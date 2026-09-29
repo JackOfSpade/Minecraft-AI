@@ -2,8 +2,7 @@ package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
-import net.minecraft.text.Text;
-
+import net.minecraft.network.chat.Component;
 import java.util.function.Supplier;
 
 /**
@@ -19,7 +18,7 @@ import java.util.function.Supplier;
  * mixin of our own is needed, and there is nothing here that could conflict with another mod's mixin on
  * {@code PlayerManager} the way a hand-written one could.
  * <p>
- * <b>How a message is attributed to a bot.</b> The event hands over the fully rendered {@link Text}, not the
+ * <b>How a message is attributed to a bot.</b> The event hands over the fully rendered {@link Component}, not the
  * player who triggered it. Vanilla's join/leave/advancement messages are always {@code "<name> ..."} (a
  * Minecraft username can never contain a space), so the first whitespace-delimited token of the rendered
  * string is the player name; that gets checked against {@link CommandServices#population()}'s live bot
@@ -43,7 +42,7 @@ public final class GameMessageFilter {
     }
 
     /**
-     * The decision, pure and independent of any real {@link Text}: a rendered vanilla join/leave/advancement
+     * The decision, pure and independent of any real {@link Component}: a rendered vanilla join/leave/advancement
      * line is always {@code "<name> ..."} (a Minecraft username can never contain a space), so the first
      * whitespace-delimited token is the player name, checked against the live bot registry. Package-visible
      * so it can be unit tested directly against a fake {@link CommandServices} -- everything it touches is

@@ -18,7 +18,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.rule.GameRules;
+import net.minecraft.world.level.gamerules.GameRules;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,7 +111,7 @@ public final class InhabitantsMod implements ModInitializer {
         session = new ServerSession(server, shared);
         if (shared.config().get().hideLocatorBar) {
             shared.guard().run("hide locator bar", () ->
-                    server.getOverworld().getGameRules().setValue(GameRules.LOCATOR_BAR, false, server));
+                    server.overworld().getGameRules().set(GameRules.LOCATOR_BAR, false, server));
         }
         LOGGER.info("Server started; the PvP BOT integration is probed on the first tick");
     }
@@ -123,14 +123,14 @@ public final class InhabitantsMod implements ModInitializer {
         ServerSession current = session;
         if (current != null && current.server() == server) {
             shared.guard().run("server tick", current::tick);
-            combat.tick(server.getTicks());
+            combat.tick(server.getTickCount());
         }
     }
 
     private void onServerStopping(MinecraftServer server) {
         ServerSession current = session;
         if (current != null && current.server() == server) {
-            combat.flush(server.getTicks());
+            combat.flush(server.getTickCount());
             current.shutdown();
         }
     }

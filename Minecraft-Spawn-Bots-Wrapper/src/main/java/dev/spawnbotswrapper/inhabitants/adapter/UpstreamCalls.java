@@ -1,7 +1,5 @@
 package dev.spawnbotswrapper.inhabitants.adapter;
 
-import net.minecraft.util.math.Vec3d;
-
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -9,6 +7,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * The only place that INVOKES PvP BOT methods, on the handles a successful {@link UpstreamContract} probe
@@ -204,7 +203,7 @@ final class UpstreamCalls {
         return truth(invoke(contract.deletePath.method(), null, path));
     }
 
-    boolean addPoint(String path, Vec3d point) throws Throwable {
+    boolean addPoint(String path, Vec3 point) throws Throwable {
         return truth(invoke(contract.addPoint.method(), null, path, point));
     }
 

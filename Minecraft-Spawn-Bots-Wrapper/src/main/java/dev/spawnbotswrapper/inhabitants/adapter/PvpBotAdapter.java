@@ -7,14 +7,13 @@ import dev.spawnbotswrapper.inhabitants.adapter.StatusAssembler.ProbeInput;
 import dev.spawnbotswrapper.inhabitants.adapter.StatusAssembler.Verdict;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.Vec2f;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.rule.GameRules;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -238,7 +237,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
             return CommandTree.UNKNOWN;
         }
         try {
-            return CommandTree.scan(server.getCommandManager().getDispatcher().getRoot());
+            return CommandTree.scan(server.getCommands().getDispatcher().getRoot());
         } catch (Throwable t) {
             log.failure("inspecting the command tree", t);
             return CommandTree.UNKNOWN;
@@ -300,7 +299,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
     }
 
     @Override
-    public SpawnTicket requestSpawn(MinecraftServer server, ServerWorld world, String name,
+    public SpawnTicket requestSpawn(MinecraftServer server, ServerLevel world, String name,
                                     double x, double y, double z, float yaw) {
         observeQuietly(server);
         SpawnTicket ticket = spawns.open(name, tickOf(server));
@@ -320,7 +319,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
     }
 
     /** Why a spawn may not even be attempted, or null. Nothing here calls PvP BOT's spawn. */
-    private String spawnRefusal(MinecraftServer server, ServerWorld world, String name,
+    private String spawnRefusal(MinecraftServer server, ServerLevel world, String name,
                                 double x, double y, double z) {
         Probed p = probed;
         if (p == null || !p.verdict().usable() || p.calls() == null) {
@@ -329,7 +328,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
         if (server == null || world == null) {
             return "no server or world given";
         }
-        if (!server.isOnThread()) {
+        if (!server.isSameThread()) {
             return "the spawn was requested off the server thread";
         }
         if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
@@ -341,21 +340,21 @@ public final class PvpBotAdapter implements PvpBotOperations {
         return check == NameRules.Check.FREE ? null : NameRules.refusal(check, name);
     }
 
-    private void issueSpawn(MinecraftServer server, ServerWorld world, SpawnTicket ticket,
+    private void issueSpawn(MinecraftServer server, ServerLevel world, SpawnTicket ticket,
                             double x, double y, double z, float yaw) {
         Probed p = probed;
-        Vec3d position = new Vec3d(x, y, z);
+        Vec3 position = new Vec3(x, y, z);
         // A console-derived source: PvP BOT's spawn dispatches HeroBot's playerspawn command with it, and that
         // command refuses non-operator players. Silenced so command feedback does not spam operators. The world
         // comes FIRST because withWorld rescales the position by the dimensions' coordinate scale, and the
         // position LAST so nothing can alter it. PvP BOT 0.0.15 always spawns facing 0/0 itself; the rotation
         // is carried for the day it stops doing that.
-        ServerCommandSource source = server.getCommandSource()
-                .withSilent()
-                .withRotation(new Vec2f(0.0F, Float.isFinite(yaw) ? yaw : 0.0F))
-                .withWorld(world)
+        CommandSourceStack source = server.createCommandSourceStack()
+                .withSuppressedOutput()
+                .withRotation(new Vec2(0.0F, Float.isFinite(yaw) ? yaw : 0.0F))
+                .withLevel(world)
                 .withPosition(position);
-        CommandDispatcher<ServerCommandSource> dispatcher = server.getCommandManager().getDispatcher();
+        CommandDispatcher<CommandSourceStack> dispatcher = server.getCommands().getDispatcher();
         UpstreamCalls.SpawnAttempt attempt = p.calls().spawn(p.verdict().tierOrder(), server, ticket.name(), source,
                 position, command -> dispatcher.execute(command, source));
         listedCache.invalidate();
@@ -403,8 +402,8 @@ public final class PvpBotAdapter implements PvpBotOperations {
 
         @Override
         public SpawnTracker.Player player(String name) {
-            ServerPlayerEntity entity = playerNamed(server, name);
-            return entity == null ? null : new SpawnTracker.Player(isBotEntity(entity), entity.getUuid(), entity);
+            ServerPlayer entity = playerNamed(server, name);
+            return entity == null ? null : new SpawnTracker.Player(isBotEntity(entity), entity.getUUID(), entity);
         }
 
         @Override
@@ -421,21 +420,21 @@ public final class PvpBotAdapter implements PvpBotOperations {
 
         @Override
         public void relist(String name, SpawnTracker.Player player) throws Throwable {
-            ServerPlayerEntity entity = (ServerPlayerEntity) player.handle();
+            ServerPlayer entity = (ServerPlayer) player.handle();
             // The source describes where the bot really is, so upstream's own record of it matches reality.
-            ServerCommandSource source = server.getCommandSource()
-                    .withSilent()
-                    .withWorld(entity.getEntityWorld())
-                    .withPosition(entity.getEntityPos());
-            probed.calls().adopt(server, name, source, entity.getEntityPos());
+            CommandSourceStack source = server.createCommandSourceStack()
+                    .withSuppressedOutput()
+                    .withLevel(entity.level())
+                    .withPosition(entity.position());
+            probed.calls().adopt(server, name, source, entity.position());
             listedCache.invalidate();
         }
     }
 
     @Override
-    public Optional<ServerPlayerEntity> findBotEntity(MinecraftServer server, String name) {
+    public Optional<ServerPlayer> findBotEntity(MinecraftServer server, String name) {
         try {
-            ServerPlayerEntity player = playerNamed(server, name);
+            ServerPlayer player = playerNamed(server, name);
             return player != null && isBotEntity(player) ? Optional.of(player) : Optional.empty();
         } catch (Throwable t) {
             log.failure("looking up a bot entity", t);
@@ -458,7 +457,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
     }
 
     @Override
-    public boolean isBotEntity(ServerPlayerEntity player) {
+    public boolean isBotEntity(ServerPlayer player) {
         try {
             return player != null && UpstreamNames.isBotClassName(player.getClass().getName());
         } catch (Throwable t) {
@@ -474,18 +473,18 @@ public final class PvpBotAdapter implements PvpBotOperations {
             if (p == null || !p.verdict().usable() || p.calls() == null) {
                 return false;
             }
-            if (server == null || !NameRules.isValid(name) || !server.isOnThread()) {
+            if (server == null || !NameRules.isValid(name) || !server.isSameThread()) {
                 return false;
             }
-            ServerPlayerEntity entity = server.getPlayerManager().getPlayer(name);
+            ServerPlayer entity = server.getPlayerList().getPlayerByName(name);
             if (entity == null || !isBotEntity(entity)) {
                 log.debugOnce("remove-refused|" + NameRules.key(name), "not removing '" + name
                         + "': there is no online bot entity with that name (real players are never removed)");
                 return false;
             }
-            String exact = botNameFor(server, entity.getNameForScoreboard());
-            ServerCommandSource source = server.getCommandSource().withSilent();
-            CommandDispatcher<ServerCommandSource> dispatcher = server.getCommandManager().getDispatcher();
+            String exact = botNameFor(server, entity.getScoreboardName());
+            CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
+            CommandDispatcher<CommandSourceStack> dispatcher = server.getCommands().getDispatcher();
             // PvP BOT's own removal internally runs "clear <name>" with a FRESH, non-silent source of its own
             // (ignoring the silent one we pass in, which only covers the follow-up kill sub-command) -- that
             // broadcasts vanilla's "[Server: Removed N item(s) from player X]" clear feedback to every player.
@@ -493,15 +492,15 @@ public final class PvpBotAdapter implements PvpBotOperations {
             // event for (confirmed by decompilation: it never calls PlayerManager#broadcastSystemMessage, the
             // method GameMessageFilter hooks) -- so the only lever available is the gamerule that broadcast
             // itself is gated on, toggled off for just this one synchronous call and restored immediately after.
-            GameRules gameRules = server.getOverworld().getGameRules();
-            boolean feedbackWasEnabled = gameRules.getValue(GameRules.SEND_COMMAND_FEEDBACK);
+            GameRules gameRules = server.overworld().getGameRules();
+            boolean feedbackWasEnabled = gameRules.get(GameRules.SEND_COMMAND_FEEDBACK);
             UpstreamCalls.RemoveAttempt attempt;
             try {
-                gameRules.setValue(GameRules.SEND_COMMAND_FEEDBACK, false, server);
+                gameRules.set(GameRules.SEND_COMMAND_FEEDBACK, false, server);
                 attempt = p.calls().remove(p.verdict().removeCommandRegistered(), server,
                         exact, source, command -> dispatcher.execute(command, source));
             } finally {
-                gameRules.setValue(GameRules.SEND_COMMAND_FEEDBACK, feedbackWasEnabled, server);
+                gameRules.set(GameRules.SEND_COMMAND_FEEDBACK, feedbackWasEnabled, server);
             }
             listedCache.invalidate();
             patrols.clear(patrolCalls(), name);
@@ -527,7 +526,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
                 log.debugOnce("patrol-unavailable", "no patrol assigned: PvP BOT's path API is not available");
                 return false;
             }
-            if (server != null && !server.isOnThread()) {
+            if (server != null && !server.isSameThread()) {
                 return false;
             }
             if (!NameRules.isValid(botName)) {
@@ -615,17 +614,17 @@ public final class PvpBotAdapter implements PvpBotOperations {
 
     private static long tickOf(MinecraftServer server) {
         try {
-            return server == null ? -1L : server.getTicks();
+            return server == null ? -1L : server.getTickCount();
         } catch (Throwable t) {
             return -1L;
         }
     }
 
-    private static ServerPlayerEntity playerNamed(MinecraftServer server, String name) {
+    private static ServerPlayer playerNamed(MinecraftServer server, String name) {
         if (server == null || name == null || name.isEmpty()) {
             return null;
         }
-        return server.getPlayerManager().getPlayer(name);
+        return server.getPlayerList().getPlayerByName(name);
     }
 
     private static boolean onlinePlayerExists(MinecraftServer server, String name) {

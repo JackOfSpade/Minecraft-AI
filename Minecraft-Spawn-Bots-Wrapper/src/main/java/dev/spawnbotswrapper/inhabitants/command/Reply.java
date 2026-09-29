@@ -1,9 +1,8 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-
 import java.util.List;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 
 /**
  * Where a command's answer goes. The actions only talk to this, so they run (and are tested) without a
@@ -21,19 +20,19 @@ interface Reply {
      * Answers through the command source. Feedback is NOT broadcast to other operators: these commands are
      * diagnostics for whoever ran them, and a listing must not spam every op's chat.
      */
-    static Reply to(ServerCommandSource source) {
+    static Reply to(CommandSourceStack source) {
         return new Reply() {
             @Override
             public void lines(List<String> lines) {
                 for (String line : lines) {
-                    Text text = ChatText.of(line);
-                    source.sendFeedback(() -> text, false);
+                    Component text = ChatText.of(line);
+                    source.sendSuccess(() -> text, false);
                 }
             }
 
             @Override
             public void error(String message) {
-                source.sendError(Text.literal(Markup.strip(message)));
+                source.sendFailure(Component.literal(Markup.strip(message)));
             }
         };
     }

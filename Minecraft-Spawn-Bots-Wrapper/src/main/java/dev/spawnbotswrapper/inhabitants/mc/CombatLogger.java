@@ -6,12 +6,12 @@ import dev.spawnbotswrapper.inhabitants.combat.CombatLedger.Kind;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.damage.DamageSource;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
 
 import java.util.function.Supplier;
@@ -91,9 +91,9 @@ public final class CombatLogger {
         if (c == null) {
             return;
         }
-        double distance = c.attacker == null ? -1 : victim.distanceTo(source.getAttacker());
+        double distance = c.attacker == null ? -1 : victim.distanceTo(source.getEntity());
         c.ledger.hit(c.now, new CombatLedger.Hit(c.attacker, c.victim, damage, baseDamage, blocked,
-                source.getName(), weapon(source), distance, victim.getHealth()), c.detail);
+                source.getMsgId(), weapon(source), distance, victim.getHealth()), c.detail);
     }
 
     private void onDeath(LivingEntity victim, DamageSource source) {
@@ -101,15 +101,15 @@ public final class CombatLogger {
         if (c == null) {
             return;
         }
-        double distance = c.attacker == null ? -1 : victim.distanceTo(source.getAttacker());
-        c.ledger.death(c.now, new CombatLedger.Death(c.victim, c.attacker, source.getName(), weapon(source), distance));
+        double distance = c.attacker == null ? -1 : victim.distanceTo(source.getEntity());
+        c.ledger.death(c.now, new CombatLedger.Death(c.victim, c.attacker, source.getMsgId(), weapon(source), distance));
     }
 
     /** Everything one event needs, or null when the event is not about an inhabitant (the common, cheap case). */
     private Context context(LivingEntity victim, DamageSource source) {
-        Entity attackerEntity = source.getAttacker();
+        Entity attackerEntity = source.getEntity();
         // Inhabitants are player entities; anything that involves no player at all is skipped without a lookup.
-        if (!(victim instanceof ServerPlayerEntity) && !(attackerEntity instanceof ServerPlayerEntity)) {
+        if (!(victim instanceof ServerPlayer) && !(attackerEntity instanceof ServerPlayer)) {
             return null;
         }
         ServerSession current = session.get();
@@ -132,7 +132,7 @@ public final class CombatLogger {
         if (ledger == null) {
             ledger = new CombatLedger(log::info, () -> settings().coalesceTicks, () -> settings().maxLinesPerMinute);
         }
-        return new Context(ledger, current.server().getTicks(), v, a, cfg.debug);
+        return new Context(ledger, current.server().getTickCount(), v, a, cfg.debug);
     }
 
     private InhabitantsConfig.CombatLog settings() {
@@ -146,23 +146,23 @@ public final class CombatLogger {
     }
 
     private static Actor actor(Entity entity, CommandServices services) {
-        if (entity instanceof ServerPlayerEntity player) {
+        if (entity instanceof ServerPlayer player) {
             String name = player.getName().getString();
             boolean inhabitant = services.population() != null && services.population().findBot(name).isPresent();
             return new Actor(name, inhabitant ? Kind.INHABITANT : Kind.PLAYER);
         }
-        return new Actor(Registries.ENTITY_TYPE.getId(entity.getType()).getPath(), Kind.MOB);
+        return new Actor(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).getPath(), Kind.MOB);
     }
 
     /** The item that did the damage: the weapon the damage source records, else what the attacker holds. */
     private static String weapon(DamageSource source) {
-        ItemStack stack = source.getWeaponStack();
-        if ((stack == null || stack.isEmpty()) && source.getAttacker() instanceof LivingEntity living) {
-            stack = living.getMainHandStack();
+        ItemStack stack = source.getWeaponItem();
+        if ((stack == null || stack.isEmpty()) && source.getEntity() instanceof LivingEntity living) {
+            stack = living.getMainHandItem();
         }
         if (stack == null || stack.isEmpty()) {
             return "none";
         }
-        return Registries.ITEM.getId(stack.getItem()).getPath();
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
     }
 }

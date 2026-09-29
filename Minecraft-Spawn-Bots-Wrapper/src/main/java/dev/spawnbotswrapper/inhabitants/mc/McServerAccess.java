@@ -1,10 +1,10 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
+import net.minecraft.server.level.ServerLevel;
 
 /** {@link ServerAccess} backed by a live {@link MinecraftServer}. */
 public final class McServerAccess implements ServerAccess {
@@ -20,26 +20,26 @@ public final class McServerAccess implements ServerAccess {
     }
 
     @Override
-    public ServerWorld world(String dimensionId) {
+    public ServerLevel world(String dimensionId) {
         Identifier id = dimensionId == null ? null : Identifier.tryParse(dimensionId);
         if (id == null) {
             return null;
         }
-        return server.getWorld(RegistryKey.of(RegistryKeys.WORLD, id));
+        return server.getLevel(ResourceKey.create(Registries.DIMENSION, id));
     }
 
     @Override
     public long worldSeed() {
-        return server.getOverworld().getSeed();
+        return server.overworld().getSeed();
     }
 
     @Override
     public boolean isPlayerOnline(String name) {
-        return name != null && server.getPlayerManager().getPlayer(name) != null;
+        return name != null && server.getPlayerList().getPlayerByName(name) != null;
     }
 
     @Override
     public int ticks() {
-        return server.getTicks();
+        return server.getTickCount();
     }
 }

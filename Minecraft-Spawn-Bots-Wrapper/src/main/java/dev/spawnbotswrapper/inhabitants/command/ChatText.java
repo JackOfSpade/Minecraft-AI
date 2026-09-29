@@ -1,20 +1,20 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
-/** Turns a marked-up line ({@link Markup}) into a styled {@link Text}. The only place markup meets Minecraft. */
+/** Turns a marked-up line ({@link Markup}) into a styled {@link Component}. The only place markup meets Minecraft. */
 final class ChatText {
     private ChatText() {
     }
 
-    static Text of(String markedUpLine) {
-        MutableText root = Text.empty();
+    static Component of(String markedUpLine) {
+        MutableComponent root = Component.empty();
         for (Markup.Span span : Markup.spans(markedUpLine)) {
-            MutableText part = Text.literal(span.text());
-            Formatting color = span.color() == 0 ? null : Formatting.byCode(span.color());
-            root.append(color == null ? part : part.formatted(color));
+            MutableComponent part = Component.literal(span.text());
+            ChatFormatting color = span.color() == 0 ? null : ChatFormatting.getByCode(span.color());
+            root.append(color == null ? part : part.withStyle(color));
         }
         return root;
     }

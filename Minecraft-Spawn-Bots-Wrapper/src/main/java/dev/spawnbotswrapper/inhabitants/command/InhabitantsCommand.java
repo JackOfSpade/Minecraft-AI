@@ -11,11 +11,11 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import dev.spawnbotswrapper.inhabitants.engine.ForceMode;
-import net.minecraft.command.argument.IdentifierArgumentType;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.PlayerManager;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.PlayerList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,36 +58,36 @@ public final class InhabitantsCommand {
      * @param services yields the services once the server has finished starting, null before that (the
      *                 commands then answer "not ready yet" instead of failing)
      */
-    public static void register(CommandDispatcher<ServerCommandSource> dispatcher, Supplier<CommandServices> services) {
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, Supplier<CommandServices> services) {
         register(dispatcher, services, Backends.standard());
     }
 
-    static void register(CommandDispatcher<ServerCommandSource> dispatcher, Supplier<CommandServices> services,
+    static void register(CommandDispatcher<CommandSourceStack> dispatcher, Supplier<CommandServices> services,
                          Backends backends) {
         Objects.requireNonNull(dispatcher, "dispatcher");
         Objects.requireNonNull(services, "services");
         Tree tree = new Tree(services, backends);
-        LiteralCommandNode<ServerCommandSource> root = dispatcher.register(tree.root());
+        LiteralCommandNode<CommandSourceStack> root = dispatcher.register(tree.root());
         dispatcher.register(tree.topLevelLiteral(CommandArgs.ALIAS).executes(tree.help(CommandArgs.ALIAS)).redirect(root));
     }
 
     /** What one command node does, given the actions for the current services and the way to answer. */
     @FunctionalInterface
     private interface Handler {
-        int handle(CommandActions actions, Reply reply, CommandContext<ServerCommandSource> ctx);
+        int handle(CommandActions actions, Reply reply, CommandContext<CommandSourceStack> ctx);
     }
 
     /** {@code reset} variants share the trailing optional {@code removeBots}. */
     @FunctionalInterface
     private interface ResetHandler {
-        int handle(CommandActions actions, Reply reply, CommandContext<ServerCommandSource> ctx, boolean removeBots);
+        int handle(CommandActions actions, Reply reply, CommandContext<CommandSourceStack> ctx, boolean removeBots);
     }
 
     private static final class Tree {
         private final Supplier<CommandServices> services;
         private final Backends backends;
-        private final Predicate<ServerCommandSource> requirement;
-        private final Predicate<ServerCommandSource> reloadRequirement;
+        private final Predicate<CommandSourceStack> requirement;
+        private final Predicate<CommandSourceStack> reloadRequirement;
         /**
          * Brigadier requires every ANCESTOR on the path to a node to pass its own {@code .requires()}, not
          * just the leaf, so a node that has {@code reload} as a descendant (the root, and the alias, which
@@ -95,7 +95,7 @@ public final class InhabitantsCommand {
          * Each leaf still enforces its own, narrower requirement, so this union widens reachability, not
          * what actually executes.
          */
-        private final Predicate<ServerCommandSource> topLevelRequirement;
+        private final Predicate<CommandSourceStack> topLevelRequirement;
 
         Tree(Supplier<CommandServices> services, Backends backends) {
             this.services = services;
@@ -105,13 +105,13 @@ public final class InhabitantsCommand {
             this.topLevelRequirement = requirement.or(reloadRequirement);
         }
 
-        LiteralArgumentBuilder<ServerCommandSource> literal(String name) {
-            return LiteralArgumentBuilder.<ServerCommandSource>literal(name).requires(requirement);
+        LiteralArgumentBuilder<CommandSourceStack> literal(String name) {
+            return LiteralArgumentBuilder.<CommandSourceStack>literal(name).requires(requirement);
         }
 
         /** The root ("inhabitants") or an alias entry point: see {@link #topLevelRequirement}. */
-        LiteralArgumentBuilder<ServerCommandSource> topLevelLiteral(String name) {
-            return LiteralArgumentBuilder.<ServerCommandSource>literal(name).requires(topLevelRequirement);
+        LiteralArgumentBuilder<CommandSourceStack> topLevelLiteral(String name) {
+            return LiteralArgumentBuilder.<CommandSourceStack>literal(name).requires(topLevelRequirement);
         }
 
         /**
@@ -119,15 +119,15 @@ public final class InhabitantsCommand {
          * the shared one: it must stay reachable at the configured permission level even when
          * {@code debugCommands=false}, or turning that flag off would need a server restart to undo.
          */
-        LiteralArgumentBuilder<ServerCommandSource> reloadLiteral() {
-            return LiteralArgumentBuilder.<ServerCommandSource>literal("reload").requires(reloadRequirement);
+        LiteralArgumentBuilder<CommandSourceStack> reloadLiteral() {
+            return LiteralArgumentBuilder.<CommandSourceStack>literal("reload").requires(reloadRequirement);
         }
 
-        <T> RequiredArgumentBuilder<ServerCommandSource, T> argument(String name, ArgumentType<T> type) {
-            return RequiredArgumentBuilder.<ServerCommandSource, T>argument(name, type).requires(requirement);
+        <T> RequiredArgumentBuilder<CommandSourceStack, T> argument(String name, ArgumentType<T> type) {
+            return RequiredArgumentBuilder.<CommandSourceStack, T>argument(name, type).requires(requirement);
         }
 
-        LiteralArgumentBuilder<ServerCommandSource> root() {
+        LiteralArgumentBuilder<CommandSourceStack> root() {
             return topLevelLiteral(CommandArgs.ROOT)
                     .executes(help(CommandArgs.ROOT))
                     .then(literal("info").executes(run((a, r, c) -> a.info(r))))
@@ -151,7 +151,7 @@ public final class InhabitantsCommand {
                     .then(reloadLiteral().executes(run(this::reload)));
         }
 
-        private LiteralArgumentBuilder<ServerCommandSource> nearby() {
+        private LiteralArgumentBuilder<CommandSourceStack> nearby() {
             return literal("nearby")
                     .executes(run((a, r, c) -> a.nearby(sender(c), CommandArgs.DEFAULT_NEARBY_RADIUS, r)))
                     .then(argument(CommandArgs.ARG_RADIUS, IntegerArgumentType.integer(1, CommandArgs.MAX_RADIUS))
@@ -159,8 +159,8 @@ public final class InhabitantsCommand {
                                     IntegerArgumentType.getInteger(c, CommandArgs.ARG_RADIUS), r))));
         }
 
-        private LiteralArgumentBuilder<ServerCommandSource> process() {
-            LiteralArgumentBuilder<ServerCommandSource> nearest = literal("nearest")
+        private LiteralArgumentBuilder<CommandSourceStack> process() {
+            LiteralArgumentBuilder<CommandSourceStack> nearest = literal("nearest")
                     .executes(run((a, r, c) -> a.processNearest(sender(c), ForceMode.ROLL, r)));
             for (ForceMode mode : ForceMode.values()) {
                 nearest.then(literal(CommandArgs.modeLiteral(mode))
@@ -169,14 +169,14 @@ public final class InhabitantsCommand {
             return literal("process").then(nearest);
         }
 
-        private LiteralArgumentBuilder<ServerCommandSource> reset() {
+        private LiteralArgumentBuilder<CommandSourceStack> reset() {
             return literal("reset")
                     .then(withRemoveBots(literal("here"),
                             (a, r, c, remove) -> a.resetHere(sender(c), remove, r)))
                     .then(withRemoveBots(literal("nearest"),
                             (a, r, c, remove) -> a.resetNearest(sender(c), remove, r)))
                     .then(literal("structure")
-                            .then(argument(CommandArgs.ARG_STRUCTURE, IdentifierArgumentType.identifier())
+                            .then(argument(CommandArgs.ARG_STRUCTURE, IdentifierArgument.id())
                                     .suggests(Suggesters.structureIds())
                                     .then(argument(CommandArgs.ARG_CHUNK_X, chunkCoordinate())
                                             .suggests(Suggesters.chunkX(services, backends.senders()))
@@ -185,7 +185,7 @@ public final class InhabitantsCommand {
                                                             .suggests(Suggesters.chunkZ(services, backends.senders())),
                                                     (a, r, c, remove) -> a.resetStructure(
                                                             sender(c),
-                                                            IdentifierArgumentType.getIdentifier(c, CommandArgs.ARG_STRUCTURE).toString(),
+                                                            IdentifierArgument.getId(c, CommandArgs.ARG_STRUCTURE).toString(),
                                                             IntegerArgumentType.getInteger(c, CommandArgs.ARG_CHUNK_X),
                                                             IntegerArgumentType.getInteger(c, CommandArgs.ARG_CHUNK_Z),
                                                             remove, r))))));
@@ -196,36 +196,36 @@ public final class InhabitantsCommand {
         }
 
         /** Runs {@code handler} with {@code removeBots=false} at {@code node}, and with true after the literal. */
-        private <B extends ArgumentBuilder<ServerCommandSource, B>> B withRemoveBots(B node, ResetHandler handler) {
+        private <B extends ArgumentBuilder<CommandSourceStack, B>> B withRemoveBots(B node, ResetHandler handler) {
             return node
                     .executes(run((a, r, c) -> handler.handle(a, r, c, false)))
                     .then(literal(CommandArgs.FLAG_REMOVE_BOTS)
                             .executes(run((a, r, c) -> handler.handle(a, r, c, true))));
         }
 
-        private Sender sender(CommandContext<ServerCommandSource> ctx) {
+        private Sender sender(CommandContext<CommandSourceStack> ctx) {
             return backends.senders().apply(ctx.getSource());
         }
 
-        private int reload(CommandActions actions, Reply reply, CommandContext<ServerCommandSource> ctx) {
+        private int reload(CommandActions actions, Reply reply, CommandContext<CommandSourceStack> ctx) {
             int result = actions.reload(reply);
             refreshCommandTrees(ctx.getSource());
             return result;
         }
 
         /** The bare command lists the subcommands; it needs no services, so it works before the server is ready. */
-        Command<ServerCommandSource> help(String rootLiteral) {
+        Command<CommandSourceStack> help(String rootLiteral) {
             return ctx -> {
                 Reply.to(ctx.getSource()).lines(AdminFormatter.help(rootLiteral));
                 return 1;
             };
         }
 
-        private Command<ServerCommandSource> run(Handler handler) {
+        private Command<CommandSourceStack> run(Handler handler) {
             return ctx -> execute(ctx, handler);
         }
 
-        private int execute(CommandContext<ServerCommandSource> ctx, Handler handler) {
+        private int execute(CommandContext<CommandSourceStack> ctx, Handler handler) {
             Reply reply = Reply.to(ctx.getSource());
             CommandServices current;
             try {
@@ -252,15 +252,15 @@ public final class InhabitantsCommand {
      * After a config reload the permission level may have changed; Minecraft only sends the command tree
      * (which tab completion is built from) at join and on op changes, so resend it to everybody online.
      */
-    private static void refreshCommandTrees(ServerCommandSource source) {
+    private static void refreshCommandTrees(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
-        if (server == null || server.getPlayerManager() == null) {
+        if (server == null || server.getPlayerList() == null) {
             return;
         }
         try {
-            PlayerManager players = server.getPlayerManager();
-            for (ServerPlayerEntity player : players.getPlayerList()) {
-                players.sendCommandTree(player);
+            PlayerList players = server.getPlayerList();
+            for (ServerPlayer player : players.getPlayers()) {
+                players.sendPlayerPermissionLevel(player);
             }
         } catch (RuntimeException e) {
             LOGGER.debug("Could not refresh the command trees after a reload", e);

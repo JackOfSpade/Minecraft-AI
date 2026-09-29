@@ -1,16 +1,15 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
-import net.minecraft.command.permission.LeveledPermissionPredicate;
-import net.minecraft.command.permission.PermissionLevel;
-import net.minecraft.command.permission.PermissionPredicate;
-import net.minecraft.server.command.CommandOutput;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.Vec2f;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.commands.CommandSource;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import net.minecraft.server.permissions.PermissionLevel;
+import net.minecraft.server.permissions.PermissionSet;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Command sources without a server: no world, no server, no entity, but a real permission predicate and
@@ -21,33 +20,33 @@ final class TestSources {
     }
 
     /** Records everything sent to it and claims to want feedback, errors and op broadcasts. */
-    static final class Capture implements CommandOutput {
-        final List<Text> messages = new ArrayList<>();
+    static final class Capture implements CommandSource {
+        final List<Component> messages = new ArrayList<>();
 
         @Override
-        public void sendMessage(Text message) {
+        public void sendSystemMessage(Component message) {
             messages.add(message);
         }
 
         @Override
-        public boolean shouldReceiveFeedback() {
+        public boolean acceptsSuccess() {
             return true;
         }
 
         @Override
-        public boolean shouldTrackOutput() {
+        public boolean acceptsFailure() {
             return true;
         }
 
         /** True: a command that (wrongly) asked to broadcast to ops would then touch the missing world and fail. */
         @Override
-        public boolean shouldBroadcastConsoleToOps() {
+        public boolean shouldInformAdmins() {
             return true;
         }
 
         List<String> strings() {
             List<String> out = new ArrayList<>();
-            for (Text t : messages) {
+            for (Component t : messages) {
                 out.add(t.getString());
             }
             return out;
@@ -59,20 +58,20 @@ final class TestSources {
     }
 
     /** The predicate a source has at vanilla op {@code level} 0-4. */
-    static PermissionPredicate at(int level) {
-        return LeveledPermissionPredicate.fromLevel(PermissionLevel.fromLevel(level));
+    static PermissionSet at(int level) {
+        return LevelBasedPermissionSet.forLevel(PermissionLevel.byId(level));
     }
 
-    static ServerCommandSource source(PermissionPredicate permissions, CommandOutput output) {
-        return new ServerCommandSource(output, Vec3d.ZERO, Vec2f.ZERO, null, permissions, "test",
-                Text.literal("test"), null, null);
+    static CommandSourceStack source(PermissionSet permissions, CommandSource output) {
+        return new CommandSourceStack(output, Vec3.ZERO, Vec2.ZERO, null, permissions, "test",
+                Component.literal("test"), null, null);
     }
 
-    static ServerCommandSource level(int level, CommandOutput output) {
+    static CommandSourceStack level(int level, CommandSource output) {
         return source(at(level), output);
     }
 
-    static ServerCommandSource level(int level) {
-        return level(level, CommandOutput.DUMMY);
+    static CommandSourceStack level(int level) {
+        return level(level, CommandSource.NULL);
     }
 }

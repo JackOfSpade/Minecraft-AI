@@ -5,25 +5,24 @@ import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile.ItemSpec;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile.PlacedItem;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile.Slot;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityEquipment;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.attribute.EntityAttributeInstance;
-import net.minecraft.entity.attribute.EntityAttributeModifier;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.Identifier;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityEquipment;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -32,8 +31,8 @@ public final class ProfileApplierMcCases {
     private ProfileApplierMcCases() {
     }
 
-    private static PlayerInventory newInventory() {
-        return new PlayerInventory(null, new EntityEquipment());
+    private static Inventory newInventory() {
+        return new Inventory(null, new EntityEquipment());
     }
 
     private static BotProfile.Loadout kit() {
@@ -50,123 +49,123 @@ public final class ProfileApplierMcCases {
 
     /** The slot numbers the planner uses are the ones vanilla's player inventory really has. */
     public static void slotConstantsMatchTheGame() {
-        assertEquals(EquipmentSlot.FEET.getOffsetEntitySlotId(36), SlotPlanner.FEET);
-        assertEquals(EquipmentSlot.LEGS.getOffsetEntitySlotId(36), SlotPlanner.LEGS);
-        assertEquals(EquipmentSlot.CHEST.getOffsetEntitySlotId(36), SlotPlanner.CHEST);
-        assertEquals(EquipmentSlot.HEAD.getOffsetEntitySlotId(36), SlotPlanner.HEAD);
-        assertEquals(PlayerInventory.OFF_HAND_SLOT, SlotPlanner.OFFHAND);
-        assertEquals(PlayerInventory.MAIN_SIZE, SlotPlanner.MAIN_LAST + 1);
-        assertEquals(PlayerInventory.getHotbarSize(), SlotPlanner.HOTBAR_LAST + 1);
-        PlayerInventory inventory = newInventory();
+        assertEquals(EquipmentSlot.FEET.getIndex(36), SlotPlanner.FEET);
+        assertEquals(EquipmentSlot.LEGS.getIndex(36), SlotPlanner.LEGS);
+        assertEquals(EquipmentSlot.CHEST.getIndex(36), SlotPlanner.CHEST);
+        assertEquals(EquipmentSlot.HEAD.getIndex(36), SlotPlanner.HEAD);
+        assertEquals(Inventory.SLOT_OFFHAND, SlotPlanner.OFFHAND);
+        assertEquals(Inventory.INVENTORY_SIZE, SlotPlanner.MAIN_LAST + 1);
+        assertEquals(Inventory.getSelectionSize(), SlotPlanner.HOTBAR_LAST + 1);
+        Inventory inventory = newInventory();
         for (int slot = 0; slot < SlotPlanner.SLOT_COUNT; slot++) {
-            inventory.setStack(slot, new ItemStack(Items.STONE));
-            assertTrue(inventory.getStack(slot).isOf(Items.STONE), "slot " + slot + " must be writable");
+            inventory.setItem(slot, new ItemStack(Items.STONE));
+            assertTrue(inventory.getItem(slot).is(Items.STONE), "slot " + slot + " must be writable");
         }
     }
 
     public static void aLoadoutLandsInTheRightVanillaSlots() {
-        PlayerInventory inventory = newInventory();
+        Inventory inventory = newInventory();
         List<String> warnings = new ArrayList<>();
         ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), true, warnings);
 
-        assertTrue(inventory.getStack(SlotPlanner.HEAD).isOf(Items.DIAMOND_HELMET));
-        assertTrue(inventory.getStack(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE));
-        assertTrue(inventory.getStack(SlotPlanner.LEGS).isOf(Items.DIAMOND_LEGGINGS));
-        assertTrue(inventory.getStack(SlotPlanner.FEET).isOf(Items.DIAMOND_BOOTS));
-        assertTrue(inventory.getStack(SlotPlanner.OFFHAND).isOf(Items.SHIELD));
-        assertTrue(inventory.getStack(0).isOf(Items.DIAMOND_SWORD));
-        assertTrue(inventory.getStack(1).isOf(Items.GOLDEN_APPLE));
-        assertEquals(8, inventory.getStack(1).getCount());
-        assertTrue(inventory.getStack(9).isOf(Items.COOKED_BEEF));
-        assertEquals(32, inventory.getStack(9).getCount());
+        assertTrue(inventory.getItem(SlotPlanner.HEAD).isOf(Items.DIAMOND_HELMET));
+        assertTrue(inventory.getItem(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE));
+        assertTrue(inventory.getItem(SlotPlanner.LEGS).isOf(Items.DIAMOND_LEGGINGS));
+        assertTrue(inventory.getItem(SlotPlanner.FEET).isOf(Items.DIAMOND_BOOTS));
+        assertTrue(inventory.getItem(SlotPlanner.OFFHAND).isOf(Items.SHIELD));
+        assertTrue(inventory.getItem(0).is(Items.DIAMOND_SWORD));
+        assertTrue(inventory.getItem(1).is(Items.GOLDEN_APPLE));
+        assertEquals(8, inventory.getItem(1).getCount());
+        assertTrue(inventory.getItem(9).is(Items.COOKED_BEEF));
+        assertEquals(32, inventory.getItem(9).getCount());
         assertEquals(0, inventory.getSelectedSlot());
-        assertTrue(inventory.getSelectedStack().isOf(Items.DIAMOND_SWORD), "the bot holds the first hotbar item");
+        assertTrue(inventory.getSelectedItem().is(Items.DIAMOND_SWORD), "the bot holds the first hotbar item");
         assertTrue(warnings.isEmpty(), warnings.toString());
     }
 
     public static void theSelectedSlotIsResetToTheFirstHotbarSlot() {
-        PlayerInventory inventory = newInventory();
+        Inventory inventory = newInventory();
         inventory.setSelectedSlot(6);
         ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), true, new ArrayList<>());
         assertEquals(0, inventory.getSelectedSlot());
     }
 
     public static void clearingWipesEverythingElseButNotClearingOnlyOverwritesPlannedSlots() {
-        PlayerInventory withJunk = newInventory();
-        withJunk.setStack(20, new ItemStack(Items.DIRT, 5));
-        withJunk.setStack(SlotPlanner.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
-        withJunk.setStack(SlotPlanner.OFFHAND, new ItemStack(Items.TORCH, 3));
+        Inventory withJunk = newInventory();
+        withJunk.setItem(20, new ItemStack(Items.DIRT, 5));
+        withJunk.setItem(SlotPlanner.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
+        withJunk.setItem(SlotPlanner.OFFHAND, new ItemStack(Items.TORCH, 3));
         ProfileApplier.fill(withJunk, McBootstrap.registries(), kit(), true, new ArrayList<>());
-        assertTrue(withJunk.getStack(20).isEmpty(), "cleared");
-        assertTrue(withJunk.getStack(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE));
+        assertTrue(withJunk.getItem(20).isEmpty(), "cleared");
+        assertTrue(withJunk.getItem(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE));
 
-        PlayerInventory kept = newInventory();
-        kept.setStack(20, new ItemStack(Items.DIRT, 5));
-        kept.setStack(SlotPlanner.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
+        Inventory kept = newInventory();
+        kept.setItem(20, new ItemStack(Items.DIRT, 5));
+        kept.setItem(SlotPlanner.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
         ProfileApplier.fill(kept, McBootstrap.registries(), kit(), false, new ArrayList<>());
-        assertTrue(kept.getStack(20).isOf(Items.DIRT), "an unrelated slot is left alone without clearing");
-        assertTrue(kept.getStack(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE), "a planned slot is overwritten");
+        assertTrue(kept.getItem(20).is(Items.DIRT), "an unrelated slot is left alone without clearing");
+        assertTrue(kept.getItem(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE), "a planned slot is overwritten");
     }
 
     public static void applyingTwiceWithoutClearingIsIdempotent() {
-        PlayerInventory once = newInventory();
+        Inventory once = newInventory();
         ProfileApplier.fill(once, McBootstrap.registries(), kit(), true, new ArrayList<>());
-        PlayerInventory twice = newInventory();
+        Inventory twice = newInventory();
         ProfileApplier.fill(twice, McBootstrap.registries(), kit(), true, new ArrayList<>());
         ProfileApplier.fill(twice, McBootstrap.registries(), kit(), false, new ArrayList<>());
         for (int slot = 0; slot < SlotPlanner.SLOT_COUNT; slot++) {
-            assertTrue(ItemStack.areEqual(once.getStack(slot), twice.getStack(slot)), "slot " + slot);
+            assertTrue(ItemStack.matches(once.getItem(slot), twice.getItem(slot)), "slot " + slot);
         }
     }
 
     public static void badItemsLeaveTheirSlotEmptyWithWarningsAndTheRestIsStillApplied() {
-        PlayerInventory inventory = newInventory();
+        Inventory inventory = newInventory();
         List<String> warnings = new ArrayList<>();
         BotProfile.Loadout loadout = new BotProfile.Loadout(List.of(
                 new PlacedItem(Slot.HEAD, 0, ItemSpec.of("somemod:crown")),
                 new PlacedItem(Slot.HOTBAR, 0, ItemSpec.of("minecraft:iron_sword")),
                 new PlacedItem("belt", 0, ItemSpec.of("minecraft:apple"))));
         ProfileApplier.fill(inventory, McBootstrap.registries(), loadout, true, warnings);
-        assertTrue(inventory.getStack(SlotPlanner.HEAD).isEmpty());
-        assertTrue(inventory.getStack(0).isOf(Items.IRON_SWORD));
-        assertTrue(inventory.getStack(9).isOf(Items.APPLE), "an unknown slot name falls back to a free slot");
+        assertTrue(inventory.getItem(SlotPlanner.HEAD).isEmpty());
+        assertTrue(inventory.getItem(0).is(Items.IRON_SWORD));
+        assertTrue(inventory.getItem(9).is(Items.APPLE), "an unknown slot name falls back to a free slot");
         assertEquals(2, warnings.size(), warnings.toString());
     }
 
     public static void anEmptyLoadoutClearsAFreshBotAndSelectsSlotZero() {
-        PlayerInventory inventory = newInventory();
-        inventory.setStack(3, new ItemStack(Items.DIRT));
+        Inventory inventory = newInventory();
+        inventory.setItem(3, new ItemStack(Items.DIRT));
         ProfileApplier.fill(inventory, McBootstrap.registries(), new BotProfile.Loadout(List.of()), true, new ArrayList<>());
-        assertTrue(inventory.getStack(3).isEmpty());
+        assertTrue(inventory.getItem(3).isEmpty());
         assertEquals(0, inventory.getSelectedSlot());
     }
 
     // ------------------------------------------------------------------------------- attribute modifiers
 
-    private static EntityAttributeInstance maxHealth() {
-        return new EntityAttributeInstance(EntityAttributes.MAX_HEALTH, instance -> {
+    private static AttributeInstance maxHealth() {
+        return new AttributeInstance(Attributes.MAX_HEALTH, instance -> {
         });
     }
 
     private static Identifier modifierId(String path) {
-        return Identifier.of("pvpbot_inhabitants", path);
+        return Identifier.fromNamespaceAndPath("pvpbot_inhabitants", path);
     }
 
     public static void aModifierIsInstalledUnderTheFixedAddonId() {
-        EntityAttributeInstance health = maxHealth();
+        AttributeInstance health = maxHealth();
         List<String> warnings = new ArrayList<>();
-        assertTrue(ProfileApplier.install(health, Identifier.of("minecraft:max_health"),
+        assertTrue(ProfileApplier.install(health, Identifier.parse("minecraft:max_health"),
                 new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 10.0), warnings));
         assertEquals(30.0, health.getValue(), 1e-9);
         assertEquals(20.0, health.getBaseValue(), 1e-9, "the base value is never touched");
         assertTrue(health.hasModifier(modifierId("profile/max_health")));
-        assertEquals(1, health.getPersistentModifiers().size(), "persistent, so it is saved with the player");
+        assertEquals(1, health.getPermanentModifiers().size(), "persistent, so it is saved with the player");
         assertTrue(warnings.isEmpty());
     }
 
     public static void applyingAgainReplacesTheModifierInsteadOfStackingOrThrowing() {
-        EntityAttributeInstance health = maxHealth();
-        Identifier id = Identifier.of("minecraft:max_health");
+        AttributeInstance health = maxHealth();
+        Identifier id = Identifier.parse("minecraft:max_health");
         ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 10.0), new ArrayList<>());
         ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 10.0), new ArrayList<>());
         assertEquals(30.0, health.getValue(), 1e-9, "same profile twice = same result");
@@ -176,32 +175,32 @@ public final class ProfileApplierMcCases {
     }
 
     public static void allThreeOperationsAreSupported() {
-        EntityAttributeInstance base = maxHealth();
-        ProfileApplier.install(base, Identifier.of("minecraft:max_health"),
+        AttributeInstance base = maxHealth();
+        ProfileApplier.install(base, Identifier.parse("minecraft:max_health"),
                 new BotProfile.AttributeMod(BotProfile.Op.ADD_MULTIPLIED_BASE, 0.5), new ArrayList<>());
         assertEquals(30.0, base.getValue(), 1e-9);
 
-        EntityAttributeInstance total = maxHealth();
-        ProfileApplier.install(total, Identifier.of("minecraft:max_health"),
+        AttributeInstance total = maxHealth();
+        ProfileApplier.install(total, Identifier.parse("minecraft:max_health"),
                 new BotProfile.AttributeMod(BotProfile.Op.ADD_MULTIPLIED_TOTAL, -0.5), new ArrayList<>());
         assertEquals(10.0, total.getValue(), 1e-9);
 
-        assertEquals(EntityAttributeModifier.Operation.ADD_VALUE, ProfileApplier.operationOf("add_value"));
-        assertEquals(EntityAttributeModifier.Operation.ADD_MULTIPLIED_BASE, ProfileApplier.operationOf("add_multiplied_base"));
-        assertEquals(EntityAttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, ProfileApplier.operationOf("add_multiplied_total"));
+        assertEquals(AttributeModifier.Operation.ADD_VALUE, ProfileApplier.operationOf("add_value"));
+        assertEquals(AttributeModifier.Operation.ADD_MULTIPLIED_BASE, ProfileApplier.operationOf("add_multiplied_base"));
+        assertEquals(AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, ProfileApplier.operationOf("add_multiplied_total"));
     }
 
     public static void moddedAttributesGetTheirNamespaceInTheModifierId() {
-        EntityAttributeInstance health = maxHealth();
-        ProfileApplier.install(health, Identifier.of("somemod:vigor"),
+        AttributeInstance health = maxHealth();
+        ProfileApplier.install(health, Identifier.parse("somemod:vigor"),
                 new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 1.0), new ArrayList<>());
         assertTrue(health.hasModifier(modifierId("profile/somemod/vigor")));
     }
 
     public static void badModifiersAreRejectedWithoutChangingAnything() {
-        EntityAttributeInstance health = maxHealth();
+        AttributeInstance health = maxHealth();
         List<String> warnings = new ArrayList<>();
-        Identifier id = Identifier.of("minecraft:max_health");
+        Identifier id = Identifier.parse("minecraft:max_health");
         assertFalse(ProfileApplier.install(health, id, new BotProfile.AttributeMod("multiply", 2.0), warnings));
         assertFalse(ProfileApplier.install(health, id, new BotProfile.AttributeMod(null, 2.0), warnings));
         assertFalse(ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, Double.NaN), warnings));
@@ -225,9 +224,9 @@ public final class ProfileApplierMcCases {
 
     // ------------------------------------------------------------------------------- guards on the entity
 
-    private static ServerPlayerEntity opaquePlayer(String name) {
-        ServerPlayerEntity player = McObjects.opaque(ServerPlayerEntity.class);
-        McObjects.setField(player, PlayerEntity.class, "gameProfile", new GameProfile(UUID.randomUUID(), name));
+    private static ServerPlayer opaquePlayer(String name) {
+        ServerPlayer player = McObjects.opaque(ServerPlayer.class);
+        McObjects.setField(player, Player.class, "gameProfile", new GameProfile(UUID.randomUUID(), name));
         McObjects.setField(player, Entity.class, "commandTags", new HashSet<String>());
         return player;
     }
@@ -243,7 +242,7 @@ public final class ProfileApplierMcCases {
             asked.incrementAndGet();
             return false;
         });
-        ServerPlayerEntity player = opaquePlayer("SomeRealPerson");
+        ServerPlayer player = opaquePlayer("SomeRealPerson");
         ProfileApplication.Result result = applier.apply(player, new BotProfile(1, 1L, "x", null, null, null), true);
         assertFalse(result.loadoutApplied());
         assertFalse(result.vitalsApplied());
@@ -272,13 +271,13 @@ public final class ProfileApplierMcCases {
 
     public static void theMarkerRoundTripsThroughTheEntitysCommandTags() {
         ProfileApplier applier = new ProfileApplier(p -> true);
-        ServerPlayerEntity bot = opaquePlayer("InhTest");
+        ServerPlayer bot = opaquePlayer("InhTest");
         assertFalse(applier.isMarked(bot));
         applier.mark(bot);
         assertTrue(applier.isMarked(bot));
-        assertTrue(bot.getCommandTags().contains("pvpbot_inhabitants"));
+        assertTrue(bot.getTags().contains("pvpbot_inhabitants"));
         applier.mark(bot);
-        assertEquals(1, bot.getCommandTags().size(), "marking twice adds nothing");
+        assertEquals(1, bot.getTags().size(), "marking twice adds nothing");
         assertEquals("pvpbot_inhabitants", ProfileApplier.MARKER_TAG);
     }
 

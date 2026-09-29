@@ -10,13 +10,12 @@ import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 /**
  * What each subcommand does: gather data from the services, hand it to the pure formatters, and answer

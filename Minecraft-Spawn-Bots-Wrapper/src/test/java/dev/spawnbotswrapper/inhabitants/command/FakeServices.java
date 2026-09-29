@@ -13,11 +13,10 @@ import dev.spawnbotswrapper.inhabitants.store.BotRecord;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,12 +47,12 @@ final class FakeServices {
     }
 
     /** Sender resolver used by the tree tests: no world, fixed dimension and position. */
-    static Function<net.minecraft.server.command.ServerCommandSource, Sender> senderAt(double x, double y, double z) {
+    static Function<net.minecraft.commands.CommandSourceStack, Sender> senderAt(double x, double y, double z) {
         return source -> new Sender(null, Fixtures.OVERWORLD, x, y, z);
     }
 
     static Backends backends(FakeCatalog catalog, Backends.ProfileRenderer renderer,
-                             Function<net.minecraft.server.command.ServerCommandSource, Sender> senders) {
+                             Function<net.minecraft.commands.CommandSourceStack, Sender> senders) {
         return new Backends(catalog, renderer, senders);
     }
 
@@ -196,7 +195,7 @@ final class FakeServices {
         }
 
         @Override
-        public SpawnTicket requestSpawn(MinecraftServer server, ServerWorld world, String name, double x, double y,
+        public SpawnTicket requestSpawn(MinecraftServer server, ServerLevel world, String name, double x, double y,
                                         double z, float yaw) {
             return null;
         }
@@ -207,7 +206,7 @@ final class FakeServices {
         }
 
         @Override
-        public Optional<ServerPlayerEntity> findBotEntity(MinecraftServer server, String name) {
+        public Optional<ServerPlayer> findBotEntity(MinecraftServer server, String name) {
             return Optional.empty();
         }
 
@@ -217,7 +216,7 @@ final class FakeServices {
         }
 
         @Override
-        public boolean isBotEntity(ServerPlayerEntity player) {
+        public boolean isBotEntity(ServerPlayer player) {
             return false;
         }
 
@@ -251,13 +250,13 @@ final class FakeServices {
         BlockPos lastNearPos;
 
         @Override
-        public List<StructureSnapshot> at(ServerWorld world, BlockPos pos) {
+        public List<StructureSnapshot> at(ServerLevel world, BlockPos pos) {
             lastAtPos = pos;
             return at;
         }
 
         @Override
-        public List<StructureSnapshot> near(ServerWorld world, BlockPos pos, int radiusChunks) {
+        public List<StructureSnapshot> near(ServerLevel world, BlockPos pos, int radiusChunks) {
             lastNearPos = pos;
             lastNearRadius = radiusChunks;
             return near;

@@ -1,7 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * The few things the gateways need to ask a running server, behind an interface so the gateway logic can be
@@ -13,7 +13,7 @@ public interface ServerAccess {
     MinecraftServer server();
 
     /** The loaded world of a dimension id such as {@code minecraft:the_nether}, or null when unknown/not loaded. */
-    ServerWorld world(String dimensionId);
+    ServerLevel world(String dimensionId);
 
     /** The seed shared by every dimension of the save. */
     long worldSeed();

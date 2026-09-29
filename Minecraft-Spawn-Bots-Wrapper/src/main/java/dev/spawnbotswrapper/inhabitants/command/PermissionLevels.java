@@ -1,19 +1,18 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
-import net.minecraft.command.DefaultPermissions;
-import net.minecraft.command.permission.Permission;
-import net.minecraft.command.permission.PermissionPredicate;
-import net.minecraft.server.command.ServerCommandSource;
-
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.server.permissions.Permission;
+import net.minecraft.server.permissions.PermissionSet;
+import net.minecraft.server.permissions.Permissions;
 
 /**
  * Maps the configured op level ({@code commandPermissionLevel}, 0-4) onto Minecraft 1.21.11's permission
  * system, which no longer has {@code hasPermissionLevel(int)}: a node's requirement now asks the source's
- * {@link PermissionPredicate} whether it holds a {@link Permission}, and the four op levels are the
- * constants of {@link DefaultPermissions}.
+ * {@link PermissionSet} whether it holds a {@link Permission}, and the four op levels are the
+ * constants of {@link Permissions}.
  * <pre>
  *   0 ALL         everybody (the vanilla "always pass" check: no permission is asked for)
  *   1 MODERATORS  DefaultPermissions.MODERATORS
@@ -37,10 +36,10 @@ final class PermissionLevels {
     /** Index = op level; slot 0 has no permission because level 0 lets everyone in. */
     private static final Permission[] BY_LEVEL = {
             null,
-            DefaultPermissions.MODERATORS,
-            DefaultPermissions.GAMEMASTERS,
-            DefaultPermissions.ADMINS,
-            DefaultPermissions.OWNERS
+            Permissions.COMMANDS_MODERATOR,
+            Permissions.COMMANDS_GAMEMASTER,
+            Permissions.COMMANDS_ADMIN,
+            Permissions.COMMANDS_OWNER
     };
 
     private PermissionLevels() {
@@ -55,7 +54,7 @@ final class PermissionLevels {
         return BY_LEVEL[clamp(level)];
     }
 
-    static boolean allows(PermissionPredicate permissions, int level) {
+    static boolean allows(PermissionSet permissions, int level) {
         Permission needed = permissionFor(level);
         return needed == null || (permissions != null && permissions.hasPermission(needed));
     }
@@ -103,15 +102,15 @@ final class PermissionLevels {
     }
 
     /** The requirement placed on every ordinary command node; evaluated per use against the current config. */
-    static Predicate<ServerCommandSource> requirement(Supplier<CommandServices> services) {
+    static Predicate<CommandSourceStack> requirement(Supplier<CommandServices> services) {
         return source -> {
             int level = currentLevel(services);
-            return level != NOBODY && allows(source.getPermissions(), level);
+            return level != NOBODY && allows(source.permissions(), level);
         };
     }
 
     /** The requirement placed on {@code reload} alone: {@link #reloadLevel}, immune to {@code debugCommands}. */
-    static Predicate<ServerCommandSource> reloadRequirement(Supplier<CommandServices> services) {
-        return source -> allows(source.getPermissions(), reloadLevel(services));
+    static Predicate<CommandSourceStack> reloadRequirement(Supplier<CommandServices> services) {
+        return source -> allows(source.permissions(), reloadLevel(services));
     }
 }

@@ -3,7 +3,6 @@ package dev.spawnbotswrapper.inhabitants.adapter;
 import org.stepan1411.pvp_bot.bot.BotPath;
 import org.stepan1411.pvp_bot.bot.BotSettings;
 import org.stepan1411.testdouble.Recorder;
-
 import java.util.List;
 
 /** Shared setup of the adapter tests: a fresh fake upstream, a probed adapter, the captured log. */

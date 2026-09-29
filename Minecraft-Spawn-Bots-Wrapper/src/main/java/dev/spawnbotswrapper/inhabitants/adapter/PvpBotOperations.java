@@ -3,9 +3,8 @@ package dev.spawnbotswrapper.inhabitants.adapter;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -101,20 +100,20 @@ public interface PvpBotOperations {
      * Asks PvP BOT to spawn a bot at the exact position in {@code world}'s dimension. Returns
      * immediately. NEVER trusts upstream's boolean: the outcome is only known through {@link #pollSpawn}.
      */
-    SpawnTicket requestSpawn(MinecraftServer server, ServerWorld world, String name,
+    SpawnTicket requestSpawn(MinecraftServer server, ServerLevel world, String name,
                              double x, double y, double z, float yaw);
 
     /** Progress: Ready once the player entity exists AND PvP BOT lists it (re-adopting an orphan if needed). */
     SpawnState pollSpawn(MinecraftServer server, SpawnTicket ticket);
 
     /** The live player entity of a bot, if online and actually a bot (not a real player). */
-    Optional<ServerPlayerEntity> findBotEntity(MinecraftServer server, String name);
+    Optional<ServerPlayer> findBotEntity(MinecraftServer server, String name);
 
     /** True when PvP BOT currently lists this bot. */
     boolean isManaged(String name);
 
     /** True when the entity is a HeroBot bot player (class-name check; no compile-time dependency). */
-    boolean isBotEntity(ServerPlayerEntity player);
+    boolean isBotEntity(ServerPlayer player);
 
     /** Removes an addon-owned bot through PvP BOT. Refuses names that are not online bots. */
     boolean removeBot(MinecraftServer server, String name);

@@ -7,11 +7,6 @@ import dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog.Category;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.argument.IdentifierArgumentType;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.server.command.ServerCommandSource;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -21,6 +16,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.IdentifierArgument;
+import net.minecraft.core.registries.Registries;
 
 /**
  * Tab completion for the command tree. Each provider is best effort and cheap: a failure yields no
@@ -34,8 +33,8 @@ final class Suggesters {
     // ---------------------------------------------------------------- Brigadier providers
 
     /** Names of inhabitants that live in processed structures near the sender. */
-    static SuggestionProvider<ServerCommandSource> botNames(Supplier<CommandServices> services,
-                                                              Function<ServerCommandSource, Sender> senders) {
+    static SuggestionProvider<CommandSourceStack> botNames(Supplier<CommandServices> services,
+                                                              Function<CommandSourceStack, Sender> senders) {
         return strings(ctx -> {
             CommandServices s = services.get();
             if (s == null) {
@@ -48,11 +47,11 @@ final class Suggesters {
     }
 
     /** Every registered structure id (vanilla and modded), straight from the registry. */
-    static SuggestionProvider<ServerCommandSource> structureIds() {
+    static SuggestionProvider<CommandSourceStack> structureIds() {
         return (ctx, builder) -> {
             try {
-                return CommandSource.suggestIdentifiers(
-                        ctx.getSource().getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE).getIds(), builder);
+                return SharedSuggestionProvider.suggestResource(
+                        ctx.getSource().registryAccess().lookupOrThrow(Registries.STRUCTURE).keySet(), builder);
             } catch (RuntimeException e) {
                 return builder.buildFuture();
             }
@@ -60,37 +59,37 @@ final class Suggesters {
     }
 
     /** Start-chunk X of processed structures with the id already typed, else the sender's own chunk. */
-    static SuggestionProvider<ServerCommandSource> chunkX(Supplier<CommandServices> services,
-                                                            Function<ServerCommandSource, Sender> senders) {
+    static SuggestionProvider<CommandSourceStack> chunkX(Supplier<CommandServices> services,
+                                                            Function<CommandSourceStack, Sender> senders) {
         return strings(ctx -> {
             CommandServices s = services.get();
             if (s == null) {
                 return List.of();
             }
             Sender at = senders.apply(ctx.getSource());
-            String id = IdentifierArgumentType.getIdentifier(ctx, CommandArgs.ARG_STRUCTURE).toString();
+            String id = IdentifierArgument.getId(ctx, CommandArgs.ARG_STRUCTURE).toString();
             return chunkXs(s.population().nearby(at.dimensionId(), at.chunkX(), at.chunkZ(),
                     CommandArgs.SUGGEST_RADIUS), id, at.chunkX());
         });
     }
 
     /** Start-chunk Z of processed structures with the id and X already typed, else the sender's own chunk. */
-    static SuggestionProvider<ServerCommandSource> chunkZ(Supplier<CommandServices> services,
-                                                            Function<ServerCommandSource, Sender> senders) {
+    static SuggestionProvider<CommandSourceStack> chunkZ(Supplier<CommandServices> services,
+                                                            Function<CommandSourceStack, Sender> senders) {
         return strings(ctx -> {
             CommandServices s = services.get();
             if (s == null) {
                 return List.of();
             }
             Sender at = senders.apply(ctx.getSource());
-            String id = IdentifierArgumentType.getIdentifier(ctx, CommandArgs.ARG_STRUCTURE).toString();
+            String id = IdentifierArgument.getId(ctx, CommandArgs.ARG_STRUCTURE).toString();
             int x = IntegerArgumentType.getInteger(ctx, CommandArgs.ARG_CHUNK_X);
             return chunkZs(s.population().nearby(at.dimensionId(), at.chunkX(), at.chunkZ(),
                     CommandArgs.SUGGEST_RADIUS), id, x, at.chunkZ());
         });
     }
 
-    static SuggestionProvider<ServerCommandSource> categories() {
+    static SuggestionProvider<CommandSourceStack> categories() {
         return strings(ctx -> categoryWords());
     }
 
@@ -103,7 +102,7 @@ final class Suggesters {
             } catch (RuntimeException | LinkageError e) {
                 found = List.of();
             }
-            return CommandSource.suggestMatching(found, builder);
+            return SharedSuggestionProvider.suggest(found, builder);
         };
     }
 

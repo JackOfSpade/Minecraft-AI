@@ -4,9 +4,8 @@ import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -37,13 +36,13 @@ final class GatewayFakes {
         SpawnState state = new SpawnState.Pending();
         boolean nullState;
         RuntimeException pollFailure;
-        ServerWorld lastWorld;
+        ServerLevel lastWorld;
         String lastName;
         double[] lastPosition;
         float lastYaw;
         final List<SpawnTicket> polled = new ArrayList<>();
 
-        Optional<ServerPlayerEntity> entity = Optional.empty();
+        Optional<ServerPlayer> entity = Optional.empty();
         RuntimeException findFailure;
         boolean managed;
         boolean removeResult = true;
@@ -89,7 +88,7 @@ final class GatewayFakes {
         }
 
         @Override
-        public SpawnTicket requestSpawn(MinecraftServer server, ServerWorld world, String name, double x, double y, double z, float yaw) {
+        public SpawnTicket requestSpawn(MinecraftServer server, ServerLevel world, String name, double x, double y, double z, float yaw) {
             lastWorld = world;
             lastName = name;
             lastPosition = new double[]{x, y, z};
@@ -110,7 +109,7 @@ final class GatewayFakes {
         }
 
         @Override
-        public Optional<ServerPlayerEntity> findBotEntity(MinecraftServer server, String name) {
+        public Optional<ServerPlayer> findBotEntity(MinecraftServer server, String name) {
             if (findFailure != null) {
                 throw findFailure;
             }
@@ -123,7 +122,7 @@ final class GatewayFakes {
         }
 
         @Override
-        public boolean isBotEntity(ServerPlayerEntity player) {
+        public boolean isBotEntity(ServerPlayer player) {
             return true;
         }
 
@@ -166,22 +165,22 @@ final class GatewayFakes {
         List<String> warnings = List.of();
         final List<Boolean> clearFlags = new ArrayList<>();
         final List<BotProfile> profiles = new ArrayList<>();
-        final Map<ServerPlayerEntity, Boolean> marked = new IdentityHashMap<>();
+        final Map<ServerPlayer, Boolean> marked = new IdentityHashMap<>();
 
         @Override
-        public Result apply(ServerPlayerEntity bot, BotProfile profile, boolean clearInventoryFirst) {
+        public Result apply(ServerPlayer bot, BotProfile profile, boolean clearInventoryFirst) {
             clearFlags.add(clearInventoryFirst);
             profiles.add(profile);
             return new Result(loadoutApplied, vitalsApplied, warnings);
         }
 
         @Override
-        public boolean isMarked(ServerPlayerEntity bot) {
+        public boolean isMarked(ServerPlayer bot) {
             return marked.containsKey(bot);
         }
 
         @Override
-        public void mark(ServerPlayerEntity bot) {
+        public void mark(ServerPlayer bot) {
             marked.put(bot, Boolean.TRUE);
         }
     }
@@ -189,7 +188,7 @@ final class GatewayFakes {
     /** A "server" with a settable world map, online-player set and tick counter. */
     static final class Access implements ServerAccess {
         final MinecraftServer server = null;
-        final Map<String, ServerWorld> worlds = new HashMap<>();
+        final Map<String, ServerLevel> worlds = new HashMap<>();
         final Set<String> online = new HashSet<>();
         long seed = 1234L;
         int ticks;
@@ -200,7 +199,7 @@ final class GatewayFakes {
         }
 
         @Override
-        public ServerWorld world(String dimensionId) {
+        public ServerLevel world(String dimensionId) {
             return worlds.get(dimensionId);
         }
 

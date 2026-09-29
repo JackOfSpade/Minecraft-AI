@@ -21,7 +21,7 @@ public final class McClock implements Clock {
     }
 
     public static McClock of(MinecraftServer server) {
-        return new McClock(server::getTicks, System::currentTimeMillis);
+        return new McClock(server::getTickCount, System::currentTimeMillis);
     }
 
     @Override

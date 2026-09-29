@@ -1,9 +1,9 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Where a command was run from: the world, its dimension id, and the position. This is the position of
@@ -12,19 +12,19 @@ import net.minecraft.util.math.Vec3d;
  *
  * @param dimensionId {@code namespace:path} of the world's dimension, the same form {@code StructureKey} uses
  */
-record Sender(ServerWorld world, String dimensionId, double x, double y, double z) {
+record Sender(ServerLevel world, String dimensionId, double x, double y, double z) {
 
-    static Sender of(ServerCommandSource source) {
-        ServerWorld world = source.getWorld();
+    static Sender of(CommandSourceStack source) {
+        ServerLevel world = source.getLevel();
         if (world == null) {
             throw new IllegalStateException("the command source has no world");
         }
-        Vec3d p = source.getPosition();
-        return new Sender(world, world.getRegistryKey().getValue().toString(), p.x, p.y, p.z);
+        Vec3 p = source.getPosition();
+        return new Sender(world, world.dimension().identifier().toString(), p.x, p.y, p.z);
     }
 
     BlockPos blockPos() {
-        return BlockPos.ofFloored(x, y, z);
+        return BlockPos.containing(x, y, z);
     }
 
     int chunkX() {

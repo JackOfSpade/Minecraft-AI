@@ -1,8 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.WorldSavePath;
-
+import net.minecraft.world.level.storage.LevelResource;
 import java.nio.file.Path;
 
 /**
@@ -18,7 +17,7 @@ public final class WorldPaths {
 
     /** {@code <world>/pvpbot_inhabitants}, normalised (the save root is reported as {@code <world>/.}). */
     public static Path dataDirectory(MinecraftServer server) {
-        return dataDirectory(server.getSavePath(WorldSavePath.ROOT));
+        return dataDirectory(server.getWorldPath(LevelResource.ROOT));
     }
 
     public static Path dataDirectory(Path worldRoot) {

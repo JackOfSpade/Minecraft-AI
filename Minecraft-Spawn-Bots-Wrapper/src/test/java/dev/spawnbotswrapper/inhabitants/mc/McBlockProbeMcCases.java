@@ -1,17 +1,16 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.spawn.Cell;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.border.WorldBorder;
-import net.minecraft.world.chunk.WorldChunk;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.world.level.chunk.LevelChunk;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -21,7 +20,7 @@ public final class McBlockProbeMcCases {
     }
 
     /** A chunk whose blocks come from a map; everything else is air. Never touches a real world. */
-    private static final class FakeChunk extends WorldChunk {
+    private static final class FakeChunk extends LevelChunk {
         Map<BlockPos, BlockState> states;
         int reads;
 
@@ -33,8 +32,8 @@ public final class McBlockProbeMcCases {
         @Override
         public BlockState getBlockState(BlockPos pos) {
             reads++;
-            BlockState state = states.get(pos.toImmutable());
-            return state == null ? Blocks.AIR.getDefaultState() : state;
+            BlockState state = states.get(pos.immutable());
+            return state == null ? Blocks.AIR.defaultBlockState() : state;
         }
     }
 
@@ -52,11 +51,11 @@ public final class McBlockProbeMcCases {
 
     public static void blocksAreReadAtWorldCoordinatesAndClassified() {
         FakeChunk chunk = chunk(Map.of(
-                new BlockPos(5, 64, 5), Blocks.STONE.getDefaultState(),
-                new BlockPos(5, 63, 5), Blocks.WATER.getDefaultState(),
-                new BlockPos(6, 64, 5), Blocks.LAVA.getDefaultState(),
-                new BlockPos(7, 64, 5), Blocks.CACTUS.getDefaultState(),
-                new BlockPos(8, 64, 5), Blocks.OAK_FENCE.getDefaultState()));
+                new BlockPos(5, 64, 5), Blocks.STONE.defaultBlockState(),
+                new BlockPos(5, 63, 5), Blocks.WATER.defaultBlockState(),
+                new BlockPos(6, 64, 5), Blocks.LAVA.defaultBlockState(),
+                new BlockPos(7, 64, 5), Blocks.CACTUS.defaultBlockState(),
+                new BlockPos(8, 64, 5), Blocks.OAK_FENCE.defaultBlockState()));
         McBlockProbe probe = probe((cx, cz) -> chunk);
         assertEquals(Cell.SOLID_STANDABLE, probe.cell(5, 64, 5));
         assertEquals(Cell.EMPTY, probe.cell(5, 65, 5));
@@ -121,9 +120,9 @@ public final class McBlockProbeMcCases {
 
     public static void theSameStateIsClassifiedConsistentlyAcrossPositionsAndProbes() {
         FakeChunk chunk = chunk(Map.of(
-                new BlockPos(1, 64, 1), Blocks.STONE.getDefaultState(),
-                new BlockPos(2, 64, 2), Blocks.STONE.getDefaultState(),
-                new BlockPos(3, 64, 3), Blocks.OAK_SLAB.getDefaultState()));
+                new BlockPos(1, 64, 1), Blocks.STONE.defaultBlockState(),
+                new BlockPos(2, 64, 2), Blocks.STONE.defaultBlockState(),
+                new BlockPos(3, 64, 3), Blocks.OAK_SLAB.defaultBlockState()));
         McBlockProbe first = probe((cx, cz) -> chunk);
         McBlockProbe second = probe((cx, cz) -> chunk);
         for (McBlockProbe probe : List.of(first, second, first)) {

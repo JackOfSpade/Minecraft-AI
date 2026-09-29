@@ -1,11 +1,11 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import net.minecraft.ChatFormatting;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -19,14 +19,14 @@ class ChatOutputTest {
 
     @Test
     void chatTextKeepsTheVisibleTextAndAppliesTheColours() {
-        Text t = ChatText.of(P + "6Title" + P + "r plain " + P + "aok" + P + "r");
+        Component t = ChatText.of(P + "6Title" + P + "r plain " + P + "aok" + P + "r");
         assertEquals("Title plain ok", t.getString());
 
-        List<Text> parts = t.getSiblings();
+        List<Component> parts = t.getSiblings();
         assertEquals(3, parts.size());
-        assertEquals(Formatting.GOLD.getColorValue(), parts.get(0).getStyle().getColor().getRgb());
+        assertEquals(ChatFormatting.GOLD.getColor(), parts.get(0).getStyle().getColor().getValue());
         assertNull(parts.get(1).getStyle().getColor());
-        assertEquals(Formatting.GREEN.getColorValue(), parts.get(2).getStyle().getColor().getRgb());
+        assertEquals(ChatFormatting.GREEN.getColor(), parts.get(2).getStyle().getColor().getValue());
     }
 
     @Test
@@ -39,7 +39,7 @@ class ChatOutputTest {
     void everyPaletteColourIsAValidMinecraftColour() {
         for (String coloured : List.of(Markup.title("x"), Markup.label("x"), Markup.id("x"), Markup.good("x"),
                 Markup.warn("x"), Markup.bad("x"))) {
-            Text t = ChatText.of(coloured);
+            Component t = ChatText.of(coloured);
             assertEquals("x", t.getString());
             assertNotNull(t.getSiblings().get(0).getStyle().getColor(), coloured);
         }
@@ -48,7 +48,7 @@ class ChatOutputTest {
     @Test
     void replyLinesGoOutAsSeparateMessagesWithoutBroadcastingToOps() {
         TestSources.Capture out = new TestSources.Capture();
-        ServerCommandSource source = TestSources.level(2, out);
+        CommandSourceStack source = TestSources.level(2, out);
 
         // the capture wants op broadcasts; had the reply asked for one, the missing world would make this throw
         Reply.to(source).lines(List.of(Markup.title("Header"), "second line"));
@@ -62,13 +62,13 @@ class ChatOutputTest {
         Reply.to(TestSources.level(2, out)).error("bad " + Markup.bad("thing"));
 
         assertEquals(List.of("bad thing"), out.strings());
-        assertEquals(Formatting.RED.getColorValue(), out.messages.get(0).getStyle().getColor().getRgb());
+        assertEquals(ChatFormatting.RED.getColor(), out.messages.get(0).getStyle().getColor().getValue());
     }
 
     @Test
     void aSilencedSourceReceivesNothing() {
         TestSources.Capture out = new TestSources.Capture();
-        ServerCommandSource silent = TestSources.level(2, out).withSilent();
+        CommandSourceStack silent = TestSources.level(2, out).withSuppressedOutput();
         Reply.to(silent).lines(List.of("hidden"));
         Reply.to(silent).error("hidden");
         assertTrue(out.messages.isEmpty());

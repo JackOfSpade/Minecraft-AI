@@ -5,16 +5,15 @@ import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * {@link BotGateway} on top of the PvP BOT adapter, the profile applier and the running server: the engine's
@@ -82,7 +81,7 @@ public final class McBotGateway implements BotGateway {
 
     @Override
     public SpawnHandle requestSpawn(SpawnRequest request) {
-        ServerWorld world = access.world(request.dimensionId());
+        ServerLevel world = access.world(request.dimensionId());
         if (world == null) {
             return rejectedHandle(request.name(), "dimension " + request.dimensionId() + " is not loaded");
         }
@@ -133,11 +132,11 @@ public final class McBotGateway implements BotGateway {
 
     @Override
     public ApplyResult applyProfile(String botName, BotProfile profile) {
-        Optional<ServerPlayerEntity> entity = findBot(botName);
+        Optional<ServerPlayer> entity = findBot(botName);
         if (entity.isEmpty()) {
             return new ApplyResult(false, false, false, List.of("bot " + botName + " is not online, or is not a bot"));
         }
-        ServerPlayerEntity bot = entity.get();
+        ServerPlayer bot = entity.get();
         List<String> warnings = new ArrayList<>();
         // Only a bot the addon has not dressed yet is wiped first; a second application overwrites in place.
         boolean fresh = !applier.isMarked(bot);
@@ -167,17 +166,17 @@ public final class McBotGateway implements BotGateway {
     @Override
     public double distanceToNearestPlayer(String botName) {
         try {
-            Optional<ServerPlayerEntity> bot = findBot(botName);
+            Optional<ServerPlayer> bot = findBot(botName);
             if (bot.isEmpty()) {
                 return -1;
             }
-            Vec3d botPos = bot.get().getEntityPos();
+            Vec3 botPos = bot.get().position();
             double best = -1;
-            for (ServerPlayerEntity p : access.server().getPlayerManager().getPlayerList()) {
+            for (ServerPlayer p : access.server().getPlayerList().getPlayers()) {
                 if (adapter.isBotEntity(p)) {
                     continue;
                 }
-                double d = p.getEntityPos().distanceTo(botPos);
+                double d = p.position().distanceTo(botPos);
                 if (best < 0 || d < best) {
                     best = d;
                 }
@@ -218,7 +217,7 @@ public final class McBotGateway implements BotGateway {
             changed = true;
         }
         if (config.get().profiles.reapplyOnRestore) {
-            Optional<ServerPlayerEntity> entity = findBot(botName);
+            Optional<ServerPlayer> entity = findBot(botName);
             if (entity.isPresent() && !applier.isMarked(entity.get())) {
                 ProfileApplication.Result applied = applier.apply(entity.get(), profile, true);
                 if (applied.loadoutApplied() && applied.vitalsApplied()) {
@@ -239,7 +238,7 @@ public final class McBotGateway implements BotGateway {
         }
     }
 
-    private Optional<ServerPlayerEntity> findBot(String botName) {
+    private Optional<ServerPlayer> findBot(String botName) {
         try {
             return adapter.findBotEntity(access.server(), botName);
         } catch (RuntimeException e) {

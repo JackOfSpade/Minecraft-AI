@@ -122,7 +122,7 @@ class SuggestersTest {
 
     @Test
     void theCategoryProviderOffersTheFourNames() {
-        SuggestionProvider<net.minecraft.server.command.ServerCommandSource> provider = Suggesters.categories();
+        SuggestionProvider<net.minecraft.commands.CommandSourceStack> provider = Suggesters.categories();
         try {
             List<String> all = provider.getSuggestions(null, new SuggestionsBuilder("", 0)).get().getList().stream()
                     .map(Suggestion::getText).toList();

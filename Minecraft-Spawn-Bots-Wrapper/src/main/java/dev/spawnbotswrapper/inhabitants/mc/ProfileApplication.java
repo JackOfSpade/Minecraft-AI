@@ -1,9 +1,8 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
-import net.minecraft.server.network.ServerPlayerEntity;
-
 import java.util.List;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * Writes a {@link BotProfile} onto a live bot entity and keeps the marker that says it was done. An interface
@@ -17,13 +16,13 @@ public interface ProfileApplication {
      *
      * @param clearInventoryFirst wipe the inventory before filling it; only ever true for a fresh addon bot
      */
-    Result apply(ServerPlayerEntity bot, BotProfile profile, boolean clearInventoryFirst);
+    Result apply(ServerPlayer bot, BotProfile profile, boolean clearInventoryFirst);
 
     /** True when the addon has already applied a profile to this entity (the marker survives restarts). */
-    boolean isMarked(ServerPlayerEntity bot);
+    boolean isMarked(ServerPlayer bot);
 
     /** Records that a profile was applied. */
-    void mark(ServerPlayerEntity bot);
+    void mark(ServerPlayer bot);
 
     /**
      * @param loadoutApplied the inventory section ran to completion (individual items may still have been

@@ -1,6 +1,6 @@
 package org.stepan1411.testdouble;
 
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.phys.Vec3;
 
 /** Test-only variants of the upstream path registry. */
 public final class Paths {
@@ -18,7 +18,7 @@ public final class Paths {
             return true;
         }
 
-        public static boolean addPoint(String pathName, Vec3d point) {
+        public static boolean addPoint(String pathName, Vec3 point) {
             return true;
         }
 
@@ -53,7 +53,7 @@ public final class Paths {
             return org.stepan1411.pvp_bot.bot.BotPath.deletePath(name);
         }
 
-        public static boolean addPoint(String pathName, Vec3d point) {
+        public static boolean addPoint(String pathName, Vec3 point) {
             return org.stepan1411.pvp_bot.bot.BotPath.addPoint(pathName, point);
         }
 

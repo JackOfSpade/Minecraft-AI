@@ -1,9 +1,8 @@
 package org.stepan1411.testdouble;
 
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.world.phys.Vec3;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -20,7 +19,7 @@ public final class Managers {
 
     /** Without the position overload of spawn. */
     public static class NoPos {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             boolean ok = Recorder.guard("spawn3", name);
             if (ok) {
                 Recorder.LISTED.add(name);
@@ -37,7 +36,7 @@ public final class Managers {
             return Recorder.LISTED.size();
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             Recorder.guard("removeBot", name);
             return Recorder.LISTED.remove(name);
         }
@@ -45,7 +44,7 @@ public final class Managers {
 
     /** With ONLY the position overload of spawn. */
     public static class OnlyPos {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             boolean ok = Recorder.guard("spawn4", name);
             if (ok) {
                 Recorder.LISTED.add(name);
@@ -62,7 +61,7 @@ public final class Managers {
             return Recorder.LISTED.size();
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             Recorder.guard("removeBot", name);
             return Recorder.LISTED.remove(name);
         }
@@ -79,7 +78,7 @@ public final class Managers {
             return Recorder.LISTED.size();
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             Recorder.guard("removeBot", name);
             return Recorder.LISTED.remove(name);
         }
@@ -87,7 +86,7 @@ public final class Managers {
 
     /** Without removeBot. */
     public static class NoRemove {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             boolean ok = Recorder.guard("spawn3", name);
             if (ok) {
                 Recorder.LISTED.add(name);
@@ -95,7 +94,7 @@ public final class Managers {
             return ok;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             boolean ok = Recorder.guard("spawn4", name);
             if (ok) {
                 Recorder.LISTED.add(name);
@@ -115,11 +114,11 @@ public final class Managers {
 
     /** Without the bot list accessor. */
     public static class NoGetAllBots {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -127,18 +126,18 @@ public final class Managers {
             return 0;
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
 
     /** Without the bot counter. */
     public static class NoGetBotCount {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -146,18 +145,18 @@ public final class Managers {
             return new HashSet<>();
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
 
     /** The bot list accessor returns a List instead of a Set. */
     public static class WrongReturn {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -169,18 +168,18 @@ public final class Managers {
             return 0;
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
 
     /** The bot counter returns long instead of int. */
     public static class WrongPrimitiveReturn {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -192,18 +191,18 @@ public final class Managers {
             return 0;
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
 
     /** removeBot became an instance method. */
     public static class NonStaticRemove {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -215,18 +214,18 @@ public final class Managers {
             return 0;
         }
 
-        public boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
 
     /** removeBot is no longer public. */
     public static class PrivateRemove {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -238,18 +237,18 @@ public final class Managers {
             return 0;
         }
 
-        static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
 
     /** The class itself is no longer public, so its public methods cannot be invoked from another package. */
     static class HiddenClass {
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -261,7 +260,7 @@ public final class Managers {
             return 0;
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
@@ -272,7 +271,7 @@ public final class Managers {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, Object source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, Object source, Vec3 pos) {
             return true;
         }
 
@@ -284,7 +283,7 @@ public final class Managers {
             return 0;
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }
@@ -295,11 +294,11 @@ public final class Managers {
             Recorder.CALLS.add("clinit:Managers.CountsInit");
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
 
-        public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+        public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
             return true;
         }
 
@@ -311,7 +310,7 @@ public final class Managers {
             return 0;
         }
 
-        public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+        public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
             return true;
         }
     }

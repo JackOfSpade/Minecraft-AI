@@ -3,7 +3,6 @@ package dev.spawnbotswrapper.inhabitants.adapter;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile.Behavior;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile.Stance;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile.Waypoint;
-import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;
 import org.stepan1411.pvp_bot.bot.BotPath;
 import org.stepan1411.testdouble.Paths;
@@ -12,6 +11,7 @@ import org.stepan1411.testdouble.Recorder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.world.phys.Vec3;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -81,11 +81,11 @@ class PvpBotAdapterPatrolTest {
     void theWaypointsReachUpstreamAsTheExactPositionsInOrder() {
         AdapterFixture f = AdapterFixture.probed();
         assertTrue(assign(f, "Inh_Foo", behavior(Stance.PATROL_CYCLE, true, "bhop", 3)));
-        List<Vec3d> got = BotPath.getPath("inh_inh_foo").points;
+        List<Vec3> got = BotPath.getPath("inh_inh_foo").points;
         assertEquals(3, got.size());
         for (int i = 0; i < 3; i++) {
             Waypoint w = points(3).get(i);
-            assertEquals(new Vec3d(w.x(), w.y(), w.z()), got.get(i));
+            assertEquals(new Vec3(w.x(), w.y(), w.z()), got.get(i));
         }
     }
 
@@ -145,7 +145,7 @@ class PvpBotAdapterPatrolTest {
     void aStalePacifistPathLeftByAnEarlierSessionIsRebuiltWithTheAttackFlagOn() {
         // Upstream persists paths, not followers: after a restart the old attack=false path is still on disk.
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("inh_inh_foo", false, new Vec3d(0, 0, 0), new Vec3d(1, 0, 1));
+        BotPath.seed("inh_inh_foo", false, new Vec3(0, 0, 0), new Vec3(1, 0, 1));
         BotPath.setAttack("inh_inh_foo", false);
         assertFalse(BotPath.getPath("inh_inh_foo").attack, "setup: the persisted path is a pacifist path");
         assertTrue(assign(f, "Inh_Foo", behavior(Stance.PATROL_CYCLE, true, "bhop", 3)));
@@ -229,7 +229,7 @@ class PvpBotAdapterPatrolTest {
     @Test
     void aStalePathOfTheSameNameIsDeletedFirst() {
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("inh_inh_foo", true, new Vec3d(0, 0, 0), new Vec3d(1, 0, 1), new Vec3d(2, 0, 2), new Vec3d(3, 0, 3));
+        BotPath.seed("inh_inh_foo", true, new Vec3(0, 0, 0), new Vec3(1, 0, 1), new Vec3(2, 0, 2), new Vec3(3, 0, 3));
         BotPath.seedFollower("Inh_Foo", "inh_inh_foo");
         assertTrue(assign(f, "Inh_Foo", behavior(Stance.GUARD_POST, true, "bhop", 1)));
         assertEquals("deletePath:inh_inh_foo", pathCalls().get(0));
@@ -296,7 +296,7 @@ class PvpBotAdapterPatrolTest {
     @Test
     void aStalePathThatCannotBeDeletedAbortsBeforeBuildingAnything() {
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("inh_inh_foo", false, new Vec3d(0, 0, 0));
+        BotPath.seed("inh_inh_foo", false, new Vec3(0, 0, 0));
         Recorder.FAIL.add("deletePath");
         assertFalse(assign(f, "Inh_Foo", behavior(Stance.GUARD_POST, true, "bhop", 1)));
         assertFalse(pathCalls().stream().anyMatch(c -> c.startsWith("createPath")));
@@ -318,7 +318,7 @@ class PvpBotAdapterPatrolTest {
     @Test
     void aBotFollowingSomeoneElsesPathIsNotPatrolling() {
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("mine", false, new Vec3d(0, 0, 0));
+        BotPath.seed("mine", false, new Vec3(0, 0, 0));
         BotPath.seedFollower("Inh_Foo", "mine");
         assertFalse(f.adapter.isPatrolling("Inh_Foo"), "not created by this addon");
     }
@@ -382,7 +382,7 @@ class PvpBotAdapterPatrolTest {
     @Test
     void clearPatrolNeverTouchesABotThatHasNoPathOfOurs() {
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("mine", false, new Vec3d(0, 0, 0));
+        BotPath.seed("mine", false, new Vec3(0, 0, 0));
         BotPath.seedFollower("Someone", "mine");
         f.adapter.clearPatrol("Someone");
         assertTrue(pathCalls().isEmpty(), "someone else's path and follower are none of our business");
@@ -394,7 +394,7 @@ class PvpBotAdapterPatrolTest {
     void clearPatrolDoesNotStopAFollowerThatMovedOnToAnotherPath() {
         AdapterFixture f = AdapterFixture.probed();
         assertTrue(assign(f, "Inh_Foo", behavior(Stance.GUARD_POST, true, "bhop", 1)));
-        BotPath.seed("theirs", false, new Vec3d(5, 5, 5));
+        BotPath.seed("theirs", false, new Vec3(5, 5, 5));
         BotPath.seedFollower("Inh_Foo", "theirs");
         Recorder.CALLS.clear();
 
@@ -408,7 +408,7 @@ class PvpBotAdapterPatrolTest {
     void aLeftoverOfAnEarlierSessionIsRecognisedByTheReservedPrefix() {
         // Upstream persists paths but not followers, so after a restart an inh_ path can outlive its follower.
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("inh_inh_bar", false, new Vec3d(0, 0, 0));
+        BotPath.seed("inh_inh_bar", false, new Vec3(0, 0, 0));
         f.adapter.clearPatrol("Inh_Bar");
         assertNull(BotPath.getPath("inh_inh_bar"));
         assertTrue(pathCalls().contains("deletePath:inh_inh_bar"));
@@ -420,7 +420,7 @@ class PvpBotAdapterPatrolTest {
     @Test
     void aLeftoverThatIsStillFollowedOnItsOwnPathIsStopped() {
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("inh_inh_bar", false, new Vec3d(0, 0, 0));
+        BotPath.seed("inh_inh_bar", false, new Vec3(0, 0, 0));
         BotPath.seedFollower("Inh_Bar", "inh_inh_bar");
         f.adapter.clearPatrol("Inh_Bar");
         assertTrue(pathCalls().contains("stopFollowing:Inh_Bar"));
@@ -430,8 +430,8 @@ class PvpBotAdapterPatrolTest {
     @Test
     void aLeftoverFollowedOnSomeoneElsesPathIsNotStopped() {
         AdapterFixture f = AdapterFixture.probed();
-        BotPath.seed("inh_inh_bar", false, new Vec3d(0, 0, 0));
-        BotPath.seed("theirs", false, new Vec3d(0, 0, 0));
+        BotPath.seed("inh_inh_bar", false, new Vec3(0, 0, 0));
+        BotPath.seed("theirs", false, new Vec3(0, 0, 0));
         BotPath.seedFollower("Inh_Bar", "theirs");
         f.adapter.clearPatrol("Inh_Bar");
         assertEquals("theirs", BotPath.followerOf("Inh_Bar"));
@@ -453,7 +453,7 @@ class PvpBotAdapterPatrolTest {
         assertTrue(assign(f, "Inh_A1", behavior(Stance.GUARD_POST, true, "bhop", 1)));
         assertTrue(assign(f, "Inh_B2", behavior(Stance.PATROL_CYCLE, true, "bhop", 3)));
         assertTrue(assign(f, "Inh_C3", behavior(Stance.PATROL_PINGPONG, false, "walk", 2)));
-        BotPath.seed("foreign", false, new Vec3d(9, 9, 9));
+        BotPath.seed("foreign", false, new Vec3(9, 9, 9));
 
         assertEquals(3, f.adapter.releaseAllPatrols());
         for (String bot : List.of("Inh_A1", "Inh_B2", "Inh_C3")) {

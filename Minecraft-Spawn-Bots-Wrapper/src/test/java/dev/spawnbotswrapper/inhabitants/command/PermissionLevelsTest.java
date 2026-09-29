@@ -1,14 +1,14 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
-import net.minecraft.command.DefaultPermissions;
-import net.minecraft.command.permission.LeveledPermissionPredicate;
-import net.minecraft.command.permission.PermissionPredicate;
-import net.minecraft.server.command.ServerCommandSource;
 import org.junit.jupiter.api.Test;
 
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import net.minecraft.server.permissions.PermissionSet;
+import net.minecraft.server.permissions.Permissions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,18 +27,18 @@ class PermissionLevelsTest {
     @Test
     void eachLevelMapsToTheMatchingDefaultPermission() {
         assertNull(PermissionLevels.permissionFor(0), "level 0 means everybody: no permission is asked for");
-        assertSame(DefaultPermissions.MODERATORS, PermissionLevels.permissionFor(1));
-        assertSame(DefaultPermissions.GAMEMASTERS, PermissionLevels.permissionFor(2));
-        assertSame(DefaultPermissions.ADMINS, PermissionLevels.permissionFor(3));
-        assertSame(DefaultPermissions.OWNERS, PermissionLevels.permissionFor(4));
+        assertSame(Permissions.COMMANDS_MODERATOR, PermissionLevels.permissionFor(1));
+        assertSame(Permissions.COMMANDS_GAMEMASTER, PermissionLevels.permissionFor(2));
+        assertSame(Permissions.COMMANDS_ADMIN, PermissionLevels.permissionFor(3));
+        assertSame(Permissions.COMMANDS_OWNER, PermissionLevels.permissionFor(4));
     }
 
     @Test
     void outOfRangeLevelsClampInsteadOfFailing() {
         assertNull(PermissionLevels.permissionFor(-1));
         assertNull(PermissionLevels.permissionFor(Integer.MIN_VALUE));
-        assertSame(DefaultPermissions.OWNERS, PermissionLevels.permissionFor(5));
-        assertSame(DefaultPermissions.OWNERS, PermissionLevels.permissionFor(Integer.MAX_VALUE));
+        assertSame(Permissions.COMMANDS_OWNER, PermissionLevels.permissionFor(5));
+        assertSame(Permissions.COMMANDS_OWNER, PermissionLevels.permissionFor(Integer.MAX_VALUE));
         assertEquals(0, PermissionLevels.clamp(-7));
         assertEquals(4, PermissionLevels.clamp(40));
         assertEquals(3, PermissionLevels.clamp(3));
@@ -57,21 +57,21 @@ class PermissionLevelsTest {
     @Test
     void theVanillaConstantsBehaveAsTheMappingAssumes() {
         // guards the assumption that GAMEMASTERS (2) is what vanilla /give and /tp need
-        assertTrue(LeveledPermissionPredicate.GAMEMASTERS.hasPermission(DefaultPermissions.GAMEMASTERS));
-        assertFalse(LeveledPermissionPredicate.GAMEMASTERS.hasPermission(DefaultPermissions.ADMINS));
-        assertTrue(LeveledPermissionPredicate.OWNERS.hasPermission(DefaultPermissions.MODERATORS));
-        assertFalse(LeveledPermissionPredicate.MODERATORS.hasPermission(DefaultPermissions.GAMEMASTERS));
+        assertTrue(LevelBasedPermissionSet.GAMEMASTER.hasPermission(Permissions.COMMANDS_GAMEMASTER));
+        assertFalse(LevelBasedPermissionSet.GAMEMASTER.hasPermission(Permissions.COMMANDS_ADMIN));
+        assertTrue(LevelBasedPermissionSet.OWNER.hasPermission(Permissions.COMMANDS_MODERATOR));
+        assertFalse(LevelBasedPermissionSet.MODERATOR.hasPermission(Permissions.COMMANDS_GAMEMASTER));
     }
 
     @Test
     void aSourceWithNoPermissionsPassesOnlyLevelZero() {
-        assertTrue(PermissionLevels.allows(PermissionPredicate.NONE, 0));
+        assertTrue(PermissionLevels.allows(PermissionSet.NO_PERMISSIONS, 0));
         for (int need = 1; need <= 4; need++) {
-            assertFalse(PermissionLevels.allows(PermissionPredicate.NONE, need), "level " + need);
+            assertFalse(PermissionLevels.allows(PermissionSet.NO_PERMISSIONS, need), "level " + need);
         }
         assertTrue(PermissionLevels.allows(null, 0));
         assertFalse(PermissionLevels.allows(null, 1));
-        assertTrue(PermissionLevels.allows(PermissionPredicate.ALL, 4));
+        assertTrue(PermissionLevels.allows(PermissionSet.ALL_PERMISSIONS, 4));
     }
 
     // ---------------------------------------------------------------- the level that applies right now
@@ -118,7 +118,7 @@ class PermissionLevelsTest {
             throw new IllegalStateException("services exploded");
         }));
 
-        Predicate<ServerCommandSource> requirement = PermissionLevels.requirement(() -> {
+        Predicate<CommandSourceStack> requirement = PermissionLevels.requirement(() -> {
             throw new IllegalStateException("services exploded");
         });
         assertTrue(requirement.test(TestSources.level(2)));
@@ -130,7 +130,7 @@ class PermissionLevelsTest {
         FakeServices fake = new FakeServices();
         fake.config.debugCommands = false;
         assertEquals(PermissionLevels.NOBODY, PermissionLevels.currentLevel(servicesOf(fake)));
-        Predicate<ServerCommandSource> requirement = PermissionLevels.requirement(servicesOf(fake));
+        Predicate<CommandSourceStack> requirement = PermissionLevels.requirement(servicesOf(fake));
         for (int level = 0; level <= 4; level++) {
             assertFalse(requirement.test(TestSources.level(level)), "level " + level);
         }
@@ -141,11 +141,11 @@ class PermissionLevelsTest {
     @Test
     void theRequirementTracksTheConfigLevelAcrossReloads() {
         FakeServices fake = new FakeServices();
-        Predicate<ServerCommandSource> requirement = PermissionLevels.requirement(servicesOf(fake));
-        ServerCommandSource moderator = TestSources.level(1);
-        ServerCommandSource gamemaster = TestSources.level(2);
-        ServerCommandSource admin = TestSources.level(3);
-        ServerCommandSource everyone = TestSources.level(0);
+        Predicate<CommandSourceStack> requirement = PermissionLevels.requirement(servicesOf(fake));
+        CommandSourceStack moderator = TestSources.level(1);
+        CommandSourceStack gamemaster = TestSources.level(2);
+        CommandSourceStack admin = TestSources.level(3);
+        CommandSourceStack everyone = TestSources.level(0);
 
         fake.config.commandPermissionLevel = 2;
         assertFalse(requirement.test(everyone));
@@ -167,7 +167,7 @@ class PermissionLevelsTest {
 
     @Test
     void whileTheServicesAreNotReadyTheDefaultLevelApplies() {
-        Predicate<ServerCommandSource> requirement = PermissionLevels.requirement(() -> null);
+        Predicate<CommandSourceStack> requirement = PermissionLevels.requirement(() -> null);
         assertFalse(requirement.test(TestSources.level(0)));
         assertFalse(requirement.test(TestSources.level(1)));
         assertTrue(requirement.test(TestSources.level(2)));

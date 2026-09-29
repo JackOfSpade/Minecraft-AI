@@ -5,9 +5,9 @@ import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.structure.StructureStart;
-import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,7 +45,7 @@ public final class StructureDetector {
     private final RecentKeys<StructureKey> recent = new RecentKeys<>(RECENT_CAPACITY);
 
     /** A chunk together with its world; equality is identity of both, i.e. "the same chunk object". */
-    record ChunkRef(ServerWorld world, WorldChunk chunk) {
+    record ChunkRef(ServerLevel world, LevelChunk chunk) {
     }
 
     public StructureDetector(SnapshotSource source, StepGuard guard) {
@@ -61,20 +61,20 @@ public final class StructureDetector {
         ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> source.invalidate());
     }
 
-    void onChunkLoad(ServerWorld world, WorldChunk chunk) {
+    void onChunkLoad(ServerLevel world, LevelChunk chunk) {
         long start = System.nanoTime();
         guard.run("chunk load callback", () -> {
-            if (!chunk.getStructureStarts().isEmpty()) {
+            if (!chunk.getAllStarts().isEmpty()) {
                 queue.loaded(new ChunkRef(world, chunk));
             }
         });
         warnIfSlow("onChunkLoad", chunk, start);
     }
 
-    void onChunkGenerate(ServerWorld world, WorldChunk chunk) {
+    void onChunkGenerate(ServerLevel world, LevelChunk chunk) {
         long start = System.nanoTime();
         guard.run("chunk generate callback", () -> {
-            if (!chunk.getStructureStarts().isEmpty()) {
+            if (!chunk.getAllStarts().isEmpty()) {
                 queue.generated(new ChunkRef(world, chunk));
             }
         });
@@ -87,7 +87,7 @@ public final class StructureDetector {
      * directly (not through {@link #guard}, which is for failures) so a stall shows up even though it
      * isn't an exception.
      */
-    private void warnIfSlow(String step, WorldChunk chunk, long startNanos) {
+    private void warnIfSlow(String step, LevelChunk chunk, long startNanos) {
         long elapsedNanos = System.nanoTime() - startNanos;
         if (elapsedNanos > SLOW_CALLBACK_WARN_NANOS) {
             LOGGER.warn("PvP BOT Inhabitants: {} took {} ms for chunk {}", step,
@@ -108,7 +108,7 @@ public final class StructureDetector {
             if (ref.world().getServer() != server) {
                 return;
             }
-            for (StructureStart start : ref.chunk().getStructureStarts().values()) {
+            for (StructureStart start : ref.chunk().getAllStarts().values()) {
                 guard.run("structure detection", () -> {
                     StructureKey key = source.keyOf(ref.world(), start);
                     if (key == null || recent.contains(key)) {

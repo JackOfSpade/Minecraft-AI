@@ -19,8 +19,6 @@ import dev.spawnbotswrapper.inhabitants.engine.ForceMode;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
-import net.minecraft.command.argument.IdentifierArgumentType;
-import net.minecraft.server.command.ServerCommandSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +27,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.arguments.IdentifierArgument;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,7 +46,7 @@ class InhabitantsCommandTest {
     private final FakeServices fs = new FakeServices();
     private final FakeServices.FakeCatalog catalog = new FakeServices.FakeCatalog();
     private final AtomicReference<CommandServices> services = new AtomicReference<>();
-    private final CommandDispatcher<ServerCommandSource> dispatcher = new CommandDispatcher<>();
+    private final CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
     private final TestSources.Capture out = new TestSources.Capture();
 
     @BeforeEach
@@ -74,14 +74,14 @@ class InhabitantsCommandTest {
     }
 
     private List<String> complete(String input) throws Exception {
-        ParseResults<ServerCommandSource> parse = dispatcher.parse(input, TestSources.level(2, out));
+        ParseResults<CommandSourceStack> parse = dispatcher.parse(input, TestSources.level(2, out));
         return dispatcher.getCompletionSuggestions(parse).get().getList().stream().map(Suggestion::getText).toList();
     }
 
     // ---------------------------------------------------------------- shape
 
-    private static void collectExecutable(CommandNode<ServerCommandSource> node, String prefix, List<String> out) {
-        for (CommandNode<ServerCommandSource> child : node.getChildren()) {
+    private static void collectExecutable(CommandNode<CommandSourceStack> node, String prefix, List<String> out) {
+        for (CommandNode<CommandSourceStack> child : node.getChildren()) {
             String token = child instanceof LiteralCommandNode ? child.getName() : "<" + child.getName() + ">";
             String path = prefix.isEmpty() ? token : prefix + " " + token;
             if (child.getCommand() != null) {
@@ -91,15 +91,15 @@ class InhabitantsCommandTest {
         }
     }
 
-    private static void collectAll(CommandNode<ServerCommandSource> node, List<CommandNode<ServerCommandSource>> out) {
-        for (CommandNode<ServerCommandSource> child : node.getChildren()) {
+    private static void collectAll(CommandNode<CommandSourceStack> node, List<CommandNode<CommandSourceStack>> out) {
+        for (CommandNode<CommandSourceStack> child : node.getChildren()) {
             out.add(child);
             collectAll(child, out);
         }
     }
 
-    private CommandNode<ServerCommandSource> node(String... path) {
-        CommandNode<ServerCommandSource> n = dispatcher.getRoot();
+    private CommandNode<CommandSourceStack> node(String... path) {
+        CommandNode<CommandSourceStack> n = dispatcher.getRoot();
         for (String p : path) {
             n = n.getChild(p);
             assertNotNull(n, "missing node " + p + " in " + String.join(" ", path));
@@ -160,9 +160,9 @@ class InhabitantsCommandTest {
 
     @SuppressWarnings("unchecked")
     private <T> ArgumentType<T> argumentType(String... path) {
-        CommandNode<ServerCommandSource> n = node(path);
+        CommandNode<CommandSourceStack> n = node(path);
         assertInstanceOf(ArgumentCommandNode.class, n);
-        return ((ArgumentCommandNode<ServerCommandSource, T>) n).getType();
+        return ((ArgumentCommandNode<CommandSourceStack, T>) n).getType();
     }
 
     @Test
@@ -172,11 +172,11 @@ class InhabitantsCommandTest {
         assertEquals(1, radius.getMinimum());
         assertEquals(64, radius.getMaximum());
 
-        assertInstanceOf(IdentifierArgumentType.class,
+        assertInstanceOf(IdentifierArgument.class,
                 argumentType("inhabitants", "reset", "structure", "structureId"));
 
         for (String coord : List.of("chunkX", "chunkZ")) {
-            CommandNode<ServerCommandSource> n = coord.equals("chunkX")
+            CommandNode<CommandSourceStack> n = coord.equals("chunkX")
                     ? node("inhabitants", "reset", "structure", "structureId", "chunkX")
                     : node("inhabitants", "reset", "structure", "structureId", "chunkX", "chunkZ");
             IntegerArgumentType t = assertInstanceOf(IntegerArgumentType.class,
@@ -207,10 +207,10 @@ class InhabitantsCommandTest {
 
     @Test
     void noNodeMixesLiteralAndArgumentChildrenAndBrigadierFindsNoAmbiguity() {
-        List<CommandNode<ServerCommandSource>> all = new ArrayList<>();
+        List<CommandNode<CommandSourceStack>> all = new ArrayList<>();
         collectAll(node("inhabitants"), all);
         all.add(node("inhabitants"));
-        for (CommandNode<ServerCommandSource> n : all) {
+        for (CommandNode<CommandSourceStack> n : all) {
             boolean literals = n.getChildren().stream().anyMatch(c -> c instanceof LiteralCommandNode);
             boolean arguments = n.getChildren().stream().anyMatch(c -> c instanceof ArgumentCommandNode);
             assertFalse(literals && arguments, "node '" + n.getName() + "' mixes literal and argument children");
@@ -224,8 +224,8 @@ class InhabitantsCommandTest {
 
     // ---------------------------------------------------------------- permission requirement
 
-    private List<CommandNode<ServerCommandSource>> everyNode() {
-        List<CommandNode<ServerCommandSource>> all = new ArrayList<>();
+    private List<CommandNode<CommandSourceStack>> everyNode() {
+        List<CommandNode<CommandSourceStack>> all = new ArrayList<>();
         all.add(node("inhabitants"));
         all.add(node("pvpbot_inhabitants"));
         collectAll(node("inhabitants"), all);
@@ -234,14 +234,14 @@ class InhabitantsCommandTest {
 
     @Test
     void everyNodeIsGuardedByTheConfiguredLevel() {
-        List<CommandNode<ServerCommandSource>> nodes = everyNode();
+        List<CommandNode<CommandSourceStack>> nodes = everyNode();
         assertTrue(nodes.size() >= 28, "expected the whole tree, got " + nodes.size());
 
         for (int configLevel = 0; configLevel <= 4; configLevel++) {
             fs.config.commandPermissionLevel = configLevel;
             for (int sourceLevel = 0; sourceLevel <= 4; sourceLevel++) {
-                ServerCommandSource source = TestSources.level(sourceLevel);
-                for (CommandNode<ServerCommandSource> n : nodes) {
+                CommandSourceStack source = TestSources.level(sourceLevel);
+                for (CommandNode<CommandSourceStack> n : nodes) {
                     assertEquals(sourceLevel >= configLevel, n.canUse(source),
                             "node '" + n.getName() + "' config " + configLevel + " source " + sourceLevel);
                 }
@@ -276,7 +276,7 @@ class InhabitantsCommandTest {
             int l = level;
             assertThrows(CommandSyntaxException.class, () -> run("inhabitants info", l));
         }
-        for (CommandNode<ServerCommandSource> n : everyNode()) {
+        for (CommandNode<CommandSourceStack> n : everyNode()) {
             // "reload" is exempt on purpose (see reloadStaysReachableEvenWhenDisabled). The root and the
             // alias carry the wider of the two requirements purely so Brigadier lets traversal continue
             // towards "reload" (every ancestor on a path must pass its own requires()) - they are not
@@ -298,7 +298,7 @@ class InhabitantsCommandTest {
         // (and so turn debugCommands back on) without a server restart.
         fs.config.debugCommands = false;
         fs.config.commandPermissionLevel = 3;
-        CommandNode<ServerCommandSource> reload = node("inhabitants", "reload");
+        CommandNode<CommandSourceStack> reload = node("inhabitants", "reload");
         assertFalse(reload.canUse(TestSources.level(2)), "still below the configured level");
         assertTrue(reload.canUse(TestSources.level(3)), "the configured level must still work");
         assertEquals(1, run("inhabitants reload", 3));
@@ -346,7 +346,7 @@ class InhabitantsCommandTest {
 
     @Test
     void aMissingWorldIsReportedAsAnError() throws Exception {
-        CommandDispatcher<ServerCommandSource> real = new CommandDispatcher<>();
+        CommandDispatcher<CommandSourceStack> real = new CommandDispatcher<>();
         InhabitantsCommand.register(real, services::get,
                 new Backends(catalog, (p, c) -> List.of(), Sender::of));
         TestSources.Capture capture = new TestSources.Capture();
@@ -362,7 +362,7 @@ class InhabitantsCommandTest {
                 throw new NoClassDefFoundError("upstream/Gone");
             }
         };
-        CommandDispatcher<ServerCommandSource> d = new CommandDispatcher<>();
+        CommandDispatcher<CommandSourceStack> d = new CommandDispatcher<>();
         InhabitantsCommand.register(d, services::get, backends(broken));
         TestSources.Capture capture = new TestSources.Capture();
         assertEquals(0, d.execute("inhabitants catalog", TestSources.level(2, capture)));
@@ -428,7 +428,7 @@ class InhabitantsCommandTest {
     @Test
     void structureHereQueriesTheLocatorAtTheSenderBlock() throws Exception {
         assertEquals(0, run("inhabitants structure here"));
-        assertEquals(new net.minecraft.util.math.BlockPos(100, 64, -21), fs.locator.lastAtPos);
+        assertEquals(new net.minecraft.core.BlockPos(100, 64, -21), fs.locator.lastAtPos);
 
         fs.locator.at = List.of(Fixtures.snapshot("minecraft:mansion", 6, -2, true));
         assertEquals(1, run("inhabitants structure here"));
@@ -609,7 +609,7 @@ class InhabitantsCommandTest {
 
     @Test
     void theRequirementAlsoGuardsCompletion() throws Exception {
-        ParseResults<ServerCommandSource> parse = dispatcher.parse("inhabitants profile ", TestSources.level(1, out));
+        ParseResults<CommandSourceStack> parse = dispatcher.parse("inhabitants profile ", TestSources.level(1, out));
         List<String> suggestions = dispatcher.getCompletionSuggestions(parse).get().getList().stream()
                 .map(Suggestion::getText).toList();
         assertEquals(List.of(), suggestions);

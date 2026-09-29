@@ -5,12 +5,11 @@ import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -25,8 +24,8 @@ public final class McBotGatewayMcCases {
         final GatewayFakes.Access access = new GatewayFakes.Access();
         final InhabitantsConfig config = new InhabitantsConfig();
         final McBotGateway gateway = new McBotGateway(access, adapter, applier, () -> config);
-        final ServerWorld overworld = McObjects.opaque(ServerWorld.class);
-        final ServerPlayerEntity bot = McObjects.opaque(ServerPlayerEntity.class);
+        final ServerLevel overworld = McObjects.opaque(ServerLevel.class);
+        final ServerPlayer bot = McObjects.opaque(ServerPlayer.class);
 
         Rig() {
             access.worlds.put("minecraft:overworld", overworld);
@@ -402,9 +401,9 @@ public final class McBotGatewayMcCases {
     public static void theWorldGatewayServesTheSeedAndLoadedDimensionsOnly() {
         GatewayFakes.Access access = new GatewayFakes.Access();
         access.seed = -8_675_309L;
-        ServerWorld nether = McObjects.opaque(ServerWorld.class);
+        ServerLevel nether = McObjects.opaque(ServerLevel.class);
         access.worlds.put("minecraft:the_nether", nether);
-        ServerWorld[] seen = new ServerWorld[1];
+        ServerLevel[] seen = new ServerLevel[1];
         dev.spawnbotswrapper.inhabitants.spawn.BlockProbe stub = new dev.spawnbotswrapper.inhabitants.spawn.BlockProbe() {
             @Override
             public dev.spawnbotswrapper.inhabitants.spawn.Cell cell(int x, int y, int z) {

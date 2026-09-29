@@ -3,20 +3,6 @@ package dev.spawnbotswrapper.inhabitants.mc;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile.ItemSpec;
 import dev.spawnbotswrapper.inhabitants.profile.ProfileVocabulary;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ItemEnchantmentsComponent;
-import net.minecraft.component.type.PotionContentsComponent;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.entity.attribute.EntityAttribute;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.potion.Potion;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.util.Identifier;
 import org.junit.jupiter.api.Assumptions;
 
 import java.util.ArrayList;
@@ -24,6 +10,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.Potion;
+import net.minecraft.world.item.alchemy.PotionContents;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -40,9 +40,9 @@ public final class ItemStackFactoryMcCases {
         return factory().build(spec, warnings).orElse(null);
     }
 
-    private static RegistryEntry<Enchantment> enchantment(String id) {
+    private static Holder<Enchantment> enchantment(String id) {
         return McBootstrap.registries()
-                .getOptionalEntry(RegistryKey.of(RegistryKeys.ENCHANTMENT, Identifier.of(id)))
+                .get(ResourceKey.create(Registries.ENCHANTMENT, Identifier.parse(id)))
                 .orElseThrow(() -> new AssertionError("enchantment " + id + " is missing from the registry"));
     }
 
@@ -50,9 +50,9 @@ public final class ItemStackFactoryMcCases {
         List<String> warnings = new ArrayList<>();
         ItemStack stack = build(ItemSpec.of("minecraft:diamond_sword"), warnings);
         assertNotNull(stack);
-        assertTrue(stack.isOf(Items.DIAMOND_SWORD));
+        assertTrue(stack.is(Items.DIAMOND_SWORD));
         assertEquals(1, stack.getCount());
-        assertEquals(0, stack.getDamage());
+        assertEquals(0, stack.getDamageValue());
         assertTrue(warnings.isEmpty(), warnings.toString());
     }
 
@@ -63,8 +63,8 @@ public final class ItemStackFactoryMcCases {
         enchants.put("minecraft:unbreaking", 3);
         ItemStack stack = build(new ItemSpec("minecraft:diamond_sword", 1, enchants, 0.0, null), warnings);
         assertNotNull(stack);
-        ItemEnchantmentsComponent applied = stack.getEnchantments();
-        assertEquals(2, applied.getEnchantments().size());
+        ItemEnchantments applied = stack.getEnchantments();
+        assertEquals(2, applied.keySet().size());
         assertEquals(5, applied.getLevel(enchantment("minecraft:sharpness")));
         assertEquals(3, applied.getLevel(enchantment("minecraft:unbreaking")));
         assertTrue(warnings.isEmpty(), warnings.toString());
@@ -81,7 +81,7 @@ public final class ItemStackFactoryMcCases {
         b.put("minecraft:protection", 4);
         ItemStack first = build(new ItemSpec("minecraft:netherite_helmet", 1, a, 0.0, null), new ArrayList<>());
         ItemStack second = build(new ItemSpec("minecraft:netherite_helmet", 1, b, 0.0, null), new ArrayList<>());
-        assertTrue(ItemStack.areItemsAndComponentsEqual(first, second));
+        assertTrue(ItemStack.isSameItemSameComponents(first, second));
     }
 
     public static void levelsAreClampedToVanillasBounds() {
@@ -101,7 +101,7 @@ public final class ItemStackFactoryMcCases {
         enchants.put("Not An Id", 1);
         ItemStack stack = build(new ItemSpec("minecraft:iron_sword", 1, enchants, 0.0, null), warnings);
         assertNotNull(stack, "the item itself survives");
-        assertEquals(1, stack.getEnchantments().getEnchantments().size());
+        assertEquals(1, stack.getEnchantments().keySet().size());
         assertEquals(4, stack.getEnchantments().getLevel(enchantment("minecraft:sharpness")));
         assertEquals(2, warnings.size(), warnings.toString());
         assertTrue(warnings.stream().anyMatch(w -> w.contains("somemod:frostbite")));
@@ -111,7 +111,7 @@ public final class ItemStackFactoryMcCases {
         List<String> warnings = new ArrayList<>();
         ItemStack stack = build(new ItemSpec("minecraft:bow", 1, Map.of("nope:nothing", 1), 0.0, null), warnings);
         assertNotNull(stack);
-        assertFalse(stack.hasEnchantments());
+        assertFalse(stack.isEnchanted());
         assertEquals(1, warnings.size());
     }
 
@@ -119,9 +119,9 @@ public final class ItemStackFactoryMcCases {
         ItemStack book = build(new ItemSpec("minecraft:enchanted_book", 1, Map.of("minecraft:mending", 1), 0.0, null),
                 new ArrayList<>());
         assertNotNull(book);
-        ItemEnchantmentsComponent stored = book.getOrDefault(DataComponentTypes.STORED_ENCHANTMENTS, ItemEnchantmentsComponent.DEFAULT);
+        ItemEnchantments stored = book.getOrDefault(DataComponents.STORED_ENCHANTMENTS, ItemEnchantments.EMPTY);
         assertEquals(1, stored.getLevel(enchantment("minecraft:mending")));
-        assertFalse(book.hasEnchantments(), "a book's own ENCHANTMENTS component stays empty");
+        assertFalse(book.isEnchanted(), "a book's own ENCHANTMENTS component stays empty");
     }
 
     public static void countsAreClampedToTheStackLimit() {
@@ -143,28 +143,28 @@ public final class ItemStackFactoryMcCases {
 
     public static void damageFractionOnlyAppliesToDamageableItemsAndNeverBreaksThem() {
         ItemStack chest = build(new ItemSpec("minecraft:diamond_chestplate", 1, Map.of(), 0.5, null), new ArrayList<>());
-        assertEquals(Math.round(chest.getMaxDamage() * 0.5), chest.getDamage());
+        assertEquals(Math.round(chest.getMaxDamage() * 0.5), chest.getDamageValue());
 
         ItemStack worn = build(new ItemSpec("minecraft:diamond_chestplate", 1, Map.of(), 0.95, null), new ArrayList<>());
-        assertTrue(worn.getDamage() > 0 && worn.getDamage() < worn.getMaxDamage(), "damaged but not broken: " + worn.getDamage());
+        assertTrue(worn.getDamageValue() > 0 && worn.getDamageValue() < worn.getMaxDamage(), "damaged but not broken: " + worn.getDamageValue());
 
         ItemStack pristine = build(new ItemSpec("minecraft:diamond_chestplate", 1, Map.of(), 0.0, null), new ArrayList<>());
-        assertEquals(0, pristine.getDamage());
+        assertEquals(0, pristine.getDamageValue());
 
         ItemStack apple = build(new ItemSpec("minecraft:golden_apple", 1, Map.of(), 0.9, null), new ArrayList<>());
-        assertFalse(apple.isDamageable());
-        assertEquals(0, apple.getDamage());
+        assertFalse(apple.isDamageableItem());
+        assertEquals(0, apple.getDamageValue());
     }
 
     public static void potionItemsCarryTheirPotion() {
         List<String> warnings = new ArrayList<>();
         ItemStack splash = build(new ItemSpec("minecraft:splash_potion", 1, Map.of(), 0.0, "minecraft:strong_healing"), warnings);
         assertNotNull(splash);
-        PotionContentsComponent contents = splash.get(DataComponentTypes.POTION_CONTENTS);
+        PotionContents contents = splash.get(DataComponents.POTION_CONTENTS);
         assertNotNull(contents);
-        Optional<RegistryEntry<Potion>> potion = contents.potion();
+        Optional<Holder<Potion>> potion = contents.potion();
         assertTrue(potion.isPresent());
-        assertEquals(Identifier.of("minecraft:strong_healing"), potion.get().getKey().orElseThrow().getValue());
+        assertEquals(Identifier.parse("minecraft:strong_healing"), potion.get().unwrapKey().orElseThrow().identifier());
         assertTrue(warnings.isEmpty(), warnings.toString());
     }
 
@@ -187,15 +187,15 @@ public final class ItemStackFactoryMcCases {
     public static void surroundingWhitespaceInIdsIsTolerated() {
         ItemStack stack = build(ItemSpec.of("  minecraft:bow "), new ArrayList<>());
         assertNotNull(stack);
-        assertTrue(stack.isOf(Items.BOW));
+        assertTrue(stack.is(Items.BOW));
     }
 
     public static void parseIdRejectsGarbage() {
         assertNull(ItemStackFactory.parseId(null));
         assertNull(ItemStackFactory.parseId("UPPER:case"));
         assertNull(ItemStackFactory.parseId("has space"));
-        assertEquals(Identifier.of("minecraft", "bow"), ItemStackFactory.parseId("bow"));
-        assertEquals(Identifier.of("mod", "a/b"), ItemStackFactory.parseId("mod:a/b"));
+        assertEquals(Identifier.fromNamespaceAndPath("minecraft", "bow"), ItemStackFactory.parseId("bow"));
+        assertEquals(Identifier.fromNamespaceAndPath("mod", "a/b"), ItemStackFactory.parseId("mod:a/b"));
     }
 
     /**
@@ -220,7 +220,7 @@ public final class ItemStackFactoryMcCases {
         List<String> problems = new ArrayList<>();
         for (String id : items) {
             Identifier parsed = ItemStackFactory.parseId(id);
-            Optional<Item> item = parsed == null ? Optional.empty() : Registries.ITEM.getOptionalValue(parsed);
+            Optional<Item> item = parsed == null ? Optional.empty() : BuiltInRegistries.ITEM.getOptional(parsed);
             if (item.isEmpty() || item.get() == Items.AIR) {
                 problems.add("item " + id);
             } else {
@@ -232,24 +232,24 @@ public final class ItemStackFactoryMcCases {
         }
         for (String id : enchantments) {
             Identifier parsed = ItemStackFactory.parseId(id);
-            if (parsed == null || McBootstrap.registries().getOptionalEntry(RegistryKey.of(RegistryKeys.ENCHANTMENT, parsed)).isEmpty()) {
+            if (parsed == null || McBootstrap.registries().get(ResourceKey.create(Registries.ENCHANTMENT, parsed)).isEmpty()) {
                 problems.add("enchantment " + id);
             }
         }
         for (String id : potions) {
             Identifier parsed = ItemStackFactory.parseId(id);
-            if (parsed == null || Registries.POTION.getEntry(parsed).isEmpty()) {
+            if (parsed == null || BuiltInRegistries.POTION.get(parsed).isEmpty()) {
                 problems.add("potion " + id);
             }
         }
         for (String id : attributes) {
             Identifier parsed = ItemStackFactory.parseId(id);
-            Optional<RegistryEntry.Reference<EntityAttribute>> attribute = parsed == null ? Optional.empty() : Registries.ATTRIBUTE.getEntry(parsed);
+            Optional<Holder.Reference<Attribute>> attribute = parsed == null ? Optional.empty() : BuiltInRegistries.ATTRIBUTE.get(parsed);
             if (attribute.isEmpty()) {
                 problems.add("attribute " + id);
             } else {
                 try {
-                    Identifier.of(ModifierIds.NAMESPACE, ModifierIds.pathFor(parsed.getNamespace(), parsed.getPath()));
+                    Identifier.fromNamespaceAndPath(ModifierIds.NAMESPACE, ModifierIds.pathFor(parsed.getNamespace(), parsed.getPath()));
                 } catch (RuntimeException e) {
                     problems.add("modifier id for attribute " + id + ": " + e);
                 }

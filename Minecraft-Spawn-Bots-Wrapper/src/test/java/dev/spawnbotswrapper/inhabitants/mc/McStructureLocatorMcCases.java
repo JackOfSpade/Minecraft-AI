@@ -3,14 +3,12 @@ package dev.spawnbotswrapper.inhabitants.mc;
 import dev.spawnbotswrapper.inhabitants.structure.IntBox;
 import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
 import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.structure.StructureStart;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.gen.structure.Structure;
-import net.minecraft.world.gen.structure.StructureKeys;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.levelgen.structure.BuiltinStructures;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,11 +24,11 @@ public final class McStructureLocatorMcCases {
         final WorldFakes.Source source = new WorldFakes.Source();
         final WorldFakes.ChunkManager chunks = WorldFakes.chunkManager();
         final MinecraftServer server = WorldFakes.server();
-        final ServerWorld world = WorldFakes.world(server, chunks);
+        final ServerLevel world = WorldFakes.world(server, chunks);
         final McStructureLocator locator = new McStructureLocator(source);
-        final Structure igloo = McBootstrap.registries().getOptionalEntry(StructureKeys.IGLOO).orElseThrow().value();
-        final Structure village = McBootstrap.registries().getOptionalEntry(StructureKeys.VILLAGE_PLAINS).orElseThrow().value();
-        final Structure pyramid = McBootstrap.registries().getOptionalEntry(StructureKeys.DESERT_PYRAMID).orElseThrow().value();
+        final Structure igloo = McBootstrap.registries().get(BuiltinStructures.IGLOO).orElseThrow().value();
+        final Structure village = McBootstrap.registries().get(BuiltinStructures.VILLAGE_PLAINS).orElseThrow().value();
+        final Structure pyramid = McBootstrap.registries().get(BuiltinStructures.DESERT_PYRAMID).orElseThrow().value();
 
         /** Loads a chunk holding one start with this box; returns the start so others can reference it. */
         StructureStart loadStart(Structure structure, String id, int cx, int cz, IntBox box, Map<Structure, LongSet> references) {
@@ -89,7 +87,7 @@ public final class McStructureLocatorMcCases {
         assertEquals(List.of(), rig.locator.at(rig.world, new BlockPos(3, 64, 3)));
         // The position's own chunk is not loaded at all.
         assertEquals(List.of(), rig.locator.at(rig.world, new BlockPos(500, 64, 500)));
-        assertFalse(rig.chunks.loaded.containsKey(net.minecraft.util.math.ChunkPos.toLong(9, 9)), "the fake would have loaded it if asked to");
+        assertFalse(rig.chunks.loaded.containsKey(net.minecraft.world.level.ChunkPos.asLong(9, 9)), "the fake would have loaded it if asked to");
     }
 
     public static void nearListsNearestStructuresFirstWithinTheRadius() {

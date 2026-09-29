@@ -1,19 +1,18 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import com.mojang.authlib.GameProfile;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.PlayerManager;
-import net.minecraft.server.dedicated.DedicatedPlayerManager;
-import net.minecraft.server.dedicated.MinecraftDedicatedServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.world.World;
-
+import net.minecraft.server.dedicated.DedicatedPlayerList;
+import net.minecraft.server.dedicated.DedicatedServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.PlayerList;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,32 +27,32 @@ public final class McServerAccessMcCases {
     private McServerAccessMcCases() {
     }
 
-    private static ServerPlayerEntity player(String name) {
-        ServerPlayerEntity player = McObjects.opaque(ServerPlayerEntity.class);
-        McObjects.setField(player, PlayerEntity.class, "gameProfile", new GameProfile(UUID.randomUUID(), name));
+    private static ServerPlayer player(String name) {
+        ServerPlayer player = McObjects.opaque(ServerPlayer.class);
+        McObjects.setField(player, Player.class, "gameProfile", new GameProfile(UUID.randomUUID(), name));
         McObjects.setField(player, Entity.class, "commandTags", new HashSet<String>());
         return player;
     }
 
-    private static MinecraftServer server(Map<RegistryKey<World>, ServerWorld> worlds, List<ServerPlayerEntity> players, int ticks) {
-        MinecraftDedicatedServer server = McObjects.opaque(MinecraftDedicatedServer.class);
+    private static MinecraftServer server(Map<ResourceKey<Level>, ServerLevel> worlds, List<ServerPlayer> players, int ticks) {
+        DedicatedServer server = McObjects.opaque(DedicatedServer.class);
         McObjects.setField(server, MinecraftServer.class, "worlds", worlds);
-        DedicatedPlayerManager manager = McObjects.opaque(DedicatedPlayerManager.class);
-        McObjects.setField(manager, PlayerManager.class, "players", new ArrayList<>(players));
+        DedicatedPlayerList manager = McObjects.opaque(DedicatedPlayerList.class);
+        McObjects.setField(manager, PlayerList.class, "players", new ArrayList<>(players));
         McObjects.setField(server, MinecraftServer.class, "playerManager", manager);
         McObjects.setInt(server, MinecraftServer.class, "ticks", ticks);
         return server;
     }
 
-    private static RegistryKey<World> dimension(String id) {
-        return RegistryKey.of(RegistryKeys.WORLD, Identifier.of(id));
+    private static ResourceKey<Level> dimension(String id) {
+        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(id));
     }
 
     public static void dimensionIdsResolveToLoadedWorldsOnly() {
-        ServerWorld overworld = McObjects.opaque(ServerWorld.class);
-        ServerWorld nether = McObjects.opaque(ServerWorld.class);
-        ServerWorld custom = McObjects.opaque(ServerWorld.class);
-        Map<RegistryKey<World>, ServerWorld> worlds = new HashMap<>();
+        ServerLevel overworld = McObjects.opaque(ServerLevel.class);
+        ServerLevel nether = McObjects.opaque(ServerLevel.class);
+        ServerLevel custom = McObjects.opaque(ServerLevel.class);
+        Map<ResourceKey<Level>, ServerLevel> worlds = new HashMap<>();
         worlds.put(dimension("minecraft:overworld"), overworld);
         worlds.put(dimension("minecraft:the_nether"), nether);
         worlds.put(dimension("somemod:pocket"), custom);

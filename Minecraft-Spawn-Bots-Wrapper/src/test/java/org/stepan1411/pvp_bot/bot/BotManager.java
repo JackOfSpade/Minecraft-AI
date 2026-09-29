@@ -1,9 +1,9 @@
 package org.stepan1411.pvp_bot.bot;
 
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.Vec3;
 import org.stepan1411.testdouble.Recorder;
 
 import java.util.HashSet;
@@ -15,7 +15,7 @@ import java.util.Set;
  */
 public class BotManager {
 
-    public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source) {
+    public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source) {
         boolean ok = Recorder.guard("spawn3", name);
         if (ok) {
             Recorder.LISTED.add(name);
@@ -23,7 +23,7 @@ public class BotManager {
         return ok;
     }
 
-    public static boolean spawnBot(MinecraftServer server, String name, ServerCommandSource source, Vec3d pos) {
+    public static boolean spawnBot(MinecraftServer server, String name, CommandSourceStack source, Vec3 pos) {
         boolean ok = Recorder.guard("spawn4", name);
         if (ok) {
             Recorder.LISTED.add(name);
@@ -41,16 +41,16 @@ public class BotManager {
         return Recorder.LISTED.size();
     }
 
-    public static boolean removeBot(MinecraftServer server, String name, ServerCommandSource source) {
+    public static boolean removeBot(MinecraftServer server, String name, CommandSourceStack source) {
         Recorder.guard("removeBot", name);
         return Recorder.LISTED.remove(name);
     }
 
-    public static ServerPlayerEntity getBot(MinecraftServer server, String name) {
+    public static ServerPlayer getBot(MinecraftServer server, String name) {
         return null;
     }
 
-    public static void removeAllBots(MinecraftServer server, ServerCommandSource source) {
+    public static void removeAllBots(MinecraftServer server, CommandSourceStack source) {
         Recorder.FORBIDDEN.add("removeAllBots");
     }
 

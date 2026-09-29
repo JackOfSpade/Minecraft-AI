@@ -1,10 +1,9 @@
 package dev.spawnbotswrapper.inhabitants.adapter;
 
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.Vec3;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -102,17 +101,17 @@ final class UpstreamContract {
         Owner main = load(locator, UpstreamNames.CLASS_MAIN);
 
         spawn3 = staticMethod(manager, "R1", "spawnBot", boolean.class,
-                MinecraftServer.class, String.class, ServerCommandSource.class);
+                MinecraftServer.class, String.class, CommandSourceStack.class);
         spawn4 = staticMethod(manager, "R2", "spawnBot", boolean.class,
-                MinecraftServer.class, String.class, ServerCommandSource.class, Vec3d.class);
+                MinecraftServer.class, String.class, CommandSourceStack.class, Vec3.class);
         getAllBots = staticMethod(manager, "R3", "getAllBots", Set.class);
         getBotCount = staticMethod(manager, "R4", "getBotCount", int.class);
         removeBot = staticMethod(manager, "R5", "removeBot", boolean.class,
-                MinecraftServer.class, String.class, ServerCommandSource.class);
-        getBot = staticMethod(manager, "R6", "getBot", ServerPlayerEntity.class, MinecraftServer.class, String.class);
+                MinecraftServer.class, String.class, CommandSourceStack.class);
+        getBot = staticMethod(manager, "R6", "getBot", ServerPlayer.class, MinecraftServer.class, String.class);
         // R7 is probed only: removing every listed bot would also remove other mods' bots, so it is never called.
         removeAllBots = staticMethod(manager, "R7", "removeAllBots", void.class,
-                MinecraftServer.class, ServerCommandSource.class);
+                MinecraftServer.class, CommandSourceStack.class);
         saveBots = staticMethod(manager, "R8", "saveBots", void.class);
         updateBotData = staticMethod(manager, "R9", "updateBotData", void.class, MinecraftServer.class);
 
@@ -132,7 +131,7 @@ final class UpstreamContract {
 
         createPath = staticMethod(path, "", "createPath", boolean.class, String.class);
         deletePath = staticMethod(path, "", "deletePath", boolean.class, String.class);
-        addPoint = staticMethod(path, "", "addPoint", boolean.class, String.class, Vec3d.class);
+        addPoint = staticMethod(path, "", "addPoint", boolean.class, String.class, Vec3.class);
         setLoop = staticMethod(path, "", "setLoop", boolean.class, String.class, boolean.class);
         setAttack = staticMethod(path, "", "setAttack", boolean.class, String.class, boolean.class);
         setWalkType = staticMethod(path, "", "setWalkType", boolean.class, String.class, String.class);

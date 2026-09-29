@@ -1,28 +1,27 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.spawn.Cell;
-import net.minecraft.block.AbstractBlock;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.BubbleColumnBlock;
-import net.minecraft.block.CactusBlock;
-import net.minecraft.block.CobwebBlock;
-import net.minecraft.block.FireBlock;
-import net.minecraft.block.MagmaBlock;
-import net.minecraft.block.NetherPortalBlock;
-import net.minecraft.block.SweetBerryBushBlock;
-import net.minecraft.block.SlabBlock;
-import net.minecraft.block.enums.SlabType;
-import net.minecraft.registry.Registries;
-import net.minecraft.state.property.Properties;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.shape.VoxelShape;
-import net.minecraft.world.EmptyBlockView;
-
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.BubbleColumnBlock;
+import net.minecraft.world.level.block.CactusBlock;
+import net.minecraft.world.level.block.FireBlock;
+import net.minecraft.world.level.block.MagmaBlock;
+import net.minecraft.world.level.block.NetherPortalBlock;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.SweetBerryBushBlock;
+import net.minecraft.world.level.block.WebBlock;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.SlabType;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,12 +35,12 @@ public final class BlockFactsMcCases {
     }
 
     private static Cell cell(Block block) {
-        return cell(block.getDefaultState());
+        return cell(block.defaultBlockState());
     }
 
     private static void expect(Cell expected, Block... blocks) {
         for (Block block : blocks) {
-            assertEquals(expected, cell(block), Registries.BLOCK.getId(block) + " should be " + expected);
+            assertEquals(expected, cell(block), BuiltInRegistries.BLOCK.getKey(block) + " should be " + expected);
         }
     }
 
@@ -65,14 +64,14 @@ public final class BlockFactsMcCases {
     }
 
     public static void anOpenGateHasNoCollisionAndIsEmpty() {
-        BlockState open = Blocks.OAK_FENCE_GATE.getDefaultState().with(Properties.OPEN, true);
+        BlockState open = Blocks.OAK_FENCE_GATE.defaultBlockState().setValue(BlockStateProperties.OPEN, true);
         assertEquals(Cell.EMPTY, cell(open));
     }
 
     public static void anUpperSlabIsAFloorAtBlockHeightButALowerSlabIsNot() {
-        BlockState top = Blocks.OAK_SLAB.getDefaultState().with(SlabBlock.TYPE, SlabType.TOP);
-        BlockState bottom = Blocks.OAK_SLAB.getDefaultState().with(SlabBlock.TYPE, SlabType.BOTTOM);
-        BlockState full = Blocks.OAK_SLAB.getDefaultState().with(SlabBlock.TYPE, SlabType.DOUBLE);
+        BlockState top = Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP);
+        BlockState bottom = Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.BOTTOM);
+        BlockState full = Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.DOUBLE);
         assertEquals(Cell.SOLID_STANDABLE, cell(top));
         assertEquals(Cell.SOLID_OTHER, cell(bottom));
         assertEquals(Cell.SOLID_STANDABLE, cell(full));
@@ -83,11 +82,11 @@ public final class BlockFactsMcCases {
         assertEquals(Cell.HAZARD, cell(Blocks.LAVA));
         // A waterlogged slab or stairs still fills part of the column: standing there would put a bot's
         // feet in the solid half, not resting exactly where planned, so it must not read as open WATER.
-        assertEquals(Cell.SOLID_OTHER, cell(Blocks.OAK_SLAB.getDefaultState().with(Properties.WATERLOGGED, true)),
+        assertEquals(Cell.SOLID_OTHER, cell(Blocks.OAK_SLAB.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true)),
                 "a waterlogged slab still occupies half the column");
-        assertEquals(Cell.SOLID_OTHER, cell(Blocks.OAK_STAIRS.getDefaultState().with(Properties.WATERLOGGED, true)),
+        assertEquals(Cell.SOLID_OTHER, cell(Blocks.OAK_STAIRS.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true)),
                 "waterlogged stairs still occupy part of the column");
-        assertEquals(Cell.SOLID_OTHER, cell(Blocks.OAK_FENCE.getDefaultState().with(Properties.WATERLOGGED, true)),
+        assertEquals(Cell.SOLID_OTHER, cell(Blocks.OAK_FENCE.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true)),
                 "a waterlogged fence still blocks movement");
         assertEquals(Cell.HAZARD, cell(Blocks.BUBBLE_COLUMN), "bubble columns push entities around");
     }
@@ -107,50 +106,50 @@ public final class BlockFactsMcCases {
     // Blocks cannot be constructed once the game's registries are frozen, so the "modded" blocks below are
     // allocated without running a constructor; that is enough, hazard detection only asks what a block IS.
     private static final class ModdedCactus extends CactusBlock {
-        ModdedCactus(AbstractBlock.Settings settings) {
+        ModdedCactus(BlockBehaviour.Properties settings) {
             super(settings);
         }
     }
 
     private static final class ModdedMagma extends MagmaBlock {
-        ModdedMagma(AbstractBlock.Settings settings) {
+        ModdedMagma(BlockBehaviour.Properties settings) {
             super(settings);
         }
     }
 
     private static final class ModdedFire extends FireBlock {
-        ModdedFire(AbstractBlock.Settings settings) {
+        ModdedFire(BlockBehaviour.Properties settings) {
             super(settings);
         }
     }
 
-    private static final class ModdedCobweb extends CobwebBlock {
-        ModdedCobweb(AbstractBlock.Settings settings) {
+    private static final class ModdedCobweb extends WebBlock {
+        ModdedCobweb(BlockBehaviour.Properties settings) {
             super(settings);
         }
     }
 
     private static final class ModdedBerries extends SweetBerryBushBlock {
-        ModdedBerries(AbstractBlock.Settings settings) {
+        ModdedBerries(BlockBehaviour.Properties settings) {
             super(settings);
         }
     }
 
     private static final class ModdedPortal extends NetherPortalBlock {
-        ModdedPortal(AbstractBlock.Settings settings) {
+        ModdedPortal(BlockBehaviour.Properties settings) {
             super(settings);
         }
     }
 
     private static final class ModdedBubbles extends BubbleColumnBlock {
-        ModdedBubbles(AbstractBlock.Settings settings) {
+        ModdedBubbles(BlockBehaviour.Properties settings) {
             super(settings);
         }
     }
 
     private static BlockState stateOf(Block block) {
         BlockState state = McObjects.opaque(BlockState.class);
-        McObjects.setField(state, net.minecraft.state.State.class, "owner", block);
+        McObjects.setField(state, net.minecraft.world.level.block.state.StateHolder.class, "owner", block);
         return state;
     }
 
@@ -165,7 +164,7 @@ public final class BlockFactsMcCases {
     public static void ordinaryVanillaBlocksAreNotHazardsEvenWhenTagsAreNotBound() {
         for (Block block : List.of(Blocks.STONE, Blocks.OAK_PLANKS, Blocks.OAK_FENCE, Blocks.OAK_SLAB, Blocks.WATER,
                 Blocks.SHORT_GRASS, Blocks.AIR, Blocks.CHEST)) {
-            assertFalse(McBlockProbe.isHazard(block.getDefaultState()), Registries.BLOCK.getId(block).toString());
+            assertFalse(McBlockProbe.isHazard(block.defaultBlockState()), BuiltInRegistries.BLOCK.getKey(block).toString());
         }
     }
 
@@ -177,15 +176,15 @@ public final class BlockFactsMcCases {
     public static void everyVanillaBlockStateIsClassifiedConsistently() {
         Map<Cell, Integer> histogram = new EnumMap<>(Cell.class);
         int states = 0;
-        for (Block block : Registries.BLOCK) {
-            for (BlockState state : block.getStateManager().getStates()) {
+        for (Block block : BuiltInRegistries.BLOCK) {
+            for (BlockState state : block.getStateDefinition().getPossibleStates()) {
                 states++;
                 BlockFacts facts = McBlockProbe.factsOf(state);
                 Cell cell = cell(state);
                 histogram.merge(cell, 1, Integer::sum);
-                String what = Registries.BLOCK.getId(block) + " " + state + " -> " + cell + " " + facts;
+                String what = BuiltInRegistries.BLOCK.getKey(block) + " " + state + " -> " + cell + " " + facts;
 
-                VoxelShape shape = state.getCollisionShape(EmptyBlockView.INSTANCE, BlockPos.ORIGIN);
+                VoxelShape shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
                 boolean harmful = facts.hazard() || facts.fluid() != BlockFacts.Fluid.NONE && facts.fluid() != BlockFacts.Fluid.WATER;
                 if (state.isAir()) {
                     assertEquals(Cell.EMPTY, cell, what);
@@ -193,7 +192,7 @@ public final class BlockFactsMcCases {
                 if (shape.isEmpty() && !harmful && facts.fluid() == BlockFacts.Fluid.NONE) {
                     assertEquals(Cell.EMPTY, cell, what);
                 }
-                if (Block.isShapeFullCube(shape) && !harmful && facts.fluid() == BlockFacts.Fluid.NONE) {
+                if (Block.isShapeFullBlock(shape) && !harmful && facts.fluid() == BlockFacts.Fluid.NONE) {
                     assertEquals(Cell.SOLID_STANDABLE, cell, what);
                 }
                 if (facts.fluid() == BlockFacts.Fluid.WATER && !harmful) {

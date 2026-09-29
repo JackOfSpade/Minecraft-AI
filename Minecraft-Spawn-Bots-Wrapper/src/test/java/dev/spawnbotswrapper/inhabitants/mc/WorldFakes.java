@@ -6,15 +6,14 @@ import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.dedicated.MinecraftDedicatedServer;
-import net.minecraft.server.world.ServerChunkManager;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.structure.StructureStart;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.gen.structure.Structure;
-
+import net.minecraft.server.dedicated.DedicatedServer;
+import net.minecraft.server.level.ServerChunkCache;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -32,8 +31,8 @@ final class WorldFakes {
     }
 
     /** A chunk manager that answers {@code getWorldChunk} from a map and counts the lookups. */
-    static final class ChunkManager extends ServerChunkManager {
-        final Map<Long, WorldChunk> loaded = new HashMap<>();
+    static final class ChunkManager extends ServerChunkCache {
+        final Map<Long, LevelChunk> loaded = new HashMap<>();
         int lookups;
 
         // Never runs (instances are allocated without a constructor); it only has to type-check.
@@ -42,47 +41,47 @@ final class WorldFakes {
         }
 
         @Override
-        public WorldChunk getWorldChunk(int chunkX, int chunkZ) {
+        public LevelChunk getChunkNow(int chunkX, int chunkZ) {
             lookups++;
-            return loaded.get(ChunkPos.toLong(chunkX, chunkZ));
+            return loaded.get(ChunkPos.asLong(chunkX, chunkZ));
         }
 
-        void load(WorldChunk chunk) {
+        void load(LevelChunk chunk) {
             loaded.put(chunk.getPos().toLong(), chunk);
         }
     }
 
     static MinecraftServer server() {
-        return McObjects.opaque(MinecraftDedicatedServer.class);
+        return McObjects.opaque(DedicatedServer.class);
     }
 
     static ChunkManager chunkManager() {
         ChunkManager manager = McObjects.opaque(ChunkManager.class);
         // Allocated without a constructor, so field initialisers did not run.
-        McObjects.setField(manager, ChunkManager.class, "loaded", new HashMap<Long, WorldChunk>());
+        McObjects.setField(manager, ChunkManager.class, "loaded", new HashMap<Long, LevelChunk>());
         return manager;
     }
 
-    static ServerWorld world(MinecraftServer server, ChunkManager chunks) {
-        ServerWorld world = McObjects.opaque(ServerWorld.class);
-        McObjects.setField(world, ServerWorld.class, "server", server);
-        McObjects.setField(world, ServerWorld.class, "chunkManager", chunks);
+    static ServerLevel world(MinecraftServer server, ChunkManager chunks) {
+        ServerLevel world = McObjects.opaque(ServerLevel.class);
+        McObjects.setField(world, ServerLevel.class, "server", server);
+        McObjects.setField(world, ServerLevel.class, "chunkManager", chunks);
         return world;
     }
 
     /** A loaded chunk at (x, z) holding the given starts and structure references. */
-    static WorldChunk chunk(int x, int z, Map<Structure, StructureStart> starts, Map<Structure, LongSet> references) {
-        WorldChunk chunk = McObjects.opaque(WorldChunk.class);
-        McObjects.setField(chunk, Chunk.class, "pos", new ChunkPos(x, z));
-        McObjects.setField(chunk, Chunk.class, "structureStarts", new HashMap<>(starts));
-        McObjects.setField(chunk, Chunk.class, "structureReferences", new HashMap<>(references));
+    static LevelChunk chunk(int x, int z, Map<Structure, StructureStart> starts, Map<Structure, LongSet> references) {
+        LevelChunk chunk = McObjects.opaque(LevelChunk.class);
+        McObjects.setField(chunk, ChunkAccess.class, "pos", new ChunkPos(x, z));
+        McObjects.setField(chunk, ChunkAccess.class, "structureStarts", new HashMap<>(starts));
+        McObjects.setField(chunk, ChunkAccess.class, "structureReferences", new HashMap<>(references));
         return chunk;
     }
 
     static LongSet chunks(int... xz) {
         LongSet set = new LongOpenHashSet();
         for (int i = 0; i < xz.length; i += 2) {
-            set.add(ChunkPos.toLong(xz[i], xz[i + 1]));
+            set.add(ChunkPos.asLong(xz[i], xz[i + 1]));
         }
         return set;
     }
@@ -107,13 +106,13 @@ final class WorldFakes {
         }
 
         @Override
-        public StructureKey keyOf(ServerWorld world, StructureStart start) {
+        public StructureKey keyOf(ServerLevel world, StructureStart start) {
             StructureSnapshot s = snapshots.get(start);
             return s == null ? null : s.key();
         }
 
         @Override
-        public StructureSnapshot build(ServerWorld world, StructureStart start, boolean newlyGenerated) {
+        public StructureSnapshot build(ServerLevel world, StructureStart start, boolean newlyGenerated) {
             builds++;
             generatedFlags.add(newlyGenerated);
             if (failing.contains(start)) {

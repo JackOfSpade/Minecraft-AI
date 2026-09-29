@@ -10,8 +10,8 @@ import dev.spawnbotswrapper.inhabitants.profile.ProfileGenerator;
 import dev.spawnbotswrapper.inhabitants.spawn.DefaultSpawnPlanner;
 import dev.spawnbotswrapper.inhabitants.store.PopulationStore;
 import dev.spawnbotswrapper.inhabitants.util.SplitMix64;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
@@ -81,7 +81,7 @@ public final class ServerSession {
             shared.detector().discardPending();
         }
         guard.run("population engine", engine::tick);
-        if (saveSchedule.due(server.getTicks())) {
+        if (saveSchedule.due(server.getTickCount())) {
             guard.run("saving population data", this::saveIfDirty);
         }
     }
@@ -128,10 +128,10 @@ public final class ServerSession {
         if (commands.isEmpty()) {
             return;
         }
-        ServerCommandSource source = server.getCommandSource().withSilent();
+        CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
         for (String command : commands) {
             try {
-                int result = server.getCommandManager().getDispatcher().execute(command, source);
+                int result = server.getCommands().getDispatcher().execute(command, source);
                 shared.log().info("startup command '{}' ran (result {})", command, result);
             } catch (OutOfMemoryError e) {
                 throw e;

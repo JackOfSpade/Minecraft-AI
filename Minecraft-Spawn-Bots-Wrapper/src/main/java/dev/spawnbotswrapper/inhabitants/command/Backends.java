@@ -4,11 +4,10 @@ import dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import dev.spawnbotswrapper.inhabitants.profile.ProfileFormatter;
-import net.minecraft.server.command.ServerCommandSource;
-
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
+import net.minecraft.commands.CommandSourceStack;
 
 /**
  * The few things the command layer takes from outside the services - the setting catalog, the profile
@@ -17,7 +16,7 @@ import java.util.function.Function;
  *
  * @param senders resolves the world and position a command was run from (needs a real world in production)
  */
-record Backends(CatalogSource catalog, ProfileRenderer profiles, Function<ServerCommandSource, Sender> senders) {
+record Backends(CatalogSource catalog, ProfileRenderer profiles, Function<CommandSourceStack, Sender> senders) {
 
     static Backends standard() {
         return new Backends(

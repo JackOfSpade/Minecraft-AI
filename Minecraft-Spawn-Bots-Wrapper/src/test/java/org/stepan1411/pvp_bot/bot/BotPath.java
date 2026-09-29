@@ -1,12 +1,12 @@
 package org.stepan1411.pvp_bot.bot;
 
-import net.minecraft.util.math.Vec3d;
 import org.stepan1411.testdouble.Recorder;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Test-only fake of the upstream path registry with the behaviour the adapter depends on: a path must exist
@@ -18,7 +18,7 @@ public class BotPath {
 
     public static class PathData {
         public String name;
-        public List<Vec3d> points = new ArrayList<>();
+        public List<Vec3> points = new ArrayList<>();
         public boolean loop = false;
         public boolean attack = true;
         public String walkType = "bhop";
@@ -38,7 +38,7 @@ public class BotPath {
     }
 
     /** Test control: seeds a path as if another mod or an earlier session had created it. */
-    public static void seed(String name, boolean loop, Vec3d... points) {
+    public static void seed(String name, boolean loop, Vec3... points) {
         PathData p = new PathData(name);
         p.loop = loop;
         p.points.addAll(List.of(points));
@@ -72,7 +72,7 @@ public class BotPath {
         return true;
     }
 
-    public static boolean addPoint(String pathName, Vec3d point) {
+    public static boolean addPoint(String pathName, Vec3 point) {
         boolean ok = Recorder.guard("addPoint", pathName);
         PathData p = PATHS.get(pathName);
         if (!ok || p == null) {

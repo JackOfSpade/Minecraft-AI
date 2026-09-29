@@ -3,19 +3,18 @@ package dev.spawnbotswrapper.inhabitants.mc;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
 import it.unimi.dsi.fastutil.longs.LongSet;
-import net.minecraft.server.world.ServerChunkManager;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.structure.StructureStart;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.gen.structure.Structure;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerChunkCache;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 
 /**
  * {@link StructureLocator} over structure data that is already in memory. It reads the structure starts and
@@ -38,18 +37,18 @@ public final class McStructureLocator implements StructureLocator {
     }
 
     @Override
-    public List<StructureSnapshot> at(ServerWorld world, BlockPos pos) {
-        ServerChunkManager chunks = world.getChunkManager();
+    public List<StructureSnapshot> at(ServerLevel world, BlockPos pos) {
+        ServerChunkCache chunks = world.getChunkSource();
         Map<StructureKey, StructureSnapshot> found = new LinkedHashMap<>();
-        WorldChunk here = chunks.getWorldChunk(pos.getX() >> 4, pos.getZ() >> 4);
+        LevelChunk here = chunks.getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
         if (here == null) {
             return List.of();
         }
         // Starts stored in this very chunk, plus every start whose box reaches this chunk (the references).
         collect(world, here, found);
-        for (Map.Entry<Structure, LongSet> reference : here.getStructureReferences().entrySet()) {
+        for (Map.Entry<Structure, LongSet> reference : here.getAllReferences().entrySet()) {
             for (long startChunk : reference.getValue()) {
-                WorldChunk origin = chunks.getWorldChunk(ChunkPos.getPackedX(startChunk), ChunkPos.getPackedZ(startChunk));
+                LevelChunk origin = chunks.getChunkNow(ChunkPos.getX(startChunk), ChunkPos.getZ(startChunk));
                 if (origin != null) {
                     collect(world, origin, found);
                 }
@@ -67,15 +66,15 @@ public final class McStructureLocator implements StructureLocator {
     }
 
     @Override
-    public List<StructureSnapshot> near(ServerWorld world, BlockPos pos, int radiusChunks) {
-        ServerChunkManager chunks = world.getChunkManager();
+    public List<StructureSnapshot> near(ServerLevel world, BlockPos pos, int radiusChunks) {
+        ServerChunkCache chunks = world.getChunkSource();
         int radius = Math.max(0, Math.min(radiusChunks, MAX_RADIUS_CHUNKS));
         int centerX = pos.getX() >> 4;
         int centerZ = pos.getZ() >> 4;
         Map<StructureKey, StructureSnapshot> found = new LinkedHashMap<>();
         for (int dz = -radius; dz <= radius; dz++) {
             for (int dx = -radius; dx <= radius; dx++) {
-                WorldChunk chunk = chunks.getWorldChunk(centerX + dx, centerZ + dz);
+                LevelChunk chunk = chunks.getChunkNow(centerX + dx, centerZ + dz);
                 if (chunk != null) {
                     collect(world, chunk, found);
                 }
@@ -94,8 +93,8 @@ public final class McStructureLocator implements StructureLocator {
     }
 
     /** Adds a snapshot for every usable structure start stored in {@code chunk}, once per structure instance. */
-    private void collect(ServerWorld world, WorldChunk chunk, Map<StructureKey, StructureSnapshot> into) {
-        for (StructureStart start : chunk.getStructureStarts().values()) {
+    private void collect(ServerLevel world, LevelChunk chunk, Map<StructureKey, StructureSnapshot> into) {
+        for (StructureStart start : chunk.getAllStarts().values()) {
             StructureKey key = source.keyOf(world, start);
             if (key == null || into.containsKey(key)) {
                 continue;

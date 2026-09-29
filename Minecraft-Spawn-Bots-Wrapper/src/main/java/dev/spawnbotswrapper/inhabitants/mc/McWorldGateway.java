@@ -2,9 +2,8 @@ package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.engine.WorldGateway;
 import dev.spawnbotswrapper.inhabitants.spawn.BlockProbe;
-import net.minecraft.server.world.ServerWorld;
-
 import java.util.function.Function;
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * {@link WorldGateway} over the running server: the overworld seed and a non-loading block view per loaded
@@ -13,13 +12,13 @@ import java.util.function.Function;
  */
 public final class McWorldGateway implements WorldGateway {
     private final ServerAccess access;
-    private final Function<ServerWorld, BlockProbe> probes;
+    private final Function<ServerLevel, BlockProbe> probes;
 
     public McWorldGateway(ServerAccess access) {
         this(access, McBlockProbe::new);
     }
 
-    McWorldGateway(ServerAccess access, Function<ServerWorld, BlockProbe> probes) {
+    McWorldGateway(ServerAccess access, Function<ServerLevel, BlockProbe> probes) {
         this.access = access;
         this.probes = probes;
     }
@@ -31,7 +30,7 @@ public final class McWorldGateway implements WorldGateway {
 
     @Override
     public BlockProbe probe(String dimensionId) {
-        ServerWorld world = access.world(dimensionId);
+        ServerLevel world = access.world(dimensionId);
         return world == null ? null : probes.apply(world);
     }
 }

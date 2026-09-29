@@ -2,7 +2,6 @@ package dev.spawnbotswrapper.inhabitants.adapter;
 
 import dev.spawnbotswrapper.inhabitants.adapter.UpstreamCalls.RemoveAttempt;
 import dev.spawnbotswrapper.inhabitants.adapter.UpstreamCalls.SpawnAttempt;
-import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.stepan1411.pvp_bot.bot.BotSettings;
@@ -12,6 +11,7 @@ import org.stepan1411.testdouble.Recorder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.world.phys.Vec3;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class UpstreamCallsTest {
 
-    private static final Vec3d POS = new Vec3d(1.5, 64, -2.5);
+    private static final Vec3 POS = new Vec3(1.5, 64, -2.5);
     private static final List<SpawnTier> AUTO = List.of(SpawnTier.CLASS_POS, SpawnTier.CLASS, SpawnTier.COMMAND);
 
     private final List<String> commands = new ArrayList<>();

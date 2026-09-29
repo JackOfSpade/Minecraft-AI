@@ -1,12 +1,11 @@
 package dev.spawnbotswrapper.inhabitants.adapter;
 
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Builds, tracks and tears down the PvP BOT paths this addon creates for its bots. It owns the one piece
@@ -73,7 +72,7 @@ final class PatrolManager {
             List<BotProfile.Waypoint> points = plan.points();
             for (int i = 0; i < points.size(); i++) {
                 BotProfile.Waypoint w = points.get(i);
-                if (!calls.addPoint(path, new Vec3d(w.x(), w.y(), w.z()))) {
+                if (!calls.addPoint(path, new Vec3(w.x(), w.y(), w.z()))) {
                     return rollback(calls, bot, path, "upstream refused waypoint #" + i);
                 }
             }

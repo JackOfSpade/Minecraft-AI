@@ -4,12 +4,11 @@ import dev.spawnbotswrapper.inhabitants.structure.IntBox;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.structure.StructureStart;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.gen.structure.Structure;
-import net.minecraft.world.gen.structure.StructureKeys;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.structure.BuiltinStructures;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,9 +26,9 @@ public final class StructureDetectorMcCases {
         final StepGuard guard = new StepGuard((message, cause) -> failures.add(message), 100);
         final StructureDetector detector = new StructureDetector(source, guard);
         final MinecraftServer server = WorldFakes.server();
-        final ServerWorld world = WorldFakes.world(server, WorldFakes.chunkManager());
-        final Structure structure = McBootstrap.registries().getOptionalEntry(StructureKeys.IGLOO).orElseThrow().value();
-        final Structure other = McBootstrap.registries().getOptionalEntry(StructureKeys.DESERT_PYRAMID).orElseThrow().value();
+        final ServerLevel world = WorldFakes.world(server, WorldFakes.chunkManager());
+        final Structure structure = McBootstrap.registries().get(BuiltinStructures.IGLOO).orElseThrow().value();
+        final Structure other = McBootstrap.registries().get(BuiltinStructures.DESERT_PYRAMID).orElseThrow().value();
         final List<StructureSnapshot> delivered = new ArrayList<>();
 
         StructureSnapshot snapshot(String id, int cx, int cz) {
@@ -37,7 +36,7 @@ public final class StructureDetectorMcCases {
         }
 
         /** A chunk that carries one start for {@code snapshot}. */
-        WorldChunk chunkWith(StructureSnapshot snapshot) {
+        LevelChunk chunkWith(StructureSnapshot snapshot) {
             StructureStart start = source.add(snapshot);
             return WorldFakes.chunk(snapshot.key().chunkX(), snapshot.key().chunkZ(), Map.of(structure, start), Map.of());
         }
@@ -61,7 +60,7 @@ public final class StructureDetectorMcCases {
         StructureSnapshot mineshaft = rig.snapshot("minecraft:mineshaft", 3, 4);
         StructureStart a = rig.source.add(village);
         StructureStart b = rig.source.add(mineshaft);
-        WorldChunk chunk = WorldFakes.chunk(3, 4, Map.of(rig.structure, a, rig.other, b), Map.of());
+        LevelChunk chunk = WorldFakes.chunk(3, 4, Map.of(rig.structure, a, rig.other, b), Map.of());
         rig.detector.onChunkLoad(rig.world, chunk);
         assertEquals(1, rig.detector.pending());
         assertEquals(2, rig.drain(10));
@@ -71,8 +70,8 @@ public final class StructureDetectorMcCases {
 
     public static void generateFlagsTheSnapshotAsNewlyGeneratedAndLoadAloneDoesNot() {
         Rig rig = new Rig();
-        WorldChunk fresh = rig.chunkWith(rig.snapshot("minecraft:igloo", 0, 0));
-        WorldChunk old = rig.chunkWith(rig.snapshot("minecraft:igloo", 9, 9));
+        LevelChunk fresh = rig.chunkWith(rig.snapshot("minecraft:igloo", 0, 0));
+        LevelChunk old = rig.chunkWith(rig.snapshot("minecraft:igloo", 9, 9));
         rig.detector.onChunkLoad(rig.world, fresh);
         rig.detector.onChunkGenerate(rig.world, fresh);
         rig.detector.onChunkLoad(rig.world, old);
@@ -125,7 +124,7 @@ public final class StructureDetectorMcCases {
     public static void chunksQueuedByAnotherServerAreDiscarded() {
         Rig rig = new Rig();
         MinecraftServer previous = WorldFakes.server();
-        ServerWorld oldWorld = WorldFakes.world(previous, WorldFakes.chunkManager());
+        ServerLevel oldWorld = WorldFakes.world(previous, WorldFakes.chunkManager());
         StructureStart start = rig.source.add(rig.snapshot("minecraft:igloo", 7, 7));
         rig.detector.onChunkLoad(oldWorld, WorldFakes.chunk(7, 7, Map.of(rig.structure, start), Map.of()));
         assertEquals(0, rig.drain(10), "a world from a previous server session must never reach the new engine");
