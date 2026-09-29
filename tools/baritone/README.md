@@ -30,7 +30,7 @@ src/main/java/.../minecraftai/mixin/      Baritone*Mixin, ServerChunkCacheBarito
 |---|---|
 | `third_party/baritone/UPSTREAM.md`, `MANIFEST.txt` | version, commit, upstream blob SHA of every vendored file (`apply.sh verify` recomputes them; the generator refuses to run on an edited vendor tree) |
 | `tools/baritone/exclude.txt` | what is vendored but not compiled, with the reason per group. Every entry has to match something, so an upstream move fails the build instead of silently compiling more or less |
-| `tools/baritone/overlay/` | new files added to the generated tree: `HostEnvironment` (hooks: game directory, game-thread hop, loot level) and stubs that stand in for excluded client-only classes (`RenderEvent`, `PathRenderer`, `SelectionRenderer`, `SchematicaHelper`, `LitematicaHelper`). An overlay file that shadows an upstream file must be in `exclude.txt` first |
+| `tools/baritone/overlay/` | new files added to the generated tree: `HostEnvironment` (hooks: game directory, game-thread hop, loot level, worker executor, daemon threads) and stubs that stand in for excluded client-only classes (`RenderEvent`, `PathRenderer`, `SelectionRenderer`, `SchematicaHelper`, `LitematicaHelper`). An overlay file that shadows an upstream file must be in `exclude.txt` first |
 | `tools/baritone/patches/` | the patch series (`git diff` output, one concern per file, description above the first `diff --git`) |
 | `tools/baritone/BaritoneSource.java` | the generator (single-file Java 21 program, no dependencies besides `git`) |
 | `tools/baritone/apply.sh` | runs the generator without Gradle |
@@ -42,7 +42,7 @@ Gradle tasks: `generateBaritoneSources` (runs before `compileBaritoneJava`), `co
 belongs to the `minecraftai` mod in Loom, and is packed into the mod jar (and so remapped to intermediary with the rest).
 `javax.annotation` comes from `jsr305` (compileOnly), and there is deliberately **no nether-pathfinder** dependency.
 
-## The patch series (29 files, +96 / -242 lines)
+## The patch series (31 files, +109 / -259 lines)
 
 The edits are small and mostly deletions of client-only code. Two rules kept them small: types are *generalised*
 (`LocalPlayer` -> `Player`, `ClientChunkCache` -> `ChunkSource`, `ClientLevel` -> `Level`), and where behaviour must
@@ -61,6 +61,8 @@ differ, upstream gets a new hook or a defaulted method that our glue implements 
 | `0009-baritone-instance-construction` | Baritone, BaritoneProvider | constructed from a player-context factory; no primary instance, no chat control; `NullElytraProcess`; commands and GUI unsupported |
 | `0010-block-optional-meta-no-client` | BlockOptionalMeta | block drops are rolled on a real level supplied through `HostEnvironment.setLootLevel` (upstream's private registry-reloading stub level wedges a Fabric server and is never used) |
 | `0011-world-scanner-chunk-snapshot` | FasterWorldScanner | scans run on worker threads (parallel stream, mine/farm rescans); they read the chunk source's thread-safe view instead of `ServerChunkCache.getChunk`, which waits for the server thread once per chunk |
+| `0012-executor-host-hook` | Baritone, CachedWorld | Baritone's background pool (path searches, rescans, region loads) is supplied by the host through `HostEnvironment.executor()` (bounded, named, daemon) instead of a private unbounded non-daemon pool; the two never-ending cache loops (region packer, periodic save) get their own daemon threads so they cannot occupy a slot of the bounded pool |
+| `0013-cancel-before-start` | AbstractNodeCostSearch | `cancelRequested` is volatile and no longer reset when `calculate()` starts, so a search cancelled while it waits for a worker (bounded pool: it can wait) is dropped instead of running to its timeout |
 
 ## Excluded from the build (see `exclude.txt`)
 
@@ -100,13 +102,17 @@ upstream counterpart goes to `overlay/`, not into a patch.
 
 | Class | Replaces (upstream, client) |
 |---|---|
-| `ServerPlayerContext` | `BaritonePlayerContext`: bot supplier, `ServerLevel`, `MinecraftServer` as the game-thread object, `getAllEntities()`, a non-blocking `playerFeet()` (the default reads `Level#getBlockState`, which waits for the server thread from any other thread, and deadlocked the ore scan) |
+| `ServerPlayerContext` | `BaritonePlayerContext`: bot supplier, `ServerLevel`, `MinecraftServer` as the game-thread object, the bot plus the dropped items it can observe (`ObservableWorldQuery`; refreshed on the server thread, readable from workers), a non-blocking `playerFeet()` (the default reads `Level#getBlockState`, which waits for the server thread from any other thread, and deadlocked the ore scan) |
 | `ServerPlayerController` | `BaritonePlayerController`: breaking through the mod's `MiningController`, placing through `useItemOn` |
 | `LoadedChunkSnapshot` + `ServerChunkCacheBaritoneMixin` + `ChunkMapVisibleChunksAccessorMixin` | the client's `MixinClientChunkProvider`/`MixinChunkArray`: an O(1), non-blocking, thread-safe view of the loaded chunks (`ChunkMap#visibleChunkMap` is published copy-on-write) |
 | `BaritonePalettedContainerMixin` (+ `...DataMixin`), `BaritoneItemStackMixin`, `BaritoneLootTableMixin`, `BaritoneLootContextBuilderMixin` | the client-only `MixinPalettedContainer`, `MixinItemStack`, `MixinLootTable`, `MixinLootContextBuilder` (same code, needed by ore scanning and drop matching) |
-| `BaritoneHost` | `BaritoneProvider`'s primary instance: `create(bot)`, `of(player)`, `destroy`, server-side default settings (`freeLook` off, no notifications) |
+| `BaritoneHost` | `BaritoneProvider`'s primary instance: `create(bot)`, `of(player)`, `destroy`; `configure(server)` installs the worker pool and the fixed settings once |
+| `BaritoneRegistry` | (new) one instance per bot keyed by UUID; `get`, `find`, `tick`, `reset` (death, runtime reset), `forget` (delete/unload), `clearAll`; wired into `RuntimeLifecycleCoordinator` so an instance never outlives its bot |
+| `BaritonePlanner` | (new) plan-only use: `plan(baritone, goal)` runs an A* on the shared pool over a snapshot taken on the server thread and returns a `Plan` (result, movements, search and queue time); one search per bot, superseded or cancelled with the bot |
+| `BaritoneExecutor` | (new) the shared worker pool behind `HostEnvironment.executor()`: `min(4, max(2, cores/2))` daemon threads, FIFO queue, queue-wait and concurrency counters |
+| `BaritoneSettings` | (new) the fixed global settings (no parkour, no water-bucket fall, no chunk cache, no avoidance, free look off, output to `BotLog`) and the ones derived from the mod's navigation config (`maxFallHeightNoWater` = `nav.maxSafeFall`) |
 
-Covered by `BaritoneServerGameTests` (real server, real bots): instance lifecycle, thread-safe chunk snapshot, A* on a worker thread
+Covered by `BaritoneServerGameTests`, `BaritonePlanningGameTests` (a bot plans a wall detour, a one-block step, a pit, a closed wooden door, a closed iron door and a water strip on a sealed platform) and `BaritoneGlueGameTests` (headless boot, registry lifecycle, worker pool bounds, queued-plan cancellation, settings, observable entities) on a real server with real bots: instance lifecycle, thread-safe chunk snapshot, A* on a worker thread
 (open floor and through a wall), the whole behavior stack ticking and producing inputs, ore scan through the snapshot and the raw
 palettes, drops matched by loot table and item hash; and by the unit tests `BaritoneVendorIntegrityTest`,
 `BaritoneServerOnlyClassesTest` (no client reference in the class files) and `BaritoneSourceGeneratorTest` (every way the pipeline
@@ -122,9 +128,6 @@ None of this needs another patch; it is glue for the next stage.
   `onWorldEvent` to `baritone.getGameEventHandler()`.
 * **Jump/move rotation events** (`RotationMoveEvent` from `Entity.moveRelative` / `LivingEntity.jumpFromGround`) are only needed
   with `freeLook`; `BaritoneHost` turns `freeLook` off so Baritone sets the real yaw.
-* **Synchronous admission and thread bounds.** `PathingBehavior` searches on a static, unbounded thread pool (`Baritone.getExecutor()`);
-  a caller that needs a same-tick answer runs `AStarPathFinder` inline (as `BaritoneServerGameTests` does).
 * **Policy per bot.** Baritone reads `Baritone.settings()` live (a global, see `BaritoneAPI.getSettings()`); per-bot rules
   (strict-survival, protected blocks) belong in a `CalculationContext` subclass, not in mutated global settings.
-* **Cache lifetime.** `WorldProvider` keeps one `WorldData` per dimension under `<game dir>/baritone/cache`; nothing closes it when
-  the last bot goes away.
+* **Cache lifetime.** `WorldProvider` keeps one `WorldData` per dimension under `<game dir>/baritone/cache` (its region packer and saver are two daemon threads per dimension); nothing closes it when the last bot goes away. With `chunkCaching` off it only holds waypoints and empty region files.
