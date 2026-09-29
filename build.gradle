@@ -80,6 +80,30 @@ loom.runs.named('gameTest') {
             file('build/test-results/gametest/TEST-minecraftai-gametest.xml').absolutePath
 }
 
+// Rewrites a mod jar into dest with the "fabric-gametest" entrypoints removed from its fabric.mod.json (everything else verbatim).
+def copyWithoutGameTestEntrypoint(File src, File dest) {
+    def zin = new java.util.zip.ZipInputStream(new FileInputStream(src))
+    def zout = new java.util.zip.ZipOutputStream(new FileOutputStream(dest))
+    try {
+        for (def e = zin.nextEntry; e != null; e = zin.nextEntry) {
+            byte[] bytes = zin.readAllBytes()
+            if (e.name == 'fabric.mod.json') {
+                def json = new groovy.json.JsonSlurper().parseText(new String(bytes, 'UTF-8'))
+                json.entrypoints.remove('fabric-gametest')
+                bytes = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)).getBytes('UTF-8')
+            }
+            def out = new java.util.zip.ZipEntry(e.name)
+            out.time = e.time
+            zout.putNextEntry(out)
+            zout.write(bytes)
+            zout.closeEntry()
+        }
+    } finally {
+        zin.close()
+        zout.close()
+    }
+}
+
 def prepareGameTestRun = tasks.register('prepareGameTestRun') {
     group = 'verification'
     description = 'Creates a clean, deterministic headless GameTest run directory.'
@@ -92,6 +116,144 @@ def prepareGameTestRun = tasks.register('prepareGameTestRun') {
         new File(runDir, 'eula.txt').setText('eula=true\n', 'UTF-8')
         new File(runDir, 'server.properties').setText(
                 'online-mode=false\nlevel-name=world\nlevel-seed=0\n', 'UTF-8')
+
+        // Optional pack-compat check: -PgametestExtraMods=<dir> copies that directory's *.jar into the run dir's mods/
+        // (Fabric Loader loads them in the dev run and remaps intermediary jars). Default off, so normal runs are unchanged.
+        // See docs/TESTING_AND_EVIDENCE.md.
+        def extraModsDir = providers.gradleProperty('gametestExtraMods').orNull
+        if (extraModsDir) {
+            def extraDir = new File(extraModsDir)
+            if (!extraDir.isDirectory()) {
+                throw new GradleException("gametestExtraMods is not a directory: ${extraModsDir}")
+            }
+            // Never load: our own mod (a deployed, older Minecraft-AI jar would clash with the dev build under test) and
+            // fabric-api (the dev run already has it; a second build of it would replace the mapped one).
+            // Extend with -PgametestExtraModsSkip=id1,id2 for a mod that cannot start in the headless server environment.
+            def skipIds = ['minecraftai', 'minecraftai-gametest', 'fabric-api'] as Set
+            def extraSkip = providers.gradleProperty('gametestExtraModsSkip').orNull
+            if (extraSkip) {
+                extraSkip.split(',').each { if (it.trim()) skipIds << it.trim() }
+            }
+            def modsDir = new File(runDir, 'mods')
+            modsDir.mkdirs()
+            def copied = []
+            def skipped = []
+            (extraDir.listFiles({ f -> f.isFile() && f.name.toLowerCase().endsWith('.jar') } as FileFilter) ?: new File[0])
+                    .sort { it.name }.each { File jar ->
+                String modId = null
+                boolean hasGameTestEntrypoint = false
+                boolean clientOnly = false
+                def zip = new java.util.zip.ZipFile(jar)
+                try {
+                    def entry = zip.getEntry('fabric.mod.json')
+                    if (entry != null) {
+                        def modJson = new groovy.json.JsonSlurper().parse(zip.getInputStream(entry), 'UTF-8')
+                        modId = modJson.id
+                        clientOnly = modJson.environment == 'client'
+                        hasGameTestEntrypoint = modJson.entrypoints instanceof Map && modJson.entrypoints.containsKey('fabric-gametest')
+                    }
+                } finally {
+                    zip.close()
+                }
+                if (modId == null) {
+                    skipped << "${jar.name} (no fabric.mod.json)"
+                } else if (clientOnly) {
+                    // the dedicated server never loads it, but the runtime remapper would still process it: skip the work and the risk
+                    skipped << "${jar.name} (client-only: ${modId})"
+                } else if (skipIds.contains(modId)) {
+                    skipped << "${jar.name} (skip list: ${modId})"
+                } else {
+                    if (hasGameTestEntrypoint) {
+                        // A pack mod's own "fabric-gametest" entrypoint (its dev-time tests, whose classes are not in the
+                        // release jar) would be run by Fabric GameTest and crash the server: copy the jar without it.
+                        copyWithoutGameTestEntrypoint(jar, new File(modsDir, jar.name))
+                        copied << "${jar.name} (${modId}; fabric-gametest entrypoint stripped)"
+                    } else {
+                        java.nio.file.Files.copy(jar.toPath(), new File(modsDir, jar.name).toPath())
+                        copied << "${jar.name} (${modId})"
+                    }
+                }
+            }
+            logger.lifecycle("gametestExtraMods: copied ${copied.size()} jar(s) from ${extraDir}:")
+            copied.each { logger.lifecycle("  + ${it}") }
+            skipped.each { logger.lifecycle("  - skipped ${it}") }
+            // The pack's own config files decide how its mods behave on a server (Physics Mod, for one, collapses connected
+            // blocks unless "collapse" is off in physics_server_config.json), so a run without them tests a pack nobody plays.
+            // -PgametestExtraModsConfig=<config dir> copies that directory into the run dir's config/ (contents are never logged;
+            // only names). Our own mod's files (they hold the LLM key), *.bak files and VeinMiner's (set below) are left out.
+            def extraConfig = providers.gradleProperty('gametestExtraModsConfig').orNull
+            if (extraConfig) {
+                def cfgSrc = new File(extraConfig)
+                if (!cfgSrc.isDirectory()) {
+                    throw new GradleException("gametestExtraModsConfig is not a directory: ${extraConfig}")
+                }
+                def cfgDest = new File(runDir, 'config')
+                cfgDest.mkdirs()
+                def cfgCopied = []
+                cfgSrc.listFiles().sort { it.name }.each { File entry ->
+                    def lower = entry.name.toLowerCase()
+                    if (lower.startsWith('minecraftai') || lower.startsWith('aibot') || lower.endsWith('.bak') || lower == 'veinminer') {
+                        return
+                    }
+                    if (entry.isDirectory()) {
+                        entry.eachFileRecurse(groovy.io.FileType.FILES) { File f ->
+                            def target = new File(new File(cfgDest, entry.name), entry.toPath().relativize(f.toPath()).toString())
+                            target.parentFile.mkdirs()
+                            java.nio.file.Files.copy(f.toPath(), target.toPath())
+                        }
+                    } else {
+                        java.nio.file.Files.copy(entry.toPath(), new File(cfgDest, entry.name).toPath())
+                    }
+                    cfgCopied << entry.name
+                }
+                logger.lifecycle("gametestExtraModsConfig: copied ${cfgCopied.size()} config entries: ${cfgCopied.join(', ')}")
+            }
+            // VeinMiner: the run must exercise the permission hook, so turn permissionRestricted on in the RUN DIR's config
+            // (never in the directory the jars came from).
+            if (copied.any { it.contains('(veinminer') }) {
+                def veinCfg = new File(runDir, 'config/Veinminer')
+                veinCfg.mkdirs()
+                // The complete default settings with permissionRestricted flipped: a partial file was not honoured by VeinMiner.
+                new File(veinCfg, 'settings.json').setText('''{
+    "cooldown": 20,
+    "mustSneak": false,
+    "delay": 0,
+    "maxChain": 100,
+    "needCorrectTool": true,
+    "searchRadius": 1,
+    "permissionRestricted": true,
+    "mergeItemDrops": false,
+    "autoUpdate": false,
+    "decreaseDurability": true,
+    "hungerPerBlock": 0.0,
+    "miningSpeedModifier": 0.0,
+    "debug": false,
+    "client": {
+        "allow": true,
+        "require": false,
+        "translucentBlockHighlight": true,
+        "allBlocks": false,
+        "overrides": {
+            "cooldown": null,
+            "mustSneak": null,
+            "delay": null,
+            "maxChain": null,
+            "needCorrectTool": null,
+            "searchRadius": null,
+            "permissionRestricted": null,
+            "decreaseDurability": null,
+            "hungerPerBlock": null,
+            "miningSpeedModifier": null
+        }
+    }
+}
+''', 'UTF-8')
+                // VeinMiner ignores autoUpdate and downloads the newest Modrinth file into config/Veinminer/update/ on every launch:
+                // occupy that path with a plain file (as the real profile does) so the write fails harmlessly.
+                new File(veinCfg, 'update').setText('', 'UTF-8')
+                logger.lifecycle('gametestExtraMods: wrote config/Veinminer/settings.json with permissionRestricted=true in the run dir')
+            }
+        }
     }
 }
 

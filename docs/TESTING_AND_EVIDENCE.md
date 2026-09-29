@@ -28,6 +28,61 @@ CI_STATIC_CHECK_ARTIFACTS=1 bash scripts/ci_static_check.sh
 
 This check scans `build/libs/*.jar` and fails if it finds GameTest or verification command leakage.
 
+## Pack-Compat Check (GameTests With the Installed Mods)
+
+Our mixins (`minecraftai.mixins.json`, `injectors.defaultRequire = 1`) and features run in a pack next to mods that transform the same
+vanilla classes (Lithium, FerriteCore, ModernFix) or change how blocks break (VeinMiner, Physics Mod). The plain GameTest run has none of
+them, so before a deploy to the Minecraft profile run the same GameTests with the profile's mods loaded. Fabric Loader loads jars from
+`<runDir>/mods` in a development run and remaps intermediary jars itself, so nothing else is needed.
+
+```bash
+# GT_EXTRA_MODS = the profile's mods folder (read only: nothing is ever written to it). Use forward slashes.
+export GT_EXTRA_MODS="C:/Users/PC/AppData/Roaming/.minecraft/profiles/Minecraft-AI-1.21.11/mods"
+bash /c/mcw/_tools/gt_filter.sh <repo> <repo>/packrun/gt_results.txt \
+  'mixin_target_class_load_game_tests_*' 'permissions_integration_game_tests_*' 'vein_miner_pack_game_tests_*' \
+  'sleep_vote_game_tests_*' 'phantom_spawner_game_tests_*' 'follow_task_game_tests_*' \
+  'gather_tool_policy_game_tests_*' 'bot_persistence_restore_game_tests_*'
+```
+
+Without the wrapper: `./gradlew runGameTest -PgametestExtraMods=<mods dir> [-PgametestExtraModsConfig=<config dir>] [-PgametestExtraModsSkip=id1,id2]`
+(with `JAVA_TOOL_OPTIONS=-Dfabric-api.gametest.filter=minecraftai-gametest:<filter>`). The property is off by default, so normal runs are
+unchanged. What `prepareGameTestRun` does with it, always logged as `gametestExtraMods: ...` lines in the Gradle output:
+
+- Copies every `*.jar` of the mods folder into `build/run/gameTest/mods` after the run dir is recreated. Skipped, with the reason logged:
+  our own mod (`minecraftai`, `minecraftai-gametest`: the profile holds an older deployed Minecraft-AI jar), `fabric-api` (the dev run
+  has its own), client-only mods (`"environment": "client"`: Sodium, Iris and so on; a dedicated server never loads them, and skipping
+  them keeps the loader's runtime remap short), and the ids in `-PgametestExtraModsSkip` (the documented place for a mod that cannot
+  start in the headless server; currently empty).
+- A pack mod's own `fabric-gametest` entrypoint (Inventory Sorter ships one whose test class is not in the release jar and crashes the
+  GameTest server) is stripped from the COPY of that jar; nothing else in the jar changes.
+- With `GT_EXTRA_MODS` set, `gt_filter.sh` also passes the profile's `config` folder (next to `mods`) as `-PgametestExtraModsConfig`. The
+  mods' behaviour depends on it: Physics Mod collapses connected blocks by default, and only its `collapse: false` in
+  `physics_server_config.json` makes bots' block breaking behave as in the real pack (without the config, 6 gather tests, the follow-dig
+  test and the vein test fail because everything a bot breaks takes its neighbours with it). Our `minecraftai*`/`aibot*` files (they hold
+  the LLM key), `*.bak` files and VeinMiner's folder are never copied; only file names are logged.
+- If VeinMiner is among the mods, the run dir gets `config/Veinminer/settings.json` with `permissionRestricted: true` (the setting the
+  deploy step sets in the profile, see `mod_list.txt`) and `config/Veinminer/update` as a plain file, as in the profile, so its
+  auto-updater cannot write a download. Note that VeinMiner still asks Modrinth for the newest version at start-up (it logs
+  "veinminer is up to date").
+- `gt_filter.sh` retries (at most twice) a run that dies with Fabric Loader's runtime-remap race (`Failed to remap mods!`,
+  `ClosedFileSystemException`) before the server exists; that is a loader race, not a test result.
+
+What to look for:
+
+1. `mixin_target_class_load_game_tests_*` must PASS: every mixin of ours still applies with Lithium/FerriteCore/ModernFix transforming
+   the same classes (a conflict fails the class load hard, `defaultRequire = 1`). The log line "Method overwrite conflict for getTemperature
+   in lithium... previously written by ...modernfix" is between those two mods, not ours.
+2. `permissions_integration_game_tests_*` proves the API answers bots "no". `vein_miner_pack_game_tests_*` proves VeinMiner really respects
+   it: with the pack's VeinMiner and `permissionRestricted: true`, a human stand-in breaking one ore of a five-ore vein with an iron pickaxe
+   vein-mines all five (positive control) while a bot breaking the same vein through its real `MiningController` removes only the ore it
+   broke. The log line `VEINMINER_PACK result=checked human_ores_left=0 bot_ores_left=4 of=5` is the evidence (a run without VeinMiner logs
+   `result=skipped` and passes, so the normal suite is unaffected).
+3. Every other class must be as green as without the pack. A failure that only appears with the pack is a pack interaction: find which mod
+   (rerun with `GT_EXTRA_MODS_SKIP=<mod id>` to bisect) and fix OUR side; never change the pack.
+
+Caveats: the check runs on a Terralith/Tectonic/Streams Reflowing world generator, but the fixtures build their own blocks, so terrain does
+not matter. A run takes 1 to 3 minutes longer than a plain one because Loader remaps about 30 mods.
+
 ## Single Isolated Evidence Run
 
 Minimal command:
