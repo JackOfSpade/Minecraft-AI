@@ -28,12 +28,36 @@ final class StringPullLine {
     record Cell(int x, int z, double fraction, boolean corner, int[] sideXz) {
     }
 
+    /**
+     * Per-column consumer of the traversal ({@link #traverse}); {@code previousX/previousZ} is the column
+     * the line left, so a corner step's brushed columns are {@code (x, previousZ)} and {@code (previousX, z)}.
+     */
+    @FunctionalInterface
+    interface CellVisitor {
+        /** @return false to stop the traversal early. */
+        boolean visit(int x, int z, double fraction, boolean corner, int previousX, int previousZ);
+    }
+
     private StringPullLine() {
     }
 
     /** @return the columns entered after {@code (fromX, fromZ)}, ending with {@code (toX, toZ)}. */
     static List<Cell> cells(int fromX, int fromZ, int toX, int toZ) {
         List<Cell> cells = new ArrayList<>();
+        traverse(fromX, fromZ, toX, toZ, (x, z, fraction, corner, previousX, previousZ) -> {
+            cells.add(new Cell(x, z, fraction, corner, corner ? new int[]{x, previousZ, previousX, z} : null));
+            return true;
+        });
+        return cells;
+    }
+
+    /**
+     * Visits the same columns as {@link #cells} in the same order without allocating per column (the
+     * executor runs this for every lookahead candidate).
+     *
+     * @return true when every column was visited, false when the visitor stopped it
+     */
+    static boolean traverse(int fromX, int fromZ, int toX, int toZ, CellVisitor visitor) {
         int dx = toX - fromX;
         int dz = toZ - fromZ;
         int ax = Math.abs(dx);
@@ -75,9 +99,10 @@ final class StringPullLine {
                 crossedZ++;
             }
             boolean corner = stepInX && stepInZ;
-            cells.add(new Cell(cx, cz, Math.min(1.0D, fraction), corner,
-                    corner ? new int[]{cx, previousZ, previousX, cz} : null));
+            if (!visitor.visit(cx, cz, Math.min(1.0D, fraction), corner, previousX, previousZ)) {
+                return false;
+            }
         }
-        return cells;
+        return true;
     }
 }

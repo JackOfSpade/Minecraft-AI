@@ -30,7 +30,8 @@ import net.minecraft.world.level.block.Blocks;
  *
  * <p>The same trip in legal pieces (east along the bridge, then a step north) is accepted, and so is the exact
  * diagonal (1, 0) to (2, -1), whose centre line passes through the lattice point and never through the water
- * column.
+ * column (its brushed neighbours are dry at feet and head). The same diagonal is refused once a brushed column
+ * holds feet-level water: the 0.6-wide body would touch it.
  */
 public final class StringPullWaterCornerGameTests {
     @GameTest(maxTicks = 20)
@@ -69,6 +70,15 @@ public final class StringPullWaterCornerGameTests {
         // point): the pre-existing diagonal rule (both corner columns passable) applies unchanged.
         require(context, PathExecutor.lineClearForStringPull(world, origin.offset(1, 0, 0), beyondTheCorner),
                 "an exact diagonal step past the water corner was refused");
+        // A brushed column is not allowed to hold water either: a shallow (feet-level) water cell beside
+        // the exact diagonal would touch the 0.6-wide body, so the same diagonal is now refused. The
+        // check is synchronous (no fluid tick runs), and the cell is put back to air right away.
+        BlockPos brushed = origin.offset(1, 0, -1);
+        world.setBlock(brushed, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        boolean diagonalBesideShallowWater = PathExecutor.lineClearForStringPull(world, origin.offset(1, 0, 0), beyondTheCorner);
+        world.setBlock(brushed, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        require(context, !diagonalBesideShallowWater,
+                "an exact diagonal brushing a water column (feet-level water) was accepted");
         context.succeed();
     }
 

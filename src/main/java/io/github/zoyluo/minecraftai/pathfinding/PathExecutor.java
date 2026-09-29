@@ -572,37 +572,42 @@ public final class PathExecutor {
      * only dry, supported, passable columns: {@link StringPullLine} enumerates every column the line's
      * centre enters, so a shortcut can never clip the corner of a water cell or a void. (The first version
      * sampled twice per block and could step over a corner column between two samples: the bot then walked
-     * the cut, its centre ended up over water, and a land follow that had a dry route swam.)
+     * the cut, its centre ended up over water, and a land follow that had a dry route swam.) A line that
+     * enters a column through an exact corner also brushes the two neighbouring columns with the 0.6-wide
+     * body: those must be passable AND fluid-free (dry at the feet and head cell) too, so the bounding box
+     * never touches water on a shortcut a land walker must stay dry on. No list or cell is allocated per
+     * column (this runs for every lookahead candidate).
      */
     static boolean lineClearForStringPull(net.minecraft.server.level.ServerLevel world, BlockPos from, BlockPos target) {
         int dy = target.getY() - from.getY();
-        java.util.List<StringPullLine.Cell> cells = StringPullLine.cells(
-                from.getX(), from.getZ(), target.getX(), target.getZ());
-        int previousY = from.getY();
-        for (StringPullLine.Cell cell : cells) {
-            boolean last = cell.x() == target.getX() && cell.z() == target.getZ();
-            int y = last ? target.getY() : (int) Math.floor(from.getY() + dy * cell.fraction());
-            BlockPos sample = new BlockPos(cell.x(), y, cell.z());
-            if (!passableColumn(world, sample) || !dryColumn(world, sample)) {
-                return false;
-            }
-            if (!hasSupport(world, sample)) {
-                return false;
-            }
-            // A line that enters a column through an exact corner brushes both neighbouring columns
-            // (the NeighborEnumerator diagonal rule already refuses walls there); the 0.6-wide body
-            // must not press against a block or hang over a fluid either.
-            if (cell.corner()) {
-                int[] side = cell.sideXz();
-                BlockPos a = new BlockPos(side[0], previousY, side[1]);
-                BlockPos b = new BlockPos(side[2], previousY, side[3]);
-                if (!passableColumn(world, a) || !passableColumn(world, b)) {
-                    return false;
-                }
-            }
-            previousY = y;
-        }
-        return Standability.isStandable(world, target);
+        int fromY = from.getY();
+        int[] previousY = {fromY};
+        boolean clear = StringPullLine.traverse(from.getX(), from.getZ(), target.getX(), target.getZ(),
+                (x, z, fraction, corner, previousX, previousZ) -> {
+                    boolean last = x == target.getX() && z == target.getZ();
+                    int y = last ? target.getY() : (int) Math.floor(fromY + dy * fraction);
+                    BlockPos sample = new BlockPos(x, y, z);
+                    if (!passableColumn(world, sample) || !dryColumn(world, sample)) {
+                        return false;
+                    }
+                    if (!hasSupport(world, sample)) {
+                        return false;
+                    }
+                    // A line that enters a column through an exact corner brushes both neighbouring columns
+                    // (the NeighborEnumerator diagonal rule already refuses walls there); the 0.6-wide body
+                    // must not press against a block, nor touch a fluid, in either of them.
+                    if (corner) {
+                        BlockPos a = new BlockPos(x, previousY[0], previousZ);
+                        BlockPos b = new BlockPos(previousX, previousY[0], z);
+                        if (!passableColumn(world, a) || !dryColumn(world, a)
+                                || !passableColumn(world, b) || !dryColumn(world, b)) {
+                            return false;
+                        }
+                    }
+                    previousY[0] = y;
+                    return true;
+                });
+        return clear && Standability.isStandable(world, target);
     }
 
     /** No fluid at the feet or head cell: a shallow-water column over a solid bed is still not walkable. */

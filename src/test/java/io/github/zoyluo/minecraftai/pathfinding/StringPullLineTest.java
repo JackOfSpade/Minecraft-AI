@@ -73,4 +73,32 @@ final class StringPullLineTest {
         // (0,0) -> (1,3): centre line x = 0.5 + t, z = 0.5 + 3t; it crosses x = 1.0 and z = 2.0 together at t = 0.5.
         assertEquals(List.of("0,1", "1,2!", "1,3"), columns(0, 0, 1, 3));
     }
+
+    @Test
+    void theAllocationFreeTraversalVisitsTheSameColumnsAndCanStopEarly() {
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dz = -5; dz <= 5; dz++) {
+                List<String> visited = new ArrayList<>();
+                boolean all = StringPullLine.traverse(3, 4, 3 + dx, 4 + dz, (x, z, fraction, corner, px, pz) -> {
+                    visited.add(x + "," + z + (corner ? "!" : ""));
+                    return true;
+                });
+                assertTrue(all);
+                assertEquals(columns(3, 4, 3 + dx, 4 + dz), visited, dx + "," + dz);
+            }
+        }
+        // A corner step reports the column it left, so the brushed neighbours are (x, previousZ) and (previousX, z).
+        int[] seen = new int[4];
+        StringPullLine.traverse(0, 0, 1, 1, (x, z, fraction, corner, px, pz) -> {
+            seen[0] = x;
+            seen[1] = pz;
+            seen[2] = px;
+            seen[3] = z;
+            return true;
+        });
+        assertArrayEquals(new int[]{1, 0, 0, 1}, seen);
+        int[] count = {0};
+        assertFalse(StringPullLine.traverse(0, 0, 5, 0, (x, z, fraction, corner, px, pz) -> ++count[0] < 2));
+        assertEquals(2, count[0]);
+    }
 }
