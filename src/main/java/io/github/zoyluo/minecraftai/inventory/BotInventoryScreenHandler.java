@@ -98,6 +98,11 @@ public final class BotInventoryScreenHandler extends AbstractContainerMenu {
         // Class initialization performs the registry insertion above.
     }
 
+    /** True while any player has this bot's inventory screen open (the bot's equipment is then being edited by hand). */
+    public static boolean isScreenOpen(AIPlayerEntity bot) {
+        return OpenScreenLeases.isOpen(bot);
+    }
+
     /** The index of the actual bot hotbar cell which is currently held in its main hand. */
     public int selectedBotHotbarSlot() {
         return clampHotbarSlot(selectedBotHotbarSlot.get());
@@ -460,6 +465,10 @@ public final class BotInventoryScreenHandler extends AbstractContainerMenu {
         private static final Map<UUID, Lease> OPEN = new HashMap<>();
 
         private OpenScreenLeases() {
+        }
+
+        private static synchronized boolean isOpen(AIPlayerEntity bot) {
+            return OPEN.containsKey(bot.getUUID());
         }
 
         private static synchronized void open(AIPlayerEntity bot) {

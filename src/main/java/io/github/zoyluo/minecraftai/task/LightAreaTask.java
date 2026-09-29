@@ -137,8 +137,11 @@ public final class LightAreaTask extends AbstractTask {
                 });
         if (skipSurfaceCells) {
             int before = cells.size();
+            // One memo per scan: each candidate used to read its own column to the top of the world.
+            SurfaceColumnMemo memo = new SurfaceColumnMemo();
             Set<BlockPos> underRoof = TorchPlacementPlanner.withoutSurfaceCells(
-                    cells, cell -> SurfaceCheck.isOnSurface(world, cell));
+                    cells, cell -> memo.isOnSurface(cell.getX(), cell.getY(), cell.getZ(),
+                            () -> SurfaceCheck.isOnSurface(world, cell)));
             cells.retainAll(underRoof);
             worldBlockLight.keySet().retainAll(underRoof);
             if (cells.size() < before) {

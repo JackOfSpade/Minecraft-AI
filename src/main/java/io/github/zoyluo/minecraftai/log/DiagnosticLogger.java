@@ -103,7 +103,8 @@ public final class DiagnosticLogger {
         if (prev == null) {
             return;
         }
-        // Health loss
+        // Health loss (with what damaged the bot since the previous sample: source/attacker, count)
+        String damageCause = bot.drainDamageSinceSample();
         if (now.health < prev.health - 0.01F) {
             BotLog.danger(bot, "diag_health_drop",
                     "from", fmt(prev.health),
@@ -114,7 +115,8 @@ public final class DiagnosticLogger {
                     "fall", fmt(now.fallDistance),
                     "in_lava", now.inLava,
                     "submerged", now.submerged,
-                    "air", now.air);
+                    "air", now.air,
+                    "damage", damageCause);
         }
         // Alive -> !alive. Entity.isAlive() also goes false for a plain removal (chunk unload,
         // despawn, the player disconnecting/quitting the world) that never touched health -- e.g.

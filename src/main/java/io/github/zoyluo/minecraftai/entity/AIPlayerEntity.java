@@ -18,6 +18,8 @@ import net.minecraft.world.entity.player.Player;
 
 public class AIPlayerEntity extends ServerPlayer {
     private final ActionPack actionPack = new ActionPack(this);
+    private final DamageLogCoalescer damageLog = new DamageLogCoalescer();
+    private final java.util.Map<String, Integer> damageSinceSample = new java.util.LinkedHashMap<>();
 
     public AIPlayerEntity(MinecraftServer server,
                           ServerLevel world,
@@ -41,6 +43,7 @@ public class AIPlayerEntity extends ServerPlayer {
             super.tick();
             this.doTick();
             this.actionPack.onUpdate();
+            logDamageSummary(damageLog.flushIfIdle(this.tickCount));
         } catch (RuntimeException exception) {
             // Was NullPointerException-only; widened so any unexpected exception here (not just an
             // NPE) is absorbed for this tick instead of crashing the whole server as a "Ticking
@@ -54,6 +57,8 @@ public class AIPlayerEntity extends ServerPlayer {
      * Combat logging: without this a fight left no trace beyond the bare {@code diag_health_drop} (no source, no
      * attacker), so a bot that lost or won a fight could not be explained from its log. Logged at the moment the
      * hit is resolved, with the vanilla result (a blocked/shielded/cooldown hit reports {@code applied=false}).
+     * Repeats of the same source/attacker within two seconds (fire, lava and drowning damage every few ticks)
+     * are coalesced into one summary line with a count, see {@link DamageLogCoalescer}.
      */
     @Override
     public boolean hurtServer(ServerLevel world, DamageSource source, float amount) {
@@ -61,23 +66,79 @@ public class AIPlayerEntity extends ServerPlayer {
         boolean applied = super.hurtServer(world, source, amount);
         try {
             Entity attacker = source == null ? null : source.getEntity();
-            BotLog.danger(this, "damage_taken",
-                    "source", source == null ? "unknown" : source.getMsgId(),
-                    "attacker", attacker == null ? "-" : attacker.getType().toString(),
-                    "attacker_id", attacker == null ? -1 : attacker.getId(),
-                    "amount", amount,
-                    "applied", applied,
-                    "hp", before + "->" + this.getHealth(),
-                    "blocking", this.isBlocking());
+            String sourceId = source == null ? "unknown" : source.getMsgId();
+            String attackerType = attacker == null ? "-" : attacker.getType().toString();
+            int attackerId = attacker == null ? -1 : attacker.getId();
+            if (applied) {
+                damageSinceSample.merge(attacker == null ? sourceId : sourceId + "/" + attackerType, 1, Integer::sum);
+            }
+            DamageLogCoalescer.Result result = damageLog.record(
+                    sourceId + " attacker=" + attackerType + "#" + attackerId,
+                    this.tickCount, amount, applied, before, this.getHealth());
+            logDamageSummary(result.flushed());
+            if (result.logNow()) {
+                BotLog.danger(this, "damage_taken",
+                        "source", sourceId,
+                        "attacker", attackerType,
+                        "attacker_id", attackerId,
+                        "amount", amount,
+                        "applied", applied,
+                        "hp", before + "->" + this.getHealth(),
+                        "blocking", this.isBlocking());
+            }
         } catch (RuntimeException ignored) {
             // Logging must never affect combat resolution.
         }
         return applied;
     }
 
+    private void logDamageSummary(DamageLogCoalescer.Summary summary) {
+        if (summary == null) {
+            return;
+        }
+        BotLog.danger(this, "damage_taken_repeated",
+                "kind", summary.key(),
+                "repeats", summary.repeats(),
+                "amount", summary.totalAmount(),
+                "applied", summary.applied(),
+                "hp", summary.hpFrom() + "->" + summary.hpTo(),
+                "span_ticks", summary.lastTick() - summary.firstTick());
+    }
+
+    /**
+     * What damaged this bot since the previous call, as {@code "source/attacker xN, ..."}, or {@code "none"}.
+     * Drained by the diagnostic sampler so a {@code diag_health_drop} names its cause (Minecraft's own
+     * last-damage-source expires after 40 ticks, the sampler runs every 40).
+     */
+    public String drainDamageSinceSample() {
+        if (damageSinceSample.isEmpty()) {
+            return "none";
+        }
+        StringBuilder text = new StringBuilder();
+        damageSinceSample.forEach((kind, count) -> {
+            if (text.length() > 0) {
+                text.append(", ");
+            }
+            text.append(kind).append(" x").append(count);
+        });
+        damageSinceSample.clear();
+        return text.toString();
+    }
+
+    @Override
+    public void remove(Entity.RemovalReason reason) {
+        try {
+            logDamageSummary(damageLog.flush());
+        } catch (RuntimeException ignored) {
+            // Logging must never affect removal.
+        }
+        super.remove(reason);
+    }
+
     @Override
     public void die(DamageSource source) {
         try {
+            logDamageSummary(damageLog.flush());
             Entity attacker = source == null ? null : source.getEntity();
             BotLog.danger(this, "bot_death",
                     "source", source == null ? "unknown" : source.getMsgId(),

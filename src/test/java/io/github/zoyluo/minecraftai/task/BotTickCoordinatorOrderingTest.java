@@ -67,9 +67,15 @@ class BotTickCoordinatorOrderingTest {
                 "            if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {\n"
                         + "                continue;\n"
                         + "            }\n"));
-        assertTrue(source.contains(
-                "            if (!handled && runBackground) {\n"
-                        + "                io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);"));
+        // The background block still auto-equips armor and ticks the idle coordinator; the armor step is
+        // additionally paused while a player has the bot's inventory screen open (it edits by hand).
+        int background = source.indexOf("            if (!handled && runBackground) {\n");
+        assertTrue(background > 0, "the background block exists");
+        String backgroundBlock = source.substring(background, source.indexOf("IdleCoordinator.INSTANCE.tickBot(bot);", background));
+        assertTrue(backgroundBlock.contains(
+                "if (!io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {\n"
+                        + "                    io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);\n"
+                        + "                }"));
         assertFalse(source.contains("= MiningAssistCoordinator"), "the call's result is never used");
         assertFalse(source.contains("if (MiningAssistCoordinator"), "the call never gates the tick");
     }

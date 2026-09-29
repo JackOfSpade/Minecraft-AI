@@ -20,6 +20,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
@@ -71,9 +72,36 @@ public final class EquipAction {
             bot.setItemSlot(slot, candidate.stack());
             inventory.setChanged();
             equipped++;
-            BotLog.action(bot, "equip_armor", "slot", slot.getSerializedName(), "item", candidate.stack().getItem(), "score", candidate.score());
+            logArmorEquip(bot, slot, candidate);
         }
         return equipped;
+    }
+
+    /** Repeat window for an identical armor-equip line (slot + item) of one bot: 1200 ticks = 1 minute. */
+    private static final int ARMOR_LOG_REPEAT_TICKS = 1200;
+    private static final Map<java.util.UUID, Map<EquipmentSlot, ArmorLogged>> LAST_ARMOR_LOGGED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record ArmorLogged(Item item, int tick) {
+    }
+
+    /**
+     * Logs an armor equip only when it is news: the same item re-equipped into the same slot within a
+     * minute is not logged again (the same four pieces were logged every 1-2 s while a player had the
+     * bot's inventory open and its equipment was being shuffled).
+     */
+    private static void logArmorEquip(AIPlayerEntity bot, EquipmentSlot slot, Candidate candidate) {
+        Item item = candidate.stack().getItem();
+        int now = bot.level().getServer() == null ? 0 : bot.level().getServer().getTickCount();
+        Map<EquipmentSlot, ArmorLogged> perBot = LAST_ARMOR_LOGGED.computeIfAbsent(
+                bot.getUUID(), id -> new EnumMap<>(EquipmentSlot.class));
+        ArmorLogged previous = perBot.get(slot);
+        if (previous != null && previous.item() == item && now - previous.tick() < ARMOR_LOG_REPEAT_TICKS
+                && now >= previous.tick()) {
+            return;
+        }
+        perBot.put(slot, new ArmorLogged(item, now));
+        BotLog.action(bot, "equip_armor", "slot", slot.getSerializedName(), "item", item, "score", candidate.score());
     }
 
     public static OptionalInt equipBestWeapon(AIPlayerEntity bot) {

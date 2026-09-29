@@ -13,6 +13,7 @@ import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 public final class ToolSelector {
@@ -29,6 +30,12 @@ public final class ToolSelector {
     }
 
     public static Selection equipBestTool(AIPlayerEntity player, BlockState state) {
+        if (state.isAir() || state.getBlock() instanceof LiquidBlock) {
+            // Nothing to dig (a gap between dig steps, or a fluid cell): scoring every stack against air
+            // ties them all, which picked a plank stack and made the hotbar ping-pong between steps.
+            int held = player.getInventory().getSelectedSlot();
+            return new Selection(false, held, player.getInventory().getNonEquipmentItems().get(held), 0.0F);
+        }
         Inventory inventory = player.getInventory();
         int currentSlot = inventory.getSelectedSlot();
         ItemStack currentStack = inventory.getNonEquipmentItems().get(currentSlot);
