@@ -57,7 +57,12 @@ public final class CraftTaskTablePlacementGameTests {
         // the bounded relocation radius is also blocked, so the bounded search must genuinely
         // exhaust and fail with a distinct, clear reason -- never an infinite/looping retry of the
         // exact support_face_not_visible failure the live bug reported.
-        Fixture fixture = spawnFullyEnclosed(context, "CraftNoPlacementGT", new BlockPos(24, 4, 8));
+        // Both tests of this class run in one batch, each in its own structure cell only 13 blocks apart
+        // and each carving a radius-6 (13x13) fixture, so every fixture must stay inside its OWN cell
+        // (relative x/z 2..14). A farther offset (this used to be x=24) spilled into the neighbouring
+        // test cell, and whichever test ran second overwrote the other's stone/air: the relocate
+        // fixture opened this enclosed pocket, a table got placed and this test timed out.
+        Fixture fixture = spawnFullyEnclosed(context, "CraftNoPlacementGT", new BlockPos(8, 4, 8));
         AIPlayerEntity bot = fixture.bot();
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
         InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 2));
