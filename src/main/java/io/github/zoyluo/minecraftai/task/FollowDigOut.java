@@ -58,7 +58,8 @@ import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
  * test use). (2) The reads either make the dig REFUSE (a fluid, a hazard, a missing floor, a suspended falling
  * block) or confirm a one-cell step that {@code FakePlayerMotion.stepToStandable} then re-verifies against the
  * live world; none of them selects a target. The one read that does choose what to break -- the
- * block itself -- is gated by {@code ObservableWorldQuery.canObserveBlock} in {@link #plan}. Fluid is
+ * block itself -- is gated by {@code ObservableWorldQuery.canObserveBlock} (shape-aware: the collision shape, or the
+ * selection outline for a block that has none) in {@link #plan}. Fluid is
  * refused on every side, so a dig-out can never open a wall into water either.
  */
 final class FollowDigOut {

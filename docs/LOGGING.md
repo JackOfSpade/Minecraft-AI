@@ -37,9 +37,10 @@ written. The size of one session is **not** capped: every line is written twice 
 the per-bot file under `by-bot/`), so a session takes roughly twice its log volume. `all.log` (and, with it,
 the per-bot files) is only rotated into `archive/` when it passes `logging.maxFileSizeMb` (default 50) or the date
 changes, and rotation only removes archive files older than `logging.maxBackups` days (default 30) inside the
-session that is being written; it never deletes anything from an older session. Measured with the diagnostic
-snapshot gate (below): a two-hour session with bots is about 5 MB of `all.log`, so about 10 MB on disk, and ten of them
-are about 100 MB. A runaway logging bug or a very long session is the only thing that can exceed this, and the
+session that is being written; it never deletes anything from an older session. The measurement behind
+the usual size, about 5 MB of `all.log` for a two-hour session with bots (so about 10 MB on disk, and ten of them
+about 100 MB), was taken BEFORE the diagnostic snapshot gate (below) existed. With the gate a session is smaller, so
+treat those figures as a conservative upper bound, not as a measurement of the current logger. A runaway logging bug or a very long session is the only thing that can exceed this, and the
 bot-less sessions are tiny; lower `logging.maxBotSessions` (or `maxFileSizeMb`) to tighten the
 bound. There is deliberately no byte ceiling that would delete the newest session's evidence mid-play.
 

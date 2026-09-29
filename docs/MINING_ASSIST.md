@@ -301,6 +301,32 @@ of changes it held back); `assist_sighting` for rare finds (at most 6 per window
   are dropped by a sort of the whole field, a few milliseconds once per 256 newly seen cells; it only occurs
   next to a very large lava or water body.
 
+## Observation predicates by caller group
+
+The block observation predicates (`canObserveBlock*`, `canObserveCell*`) are an older family than the view
+sensor and follow the block's own shape (`FaceAim`): a block with a collision shape is aimed at through it
+with a COLLIDER ray; a non-colliding, non-fluid block (torch, rail, cobweb, plant, crop, banner) is aimed at
+through its outline with an OUTLINE ray, because a player in plain view sees it. That is visibility, not
+solidity. By caller group:
+
+1. Target discovery (containers, stations, crops, ores, decor lists) counts outline-only blocks as seen.
+2. Hazard and unknown-cell fail-closed checks read the state after the proof and decide on it, so a seen
+   cobweb is a known cobweb, never "known safe" (fluid cells are unchanged: no outline, full-cell ray).
+3. Tunnel-cell checks use `canObserveCell || canObserveBlock`, which already accepted non-colliding cells.
+4. Support, ground and standability proofs (a stand cell's floor, a torch or depot floor) use
+   `canObserveCollider*`, which never accepts a block without a collision shape; the caller still checks the
+   collision shape or `Standability`.
+5. Placement proofs (`BuildAction`) aim at the support's outline shape and are decided by an exact ray hit
+   on that face.
+
+`canObserveFarmCell` is the farm-specific cell query (top-of-shape samples, the empty cell above a field
+accepted).
+
+Intended consequence: under strict survival, food planning (a "what can I eat here" survey) now sees short
+grass, ferns and sweet berry bushes that are in plain view, where the old collider-only proof never
+accepted them. Nothing behind a wall or out of range becomes visible; only the plants a player looking at
+the spot would see.
+
 ## Invariants the code comments cite
 
 The design document is not in this repository, so the invariants that comments, tests and log lines refer
@@ -318,6 +344,11 @@ to by number are restated here (design section 1):
   existing `OreScan.observe` and `canObserveEntity` helpers, whose answers follow the active profile like
   every other mining task's (under `operator` with `hiddenBlockScan` enabled they are as permissive as
   those tasks are); `castViewRay` itself is profile independent.
+  The palette prefilter of the observable block scans (`SectionPrefilter`: `LevelChunkSection.maybeHas` and
+  one state read, run before the ray proof in `OreProspector` and `WorkshopLocator`) is a cost-only conjunct:
+  it only puts the cheaper test first, a cell is still returned only when it matches AND is observable, the
+  prefilter's answer never leaves the scan, and no decision (target, log line, notice, abort) reacts to a
+  section or cell that matched but was not seen. `maybeHas` stays banned from the sensor and the assist.
 - **I4 Origin and flag gating.** The assist runs only for `MISSION`, `PLAYER_COMMAND`, `PLAYER_PANEL`,
   `LLM_TOOL` and `JOB` origins, never while `MiningEvidenceAudit.hasSession(uuid)`, and only when the mode
   allows. The harness defaults it off. With the mode off a hook is one static check.

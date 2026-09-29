@@ -111,8 +111,10 @@ public final class OreScan {
 
     /**
      * Evaluates a block-state predicate only after the target cell or one of its real block faces
-     * is observable. Both probes are content-independent; the world state is not read merely to
-     * choose which visibility query to apply.
+     * is observable. The face probe ({@code canObserveBlock}) is shape-aware: it aims at the block's collision
+     * shape, or at its selection outline when it has none. The cell probe ({@code canObserveCell}) accepts an
+     * unobstructed view into the cell, an empty one included. Both probes are content-independent; the world
+     * state is not read merely to choose which visibility query to apply.
      */
     public static Observation observe(AIPlayerEntity bot,
                                       BlockPos pos,

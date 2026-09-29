@@ -139,10 +139,11 @@ final class BoatSupport {
     }
 
     /**
-     * Line-of-sight test for a water cell.  {@link ObservableWorldQuery#canObserveBlock} aims at
-     * the block-face centres, all of which sit outside the (0.89-high) water surface or on hidden
-     * side faces, so a calm lake seen from a bank never passes it; here the rays aim at points
-     * just under the water surface, which is exactly what a player looking at the lake sees.
+     * Line-of-sight test for a water cell.  {@link ObservableWorldQuery#canObserveBlock} is shape-aware, but a
+     * fluid has neither a collision shape nor a selection outline to aim at, so it is aimed at as a full cell
+     * with a collider ray, which never strikes water (and the face centres of that cell sit outside the
+     * 0.89-high surface or on hidden side faces): a calm lake seen from a bank never passes it. Here the rays
+     * aim at points just under the water surface, which is exactly what a player looking at the lake sees.
      */
     static boolean canObserveWater(AIPlayerEntity bot, BlockPos water) {
         if (ObservableWorldQuery.canObserveBlock(bot, water)) {
