@@ -6,13 +6,15 @@ import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
  * Decides which failed route searches justify telling the player there is no way to them.
  *
  * <p>A search that ran to exhaustion ({@link FailureReason#GOAL_UNREACHABLE}: the open set emptied without
- * reaching the goal) and one whose goal has no standable cell ({@link FailureReason#GOAL_NOT_STANDABLE}: the
- * bot cannot find a place to stand near the player) are genuine: each says something definite about the
- * world, so they are announced at once, once per episode. A budget failure (node limit, time limit), a bad
- * start cell or an unloaded-chunk hiccup says nothing about connectivity on its own, so the bot just retries on
- * the normal schedule. When such non-genuine failures keep repeating, though, silence is worse than a generic
- * "I can't find a way" (see {@link RepeatedFailures}): the player would otherwise watch a follower stand still
- * with no explanation.
+ * reaching the goal) says something definite about the world, so it is announced at once, once per episode.
+ * Everything else says nothing about connectivity on its own, so the bot just retries on the normal schedule:
+ * a budget failure (node limit, time limit), a bad start cell, an unloaded-chunk hiccup, and also
+ * {@link FailureReason#GOAL_NOT_STANDABLE} (no standable cell near the player), because a player who is
+ * momentarily mid-air (a jump, a fall, a knockback) or at a chunk edge has no standable cell for a moment
+ * yet is fine a second later. When such failures keep repeating, though, silence is worse than a line (see
+ * {@link RepeatedFailures}): the player would otherwise watch a follower stand still with no explanation.
+ * The line then says what was not found ({@link #messageFor}): the specific "no place to stand" for a
+ * persistent unstandable goal, a generic one for the rest.
  *
  * <p>Known limitation: the search treats an unloaded chunk as blocked, so a route that leaves the loaded area
  * is reported exactly like a genuinely severed one ("no route" while the player is merely far away or across
@@ -39,21 +41,27 @@ final class FollowNoRoute {
 
     /** @param reason the failed {@code ActionResult.reason()} of a path request (may be null) */
     static boolean isGenuine(String reason) {
-        return reason != null
-                && (reason.equals(FAILED_PREFIX + FailureReason.GOAL_UNREACHABLE.name())
-                || reason.equals(FAILED_PREFIX + FailureReason.GOAL_NOT_STANDABLE.name()));
-    }
-
-    /** The line for a genuine failure: what exactly the bot could not find. */
-    static String messageFor(String reason) {
-        return reason != null && reason.equals(FAILED_PREFIX + FailureReason.GOAL_NOT_STANDABLE.name())
-                ? NO_STANDING_PLACE_MESSAGE
-                : NO_DRY_ROUTE_MESSAGE;
+        return reason != null && reason.equals(FAILED_PREFIX + FailureReason.GOAL_UNREACHABLE.name());
     }
 
     /**
-     * Counts consecutive NON-genuine failed re-plans and says when the generic notice is due: at least
-     * {@link #REPEATED_FAILURES_BEFORE_NOTICE} of them, spanning at least {@link #REPEATED_FAILURE_SPAN_TICKS}.
+     * The line for an announced failure: what exactly the bot could not find. A persistent unstandable goal
+     * gets its specific line, an exhausted search the dry-route line, any other repeated failure the generic one.
+     */
+    static String messageFor(String reason) {
+        if (reason == null) {
+            return GENERIC_MESSAGE;
+        }
+        if (reason.equals(FAILED_PREFIX + FailureReason.GOAL_NOT_STANDABLE.name())) {
+            return NO_STANDING_PLACE_MESSAGE;
+        }
+        return reason.equals(FAILED_PREFIX + FailureReason.GOAL_UNREACHABLE.name())
+                ? NO_DRY_ROUTE_MESSAGE
+                : GENERIC_MESSAGE;
+    }
+
+    /**
+* Counts consecutive NON-genuine failed re-plans (an unstandable goal included) and says when a notice is     * due: at least {@link #REPEATED_FAILURES_BEFORE_NOTICE} of them, spanning at least     * {@link #REPEATED_FAILURE_SPAN_TICKS}.
      * Any successful route, arrival or genuine failure ends the streak. Pure (no game objects).
      */
     static final class RepeatedFailures {

@@ -245,6 +245,11 @@ public final class BotLogWriter {
         }
     }
 
+    /**
+     * Test support: floods the queue. Like {@link #submit}, every offered entry bumps {@code enqueuedCount}
+     * (undone on a failed offer), because the writer bumps {@code writtenCount} for every entry it writes and
+     * {@link #awaitDrainedForTest} compares the two counters; they must stay balanced.
+     */
     public void forceOverflowForTest(int count) {
         if (!started || !config.enabled()) {
             return;
@@ -262,13 +267,16 @@ public final class BotLogWriter {
                     Map.of("index", Integer.toString(index)),
                     "manual overflow validation",
                     null);
+            enqueuedCount.incrementAndGet();
             if (!queue.offer(entry)) {
+                enqueuedCount.decrementAndGet();
                 droppedCount.incrementAndGet();
             }
         }
         if (droppedCount.get() == droppedBefore) {
             droppedCount.incrementAndGet();
-            queue.offer(new LogEntry(
+            enqueuedCount.incrementAndGet();
+            if (!queue.offer(new LogEntry(
                     System.currentTimeMillis(),
                     LogCategory.ERROR,
                     Level.ERROR,
@@ -277,7 +285,9 @@ public final class BotLogWriter {
                     "overflow_test_marker",
                     Map.of("requested", Integer.toString(attempts)),
                     "manual overflow validation marker",
-                    null));
+                    null))) {
+                enqueuedCount.decrementAndGet();
+            }
         }
     }
 

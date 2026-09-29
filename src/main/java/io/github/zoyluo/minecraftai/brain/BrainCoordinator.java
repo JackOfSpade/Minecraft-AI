@@ -814,14 +814,17 @@ public final class BrainCoordinator {
      * <p>Only a round that belongs to a player instruction is deferred: a blocked tool call in an
      * autonomous wake (goal continuation, task-finished, failure) is not a player request, and
      * replaying "the player's last request" for it would start an old instruction nobody just asked for.</p>
+     *
+     * @return whether the request was deferred (the caller words the tool result accordingly)
      */
-    void deferRequestUntilSafetyEnds(AIPlayerEntity bot) {
+    boolean deferRequestUntilSafetyEnds(AIPlayerEntity bot) {
         BotConversation conversation = conversations.get(bot.getUUID());
         if (conversation == null || !conversation.instructionChain.playerInstruction()) {
             BotLog.comm(bot, "request_deferral_skipped", "reason", "not_a_player_instruction_round");
-            return;
+            return false;
         }
         deferredRequests.put(bot.getUUID(), true);
+        return true;
     }
 
     /** Test seam: marks the bot's current model-call chain as belonging to a player instruction (or not). */

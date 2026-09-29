@@ -377,6 +377,99 @@ public final class FollowTaskGameTests {
         });
     }
 
+    /** Cells above the platform the player hangs at: beyond the goal snap's 24-cell downward fallback. */
+    private static final int UNSTANDABLE_HEIGHT = 40;
+
+    /**
+     * A player who is only momentarily somewhere with no standable cell (mid-air after a jump or knockback, a
+     * chunk edge) must not make the follower announce "I can't find a place to stand near you": the goal is
+     * unstandable for a few re-plans, then the player lands and the bot walks up to them. The failures are
+     * re-planned quietly (GOAL_NOT_STANDABLE goes through the same persistence rule as the other non-genuine
+     * failures), so no notice is ever sent.
+     */
+    @GameTest(maxTicks = 420)
+    public void followDoesNotAnnounceAMomentarilyUnstandableGoal(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 34, 8));
+        preparePlatform(context, c, 6);
+
+        String targetName = "FollowAirTargetGT";
+        BlockPos home = c.offset(3, 0, 0);
+        BlockPos aloft = home.above(UNSTANDABLE_HEIGHT);
+        AIPlayerEntity targetBot = spawn(context, targetName, aloft);
+        TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
+        String botName = "FollowAirGT";
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-5, 0, 0));
+        FollowTask followTask = new FollowTask(targetName);
+        TaskManager.INSTANCE.assign(bot, followTask,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_momentary_unstandable"));
+
+        int[] tick = {0};
+        context.failIfEver(() -> {
+            tick[0]++;
+            require(context, followTask.state() == TaskState.RUNNING,
+                    "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
+            require(context, followTask.noRouteNotices() == 0,
+                    "a momentarily unstandable goal was announced at tick " + tick[0]);
+            if (tick[0] <= 90) {
+                teleportTo(world, targetBot, aloft); // hangs there; nothing standable within the goal snap
+                return;
+            }
+            if (tick[0] == 91) {
+                teleportTo(world, targetBot, home); // lands: the goal is standable again
+                return;
+            }
+            if (tick[0] > 91 && bot.distanceTo(targetBot) <= 4.5D) {
+                finish(context, bot, botName, targetBot, targetName);
+                return;
+            }
+            require(context, tick[0] < 400, "the bot never walked up to the player who landed: distance "
+                    + bot.distanceTo(targetBot));
+        });
+    }
+
+    /**
+     * Companion: a player who stays somewhere with no standable cell (a persistent GOAL_NOT_STANDABLE) is
+     * announced, once, and only after the repeated-failure rule (three re-plans spanning 10 s) -- not on the
+     * first failed re-plan, and not again on later ones.
+     */
+    @GameTest(maxTicks = 520)
+    public void followAnnouncesAPersistentlyUnstandableGoalOnce(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 34, 8));
+        preparePlatform(context, c, 6);
+
+        String targetName = "FollowAirStayTargetGT";
+        BlockPos aloft = c.offset(3, UNSTANDABLE_HEIGHT, 0);
+        AIPlayerEntity targetBot = spawn(context, targetName, aloft);
+        TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
+        String botName = "FollowAirStayGT";
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-5, 0, 0));
+        FollowTask followTask = new FollowTask(targetName);
+        TaskManager.INSTANCE.assign(bot, followTask,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_persistent_unstandable"));
+
+        int[] tick = {0};
+        context.failIfEver(() -> {
+            tick[0]++;
+            teleportTo(world, targetBot, aloft);
+            require(context, followTask.state() == TaskState.RUNNING,
+                    "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
+            if (tick[0] <= 150) {
+                require(context, followTask.noRouteNotices() == 0,
+                        "the unstandable goal was announced at tick " + tick[0] + ", before it had persisted 10 s");
+            }
+            if (tick[0] >= 480) {
+                require(context, followTask.noRouteNotices() == 1,
+                        "a persistently unstandable goal must be announced exactly once, not "
+                                + followTask.noRouteNotices() + " times");
+                finish(context, bot, botName, targetBot, targetName);
+            }
+        });
+    }
+
     /**
      * Arriving must cancel the path executor, not just release the movement keys: a stale path
      * kept forward=1 for up to WalkToController.MAX_TICKS with no replan.

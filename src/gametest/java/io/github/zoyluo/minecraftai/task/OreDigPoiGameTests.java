@@ -1733,7 +1733,7 @@ public final class OreDigPoiGameTests {
         /** Ticks the server thread gets, after the worker returned, to run the queued advisor callback. */
         private static final int CALLBACK_TICK_BUDGET = 100;
         /** Ticks a reply is held back once the consult started, so the hold is visibly in force first. */
-        static final int HOLD_TICKS = 10;
+        static final int HOLD_TICKS = 50;
         private final CountDownLatch release = new CountDownLatch(1);
         private final CountDownLatch returned = new CountDownLatch(1);
         private final PoiPrompt.Verdict verdict;

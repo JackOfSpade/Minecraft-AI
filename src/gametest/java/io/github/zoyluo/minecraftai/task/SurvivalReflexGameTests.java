@@ -378,6 +378,9 @@ public final class SurvivalReflexGameTests {
                     new io.github.zoyluo.minecraftai.brain.ChatToolCall("call_0", "eat", "{}")));
             require(context, autonomous.get(0).content().contains("safety_task_active"),
                     "the autonomous tool call was not blocked: " + autonomous.get(0).content());
+            require(context, !autonomous.get(0).content().contains("kept and will be started")
+                            && autonomous.get(0).content().contains("not kept"),
+                    "an undeferred blocked call was promised an automatic restart: " + autonomous.get(0).content());
             require(context, !io.github.zoyluo.minecraftai.brain.BrainCoordinator.INSTANCE.isRequestDeferredForTest(bot),
                     "a blocked call of an autonomous wake was deferred as if it were a player request");
             io.github.zoyluo.minecraftai.brain.BrainCoordinator.INSTANCE.setPlayerInstructionChainForTest(bot, true);
@@ -388,6 +391,8 @@ public final class SurvivalReflexGameTests {
             require(context, content.contains("blocked") && content.contains("safety_task_active")
                             && !content.contains("assigned"),
                     "the tool was not blocked by the SAFETY task: " + content);
+            require(context, content.contains("kept and will be started automatically"),
+                    "a deferred blocked call was not told its request is kept: " + content);
             require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == fight && fight.state() == TaskState.RUNNING,
                     "the blocked tool disturbed the running SAFETY task");
             require(context, io.github.zoyluo.minecraftai.brain.BrainCoordinator.INSTANCE.isRequestDeferredForTest(bot),

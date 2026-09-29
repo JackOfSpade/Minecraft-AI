@@ -38,9 +38,9 @@ public final class GameTestCleanup {
     /**
      * Runs {@code cleanup} exactly once when the test behind {@code helper} has finished (passed, failed or
      * timed out). It never completes the test itself. Call it from the test method (not from inside a
-     * running tick callback) so the listener is registered before the first tick. A cleanup that throws a
-     * RuntimeException or AssertionError (other Errors propagate) is
-     * logged and swallowed so it cannot take down the test runner's tick loop.
+     * running tick callback) so the listener is registered before the first tick. A cleanup that throws
+     * a RuntimeException or AssertionError (other Errors propagate) is logged and swallowed so it cannot
+     * take down the test runner's tick loop.
      */
     public static void whenFinished(GameTestHelper helper, Runnable cleanup) {
         whenFinished(helper, (info, runner) -> cleanup.run());

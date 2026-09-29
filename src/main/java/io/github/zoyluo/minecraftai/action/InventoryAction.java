@@ -169,9 +169,9 @@ public final class InventoryAction {
         return remaining;
     }
 
-    // Harmful/side-effect foods: raw chicken (30% chance of hunger), rotten flesh, pufferfish, spider eye, poisonous potato -- only fall back to these when nothing else is edible. Poison-inflicting ones are never eaten at all, see isPoisonFood.
+    // Hunger-only last-resort foods: raw chicken (30% chance of hunger) and rotten flesh -- only fall back to these when nothing else is edible. Poison-inflicting foods (pufferfish, spider eye, poisonous potato) never reach this list: isEatableFood excludes them, see isPoisonFood.
     private static final java.util.Set<Item> HARMFUL_FOODS = java.util.Set.of(
-            Items.CHICKEN, Items.ROTTEN_FLESH, Items.PUFFERFISH, Items.SPIDER_EYE, Items.POISONOUS_POTATO);
+            Items.CHICKEN, Items.ROTTEN_FLESH);
 
     /**
      * Whether eating {@code stack} can inflict poison or wither (pufferfish, spider eye, poisonous

@@ -490,9 +490,9 @@ public final class FollowTask extends AbstractTask {
                 repeatedFailures.reset();
                 announceNoRoute(bot, standNear, path.reason(), FollowNoRoute.messageFor(path.reason()));
             } else if (repeatedFailures.recordFailure(elapsed)) {
-                // Budget/transient failures alone say nothing definite, but a follower that keeps failing to
-                // plan for 10+ seconds owes the player one honest, generic line.
-                announceNoRoute(bot, standNear, path.reason(), FollowNoRoute.GENERIC_MESSAGE);
+                // Budget/transient/unstandable-goal failures alone say nothing definite, but a follower that keeps failing
+                // to plan for 10+ seconds owes the player one honest line (specific for an unstandable goal, else generic).
+                announceNoRoute(bot, standNear, path.reason(), FollowNoRoute.messageFor(path.reason()));
             }
             return;
         }

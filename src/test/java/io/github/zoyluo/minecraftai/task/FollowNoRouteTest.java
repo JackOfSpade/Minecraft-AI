@@ -10,18 +10,19 @@ import org.junit.jupiter.api.Test;
 
 final class FollowNoRouteTest {
     @Test
-    void anExhaustedSearchAndAnUnstandableGoalAreGenuine() {
+    void onlyAnExhaustedSearchIsGenuine() {
         assertTrue(FollowNoRoute.isGenuine("pathfinding_failed: " + FailureReason.GOAL_UNREACHABLE));
-        assertTrue(FollowNoRoute.isGenuine("pathfinding_failed: " + FailureReason.GOAL_NOT_STANDABLE));
     }
 
     @Test
-    void budgetAndTransientFailuresAreNotGenuine() {
+    void budgetTransientAndUnstandableGoalFailuresAreNotGenuine() {
         for (FailureReason reason : FailureReason.values()) {
-            if (reason != FailureReason.GOAL_UNREACHABLE && reason != FailureReason.GOAL_NOT_STANDABLE) {
+            if (reason != FailureReason.GOAL_UNREACHABLE) {
                 assertFalse(FollowNoRoute.isGenuine("pathfinding_failed: " + reason), reason.name());
             }
         }
+        // A player momentarily mid-air / at a chunk edge has no standable cell for a moment: not announced at once.
+        assertFalse(FollowNoRoute.isGenuine("pathfinding_failed: " + FailureReason.GOAL_NOT_STANDABLE));
         assertFalse(FollowNoRoute.isGenuine("pathfinding_throttled"));
         assertFalse(FollowNoRoute.isGenuine("path_contract_failed: start_below_minimum_y"));
         assertFalse(FollowNoRoute.isGenuine(""));
@@ -34,8 +35,23 @@ final class FollowNoRouteTest {
                 FollowNoRoute.messageFor("pathfinding_failed: " + FailureReason.GOAL_NOT_STANDABLE));
         assertEquals(FollowNoRoute.NO_DRY_ROUTE_MESSAGE,
                 FollowNoRoute.messageFor("pathfinding_failed: " + FailureReason.GOAL_UNREACHABLE));
+        assertEquals(FollowNoRoute.GENERIC_MESSAGE,
+                FollowNoRoute.messageFor("pathfinding_failed: " + FailureReason.TIMEOUT));
+        assertEquals(FollowNoRoute.GENERIC_MESSAGE, FollowNoRoute.messageFor(null));
         assertNotEquals(FollowNoRoute.NO_STANDING_PLACE_MESSAGE, FollowNoRoute.GENERIC_MESSAGE);
         assertTrue(FollowNoRoute.NO_STANDING_PLACE_MESSAGE.contains("place to stand"));
+    }
+
+    @Test
+    void anUnstandableGoalOnlyAnnouncesThroughTheRepeatedFailureRule() {
+        FollowNoRoute.RepeatedFailures streak = new FollowNoRoute.RepeatedFailures();
+        // Not genuine, so it is recorded like any other failed re-plan: the first (and second, third...) within
+        // a moment do not announce; only a streak of three spanning 10 s does.
+        assertFalse(FollowNoRoute.isGenuine("pathfinding_failed: " + FailureReason.GOAL_NOT_STANDABLE));
+        assertFalse(streak.recordFailure(0));
+        assertFalse(streak.recordFailure(40));
+        assertFalse(streak.recordFailure(80));
+        assertTrue(streak.recordFailure(200));
     }
 
     @Test
