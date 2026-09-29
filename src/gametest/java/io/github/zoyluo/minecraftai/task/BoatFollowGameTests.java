@@ -21,6 +21,8 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -63,18 +65,7 @@ public final class BoatFollowGameTests {
                     "boat driven by an AIPlayerEntity did not move: moved=" + moved
                             + " velocity=" + boat.getVelocity()
                             + " logicalSide=" + boat.isLogicalSideForUpdatingMovement()
-                            + " controller=" + boat.getControllingPassenger()
-                            + " inWater=" + boat.isTouchingWater()
-                            + " alive=" + boat.isAlive() + " age=" + boat.age
-                            + " tickEntityAt=" + world.shouldTickEntityAt(boat.getBlockPos())
-                            + " tickTestAt=" + world.shouldTickTestAt(boat.getChunkPos())
-                            + " tickChunkAt=" + world.shouldTickChunkAt(boat.getChunkPos())
-                            + " blockAt=" + world.getBlockState(boat.getBlockPos()).getBlock()
-                            + " blockBelow=" + world.getBlockState(boat.getBlockPos().down()).getBlock()
-                            + " blockBelow2=" + world.getBlockState(boat.getBlockPos().down(2)).getBlock()
-                            + " feetY=" + feet.getY()
-                            + " botAge=" + bot.age + " inputs=" + boat.isPaddleMoving(0)
-                            + " pos=" + boat.getEntityPos() + " yaw=" + boat.getYaw());
+                            + " controller=" + boat.getControllingPassenger());
             despawnAndComplete(context, bot);
         });
     }
@@ -192,6 +183,60 @@ public final class BoatFollowGameTests {
         });
     }
 
+    /**
+     * Guard for AIPlayerControlledBoatLogicalSideMixin: it may only make the server authoritative
+     * for a boat controlled by our own AIPlayerEntity.  A boat carrying a plain non-AI entity (the
+     * only non-AI passenger seated here: a mock or Fabric FakePlayer was refused by startRiding on a
+     * boat in a GameTest) must answer exactly what an empty boat does, i.e. the mixin
+     * must not leak onto other drivers.  The AI-driven counterpart (true, boat moves) is proven by
+     * aiPlayerBoatMovesWhenSteeredOnOpenWater.
+     */
+    @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_plain_entity_driven_boat_keeps_vanilla_server_authority", maxTicks = 60)
+    public void plainEntityDrivenBoatKeepsVanillaServerAuthority(TestContext context) {
+        ServerWorld world = context.getWorld();
+        BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 3));
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                world.setBlockState(feet.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlockState(feet.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                }
+            }
+        }
+        AbstractBoatEntity emptyBoat = placeBoat(world, feet.add(-1, 0, -1));
+        AbstractBoatEntity plainBoat = placeBoat(world, feet.add(1, 0, 1));
+        net.minecraft.entity.passive.VillagerEntity villager =
+                EntityType.VILLAGER.create(world, SpawnReason.COMMAND);
+        if (villager == null) {
+            throw new IllegalStateException("failed to create villager");
+        }
+        villager.refreshPositionAndAngles(plainBoat.getX(), plainBoat.getY(), plainBoat.getZ(), 0.0F, 0.0F);
+        world.spawnEntity(villager);
+        villager.setAiDisabled(true);
+        require(context, villager.startRiding(plainBoat, true, false), "villager could not board the plain boat");
+        context.addFinalTask(() -> {
+            villager.discard();
+            emptyBoat.discard();
+            plainBoat.discard();
+        });
+        AtomicInteger ticks = new AtomicInteger();
+        context.runAtEveryTick(() -> {
+            require(context, plainBoat.getPassengerList().contains(villager),
+                    "fixture: the villager left the plain boat");
+            require(context, !(plainBoat.getControllingPassenger() instanceof AIPlayerEntity),
+                    "fixture: the passenger must not be an AIPlayerEntity");
+            require(context, plainBoat.isLogicalSideForUpdatingMovement()
+                            == emptyBoat.isLogicalSideForUpdatingMovement(),
+                    "a plain-entity-driven boat is treated differently from an empty boat: plain="
+                            + plainBoat.isLogicalSideForUpdatingMovement()
+                            + " empty=" + emptyBoat.isLogicalSideForUpdatingMovement());
+            if (ticks.incrementAndGet() >= 20) {
+                context.complete();
+            }
+        });
+    }
+
+
     // ---- scenario plumbing -------------------------------------------------------------------
 
     private record Scenario(BlockPos feet, AIPlayerEntity bot, AIPlayerEntity target,
@@ -278,6 +323,9 @@ public final class BoatFollowGameTests {
         // The gametest box is one chunk-sized structure; the lake is wider than that and boats
         // only tick (and only float/drive) in entity-ticking chunks, so force-load the whole area.
         forceLakeChunks(world, feet, true);
+        // Released when the test ends (pass, fail or timeout) so a finished test never leaves its
+        // chunks force-loaded for the rest of the batch.
+        context.addFinalTask(() -> forceLakeChunks(world, feet, false));
         // Leftover boats from earlier tests in the same server would be offered as "empty boats".
         world.getEntitiesByClass(AbstractBoatEntity.class,
                 net.minecraft.util.math.Box.enclosing(feet.add(-30, -10, -30), feet.add(LAKE_MAX_X + 30, 10, MAX_Z + 30)),
@@ -311,10 +359,22 @@ public final class BoatFollowGameTests {
         return feet;
     }
 
+    /** Reference counts per forced chunk, so overlapping fixtures never unforce each other's chunks. */
+    private static final Map<Long, Integer> FORCED_CHUNK_REFS = new HashMap<>();
+
     private static void forceLakeChunks(ServerWorld world, BlockPos feet, boolean forced) {
         for (int cx = (feet.getX() - 1) >> 4; cx <= (feet.getX() + LAKE_MAX_X + 1) >> 4; cx++) {
             for (int cz = (feet.getZ() - 1) >> 4; cz <= (feet.getZ() + MAX_Z + 1) >> 4; cz++) {
-                world.setChunkForced(cx, cz, forced);
+                long key = net.minecraft.util.math.ChunkPos.toLong(cx, cz);
+                int refs = FORCED_CHUNK_REFS.getOrDefault(key, 0) + (forced ? 1 : -1);
+                if (refs > 0) {
+                    FORCED_CHUNK_REFS.put(key, refs);
+                } else {
+                    FORCED_CHUNK_REFS.remove(key);
+                }
+                if (forced && refs == 1 || !forced && refs <= 0) {
+                    world.setChunkForced(cx, cz, forced);
+                }
             }
         }
     }

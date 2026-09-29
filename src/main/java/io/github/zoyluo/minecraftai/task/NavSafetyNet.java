@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.BlockState;
+import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
@@ -183,11 +184,11 @@ public final class NavSafetyNet {
         // Can't just look at the whole cell at getBlockPos(): low supports like dirt_path/slabs put
         // a normally standing player's floored BlockPos inside the support cell, even though the
         // entity's AABB only touches its top face and the player isn't actually buried.
-        // A rider is never "buried": vanilla riders skip block collision and a boat resting on a
+        // A boat rider is never "buried": vanilla riders skip block collision and a boat resting on a
         // bank seats its passenger a little below the hull, i.e. inside the ground.  Snapping the
         // bot out of the seat every tick (then re-boarding, forever) is what made a beached boat
-        // impossible to use.
-        if (!bot.hasVehicle()
+        // impossible to use.  Other vehicles (minecart, horse, ...) keep the normal snap.
+        if (!(bot.getVehicle() instanceof AbstractBoatEntity)
                 && !FakePlayerMotion.isBlockCollisionFree(bot)
                 && escapeSuffocation(bot, world, feet)) {
             throttledLog(server, bot, "navsafe_suffocation_snap", feet);
