@@ -15,10 +15,10 @@ import net.minecraft.server.permissions.Permissions;
  * constants of {@link Permissions}.
  * <pre>
  *   0 ALL         everybody (the vanilla "always pass" check: no permission is asked for)
- *   1 MODERATORS  DefaultPermissions.MODERATORS
- *   2 GAMEMASTERS DefaultPermissions.GAMEMASTERS   (what /give, /summon, /tp need)
- *   3 ADMINS      DefaultPermissions.ADMINS
- *   4 OWNERS      DefaultPermissions.OWNERS
+ *   1 MODERATORS  Permissions.COMMANDS_MODERATOR
+ *   2 GAMEMASTERS Permissions.COMMANDS_GAMEMASTER   (what /give, /summon, /tp need)
+ *   3 ADMINS      Permissions.COMMANDS_ADMIN
+ *   4 OWNERS      Permissions.COMMANDS_OWNER
  * </pre>
  * The level is read from the CURRENT config on every evaluation, so a reload takes effect at once. The
  * requirement is evaluated by Minecraft for every node whenever the command tree is sent to a player or

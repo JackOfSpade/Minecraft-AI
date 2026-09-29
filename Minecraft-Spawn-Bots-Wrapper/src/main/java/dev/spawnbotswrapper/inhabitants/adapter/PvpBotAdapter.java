@@ -346,7 +346,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
         Vec3 position = new Vec3(x, y, z);
         // A console-derived source: PvP BOT's spawn dispatches HeroBot's playerspawn command with it, and that
         // command refuses non-operator players. Silenced so command feedback does not spam operators. The world
-        // comes FIRST because withWorld rescales the position by the dimensions' coordinate scale, and the
+        // comes FIRST because withLevel rescales the position by the dimensions' coordinate scale, and the
         // position LAST so nothing can alter it. PvP BOT 0.0.15 always spawns facing 0/0 itself; the rotation
         // is carried for the day it stops doing that.
         CommandSourceStack source = server.createCommandSourceStack()
@@ -488,8 +488,8 @@ public final class PvpBotAdapter implements PvpBotOperations {
             // PvP BOT's own removal internally runs "clear <name>" with a FRESH, non-silent source of its own
             // (ignoring the silent one we pass in, which only covers the follow-up kill sub-command) -- that
             // broadcasts vanilla's "[Server: Removed N item(s) from player X]" clear feedback to every player.
-            // It goes through ServerCommandSource#sendFeedback's ops-broadcast path, which Fabric API has no
-            // event for (confirmed by decompilation: it never calls PlayerManager#broadcastSystemMessage, the
+            // It goes through CommandSourceStack#sendSuccess's ops-broadcast path, which Fabric API has no
+            // event for (confirmed by decompilation: it never calls PlayerList#broadcastSystemMessage, the
             // method GameMessageFilter hooks) -- so the only lever available is the gamerule that broadcast
             // itself is gated on, toggled off for just this one synchronous call and restored immediately after.
             GameRules gameRules = server.overworld().getGameRules();

@@ -1,7 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.structure;
 
 /**
- * Axis-aligned box of block coordinates, both corners INCLUSIVE (matches Minecraft's BlockBox).
+ * Axis-aligned box of block coordinates, both corners INCLUSIVE (matches Minecraft's BoundingBox).
  * Pure data so structure geometry can be passed around and unit-tested without Minecraft.
  */
 public record IntBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {

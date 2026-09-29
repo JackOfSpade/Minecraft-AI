@@ -96,7 +96,7 @@ class StatusAssemblerTest {
         assertEquals("CLASS", a.status().spawnTier());
         assertTrue(a.status().usable());
         assertTrue(anyContains(a.status().warnings(), "R2 BotManager.spawnBot(MinecraftServer, String, "
-                + "ServerCommandSource, Vec3d)"), a.status().warnings().toString());
+                + "CommandSourceStack, Vec3)"), a.status().warnings().toString());
         assertTrue(anyContains(a.status().warnings(), "spawn tier is CLASS"));
         assertEquals(ReportLevel.WARN, a.level());
         assertTrue(a.status().details().get(0).startsWith("API compatibility: DEGRADED"));
@@ -212,7 +212,7 @@ class StatusAssemblerTest {
         assertEquals(Availability.UNAVAILABLE, a.status().availability());
         String summary = a.status().summary();
         assertTrue(summary.contains("no usable spawn path"), summary);
-        assertTrue(summary.contains("R1 BotManager.spawnBot(MinecraftServer, String, ServerCommandSource)"), summary);
+        assertTrue(summary.contains("R1 BotManager.spawnBot(MinecraftServer, String, CommandSourceStack)"), summary);
         assertTrue(summary.contains("R2 BotManager.spawnBot"), summary);
         assertTrue(summary.contains("'pvpbot spawn <name>' is not registered"), summary);
     }

@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * The vocabulary is the contract with the Minecraft-side applier: closed, valid, and exactly what the
  * generator can emit. The expected lists below are transcribed independently from the decompiled 1.21.11
- * registries (Items, Enchantments, Potions, EntityAttributes), so a typo in the generator's own tables
+ * registries (Items, Enchantments, Potions, Attributes), so a typo in the generator's own tables
  * cannot pass by agreeing with itself.
  */
 class ProfileVocabularyTest {

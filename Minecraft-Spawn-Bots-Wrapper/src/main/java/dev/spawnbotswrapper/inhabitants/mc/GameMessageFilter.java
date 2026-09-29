@@ -14,9 +14,9 @@ import java.util.function.Supplier;
  * suppressed.
  * <p>
  * Registers {@link ServerMessageEvents#ALLOW_GAME_MESSAGE}, which is exactly the vanilla-plus-Fabric-API hook
- * these three message kinds already go through (via Fabric API's own {@code PlayerManager} mixin) -- no
+ * these three message kinds already go through (via Fabric API's own {@code PlayerList} mixin) -- no
  * mixin of our own is needed, and there is nothing here that could conflict with another mod's mixin on
- * {@code PlayerManager} the way a hand-written one could.
+ * {@code PlayerList} the way a hand-written one could.
  * <p>
  * <b>How a message is attributed to a bot.</b> The event hands over the fully rendered {@link Component}, not the
  * player who triggered it. Vanilla's join/leave/advancement messages are always {@code "<name> ..."} (a

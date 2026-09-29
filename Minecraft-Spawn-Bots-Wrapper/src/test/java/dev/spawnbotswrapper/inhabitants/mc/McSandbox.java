@@ -20,9 +20,9 @@ import java.util.stream.Stream;
 /**
  * Lets unit tests run code that needs the real Minecraft classes and registries.
  * <p>
- * The deobfuscated (Yarn) Minecraft jar has package-private members that are used across packages; that is
+ * The deobfuscated (Mojang-named) Minecraft jar has package-private members that are used across packages; that is
  * invalid on a plain classpath, and Fabric Loader normally repairs it while loading classes in the game.
- * A JUnit JVM has no Loader, so {@code Bootstrap.initialize()} dies with an {@code IllegalAccessError}. This
+ * A JUnit JVM has no Loader, so {@code Bootstrap.bootStrap()} dies with an {@code IllegalAccessError}. This
  * class does the same repair itself: it loads {@code net.minecraft.*} and the addon's own classes through a
  * child class loader that widens every non-private member to public, exactly like Loader's own transformer.
  * <p>
@@ -108,7 +108,8 @@ final class McSandbox {
 
         @Override
         protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-            boolean minecraft = name.startsWith("net.minecraft.");
+            boolean minecraft = name.startsWith("net.minecraft.") || name.startsWith("com.mojang.math.")
+                    || name.startsWith("com.mojang.blaze3d.") || name.startsWith("com.mojang.realmsclient.");
             boolean addon = name.startsWith("dev.spawnbotswrapper.inhabitants.") && !name.startsWith(SELF);
             if (!minecraft && !addon) {
                 return super.loadClass(name, resolve);

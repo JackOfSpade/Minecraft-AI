@@ -291,7 +291,7 @@ same result in deterministic mode); it is never done automatically.
 ```
 
 Produces `build/libs/pvpbot-inhabitants-<version>.jar`. Requires a JDK 21 (a Gradle toolchain download or
-your own JDK 21 both work) and internet access on first run (Minecraft, Yarn mappings, Fabric API, Gradle
+your own JDK 21 both work) and internet access on first run (Minecraft, the official Mojang mappings, Fabric API, Gradle
 itself).
 
 ```bash

@@ -30,7 +30,7 @@ final class WorldFakes {
     private WorldFakes() {
     }
 
-    /** A chunk manager that answers {@code getWorldChunk} from a map and counts the lookups. */
+    /** A chunk manager that answers {@code getChunkNow} from a map and counts the lookups. */
     static final class ChunkManager extends ServerChunkCache {
         final Map<Long, LevelChunk> loaded = new HashMap<>();
         int lookups;
@@ -65,16 +65,16 @@ final class WorldFakes {
     static ServerLevel world(MinecraftServer server, ChunkManager chunks) {
         ServerLevel world = McObjects.opaque(ServerLevel.class);
         McObjects.setField(world, ServerLevel.class, "server", server);
-        McObjects.setField(world, ServerLevel.class, "chunkManager", chunks);
+        McObjects.setField(world, ServerLevel.class, "chunkSource", chunks);
         return world;
     }
 
     /** A loaded chunk at (x, z) holding the given starts and structure references. */
     static LevelChunk chunk(int x, int z, Map<Structure, StructureStart> starts, Map<Structure, LongSet> references) {
         LevelChunk chunk = McObjects.opaque(LevelChunk.class);
-        McObjects.setField(chunk, ChunkAccess.class, "pos", new ChunkPos(x, z));
+        McObjects.setField(chunk, ChunkAccess.class, "chunkPos", new ChunkPos(x, z));
         McObjects.setField(chunk, ChunkAccess.class, "structureStarts", new HashMap<>(starts));
-        McObjects.setField(chunk, ChunkAccess.class, "structureReferences", new HashMap<>(references));
+        McObjects.setField(chunk, ChunkAccess.class, "structuresRefences", new HashMap<>(references));
         return chunk;
     }
 

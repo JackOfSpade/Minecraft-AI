@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * What can be proven about spawning without a running server: name availability against PvP BOT's list,
  * refusals that must happen before anything upstream is called, ticket bookkeeping, and that nothing ever
- * throws. A real MinecraftServer or ServerWorld cannot be created in a unit test and is deliberately not
+ * throws. A real MinecraftServer or ServerLevel cannot be created in a unit test and is deliberately not
  * faked; see the class documentation of the adapter for what only an end-to-end run can prove (building the
  * command source, dispatching through Brigadier, the entity appearing, the re-list of an orphan).
  */
@@ -217,7 +217,7 @@ class PvpBotAdapterSpawnTest {
     void theBotEntityCheckRequiresBothTheSimpleNameAndAKnownHeroBotPackage() {
         assertTrue(UpstreamNames.isBotClassName("hero.bane.herobot.bot.BotPlayer"), "HeroBot 1.x");
         assertTrue(UpstreamNames.isBotClassName("hero.bane.herobot.mod.common.bot.BotPlayer"), "HeroBot 2.x");
-        assertFalse(UpstreamNames.isBotClassName("net.minecraft.server.network.ServerPlayerEntity"));
+        assertFalse(UpstreamNames.isBotClassName("net.minecraft.server.level.ServerPlayer"));
         assertFalse(UpstreamNames.isBotClassName("some.pkg.NotABotPlayer"));
         assertFalse(UpstreamNames.isBotClassName("some.pkg.BotPlayerHelper"));
         assertFalse(UpstreamNames.isBotClassName("some.pkg.MyBotPlayer"));

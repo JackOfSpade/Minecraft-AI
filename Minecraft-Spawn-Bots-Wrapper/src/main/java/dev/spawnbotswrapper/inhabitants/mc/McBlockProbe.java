@@ -34,9 +34,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 /**
  * {@link BlockProbe} over one loaded {@link ServerLevel} that can never load, generate or wait for a chunk.
  * <p>
- * Chunks come from {@link ServerChunkManager#getWorldChunk(int, int)}, which answers null unless the chunk
+ * Chunks come from {@link ServerChunkCache#getChunkNow(int, int)}, which answers null unless the chunk
  * is fully loaded right now, and blocks are read from that {@link LevelChunk} itself. The usual
- * {@code World.getBlockState} is avoided on purpose: on an unloaded chunk it synchronously generates it, and
+ * {@code Level.getBlockState} is avoided on purpose: on an unloaded chunk it synchronously generates it, and
  * inside a chunk-load callback it would wait for the very task it is running in.
  * <p>
  * Shapes are queried against {@link EmptyBlockGetter}, exactly as vanilla builds its own per-state shape

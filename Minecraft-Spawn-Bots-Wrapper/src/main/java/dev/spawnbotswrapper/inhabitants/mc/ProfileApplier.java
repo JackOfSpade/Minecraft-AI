@@ -88,7 +88,7 @@ public final class ProfileApplier implements ProfileApplication {
      * the scoreboard, so this needs doing only once per bot -- it is not lost across a restart or a new
      * entity instance for the same name, unlike the command tag it rides alongside.
      * <p>
-     * Best-effort like the rest of {@code mark}: an entity not yet fully in a world (its {@code World} or
+     * Best-effort like the rest of {@code mark}: an entity not yet fully in a world (its {@code Level} or
      * {@code MinecraftServer} reference still null) is left for a later call rather than throwing.
      */
     private static void hideNametag(ServerPlayer bot) {

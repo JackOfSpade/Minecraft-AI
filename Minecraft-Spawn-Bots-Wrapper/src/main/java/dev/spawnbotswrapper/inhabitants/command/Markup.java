@@ -10,7 +10,7 @@ import java.util.List;
  * gold titles, gray labels and hints, aqua identifiers, and green / yellow / red for status. Plain values
  * carry no code and therefore render in the default colour.
  * <p>
- * The thin Brigadier layer converts a marked-up line into a styled {@code Text} ({@link ChatText}); on a
+ * The thin Brigadier layer converts a marked-up line into a styled {@code Component} ({@link ChatText}); on a
  * console the styling simply disappears. Everything dynamic (bot names, ids and messages that come from
  * other mods or from PvP BOT) passes through {@link #esc} so it can never inject a colour of its own.
  */

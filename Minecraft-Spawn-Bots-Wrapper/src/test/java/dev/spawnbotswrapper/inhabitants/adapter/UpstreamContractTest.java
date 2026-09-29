@@ -85,9 +85,9 @@ class UpstreamContractTest {
         UpstreamContract c = probe(TestLocators.replacing(UpstreamNames.CLASS_BOT_MANAGER, Managers.NoPos.class));
         assertTrue(c.spawn3.ok());
         assertFalse(c.spawn4.ok());
-        assertEquals("R2 BotManager.spawnBot(MinecraftServer, String, ServerCommandSource, Vec3d)", c.spawn4.label());
+        assertEquals("R2 BotManager.spawnBot(MinecraftServer, String, CommandSourceStack, Vec3)", c.spawn4.label());
         assertEquals("not found", c.spawn4.problem());
-        assertTrue(c.spawn4.failure().contains("spawnBot") && c.spawn4.failure().contains("Vec3d"));
+        assertTrue(c.spawn4.failure().contains("spawnBot") && c.spawn4.failure().contains("Vec3"));
     }
 
     @Test

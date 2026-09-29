@@ -68,11 +68,11 @@ public final class ProfileApplierMcCases {
         List<String> warnings = new ArrayList<>();
         ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), true, warnings);
 
-        assertTrue(inventory.getItem(SlotPlanner.HEAD).isOf(Items.DIAMOND_HELMET));
-        assertTrue(inventory.getItem(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE));
-        assertTrue(inventory.getItem(SlotPlanner.LEGS).isOf(Items.DIAMOND_LEGGINGS));
-        assertTrue(inventory.getItem(SlotPlanner.FEET).isOf(Items.DIAMOND_BOOTS));
-        assertTrue(inventory.getItem(SlotPlanner.OFFHAND).isOf(Items.SHIELD));
+        assertTrue(inventory.getItem(SlotPlanner.HEAD).is(Items.DIAMOND_HELMET));
+        assertTrue(inventory.getItem(SlotPlanner.CHEST).is(Items.DIAMOND_CHESTPLATE));
+        assertTrue(inventory.getItem(SlotPlanner.LEGS).is(Items.DIAMOND_LEGGINGS));
+        assertTrue(inventory.getItem(SlotPlanner.FEET).is(Items.DIAMOND_BOOTS));
+        assertTrue(inventory.getItem(SlotPlanner.OFFHAND).is(Items.SHIELD));
         assertTrue(inventory.getItem(0).is(Items.DIAMOND_SWORD));
         assertTrue(inventory.getItem(1).is(Items.GOLDEN_APPLE));
         assertEquals(8, inventory.getItem(1).getCount());
@@ -97,14 +97,14 @@ public final class ProfileApplierMcCases {
         withJunk.setItem(SlotPlanner.OFFHAND, new ItemStack(Items.TORCH, 3));
         ProfileApplier.fill(withJunk, McBootstrap.registries(), kit(), true, new ArrayList<>());
         assertTrue(withJunk.getItem(20).isEmpty(), "cleared");
-        assertTrue(withJunk.getItem(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE));
+        assertTrue(withJunk.getItem(SlotPlanner.CHEST).is(Items.DIAMOND_CHESTPLATE));
 
         Inventory kept = newInventory();
         kept.setItem(20, new ItemStack(Items.DIRT, 5));
         kept.setItem(SlotPlanner.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
         ProfileApplier.fill(kept, McBootstrap.registries(), kit(), false, new ArrayList<>());
         assertTrue(kept.getItem(20).is(Items.DIRT), "an unrelated slot is left alone without clearing");
-        assertTrue(kept.getItem(SlotPlanner.CHEST).isOf(Items.DIAMOND_CHESTPLATE), "a planned slot is overwritten");
+        assertTrue(kept.getItem(SlotPlanner.CHEST).is(Items.DIAMOND_CHESTPLATE), "a planned slot is overwritten");
     }
 
     public static void applyingTwiceWithoutClearingIsIdempotent() {
@@ -227,7 +227,7 @@ public final class ProfileApplierMcCases {
     private static ServerPlayer opaquePlayer(String name) {
         ServerPlayer player = McObjects.opaque(ServerPlayer.class);
         McObjects.setField(player, Player.class, "gameProfile", new GameProfile(UUID.randomUUID(), name));
-        McObjects.setField(player, Entity.class, "commandTags", new HashSet<String>());
+        McObjects.setField(player, Entity.class, "tags", new HashSet<String>());
         return player;
     }
 

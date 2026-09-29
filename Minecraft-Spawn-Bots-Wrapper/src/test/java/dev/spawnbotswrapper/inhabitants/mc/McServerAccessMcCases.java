@@ -30,17 +30,17 @@ public final class McServerAccessMcCases {
     private static ServerPlayer player(String name) {
         ServerPlayer player = McObjects.opaque(ServerPlayer.class);
         McObjects.setField(player, Player.class, "gameProfile", new GameProfile(UUID.randomUUID(), name));
-        McObjects.setField(player, Entity.class, "commandTags", new HashSet<String>());
+        McObjects.setField(player, Entity.class, "tags", new HashSet<String>());
         return player;
     }
 
     private static MinecraftServer server(Map<ResourceKey<Level>, ServerLevel> worlds, List<ServerPlayer> players, int ticks) {
         DedicatedServer server = McObjects.opaque(DedicatedServer.class);
-        McObjects.setField(server, MinecraftServer.class, "worlds", worlds);
+        McObjects.setField(server, MinecraftServer.class, "levels", worlds);
         DedicatedPlayerList manager = McObjects.opaque(DedicatedPlayerList.class);
         McObjects.setField(manager, PlayerList.class, "players", new ArrayList<>(players));
-        McObjects.setField(server, MinecraftServer.class, "playerManager", manager);
-        McObjects.setInt(server, MinecraftServer.class, "ticks", ticks);
+        McObjects.setField(server, MinecraftServer.class, "playerList", manager);
+        McObjects.setInt(server, MinecraftServer.class, "tickCount", ticks);
         return server;
     }
 
