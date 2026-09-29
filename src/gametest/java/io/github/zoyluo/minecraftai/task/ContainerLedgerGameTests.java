@@ -32,6 +32,14 @@ import net.minecraft.world.phys.Vec3;
  * last opened a container answers "where is X" and steers a withdraw to the right chest; deposits
  * only ever go into storage blocks whose lid can open; and a bot never learns what is inside a
  * container it has not opened (no remote peeking).
+ *
+ * <p>Far-arena assumption: every test builds its arena at an absolute position a million blocks from the
+ * origin (see {@link #fixture}), on the GameTest structure's own Y, so it neither collides with another
+ * class's structures nor is wiped by them. That relies on the world border being wider than that (the
+ * default is about 30 million), on the chunks there being generated and loaded on demand by the bot's
+ * own spawn (there is no player near, so nothing else keeps them loaded), and on no other test placing
+ * anything in the reserved region. A world border or a spawn-chunk policy that changes those breaks this
+ * class first, with a fixture failure rather than a behaviour failure.</p>
  */
 public final class ContainerLedgerGameTests {
     private static final String OVERWORLD = "minecraft:overworld";
@@ -400,7 +408,7 @@ public final class ContainerLedgerGameTests {
                         "fixture: the chest should have been opened and remembered");
                 // The remembered chest turns into a furnace (which would happily accept cobblestone).
                 fixture.world.setBlock(remembered, Blocks.FURNACE.defaultBlockState(), Block.UPDATE_ALL);
-                junk[0] = ContainerTask.depositJunk(remembered);
+                junk[0] = ContainerTask.depositJunkTrusted(remembered);
                 steps.add(junk[0]);
                 return false;
             }
@@ -411,6 +419,53 @@ public final class ContainerLedgerGameTests {
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 192, "the bot lost cobblestone");
             require(context, ledger.get(OVERWORLD, remembered).isEmpty(),
                     "the stale entry of the position that is no longer storage must be forgotten");
+            return true;
+        });
+    }
+
+    /**
+     * A junk stow aimed at a chest a player (or the LLM deposit tool) named keeps the storage rules, but never
+     * silently falls back to another chest: a named furnace is reported unusable while a usable chest stands
+     * right beside the bot and stays empty. The same junk stow started as a trusted internal candidate (the
+     * janitor's own pick) does fall back to it.
+     */
+    @GameTest(maxTicks = 400)
+    public void junkStowToAPlayerNamedUnusableBlockReportsItInsteadOfUsingAnotherChest(GameTestHelper context) {
+        Fixture fixture = fixture(context, "JunkNamedGT", 10);
+        AIPlayerEntity bot = fixture.bot;
+        BlockPos named = fixture.feet.offset(0, 0, 3);
+        BlockPos other = fixture.feet.offset(3, 0, 0);
+        fixture.world.setBlock(named, Blocks.FURNACE.defaultBlockState(), Block.UPDATE_ALL);
+        chest(fixture.world, other);
+        var main = bot.getInventory().getNonEquipmentItems();
+        main.set(0, new ItemStack(Items.COBBLESTONE, 64));
+        main.set(1, new ItemStack(Items.COBBLESTONE, 64));
+        main.set(2, new ItemStack(Items.COBBLESTONE, 64));
+        bot.getInventory().setChanged();
+
+        Deque<Task> steps = new ArrayDeque<>();
+        ContainerTask namedJunk = ContainerTask.depositJunk(named);
+        steps.add(namedJunk);
+        ContainerTask[] trusted = new ContainerTask[1];
+        runStepsAllowingFailure(context, bot, steps, task -> {
+            if (task == namedJunk) {
+                require(context, task.state() == TaskState.FAILED
+                                && task.failureReason() != null
+                                && task.failureReason().startsWith("named_container_unusable"),
+                        "a named unusable chest must be reported as such, not replaced: "
+                                + task.state() + " " + task.failureReason());
+                require(context, container(fixture.world, other).isEmpty(),
+                        "the named junk stow silently used another chest");
+                require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 192, "the bot lost cobblestone");
+                trusted[0] = ContainerTask.depositJunkTrusted(named);
+                steps.add(trusted[0]);
+                return false;
+            }
+            require(context, task == trusted[0] && task.state() == TaskState.COMPLETED,
+                    "a trusted internal candidate must fall back to the automatic candidates: "
+                            + task.state() + " " + task.failureReason());
+            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) < 192,
+                    "the trusted junk stow put nothing into the usable chest");
             return true;
         });
     }

@@ -172,9 +172,11 @@ public final class GoalSnapshotCollector {
         return counts;
     }
 
-    /** The box the old direct scan used: within the container radius (Manhattan) and +/-6 blocks vertically. */
+    /** The box the old direct scan used: |dx| and |dz| within the container radius and |dy| within +/-6 blocks. */
     private static boolean withinContainerBox(BlockPos pos, BlockPos origin) {
-        return Math.abs(pos.getY() - origin.getY()) <= CONTAINER_HEIGHT && pos.distManhattan(origin) <= CONTAINER_RADIUS;
+        return Math.abs(pos.getX() - origin.getX()) <= CONTAINER_RADIUS
+                && Math.abs(pos.getY() - origin.getY()) <= CONTAINER_HEIGHT
+                && Math.abs(pos.getZ() - origin.getZ()) <= CONTAINER_RADIUS;
     }
 
     private static boolean fresh(io.github.zoyluo.minecraftai.memory.ContainerLedger.Entry entry, long now) {

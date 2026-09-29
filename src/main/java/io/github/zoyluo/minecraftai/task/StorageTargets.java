@@ -26,8 +26,9 @@ import net.minecraft.world.level.block.state.BlockState;
  * lid vanilla would refuse to open is skipped; chests near an observed spawner (dungeon and
  * structure loot) are skipped; containers the ledger recently saw full are DEMOTED for deposits
  * (tried last, never excluded: a player may have emptied them since, and opening one re-verifies
- * it), and a "full" observation older than {@link ContainerLedger#FULL_TRUST_TICKS} is not believed
- * at all. Nothing here reads container contents: ranking uses the ledger (what the bot saw when it
+ * it) when they are in sight, and ignored for at most {@link ContainerLedger#FULL_TRUST_TICKS} when
+ * they are only remembered (an old "full" observation is not believed at all; a remembered-only full
+ * entry is left out of a base search until the flag fades). Nothing here reads container contents: ranking uses the ledger (what the bot saw when it
  * last opened a container) and the block kind is tested before any line-of-sight ray is cast.
  * A remembered (ledger) position is only ever a candidate when its chunk is loaded and it lies
  * within {@link #LEDGER_MAX_DISTANCE} blocks: an unloaded position is unknown, not visited.

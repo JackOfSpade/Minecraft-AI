@@ -97,7 +97,7 @@ public final class StorageJanitor {
         }
         BotLog.action(bot, "junk_stow_start", "target", target.get().toShortString(),
                 "free_slots", InventoryPolicy.freeMainSlots(bot));
-        TaskManager.INSTANCE.assign(bot, ContainerTask.depositJunk(target.get()),
+        TaskManager.INSTANCE.assign(bot, ContainerTask.depositJunkTrusted(target.get()),
                 TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "junk_stow"));
         return true;
     }

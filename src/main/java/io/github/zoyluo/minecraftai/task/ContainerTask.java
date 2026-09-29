@@ -54,6 +54,12 @@ public final class ContainerTask extends AbstractTask {
     private final int targetCount;
     private final boolean allExceptTools;
     private final boolean junkOnly;
+    /**
+     * Junk only: the position was picked by the bot's own automatic rules (StorageJanitor), not named by a player or
+     * the LLM. Only such a trusted candidate may fall back to the automatic candidates when it turns out unusable;
+     * a player-named chest that is unusable is reported as such and never silently replaced by another chest.
+     */
+    private final boolean trustedCandidate;
     private Phase phase = Phase.FINDING;
     private BlockPos containerPos;
     private int transferred;
@@ -64,31 +70,41 @@ public final class ContainerTask extends AbstractTask {
     private boolean placedFallbackChest;
 
     public static ContainerTask deposit(BlockPos containerPos, Item item, int count, boolean allExceptTools) {
-        return new ContainerTask(Mode.DEPOSIT, containerPos, item, count, allExceptTools, false);
+        return new ContainerTask(Mode.DEPOSIT, containerPos, item, count, allExceptTools, false, false);
     }
 
     /** Stows only the junk surplus (filler blocks beyond the configured throwaway budget); keeps everything else. */
     public static ContainerTask depositJunk(BlockPos containerPos) {
-        return new ContainerTask(Mode.DEPOSIT, containerPos, null, 0, false, true);
+        return new ContainerTask(Mode.DEPOSIT, containerPos, null, 0, false, true, false);
+    }
+
+    /**
+     * A junk stow toward a position the bot itself chose (a remembered chest or base storage): the storage rules
+     * still apply on arrival, and when it turns out unusable the automatic candidates are tried instead.
+     * {@link #depositJunk} with a position is a named target and never falls back.
+     */
+    public static ContainerTask depositJunkTrusted(BlockPos trustedCandidate) {
+        return new ContainerTask(Mode.DEPOSIT, trustedCandidate, null, 0, false, true, true);
     }
 
     public static ContainerTask withdraw(BlockPos containerPos, Item item, int count) {
-        return new ContainerTask(Mode.WITHDRAW, containerPos, item, count, false, false);
+        return new ContainerTask(Mode.WITHDRAW, containerPos, item, count, false, false, false);
     }
 
     /** Opens a container in sight (nearest, or the one at the given position), records what is inside, and stops. */
     public static ContainerTask inspect(BlockPos containerPos) {
-        return new ContainerTask(Mode.INSPECT, containerPos, null, 0, false, false);
+        return new ContainerTask(Mode.INSPECT, containerPos, null, 0, false, false, false);
     }
 
     private ContainerTask(Mode mode, BlockPos containerPos, Item item, int count, boolean allExceptTools,
-                          boolean junkOnly) {
+                          boolean junkOnly, boolean trustedCandidate) {
         this.mode = mode;
         this.requestedContainerPos = containerPos == null ? null : containerPos.immutable();
         this.item = item;
         this.targetCount = count <= 0 ? Integer.MAX_VALUE : count;
         this.allExceptTools = allExceptTools;
         this.junkOnly = junkOnly;
+        this.trustedCandidate = trustedCandidate;
     }
 
     @Override
@@ -180,10 +196,11 @@ public final class ContainerTask extends AbstractTask {
         candidates.clear();
         if (explicitTarget()) {
             candidates.add(requestedContainerPos);
-            if (!junkOnly) {
+            if (!junkOnly || !trustedCandidate) {
+                // An explicit or player-named position is the only candidate: no silent fallback to another chest.
                 return;
             }
-            // A junk stow handed a remembered position keeps the automatic rules and falls back to them.
+            // A junk stow toward a candidate the bot itself picked keeps the automatic rules and falls back to them.
         }
         String dimension = bot.level().dimension().identifier().toString();
         long now = bot.level().getGameTime();
@@ -309,6 +326,12 @@ public final class ContainerTask extends AbstractTask {
         }
         if (transferred > 0) {
             complete();
+            return;
+        }
+        if (explicitTarget() && junkOnly && !trustedCandidate) {
+            // The named chest cannot take a junk stow (not storage, a blocked lid, a spawner nearby, unreachable).
+            fail("named_container_unusable: " + shortPos(requestedContainerPos)
+                    + (doneReason.isBlank() ? "" : " (" + doneReason + ")"));
             return;
         }
         if (explicitTarget()) {

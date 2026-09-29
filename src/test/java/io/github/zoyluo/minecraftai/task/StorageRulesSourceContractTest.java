@@ -76,6 +76,16 @@ final class StorageRulesSourceContractTest {
         String task = squash(read("task/ContainerTask.java"));
         assertTrue(task.contains("anyContainerAllowed()") && task.contains("returnexplicitTarget()&&!junkOnly;"),
                 "a junk stow keeps the storage-kind rules even when handed a position");
+        assertTrue(task.contains("!junkOnly||!trustedCandidate")
+                        && task.contains("named_container_unusable:"),
+                "a player-named junk target is reported unusable, never silently replaced by another chest");
+        assertTrue(squash(read("task/StorageJanitor.java")).contains("ContainerTask.depositJunkTrusted(target.get())"),
+                "only the janitor's own pick is a trusted candidate that may fall back to automatic ones");
+        String box = squash(read("goal/GoalSnapshotCollector.java"));
+        assertTrue(box.contains("Math.abs(pos.getX()-origin.getX())<=CONTAINER_RADIUS")
+                        && box.contains("Math.abs(pos.getZ()-origin.getZ())<=CONTAINER_RADIUS")
+                        && box.contains("Math.abs(pos.getY()-origin.getY())<=CONTAINER_HEIGHT"),
+                "the goal snapshot keeps the original |dx|,|dz| <= 16 and |dy| <= 6 container box");
         assertTrue(task.contains("StorageTargets.ledgerCandidateOk(bot,entry)"), "ledger candidates are bounded");
     }
 
