@@ -108,3 +108,5 @@ pin the order.
   arrival within 3 blocks, cancel, bot removal, sealed moat stays dry, dry bridge), `BaritoneEngineMoveGameTests` (the same for
   move-to, `stopAll`, removal, unreachable goal answer, dry bridge, config switch), `BaritoneEngineWaterGameTests` (swim lease and
   control, fallback when Baritone is unavailable, the legacy engine loads no Baritone class).
+* Obstacle courses (legacy vs Baritone on identical geometry, results table and verdicts): `NavigationCourseGameTests`, see
+  `docs/NAVIGATION_COURSES.md`.

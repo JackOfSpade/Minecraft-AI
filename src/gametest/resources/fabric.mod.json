@@ -86,6 +86,7 @@
       "io.github.zoyluo.minecraftai.task.BaritoneEngineMoveGameTests",
       "io.github.zoyluo.minecraftai.task.BaritoneEngineWaterGameTests",
       "io.github.zoyluo.minecraftai.task.BaritoneEngineTunnelGameTests",
+      "io.github.zoyluo.minecraftai.task.NavigationCourseGameTests",
       "io.github.zoyluo.minecraftai.task.BotFallAndKnockbackGameTests"
     ]
   },
