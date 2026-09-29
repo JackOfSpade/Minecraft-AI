@@ -296,9 +296,9 @@ cell is occluded, asserting recovery within the bounded window) — tracked as P
   in full (delivered=8/8) and asserts its commit settles normally (`mining.batch_open=false`, epoch reset to
   zero) instead of dying with `rare_batch_commit_checkpoint_invalid`.
 
-**Process lesson**: the first version of the F8 gametest re-registered `context.runAtEveryTick` from inside a
+**Process lesson**: the first version of the F8 gametest re-registered `helper.onEachTick` (Yarn then: `context.runAtEveryTick`) from inside a
 tick callback, which directly NPE-crashed the GameTest scheduler (modifying the listener table while
-`GameTestState.tickTests` was iterating it) — fixed by driving the commit synchronously inside the probe
+`GameTestInfo.tick` (Yarn then: `GameTestState.tickTests`) was iterating it) — fixed by driving the commit synchronously inside the probe
 instead (`AbstractTask.abort` is a no-op on COMPLETED, so it just clears the TaskManager slot and then
 manually settles via `tickBot`). Registering a nested tick listener is a hard no-go in this repo's gametests.
 

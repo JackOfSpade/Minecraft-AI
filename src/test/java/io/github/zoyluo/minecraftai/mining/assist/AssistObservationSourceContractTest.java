@@ -45,13 +45,10 @@ class AssistObservationSourceContractTest {
             "findNearestMapStructure", "getStructureGeneratingAt",
             "maybeHas(",
             "getBlockEntity(",
-            ".teleportTo(",
             "teleportTo(",
             "teleport(",
             "setPos(",
-            "setPos(",
             "snapTo(",
-            "getEntities(",
             "getEntities(",
             "getMaxLocalRawBrightness(",
             "TaskManager.INSTANCE.assign(");

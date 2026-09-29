@@ -138,7 +138,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 
 **F26 — Hunt pickup receipt fragile across restart (stats + inventory baselines both perishable)** (major; GoalExecutor/HuntPickupCheckpoint; from: executor F7)
 - Citations: GE:1783-1803, 351-363, 1701-1710, 1776-1778 (CLOSED_NO_RAW needs world time ≥240); HuntPickupCheckpoint.java:147-153; DangerWatcher.java:557-611 (eat can consume bound raw meat); no bot-stat persistence in src/main/java/io/github/zoyluo/minecraftai/persist/.
-- Trigger: restart drops `Stats.PICKED_UP` (if ServerStatHandler doesn't persist for fake players) and pre-shutdown eating consumed bound units → restore rejects the whole mission (`mission_restore_invalid_hunt_pickup_checkpoint`) or settles FAILED; world-time rollback also invalidates receipts.
+- Trigger: restart drops `Stats.PICKED_UP` (if ServerStatsCounter doesn't persist for fake players) and pre-shutdown eating consumed bound units → restore rejects the whole mission (`mission_restore_invalid_hunt_pickup_checkpoint`) or settles FAILED; world-time rollback also invalidates receipts.
 - Smallest fix: persist the stat baseline (or a monotonic pickup counter) in the checkpoint itself; verify stat persistence in a live run (see open questions).
 
 **F27 — Skeletons are unsolvable: leash 8 < bow range ~15, no bow ever provisioned** (major; CombatTask/GoalPlanner; from: survival D9)
@@ -228,7 +228,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 
 1. **Actual diamond yield per epoch** at Y≈-59 with the real search pattern (breaks/epoch, seed encounter rate, vein flood-fill sizes) — validates the 3–9/epoch estimate and the 10–30% per-batch shortfall band behind F2.
 2. **Realized end-to-end tick consumption** of the nominal diamond plan (estimate 0.7–1.0M ticks) and whether the 15-TPS floor holds under runtime return-proof load and SCAN raycasting (F20, F37) — the timeout headroom claim depends on both.
-3. **Does ServerStatHandler persist fake-player stats across server restart?** Decides whether the hunt pickup receipt's statistics leg survives restarts (F26).
+3. **Does ServerStatsCounter persist fake-player stats across server restart?** Decides whether the hunt pickup receipt's statistics leg survives restarts (F26).
 4. **Empirical frequency of descend landing-drift knockback** per 122-window descent under mob pressure (F3), and of fall≥2 DROP_DOWN nodes appearing in anchored hunt routes on natural terrain (F13).
 5. **Is there any GoalExecutor per-tick hard deadline for RUNNING tasks** that would eventually rescue the F11 freeze? The oredig report's grep was inconclusive ("not exhaustively verified").
 6. **Torch consumption per epoch** in high-advance epochs vs the 40/epoch cap — does `ore_dig_torch_epoch_exhausted` fire in practice on good terrain?

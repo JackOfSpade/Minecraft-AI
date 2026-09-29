@@ -1,6 +1,8 @@
 # Bot navigation on Baritone: analysis findings and proposed plan
 
-Status: **PROPOSAL, awaiting the user's review. Nothing below is built yet.**
+Status: **APPROVED design (2026-09-29): pristine vendored Baritone + replayable patch series + our own glue.**
+The mod moved to official Mojang mappings on 2026-09-29 (same names as Baritone), so no cross-mapping build is needed.
+The P0 spike (vendor, patch series, headless boot, physics probes) runs first; P1+ are not built yet.
 Date: 2026-09-29. Sources analysed (read-only, temporary copies in `C:\Users\PC\Downloads\baritone-analysis`):
 
 | Tree | Version | Mappings | Role |
@@ -76,15 +78,21 @@ a bot"). Its movement code "presses keys" through one map (`InputOverrideHandler
 9. **Fake-player physics.** Baritone's jump, ascend, pillar and sneak-edge timings assume real player physics. Our
    repo has contradictory notes about stale `onGround` and gravity on the bot, so this is verified by probes
    before anything depends on it.
-10. **Build setup.** Baritone uses Mojang names, we use Yarn. Plan: a `baritone-core` Loom subproject on Mojang
-    mappings whose remapped jar our mod consumes and embeds (one deployed jar). This needs a 30-minute spike.
-    Fallbacks: a separate nested build like the PvP BOT wrapper, or translating the kept sources to Yarn once.
+10. **Build setup.** Baritone and our mod both use the official Mojang names (we migrated from Yarn on 2026-09-29),
+    so the vendored sources compile as a source set of our own build and ship inside our one jar.
+11. **Upgradability.** Upstream Baritone must stay byte-identical so a newer release can be dropped in. Every change
+    we need lives outside the vendored tree: an exclusion list (files not compiled), an ordered `git apply` patch
+    series for the few unavoidable in-file edits (fails loudly when upstream moved), and new glue classes.
 
 ## 2. Proposed design
 
-- **Where it lives:** `baritone-core/` Gradle subproject (vendored Baritone 1.21.11 minus the skip list, original
-  `baritone.*` packages for easy upstream diffs, mod id `baritone_core`). Consequence: the real Baritone client mod
-  must not be installed in the same profile.
+- **Where it lives:** `third_party/baritone/` holds upstream Baritone 1.21.11 (commit 2372389) unmodified.
+  `tools/baritone/` holds the exclusion list, the numbered patch series and the apply/verify script that copies
+  the vendored tree into the build, applies the patches and fails on any rejected hunk. The result compiles as
+  its own source set in our build; our glue lives in our own packages. Original `baritone.*` packages are kept for
+  easy upstream diffs, so the real Baritone client mod must not be installed in the same profile.
+- **Upgrading Baritone:** replace `third_party/baritone` with the new upstream tree, re-run the apply script,
+  refresh any patch that no longer applies, run the unit tests and the navigation GameTests.
 - **Per-bot instance:** a registry keyed by bot UUID; the player context resolves the current bot entity on every
   call (respawn-safe).
 - **Server glue (~12-15 files, ~0.9-1.3k LOC):** server player context, `IPlayerController` over
@@ -114,14 +122,14 @@ a bot"). Its movement code "presses keys" through one map (`InputOverrideHandler
 
 | Phase | Content | Exit evidence |
 |---|---|---|
-| P0 Spike (~half a day) | Cross-mapping Loom build; compile Baritone core with client refs stripped; dedicated-server boot; physics probes of the bot under raw inputs (walk, sprint, 1-block jump, 3-block fall, sneak at an edge, ladder, door, water entry) | Build works, server boots with no client classes, probe GameTests pass or give the list of physics fixes needed. **Go / no-go decision with you.** |
+| P0 Spike (~half a day) | Vendor + exclusion list + patch series (with an upgrade rehearsal on newer upstream trees); compile Baritone core with client refs excluded or patched; dedicated-server boot; physics probes of the bot under raw inputs (walk, sprint, 1-block jump, 3-block fall, sneak at an edge, ladder, door, water entry) | Build works, server boots with no client classes, probe GameTests pass or give the list of physics fixes needed. **Go / no-go decision with you.** |
 | P1 Core port | Vendor + strip + server glue; per-bot instances; unit tests for the pure core | Unit tests green; a bot walks a Baritone path in a GameTest |
 | P2 Integration behind the switch | Navigator seam in ActionPack (default still legacy), follow and move on Baritone goals, doors/gates/ladders, tick-order fix for Baritone-driven bots | Existing GameTests unchanged with legacy; new tests pass with `nav.engine=baritone` |
 | P3 Navigation obstacle course | GameTests: walls needing detours, 2-high steps, pits and old staircases, lake crossings, lava moats, cactus, cliffs, a house with a door (in and out), fence gates, ladders, tree canopy, moving target, two bots. Metrics: reached, time, damage, blocks broken/placed. Legacy vs Baritone side by side | Baritone at least as good as legacy on every course, then switch the default |
 | P4 Extend | Dig approaches and contract routes on Baritone's A*; retire legacy code it covers | Mining/hunting GameTest suites green on Baritone |
 | P5 Optional | BuilderProcess behind BuildTask, FarmProcess for more crops, targeted MineProcess fed by observed ores, ExploreProcess with a per-bot seen-chunk set | Per-feature GameTests |
 
-## 4. Decisions needed from you
+## 4. Decisions (all taken as recommended; the pristine-vendor design is approved and planning-only was rejected)
 
 1. **Route knowledge:** plan routes over all loaded terrain (like vanilla mobs and our current navigator), with
    targets still limited to what the bot can see. (Recommended.)
@@ -131,6 +139,6 @@ a bot"). Its movement code "presses keys" through one map (`InputOverrideHandler
 4. **Water:** land routes avoid water; our swim-follow keeps handling swimming for now. (Recommended.)
 5. **Packages:** keep `baritone.*` (easy upstream syncs; you must not also install the real Baritone mod in this
    profile) or relocate the packages (safe coexistence, harder syncs).
-6. **P0 downloads:** the spike downloads Mojang's official mappings through Gradle (normal Loom behaviour).
+6. **Mappings:** done; the whole repo now builds on official Mojang mappings.
 7. **In-flight fixes:** the current follow/swim bug-fix jobs (r10c, r11a) continue, because the legacy navigator
    stays as the fallback and for mining/hunting routes. (Recommended.)

@@ -309,8 +309,8 @@ to by number are restated here (design section 1):
 - **I1 Honest sensing.** Perception is first-hit rays clamped to the live perception radius. A ray hit is
   only a nomination; any action is preceded by an `OreScan.observe*` or `ObservableWorldQuery` re-proof of
   that exact cell. Unknown is never absent, safe or hazardous.
-- **I2 No new privilege.** No teleport, forced pickup, hidden scan, `StructureAccessor`, `getBlockEntity` or
-  `hasAny`. `castViewRay` never calls `CapabilityRuntime.decide`. The own-cell reads beyond position are
+- **I2 No new privilege.** No teleport, forced pickup, hidden scan, `StructureManager`, `getBlockEntity` or
+  `maybeHas`. `castViewRay` never calls `CapabilityRuntime.decide`. The own-cell reads beyond position are
   exactly two, both at the bot's feet and both pinned to one call in one file by a source contract: the biome
   id (`PoiDetector`, the F3 equivalent) and the sky-visibility flag (`MiningAssistCoordinator`, the
   underground test, the same call `DangerWatcher` and `MineValuablesTask` already make). The design text
