@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.gametest.GameTestTimeLock;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
@@ -92,18 +93,29 @@ final class ShelterGameTestFixtures {
      * Registers {@code perTick} as the test's single top-level {@code failIfEver} callback,
      * gated on {@link GameTestTimeLock}: the callback polls {@link GameTestTimeLock#tryAcquire()}
      * every tick until it holds the lock, then runs {@code perTick} from that same callback on
-     * every subsequent tick, and releases the lock in {@code context.succeedIf} if it was ever
-     * acquired. See {@link GameTestTimeLock}'s class docs for why this must stay the test's only
-     * {@code failIfEver} registration.
+     * every subsequent tick. See {@link GameTestTimeLock}'s class docs for why this must stay the
+     * test's only {@code failIfEver} registration.
+     *
+     * <p>The test completes only through {@code perTick}'s own assertions ({@link #finish} after
+     * the checks) or fails through them. The lock is released by {@link GameTestCleanup#whenFinished}
+     * when the test really ends (pass, fail or timeout). It must NOT be released from
+     * {@code GameTestHelper.succeedIf}: that runs its task on the first tick and then passes the test,
+     * which used to complete every test built on this helper at tick 1, before any assertion ran.
      */
     static void runLocked(GameTestHelper context, Runnable perTick) {
         boolean[] timeLockAcquired = {false};
-        context.succeedIf(() -> {
+        boolean[] over = {false};
+        GameTestCleanup.whenFinished(context, () -> {
+            over[0] = true;
             if (timeLockAcquired[0]) {
+                timeLockAcquired[0] = false;
                 GameTestTimeLock.release();
             }
         });
         context.failIfEver(() -> {
+            if (over[0]) {
+                return;
+            }
             if (!timeLockAcquired[0]) {
                 if (!GameTestTimeLock.tryAcquire()) {
                     return;

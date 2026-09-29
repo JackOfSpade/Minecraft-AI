@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.gametest.GameTestTimeLock;
 import java.util.function.BooleanSupplier;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -28,6 +29,16 @@ final class TimeLockedRun {
         boolean[] held = {false};
         boolean[] over = {false};
         int[] heldTicks = {0};
+        // The test can also end without the body noticing (ran out of maxTicks before the hold limit, or failed
+        // elsewhere): release the lock and clean up then too, exactly once.
+        GameTestCleanup.whenFinished(context, () -> {
+            if (!over[0]) {
+                over[0] = true;
+                if (held[0]) {
+                    finish(cleanup);
+                }
+            }
+        });
         context.failIfEver(() -> {
             if (over[0]) {
                 return;

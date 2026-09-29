@@ -80,20 +80,8 @@ public final class LightAreaGameTests {
         AIPlayerEntity bot = spawn(context, "LightCanopyGT", feet);
         giveTorches(bot, 4);
 
-        boolean[] timeLockAcquired = {false};
         int[] settleTicks = {0};
-        context.succeedIf(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.failIfEver(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
+        ShelterGameTestFixtures.runLocked(context, () -> {
             context.getLevel().setDayTime(6000L); // noon: ambient darkness 0, unambiguously day
 
             if (TaskManager.INSTANCE.getActive(bot).isPresent()) {

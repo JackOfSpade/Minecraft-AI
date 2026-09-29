@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.network.PlayerKind;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
@@ -212,7 +213,7 @@ public final class BoatFollowGameTests {
         AIPlayerEntity bot = spawnBot(world, "BoatAuthorityBotGT", feet.offset(-3, 0, 3));
         boarded(bot, aiBoat);
         ServerPlayer human = SleepVoteGameTests.connectHuman(world.getServer(), world, humanBoat.blockPosition());
-        context.succeedIf(() -> {
+        GameTestCleanup.whenFinished(context, () -> {
             if (human.connection != null) {
                 human.connection.onDisconnect(new DisconnectionDetails(Component.literal("boat authority test over")));
             }
@@ -334,7 +335,7 @@ public final class BoatFollowGameTests {
         forceLakeChunks(world, feet, true);
         // Released when the test ends (pass, fail or timeout) so a finished test never leaves its
         // chunks force-loaded for the rest of the batch.
-        context.succeedIf(() -> forceLakeChunks(world, feet, false));
+        GameTestCleanup.whenFinished(context, () -> forceLakeChunks(world, feet, false));
         // Leftover boats from earlier tests in the same server would be offered as "empty boats".
         world.getEntitiesOfClass(AbstractBoat.class,
                 net.minecraft.world.phys.AABB.encapsulatingFullBlocks(feet.offset(-30, -10, -30), feet.offset(LAKE_MAX_X + 30, 10, MAX_Z + 30)),
@@ -370,6 +371,13 @@ public final class BoatFollowGameTests {
 
     /** Reference counts per forced chunk, so overlapping fixtures never unforce each other's chunks. */
     private static final Map<Long, Integer> FORCED_CHUNK_REFS = new HashMap<>();
+    /**
+     * Chunks this fixture itself switched to force-loaded. The GameTest runner force-loads the chunks under every
+     * test structure too (TestInstanceBlockEntity), and that flag is shared: unforcing a chunk the runner forced
+     * lets it unload under the NEXT test, which then waits forever for its structure chunks to be entity-loaded
+     * (its tick counter never starts, so it does not even time out). Only chunks we forced are ever released.
+     */
+    private static final java.util.Set<Long> OWNED_FORCED_CHUNKS = new java.util.HashSet<>();
 
     private static void forceLakeChunks(ServerLevel world, BlockPos feet, boolean forced) {
         for (int cx = (feet.getX() - 1) >> 4; cx <= (feet.getX() + LAKE_MAX_X + 1) >> 4; cx++) {
@@ -381,8 +389,12 @@ public final class BoatFollowGameTests {
                 } else {
                     FORCED_CHUNK_REFS.remove(key);
                 }
-                if (forced && refs == 1 || !forced && refs <= 0) {
-                    world.setChunkForced(cx, cz, forced);
+                if (forced && refs == 1) {
+                    if (world.setChunkForced(cx, cz, true)) {
+                        OWNED_FORCED_CHUNKS.add(key);
+                    }
+                } else if (!forced && refs <= 0 && OWNED_FORCED_CHUNKS.remove(key)) {
+                    world.setChunkForced(cx, cz, false);
                 }
             }
         }
