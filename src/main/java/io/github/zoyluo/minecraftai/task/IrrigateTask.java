@@ -30,7 +30,8 @@ public final class IrrigateTask extends AbstractTask {
     private enum Phase {GOTO, DIG, PLACE, SETTLE, DONE}
 
     private static final int SETTLE_TICKS = 20; // After placing water, wait for the flow to spread and the two empty cells to convert into source blocks
-    private static final int PLACE_RETRIES = 60; // ticks of repositioning tolerated before the pour is reported failed
+    private static final int PLACE_RETRIES = 60; // refused pours tolerated while standing still (about 3 s) before the pour is reported failed
+    private static final int MAX_REPOSITIONS = 6; // walks to a new stand cell tolerated per pour (a walk itself is never counted per tick)
     private final BlockPos center;
     private final List<BlockPos> cells = new ArrayList<>(); // The 4 cells of the 2x2 area (same y layer)
     private final BlockMiner digMiner = new BlockMiner();
@@ -40,6 +41,7 @@ public final class IrrigateTask extends AbstractTask {
     private int settle;
     private int placedPours;
     private int placeAttempts;
+    private int placeRepositions;
     private String note = "";
 
     public IrrigateTask(BlockPos center) {
@@ -80,6 +82,7 @@ public final class IrrigateTask extends AbstractTask {
         digFloorPlaced = false;
         placedPours = 0;
         placeAttempts = 0;
+        placeRepositions = 0;
     }
 
     @Override
@@ -186,6 +189,7 @@ public final class IrrigateTask extends AbstractTask {
         if (pour.isSuccess()) {
             placedPours++;
             placeAttempts = 0;
+            placeRepositions = 0;
             if (placedPours >= 2) {
                 phase = Phase.SETTLE;
             }
@@ -195,15 +199,25 @@ public final class IrrigateTask extends AbstractTask {
         boolean positional = reason.equals("water_placement_not_visible")
                 || reason.equals("water_support_out_of_reach")
                 || reason.equals("water_support_face_not_visible");
-        if (!positional || ++placeAttempts > PLACE_RETRIES) {
+        if (!positional) {
             fail("place_water_failed:" + reason);
             return;
         }
         note = "repositioning:" + reason;
+        if (!bot.getActionPack().isPathExecutorIdle()) {
+            return; // still walking to the last chosen stand cell: not an attempt (the walk has its own bounds)
+        }
+        // Only real attempts count: a new walk to a stand cell, or a refusal while standing still with nowhere
+        // better to go. (Counting every tick of a walk let a long approach exhaust the budget mid-route.)
         BlockPos stand = adjacentStand(bot, cell);
-        if (stand != null && bot.getActionPack().isPathExecutorIdle()
-                && !bot.blockPosition().equals(stand)) {
+        if (stand != null && !bot.blockPosition().equals(stand)) {
+            if (++placeRepositions > MAX_REPOSITIONS) {
+                fail("place_water_failed:" + reason);
+                return;
+            }
             bot.getActionPack().startPathTo(stand);
+        } else if (++placeAttempts > PLACE_RETRIES) {
+            fail("place_water_failed:" + reason);
         }
     }
 

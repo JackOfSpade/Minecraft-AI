@@ -119,6 +119,8 @@ public final class RecipeRegistry {
                 new Ingredient(STICKS, 1)), false));
         put(new Recipe(Items.BOWL, 4, List.of(new Ingredient(PLANKS, 3)), false));
         put(new Recipe(Items.BREAD, 1, List.of(new Ingredient(List.of(Items.WHEAT), 3)), false));
+        // Bone meal: 1 bone -> 3 (a 1x1 recipe, so no table); FarmTask crafts it from carried bones to speed crops up.
+        put(new Recipe(Items.BONE_MEAL, 3, List.of(new Ingredient(List.of(Items.BONE), 1)), false));
         // Cake chain: sugar <- sugar cane; bucket <- 3 iron; cake = 3 milk buckets + 2 sugar + 1 egg + 3
         // wheat (egg is a passive product, must already be in inventory, see GoalPlanner).
         put(new Recipe(Items.SUGAR, 1, List.of(new Ingredient(List.of(Items.SUGAR_CANE), 1)), false));

@@ -13,8 +13,9 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -48,6 +49,8 @@ public final class FarmTask extends AbstractTask {
     private static final int WAIT_SURVEY_INTERVAL = 10;   // while waiting for maturity, re-survey this often
     private static final int BONE_MEAL_INTERVAL = 4;      // ticks between bone meal clicks
     private static final int MAX_TILL_ATTEMPTS = 3;       // coarse dirt and rooted dirt need a second click
+    private static final int BONE_CRAFT_MAX_BONES = 4;     // bones turned into bone meal per craft (3 meal each)
+    static final int FAILED_CELL_TTL_TICKS = 600; // a cell whose click proof failed is skipped this long
     private static final int CROP_LIGHT_MIN = 8;          // vanilla crop rule: raw brightness of the crop cell
 
     private final BlockPos areaCenter;
@@ -64,7 +67,9 @@ public final class FarmTask extends AbstractTask {
     private final List<FarmTarget> targets = new ArrayList<>();
     private final List<BlockPos> depositContainers = new ArrayList<>();
     private final BlockMiner harvestMiner = new BlockMiner();
-    private final Set<BlockPos> failedCells = new HashSet<>(); // grounds whose click proof failed: not retried this run
+    // grounds whose click proof failed -> task tick of the failure; retried after FAILED_CELL_TTL_TICKS so one
+    // transient refusal (a mob in the way, a momentary view block) is not permanent for a long-running task
+    private final Map<BlockPos, Integer> failedCells = new HashMap<>();
     private final List<BlockPos> immatureCrops = new ArrayList<>();
     private Phase phase = Phase.SURVEY;
     private FarmTarget current;
@@ -79,6 +84,8 @@ public final class FarmTask extends AbstractTask {
     private int lastWaitSurvey = -WAIT_SURVEY_INTERVAL;
     private int lastBoneMeal = -BONE_MEAL_INTERVAL;
     private int darkCells;
+    private CraftTask boneMealCraft;
+    private boolean boneMealCraftFailed;
     private boolean waitingForMaturity; // After planting, stay put waiting for crops to mature naturally (quantity-limited mode); not stuck
     private String note = "";
 
@@ -133,6 +140,8 @@ public final class FarmTask extends AbstractTask {
         tillAttempts = 0;
         lastWaitSurvey = -WAIT_SURVEY_INTERVAL;
         lastBoneMeal = -BONE_MEAL_INTERVAL;
+        boneMealCraft = null;
+        boneMealCraftFailed = false;
         waitingForMaturity = false;
         produceBaseline = produceItem == null ? 0 : InventoryAction.countItem(bot, produceItem);
     }
@@ -194,10 +203,13 @@ public final class FarmTask extends AbstractTask {
         // canObserveBlock can never see an existing field: farm cells are judged by their real outline instead.
         BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
                 .map(BlockPos::immutable)
-                .filter(pos -> !failedCells.contains(pos))
-                .filter(pos -> ObservableWorldQuery.canObserveFarmCell(bot, pos)
-                        || ObservableWorldQuery.canObserveFarmCell(bot, pos.above()))
-                .forEach(pos -> addTargetIfUseful(world, pos, hasSeeds));
+                .filter(pos -> !isFailed(pos))
+                // Cheap first: the block-state verdict is a few lookups, the outline ray tests are not.
+                .map(pos -> new Verdict(pos, classify(world, pos, hasSeeds)))
+                .filter(verdict -> verdict.kind() != Kind.NONE)
+                .filter(verdict -> ObservableWorldQuery.canObserveFarmCell(bot, verdict.ground())
+                        || ObservableWorldQuery.canObserveFarmCell(bot, verdict.ground().above()))
+                .forEach(this::addTarget);
         targets.sort(Comparator.comparingDouble(pos -> pos.ground().distSqr(bot.blockPosition())));
         if (targets.isEmpty()) {
             if (!harvestOnly && InventoryAction.countItem(bot, seed) <= 0 && completedActions == 0) {
@@ -238,27 +250,59 @@ public final class FarmTask extends AbstractTask {
         phase = Phase.NEXT;
     }
 
-    private void addTargetIfUseful(ServerLevel world, BlockPos ground, boolean hasSeeds) {
+    /** What a survey would do with {@code ground} judged by block state alone (no visibility test yet). */
+    private Kind classify(ServerLevel world, BlockPos ground, boolean hasSeeds) {
         BlockPos cropPos = ground.above();
         if (world.getBlockState(cropPos).is(crop) && FarmAction.isMature(world, cropPos)) {
-            targets.add(new FarmTarget(ground, TargetAction.HARVEST));
-            return;
+            return Kind.HARVEST;
         }
         if (harvestOnly || world.getBlockState(cropPos).is(crop) || !world.getBlockState(cropPos).isAir()) {
-            return;
+            return Kind.NONE;
         }
         if (!hasSeeds) {
-            return;
+            return Kind.NONE;
         }
         boolean farmland = world.getBlockState(ground).is(Blocks.FARMLAND);
         if (!farmland && !FarmAction.isTillable(world.getBlockState(ground))) {
-            return;
+            return Kind.NONE;
         }
         if (world.getRawBrightness(cropPos, 0) < CROP_LIGHT_MIN) {
-            darkCells++; // a seed placed here would be refused (and could never grow)
-            return;
+            return Kind.DARK; // a seed placed here would be refused (and could never grow)
         }
-        targets.add(new FarmTarget(ground, farmland ? TargetAction.PLANT : TargetAction.TILL_PLANT));
+        return farmland ? Kind.PLANT : Kind.TILL_PLANT;
+    }
+
+    private void addTarget(Verdict verdict) {
+        switch (verdict.kind()) {
+            case HARVEST -> targets.add(new FarmTarget(verdict.ground(), TargetAction.HARVEST));
+            case PLANT -> targets.add(new FarmTarget(verdict.ground(), TargetAction.PLANT));
+            case TILL_PLANT -> targets.add(new FarmTarget(verdict.ground(), TargetAction.TILL_PLANT));
+            case DARK -> darkCells++;
+            case NONE -> {
+            }
+        }
+    }
+
+    private void markFailed(BlockPos ground) {
+        failedCells.put(ground.immutable(), elapsed);
+    }
+
+    /** Whether {@code ground} failed recently; an entry older than the TTL is dropped and retried. */
+    private boolean isFailed(BlockPos ground) {
+        Integer at = failedCells.get(ground);
+        if (at == null) {
+            return false;
+        }
+        if (failureExpired(at, elapsed)) {
+            failedCells.remove(ground);
+            return false;
+        }
+        return true;
+    }
+
+    /** Whether a cell that failed at task tick {@code failedAt} may be tried again at {@code now}. */
+    static boolean failureExpired(int failedAt, int now) {
+        return now - failedAt >= FAILED_CELL_TTL_TICKS;
     }
 
     private void next(AIPlayerEntity bot) {
@@ -311,7 +355,7 @@ public final class FarmTask extends AbstractTask {
         ActionResult result = FarmAction.till(bot, current.ground());
         if (result.isFailed()) {
             note = result.reason();
-            failedCells.add(current.ground());
+            markFailed(current.ground());
             phase = Phase.NEXT;
             return;
         }
@@ -319,7 +363,7 @@ public final class FarmTask extends AbstractTask {
         // dirt (vanilla), which needs a second click.
         if (!bot.level().getBlockState(current.ground()).is(Blocks.FARMLAND)) {
             if (++tillAttempts >= MAX_TILL_ATTEMPTS) {
-                failedCells.add(current.ground());
+                markFailed(current.ground());
                 tillAttempts = 0;
                 phase = Phase.NEXT;
             }
@@ -338,7 +382,7 @@ public final class FarmTask extends AbstractTask {
         ActionResult result = FarmAction.plant(bot, current.ground(), seed, crop);
         if (result.isFailed()) {
             note = result.reason();
-            failedCells.add(current.ground());
+            markFailed(current.ground());
         } else {
             completedActions++;
         }
@@ -459,7 +503,7 @@ public final class FarmTask extends AbstractTask {
             ActionResult proof = FarmAction.harvestProof(bot, cropPos);
             if (proof.isFailed()) {
                 note = proof.reason();
-                failedCells.add(current.ground());
+                markFailed(current.ground());
                 phase = Phase.NEXT;
                 return;
             }
@@ -471,7 +515,7 @@ public final class FarmTask extends AbstractTask {
         }
         if (status == BlockMiner.Status.FAILED) {
             note = "harvest_failed:" + harvestMiner.failureReason();
-            failedCells.add(current.ground());
+            markFailed(current.ground());
             phase = Phase.NEXT;
             return;
         }
@@ -537,12 +581,19 @@ public final class FarmTask extends AbstractTask {
     /**
      * While waiting for maturity: with bone meal in the inventory, click the nearest observed growing crop
      * (vanilla item use: reach and outline proof, the item is consumed by the item itself), one click per
-     * BONE_MEAL_INTERVAL ticks. Out of reach, it walks next to the crop first. Without bone meal the wait
-     * stays natural.
+     * BONE_MEAL_INTERVAL ticks. Out of reach, it walks next to the crop first. Without bone meal but with
+     * bones in the inventory, one bounded craft (1 bone -> 3 bone meal, the 2x2 recipe) makes some first;
+     * without either the wait stays natural.
      */
     private void boneMealStep(AIPlayerEntity bot) {
-        if (InventoryAction.countItem(bot, Items.BONE_MEAL) <= 0 || immatureCrops.isEmpty()
-                || elapsed - lastBoneMeal < BONE_MEAL_INTERVAL) {
+        if (immatureCrops.isEmpty()) {
+            return;
+        }
+        if (InventoryAction.countItem(bot, Items.BONE_MEAL) <= 0) {
+            craftBoneMeal(bot);
+            return;
+        }
+        if (elapsed - lastBoneMeal < BONE_MEAL_INTERVAL) {
             return;
         }
         ServerLevel world = bot.level();
@@ -577,6 +628,44 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         lastWaitSurvey = -WAIT_SURVEY_INTERVAL; // re-survey next tick: the crop may be ripe now
+    }
+
+    /**
+     * Crafts bone meal from carried bones through the ordinary crafting path (a nested CraftTask, so the
+     * atomic ingredient/capacity checks apply). Bounded: at most {@link #BONE_CRAFT_MAX_BONES} bones per run
+     * of the wait, and one failure ends the attempts (a full inventory would otherwise retry forever).
+     */
+    private void craftBoneMeal(AIPlayerEntity bot) {
+        if (boneMealCraftFailed) {
+            return;
+        }
+        if (boneMealCraft == null) {
+            int bones = Math.min(InventoryAction.countItem(bot, Items.BONE), BONE_CRAFT_MAX_BONES);
+            if (bones <= 0) {
+                return;
+            }
+            boneMealCraft = new CraftTask(Items.BONE_MEAL, bones * 3);
+            boneMealCraft.start(bot);
+            BotLog.action(bot, "farm_craft_bone_meal", "bones", bones);
+        }
+        boneMealCraft.tick(bot);
+        if (boneMealCraft.state() == TaskState.FAILED || boneMealCraft.state() == TaskState.CANCELLED) {
+            note = "bone_meal_craft_failed:" + boneMealCraft.failureReason();
+            boneMealCraftFailed = true;
+            boneMealCraft = null;
+        } else if (boneMealCraft.state() == TaskState.COMPLETED) {
+            boneMealCraft = null;
+            lastBoneMeal = -BONE_MEAL_INTERVAL;
+        }
+    }
+
+    @Override
+    protected void onAbort(AIPlayerEntity bot) {
+        if (boneMealCraft != null) {
+            boneMealCraft.cancel(bot, "parent_aborted");
+            boneMealCraft = null;
+        }
+        super.onAbort(bot);
     }
 
     private void done(AIPlayerEntity bot) {
@@ -649,6 +738,17 @@ public final class FarmTask extends AbstractTask {
             }
         }
         return null;
+    }
+
+    private enum Kind {
+        NONE,
+        DARK,
+        HARVEST,
+        PLANT,
+        TILL_PLANT
+    }
+
+    private record Verdict(BlockPos ground, Kind kind) {
     }
 
     private enum TargetAction {

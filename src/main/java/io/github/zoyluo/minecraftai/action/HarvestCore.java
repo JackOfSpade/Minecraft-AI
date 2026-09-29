@@ -25,6 +25,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 public final class HarvestCore {
     // NAV-OPT (layer 0B): reachability that's actually reachable -- verify only the nearest N candidates,
@@ -349,23 +350,96 @@ public final class HarvestCore {
      * One tick of a plain walk-over pickup for drops lying in open ground (a harvested crop field): forced
      * pickup first when the profile allows it, otherwise a direct walk (collision-driven, the same controller
      * a player-like walk uses) toward the nearest observed, settled drop of {@code items} within
-     * {@code radius}. Unlike {@link #approachDropPhysically}, it assumes no standable-cell geometry: a bot
-     * standing on farmland (15/16 high) or a drop resting inside a partial block's cell has no clean integer
-     * stand cell for the route planner, but a short straight walk over the field reaches it. Returns whether
-     * a drop is still on the ground within range.
+     * {@code radius} whose straight approach is a {@link #isSafeWalkCorridor safe corridor}. Unlike
+     * {@link #approachDropPhysically}, it assumes no standable-cell geometry: a bot standing on farmland
+     * (15/16 high) or a drop resting inside a partial block's cell has no clean integer stand cell for the
+     * route planner, but a short straight walk over the field reaches it. The straight walk has no route
+     * planning, so a drop across a cliff, lava or water is skipped (left for the durable pickup logic)
+     * instead of walked at. Returns whether a reachable drop is still on the ground within range.
      */
     public static boolean walkOverDrops(AIPlayerEntity bot, Set<Item> items, double radius) {
         if (forcePickupNearbyAnyOf(bot, items)) {
             bot.getActionPack().stopMovement();
         }
-        Optional<ItemEntity> drop = nearestDropAnyOf(bot, items, radius);
-        if (drop.isEmpty()) {
-            return false;
+        List<ItemEntity> drops = bot.level()
+                .getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(radius),
+                        entity -> !entity.getItem().isEmpty() && matches(entity.getItem(), items)
+                                && ObservableWorldQuery.canObserveEntity(bot, entity));
+        drops.sort(Comparator.comparingDouble(entity -> entity.distanceTo(bot)));
+        boolean settling = false;
+        for (ItemEntity target : drops) {
+            if (!isDropPhysicallySupported(bot, target)) {
+                settling = true; // a fresh drop is still in the air: keep waiting for it, do not walk at it yet
+                continue;
+            }
+            if (!isSafeWalkCorridor(bot, target.position())) {
+                continue; // skipped for good: nothing to wait for
+            }
+            if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                bot.getActionPack().startWalkTo(target.position(), 0.5D);
+            }
+            return true;
         }
-        ItemEntity target = drop.get();
-        if (isDropPhysicallySupported(bot, target)
-                && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
-            bot.getActionPack().startWalkTo(target.position(), 0.5D);
+        if (!drops.isEmpty() && !settling) {
+            bot.getActionPack().stopMovement();
+        }
+        return settling;
+    }
+
+    /** Spacing of the corridor samples: the bot's box is 0.6 wide, so half a block never skips a cell. */
+    private static final double CORRIDOR_STEP = 0.5D;
+    /** Largest fall a straight walk may take on the way (vanilla's no-damage fall). */
+    private static final double CORRIDOR_MAX_FALL = 3.0D;
+    /** Highest ledge the straight walk climbs without a jump (vanilla step height is 0.6). */
+    private static final double CORRIDOR_STEP_UP = 0.6D;
+
+    /** Points along the straight segment {@code from}..{@code to}, both ends included, at most {@code step} apart. */
+    static List<Vec3> corridorSamples(Vec3 from, Vec3 to, double step) {
+        double length = from.distanceTo(to);
+        int segments = Math.max(1, (int) Math.ceil(length / step));
+        List<Vec3> samples = new java.util.ArrayList<>(segments + 1);
+        for (int i = 0; i <= segments; i++) {
+            samples.add(from.lerp(to, (double) i / segments));
+        }
+        return samples;
+    }
+
+    /**
+     * Cheap safety check for a straight, unplanned walk from the bot to {@code to}: at every sample along
+     * the segment the bot's box must be free of collision, must not overlap fire/lava/other hazards or any
+     * fluid (feet, head or the cell under the feet), and must have a floor within a harmless fall. A
+     * cliff edge, a lava pool or a pond between the bot and the drop fails the corridor.
+     */
+    public static boolean isSafeWalkCorridor(AIPlayerEntity bot, Vec3 to) {
+        var world = bot.level();
+        Vec3 from = bot.position();
+        AABB base = bot.getBoundingBox();
+        for (Vec3 sample : corridorSamples(from, to, CORRIDOR_STEP)) {
+            // Level with the bot: the walk is collision-driven at the bot's own height (a drop a hair lower on a
+            // 15/16 farmland row is still reached; interpolating the height would scrape the floor it stands on).
+            AABB box = base.move(sample.x - from.x, 0.0D, sample.z - from.z).deflate(0.01D, 0.0D, 0.01D);
+            AABB body = box.inflate(0.0D, -0.01D, 0.0D);
+            // Blocked unless the obstacle is something a walking player steps onto (farmland next to a path,
+            // a slab, a carpet): free once the box is lifted by the step height.
+            if (!world.noCollision(bot, body) && !world.noCollision(bot, body.move(0.0D, CORRIDOR_STEP_UP, 0.0D))) {
+                return false;
+            }
+            int minX = net.minecraft.util.Mth.floor(box.minX);
+            int maxX = net.minecraft.util.Mth.floor(box.maxX);
+            int minZ = net.minecraft.util.Mth.floor(box.minZ);
+            int maxZ = net.minecraft.util.Mth.floor(box.maxZ);
+            int feetY = net.minecraft.util.Mth.floor(box.minY + 0.01D);
+            int headY = net.minecraft.util.Mth.floor(box.maxY - 0.01D);
+            int belowY = net.minecraft.util.Mth.floor(box.minY - 0.01D);
+            for (BlockPos cell : BlockPos.betweenClosed(minX, Math.min(belowY, feetY), minZ, maxX, headY, maxZ)) {
+                var state = world.getBlockState(cell);
+                if (Standability.isDangerous(state) || !state.getFluidState().isEmpty()) {
+                    return false;
+                }
+            }
+            if (world.noCollision(bot, box.expandTowards(0.0D, -CORRIDOR_MAX_FALL - 0.01D, 0.0D))) {
+                return false; // no floor within a harmless fall
+            }
         }
         return true;
     }

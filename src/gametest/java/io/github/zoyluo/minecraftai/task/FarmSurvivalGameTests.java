@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.FarmAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MilkCowAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
@@ -334,6 +335,12 @@ public final class FarmSurvivalGameTests {
                 return;
             }
             if (task.state() == TaskState.PENDING) {
+                // The freshly added cow only becomes observable once its chunk has taken it (entity loading is
+                // asynchronous under load): start the task when the fixture is really there.
+                if (MilkCowAction.nearestCow(bot, MilkCowAction.REACH) == null) {
+                    require(context, context.getTick() < 100, "fixture: the cow never became observable");
+                    return;
+                }
                 task.start(bot);
                 return;
             }
@@ -464,6 +471,172 @@ public final class FarmSurvivalGameTests {
                             "a seed was planted in the dark");
                 }
             }
+            context.succeed();
+        });
+    }
+
+    /**
+     * A ripe field behind a solid wall is invisible to the bot: the raid finds nothing (no X-ray through the
+     * wall), a harvest-only farm task leaves every crop standing, and the click proof for a crop that is inside
+     * reach but hidden fails typed as crop_not_visible.
+     */
+    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_hidden_crop_behind_awall_is_never_raided", maxTicks = 400)
+    public void hiddenCropBehindAWallIsNeverRaided(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(14, 4, 194));
+        forceChunks(context, feet, 12);
+        prepareGround(world, feet, 12);
+        // A 17-wide, 7-high stone wall right in front of the bot; the ripe field is entirely behind it.
+        for (int dz = -8; dz <= 8; dz++) {
+            for (int dy = 0; dy <= 6; dy++) {
+                world.setBlock(feet.offset(2, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        BlockPos fieldOrigin = feet.offset(3, 0, -2);
+        field(world, fieldOrigin, 5, 5, MATURE_WHEAT);
+        AIPlayerEntity bot = spawnBot(context, "FarmHiddenGT", feet);
+        requireStrict(context, bot);
+        BlockPos nearestCrop = fieldOrigin.offset(0, 0, 2);
+
+        RaidCropsTask raid = new RaidCropsTask(4);
+        FarmTask harvestOnly = new FarmTask(fieldOrigin.offset(2, 0, 2), 4, Items.WHEAT_SEEDS, Blocks.WHEAT,
+                false, true);
+        long startTick = context.getTick() + 5;
+        context.failIfEver(() -> {
+            if (context.getTick() < startTick) {
+                return;
+            }
+            if (context.getTick() == startTick) {
+                require(context, world.getBlockState(nearestCrop).is(Blocks.WHEAT)
+                                && bot.isWithinBlockInteractionRange(nearestCrop, 0.0D),
+                        "fixture: the hidden crop must be inside interaction reach");
+                ActionResult proof = FarmAction.harvestProof(bot, nearestCrop);
+                require(context, proof.isFailed() && "crop_not_visible".equals(proof.reason()),
+                        "a crop behind the wall passed the click proof: " + proof);
+            }
+            if (raid.state() == TaskState.PENDING) {
+                raid.start(bot);
+                return;
+            }
+            if (raid.state() == TaskState.RUNNING) {
+                require(context, context.getTick() < 300, "raid neither finished nor failed: " + raid.describe());
+                raid.tick(bot);
+                return;
+            }
+            require(context, raid.state() == TaskState.FAILED && raid.failureReason().contains("no_mature_crops"),
+                    "the raid saw or harvested a field behind a wall: " + raid.state() + " " + raid.failureReason());
+            if (harvestOnly.state() == TaskState.PENDING) {
+                harvestOnly.start(bot);
+                return;
+            }
+            if (harvestOnly.state() == TaskState.RUNNING) {
+                require(context, context.getTick() < 380, "harvest-only farm did not finish: " + harvestOnly.describe());
+                harvestOnly.tick(bot);
+                return;
+            }
+            int standing = 0;
+            for (int x = 0; x < 5; x++) {
+                for (int z = 0; z < 5; z++) {
+                    if (world.getBlockState(fieldOrigin.offset(x, 0, z)).equals(MATURE_WHEAT)) {
+                        standing++;
+                    }
+                }
+            }
+            require(context, standing == 25, "a hidden crop was broken: standing=" + standing + "/25");
+            require(context, InventoryAction.countItem(bot, Items.WHEAT) == 0
+                            && InventoryAction.countItem(bot, Items.WHEAT_SEEDS) == 0,
+                    "the bot holds produce from a field it could not see");
+            context.succeed();
+        });
+    }
+
+    /**
+     * With no bone meal but bones in the inventory, the wait for maturity first crafts bone meal (1 bone ->
+     * 3) through the ordinary crafting path, then uses it on the growing crops.
+     */
+    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_bone_meal_is_crafted_from_bones_when_none_is_carried", maxTicks = 900)
+    public void boneMealIsCraftedFromBonesWhenNoneIsCarried(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(14, 4, 214));
+        forceChunks(context, feet, 12);
+        prepareGround(world, feet, 12);
+        BlockPos fieldOrigin = feet.offset(2, 0, -1);
+        field(world, fieldOrigin, 3, 3, Blocks.WHEAT.defaultBlockState());
+        AIPlayerEntity bot = spawnBot(context, "FarmBoneCraftGT", feet);
+        requireStrict(context, bot);
+        InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 4));
+        InventoryAction.giveItem(bot, new ItemStack(Items.BONE, 2));
+        require(context, InventoryAction.countItem(bot, Items.BONE_MEAL) == 0, "fixture: no bone meal carried");
+
+        FarmTask task = new FarmTask(fieldOrigin.offset(1, 0, 1), 2, Items.WHEAT_SEEDS, Blocks.WHEAT,
+                false, false, Items.WHEAT, 1);
+        boolean[] sawMeal = {false};
+        long startTick = context.getTick() + 5;
+        context.failIfEver(() -> {
+            if (context.getTick() < startTick) {
+                return;
+            }
+            sawMeal[0] |= InventoryAction.countItem(bot, Items.BONE_MEAL) > 0;
+            if (task.state() == TaskState.PENDING) {
+                task.start(bot);
+                return;
+            }
+            if (task.state() == TaskState.RUNNING) {
+                if (context.getTick() > 850) {
+                    context.fail(Component.nullToEmpty("bone craft farm timed out: " + task.describe()
+                            + " bones=" + InventoryAction.countItem(bot, Items.BONE)
+                            + " bone_meal=" + InventoryAction.countItem(bot, Items.BONE_MEAL)));
+                    return;
+                }
+                task.tick(bot);
+                return;
+            }
+            require(context, task.state() == TaskState.COMPLETED,
+                    "farm did not complete: " + task.failureReason());
+            require(context, sawMeal[0], "no bone meal was ever crafted from the carried bones");
+            require(context, InventoryAction.countItem(bot, Items.BONE) == 0,
+                    "the bones were not turned into bone meal: " + InventoryAction.countItem(bot, Items.BONE));
+            require(context, InventoryAction.countItem(bot, Items.BONE_MEAL) < 6,
+                    "the crafted bone meal was never used on the crops");
+            require(context, InventoryAction.countItem(bot, Items.WHEAT) >= 1, "no wheat collected");
+            context.succeed();
+        });
+    }
+
+    /**
+     * A cow inside the 4-block search radius but beyond the 3-block interaction range is not milked: the action
+     * fails typed as cow_out_of_reach and the bucket is untouched.
+     */
+    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_milking_acow_beyond_reach_fails_typed", maxTicks = 100)
+    public void milkingACowBeyondReachFailsTyped(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(14, 4, 234));
+        forceChunks(context, feet, 12);
+        prepareGround(world, feet, 6);
+        AIPlayerEntity bot = spawnBot(context, "FarmMilkFarGT", feet);
+        requireStrict(context, bot);
+        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET, 1));
+        Cow cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
+        require(context, cow != null, "could not create a cow");
+        cow.snapTo(feet.getX() + 0.5D + 3.9D, feet.getY(), feet.getZ() + 0.5D, 90.0F, 0.0F);
+        cow.setNoAi(true);
+        world.addFreshEntity(cow);
+        GameTestCleanup.whenFinished(context, cow::discard);
+
+        context.failIfEver(() -> {
+            if (context.getTick() != 10) {
+                return;
+            }
+            require(context, MilkCowAction.nearestCow(bot, MilkCowAction.REACH) == cow,
+                    "fixture: the cow must be inside the search radius");
+            require(context, !bot.isWithinEntityInteractionRange(cow, 0.0D),
+                    "fixture: the cow must be beyond interaction range");
+            ActionResult result = MilkCowAction.milk(bot);
+            require(context, result.isFailed() && "cow_out_of_reach".equals(result.reason()),
+                    "a cow beyond reach was milked or failed untyped: " + result);
+            require(context, InventoryAction.countItem(bot, Items.BUCKET) == 1
+                            && InventoryAction.countItem(bot, Items.MILK_BUCKET) == 0,
+                    "the bucket changed although nothing was milked");
             context.succeed();
         });
     }
