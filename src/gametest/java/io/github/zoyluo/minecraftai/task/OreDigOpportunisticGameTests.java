@@ -1204,7 +1204,7 @@ public final class OreDigOpportunisticGameTests {
                 // No in-memory equivalent exists (CapabilityTally only counts allowed FORCED_PICKUP and denied
                 // decisions; an open MiningEvidenceAudit session closes the assist gate), so say so in the log
                 // instead of passing without a trace. Deliberately not a failure.
-                LOG.info("[capability-canary skipped: no per-bot log] {}", bot.getGameProfile().name());
+                LOG.warn("[capability-canary skipped: no per-bot log] {}", bot.getGameProfile().name());
                 return;
             }
             long allowed = lines.stream()

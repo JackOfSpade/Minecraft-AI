@@ -1017,5 +1017,4 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         bot.getHungerManager().setSaturationLevel(5.0F);
         return bot;
     }
-
 }

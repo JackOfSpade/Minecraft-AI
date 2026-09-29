@@ -1615,7 +1615,7 @@ public final class MiningAssistSenseGameTests {
             List<String> lines = botLog(bot.getGameProfile().name());
             if (lines == null || !hasSpawnLine(lines)) {
                 // Same unavailable-log skip as OreDigOpportunisticGameTests: say so instead of passing silently.
-                LOG.info("[capability-canary skipped: no per-bot log] {}", bot.getGameProfile().name());
+                LOG.warn("[capability-canary skipped: no per-bot log] {}", bot.getGameProfile().name());
                 return;
             }
             long allowed = lines.stream()

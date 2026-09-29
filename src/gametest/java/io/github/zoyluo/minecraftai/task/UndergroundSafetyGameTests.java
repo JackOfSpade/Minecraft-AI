@@ -1206,5 +1206,4 @@ public final class UndergroundSafetyGameTests {
                 Set.of(), 0.0F, 0.0F, true);
         return bot;
     }
-
 }
