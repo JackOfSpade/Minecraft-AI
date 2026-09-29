@@ -1,0 +1,47 @@
+# Files that are vendored (byte-identical, third_party/baritone) but NOT compiled into the mod.
+# One glob per line, relative to the Baritone repository root ('**' crosses directories).
+# Every entry must match at least one file, otherwise the generator fails: that is how an upstream
+# move/rename shows up on upgrade. A file that is replaced by a stub in tools/baritone/overlay/ must
+# be listed here as well.
+#
+# Nothing is ever deleted from third_party/baritone; this list only shapes the generated build copy.
+
+# --- chat/console command front end (client chat driven). The command API (api/command) stays: IBaritone,
+#     IBaritoneProvider and ISchematicSystem still mention its interfaces.
+src/main/java/baritone/command/**
+src/api/java/baritone/api/command/datatypes/RelativeFile.java
+
+# --- elytra flying: needs the nether-pathfinder JNI library. NullElytraProcess (same package) stays and is used instead.
+src/main/java/baritone/process/ElytraProcess.java
+src/main/java/baritone/process/elytra/BlockStateOctreeInterface.java
+src/main/java/baritone/process/elytra/BuildLimitPathFinder.java
+src/main/java/baritone/process/elytra/ElytraBehavior.java
+src/main/java/baritone/process/elytra/IElytraPathFinder.java
+src/main/java/baritone/process/elytra/NetherPath.java
+src/main/java/baritone/process/elytra/NetherPathfinderContext.java
+src/main/java/baritone/process/elytra/PathCalculationException.java
+src/main/java/baritone/process/elytra/UnpackedSegment.java
+
+# --- rendering, GUI, toasts (client only). RenderEvent, PathRenderer and SelectionRenderer are replaced by
+#     empty stubs from tools/baritone/overlay/ so their callers stay unpatched.
+src/api/java/baritone/api/event/events/RenderEvent.java
+src/api/java/baritone/api/utils/gui/BaritoneToast.java
+src/main/java/baritone/utils/IRenderer.java
+src/main/java/baritone/utils/PathRenderer.java
+src/main/java/baritone/utils/GuiClick.java
+src/main/java/baritone/selection/SelectionRenderer.java
+src/main/java/baritone/utils/accessor/IRenderPipelines.java
+src/main/java/baritone/utils/accessor/IRenderType.java
+
+# --- the client's IPlayerContext/IPlayerController/input implementations (LocalPlayer, MultiPlayerGameMode,
+#     ClientInput). The mod provides the server-side ones.
+src/main/java/baritone/utils/player/BaritonePlayerContext.java
+src/main/java/baritone/utils/player/BaritonePlayerController.java
+src/main/java/baritone/utils/PlayerMovementInput.java
+
+# --- superseded by FasterWorldScanner (BaritoneProvider uses that one); only reads the client chunk cache
+src/main/java/baritone/cache/WorldScanner.java
+
+# --- bridges to the Schematica / Litematica client mods. Replaced by stubs that report "not present".
+src/main/java/baritone/utils/schematic/schematica/**
+src/main/java/baritone/utils/schematic/litematica/**
