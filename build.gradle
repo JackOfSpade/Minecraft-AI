@@ -306,6 +306,9 @@ jar {
     }
 }
 
+// Vendored Baritone + our replayable patch series, compiled as the `baritone` source set (see tools/baritone/README.md).
+apply from: 'tools/baritone/baritone.gradle'
+
 publishing {
     publications {
         create('mavenJava', MavenPublication) {

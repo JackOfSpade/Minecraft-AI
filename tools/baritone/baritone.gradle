@@ -1,0 +1,71 @@
+// Baritone integration (applied from build.gradle).
+//
+//   third_party/baritone (pristine upstream) --[tools/baritone: exclude.txt, overlay/, patches/]--> build/baritone-src
+//   build/baritone-src is compiled as the 'baritone' source set of this project (Mojang names, server classes only:
+//   the classpath is the common Minecraft jar, so any reference to net.minecraft.client fails the build).
+//   The mod source sets depend on its output and it is packed into the mod jar. Upstream's own JUnit 4 tests
+//   run as the 'baritoneTest' source set. See tools/baritone/README.md.
+
+def baritoneGenerated = layout.buildDirectory.dir('baritone-src')
+
+def generateBaritoneSources = tasks.register('generateBaritoneSources', Exec) {
+    group = 'baritone'
+    description = 'Regenerates build/baritone-src: vendored Baritone minus exclude.txt, plus overlay, plus the patch series'
+    inputs.dir('third_party/baritone')
+    inputs.dir('tools/baritone')
+    outputs.dir(baritoneGenerated)
+    workingDir = projectDir
+    // The generator is a single-file Java program (needs a JDK, which Loom requires anyway); it calls `git apply`.
+    commandLine "${System.getProperty('java.home')}/bin/java", 'tools/baritone/BaritoneSource.java',
+            'generate', '--out', baritoneGenerated.get().asFile.toString()
+}
+
+// Captured before anything is added to main's classpath, so the 'baritone' set can never see mod code.
+def minecraftCompileClasspath = sourceSets.main.compileClasspath
+
+sourceSets {
+    baritone {
+        java.setSrcDirs([baritoneGenerated.map { it.dir('src/api/java') }, baritoneGenerated.map { it.dir('src/main/java') }])
+        resources.setSrcDirs([baritoneGenerated.map { it.dir('resources') }])
+        compileClasspath += minecraftCompileClasspath
+    }
+    baritoneTest {
+        java.setSrcDirs([baritoneGenerated.map { it.dir('src/test/java') }])
+        compileClasspath += sourceSets.baritone.output + sourceSets.baritone.compileClasspath
+        runtimeClasspath += output + compileClasspath
+    }
+}
+
+dependencies {
+    // javax.annotation.Nonnull/Nullable (BetterBlockPos, BlockOptionalMeta, BlockStateInterfaceAccessWrapper)
+    baritoneCompileOnly 'com.google.code.findbugs:jsr305:3.0.2'
+
+    // same BOM as the mod's own tests (build.gradle)
+    baritoneTestImplementation platform('org.junit:junit-bom:6.1.3')
+    baritoneTestRuntimeOnly platform('org.junit:junit-bom:6.1.3')
+    baritoneTestImplementation 'junit:junit:4.13.2'
+    baritoneTestRuntimeOnly 'org.junit.vintage:junit-vintage-engine'
+    baritoneTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('compileBaritoneJava') { dependsOn generateBaritoneSources }
+tasks.named('compileBaritoneTestJava') { dependsOn generateBaritoneSources }
+tasks.named('processBaritoneResources') { dependsOn generateBaritoneSources }
+
+// Every mod-side source set sees the Baritone classes, and the mod jar contains them.
+sourceSets.matching { it.name in ['main', 'client', 'test', 'gametest'] }.configureEach { ss ->
+    ss.compileClasspath += sourceSets.baritone.output
+    ss.runtimeClasspath += sourceSets.baritone.output
+}
+
+loom.mods.named('minecraftai') { sourceSet sourceSets.baritone }
+
+jar { from sourceSets.baritone.output }
+
+tasks.register('baritoneTest', Test) {
+    group = 'verification'
+    description = "Runs upstream Baritone's own unit tests against the patched sources."
+    testClassesDirs = sourceSets.baritoneTest.output.classesDirs
+    classpath = sourceSets.baritoneTest.runtimeClasspath
+}
+tasks.named('check') { dependsOn 'baritoneTest' }
