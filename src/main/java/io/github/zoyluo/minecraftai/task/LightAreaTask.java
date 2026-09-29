@@ -30,6 +30,7 @@ public final class LightAreaTask extends AbstractTask {
 
     private final int radius;
     private final int maxTorches;
+    private final boolean skipSurfaceCells;
     // The fixed pool of observable, dark, placeable floor cells within radius. Computed exactly
     // once (in scan()), never rescanned mid-task: this is what keeps each decision cheap even
     // though it drives every subsequent torch choice via TorchPlacementPlanner's prediction.
@@ -48,8 +49,23 @@ public final class LightAreaTask extends AbstractTask {
     private int threshold;
 
     public LightAreaTask(int radius, int maxTorches) {
+        this(radius, maxTorches, false);
+    }
+
+    private LightAreaTask(int radius, int maxTorches, boolean skipSurfaceCells) {
         this.radius = Math.max(2, radius);
         this.maxTorches = Math.max(1, maxTorches);
+        this.skipSurfaceCells = skipSurfaceCells;
+    }
+
+    /**
+     * The lighting the danger watcher starts on its own (night top-up, dark-spot reflex): it never
+     * places a torch on, or counts as dark, a cell that is on the surface (see {@link SurfaceCheck}).
+     * Explicit requests (the tools, the command, task-board jobs) use the public constructor and light
+     * wherever they are asked to.
+     */
+    static LightAreaTask automatic(int radius, int maxTorches) {
+        return new LightAreaTask(radius, maxTorches, true);
     }
 
     @Override
@@ -120,6 +136,16 @@ public final class LightAreaTask extends AbstractTask {
                     cells.add(pos);
                     worldBlockLight.put(pos, world.getLightLevel(LightType.BLOCK, pos));
                 });
+        if (skipSurfaceCells) {
+            int before = cells.size();
+            Set<BlockPos> underRoof = TorchPlacementPlanner.withoutSurfaceCells(
+                    cells, cell -> SurfaceCheck.isOnSurface(world, cell));
+            cells.retainAll(underRoof);
+            worldBlockLight.keySet().retainAll(underRoof);
+            if (cells.size() < before) {
+                BotLog.action(bot, "light_area_surface_cells_skipped", "skipped", before - cells.size(), "kept", cells.size());
+            }
+        }
         pickNextTarget(bot);
     }
 

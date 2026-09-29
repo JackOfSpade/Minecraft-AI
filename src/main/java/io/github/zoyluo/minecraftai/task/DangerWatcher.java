@@ -37,7 +37,7 @@ public final class DangerWatcher {
     private final Map<UUID, Integer> nextEatAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextResupplyAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextNightAttemptTick = new ConcurrentHashMap<>();
-    private final Map<UUID, Integer> observedSleepCompletionTicks = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> nextSurfaceSkipLogTick = new ConcurrentHashMap<>();
     private final Map<UUID, TrapRecord> trapRecords = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextHuntAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, PosRecord> darkStuckRecords = new ConcurrentHashMap<>(); // Mitigation: trapped-in-the-dark detection
@@ -59,6 +59,8 @@ public final class DangerWatcher {
     private static final double DROP_RECOVERY_MAX_DISTANCE = 80.0D;
     private static final int DROP_RECOVERY_MAX_VERTICAL_DELTA = 24;
     private static final int SHELTER_RETRY_COOLDOWN = 100;
+    private static final int SURFACE_RECHECK_TICKS = 200;   // a bot that is on the surface is looked at again (it may have walked into a cave) after 10s
+    private static final int SURFACE_SKIP_LOG_TICKS = 600;  // at most one auto_light_skipped log per bot every 30s
     private static final double SHELTER_EPISODE_RADIUS = 4.0D;
     private static final double CLOSE_DEFENSIVE_HOSTILE_RADIUS = CombatCore.ATTACK_RANGE + 2.0D;
 
@@ -71,7 +73,7 @@ public final class DangerWatcher {
         nextEatAttemptTick.remove(id);
         nextResupplyAttemptTick.remove(id);
         nextNightAttemptTick.remove(id);
-        observedSleepCompletionTicks.remove(id);
+        nextSurfaceSkipLogTick.remove(id);
         trapRecords.remove(id);
         nextHuntAttemptTick.remove(id);
         darkStuckRecords.remove(id);
@@ -85,7 +87,7 @@ public final class DangerWatcher {
         nextEatAttemptTick.clear();
         nextResupplyAttemptTick.clear();
         nextNightAttemptTick.clear();
-        observedSleepCompletionTicks.clear();
+        nextSurfaceSkipLogTick.clear();
         trapRecords.clear();
         nextHuntAttemptTick.clear();
         darkStuckRecords.clear();
@@ -958,7 +960,7 @@ public final class DangerWatcher {
             return false;
         }
         MinecraftAiConfig.Night night = MinecraftAiConfig.get().night();
-        if (!night.autoSleep()
+        if (!night.autoLight()
                 || bot.getEntityWorld().isDay()
                 || active.isPresent()
                 || bot.getActionPack().hasActiveActions()) {
@@ -974,29 +976,41 @@ public final class DangerWatcher {
             return false;
         }
         int now = server.getTicks();
-        TaskStatus lastStatus = TaskManager.INSTANCE.status(bot);
-        if ("sleep".equals(lastStatus.name()) && lastStatus.state() == TaskState.COMPLETED) {
-            Integer observedElapsed = observedSleepCompletionTicks.putIfAbsent(bot.getUuid(), lastStatus.elapsedTicks());
-            if (observedElapsed == null || observedElapsed != lastStatus.elapsedTicks()) {
-                observedSleepCompletionTicks.put(bot.getUuid(), lastStatus.elapsedTicks());
-                nextNightAttemptTick.put(bot.getUuid(), now + 600);
-                return false;
-            }
-        }
         if (now < nextNightAttemptTick.getOrDefault(bot.getUuid(), 0)) {
             return false;
         }
-        // Sleeping is temporarily disabled (to be added later): don't sleep in a bed at night, only top up lighting with torches when available to prevent mob spawns.
-        Task task;
-        if (InventoryAction.countItem(bot, net.minecraft.item.Items.TORCH) > 0) {
-            task = new LightAreaTask(8, 8);
-        } else {
+        // Bots never sleep: whether the night is skipped is decided by the human players alone (vanilla
+        // sleep vote). At night an idle bot only tops up lighting with torches, to prevent mob spawns.
+        if (InventoryAction.countItem(bot, net.minecraft.item.Items.TORCH) <= 0) {
             nextNightAttemptTick.put(bot.getUuid(), now + 600);
             return false;
         }
+        if (skipAutoLightOnSurface(bot, now, "night_task")) {
+            return false;
+        }
+        Task task = LightAreaTask.automatic(8, 8);
         TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "night_task"));
         nextNightAttemptTick.put(bot.getUuid(), now + 600);
         BotLog.danger(bot, "night_task_started", "task", task.name());
+        return true;
+    }
+
+    /**
+     * Automatic lighting never happens on the surface (it would burn torches lighting the open air, or
+     * a spot under a tree canopy). Returns true, after backing the shared lighting throttle off a short
+     * while and logging a throttled {@code auto_light_skipped}, when the bot stands where the column
+     * above it is open to the sky (canopy and mushroom growth do not count as a roof, see
+     * {@link SurfaceCheck}). Explicit light_area requests never come through here.
+     */
+    private boolean skipAutoLightOnSurface(AIPlayerEntity bot, int now, String reflex) {
+        if (!SurfaceCheck.isOnSurface(bot.getEntityWorld(), bot.getBlockPos())) {
+            return false;
+        }
+        nextNightAttemptTick.put(bot.getUuid(), now + SURFACE_RECHECK_TICKS);
+        if (now >= nextSurfaceSkipLogTick.getOrDefault(bot.getUuid(), 0)) {
+            nextSurfaceSkipLogTick.put(bot.getUuid(), now + SURFACE_SKIP_LOG_TICKS);
+            BotLog.danger(bot, "auto_light_skipped", "reason", "surface", "reflex", reflex);
+        }
         return true;
     }
 
@@ -1008,7 +1022,7 @@ public final class DangerWatcher {
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
             return false;
         }
-        if (active.isPresent() || bot.getActionPack().hasActiveActions()) {
+        if (!MinecraftAiConfig.get().night().autoLight() || active.isPresent() || bot.getActionPack().hasActiveActions()) {
             return false;
         }
         // While a goal plan is in progress (active is briefly empty between steps), don't insert
@@ -1043,7 +1057,10 @@ public final class DangerWatcher {
         if (now < nextNightAttemptTick.getOrDefault(bot.getUuid(), 0)) {
             return false; // Reuses the night-time throttle to avoid dispatching on every scan
         }
-        TaskManager.INSTANCE.assign(bot, new LightAreaTask(8, 8),
+        if (skipAutoLightOnSurface(bot, now, "dark_area_light")) {
+            return false;
+        }
+        TaskManager.INSTANCE.assign(bot, LightAreaTask.automatic(8, 8),
                 TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "dark_area_light"));
         nextNightAttemptTick.put(bot.getUuid(), now + 600);
         BotLog.danger(bot, "dark_area_lit",

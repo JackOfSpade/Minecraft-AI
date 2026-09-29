@@ -47,18 +47,25 @@ final class MinecraftAiConfigPartialSectionBooleanTest {
     }
 
     @Test
-    void aPartialNightSectionKeepsTheShippedAutoSleepDefault() {
+    void aPartialNightSectionKeepsTheShippedAutoLightDefault() {
         MinecraftAiConfig.Night night = parse("{\"night\":{\"torchLightThreshold\":12}}").night();
 
-        assertTrue(night.autoSleep(), "omitting 'autoSleep' must not silently disable it");
-        assertTrue(MinecraftAiConfig.defaults().night().autoSleep(), "sanity check: shipped default is true");
+        assertTrue(night.autoLight(), "omitting 'autoLight' must not silently disable it");
+        assertTrue(MinecraftAiConfig.defaults().night().autoLight(), "sanity check: shipped default is true");
     }
 
     @Test
-    void explicitFalseAutoSleepIsHonoured() {
-        MinecraftAiConfig.Night night = parse("{\"night\":{\"autoSleep\":false}}").night();
+    void explicitFalseAutoLightIsHonoured() {
+        assertFalse(parse("{\"night\":{\"autoLight\":false}}").night().autoLight());
+    }
 
-        assertFalse(night.autoSleep());
+    @Test
+    void theLegacyAutoSleepKeyIsStillReadAndTheNewNameWinsWhenBothArePresent() {
+        assertFalse(parse("{\"night\":{\"autoSleep\":false}}").night().autoLight(),
+                "an existing config file that says autoSleep=false keeps switching the reflexes off");
+        assertTrue(parse("{\"night\":{\"autoSleep\":true}}").night().autoLight());
+        assertTrue(parse("{\"night\":{\"autoSleep\":false,\"autoLight\":true}}").night().autoLight());
+        assertFalse(parse("{\"night\":{\"autoLight\":false,\"autoSleep\":true}}").night().autoLight());
     }
 
     @Test

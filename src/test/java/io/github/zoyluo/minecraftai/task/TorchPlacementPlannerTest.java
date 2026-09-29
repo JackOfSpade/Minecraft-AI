@@ -129,6 +129,20 @@ final class TorchPlacementPlannerTest {
         return cells;
     }
 
+    @Test
+    void surfaceCellsAreDroppedFromTheLightingPoolWhenTheyArePassedThrough() {
+        BlockPos indoors = new BlockPos(0, 60, 0);
+        BlockPos mouth = new BlockPos(1, 64, 0);
+        BlockPos indoorsToo = new BlockPos(2, 60, 0);
+        Set<BlockPos> pool = new LinkedHashSet<>(List.of(indoors, mouth, indoorsToo));
+
+        Set<BlockPos> kept = TorchPlacementPlanner.withoutSurfaceCells(pool, cell -> cell.getY() >= 64);
+
+        assertEquals(List.of(indoors, indoorsToo), new ArrayList<>(kept), "order kept, surface cell dropped");
+        assertEquals(3, pool.size(), "the caller's pool is left alone");
+        assertTrue(TorchPlacementPlanner.withoutSurfaceCells(new LinkedHashSet<>(List.of(mouth)), cell -> true).isEmpty());
+    }
+
     private static Map<BlockPos, Integer> zeroLight(Set<BlockPos> cells) {
         Map<BlockPos, Integer> light = new HashMap<>();
         for (BlockPos cell : cells) {

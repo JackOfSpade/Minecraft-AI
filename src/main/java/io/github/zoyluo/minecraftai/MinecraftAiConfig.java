@@ -68,6 +68,13 @@ public record MinecraftAiConfig(
             root = root.deepCopy();
             root.remove("deepseek");
         }
+        JsonElement night = root.get("night");
+        if (night != null && night.isJsonObject()
+                && night.getAsJsonObject().has("autoLight") && night.getAsJsonObject().has("autoSleep")) {
+            // Same rule for the pre-rename night.autoSleep key: the new name wins.
+            root = root.deepCopy();
+            root.getAsJsonObject("night").remove("autoSleep");
+        }
         MinecraftAiConfig parsed = GSON.fromJson(root, MinecraftAiConfig.class);
         return parsed == null ? null : parsed.withProfile(profile).withDefaults();
     }
@@ -359,10 +366,17 @@ public record MinecraftAiConfig(
         }
     }
 
-    public record Night(Boolean autoSleep, int torchLightThreshold) {
+    /**
+     * {@code autoLight} gates both automatic torch-lighting reflexes of the danger watcher (the night
+     * top-up and the dark-spot reflex; neither ever lights the open surface). Its pre-rename JSON
+     * name was {@code autoSleep} (it never gated sleeping); that key is still read, and the new name
+     * wins when both are present.
+     */
+    public record Night(@SerializedName(value = "autoLight", alternate = {"autoSleep"}) Boolean autoLight,
+                        int torchLightThreshold) {
         Night withDefaults(Night defaults) {
             return new Night(
-                    boolOrDefault(autoSleep, defaults.autoSleep),
+                    boolOrDefault(autoLight, defaults.autoLight),
                     positiveOrDefault(torchLightThreshold, defaults.torchLightThreshold));
         }
     }

@@ -3,8 +3,10 @@ package io.github.zoyluo.minecraftai.task;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Pure, world-free torch placement selection used by {@link LightAreaTask}.
@@ -29,6 +31,21 @@ final class TorchPlacementPlanner {
     static final int TORCH_LUMINANCE = 14;
 
     private TorchPlacementPlanner() {
+    }
+
+    /**
+     * The cells of {@code cells} that may be lit or hold a torch when surface cells are off limits: a
+     * cell for which {@code isSurface} holds is dropped (an automatic lighting reflex never spends
+     * torches on the open surface, and does not count surface cells as darkness to fix).
+     */
+    static Set<BlockPos> withoutSurfaceCells(Set<BlockPos> cells, Predicate<BlockPos> isSurface) {
+        Set<BlockPos> kept = new LinkedHashSet<>();
+        for (BlockPos cell : cells) {
+            if (!isSurface.test(cell)) {
+                kept.add(cell);
+            }
+        }
+        return kept;
     }
 
     static int manhattanDistance(BlockPos a, BlockPos b) {
