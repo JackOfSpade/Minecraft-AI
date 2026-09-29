@@ -2,8 +2,8 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BucketAction;
 import io.github.zoyluo.minecraftai.action.BuildAction;
-import io.github.zoyluo.minecraftai.action.FarmAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -30,6 +30,7 @@ public final class IrrigateTask extends AbstractTask {
     private enum Phase {GOTO, DIG, PLACE, SETTLE, DONE}
 
     private static final int SETTLE_TICKS = 20; // After placing water, wait for the flow to spread and the two empty cells to convert into source blocks
+    private static final int PLACE_RETRIES = 60; // ticks of repositioning tolerated before the pour is reported failed
     private final BlockPos center;
     private final List<BlockPos> cells = new ArrayList<>(); // The 4 cells of the 2x2 area (same y layer)
     private final BlockMiner digMiner = new BlockMiner();
@@ -37,6 +38,8 @@ public final class IrrigateTask extends AbstractTask {
     private int digIndex;
     private boolean digFloorPlaced;
     private int settle;
+    private int placedPours;
+    private int placeAttempts;
     private String note = "";
 
     public IrrigateTask(BlockPos center) {
@@ -75,6 +78,8 @@ public final class IrrigateTask extends AbstractTask {
         phase = Phase.GOTO;
         digIndex = 0;
         digFloorPlaced = false;
+        placedPours = 0;
+        placeAttempts = 0;
     }
 
     @Override
@@ -146,7 +151,10 @@ public final class IrrigateTask extends AbstractTask {
             digFloorPlaced = true;
         }
         // Clear the pit interior to air to hold water: mined tick-by-tick based on real hardness/tool speed, not destroyed instantly.
-        if (world.getBlockState(cell).isAir()) {
+        // Only skip a cell that is already open when the miner is idle: the mining controller may break the cell
+        // between two task ticks, and skipping then would leave the miner holding this cell as a stale target
+        // (its next tick would report DONE for the wrong cell and silently skip the following one).
+        if (digMiner.target() == null && world.getBlockState(cell).isAir()) {
             digIndex++;
             digFloorPlaced = false;
             return;
@@ -165,19 +173,38 @@ public final class IrrigateTask extends AbstractTask {
         }
     }
 
+    /**
+     * Pours the two diagonal cells (cells[0] then cells[3]) with the real bucket, one pour per tick: the
+     * water bucket is aimed at the pit floor's top face (a support that must be visible and inside reach),
+     * so vanilla's bucket rules run and the bucket becomes empty by itself. The other two cells (cells[1]/[2])
+     * are each adjacent to 2 source blocks and automatically become sources after SETTLE. A pour refused for
+     * reach or view walks to a standable cell beside the target and retries a bounded number of times.
+     */
     private void place(AIPlayerEntity bot) {
-        // Place water in the two diagonal cells (cells[0] and cells[3]); the other two cells (cells[1]/[2]) are each adjacent to 2 source blocks and automatically become source blocks after SETTLE.
-        ActionResult a = FarmAction.placeWater(bot, cells.get(0));
-        if (a.isFailed()) {
-            fail("place_water_failed:" + a.reason());
+        BlockPos cell = cells.get(placedPours == 0 ? 0 : 3);
+        ActionResult pour = BucketAction.placeWater(bot, cell.below(), Direction.UP);
+        if (pour.isSuccess()) {
+            placedPours++;
+            placeAttempts = 0;
+            if (placedPours >= 2) {
+                phase = Phase.SETTLE;
+            }
             return;
         }
-        ActionResult b = FarmAction.placeWater(bot, cells.get(3));
-        if (b.isFailed()) {
-            fail("place_water_failed:" + b.reason());
+        String reason = pour.reason() == null ? "" : pour.reason();
+        boolean positional = reason.equals("water_placement_not_visible")
+                || reason.equals("water_support_out_of_reach")
+                || reason.equals("water_support_face_not_visible");
+        if (!positional || ++placeAttempts > PLACE_RETRIES) {
+            fail("place_water_failed:" + reason);
             return;
         }
-        phase = Phase.SETTLE;
+        note = "repositioning:" + reason;
+        BlockPos stand = adjacentStand(bot, cell);
+        if (stand != null && bot.getActionPack().isPathExecutorIdle()
+                && !bot.blockPosition().equals(stand)) {
+            bot.getActionPack().startPathTo(stand);
+        }
     }
 
     private void settle() {

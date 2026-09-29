@@ -2,22 +2,33 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.OptionalInt;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.HoeItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.BonemealableBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+/**
+ * Farming as a player does it: every world change is a real vanilla item use or block break, so the
+ * hoe wears, seeds obey the light and support rules, and bone meal is consumed by the item itself.
+ * Each use is preceded by the exact-face (or exact-outline) ray proof inside reach; nothing here
+ * writes blocks or edits the inventory.
+ */
 public final class FarmAction {
     private FarmAction() {
     }
 
+    /** Tills the dirt-family block {@code ground} by using a hoe on its top face. */
     public static ActionResult till(AIPlayerEntity bot, BlockPos ground) {
         ServerLevel world = bot.level();
         if (!isTillable(world.getBlockState(ground)) || !world.getBlockState(ground.above()).isAir()) {
@@ -28,21 +39,43 @@ public final class FarmAction {
             return ActionResult.failed("missing_hoe");
         }
         InventoryAction.equipFromSlot(bot, hoeSlot.getAsInt());
-        world.setBlock(ground, Blocks.FARMLAND.defaultBlockState(), Block.UPDATE_ALL);
-        BotLog.action(bot, "till", "pos", ground);
+        BlockState before = world.getBlockState(ground);
+        ActionResult used = BuildAction.useItemOnFace(bot, ground, Direction.UP, InteractionHand.MAIN_HAND);
+        if (used.isFailed()) {
+            return ActionResult.failed("till_" + used.reason());
+        }
+        if (world.getBlockState(ground).equals(before)) {
+            return ActionResult.failed("till_no_effect");
+        }
+        BotLog.action(bot, "till", "pos", ground, "result", world.getBlockState(ground).getBlock());
         return ActionResult.SUCCESS;
     }
 
+    /** Plants {@code seed} on {@code farmland} by using it on the farmland's top face. */
     public static ActionResult plant(AIPlayerEntity bot, BlockPos farmland, Item seed, Block crop) {
         ServerLevel world = bot.level();
-        if (!world.getBlockState(farmland).is(Blocks.FARMLAND) || !world.getBlockState(farmland.above()).isAir()) {
+        BlockPos cropPos = farmland.above();
+        if (!world.getBlockState(farmland).is(Blocks.FARMLAND) || !world.getBlockState(cropPos).isAir()) {
             return ActionResult.failed("not_empty_farmland");
         }
-        if (!InventoryAction.removeItems(bot, seed, 1)) {
+        // The seed's own placement rule (crops need light >= 8): checked up front so a refusal never
+        // reaches a consumable seed item (a carrot or potato would otherwise start being eaten).
+        if (!crop.defaultBlockState().canSurvive(world, cropPos)) {
+            return ActionResult.failed("too_dark_or_unsupported");
+        }
+        OptionalInt slot = InventoryAction.findItem(bot, seed);
+        if (slot.isEmpty()) {
             return ActionResult.failed("missing " + seed + " x1");
         }
-        world.setBlock(farmland.above(), crop.defaultBlockState(), Block.UPDATE_ALL);
-        BotLog.action(bot, "plant", "pos", farmland.above(), "seed", seed, "crop", crop);
+        InventoryAction.equipFromSlot(bot, slot.getAsInt());
+        ActionResult used = BuildAction.useItemOnFace(bot, farmland, Direction.UP, InteractionHand.MAIN_HAND);
+        if (used.isFailed()) {
+            return ActionResult.failed("plant_" + used.reason());
+        }
+        if (!world.getBlockState(cropPos).is(crop)) {
+            return ActionResult.failed("plant_no_effect");
+        }
+        BotLog.action(bot, "plant", "pos", cropPos, "seed", seed, "crop", crop);
         return ActionResult.SUCCESS;
     }
 
@@ -51,29 +84,53 @@ public final class FarmAction {
         return state.getBlock() instanceof CropBlock cropBlock && cropBlock.isMaxAge(state);
     }
 
-    public static ActionResult harvest(AIPlayerEntity bot, BlockPos cropPos) {
-        ServerLevel world = bot.level();
-        if (!isMature(world, cropPos)) {
+    /**
+     * Click-time proof for breaking a ripe crop: it is still ripe, inside the physical block
+     * interaction reach, and its outline is actually visible. The break itself is a real mining
+     * action (BlockMiner), so tools, swing and the vanilla break path all apply.
+     */
+    public static ActionResult harvestProof(AIPlayerEntity bot, BlockPos cropPos) {
+        if (!isMature(bot.level(), cropPos)) {
             return ActionResult.failed("not_mature");
         }
-        world.destroyBlock(cropPos, true, bot);
-        BotLog.action(bot, "harvest", "pos", cropPos);
+        if (!bot.isWithinBlockInteractionRange(cropPos, 0.0D)) {
+            return ActionResult.failed("out_of_reach");
+        }
+        if (!ObservableWorldQuery.canObserveFarmCell(bot, cropPos)) {
+            return ActionResult.failed("crop_not_visible");
+        }
         return ActionResult.SUCCESS;
     }
 
-    // Irrigation: place a water source at pos using a water bucket (simplified: directly setBlockState to a WATER source + inventory WATER_BUCKET→BUCKET).
-    public static ActionResult placeWater(AIPlayerEntity bot, BlockPos pos) {
+    /** Whether the crop at {@code cropPos} can still grow and accept bone meal (vanilla's own rule). */
+    public static boolean isBonemealTarget(ServerLevel world, BlockPos cropPos) {
+        BlockState state = world.getBlockState(cropPos);
+        return state.getBlock() instanceof CropBlock
+                && state.getBlock() instanceof BonemealableBlock bonemealable
+                && bonemealable.isValidBonemealTarget(world, cropPos, state);
+    }
+
+    /** Applies one bone meal to the growing crop at {@code cropPos} with the item's own use. */
+    public static ActionResult boneMeal(AIPlayerEntity bot, BlockPos cropPos) {
         ServerLevel world = bot.level();
-        BlockState at = world.getBlockState(pos);
-        if (!at.isAir() && !at.is(Blocks.WATER) && (!world.getFluidState(pos).isEmpty() || !at.canBeReplaced())) {
-            return ActionResult.failed("not_empty"); // target is occupied by a solid block or a non-water fluid (e.g. lava); water cannot be placed
+        if (!isBonemealTarget(world, cropPos)) {
+            return ActionResult.failed("not_a_growing_crop");
         }
-        if (!InventoryAction.removeItems(bot, Items.WATER_BUCKET, 1)) {
-            return ActionResult.failed("missing_water_bucket");
+        OptionalInt slot = InventoryAction.findItem(bot, Items.BONE_MEAL);
+        if (slot.isEmpty()) {
+            return ActionResult.failed("missing_bone_meal");
         }
-        world.setBlock(pos, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET, 1));
-        BotLog.action(bot, "place_water", "pos", pos);
+        InventoryAction.equipFromSlot(bot, slot.getAsInt());
+        BlockState before = world.getBlockState(cropPos);
+        int countBefore = InventoryAction.countItem(bot, Items.BONE_MEAL);
+        ActionResult used = BuildAction.useItemOnCell(bot, cropPos, InteractionHand.MAIN_HAND);
+        if (used.isFailed()) {
+            return ActionResult.failed("bone_meal_" + used.reason());
+        }
+        BotLog.action(bot, "bone_meal", "pos", cropPos,
+                "grew", !world.getBlockState(cropPos).equals(before),
+                "left", InventoryAction.countItem(bot, Items.BONE_MEAL),
+                "used", countBefore - InventoryAction.countItem(bot, Items.BONE_MEAL));
         return ActionResult.SUCCESS;
     }
 

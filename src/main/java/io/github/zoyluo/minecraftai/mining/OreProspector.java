@@ -76,7 +76,20 @@ public final class OreProspector {
                              Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
         boolean hiddenScanAllowed = CapabilityRuntime.decide(
                 bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_prospector").allowed();
-        return new Scan(bot, range, match, posFilter, hiddenScanAllowed);
+        return new Scan(bot, range, match, posFilter, hiddenScanAllowed, false);
+    }
+
+    /**
+     * Like {@link #begin}, but a candidate cell counts as seen when {@link ObservableWorldQuery#canObserveFarmCell}
+     * says the bot can see its real outline. Crops have an outline but no collider, so the collider-ray
+     * face test of {@link #begin} can never see them; farm scans (village crop raiding) use this instead.
+     * The capability decision and the search cube are otherwise identical.
+     */
+    public static Scan beginFarmCells(AIPlayerEntity bot, int range,
+                                      Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
+        boolean hiddenScanAllowed = CapabilityRuntime.decide(
+                bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_prospector").allowed();
+        return new Scan(bot, range, match, posFilter, hiddenScanAllowed, true);
     }
 
     /**
@@ -95,6 +108,7 @@ public final class OreProspector {
         private final Predicate<BlockState> match;
         private final Predicate<BlockPos> posFilter;
         private final boolean raw;
+        private final boolean farmCells;
         private final int startTick;
         private BlockPos best;
         private double bestDist = Double.MAX_VALUE;
@@ -128,7 +142,8 @@ public final class OreProspector {
         private int cursorSY;
 
         private Scan(AIPlayerEntity bot, int requestedRange, Predicate<BlockState> match,
-                     Predicate<BlockPos> posFilter, boolean hiddenScanAllowed) {
+                     Predicate<BlockPos> posFilter, boolean hiddenScanAllowed, boolean farmCells) {
+            this.farmCells = farmCells;
             this.bot = bot;
             this.world = bot.level();
             this.origin = bot.blockPosition();
@@ -235,7 +250,9 @@ public final class OreProspector {
                         }
                         pos.set(cursorX, cursorY, z);
                         if ((posFilter == null || posFilter.test(pos))
-                                && ObservableWorldQuery.canObserveBlock(bot, pos)) {
+                                && (farmCells
+                                ? ObservableWorldQuery.canObserveFarmCell(bot, pos)
+                                : ObservableWorldQuery.canObserveBlock(bot, pos))) {
                             BlockState state = world.getBlockState(pos);
                             if (match.test(state)) {
                                 double distance = origin.distSqr(pos);

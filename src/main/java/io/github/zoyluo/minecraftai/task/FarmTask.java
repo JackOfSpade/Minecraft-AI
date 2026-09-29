@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.ContainerAction;
 import io.github.zoyluo.minecraftai.action.FarmAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
@@ -8,10 +9,13 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -28,6 +32,7 @@ public final class FarmTask extends AbstractTask {
         TILL,
         PLANT,
         HARVEST,
+        PICKUP,
         NEXT,
         DEPOSIT,
         DEPOSIT_GOTO,
@@ -38,6 +43,12 @@ public final class FarmTask extends AbstractTask {
     private static final int DEPOSIT_RADIUS = 8;
     private static final int DEPOSIT_INTERVAL_ACTIONS = 16;
     private static final double REACH_SQUARED = 20.25D;
+    private static final int PICKUP_BUDGET_TICKS = 100;   // walking over harvest drops before moving on
+    private static final double PICKUP_RADIUS = 8.0D;
+    private static final int WAIT_SURVEY_INTERVAL = 10;   // while waiting for maturity, re-survey this often
+    private static final int BONE_MEAL_INTERVAL = 4;      // ticks between bone meal clicks
+    private static final int MAX_TILL_ATTEMPTS = 3;       // coarse dirt and rooted dirt need a second click
+    private static final int CROP_LIGHT_MIN = 8;          // vanilla crop rule: raw brightness of the crop cell
 
     private final BlockPos areaCenter;
     private final int radius;
@@ -52,6 +63,9 @@ public final class FarmTask extends AbstractTask {
     private int produceBaseline;
     private final List<FarmTarget> targets = new ArrayList<>();
     private final List<BlockPos> depositContainers = new ArrayList<>();
+    private final BlockMiner harvestMiner = new BlockMiner();
+    private final Set<BlockPos> failedCells = new HashSet<>(); // grounds whose click proof failed: not retried this run
+    private final List<BlockPos> immatureCrops = new ArrayList<>();
     private Phase phase = Phase.SURVEY;
     private FarmTarget current;
     private BlockPos basePos;
@@ -60,6 +74,11 @@ public final class FarmTask extends AbstractTask {
     private int completedActions;
     private int lastDepositActionCount;
     private int waitTicks;
+    private int pickupTicks;
+    private int tillAttempts;
+    private int lastWaitSurvey = -WAIT_SURVEY_INTERVAL;
+    private int lastBoneMeal = -BONE_MEAL_INTERVAL;
+    private int darkCells;
     private boolean waitingForMaturity; // After planting, stay put waiting for crops to mature naturally (quantity-limited mode); not stuck
     private String note = "";
 
@@ -107,6 +126,13 @@ public final class FarmTask extends AbstractTask {
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.SURVEY;
         lastDepositActionCount = completedActions;
+        failedCells.clear();
+        immatureCrops.clear();
+        harvestMiner.cancel(bot);
+        pickupTicks = 0;
+        tillAttempts = 0;
+        lastWaitSurvey = -WAIT_SURVEY_INTERVAL;
+        lastBoneMeal = -BONE_MEAL_INTERVAL;
         waitingForMaturity = false;
         produceBaseline = produceItem == null ? 0 : InventoryAction.countItem(bot, produceItem);
     }
@@ -114,7 +140,9 @@ public final class FarmTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         // P3: quantity-limited mode — complete as soon as the target produce count is reached (checked before any other phase logic).
+        // (Not mid-harvest: the picked-up drops and the replant of the cell just harvested finish first.)
         if (produceItem != null
+                && phase != Phase.HARVEST && phase != Phase.PICKUP
                 && InventoryAction.countItem(bot, produceItem) - produceBaseline >= targetHarvest) {
             complete();
             return;
@@ -141,6 +169,7 @@ public final class FarmTask extends AbstractTask {
             case TILL -> till(bot);
             case PLANT -> plant(bot);
             case HARVEST -> harvest(bot);
+            case PICKUP -> pickup(bot);
             case NEXT -> next(bot);
             case DEPOSIT -> prepareDeposit(bot);
             case DEPOSIT_GOTO -> goToDepositContainer(bot);
@@ -150,14 +179,24 @@ public final class FarmTask extends AbstractTask {
     }
 
     private void survey(AIPlayerEntity bot) {
+        if (waitingForMaturity && elapsed - lastWaitSurvey < WAIT_SURVEY_INTERVAL) {
+            // Between waiting surveys only the bone meal clicks (which have their own rate limit) run.
+            boneMealStep(bot);
+            return;
+        }
+        lastWaitSurvey = elapsed;
         targets.clear();
         current = null;
+        darkCells = 0;
         ServerLevel world = bot.level();
         boolean hasSeeds = !harvestOnly && InventoryAction.countItem(bot, seed) > 0;
+        // A crop has an outline but no collider and interior farmland is 15/16 high, so the collider-ray face test of
+        // canObserveBlock can never see an existing field: farm cells are judged by their real outline instead.
         BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
                 .map(BlockPos::immutable)
-                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
-                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.above()))
+                .filter(pos -> !failedCells.contains(pos))
+                .filter(pos -> ObservableWorldQuery.canObserveFarmCell(bot, pos)
+                        || ObservableWorldQuery.canObserveFarmCell(bot, pos.above()))
                 .forEach(pos -> addTargetIfUseful(world, pos, hasSeeds));
         targets.sort(Comparator.comparingDouble(pos -> pos.ground().distSqr(bot.blockPosition())));
         if (targets.isEmpty()) {
@@ -175,11 +214,19 @@ public final class FarmTask extends AbstractTask {
             // if crops never mature we won't wait forever.
             boolean needMore = produceItem != null
                     && InventoryAction.countItem(bot, produceItem) - produceBaseline < targetHarvest;
-            if (!harvestOnly && needMore && hasImmatureCrops(bot, world)) {
+            collectImmatureCrops(bot, world);
+            if (!harvestOnly && needMore && !immatureCrops.isEmpty()) {
                 waitingForMaturity = true;
-                return; // Stay in SURVEY and keep waiting for maturity next tick (don't switch to DONE); exempt from StuckWatcher while isWaiting()
+                boneMealStep(bot);
+                return; // Stay in SURVEY and keep waiting for maturity (don't switch to DONE); exempt from StuckWatcher while isWaiting()
             }
             waitingForMaturity = false;
+            if (darkCells > 0 && needMore && completedActions == 0) {
+                // Crops need light >= 8 at the crop cell (vanilla rule); seeds cannot be planted here, and
+                // waiting would only burn the whole quota timeout.
+                fail("farm_area_too_dark cells=" + darkCells);
+                return;
+            }
             if (keepTending && hasDepositItems(bot)) {
                 phase = Phase.DEPOSIT;
             } else {
@@ -203,13 +250,15 @@ public final class FarmTask extends AbstractTask {
         if (!hasSeeds) {
             return;
         }
-        if (world.getBlockState(ground).is(Blocks.FARMLAND)) {
-            targets.add(new FarmTarget(ground, TargetAction.PLANT));
+        boolean farmland = world.getBlockState(ground).is(Blocks.FARMLAND);
+        if (!farmland && !FarmAction.isTillable(world.getBlockState(ground))) {
             return;
         }
-        if (FarmAction.isTillable(world.getBlockState(ground))) {
-            targets.add(new FarmTarget(ground, TargetAction.TILL_PLANT));
+        if (world.getRawBrightness(cropPos, 0) < CROP_LIGHT_MIN) {
+            darkCells++; // a seed placed here would be refused (and could never grow)
+            return;
         }
+        targets.add(new FarmTarget(ground, farmland ? TargetAction.PLANT : TargetAction.TILL_PLANT));
     }
 
     private void next(AIPlayerEntity bot) {
@@ -262,9 +311,21 @@ public final class FarmTask extends AbstractTask {
         ActionResult result = FarmAction.till(bot, current.ground());
         if (result.isFailed()) {
             note = result.reason();
+            failedCells.add(current.ground());
             phase = Phase.NEXT;
             return;
         }
+        // A hoe turns dirt/grass into farmland in one click, but coarse and rooted dirt only become plain
+        // dirt (vanilla), which needs a second click.
+        if (!bot.level().getBlockState(current.ground()).is(Blocks.FARMLAND)) {
+            if (++tillAttempts >= MAX_TILL_ATTEMPTS) {
+                failedCells.add(current.ground());
+                tillAttempts = 0;
+                phase = Phase.NEXT;
+            }
+            return;
+        }
+        tillAttempts = 0;
         phase = Phase.PLANT;
     }
 
@@ -277,6 +338,7 @@ public final class FarmTask extends AbstractTask {
         ActionResult result = FarmAction.plant(bot, current.ground(), seed, crop);
         if (result.isFailed()) {
             note = result.reason();
+            failedCells.add(current.ground());
         } else {
             completedActions++;
         }
@@ -304,7 +366,7 @@ public final class FarmTask extends AbstractTask {
         depositContainers.clear();
         BlockPos.betweenClosedStream(basePos.offset(-DEPOSIT_RADIUS, -3, -DEPOSIT_RADIUS), basePos.offset(DEPOSIT_RADIUS, 4, DEPOSIT_RADIUS))
                 .map(BlockPos::immutable)
-                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(depositContainers::add);
         depositContainers.sort(Comparator
@@ -364,7 +426,7 @@ public final class FarmTask extends AbstractTask {
     private void depositTransfer(AIPlayerEntity bot) {
         if (depositContainerPos == null
                 || bot.getEyePosition().distanceToSqr(depositContainerPos.getCenter()) > REACH_SQUARED
-                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, depositContainerPos)) {
+                || !ObservableWorldQuery.canObserveBlock(bot, depositContainerPos)) {
             phase = Phase.DEPOSIT;
             return;
         }
@@ -392,30 +454,131 @@ public final class FarmTask extends AbstractTask {
     }
 
     private void harvest(AIPlayerEntity bot) {
-        ActionResult result = FarmAction.harvest(bot, current.ground().above());
-        if (result.isFailed()) {
-            note = result.reason();
+        BlockPos cropPos = current.ground().above();
+        if (harvestMiner.target() == null) {
+            // Click-time proof (still ripe, inside reach, outline visible), then a real break: the tick-paced
+            // BlockMiner drives the same mining controller every other digging task uses.
+            ActionResult proof = FarmAction.harvestProof(bot, cropPos);
+            if (proof.isFailed()) {
+                note = proof.reason();
+                failedCells.add(current.ground());
+                phase = Phase.NEXT;
+                return;
+            }
+            harvestMiner.begin(bot, cropPos);
+        }
+        BlockMiner.Status status = harvestMiner.tick(bot);
+        if (status == BlockMiner.Status.MINING) {
+            return;
+        }
+        if (status == BlockMiner.Status.FAILED) {
+            note = "harvest_failed:" + harvestMiner.failureReason();
+            failedCells.add(current.ground());
             phase = Phase.NEXT;
             return;
         }
         completedActions++;
-        // The harvested produce/seed drops as an on-ground ItemEntity (FarmAction.harvest breaks the block
-        // with dropResources=true, which does not go straight into the inventory). The bot harvests from reach
-        // distance (<= 4.5 blocks), so drops more than 1 block from its feet are out of vanilla's automatic
-        // pickup range -- forced pickup is required, otherwise countItem(produce) never increases and the
-        // harvest/farm goal never completes (farm_wheat_from_scratch testing timed out with 0 wheat in the
-        // inventory). forcePickup bypasses the drop's 10-tick pickup delay so it enters the inventory this
-        // same tick (same fix approach as DigDownTask).
-        HarvestCore.forcePickupNearbyAnyOf(bot, java.util.Set.of(harvestItem(), seed), 5.0D, 4.0D);
-        if (!harvestOnly && InventoryAction.countItem(bot, seed) > 0) {
-            ActionResult plantResult = FarmAction.plant(bot, current.ground(), seed, crop);
-            if (plantResult.isFailed()) {
-                note = "replant_failed:" + plantResult.reason();
-            }
-        } else if (!harvestOnly) {
-            note = "replant_skipped:missing " + seed + " x1";
+        BotLog.action(bot, "harvest", "pos", cropPos);
+        // The harvested produce/seed drops as an on-ground ItemEntity that does not go straight into the
+        // inventory. The bot harvests from reach distance (<= 4.5 blocks), so the drops are usually out of
+        // vanilla's automatic pickup range. Forced pickup (FORCED_PICKUP) is denied in strict_survival, so
+        // the PICKUP phase walks over the observed drops like a player would.
+        pickupTicks = 0;
+        phase = Phase.PICKUP;
+    }
+
+    private Set<Item> dropItems() {
+        return Set.of(harvestItem(), seed);
+    }
+
+    /**
+     * Walks over the observed harvest drops (produce and seeds) within a short radius until none is left or
+     * the budget is spent, then replants the harvested cell if seeds are on hand. Forced pickup still runs
+     * first when the profile allows it (HarvestCore.walkOverDrops).
+     */
+    private void pickup(AIPlayerEntity bot) {
+        pickupTicks++;
+        boolean dropsLeft = HarvestCore.walkOverDrops(bot, dropItems(), PICKUP_RADIUS);
+        if (dropsLeft && pickupTicks <= PICKUP_BUDGET_TICKS) {
+            return;
         }
+        bot.getActionPack().stopMovement();
+        if (dropsLeft) {
+            note = "pickup_budget_spent";
+        }
+        replantHarvestedCell(bot);
         phase = Phase.NEXT;
+    }
+
+    private void replantHarvestedCell(AIPlayerEntity bot) {
+        if (harvestOnly) {
+            return;
+        }
+        if (InventoryAction.countItem(bot, seed) <= 0) {
+            note = "replant_skipped:missing " + seed + " x1";
+            return;
+        }
+        ActionResult plantResult = FarmAction.plant(bot, current.ground(), seed, crop);
+        if (plantResult.isFailed()) {
+            note = "replant_failed:" + plantResult.reason();
+        }
+    }
+
+    /** Observed, still-growing crops of this task's crop within the area (a snapshot for the waiting loop). */
+    private void collectImmatureCrops(AIPlayerEntity bot, ServerLevel world) {
+        immatureCrops.clear();
+        BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
+                .map(BlockPos::immutable)
+                .filter(ground -> world.getBlockState(ground.above()).is(crop)
+                        && !FarmAction.isMature(world, ground.above()))
+                .filter(ground -> ObservableWorldQuery.canObserveFarmCell(bot, ground.above())
+                        || ObservableWorldQuery.canObserveFarmCell(bot, ground))
+                .forEach(ground -> immatureCrops.add(ground.above()));
+    }
+
+    /**
+     * While waiting for maturity: with bone meal in the inventory, click the nearest observed growing crop
+     * (vanilla item use: reach and outline proof, the item is consumed by the item itself), one click per
+     * BONE_MEAL_INTERVAL ticks. Out of reach, it walks next to the crop first. Without bone meal the wait
+     * stays natural.
+     */
+    private void boneMealStep(AIPlayerEntity bot) {
+        if (InventoryAction.countItem(bot, Items.BONE_MEAL) <= 0 || immatureCrops.isEmpty()
+                || elapsed - lastBoneMeal < BONE_MEAL_INTERVAL) {
+            return;
+        }
+        ServerLevel world = bot.level();
+        BlockPos target = null;
+        double best = Double.MAX_VALUE;
+        for (BlockPos cropPos : immatureCrops) {
+            if (!FarmAction.isBonemealTarget(world, cropPos)) {
+                continue;
+            }
+            double distance = bot.getEyePosition().distanceToSqr(cropPos.getCenter());
+            if (distance < best) {
+                best = distance;
+                target = cropPos;
+            }
+        }
+        if (target == null) {
+            return;
+        }
+        if (!bot.isWithinBlockInteractionRange(target, 0.0D)) {
+            BlockPos stand = adjacentStandPos(bot, target.below());
+            if (stand != null && bot.getActionPack().isPathExecutorIdle()) {
+                bot.getActionPack().startPathTo(stand);
+            }
+            return;
+        }
+        bot.getActionPack().stopMovement();
+        lastBoneMeal = elapsed;
+        ActionResult result = FarmAction.boneMeal(bot, target);
+        if (result.isFailed()) {
+            note = result.reason();
+            immatureCrops.remove(target); // not clickable from here: leave it to the natural wait
+            return;
+        }
+        lastWaitSurvey = -WAIT_SURVEY_INTERVAL; // re-survey next tick: the crop may be ripe now
     }
 
     private void done(AIPlayerEntity bot) {
@@ -423,6 +586,7 @@ public final class FarmTask extends AbstractTask {
             waitTicks++;
             if (waitTicks >= 100) {
                 waitTicks = 0;
+                failedCells.clear();
                 phase = Phase.SURVEY;
             }
             return;
@@ -436,18 +600,6 @@ public final class FarmTask extends AbstractTask {
         // crops to grow), so it's exempt from being wrongly flagged by StuckWatcher; a genuine stall is
         // caught by the 12000t quota timeout as the backstop.
         return (keepTending && phase == Phase.DONE) || waitingForMaturity;
-    }
-
-    // Whether the area has any of this crop that's "planted but not yet mature" -- if so it's worth staying
-    // to wait for maturity instead of leaving right after planting (fixes real_wheat harvest=0).
-    private boolean hasImmatureCrops(AIPlayerEntity bot, ServerLevel world) {
-        return BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
-                .filter(ground -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, ground)
-                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, ground.above()))
-                .anyMatch(ground -> {
-                    BlockPos cropPos = ground.above();
-                    return world.getBlockState(cropPos).is(crop) && !FarmAction.isMature(world, cropPos);
-                });
     }
 
     private boolean hasDepositItems(AIPlayerEntity bot) {

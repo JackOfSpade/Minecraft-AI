@@ -170,6 +170,73 @@ public final class ObservableWorldQuery {
                 || (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos));
     }
 
+    /**
+     * Farm-cell observation: whether the bot's own eye can see the real outline of a crop or farmland
+     * cell. The generic block query aims collider rays at fixed full-cube face points, which misses
+     * crops (they have an outline but no collider) and the top of farmland (15/16 high, so the fixed
+     * point at y+0.999 lies above the shape). This aims OUTLINE rays at points inside the state's real
+     * shape (its top centre and four inset top points) and needs the exact ray to strike this cell, so
+     * a crop hidden behind a wall or a taller crop stays hidden. An empty (non-shaped) cell falls back
+     * to {@link #canObserveCell}'s policy. Same perception radius and capability gate as the other
+     * observation predicates; it sees nothing a player standing at the bot's eye could not see.
+     */
+    public static boolean canObserveFarmCell(AIPlayerEntity bot, BlockPos pos) {
+        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                "observable_farm_cell_query").allowed()) {
+            return true;
+        }
+        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        double radiusSquared = (double) radius * radius;
+        Vec3 eye = bot.getEyePosition();
+        if (eye.distanceToSqr(pos.getCenter()) > (radius + 1.0D) * (radius + 1.0D)) {
+            return false;
+        }
+        var world = bot.level();
+        java.util.List<Vec3> samples = shapeTopSamples(world, pos);
+        if (samples.isEmpty()) {
+            return canObserveCellWithinAfterPolicy(bot, pos, 0);
+        }
+        for (Vec3 endpoint : samples) {
+            if (eye.distanceToSqr(endpoint) > radiusSquared) {
+                continue;
+            }
+            BlockHitResult hit = world.clip(new ClipContext(
+                    eye, endpoint, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, bot));
+            if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Aim points inside a cell's real outline shape: the top centre and four points inset by a quarter
+     * of the shape's span, 0.01 below its top face (an inside point, so a ray to it strikes the shape
+     * itself). Empty when the cell has no outline (air). Crops and farmland have different heights, so
+     * the points follow the actual shape rather than a fixed unit-cube face.
+     */
+    public static java.util.List<Vec3> shapeTopSamples(net.minecraft.world.level.BlockGetter world, BlockPos pos) {
+        var shape = world.getBlockState(pos).getShape(world, pos);
+        if (shape.isEmpty()) {
+            return java.util.List.of();
+        }
+        double minX = pos.getX() + shape.min(net.minecraft.core.Direction.Axis.X);
+        double maxX = pos.getX() + shape.max(net.minecraft.core.Direction.Axis.X);
+        double minZ = pos.getZ() + shape.min(net.minecraft.core.Direction.Axis.Z);
+        double maxZ = pos.getZ() + shape.max(net.minecraft.core.Direction.Axis.Z);
+        double topY = pos.getY() + shape.max(net.minecraft.core.Direction.Axis.Y) - 0.01D;
+        double centerX = (minX + maxX) * 0.5D;
+        double centerZ = (minZ + maxZ) * 0.5D;
+        double spanX = (maxX - minX) * 0.25D;
+        double spanZ = (maxZ - minZ) * 0.25D;
+        return java.util.List.of(
+                new Vec3(centerX, topY, centerZ),
+                new Vec3(centerX - spanX, topY, centerZ - spanZ),
+                new Vec3(centerX + spanX, topY, centerZ - spanZ),
+                new Vec3(centerX - spanX, topY, centerZ + spanZ),
+                new Vec3(centerX + spanX, topY, centerZ + spanZ));
+    }
+
     public static boolean canObserveEntity(AIPlayerEntity bot, Entity entity) {
         if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                 "observable_entity_query").allowed()) {

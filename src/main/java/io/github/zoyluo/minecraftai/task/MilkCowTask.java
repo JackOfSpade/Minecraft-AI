@@ -13,7 +13,6 @@ import net.minecraft.world.item.Items;
  */
 public final class MilkCowTask extends AbstractTask {
     private static final double SEARCH = 32.0D;
-    private static final double MILK_RANGE = 3.5D;
     private static final int NO_PROGRESS_LIMIT = 600;
 
     private final int target;
@@ -67,7 +66,7 @@ public final class MilkCowTask extends AbstractTask {
             finishOrFail("no_cow");
             return;
         }
-        if (bot.getEyePosition().distanceTo(cow.getEyePosition()) <= MILK_RANGE) {
+        if (bot.isWithinEntityInteractionRange(cow, 0.0D)) {
             bot.getActionPack().stopMovement();
             ActionResult result = MilkCowAction.milk(bot);
             if (result.isSuccess()) {

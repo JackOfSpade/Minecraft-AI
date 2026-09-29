@@ -345,6 +345,31 @@ public final class HarvestCore {
         });
     }
 
+    /**
+     * One tick of a plain walk-over pickup for drops lying in open ground (a harvested crop field): forced
+     * pickup first when the profile allows it, otherwise a direct walk (collision-driven, the same controller
+     * a player-like walk uses) toward the nearest observed, settled drop of {@code items} within
+     * {@code radius}. Unlike {@link #approachDropPhysically}, it assumes no standable-cell geometry: a bot
+     * standing on farmland (15/16 high) or a drop resting inside a partial block's cell has no clean integer
+     * stand cell for the route planner, but a short straight walk over the field reaches it. Returns whether
+     * a drop is still on the ground within range.
+     */
+    public static boolean walkOverDrops(AIPlayerEntity bot, Set<Item> items, double radius) {
+        if (forcePickupNearbyAnyOf(bot, items)) {
+            bot.getActionPack().stopMovement();
+        }
+        Optional<ItemEntity> drop = nearestDropAnyOf(bot, items, radius);
+        if (drop.isEmpty()) {
+            return false;
+        }
+        ItemEntity target = drop.get();
+        if (isDropPhysicallySupported(bot, target)
+                && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+            bot.getActionPack().startWalkTo(target.position(), 0.5D);
+        }
+        return true;
+    }
+
     public static int sweepPickup(AIPlayerEntity bot, Item item, double radius, int maxTargets) {
         return sweepPickupAnyOf(bot, item == null ? null : Set.of(item), radius, maxTargets);
     }

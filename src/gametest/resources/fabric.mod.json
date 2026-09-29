@@ -69,6 +69,7 @@
       "io.github.zoyluo.minecraftai.task.BoatFollowGameTests",
       "io.github.zoyluo.minecraftai.task.FollowSwimGameTests",
       "io.github.zoyluo.minecraftai.task.FollowAroundPondGameTests",
+      "io.github.zoyluo.minecraftai.task.FarmSurvivalGameTests",
       "io.github.zoyluo.minecraftai.gametest.GameTestCleanupSelfTests",
       "io.github.zoyluo.minecraftai.gametest.MixinTargetClassLoadGameTests",
       "io.github.zoyluo.minecraftai.baritone.BaritoneServerGameTests",

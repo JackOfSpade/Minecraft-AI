@@ -134,6 +134,83 @@ public final class BuildAction {
         return null;
     }
 
+    /**
+     * Uses the item in {@code hand} on {@code pos}'s {@code face} exactly as a player's right click does:
+     * the same exact-face ray proof as {@link #placeBlock} (a sampled point of that face that vanilla's
+     * own look-direction raycast strikes, inside both the physical reach and the perception radius),
+     * then {@code gameMode.useItemOn}. The item's own logic runs (hoe tilling and durability, seed
+     * placement with its light and support rules, bone meal, buckets); nothing is written to the world
+     * here. Success means vanilla accepted the interaction; whether the world changed as intended is for
+     * the caller to check, since the result differs per item (tilling changes the clicked block, a seed
+     * changes the cell above it).
+     */
+    public static ActionResult useItemOnFace(AIPlayerEntity player, BlockPos pos, Direction face, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+        if (stack.isEmpty()) {
+            return ActionResult.failed("empty_hand");
+        }
+        double sampleRange = exactPlacementSampleRange(
+                MinecraftAiConfig.get().perception().radius(), player.blockInteractionRange());
+        BlockHitResult hit = visibleSupportFaceHit(player, pos, face, sampleRange);
+        if (hit == null) {
+            return ActionResult.failed("face_not_visible");
+        }
+        if (!player.isWithinBlockInteractionRange(pos, 0.0D)) {
+            return ActionResult.failed("out_of_reach_or_sight");
+        }
+        net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
+                player, player.level(), stack, hand, hit);
+        if (!result.consumesAction()) {
+            return ActionResult.failed("interact_block_" + result.getClass().getSimpleName());
+        }
+        player.swing(hand);
+        player.resetLastActionTime();
+        AStarPathfinder.invalidateCache("block_use");
+        return ActionResult.SUCCESS;
+    }
+
+    /**
+     * Uses the item in {@code hand} on the cell {@code pos} itself, aiming at its real outline (a
+     * crop has no collider and can be only 2/16 tall, so no full-cube face point is a valid aim).
+     * The head really turns to each sampled point inside the shape and vanilla's own look raycast must
+     * strike this cell within both the physical reach and the perception radius before
+     * {@code gameMode.useItemOn} is called with that exact hit (bone meal on a growing crop).
+     */
+    public static ActionResult useItemOnCell(AIPlayerEntity player, BlockPos pos, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+        if (stack.isEmpty()) {
+            return ActionResult.failed("empty_hand");
+        }
+        var samples = ObservableWorldQuery.shapeTopSamples(player.level(), pos);
+        if (samples.isEmpty()) {
+            return ActionResult.failed("no_target_shape");
+        }
+        double sampleRange = exactPlacementSampleRange(
+                MinecraftAiConfig.get().perception().radius(), player.blockInteractionRange());
+        if (!player.isWithinBlockInteractionRange(pos, 0.0D)) {
+            return ActionResult.failed("out_of_reach_or_sight");
+        }
+        Vec3 eye = player.getEyePosition();
+        for (Vec3 target : samples) {
+            if (eye.distanceToSqr(target) > sampleRange * sampleRange) {
+                continue;
+            }
+            BlockHitResult hit = rotateAndRaycast(player, target, sampleRange);
+            if (hit == null || hit.getType() != HitResult.Type.BLOCK || !pos.equals(hit.getBlockPos())) {
+                continue;
+            }
+            net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
+                    player, player.level(), stack, hand, hit);
+            if (!result.consumesAction()) {
+                return ActionResult.failed("interact_block_" + result.getClass().getSimpleName());
+            }
+            player.swing(hand);
+            player.resetLastActionTime();
+            return ActionResult.SUCCESS;
+        }
+        return ActionResult.failed("cell_not_visible");
+    }
+
     public static ActionResult placeBlockAt(AIPlayerEntity player, BlockPos pos) {
         ActionResult lastFailure = ActionResult.failed("no_adjacent_block");
         // Do not pre-filter supports through canObserveBlock's six face-center rays. A support
