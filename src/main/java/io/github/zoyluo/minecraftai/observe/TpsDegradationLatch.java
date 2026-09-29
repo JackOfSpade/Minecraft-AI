@@ -9,8 +9,8 @@ package io.github.zoyluo.minecraftai.observe;
  * session, each flip also toggling the mining-assist gate between {@code tps_degraded} and enabled).
  * This latch adds three things:</p>
  * <ul>
- *   <li><b>separate thresholds</b>: enter above {@link #ENTER_MS}, exit only at or below {@link #EXIT_MS}
- *       (a dead band in between changes nothing);</li>
+ *   <li><b>separate, baseline-adaptive thresholds</b>: enter above {@link #enterLevel()}, exit only at or below
+ *       {@link #exitLevel()} (a dead band in between changes nothing);</li>
  *   <li><b>debounce</b>: the average must stay beyond the relevant threshold for
  *       {@link #ENTER_SAMPLES} / {@link #EXIT_SAMPLES} consecutive samples;</li>
  *   <li><b>minimum dwell</b>: once entered, the degraded state lasts at least
@@ -20,25 +20,37 @@ package io.github.zoyluo.minecraftai.observe;
  * A sample is one server tick (about 50 ms), so the defaults are 0.5 s / 2 s to confirm and a 5 s / 2 s
  * dwell. Not thread-safe by itself; {@link TpsGuard} synchronizes access.
  *
- * <p><b>Why these thresholds.</b> The value fed in is an EMA of the interval between consecutive
+ * <p><b>Why adaptive thresholds.</b> The value fed in is an EMA of the interval between consecutive
  * {@code END_SERVER_TICK} calls, not of the work done per tick. The server paces itself at 50 ms, so a healthy
  * server reads about 50 ms and can never read lower: the metric has a floor of 50 ms. This pack's normal, merely
- * busy operation reads 53-59 ms (52.87-56.9 in the measured session). The thresholds therefore sit outside that
- * band, both reachable from either side:</p>
+ * busy operation reads 53-59 ms (52.87-56.9 in the measured session). A fixed exit level of 58 ms could never be
+ * reached by a server that recovered to a steady 59 ms, so the latch would stay degraded for good. It therefore
+ * works like the wrapper's {@code TickHealth}: it learns the server's own baseline (from healthy samples only,
+ * each capped at {@link #BASELINE_MAX_MS}) and uses</p>
  * <ul>
- *   <li>{@link #ENTER_MS} 62.5 ms = 16 TPS: sustained throughput below 16 TPS is genuinely degraded;</li>
- *   <li>{@link #EXIT_MS} 58 ms: above the healthy floor and inside the pack's normal band, so a server that has
- *       recovered to its usual load leaves the degraded state, yet 4.5 ms below {@link #ENTER_MS} so noise near
- *       one threshold cannot trip the other.</li>
+ *   <li>enter level {@code max(}{@link #ENTER_FLOOR_MS}{@code , baseline x }{@link #ENTER_FACTOR}{@code )};</li>
+ *   <li>exit level {@code max(}{@link #EXIT_FLOOR_MS}{@code , baseline x }{@link #EXIT_FACTOR}{@code )}, never
+ *       closer than {@link #MIN_HYSTERESIS_MS} to the enter level and always above the 50 ms floor, so it is
+ *       reachable from a server that is steady at its own baseline.</li>
  * </ul>
  * (An earlier draft used exit 48 ms, which is below the 50 ms floor: the latch could never have left the
  * degraded state and the mining-assist gate would have stayed denied for good.)
  */
 public final class TpsDegradationLatch {
-    /** 16 TPS. Strictly above this (as a smoothed average) for {@link #ENTER_SAMPLES} samples means degraded. */
-    public static final double ENTER_MS = 62.5D;
-    /** At or below this (as a smoothed average) for {@link #EXIT_SAMPLES} samples, after the dwell, means recovered. */
-    public static final double EXIT_MS = 58.0D;
+    /** Enter level floor (about 15.4 TPS): used until a baseline exists and whenever baseline x factor is lower. */
+    public static final double ENTER_FLOOR_MS = 65.0D;
+    /** Enter level, adaptive part: multiple of the learned baseline. */
+    public static final double ENTER_FACTOR = 1.25D;
+    /** Exit level floor: above the 50 ms metric floor and inside the pack's normal band. */
+    public static final double EXIT_FLOOR_MS = 58.0D;
+    /** Exit level, adaptive part: multiple of the learned baseline. */
+    public static final double EXIT_FACTOR = 1.10D;
+    /** Each baseline sample is capped here, so a server that lives its whole life struggling cannot teach itself that awful is normal. */
+    public static final double BASELINE_MAX_MS = 60.0D;
+    /** The exit level is always at least this far below the enter level so the two can never coincide. */
+    public static final double MIN_HYSTERESIS_MS = 2.0D;
+    /** Time constant of the baseline in samples (about 5 minutes); the first samples are a plain running mean. */
+    public static final int BASELINE_WINDOW_SAMPLES = 6000;
     public static final int ENTER_SAMPLES = 10;
     public static final int EXIT_SAMPLES = 40;
     public static final int MIN_DEGRADED_SAMPLES = 100;
@@ -47,6 +59,8 @@ public final class TpsDegradationLatch {
     private boolean degraded;
     private int samplesInState;
     private int beyondStreak;
+    private double baseline = Double.NaN;
+    private int baselineSamples;
 
     /**
      * Feeds one smoothed average tick time in milliseconds.
@@ -62,19 +76,41 @@ public final class TpsDegradationLatch {
             return false;
         }
         if (degraded) {
-            beyondStreak = averageTickMs <= EXIT_MS ? beyondStreak + 1 : 0;
+            beyondStreak = averageTickMs <= exitLevel() ? beyondStreak + 1 : 0;
             if (beyondStreak >= EXIT_SAMPLES && samplesInState >= MIN_DEGRADED_SAMPLES) {
                 flip(false);
                 return true;
             }
         } else {
-            beyondStreak = averageTickMs > ENTER_MS ? beyondStreak + 1 : 0;
+            if (averageTickMs > enterLevel()) {
+                beyondStreak++;
+            } else {
+                beyondStreak = 0;
+                learn(averageTickMs);
+            }
             if (beyondStreak >= ENTER_SAMPLES && samplesInState >= MIN_NORMAL_SAMPLES) {
                 flip(true);
                 return true;
             }
         }
         return false;
+    }
+
+    /** Level above which (sustained) the server counts as degraded: {@code max(65, baseline x 1.25)}. */
+    public double enterLevel() {
+        double byBaseline = Double.isNaN(baseline) ? 0.0D : baseline * ENTER_FACTOR;
+        return Math.max(ENTER_FLOOR_MS, byBaseline);
+    }
+
+    /** Level at or below which (sustained) a degraded server counts as recovered; always below {@link #enterLevel()}. */
+    public double exitLevel() {
+        double byBaseline = Double.isNaN(baseline) ? 0.0D : baseline * EXIT_FACTOR;
+        return Math.min(Math.max(EXIT_FLOOR_MS, byBaseline), enterLevel() - MIN_HYSTERESIS_MS);
+    }
+
+    /** The learned typical smoothed tick time, or NaN before the first healthy sample. */
+    public double baselineMs() {
+        return baseline;
     }
 
     public boolean degraded() {
@@ -90,6 +126,26 @@ public final class TpsDegradationLatch {
         degraded = false;
         samplesInState = 0;
         beyondStreak = 0;
+        baseline = Double.NaN;
+        baselineSamples = 0;
+    }
+
+    /**
+     * Learns the server's own typical tick time, only from healthy samples (never while degraded, never from a
+     * sample above the enter level, each capped at {@link #BASELINE_MAX_MS}): a running mean for the first
+     * samples, then an EMA with a {@link #BASELINE_WINDOW_SAMPLES} time constant.
+     */
+    private void learn(double averageTickMs) {
+        double sample = Math.min(averageTickMs, BASELINE_MAX_MS);
+        if (baselineSamples < Integer.MAX_VALUE) {
+            baselineSamples++;
+        }
+        if (Double.isNaN(baseline)) {
+            baseline = sample;
+            return;
+        }
+        double alpha = Math.max(1.0D / BASELINE_WINDOW_SAMPLES, 1.0D / baselineSamples);
+        baseline += alpha * (sample - baseline);
     }
 
     private void flip(boolean nowDegraded) {

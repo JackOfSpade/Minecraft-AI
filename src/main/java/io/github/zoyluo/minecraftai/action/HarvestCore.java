@@ -204,7 +204,8 @@ public final class HarvestCore {
                     if (!enumerated) {
                         return false;
                     }
-                    candidates.sort(Comparator.comparingDouble(pos -> pos.distSqr(origin)));                }
+                    candidates.sort(Comparator.comparingDouble(pos -> pos.distSqr(origin)));
+                }
                 verify(deadline);
                 return done;
             } finally {
