@@ -158,6 +158,7 @@ GAMEPLAY / COMBAT / HUD
 | Easy Anvils           | 21.11.1                   | 2026-09-27 |
 | Fiw Graves            | v1.1.0 (fabric-1.21.11)   | 2026-09-27 (added later same day, ~08:24, replacing DeathMarker) |
 | DeathCompass          | 1.1.0 (fabric-1.21.11)   | 2026-09-27 (added later same day, ~08:28, alongside Architectury API) |
+| VeinMiner             | 2.11.2 (fabric, veinminer-fabric-2.11.2+1.21.11.jar) | 2026-09-29 |
 
 Fiw Graves (by Fi3w0) replaces DeathMarker (below): server-side/singleplayer
 grave system, packet-only marker+hologram at your death spot (nothing written
@@ -180,6 +181,28 @@ targets 1.20.1 / fabric_api_version 0.92.7); Minecraft's client rendering
 internals moved on by 1.21.11 and the mod (last updated 8 months ago, no
 GitHub releases) was never rebuilt against a newer one. Re-add it if/when the
 author (LumaBlossom) publishes a 1.21.11-compatible build.
+
+VeinMiner (by Miraculixx, https://modrinth.com/mod/veinminer; the user linked the
+project's /datapack/ page, but its v2 Fabric mod build is used because it applies to
+every world and is configurable, while the v1.x datapack must be added per world).
+Server-side: mining one ore with a pickaxe also breaks the connected ores (default
+group "#c:ores" + "#minecraft:pickaxes", max chain 100, tool durability used per
+block, no sneak needed). Requires Fabric API and Fabric Language Kotlin (both already
+installed); bundles fabric-permissions-api. Config lives in config/Veinminer/
+(settings.json, blocks.json, groups.json; /veinminer settings|groups|toggle in game).
+Two profile-specific notes:
+- Its settings.json "autoUpdate" flag is never read: every launch it downloads the
+  newest Modrinth file into config/Veinminer/update/ (never loaded, but pointless).
+  This profile pre-creates config/Veinminer/update as a read-only FILE so those
+  writes fail harmlessly (a WARN in the log). Keep that file when reinstalling.
+- The Minecraft-AI bots must not vein-mine (it breaks the extra blocks behind their
+  per-block safety, drop and mining-assist checks). The Minecraft-AI mod answers
+  VeinMiner's "veinminer.use" permission with "no" for bots and "yes" for human
+  players; that only takes effect with "permissionRestricted": true in
+  config/Veinminer/settings.json, which this profile sets together with the
+  Minecraft-AI build that contains that permission hook. Without the Minecraft-AI mod,
+  permissionRestricted=true means nobody vein-mines (fabric-permissions-api defaults
+  to "no"), so set it back to false in that case.
 
 (PvP BOT itself is listed under World Generation / Exploration above, since
 that is what it primarily adds; it is a gameplay/combat mod too.)
