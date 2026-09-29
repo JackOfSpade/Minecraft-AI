@@ -151,6 +151,35 @@ final class CombatHardeningSourceContractTest {
                 "Mob.getTarget() stays only the legacy Enderman rule");
     }
 
+    @Test
+    void walkedStepsScaleTheirInputsByTheItemUseSlowdownAndAllowTheLongerWalk() throws IOException {
+        String core = read("task/CombatCore.java");
+        int stepBody = core.indexOf("public static StepStatus stepByInput(");
+        int stepEnd = core.indexOf("public static void cancelStep", stepBody);
+        String body = core.substring(stepBody, stepEnd);
+        assertTrue(core.contains("STEP_ITEM_USE_SLOWDOWN = 0.2F"), "vanilla's item-use slowdown is 0.2");
+        assertTrue(body.contains("bot.isUsingItem()") && body.contains("forward * scale") && body.contains("left * scale"),
+                "a drawn bow or raised shield scales the walk inputs like a player's");
+        assertTrue(body.contains("STEP_SLOWED_TIMEOUT_TICKS"), "the step timeout grows with the slowdown");
+    }
+
+    @Test
+    void coverPhasesCountFriendlyBlockedPeeksAndLeaveThroughTheRangedGiveUpPath() throws IOException {
+        String combat = read("task/CombatTask.java");
+        assertTrue(combat.contains("FRIENDLY_PEEK_LIMIT") && combat.contains("friendlyBlockedPeeks"));
+        int give = combat.indexOf("private void giveUpBowForFriendlyLine(");
+        assertTrue(give > 0 && combat.substring(give).contains("bowSuppressedUntil = elapsed + BOW_SUPPRESS_TICKS"));
+        int ranged = combat.indexOf("private void ranged(");
+        assertTrue(combat.substring(ranged, combat.indexOf("private void giveUpBowForFriendlyLine(")).contains("giveUpBowForFriendlyLine(bot)"),
+                "ranged() gives the bow up through the shared path");
+        int peek = combat.indexOf("private void coverPeek(");
+        assertTrue(combat.substring(peek, combat.indexOf("private boolean shouldBlock(")).contains("giveUpBowForFriendlyLine(bot)"),
+                "a peek that a friend keeps blocking gives the bow up through the same path");
+        int hide = combat.indexOf("private void coverHide(");
+        assertTrue(combat.substring(hide, combat.indexOf("private void coverPeek(")).contains("!shouldUseBow(bot)"),
+                "cover-hide re-checks that the bow is still in the plan");
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(MAIN.resolve(relative));
     }

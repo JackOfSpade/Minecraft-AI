@@ -80,6 +80,8 @@ public final class CombatTask extends AbstractTask {
     private static final int FRIENDLY_LINE_HOLD_LIMIT = 60;
     /** After a friend blocked the line of fire this long, the bow stays out of the plan this many ticks. */
     private static final int BOW_SUPPRESS_TICKS = 200;
+    /** Peek cycles in a row whose shot a friend on the line of fire held back, before the bow is given up. */
+    private static final int FRIENDLY_PEEK_LIMIT = 3;
     /** A warden's flight must clear its sonic boom range, not the generic six-block retreat step. */
     private static final int WARDEN_RETREAT_STEP_DISTANCE = CombatCore.WARDEN_ESCAPE_DISTANCE;
     /** "there are other ranged enemies" -- at least one besides whichever one is currently targeted. */
@@ -117,6 +119,8 @@ public final class CombatTask extends AbstractTask {
     private int shooterShieldTicks;
     private int shooterShieldCooldownUntil;
     private int friendlyLineTicks;
+    /** Consecutive peeks that ended with a friend on the line of fire (the drawn bow was kept, not shot). */
+    private int friendlyBlockedPeeks;
     private BlockPos peekHideSpot;
     private BlockPos peekCoverFeet;
     private BlockPos peekExposeSpot;
@@ -197,6 +201,7 @@ public final class CombatTask extends AbstractTask {
         bowSuppressedUntil = 0;
         peekThreatsAtLastPeek = 0;
         friendlyLineTicks = 0;
+        friendlyBlockedPeeks = 0;
     }
 
     /**
@@ -513,14 +518,7 @@ public final class CombatTask extends AbstractTask {
                 // through shouldUseBow(), so the give-up latches the bow out of the plan for a while
                 // and the fight really continues in melee.
                 if (++friendlyLineTicks > FRIENDLY_LINE_HOLD_LIMIT) {
-                    friendlyLineTicks = 0;
-                    bowSuppressedUntil = elapsed + BOW_SUPPRESS_TICKS;
-                    BotLog.action(bot, "bow_suppressed", "reason", "friendly_on_line_of_fire",
-                            "until", bowSuppressedUntil);
-                    finishRangedLoadout(bot);
-                    CombatCore.ensureMeleeWeapon(bot);
-                    phase = Phase.APPROACH;
-                    startApproach(bot);
+                    giveUpBowForFriendlyLine(bot);
                 }
                 return;
             }
@@ -528,6 +526,26 @@ public final class CombatTask extends AbstractTask {
             bot.releaseUsingItem();
             phase = Phase.APPROACH;
         }
+    }
+
+    /**
+     * The one give-up path for a bow that a friend keeps blocking (the ranged hold and the cover peeks both
+     * end here): latches the bow out of the plan for a while, so the fight really continues in melee.
+     */
+    private void giveUpBowForFriendlyLine(AIPlayerEntity bot) {
+        friendlyLineTicks = 0;
+        friendlyBlockedPeeks = 0;
+        bowSuppressedUntil = elapsed + BOW_SUPPRESS_TICKS;
+        BotLog.action(bot, "bow_suppressed", "reason", "friendly_on_line_of_fire",
+                "until", bowSuppressedUntil);
+        cancelPeekStep(bot);
+        if (bot.isUsingItem()) {
+            bot.releaseUsingItem();
+        }
+        finishRangedLoadout(bot);
+        CombatCore.ensureMeleeWeapon(bot);
+        phase = Phase.APPROACH;
+        startApproach(bot);
     }
 
     private void strike(AIPlayerEntity bot) {
@@ -1083,6 +1101,18 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire(bot);
             return;
         }
+        if (!shouldUseBow(bot)) {
+            // The bow left the plan (a friend kept blocking the line, or the target closed in): leave cover.
+            cancelPeekStep(bot);
+            if (bot.isUsingItem()) {
+                bot.releaseUsingItem();
+            }
+            finishRangedLoadout(bot);
+            CombatCore.ensureMeleeWeapon(bot);
+            phase = Phase.APPROACH;
+            startApproach(bot);
+            return;
+        }
         if (!bot.blockPosition().equals(peekHideSpot) && bot.getActionPack().isPathExecutorIdle()) {
             // Knocked out of its hiding cell: walk back in, by inputs, like a player would.
             if (peekStep == null || !peekStep.cell().equals(peekHideSpot)) {
@@ -1189,10 +1219,19 @@ public final class CombatTask extends AbstractTask {
             // The only moment the shooters are in sight: remember how many there are, because the
             // bot's own column hides them again as soon as it ducks back.
             peekThreatsAtLastPeek = CombatCore.rangedThreatsAround(bot, PEEKABOO_SCAN_RANGE).size();
-            if (bot.isUsingItem() && !StrikeLegality.friendlyOnLineOfFire(bot, target)) {
-                // With a friend on the line of fire the drawn bow is kept, never released into them.
-                bot.releaseUsingItem();
-                BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
+            if (StrikeLegality.friendlyOnLineOfFire(bot, target)) {
+                // With a friend on the line of fire the drawn bow is kept, never released into them; past a
+                // few such peeks the bow is given up, through the same path ranged() uses.
+                if (++friendlyBlockedPeeks > FRIENDLY_PEEK_LIMIT) {
+                    giveUpBowForFriendlyLine(bot);
+                    return;
+                }
+            } else {
+                friendlyBlockedPeeks = 0;
+                if (bot.isUsingItem()) {
+                    bot.releaseUsingItem();
+                    BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
+                }
             }
             peekStage = PeekStage.BACK;
         }

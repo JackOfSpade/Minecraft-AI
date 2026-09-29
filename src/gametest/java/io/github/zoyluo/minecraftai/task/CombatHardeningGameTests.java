@@ -619,8 +619,8 @@ public final class CombatHardeningGameTests {
     /**
      * A ledge beside the fight: the bot stands on the outer edge of a platform whose north side is
      * a long drop. Its post-swing repositioning strafes alternate sideways every twenty ticks; the
-     * footing guard must never let a strafe carry it over the edge, and must be seen refusing the
-     * ledge side.
+     * footing guard must never let a strafe carry it over the edge. Asserted on the running behaviour: the
+     * bot's own sideways input never points at the ledge from the rim, and its position never crosses it.
      */
     @GameTest(environment = ENV + "reposition_strafe_never_walks_off_the_ledge", maxTicks = 220)
     public void repositionStrafeNeverWalksOffTheLedge(GameTestHelper context) {
@@ -653,26 +653,35 @@ public final class CombatHardeningGameTests {
         CombatTask combat = CombatTask.defensive(husk, 6.0F, feet);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_ledge_strafe"));
         double startY = bot.getY();
+        double startZ = bot.getZ();
+        double rimZ = feet.getZ();
         AtomicInteger repositionTicks = new AtomicInteger();
-        AtomicInteger ledgeRefusals = new AtomicInteger();
-        double[] southmost = {bot.getZ()};
+        AtomicInteger strafeAwayTicks = new AtomicInteger();
         context.failIfEver(() -> {
             require(context, bot.isAlive() && bot.getY() > startY - 0.05D,
                     "the bot strafed off the ledge: y=" + bot.getY() + " z=" + bot.getZ()
                             + " " + combat.describe());
-            southmost[0] = Math.max(southmost[0], bot.getZ());
+            // The running strafe itself, not the guard function in a pose: the bot's own sideways input
+            // (xxa, what the task wrote through the action pack) and where it actually went.
+            require(context, bot.getZ() >= startZ - 0.05D,
+                    "the bot crossed the rim: z=" + bot.getZ() + " start=" + startZ + " " + combat.describe());
             if (combat.describe().contains("phase=REPOSITION")) {
                 repositionTicks.incrementAndGet();
                 // Facing east, a positive strafe input is toward the north (the ledge).
-                if (CombatCore.safeStrafeInput(bot, 0.45F) != 0.45F) {
-                    ledgeRefusals.incrementAndGet();
+                if (bot.getZ() < rimZ + 0.6D) {
+                    require(context, bot.xxa <= 0.0F,
+                            "the running strafe pushed toward the ledge from the rim: xxa=" + bot.xxa
+                                    + " z=" + bot.getZ() + " " + combat.describe());
+                    if (bot.xxa < 0.0F) {
+                        strafeAwayTicks.incrementAndGet();
+                    }
                 }
             }
             if (context.getTick() >= 190) {
                 require(context, repositionTicks.get() >= 8,
                         "the fight never repositioned: " + combat.describe());
-                require(context, ledgeRefusals.get() >= 1,
-                        "the footing guard never refused the ledge side during repositioning");
+                require(context, strafeAwayTicks.get() >= 1,
+                        "the fight never strafed away from the ledge while repositioning at the rim");
                 husk.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_ledge_strafe_done");
                 despawnAndComplete(context, bot);

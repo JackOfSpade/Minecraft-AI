@@ -407,6 +407,13 @@ public final class CombatCore {
      * is blocked or shoved, not a pace to plan on.
      */
     public static final int STEP_TIMEOUT_TICKS = 10;
+    /**
+     * Vanilla item-use slowdown (LocalPlayer.aiStep: movement input times 0.2 while an item is in use, a
+     * drawn bow or a raised shield): the walked step scales its keys by this and, having done so, allows the
+     * proportionally longer walk ({@link #STEP_TIMEOUT_TICKS} times the reciprocal).
+     */
+    private static final float STEP_ITEM_USE_SLOWDOWN = 0.2F;
+    private static final int STEP_SLOWED_TIMEOUT_TICKS = (int) (STEP_TIMEOUT_TICKS / STEP_ITEM_USE_SLOWDOWN);
     /** A step ends once the bot stands this close to the centre of its cell (and has settled). */
     private static final double STEP_CENTER_TOLERANCE = 0.35D;
     /** Horizontal blocks per tick below which the bot counts as settled on its cell. */
@@ -435,6 +442,7 @@ public final class CombatCore {
         private final boolean keepAim;
         private final boolean sprint;
         private int ticks;
+        private boolean slowed;
         private Vec3 lastPosition;
         private String failure;
 
@@ -474,8 +482,10 @@ public final class CombatCore {
      * void) and the course every tick, writes the forward/strafe inputs, and releases the keys
      * early enough that the slide ends on the cell centre. There is no teleport and no velocity
      * reset: the bot moves at the speed vanilla physics gives its inputs, so it is never faster than
-     * a player. Item-use slowdown is NOT applied (a bot holding a drawn bow or a raised shield
-     * moves at full speed; this is the same physics gap the shield/strafe code documents).
+     * a player. While the bot uses an item (a drawn bow, a raised shield) the
+     * inputs are scaled by vanilla's 0.2 item-use slowdown, so a peek or a duck covers a block at a
+     * human's pace (and the step timeout grows to match); a general slowdown for all bot movement is
+     * a separate concern of the input bridge.
      *
      * <p>Inputs are released on {@link StepStatus#ARRIVED} and {@link StepStatus#FAILED}; a caller
      * that abandons a step still in progress must call {@link #cancelStep}.</p>
@@ -513,7 +523,9 @@ public final class CombatCore {
             bot.getActionPack().stopMovement();
             return StepStatus.ARRIVED;
         }
-        if (step.ticks > STEP_TIMEOUT_TICKS) {
+        boolean usingItem = bot.isUsingItem();
+        step.slowed |= usingItem;
+        if (step.ticks > (step.slowed ? STEP_SLOWED_TIMEOUT_TICKS : STEP_TIMEOUT_TICKS)) {
             return failStep(bot, step, "timeout");
         }
         if (inCell && distance <= STEP_CENTER_TOLERANCE || distance <= speed * STEP_BRAKE_FACTOR) {
@@ -532,11 +544,12 @@ public final class CombatCore {
         float forward = (float) (-Math.sin(yaw) * ux + Math.cos(yaw) * uz);
         float left = (float) (Math.cos(yaw) * ux + Math.sin(yaw) * uz);
         var pack = bot.getActionPack();
-        pack.setForward(forward);
-        pack.setStrafing(left);
+        float scale = usingItem ? STEP_ITEM_USE_SLOWDOWN : 1.0F;
+        pack.setForward(forward * scale);
+        pack.setStrafing(left * scale);
         boolean sprints = step.sprint
                 && forward > 0.5F
-                && !bot.isUsingItem()
+                && !usingItem
                 && bot.getFoodData().getFoodLevel() > STEP_SPRINT_FOOD_FLOOR;
         pack.setSprinting(sprints);
         return StepStatus.MOVING;
