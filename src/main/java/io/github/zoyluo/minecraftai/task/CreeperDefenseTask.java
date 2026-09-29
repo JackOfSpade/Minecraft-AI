@@ -9,7 +9,6 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.ArrayDeque;
@@ -71,6 +70,11 @@ public final class CreeperDefenseTask extends AbstractTask {
 
     private enum Phase {
         ESCAPE,
+        /**
+         * One walked block away from a Creeper whose fuse is still young, by ordinary movement
+         * inputs (never a teleport), before the wall goes up. A fuse that is too far along skips it.
+         */
+        STEP_AWAY,
         BUILD_CORE,
         HOLD_BARRIER,
         /** Last resort with no wall and no way out: face the fuse behind a raised shield. */
@@ -173,6 +177,9 @@ public final class CreeperDefenseTask extends AbstractTask {
     private int currentlyVisibleRiskCount;
     private int shieldStartedElapsed;
     private int shieldMissingTicks;
+    /** The walked step of {@link Phase#STEP_AWAY} while one is under way. */
+    private CombatCore.InputStep stepAway;
+    private BlockPos stepAwayOrigin;
 
     /**
      * Compatibility admission for callers that already proved this exact entity observable.
@@ -212,6 +219,7 @@ public final class CreeperDefenseTask extends AbstractTask {
         }
         return switch (phase) {
             case ESCAPE -> Math.min(0.60D, elapsed / 400.0D);
+            case STEP_AWAY -> 0.55D;
             case BUILD_CORE -> Math.min(0.82D, 0.60D + wallPlacements * 0.10D);
             case HOLD_BARRIER -> 0.90D;
             case SHIELD -> 0.70D;
@@ -241,6 +249,8 @@ public final class CreeperDefenseTask extends AbstractTask {
         barrierTowardThreat = null;
         wallPlacements = 0;
         wingPlacementDisabled = false;
+        stepAway = null;
+        stepAwayOrigin = null;
         currentlyVisibleRiskCount = 0;
         nextWallAttemptElapsed = 0;
         nextOwnerWatchdogElapsed = OWNER_WATCHDOG_TICKS;
@@ -264,8 +274,7 @@ public final class CreeperDefenseTask extends AbstractTask {
                 || rememberedLateFuse
                 || rememberedCharged && rememberedFuse;
         if (synchronousWall && beginWall(bot, risk)) {
-            int coreAttempts = rememberedLateFuse
-                    || rememberedCharged && rememberedFuse ? 2 : 1;
+            int coreAttempts = fuseTooLateForStep() ? 2 : 1;
             for (int attempt = 0;
                  attempt < coreAttempts && phase == Phase.BUILD_CORE;
                  attempt++) {
@@ -312,12 +321,14 @@ public final class CreeperDefenseTask extends AbstractTask {
 
         // A wall is tied to one remembered ray. Revalidate that geometry every tick, not only
         // when a UUID changes: the same Creeper can walk around the side of a completed column.
-        if (phase != Phase.ESCAPE && phase != Phase.SHIELD && !barrierFaces(bot, lastSeenPos)) {
+        if (phase != Phase.ESCAPE && phase != Phase.SHIELD && phase != Phase.STEP_AWAY
+                && !barrierFaces(bot, lastSeenPos)) {
             fallbackToEscape(bot, risk, "creeper_wall_direction_changed");
         }
 
         switch (phase) {
             case ESCAPE -> tickEscape(bot, risk);
+            case STEP_AWAY -> tickStepAway(bot, risk);
             case BUILD_CORE -> tickCoreBuild(bot, risk);
             case HOLD_BARRIER -> tickBarrierHold(bot, risk);
             case SHIELD -> tickShield(bot, risk);
@@ -440,10 +451,11 @@ public final class CreeperDefenseTask extends AbstractTask {
         if (wallUrgent
                 && elapsed >= nextWallAttemptElapsed
                 && beginWall(bot, risk)) {
-            placeNextCoreBlock(bot, risk);
-            if (phase == Phase.BUILD_CORE
-                    && (rememberedLateFuse || rememberedCharged && rememberedFuse)) {
+            if (phase == Phase.BUILD_CORE) {
                 placeNextCoreBlock(bot, risk);
+                if (phase == Phase.BUILD_CORE && fuseTooLateForStep()) {
+                    placeNextCoreBlock(bot, risk);
+                }
             }
             return;
         }
@@ -470,10 +482,78 @@ public final class CreeperDefenseTask extends AbstractTask {
         }
     }
 
+    /** A fuse this far along leaves no time for a walked step: the wall goes up where the bot stands. */
+    private boolean fuseTooLateForStep() {
+        return rememberedLateFuse || rememberedCharged && rememberedFuse;
+    }
+
+    /**
+     * Starts the blast wall. While the fuse is young the bot first backs one block away, walking
+     * (see {@link Phase#STEP_AWAY}); a late fuse, a missing wall material or no legal cell to back
+     * into starts the wall in place. Returns whether this call took ownership of the situation (a
+     * step under way or a wall started); {@code false} means the wall could not start and the
+     * task fell back to escape.
+     */
     private boolean beginWall(AIPlayerEntity bot, RiskSelection risk) {
         bot.getActionPack().stopAll();
-        BlockPos origin = bot.blockPosition().immutable();
-        boolean stepped = tryFastStepAway(bot, lastSeenPos);
+        if (!fuseTooLateForStep() && MaterialPalette.pickEmergencyShelterBlockSlot(bot).isPresent()) {
+            CombatCore.InputStep step = chooseStepAway(bot, lastSeenPos);
+            if (step != null) {
+                stepAway = step;
+                stepAwayOrigin = bot.blockPosition().immutable();
+                phase = Phase.STEP_AWAY;
+                escapeGoal = null;
+                resetAwayProgress(bot);
+                BotLog.danger(bot, "creeper_step_away_started",
+                        "from", stepAwayOrigin,
+                        "to", step.cell(),
+                        "source", lastSeenPos,
+                        "source_id", trackedCreeperId);
+                return true;
+            }
+        }
+        return startWall(bot, risk, bot.blockPosition().immutable(), false);
+    }
+
+    private void tickStepAway(AIPlayerEntity bot, RiskSelection risk) {
+        CombatCore.InputStep step = stepAway;
+        if (step == null) {
+            finishStepAway(bot, risk, "no_step", false);
+            return;
+        }
+        if (fuseTooLateForStep()) {
+            finishStepAway(bot, risk, "fuse_too_late", false);
+            return;
+        }
+        CombatCore.StepStatus status = CombatCore.stepByInput(bot, step);
+        if (status == CombatCore.StepStatus.ARRIVED) {
+            finishStepAway(bot, risk, "arrived", true);
+        } else if (status == CombatCore.StepStatus.FAILED) {
+            finishStepAway(bot, risk, step.failure(), false);
+        }
+    }
+
+    /** Ends the walked step (arrived or not) and raises the wall from wherever the bot now stands. */
+    private void finishStepAway(AIPlayerEntity bot, RiskSelection risk, String why, boolean stepped) {
+        CombatCore.cancelStep(bot, stepAway);
+        BlockPos origin = stepAwayOrigin == null ? bot.blockPosition().immutable() : stepAwayOrigin;
+        stepAway = null;
+        stepAwayOrigin = null;
+        BotLog.danger(bot, "creeper_step_away_finished",
+                "why", why,
+                "stepped", stepped,
+                "from", origin,
+                "at", bot.blockPosition(),
+                "source_id", trackedCreeperId);
+        if (startWall(bot, risk, origin, stepped) && phase == Phase.BUILD_CORE) {
+            placeNextCoreBlock(bot, risk);
+            if (phase == Phase.BUILD_CORE && fuseTooLateForStep()) {
+                placeNextCoreBlock(bot, risk);
+            }
+        }
+    }
+
+    private boolean startWall(AIPlayerEntity bot, RiskSelection risk, BlockPos origin, boolean stepped) {
         BlockPos retreatFeet = bot.blockPosition().immutable();
         Direction towardThreat = dominantDirectionToward(retreatFeet, lastSeenPos);
         if (towardThreat == null) {
@@ -808,9 +888,14 @@ public final class CreeperDefenseTask extends AbstractTask {
                 .map(visible -> new ObservedCreeper(visible.uuid(), visible.pos()));
     }
 
-    private boolean tryFastStepAway(AIPlayerEntity bot, BlockPos source) {
+    /**
+     * The best adjacent cell to back into, away from {@code source}: observable feet, head and
+     * support, and a legal landing (standable, no hazard, nobody standing in it). Returns the walked
+     * step to it, or {@code null} when no cell qualifies.
+     */
+    private static CombatCore.InputStep chooseStepAway(AIPlayerEntity bot, BlockPos source) {
         if (source == null) {
-            return false;
+            return null;
         }
         BlockPos from = bot.blockPosition();
         double awayX = bot.getX() - (source.getX() + 0.5D);
@@ -833,14 +918,12 @@ public final class CreeperDefenseTask extends AbstractTask {
             if (ObservableWorldQuery.canObserveCell(bot, target)
                     && ObservableWorldQuery.canObserveCell(bot, target.above())
                     && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target.below())
-                    && FakePlayerMotion.stepToStandable(bot, target, "creeper_fast_step_away")) {
-                bot.setDeltaMovement(Vec3.ZERO);
-                bot.fallDistance = 0.0F;
-                bot.setOnGround(true);
-                return true;
+                    && CombatCore.stepRefusal(bot, target) == null) {
+                // Facing the cell, sprinting (never at six food or fewer): a player running one block.
+                return CombatCore.beginStepByInput(target, false, true);
             }
         }
-        return false;
+        return null;
     }
 
     private static void addColumn(Deque<BlockPos> targets, BlockPos feet) {

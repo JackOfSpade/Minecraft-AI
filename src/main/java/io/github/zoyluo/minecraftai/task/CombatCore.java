@@ -24,6 +24,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.NeutralMob;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.EnderMan;
@@ -183,13 +184,15 @@ public final class CombatCore {
      */
     static boolean isMeleeForbiddenThreat(LivingEntity entity) {
         // Never melee: a Warden (30 damage per hit, and a sonic boom that ignores armour), the
-        // Wither (boss), ghasts and shulkers (out of reach or evade-only until they have their own
-        // tactic), and a heart-bound Creaking, which cannot be damaged by the bot at all.
+        // Wither and Ender Dragon (bosses; the End is out of scope for melee), ghasts and shulkers
+        // (out of reach or evade-only until they have their own tactic), and a heart-bound Creaking,
+        // which cannot be damaged by the bot at all.
         // isHeartBound() only removes an attack option, so it can never hand the bot an advantage.
         return entity instanceof Creeper
                 || entity instanceof EnderMan
                 || entity instanceof Warden
                 || entity instanceof WitherBoss
+                || entity instanceof EnderDragon
                 || entity instanceof Ghast
                 || entity instanceof Shulker
                 || entity instanceof Creaking creaking && creaking.isHeartBound();
@@ -223,10 +226,15 @@ public final class CombatCore {
             return true;
         }
         if (entity instanceof NeutralMob neutral) {
-            // isAngryAt() binds persistent/universal anger to this exact bot; the live target is the
-            // legacy signal the Enderman rule has always used.
+            // Server-state reads of this rule (documented, not hidden): isAngryAt() reads the mob's
+            // persistent anger target (persisted, not AI-goal state; universal anger is a world
+            // rule), hasHurtBotOrOwner() above reads the bot's own hurt-by memory. Mob.getTarget()
+            // is unsynced AI state and is deliberately NOT generalised to every neutral (a
+            // zombified piglin or wolf targeting the bot is already caught by the two facts
+            // above once it is provoked); it stays only for the legacy Enderman rule, whose
+            // anger is a stare the persistent-anger fields do not always carry.
             return neutral.isAngryAt(bot, bot.level())
-                    || entity instanceof Mob mob && mob.getTarget() == bot;
+                    || entity instanceof EnderMan enderman && enderman.getTarget() == bot;
         }
         if (entity instanceof Piglin && PiglinAi.isWearingSafeArmor(bot)) {
             return false;
@@ -271,12 +279,21 @@ public final class CombatCore {
     }
 
     public static Optional<LivingEntity> nearestHostileAround(AIPlayerEntity bot, BlockPos center, double range) {
+        return nearestHostileAround(bot, center, range, entity -> true);
+    }
+
+    /** {@link #nearestHostileAround(AIPlayerEntity, BlockPos, double)} restricted to entities {@code allowed} accepts. */
+    public static Optional<LivingEntity> nearestHostileAround(AIPlayerEntity bot,
+                                                              BlockPos center,
+                                                              double range,
+                                                              java.util.function.Predicate<LivingEntity> allowed) {
         AABB box = new AABB(center).inflate(range);
         return bot.level()
                 .getEntitiesOfClass(LivingEntity.class, box,
                         entity -> entity != bot
                                 && hostileTo(bot, entity)
-                                && !isMeleeForbiddenThreat(entity))
+                                && !isMeleeForbiddenThreat(entity)
+                                && allowed.test(entity))
                 .stream()
                 .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
@@ -380,6 +397,186 @@ public final class CombatCore {
             return desired;
         }
         return canStrafeToward(bot, -desired) ? -desired : 0.0F;
+    }
+
+    // ------------------------------------------------------------------ walked one-cell steps
+
+    /**
+     * Longest a walked one-cell step may take. A player covers a block in about six ticks from a
+     * standstill (walking 0.216 blocks per tick at steady state), so ten is a bound for a step that
+     * is blocked or shoved, not a pace to plan on.
+     */
+    public static final int STEP_TIMEOUT_TICKS = 10;
+    /** A step ends once the bot stands this close to the centre of its cell (and has settled). */
+    private static final double STEP_CENTER_TOLERANCE = 0.35D;
+    /** Horizontal blocks per tick below which the bot counts as settled on its cell. */
+    private static final double STEP_SETTLED_SPEED = 0.10D;
+    /**
+     * Ground friction leaves a released walker sliding about 1.2 ticks worth of its speed; keys are
+     * let go that far before the centre so the slide lands on it, as a player taps the key early.
+     */
+    private static final double STEP_BRAKE_FACTOR = 1.3D;
+    /** A sprint needs more than this many food points (LocalPlayer.aiStep: hunger above 6). */
+    private static final int STEP_SPRINT_FOOD_FLOOR = 6;
+
+    public enum StepStatus {
+        MOVING,
+        ARRIVED,
+        FAILED
+    }
+
+    /**
+     * One walked step to an adjacent cell, driven by ordinary movement inputs (forward and strafe
+     * keys, exactly the fields a client's key state feeds vanilla physics with) instead of a
+     * teleport. The caller owns the object and passes it to {@link #stepByInput} once per tick.
+     */
+    public static final class InputStep {
+        private final BlockPos cell;
+        private final boolean keepAim;
+        private final boolean sprint;
+        private int ticks;
+        private Vec3 lastPosition;
+        private String failure;
+
+        private InputStep(BlockPos cell, boolean keepAim, boolean sprint) {
+            this.cell = cell.immutable();
+            this.keepAim = keepAim;
+            this.sprint = sprint;
+        }
+
+        public BlockPos cell() {
+            return cell;
+        }
+
+        /** Why the step failed, or {@code null} while it has not. */
+        public String failure() {
+            return failure;
+        }
+
+        public int ticks() {
+            return ticks;
+        }
+    }
+
+    /**
+     * Starts a walked step to the adjacent, same-height {@code cell}.
+     *
+     * @param keepAim keep the current look direction and strafe/back up into the cell (a raised
+     *                bow stays aimed at its target); otherwise the bot turns to face the cell
+     * @param sprint  sprint while walking (never at six food points or fewer, never while using an item)
+     */
+    public static InputStep beginStepByInput(BlockPos cell, boolean keepAim, boolean sprint) {
+        return new InputStep(cell, keepAim, sprint);
+    }
+
+    /**
+     * Advances a walked step by one tick: re-proves the destination (standable, no fire, lava or
+     * void) and the course every tick, writes the forward/strafe inputs, and releases the keys
+     * early enough that the slide ends on the cell centre. There is no teleport and no velocity
+     * reset: the bot moves at the speed vanilla physics gives its inputs, so it is never faster than
+     * a player. Item-use slowdown is NOT applied (a bot holding a drawn bow or a raised shield
+     * moves at full speed; this is the same physics gap the shield/strafe code documents).
+     *
+     * <p>Inputs are released on {@link StepStatus#ARRIVED} and {@link StepStatus#FAILED}; a caller
+     * that abandons a step still in progress must call {@link #cancelStep}.</p>
+     */
+    public static StepStatus stepByInput(AIPlayerEntity bot, InputStep step) {
+        step.ticks++;
+        Vec3 position = bot.position();
+        double speed = step.lastPosition == null ? 0.0D
+                : Math.hypot(position.x - step.lastPosition.x, position.z - step.lastPosition.z);
+        step.lastPosition = position;
+
+        BlockPos cell = step.cell;
+        BlockPos here = bot.blockPosition();
+        if (step.ticks == 1) {
+            if (here.getY() != cell.getY()
+                    || Math.abs(here.getX() - cell.getX()) > 1
+                    || Math.abs(here.getZ() - cell.getZ()) > 1) {
+                return failStep(bot, step, "not_adjacent");
+            }
+            // The step takes the bot over from any route it was following.
+            bot.getActionPack().stopNavigation();
+        }
+        String hazard = step.ticks == 1 ? stepRefusal(bot, cell) : stepHazard(bot.level(), cell);
+        if (hazard != null) {
+            return failStep(bot, step, hazard);
+        }
+        double dx = cell.getX() + 0.5D - position.x;
+        double dz = cell.getZ() + 0.5D - position.z;
+        double distance = Math.hypot(dx, dz);
+        if (distance > 2.0D || bot.getY() < cell.getY() - 0.6D) {
+            return failStep(bot, step, "left_course");
+        }
+        boolean inCell = here.equals(cell);
+        if (inCell && distance <= STEP_CENTER_TOLERANCE && speed <= STEP_SETTLED_SPEED) {
+            bot.getActionPack().stopMovement();
+            return StepStatus.ARRIVED;
+        }
+        if (step.ticks > STEP_TIMEOUT_TICKS) {
+            return failStep(bot, step, "timeout");
+        }
+        if (inCell && distance <= STEP_CENTER_TOLERANCE || distance <= speed * STEP_BRAKE_FACTOR) {
+            // Close enough: let go of the keys and let friction finish the step.
+            bot.getActionPack().stopMovement();
+            return StepStatus.MOVING;
+        }
+
+        if (!step.keepAim) {
+            LookAction.lookHorizontallyAt(bot, new Vec3(cell.getX() + 0.5D, bot.getY(), cell.getZ() + 0.5D));
+        }
+        double yaw = Math.toRadians(bot.getYRot());
+        double ux = dx / distance;
+        double uz = dz / distance;
+        // Yaw frame of vanilla moveRelative: forward = (-sin, cos), left = (cos, sin).
+        float forward = (float) (-Math.sin(yaw) * ux + Math.cos(yaw) * uz);
+        float left = (float) (Math.cos(yaw) * ux + Math.sin(yaw) * uz);
+        var pack = bot.getActionPack();
+        pack.setForward(forward);
+        pack.setStrafing(left);
+        boolean sprints = step.sprint
+                && forward > 0.5F
+                && !bot.isUsingItem()
+                && bot.getFoodData().getFoodLevel() > STEP_SPRINT_FOOD_FLOOR;
+        pack.setSprinting(sprints);
+        return StepStatus.MOVING;
+    }
+
+    /** Lets go of every movement key of a walked step that the caller abandons before it ends. */
+    public static void cancelStep(AIPlayerEntity bot, InputStep step) {
+        if (step != null) {
+            bot.getActionPack().stopMovement();
+        }
+    }
+
+    private static StepStatus failStep(AIPlayerEntity bot, InputStep step, String reason) {
+        step.failure = reason;
+        bot.getActionPack().stopMovement();
+        return StepStatus.FAILED;
+    }
+
+    /**
+     * Why a walked step into {@code cell} is not legal right now, or {@code null} when it is: the
+     * destination is a dry, supported, hazard-free landing and nothing (block or entity) occupies
+     * the body volume the bot would take there. The same landing rules re-run every tick of the walk.
+     */
+    public static String stepRefusal(AIPlayerEntity bot, BlockPos cell) {
+        String hazard = stepHazard(bot.level(), cell);
+        if (hazard != null) {
+            return hazard;
+        }
+        AABB landing = bot.getBoundingBox().move(
+                cell.getX() + 0.5D - bot.getX(), cell.getY() - bot.getY(), cell.getZ() + 0.5D - bot.getZ());
+        return bot.level().noCollision(bot, landing) ? null : "occupied";
+    }
+
+    /** The destination must still be a dry, supported, hazard-free landing every tick of the walk. */
+    private static String stepHazard(ServerLevel level, BlockPos cell) {
+        String danger = DangerCheck.scan(level, cell);
+        if (danger != null) {
+            return "hazard:" + danger;
+        }
+        return Standability.isStandableFresh(level, cell) ? null : "no_landing";
     }
 
     private static boolean canStrafeToward(AIPlayerEntity bot, float input) {

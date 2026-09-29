@@ -204,15 +204,21 @@ public final class CreeperDefenseGameTests {
         require(context, !phase(owner, "ESCAPE") && owner.elapsedTicks() <= 6,
                 "north/south oscillation reset away-progress and suppressed the five-tick"
                         + " core-wall escalation: " + owner.describe());
-        owner.tick(bot);
-        owner.tick(bot);
+        // The escalation now starts a walked step (a real walk of several ticks) before the wall;
+        // the step and the wall are proven over real ticks, not synchronous owner ticks.
         BlockPos center = origin;
-        require(context, isPhysicalBarrierCell(bot, center)
-                        && isPhysicalBarrierCell(bot, center.above()),
-                "lateral-stall escalation did not physically complete its central two-high wall:"
-                        + " bot=" + bot.blockPosition().toShortString()
-                        + " owner=" + owner.describe());
-        finish(context, bot, "CreeperLateralStallGT", creeper);
+        context.failIfEver(() -> {
+            if (isPhysicalBarrierCell(bot, center) && isPhysicalBarrierCell(bot, center.above())) {
+                require(context, origin.getX() + 0.5D - bot.getX() >= 0.5D,
+                        "the wall stands but the bot never backed away from it: x=" + bot.getX());
+                finish(context, bot, "CreeperLateralStallGT", creeper);
+            } else if (context.getTick() >= 40) {
+                context.fail(Component.nullToEmpty(
+                        "lateral-stall escalation did not physically complete its central two-high wall:"
+                                + " bot=" + bot.blockPosition().toShortString()
+                                + " owner=" + owner.describe()));
+            }
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_two_legal_blocks_complete_core_and_hold_without_side_material", maxTicks = 60)
@@ -223,6 +229,14 @@ public final class CreeperDefenseGameTests {
         assertStrictCapabilities(context, bot);
         Creeper creeper = spawnDisabledCreeper(context, origin.east(3));
         creeper.ignite();
+        creeper.setSwellDir(1);
+        // A fuse already past the late threshold leaves no time for a walked step, so the two-high
+        // wall goes up where the bot stands, one cell toward the Creeper (the young-fuse walked
+        // step has its own test).
+        for (int tick = 0; tick < 15; tick++) {
+            creeper.tick();
+        }
+        BlockPos wall = origin.east();
         CreeperDefenseTask owner = new CreeperDefenseTask(
                 creeper.getUUID(), creeper.blockPosition());
         TaskManager.INSTANCE.assign(bot, owner,
@@ -230,8 +244,8 @@ public final class CreeperDefenseGameTests {
 
         owner.tick(bot);
         owner.tick(bot);
-        require(context, isPhysicalBarrierCell(bot, origin)
-                        && isPhysicalBarrierCell(bot, origin.above()),
+        require(context, isPhysicalBarrierCell(bot, wall)
+                        && isPhysicalBarrierCell(bot, wall.above()),
                 "two legal blocks did not become the central two-high physical wall: "
                         + owner.describe());
         require(context, MaterialPalette.countEmergencyShelterBlocks(bot) == 0,
@@ -245,10 +259,54 @@ public final class CreeperDefenseGameTests {
                 "missing optional side material discarded a proven central wall instead of"
                         + " retaining HOLD_BARRIER ownership: " + owner.describe()
                         + " state=" + owner.state() + ":" + owner.failureReason());
-        require(context, isPhysicalBarrierCell(bot, origin)
-                        && isPhysicalBarrierCell(bot, origin.above()),
+        require(context, isPhysicalBarrierCell(bot, wall)
+                        && isPhysicalBarrierCell(bot, wall.above()),
                 "central wall was not maintained during the hidden-pressure hold");
         finish(context, bot, "CreeperTwoBlockCoreGT");
+    }
+
+    /**
+     * A lit Creeper still early in its fuse: the bot backs one block away from it before it walls up,
+     * and that step is a real walk by movement inputs, not a teleport. No tick may carry the bot a
+     * block, the step must take several ticks, and the two-high wall must still stand in the cell
+     * the bot left (proof that the step really happened) before the fuse ends.
+     */
+    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_walked_step_away_uses_inputs_instead_of_teleporting", maxTicks = 60)
+    public void walkedStepAwayUsesInputsInsteadOfTeleporting(GameTestHelper context) {
+        AIPlayerEntity bot = spawnArenaBot(context, "CreeperWalkStepGT", 242);
+        BlockPos origin = bot.blockPosition().immutable();
+        InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 8));
+        assertStrictCapabilities(context, bot);
+        Creeper creeper = spawnDisabledCreeper(context, origin.east(3));
+        creeper.ignite();
+        Vec3[] previous = {bot.position()};
+        CreeperDefenseTask owner = new CreeperDefenseTask(creeper.getUUID(), creeper.blockPosition());
+        TaskManager.INSTANCE.assign(bot, owner, TaskOrigin.safety("gametest_walked_step_away"));
+        int[] firstMovedTick = {-1};
+        context.failIfEver(() -> {
+            Vec3 now = bot.position();
+            double step = Math.hypot(now.x - previous[0].x, now.z - previous[0].z);
+            previous[0] = now;
+            require(context, step < 0.6D,
+                    "the creeper step moved the bot " + step + " blocks in one tick (a teleport, not a walk): "
+                            + owner.describe());
+            if (firstMovedTick[0] < 0 && step > 0.0D) {
+                firstMovedTick[0] = (int) context.getTick();
+            }
+            boolean walled = isPhysicalBarrierCell(bot, origin)
+                    && isPhysicalBarrierCell(bot, origin.above());
+            if (walled) {
+                require(context, origin.getX() + 0.5D - bot.getX() >= 0.5D,
+                        "the wall stands but the bot never backed away from it: x=" + bot.getX());
+                require(context, context.getTick() >= 3,
+                        "the step and the wall were both finished within " + context.getTick() + " ticks");
+                require(context, bot.isAlive() && bot.getHealth() >= 19.0F, "the bot was hurt behind its wall");
+                finish(context, bot, "CreeperWalkStepGT", creeper);
+            } else if (context.getTick() >= 26) {
+                context.fail(Component.nullToEmpty("no wall behind a walked step: " + owner.describe()
+                        + " bot=" + bot.blockPosition().toShortString() + " x=" + bot.getX()));
+            }
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_hidden_creeper_memory_yields_to_non_creeper_low_hp_shelter", maxTicks = 60)

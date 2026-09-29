@@ -1610,7 +1610,8 @@ public final class DangerWatcher {
                 return Optional.of(new Threat(
                         Threat.Type.LOW_HP, Threat.Severity.HIGH, mob, mob.blockPosition()));
             }
-            Threat.Severity severity = mob instanceof Creeper
+            // A warden (sonic boom ignores armour, 30 per hit) is as lethal as a fuse: same severity.
+            Threat.Severity severity = mob instanceof Creeper || mob instanceof net.minecraft.world.entity.monster.warden.Warden
                     ? Threat.Severity.HIGH : Threat.Severity.MEDIUM;
             return Optional.of(new Threat(Threat.Type.HOSTILE, severity, mob, mob.blockPosition()));
         }

@@ -57,15 +57,18 @@ public final class CombatHardeningGameTests {
     @GameTest(environment = ENV + "weapon_choice_picks_sword_over_same_tier_axe", maxTicks = 40)
     public void weaponChoicePicksSwordOverSameTierAxe(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "DpsSwordGT", 2);
-        record Tier(String name, Item sword, Item axe) {
+        record Tier(String name, Item sword, Item axe, boolean swordWins) {
         }
         List<Tier> tiers = List.of(
-                new Tier("wooden", Items.WOODEN_SWORD, Items.WOODEN_AXE),
-                new Tier("stone", Items.STONE_SWORD, Items.STONE_AXE),
-                new Tier("copper", Items.COPPER_SWORD, Items.COPPER_AXE),
-                new Tier("iron", Items.IRON_SWORD, Items.IRON_AXE),
-                new Tier("diamond", Items.DIAMOND_SWORD, Items.DIAMOND_AXE),
-                new Tier("netherite", Items.NETHERITE_SWORD, Items.NETHERITE_AXE));
+                new Tier("wooden", Items.WOODEN_SWORD, Items.WOODEN_AXE, true),
+                new Tier("stone", Items.STONE_SWORD, Items.STONE_AXE, true),
+                new Tier("copper", Items.COPPER_SWORD, Items.COPPER_AXE, true),
+                new Tier("iron", Items.IRON_SWORD, Items.IRON_AXE, true),
+                new Tier("diamond", Items.DIAMOND_SWORD, Items.DIAMOND_AXE, true),
+                new Tier("netherite", Items.NETHERITE_SWORD, Items.NETHERITE_AXE, true),
+                // Gold is the documented exception of the DPS formula: the golden axe swings at the
+                // full 1.0 attack speed (7 x 1.0 = 7.0) against the golden sword (4 x 1.6 = 6.4).
+                new Tier("golden", Items.GOLDEN_SWORD, Items.GOLDEN_AXE, false));
         for (Tier tier : tiers) {
             bot.getInventory().clearContent();
             // The axe goes in first so it is genuinely the held weapon before selection.
@@ -75,8 +78,14 @@ public final class CombatHardeningGameTests {
                             >= EquipAction.attackDamage(new ItemStack(tier.sword())),
                     tier.name() + " fixture: the axe must out-damage the sword per hit for this to prove DPS");
             CombatCore.equipMelee(bot);
-            require(context, bot.getMainHandItem().is(tier.sword()),
-                    tier.name() + " sword lost to the same-tier axe, held=" + bot.getMainHandItem().getItem());
+            if (tier.swordWins()) {
+                require(context, bot.getMainHandItem().is(tier.sword()),
+                        tier.name() + " sword lost to the same-tier axe, held=" + bot.getMainHandItem().getItem());
+            } else {
+                require(context, bot.getMainHandItem().is(tier.axe()),
+                        tier.name() + " axe was expected to win on DPS (documented exception), held="
+                                + bot.getMainHandItem().getItem());
+            }
         }
 
         // A Sharpness V stone sword out-damages a plain iron sword, so the small bonus must count.
@@ -530,7 +539,295 @@ public final class CombatHardeningGameTests {
         });
     }
 
+    /**
+     * Peekaboo against two live skeletons: the bot builds its cover column, then peeks out and ducks
+     * back. Both moves must be real walks by movement inputs: no tick may carry the bot a block, and
+     * getting out from behind the column must take several ticks (a teleport step took one).
+     */
+    @GameTest(environment = ENV + "peekaboo_walks_out_and_back_without_teleport", maxTicks = 420)
+    public void peekabooWalksOutAndBackWithoutTeleport(GameTestHelper context) {
+        AIPlayerEntity bot = spawnCorridor(context, "PeekabooGT", 122, -4, 16);
+        var world = context.getLevel();
+        BlockPos origin = bot.blockPosition().immutable();
+        bot.getInventory().clearContent();
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
+        InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
+        InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 64));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HELMET));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_LEGGINGS));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_BOOTS));
+        bot.setHealth(20.0F);
+        bot.getFoodData().setFoodLevel(20);
+
+        // Two live, armed skeletons (a helmet keeps the daylight off them) at the far end.
+        var first = spawnArmedSkeleton(context, origin.east(11).north());
+        var second = spawnArmedSkeleton(context, origin.east(11).south());
+        require(context, CombatCore.rangedThreatsAround(bot, 24.0D).size() >= 2,
+                "the skeleton fixtures were not two observable ranged threats");
+
+        CombatTask combat = new CombatTask(EntityType.SKELETON, 2, 6.0F);
+        TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_peekaboo"));
+
+        Vec3[] previous = {bot.position()};
+        Vec3[] hide = {null};
+        int[] peekStartTick = {-1};
+        int[] leftCoverTick = {-1};
+        boolean[] cycleDone = {false};
+        double[] maxStep = {0.0D};
+        context.failIfEver(() -> {
+            Vec3 now = bot.position();
+            double step = Math.hypot(now.x - previous[0].x, now.z - previous[0].z);
+            previous[0] = now;
+            require(context, bot.isAlive(), "the bot died on the skeleton course: " + combat.describe());
+            boolean peeking = combat.describe().contains("phase=COVER_PEEK");
+            if (peeking && bot.hurtTime == 0) {
+                maxStep[0] = Math.max(maxStep[0], step);
+                require(context, step < 0.75D,
+                        "a peek step moved the bot " + step + " blocks in one tick (a teleport, not a walk)");
+            }
+            if (peeking && peekStartTick[0] < 0) {
+                peekStartTick[0] = (int) context.getTick();
+                hide[0] = now;
+            }
+            if (peeking && leftCoverTick[0] < 0 && hide[0] != null
+                    && Math.hypot(now.x - hide[0].x, now.z - hide[0].z) >= 0.6D) {
+                leftCoverTick[0] = (int) context.getTick();
+                require(context, leftCoverTick[0] - peekStartTick[0] >= 3,
+                        "the bot reached the exposed cell within " + (leftCoverTick[0] - peekStartTick[0])
+                                + " ticks: that is a teleport, not a walk");
+            }
+            if (leftCoverTick[0] >= 0 && !peeking && hide[0] != null
+                    && Math.hypot(now.x - hide[0].x, now.z - hide[0].z) <= 0.4D) {
+                cycleDone[0] = true;
+            }
+            if (cycleDone[0]) {
+                require(context, maxStep[0] < 0.75D, "a peek step was a teleport");
+                first.discard();
+                second.discard();
+                TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_peekaboo_done");
+                despawnAndComplete(context, bot);
+            } else if (context.getTick() >= 380) {
+                context.fail(Component.nullToEmpty("no complete peek out and back: peekStart="
+                        + peekStartTick[0] + " leftCover=" + leftCoverTick[0] + " maxStep=" + maxStep[0]
+                        + " state=" + combat.state() + " " + combat.describe() + " hp=" + bot.getHealth()));
+            }
+        });
+    }
+
+    /**
+     * A ledge beside the fight: the bot stands on the outer edge of a platform whose north side is
+     * a long drop. Its post-swing repositioning strafes alternate sideways every twenty ticks; the
+     * footing guard must never let a strafe carry it over the edge, and must be seen refusing the
+     * ledge side.
+     */
+    @GameTest(environment = ENV + "reposition_strafe_never_walks_off_the_ledge", maxTicks = 220)
+    public void repositionStrafeNeverWalksOffTheLedge(GameTestHelper context) {
+        var world = context.getLevel();
+        world.setDayTime(1000L);
+        BlockPos feet = context.absolutePos(new BlockPos(3, 134, 3));
+        for (int dx = -3; dx <= 5; dx++) {
+            for (int dz = -3; dz <= 4; dz++) {
+                BlockPos cell = feet.offset(dx, 0, dz);
+                boolean floor = dz >= 0;
+                world.setBlock(cell.below(),
+                        floor ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlock(cell.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        AIPlayerEntity bot = spawnBot(context, "LedgeStrafeGT", feet, null);
+        // Right on the northern rim: the box still rests on the platform but a few ticks of strafing
+        // north would take it fully off.
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.06D,
+                Set.of(), 0.0F, 0.0F, true);
+        bot.setDeltaMovement(Vec3.ZERO);
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
+        bot.setHealth(20.0F);
+        Husk husk = spawnHusk(context, feet.east(2));
+        husk.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH).setBaseValue(600.0D);
+        husk.setHealth(600.0F);
+
+        CombatTask combat = CombatTask.defensive(husk, 6.0F, feet);
+        TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_ledge_strafe"));
+        double startY = bot.getY();
+        AtomicInteger repositionTicks = new AtomicInteger();
+        AtomicInteger ledgeRefusals = new AtomicInteger();
+        double[] southmost = {bot.getZ()};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive() && bot.getY() > startY - 0.05D,
+                    "the bot strafed off the ledge: y=" + bot.getY() + " z=" + bot.getZ()
+                            + " " + combat.describe());
+            southmost[0] = Math.max(southmost[0], bot.getZ());
+            if (combat.describe().contains("phase=REPOSITION")) {
+                repositionTicks.incrementAndGet();
+                // Facing east, a positive strafe input is toward the north (the ledge).
+                if (CombatCore.safeStrafeInput(bot, 0.45F) != 0.45F) {
+                    ledgeRefusals.incrementAndGet();
+                }
+            }
+            if (context.getTick() >= 190) {
+                require(context, repositionTicks.get() >= 8,
+                        "the fight never repositioned: " + combat.describe());
+                require(context, ledgeRefusals.get() >= 1,
+                        "the footing guard never refused the ledge side during repositioning");
+                husk.discard();
+                TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_ledge_strafe_done");
+                despawnAndComplete(context, bot);
+            }
+        });
+    }
+
+    /**
+     * A skeleton that is visibly drawing its bow at the bot, close enough for the arrow to come with
+     * little warning, gets the shield up before the arrow exists (the fixture skeleton has no AI and
+     * never fires: the shield can only be a reaction to the drawn bow). A skeleton drawing with its
+     * head turned away must not.
+     */
+    @GameTest(environment = ENV + "drawing_skeleton_raises_the_shield_before_the_arrow", maxTicks = 260)
+    public void drawingSkeletonRaisesTheShieldBeforeTheArrow(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "PreShieldGT", 146);
+        BlockPos origin = bot.blockPosition().immutable();
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
+        InventoryAction.giveItem(bot, new ItemStack(Items.SHIELD));
+        bot.setHealth(20.0F);
+        Husk husk = spawnHusk(context, origin.east(2));
+        husk.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH).setBaseValue(600.0D);
+        husk.setHealth(600.0F);
+        var skeleton = EntityType.SKELETON.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        require(context, skeleton != null, "failed to create the skeleton fixture");
+        skeleton.setPersistenceRequired();
+        skeleton.setNoAi(true);
+        skeleton.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
+        skeleton.setItemSlot(net.minecraft.world.entity.EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+        BlockPos skeletonFeet = origin.west(6);
+        // Facing west, away from the bot: yaw 90 points the head along -x.
+        skeleton.snapTo(skeletonFeet.getX() + 0.5D, skeletonFeet.getY(), skeletonFeet.getZ() + 0.5D, 90.0F, 0.0F);
+        skeleton.setYHeadRot(90.0F);
+        context.getLevel().addFreshEntity(skeleton);
+        skeleton.startUsingItem(InteractionHand.MAIN_HAND);
+
+        CombatTask combat = CombatTask.defensive(husk, 6.0F, origin);
+        TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_pre_shield"));
+        int[] turnedAt = {-1};
+        int[] drawRestarts = {0};
+        boolean[] raised = {false};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive(), "the bot died: " + combat.describe());
+            if (!skeleton.isUsingItem() || !skeleton.getUseItem().is(Items.BOW)) {
+                // The fixture keeps its (AI-less) skeleton drawing; a dropped draw simply starts over.
+                drawRestarts[0]++;
+                skeleton.startUsingItem(InteractionHand.MAIN_HAND);
+            }
+            boolean shieldUp = bot.isUsingItem() && bot.getUsedItemHand() == InteractionHand.OFF_HAND
+                    && bot.getOffhandItem().is(Items.SHIELD);
+            if (turnedAt[0] < 0) {
+                require(context, !shieldUp,
+                        "the shield went up for a skeleton drawing with its head turned away (tick "
+                                + context.getTick() + ", draw ticks " + skeleton.getTicksUsingItem() + ")");
+                if (context.getTick() >= 30 && skeleton.getTicksUsingItem() >= 14) {
+                    turnedAt[0] = (int) context.getTick();
+                    // Turn to face the bot: yaw -90 points the head along +x.
+                    skeleton.setYRot(-90.0F);
+                    skeleton.setYHeadRot(-90.0F);
+                    skeleton.setYBodyRot(-90.0F);
+                } else if (context.getTick() >= 120) {
+                    context.fail(Component.nullToEmpty("the fixture skeleton never held a draw: restarts="
+                            + drawRestarts[0] + " draw_ticks=" + skeleton.getTicksUsingItem()));
+                }
+                return;
+            }
+            if (shieldUp && CombatTask.nearbyDrawingShooter(bot) == skeleton) {
+                raised[0] = true;
+            }
+            if (raised[0] && bot.isBlocking()) {
+                skeleton.discard();
+                husk.discard();
+                TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_pre_shield_done");
+                despawnAndComplete(context, bot);
+            } else if (context.getTick() >= turnedAt[0] + 30) {
+                context.fail(Component.nullToEmpty("the shield never came up for a skeleton drawing at the bot: "
+                        + combat.describe() + " drawing=" + (CombatTask.nearbyDrawingShooter(bot) == skeleton)
+                        + " draw_ticks=" + skeleton.getTicksUsingItem() + " restarts=" + drawRestarts[0]));
+            }
+        });
+    }
+
+    /**
+     * A hostile the guard can see from its post but never reach: the moment the guard engages it, a
+     * glass partition cuts the line of sight, and once the guard has given up and returned the
+     * partition is gone again (as when a mob is visible across a gap but out of sight on any route
+     * to it). The guard must drop it for a cooldown instead of cycling engage / walk up /
+     * disengage / return.
+     */
+    @GameTest(environment = ENV + "guard_does_not_cycle_on_the_target_it_lost_sight_of", maxTicks = 220)
+    public void guardDoesNotCycleOnTheTargetItLostSightOf(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GuardCooldownGT", 158);
+        BlockPos origin = bot.blockPosition().immutable();
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
+        Husk husk = spawnHusk(context, origin.east(4));
+        // Once the partition is gone the server's own danger response may fight it too: keep it alive.
+        husk.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH).setBaseValue(600.0D);
+        husk.setHealth(600.0F);
+
+        GuardTask guard = GuardTask.point(origin);
+        guard.start(bot);
+        AtomicInteger engagements = new AtomicInteger();
+        AtomicBoolean lostSightExit = new AtomicBoolean();
+        boolean[] wasApproaching = {false};
+        boolean[] wallUp = {false};
+        context.failIfEver(() -> {
+            if (guard.state() == TaskState.RUNNING) {
+                guard.tick(bot);
+            }
+            require(context, guard.state() == TaskState.RUNNING,
+                    "GuardTask ended: " + guard.state() + ":" + guard.failureReason());
+            boolean approaching = guard.describe().contains("phase=APPROACH");
+            if (approaching && !wasApproaching[0]) {
+                engagements.incrementAndGet();
+                buildWall(context, origin.east(2), Blocks.GLASS);
+                wallUp[0] = true;
+            }
+            if (!approaching && wasApproaching[0]) {
+                lostSightExit.set(true);
+                buildWall(context, origin.east(2), Blocks.AIR);
+                wallUp[0] = false;
+            }
+            wasApproaching[0] = approaching;
+            require(context, !wallUp[0] || husk.getHealth() == husk.getMaxHealth(),
+                    "the guard struck through the glass");
+            if (context.getTick() >= 150) {
+                require(context, engagements.get() >= 1 && lostSightExit.get(),
+                        "the guard never engaged and dropped the unreachable husk: engagements="
+                                + engagements.get() + " " + guard.describe());
+                require(context, engagements.get() == 1,
+                        "the guard re-engaged a target it had just lost sight of, " + engagements.get() + " times");
+                guard.abort(bot);
+                husk.discard();
+                despawnAndComplete(context, bot);
+            }
+        });
+    }
+
+
     // ------------------------------------------------------------------ fixtures
+
+    private static net.minecraft.world.entity.monster.skeleton.Skeleton spawnArmedSkeleton(GameTestHelper context,
+                                                                                        BlockPos feet) {
+        var skeleton = EntityType.SKELETON.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        if (skeleton == null) {
+            context.fail(Component.nullToEmpty("failed to create the skeleton fixture"));
+            throw new IllegalStateException("failed to create the skeleton fixture");
+        }
+        skeleton.setPersistenceRequired();
+        skeleton.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
+        skeleton.setItemSlot(net.minecraft.world.entity.EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+        skeleton.snapTo(feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, 90.0F, 0.0F);
+        context.getLevel().addFreshEntity(skeleton);
+        return skeleton;
+    }
 
     private static int arrows(AIPlayerEntity bot) {
         int count = InventoryAction.countItem(bot, Items.ARROW);

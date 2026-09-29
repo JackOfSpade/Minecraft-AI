@@ -85,7 +85,7 @@ final class CombatHardeningSourceContractTest {
         int table = core.indexOf("static boolean isMeleeForbiddenThreat");
         String body = core.substring(table, core.indexOf("public static boolean isFriendly"));
         for (String forbidden : new String[]{"Creeper", "EnderMan", "Warden", "WitherBoss", "Ghast",
-                "Shulker", "Creaking creaking && creaking.isHeartBound()"}) {
+                "Shulker", "EnderDragon", "Creaking creaking && creaking.isHeartBound()"}) {
             assertTrue(body.contains(forbidden), "missing from the never-melee table: " + forbidden);
         }
         assertTrue(core.contains("entity instanceof Enemy || entity instanceof Monster"),
@@ -122,6 +122,33 @@ final class CombatHardeningSourceContractTest {
         assertTrue(creeper.contains("SHIELD") && creeper.contains("shouldRaiseShield")
                         && creeper.contains("EquipAction.hasShield(bot)"),
                 "the creeper shield fallback must exist and only fire with a shield");
+    }
+
+    @Test
+    void combatMovesByInputsNeverByTeleportSteps() throws IOException {
+        String combat = read("task/CombatTask.java");
+        String creeper = read("task/CreeperDefenseTask.java");
+        for (String source : new String[]{combat, creeper}) {
+            assertFalse(source.contains("FakePlayerMotion") || source.contains("stepToStandable")
+                            || source.contains("teleportTo("),
+                    "combat and creeper defense must move by movement inputs, never a teleport step");
+        }
+        String core = read("task/CombatCore.java");
+        assertTrue(core.contains("public static StepStatus stepByInput(")
+                        && core.contains("STEP_TIMEOUT_TICKS")
+                        && core.contains("stepHazard(")
+                        && core.contains("STEP_SPRINT_FOOD_FLOOR"),
+                "the walked step must re-prove its landing every tick, time out and never sprint when hungry");
+        int stepBody = core.indexOf("public static StepStatus stepByInput(");
+        int stepEnd = core.indexOf("public static void cancelStep", stepBody);
+        assertFalse(core.substring(stepBody, stepEnd).contains("teleport")
+                        || core.substring(stepBody, stepEnd).contains("setDeltaMovement"),
+                "a walked step must not move or re-velocity the bot itself");
+        assertTrue(combat.contains("bowSuppressedUntil"),
+                "a friend on the line of fire must latch the bow out of the plan, not loop into RANGED");
+        assertTrue(core.contains("enderman.getTarget() == bot")
+                        && !core.contains("mob.getTarget() == bot ||"),
+                "Mob.getTarget() stays only the legacy Enderman rule");
     }
 
     private static String read(String relative) throws IOException {

@@ -15,6 +15,12 @@ public final class GuardTask extends AbstractTask {
     private static final double RETURN_DISTANCE = 5.0D;
     /** Sustained loss of sight (2.5 s) ends an engagement, like CombatTask's own grace window. */
     private static final int LOST_SIGHT_LIMIT = 50;
+    /**
+     * After a lost-sight disengage the same target is left alone this long (10 s), unless it hurts the
+     * bot or its owner: a visible-but-unstrikable target (behind glass, across a gap) must not cycle
+     * engage / walk up / disengage / return forever.
+     */
+    private static final int LOST_SIGHT_COOLDOWN_TICKS = 200;
 
     private enum Phase {
         WATCH,
@@ -31,6 +37,8 @@ public final class GuardTask extends AbstractTask {
     private BlockPos guardPoint;
     private int repositionTicks;
     private int lostSightTicks;
+    private java.util.UUID cooldownTargetId;
+    private int cooldownUntilElapsed;
     private boolean waiting;
 
     public GuardTask(BlockPos point, String targetPlayerName) {
@@ -71,6 +79,8 @@ public final class GuardTask extends AbstractTask {
         guardPoint = fixedPoint == null ? bot.blockPosition().immutable() : fixedPoint;
         CombatCore.equipMelee(bot);
         phase = Phase.WATCH;
+        cooldownTargetId = null;
+        cooldownUntilElapsed = 0;
     }
 
     @Override
@@ -96,7 +106,8 @@ public final class GuardTask extends AbstractTask {
     }
 
     private void watch(AIPlayerEntity bot) {
-        target = CombatCore.nearestHostileAround(bot, guardPoint, GUARD_RADIUS).orElse(null);
+        target = CombatCore.nearestHostileAround(bot, guardPoint, GUARD_RADIUS,
+                entity -> !coolingDown(bot, entity)).orElse(null);
         if (target != null) {
             // This task never completes/fails (a persistent watch), so combat episodes would
             // otherwise leave zero trace -- no way to tell, after the fact, whether/when/against
@@ -142,11 +153,22 @@ public final class GuardTask extends AbstractTask {
             return false;
         }
         BotLog.danger(bot, "guard_disengage", "phase", phaseName, "reason", reason);
+        if ("lost_sight".equals(reason) && target != null) {
+            cooldownTargetId = target.getUUID();
+            cooldownUntilElapsed = elapsed + LOST_SIGHT_COOLDOWN_TICKS;
+        }
         bot.getActionPack().stopAll();
         target = null;
         lostSightTicks = 0;
         phase = Phase.RETURN;
         return true;
+    }
+
+    /** A target dropped for lost sight stays ignored for a while, unless it has since hurt the bot or its owner. */
+    private boolean coolingDown(AIPlayerEntity bot, LivingEntity entity) {
+        return elapsed < cooldownUntilElapsed
+                && entity.getUUID().equals(cooldownTargetId)
+                && !CombatCore.hasHurtBotOrOwner(bot, entity);
     }
 
     private void approach(AIPlayerEntity bot) {

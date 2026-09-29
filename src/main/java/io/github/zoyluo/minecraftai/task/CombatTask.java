@@ -12,7 +12,6 @@ import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.Comparator;
 import java.util.List;
@@ -79,13 +78,20 @@ public final class CombatTask extends AbstractTask {
     private static final float MIN_BLOCK_COOLDOWN_TICKS = 6.0F;
     /** A friend on the line of fire holds the drawn bow this long before falling back to melee. */
     private static final int FRIENDLY_LINE_HOLD_LIMIT = 60;
+    /** After a friend blocked the line of fire this long, the bow stays out of the plan this many ticks. */
+    private static final int BOW_SUPPRESS_TICKS = 200;
     /** A warden's flight must clear its sonic boom range, not the generic six-block retreat step. */
     private static final int WARDEN_RETREAT_STEP_DISTANCE = CombatCore.WARDEN_ESCAPE_DISTANCE;
     /** "there are other ranged enemies" -- at least one besides whichever one is currently targeted. */
     private static final int PEEKABOO_MIN_RANGED_THREATS = 2;
     private static final double PEEKABOO_SCAN_RANGE = 24.0D;
     private static final int PEEKABOO_BUILD_RETRY_LIMIT = 3;
-    private static final int PEEKABOO_EXPOSE_TICKS = 2;
+    /**
+     * Ticks the bot holds its aim once it stands in the exposed cell before it releases the shot.
+     * The peek out and the duck back are real walks (each bounded by CombatCore.STEP_TIMEOUT_TICKS),
+     * so this only has to cover the aim settling after the walk, not the movement itself.
+     */
+    private static final int PEEKABOO_EXPOSE_TICKS = 3;
     private static final int PEEKABOO_RETRY_COOLDOWN_TICKS = 100;
 
     private final EntityType<?> targetType;
@@ -117,6 +123,21 @@ public final class CombatTask extends AbstractTask {
     private int peekBuildAttempts;
     private int peekCycleTicks;
     private int nextPeekabooAttemptElapsed;
+    /** Where a peekaboo cycle is: walking out, holding the aim exposed, or walking back behind cover. */
+    private enum PeekStage {
+        OUT,
+        EXPOSED,
+        BACK
+    }
+
+    private PeekStage peekStage = PeekStage.OUT;
+    private int peekExposedTicks;
+    /** The walked step of the current peekaboo stage (or of a return to the hide spot), if one is under way. */
+    private CombatCore.InputStep peekStep;
+    /** Ranged shooters counted in sight while last exposed (the cover column hides them the rest of the time). */
+    private int peekThreatsAtLastPeek;
+    /** The bow stays out of the plan until this elapsed tick (a friend kept blocking the line of fire). */
+    private int bowSuppressedUntil;
 
     public CombatTask(EntityType<?> targetType, int targetKills, float retreatHpThreshold) {
         this(targetType, targetKills, retreatHpThreshold, null, null);
@@ -170,6 +191,12 @@ public final class CombatTask extends AbstractTask {
         peekBuildAttempts = 0;
         peekCycleTicks = 0;
         nextPeekabooAttemptElapsed = 0;
+        peekStage = PeekStage.OUT;
+        peekExposedTicks = 0;
+        peekStep = null;
+        bowSuppressedUntil = 0;
+        peekThreatsAtLastPeek = 0;
+        friendlyLineTicks = 0;
     }
 
     /**
@@ -222,6 +249,10 @@ public final class CombatTask extends AbstractTask {
             fail("combat_timeout");
             return;
         }
+        if (peekStep != null && phase != Phase.COVER_PEEK && phase != Phase.COVER_HIDE) {
+            // A walked cover step never outlives the cover phases (a retreat or a leash exit took over).
+            cancelPeekStep(bot);
+        }
         if (settleDeadPrimary(bot)) {
             if (state == TaskState.RUNNING && phase == Phase.RETREAT) {
                 retreat(bot);
@@ -237,7 +268,12 @@ public final class CombatTask extends AbstractTask {
         // doesn't count; only a sustained 2.5s of no line of sight ends it. Unreachable is inherently
         // safe, so use complete() to end cleanly and let the original task resume, instead of fail()
         // which would alarm the brain.
-        if (target != null && target.isAlive() && !CombatCore.hasLineOfSight(bot, target)) {
+        boolean hidingOnPurpose = phase == Phase.COVER_BUILD
+                || phase == Phase.COVER_HIDE || phase == Phase.COVER_PEEK;
+        if (hidingOnPurpose) {
+            // Peekaboo puts the bot's own column between it and the target: no sight is the plan.
+            lostSightTicks = 0;
+        } else if (target != null && target.isAlive() && !CombatCore.hasLineOfSight(bot, target)) {
             if (++lostSightTicks > LOST_SIGHT_LIMIT) {
                 lostSightTicks = 0;
                 finishRangedLoadout(bot);
@@ -473,9 +509,14 @@ public final class CombatTask extends AbstractTask {
         if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS) {
             if (StrikeLegality.friendlyOnLineOfFire(bot, target)) {
                 // Never release into the owner or another bot: hold the draw until the line clears,
-                // then give up on the bow if it does not.
+                // then give up on the bow if it does not. approach() would re-enter RANGED at once
+                // through shouldUseBow(), so the give-up latches the bow out of the plan for a while
+                // and the fight really continues in melee.
                 if (++friendlyLineTicks > FRIENDLY_LINE_HOLD_LIMIT) {
                     friendlyLineTicks = 0;
+                    bowSuppressedUntil = elapsed + BOW_SUPPRESS_TICKS;
+                    BotLog.action(bot, "bow_suppressed", "reason", "friendly_on_line_of_fire",
+                            "until", bowSuppressedUntil);
                     finishRangedLoadout(bot);
                     CombatCore.ensureMeleeWeapon(bot);
                     phase = Phase.APPROACH;
@@ -892,7 +933,8 @@ public final class CombatTask extends AbstractTask {
     }
 
     private boolean shouldUseBow(AIPlayerEntity bot) {
-        return target != null
+        return elapsed >= bowSuppressedUntil
+                && target != null
                 && target.isAlive()
                 && bot.distanceTo(target) > BOW_MELEE_SWITCH_DISTANCE
                 && EquipAction.bestRangedSlot(bot, target).isPresent();
@@ -1015,11 +1057,22 @@ public final class CombatTask extends AbstractTask {
                 .getCollisionShape(bot.level(), pos).isEmpty();
     }
 
+    /** Lets go of the movement keys of a walked cover step that is being given up mid-walk. */
+    private void cancelPeekStep(AIPlayerEntity bot) {
+        if (peekStep != null) {
+            CombatCore.cancelStep(bot, peekStep);
+            peekStep = null;
+        }
+    }
+
     private void abandonPeekaboo(AIPlayerEntity bot, String reason) {
+        cancelPeekStep(bot);
+        peekStage = PeekStage.OUT;
         BotLog.action(bot, "peekaboo_abandoned", "reason", reason);
         peekHideSpot = null;
         peekCoverFeet = null;
         peekExposeSpot = null;
+        peekThreatsAtLastPeek = 0;
         nextPeekabooAttemptElapsed = elapsed + PEEKABOO_RETRY_COOLDOWN_TICKS;
         phase = Phase.RANGED;
     }
@@ -1031,11 +1084,37 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         if (!bot.blockPosition().equals(peekHideSpot) && bot.getActionPack().isPathExecutorIdle()) {
-            FakePlayerMotion.stepToStandable(bot, peekHideSpot, "peekaboo_return_to_hide");
+            // Knocked out of its hiding cell: walk back in, by inputs, like a player would.
+            if (peekStep == null || !peekStep.cell().equals(peekHideSpot)) {
+                peekStep = CombatCore.beginStepByInput(peekHideSpot, false, false);
+            }
+            CombatCore.StepStatus returning = CombatCore.stepByInput(bot, peekStep);
+            if (returning == CombatCore.StepStatus.FAILED) {
+                String why = peekStep.failure();
+                peekStep = null;
+                abandonPeekaboo(bot, "peekaboo_hide_step_failed:" + why);
+                return;
+            }
+            if (returning == CombatCore.StepStatus.ARRIVED) {
+                peekStep = null;
+            }
+        } else {
+            cancelPeekStep(bot);
         }
         if (rangedLoadout == null) {
             rangedLoadout = EquipAction.equipBestRangedLoadout(bot, target).orElse(null);
             if (rangedLoadout == null) {
+                CombatCore.ensureMeleeWeapon(bot);
+                phase = Phase.APPROACH;
+                startApproach(bot);
+                return;
+            }
+        } else if (!bot.getMainHandItem().is(Items.BOW)) {
+            // Placing the cover column put a building block in the main hand: take the bow back
+            // (the arrow stays in the offhand; equipping an already selected slot is a no-op).
+            OptionalInt bowSlot = EquipAction.bestRangedSlot(bot, target);
+            if (bowSlot.isEmpty() || InventoryAction.equipFromSlot(bot, bowSlot.getAsInt()) < 0) {
+                finishRangedLoadout(bot);
                 CombatCore.ensureMeleeWeapon(bot);
                 phase = Phase.APPROACH;
                 startApproach(bot);
@@ -1054,47 +1133,99 @@ public final class CombatTask extends AbstractTask {
         }
         // See the identical check in ranged(): getTicksUsingItem() tracks the CURRENT draw, so it
         // can't fire early even if this draw was interrupted and restarted mid-charge.
-        if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS) {
+        // The peek only starts from the hiding cell itself (a bow drawn while still walking back in waits).
+        if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS
+                && bot.blockPosition().equals(peekHideSpot)
+                && peekStep == null) {
             phase = Phase.COVER_PEEK;
             peekCycleTicks = 0;
+            peekStage = PeekStage.OUT;
+            peekExposedTicks = 0;
         }
     }
 
+    /**
+     * One peek cycle, all of it real walking: strafe out of the hiding cell into the exposed cell
+     * with the drawn bow kept aimed at the target, hold the aim a few ticks, release, and strafe
+     * back behind the column. Each walk is a {@link CombatCore.InputStep} (bounded by
+     * {@link CombatCore#STEP_TIMEOUT_TICKS}, re-proving the footing and hazards every tick), so the
+     * exposure lasts as long as the walk really takes instead of one teleported tick.
+     */
     private void coverPeek(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
+            cancelPeekStep(bot);
             bot.releaseUsingItem();
             kills++;
             finishOrAcquire(bot);
             return;
         }
         peekCycleTicks++;
-        if (peekCycleTicks == 1) {
-            if (!FakePlayerMotion.stepToStandable(bot, peekExposeSpot, "peekaboo_peek_out")) {
+        if (peekStage == PeekStage.OUT) {
+            // Aim first: the strafe below is computed in the current yaw frame, so the bow stays on target.
+            CombatCore.lookAtForBowShot(bot, target);
+            if (peekStep == null) {
+                peekStep = CombatCore.beginStepByInput(peekExposeSpot, true, false);
+            }
+            CombatCore.StepStatus status = CombatCore.stepByInput(bot, peekStep);
+            if (status == CombatCore.StepStatus.FAILED) {
+                String why = peekStep.failure();
+                peekStep = null;
                 bot.releaseUsingItem();
-                abandonPeekaboo(bot, "peekaboo_peek_step_failed");
+                abandonPeekaboo(bot, "peekaboo_peek_step_failed:" + why);
                 return;
             }
+            if (status == CombatCore.StepStatus.ARRIVED) {
+                peekStep = null;
+                peekStage = PeekStage.EXPOSED;
+                peekExposedTicks = 0;
+            }
+            return;
+        }
+        if (peekStage == PeekStage.EXPOSED) {
             CombatCore.lookAtForBowShot(bot, target);
+            if (++peekExposedTicks <= PEEKABOO_EXPOSE_TICKS) {
+                return;
+            }
+            // The only moment the shooters are in sight: remember how many there are, because the
+            // bot's own column hides them again as soon as it ducks back.
+            peekThreatsAtLastPeek = CombatCore.rangedThreatsAround(bot, PEEKABOO_SCAN_RANGE).size();
+            if (bot.isUsingItem() && !StrikeLegality.friendlyOnLineOfFire(bot, target)) {
+                // With a friend on the line of fire the drawn bow is kept, never released into them.
+                bot.releaseUsingItem();
+                BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
+            }
+            peekStage = PeekStage.BACK;
+        }
+        if (peekStep == null) {
+            peekStep = CombatCore.beginStepByInput(peekHideSpot, true, false);
+        }
+        CombatCore.lookAtForBowShot(bot, target);
+        CombatCore.StepStatus back = CombatCore.stepByInput(bot, peekStep);
+        if (back == CombatCore.StepStatus.FAILED) {
+            String why = peekStep.failure();
+            peekStep = null;
+            abandonPeekaboo(bot, "peekaboo_hide_step_failed:" + why);
             return;
         }
-        if (peekCycleTicks <= PEEKABOO_EXPOSE_TICKS) {
-            CombatCore.lookAtForBowShot(bot, target);
+        if (back != CombatCore.StepStatus.ARRIVED) {
             return;
         }
-        if (bot.isUsingItem() && !StrikeLegality.friendlyOnLineOfFire(bot, target)) {
-            // With a friend on the line of fire the drawn bow is kept, never released into them.
-            bot.releaseUsingItem();
-            BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
-        }
-        if (!FakePlayerMotion.stepToStandable(bot, peekHideSpot, "peekaboo_duck_back")) {
-            abandonPeekaboo(bot, "peekaboo_hide_step_failed");
-            return;
-        }
+        peekStep = null;
+        peekStage = PeekStage.OUT;
         if (!shouldUseBow(bot)) {
             finishRangedLoadout(bot);
             CombatCore.ensureMeleeWeapon(bot);
             phase = Phase.APPROACH;
             startApproach(bot);
+            return;
+        }
+        if (peekThreatsAtLastPeek >= PEEKABOO_MIN_RANGED_THREATS
+                && isObservableSolid(bot, peekCoverFeet) && isObservableSolid(bot, peekCoverFeet.above())) {
+            // Hidden again with the shooters still out there. The column now blocks the sight that
+            // shouldUsePeekaboo() counts, so re-deriving eligibility below would wrongly see none:
+            // the next cycle follows from what was seen while exposed.
+            phase = Phase.COVER_HIDE;
+            peekCycleTicks = 0;
             return;
         }
         // Reuses the same single entry point every reload goes through: it restores/re-derives the
@@ -1138,6 +1269,7 @@ public final class CombatTask extends AbstractTask {
     @Override
     protected void onPause(AIPlayerEntity bot) {
         finishRangedLoadout(bot);
+        cancelPeekStep(bot);
         lowerReactiveShield(bot);
         super.onPause(bot);
     }
@@ -1145,6 +1277,7 @@ public final class CombatTask extends AbstractTask {
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         finishRangedLoadout(bot);
+        cancelPeekStep(bot);
         lowerReactiveShield(bot);
         super.onAbort(bot);
     }

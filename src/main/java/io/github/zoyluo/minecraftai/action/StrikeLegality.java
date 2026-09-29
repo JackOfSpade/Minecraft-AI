@@ -22,6 +22,13 @@ import net.minecraft.world.phys.Vec3;
  * <p>Line of sight here uses collision shapes ({@link ClipContext.Block#COLLIDER}), the same bar
  * vanilla mobs use to melee, so non-colliding plants (grass, flowers) never occlude a strike; an
  * outline-based ray would stall melee in a meadow.
+ *
+ * <p>Residual difference to a human's crosshair: vanilla picks the entity under the crosshair with
+ * an outline-based block ray, so a plant standing in the line of sight (tall grass, a flower) can take
+ * the crosshair (the human targets the plant, not the mob), while this collider test lets the bot strike
+ * through it. That is kept on purpose (it never makes the bot able to hit through anything solid,
+ * and the outline rule would stall melee in a meadow); it is a known, documented gap, not a claim of
+ * crosshair equivalence.
  */
 public final class StrikeLegality {
     /** Widening applied to a friendly player's box when testing a bow line of fire (arc and spread). */

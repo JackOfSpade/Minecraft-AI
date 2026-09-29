@@ -124,8 +124,11 @@ public final class EquipAction {
      *
      * <p>Vanilla attack cooldown makes a slow heavy weapon worse than its damage suggests: a stone
      * axe hits for 9 every 1.25 s while a stone sword hits for 5 every 0.625 s, so by the vanilla
-     * numbers a sword out-damages the same-tier axe at every tier (and knocks the mob back twice as
-     * often). The score is {@code (1 + ATTACK_DAMAGE) * (4 + ATTACK_SPEED)}, read from the stack's
+     * numbers a sword out-damages the same-tier axe at the wooden, stone, copper, iron, diamond and
+     * netherite tiers (and knocks the mob back twice as often). Gold is the exception the formula
+     * itself produces: a golden axe swings at the full 1.0 attack speed (7 damage x 1.0) against
+     * the golden sword (4 damage x 1.6), so the axe wins there and is chosen on purpose. The score is
+     * {@code (1 + ATTACK_DAMAGE) * (4 + ATTACK_SPEED)}, read from the stack's
      * own attribute modifiers so modded weapons with unusual numbers are ranked correctly, plus a
      * small Sharpness bonus. Ties go to swords, then to remaining durability.
      *

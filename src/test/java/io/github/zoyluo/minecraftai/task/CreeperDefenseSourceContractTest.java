@@ -35,16 +35,18 @@ class CreeperDefenseSourceContractTest {
     @Test
     void fastStepAndBarrierReadsProveTheirCellsFirst() throws IOException {
         String source = Files.readString(TASK);
-        int fastStep = source.indexOf("private boolean tryFastStepAway");
+        int fastStep = source.indexOf("private static CombatCore.InputStep chooseStepAway");
         int feet = source.indexOf("ObservableWorldQuery.canObserveCell(bot, target)", fastStep);
         int head = source.indexOf(
                 "ObservableWorldQuery.canObserveCell(bot, target.above())", feet);
         int support = source.indexOf(
                 "ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target.below())", head);
-        int physicalStep = source.indexOf("FakePlayerMotion.stepToStandable", support);
+        int physicalStep = source.indexOf("CombatCore.stepRefusal(bot, target)", support);
         assertTrue(fastStep >= 0 && feet > fastStep && head > feet
                         && support > head && physicalStep > support,
                 "feet, head and support must all be observable before standability reads");
+        assertFalse(source.contains("FakePlayerMotion") || source.contains("stepToStandable"),
+                "the creeper step away is a walked step by movement inputs, never a teleport step");
 
         int barrier = source.indexOf(
                 "private static boolean isObservablePhysicalBarrierCell");
