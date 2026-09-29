@@ -52,6 +52,8 @@ bin/
 !docs/
 !docs/*.md
 !docs/**/*.md
+# The vendored Baritone provenance note (BaritoneVendorIntegrityTest reads it); *.md would otherwise hide it.
+!third_party/baritone/UPSTREAM.md
 
 # Local reference source used during implementation.
 references/
