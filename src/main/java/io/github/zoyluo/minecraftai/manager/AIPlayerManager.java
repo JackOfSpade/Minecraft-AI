@@ -194,6 +194,7 @@ public final class AIPlayerManager {
                 record.skinIndex());
         spawned.ifPresent(bot -> {
             BotPersistence.applyInventory(bot, record.inventoryNbt());
+            BotPersistence.applyPlayerState(bot, record.playerStateNbt());
             BotMemoryStore.INSTANCE.loadString(bot.getUuid(), record.memoryNbt());
             bot.setHealth(Math.max(1.0F, Math.min(record.health(), bot.getMaxHealth())));
             bot.getHungerManager().setFoodLevel(Math.max(0, Math.min(20, record.hunger())));

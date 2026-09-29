@@ -16,6 +16,17 @@ public record BotRecord(
         String ownerUuid,
         /** One of OfflineProfileFactory's 18 default-skin indices; null for records saved before
          *  skin randomization existed, in which case a fresh random one is assigned on restore. */
-        Integer skinIndex
+        Integer skinIndex,
+        /** SNBT compound with equipment (armor/offhand), ender chest, hotbar slot, XP, saturation,
+         *  status effects, air/fire (see {@link BotPlayerState}); null for records saved before it
+         *  existed, which means "nothing to restore". */
+        String playerStateNbt
 ) {
+    /** Pre-{@code playerStateNbt} shape, kept so older callers and tests still compile. */
+    public BotRecord(String name, String dimension, double x, double y, double z, float yaw, float pitch,
+                     String gameMode, float health, int hunger, String inventoryNbt, String memoryNbt,
+                     String ownerUuid, Integer skinIndex) {
+        this(name, dimension, x, y, z, yaw, pitch, gameMode, health, hunger, inventoryNbt, memoryNbt,
+                ownerUuid, skinIndex, null);
+    }
 }

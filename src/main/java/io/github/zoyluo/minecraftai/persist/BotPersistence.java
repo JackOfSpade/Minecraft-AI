@@ -219,7 +219,13 @@ public final class BotPersistence {
                 encodeInventory(bot),
                 BotMemoryStore.INSTANCE.saveString(bot.getUuid()),
                 AIPlayerManager.INSTANCE.ownerOf(bot).map(UUID::toString).orElse(""),
-                AIPlayerManager.INSTANCE.skinIndex(bot));
+                AIPlayerManager.INSTANCE.skinIndex(bot),
+                BotPlayerState.encode(bot));
+    }
+
+    /** Restores equipment, ender chest, XP, effects etc. (see {@link BotPlayerState}); null = old record. */
+    public static void applyPlayerState(ServerPlayerEntity player, String snbt) {
+        BotPlayerState.apply(player, snbt);
     }
 
     public static String encodeInventory(ServerPlayerEntity player) {
