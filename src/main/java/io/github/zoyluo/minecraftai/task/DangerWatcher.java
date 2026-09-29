@@ -675,11 +675,16 @@ public final class DangerWatcher {
             return false;
         }
 
-        if (active.isPresent()) {
-            if (!urgent || active.get() instanceof EvadeTask
-                    || active.get() instanceof CombatTask) {
-                return false;
-            }
+        boolean activeBlocksInterrupt = active.isPresent()
+                && (active.get() instanceof EvadeTask || active.get() instanceof CombatTask);
+        boolean activeIsProtectedTransaction = active.isPresent()
+                && isProtectedEatTransaction(active.get());
+        EatInterruptDecision decision = decideEatInterrupt(
+                active.isPresent(), urgent, activeBlocksInterrupt, activeIsProtectedTransaction);
+        if (!decision.startEating()) {
+            return false;
+        }
+        if (decision.pauseActive()) {
             TaskManager.INSTANCE.pauseFor(bot, healingEmergency
                     ? "low_health_heal: " + bot.getHealth()
                     : shelterCleanupRecovery ? "shelter_cleanup_hunger: " + foodLevel
@@ -692,8 +697,53 @@ public final class DangerWatcher {
         nextEatAttemptTick.put(bot.getUuid(), now + (shelterCleanupRecovery ? 1 : 100));
         BotLog.danger(bot, "hunger_eat_started", "food", foodLevel, "critical", critical,
                 "healing", healingEmergency, "cleanup_recovery", shelterCleanupRecovery,
-                "hp", (int) bot.getHealth());
+                "hp", (int) bot.getHealth(), "interrupted_active", decision.pauseActive());
         return true;
+    }
+
+    /**
+     * Whether hunger eating may take over the currently active task right now, given how urgent
+     * the hunger is. Pure decision helper (package-private for unit testing).
+     *
+     * <p>Low (non-critical) hunger is allowed to pause ordinary interruptible work -- follow,
+     * hold, guard, gather, idle-ish tasks -- via the existing {@code TaskManager.pauseFor}
+     * machinery, exactly like the urgent path already does, so the paused task resumes once
+     * eating finishes. It must never preempt active combat/evasion, and it must not interrupt a
+     * protected atomic transaction (an in-flight mining-pick transaction, or a crafting/smelting/
+     * container transaction) unless the situation is actually urgent (critical starvation, a
+     * low-health heal, or shelter-cleanup recovery) -- matching the pre-existing urgent path,
+     * which was always allowed to preempt those.
+     */
+    record EatInterruptDecision(boolean startEating, boolean pauseActive) {
+    }
+
+    static EatInterruptDecision decideEatInterrupt(boolean hasActiveTask, boolean urgent,
+                                                    boolean activeBlocksInterrupt,
+                                                    boolean activeIsProtectedTransaction) {
+        if (!hasActiveTask) {
+            return new EatInterruptDecision(true, false);
+        }
+        if (activeBlocksInterrupt) {
+            return new EatInterruptDecision(false, false);
+        }
+        if (!urgent && activeIsProtectedTransaction) {
+            return new EatInterruptDecision(false, false);
+        }
+        return new EatInterruptDecision(true, true);
+    }
+
+    /**
+     * Atomic transactions that a non-urgent hunger pause must never interrupt mid-flight: an
+     * in-flight mining-pick transaction (reusing the existing {@link #ownsMiningPickTransaction}
+     * notion -- covers a break in progress), and crafting/smelting/container transactions.
+     * Shelter/emergency tasks are already excluded earlier in {@link #scanBot}, and
+     * Evade/Combat are handled separately via {@code activeBlocksInterrupt}.
+     */
+    private static boolean isProtectedEatTransaction(Task task) {
+        return ownsMiningPickTransaction(task)
+                || task instanceof CraftTask
+                || task instanceof SmeltTask
+                || task instanceof ContainerTask;
     }
 
     // Layer 2 hunger chain: actively hunt for food (raw meat) when there is no food. Only dispatched

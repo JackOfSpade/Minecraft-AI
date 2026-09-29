@@ -47,7 +47,8 @@
       "io.github.zoyluo.minecraftai.task.OreDigFrontierGameTests",
       "io.github.zoyluo.minecraftai.task.LightAreaGameTests",
       "io.github.zoyluo.minecraftai.task.CraftTaskTablePlacementGameTests",
-      "io.github.zoyluo.minecraftai.task.GiveItemTaskGameTests"
+      "io.github.zoyluo.minecraftai.task.GiveItemTaskGameTests",
+      "io.github.zoyluo.minecraftai.task.HungerEatToFullGameTests"
     ]
   },
   "depends": {
