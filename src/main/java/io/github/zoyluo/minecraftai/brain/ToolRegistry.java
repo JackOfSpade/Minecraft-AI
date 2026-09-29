@@ -46,6 +46,7 @@ import io.github.zoyluo.minecraftai.task.FishTask;
 import io.github.zoyluo.minecraftai.task.FarmTask;
 import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
 import io.github.zoyluo.minecraftai.task.FollowTask;
+import io.github.zoyluo.minecraftai.task.GiveItemTask;
 import io.github.zoyluo.minecraftai.task.GuardTask;
 import io.github.zoyluo.minecraftai.task.HoldTask;
 import io.github.zoyluo.minecraftai.task.LightAreaTask;
@@ -477,6 +478,20 @@ public final class ToolRegistry {
                     optionalBlockPos(args, "chest_x", "chest_y", "chest_z"),
                     requiredItem(args, "item"),
                     optionalInt(args, "count", 1));
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("give_item", "Hand real items to a nearby player: walks within reach, then drops exactly the requested item/count toward them using the same vanilla drop path a human player uses with Q (no teleport or forced pickup). Use this whenever the player asks to be given/handed an item directly, as opposed to deposit (containers) or trade (villagers). Omit player to give to this bot's owner.", objectSchema()
+                .property("item", stringSchema("item id to give, for example minecraft:stone_pickaxe"))
+                .property("count", integerSchema("item count to give"))
+                .property("player", stringSchema("optional recipient player name; defaults to owner"))
+                .required("item")
+                .build(), (bot, args) -> {
+            Task task = new GiveItemTask(
+                    requiredItem(args, "item"),
+                    optionalInt(args, "count", 1),
+                    optionalString(args, "player", ""));
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
         });

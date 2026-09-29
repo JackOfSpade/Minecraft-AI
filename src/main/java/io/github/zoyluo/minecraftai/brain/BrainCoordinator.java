@@ -51,7 +51,7 @@ public final class BrainCoordinator {
             "follow", "hold", "guard", "farm", "harvest", "breed", "attack_entity", "post_job",
             "tell_bot", "remember", "forget", "mark_place", "goto_place", "resume_mining",
             "mine_and_stockpile", "recover_drops", "set_goal", "advance_goal", "assign_task",
-            "launch_boat", "board_boat", "boat_follow", "exit_boat");
+            "launch_boat", "board_boat", "boat_follow", "exit_boat", "give_item");
     // A successful setup, memory, or coordination call is not evidence that the requested work
     // has begun. These are the concrete task/goal/direct-work entry points that may start the
     // initial request even when their operation finishes in the same tick.
@@ -63,7 +63,7 @@ public final class BrainCoordinator {
             "withdraw", "attack", "sleep", "light_area", "follow", "hold", "guard", "farm",
             "harvest", "breed", "attack_entity", "goto_place", "resume_mining",
             "mine_and_stockpile", "recover_drops", "assign_task", "launch_boat", "board_boat",
-            "boat_follow", "exit_boat");
+            "boat_follow", "exit_boat", "give_item");
     // These terminal/mission-control commands are intentionally not "start work" actions. They
     // must remain usable as concise commands without making a fictional plan first.
     private static final Set<String> CONTROL_ONLY_TOOLS = Set.of(

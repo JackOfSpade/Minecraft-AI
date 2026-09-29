@@ -224,6 +224,66 @@ public final class InventoryAction {
         return inserted ? ActionResult.SUCCESS : ActionResult.failed("inventory_full");
     }
 
+    /**
+     * Drops an exact total {@code count} of {@code item} through the ordinary vanilla player-drop
+     * path ({@link AIPlayerEntity#dropItem}, the same thing a human player does with Q) -- main
+     * inventory first, then offhand, mirroring {@link #removeItems}'s counting/consumption order,
+     * but spawning real world {@link ItemEntity} drops instead of deleting the stacks. Used by
+     * give_item/{@code GiveItemTask} to hand items to a player without any forced-pickup or
+     * teleport shortcut. Fails (and restocks anything already split off) if the full count is not
+     * actually present, so a caller can trust a {@code true} result means exactly {@code count}
+     * left the bot's inventory as real, pickup-able drops.
+     */
+    public static boolean dropItems(AIPlayerEntity player, Item item, int count) {
+        if (count <= 0) {
+            return true;
+        }
+        if (countItem(player, item) < count) {
+            return false;
+        }
+        PlayerInventory inventory = player.getInventory();
+        java.util.List<ItemStack> chunks = new java.util.ArrayList<>();
+        int remaining = count;
+        for (int slot = 0; slot < inventory.getMainStacks().size() && remaining > 0; slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
+            if (!stack.isOf(item)) {
+                continue;
+            }
+            int take = Math.min(remaining, stack.getCount());
+            chunks.add(stack.split(take));
+            remaining -= take;
+        }
+        if (remaining > 0) {
+            ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
+            if (offHandStack.isOf(item)) {
+                int take = Math.min(remaining, offHandStack.getCount());
+                chunks.add(offHandStack.split(take));
+                remaining -= take;
+            }
+        }
+        inventory.markDirty();
+        if (remaining > 0) {
+            // Unreachable given the countItem check above (no other code runs mid-tick to change
+            // the inventory), but never silently vanish a partially-split remainder.
+            for (ItemStack chunk : chunks) {
+                giveItem(player, chunk);
+            }
+            return false;
+        }
+        boolean allDropped = true;
+        for (ItemStack chunk : chunks) {
+            if (player.dropItem(chunk, false, true) == null) {
+                // Extremely rare (event-cancelled spawn): restock this chunk rather than lose it.
+                giveItem(player, chunk);
+                allDropped = false;
+            }
+        }
+        if (allDropped) {
+            BotLog.action(player, "give_drop", "item", item, "count", count);
+        }
+        return allDropped;
+    }
+
     public static ActionResult dropSlot(AIPlayerEntity player, int slot, boolean wholeStack) {
         return dropSlotEntity(player, slot, wholeStack).isPresent()
                 ? ActionResult.SUCCESS : ActionResult.failed("drop_entity_not_created");
