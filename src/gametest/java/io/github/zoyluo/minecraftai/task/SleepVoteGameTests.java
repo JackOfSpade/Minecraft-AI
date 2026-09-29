@@ -137,7 +137,7 @@ public final class SleepVoteGameTests {
      * A real (non-{@link AIPlayerEntity}) player whose connection is a fake that never touches a socket but
      * runs over a {@link LocalChannel}, the channel type of a singleplayer client, so it counts as a human.
      */
-    private static ServerPlayerEntity connectHuman(MinecraftServer server, ServerWorld world, BlockPos foot) {
+    static ServerPlayerEntity connectHuman(MinecraftServer server, ServerWorld world, BlockPos foot) {
         GameProfile profile = new GameProfile(UUID.randomUUID(), "SleepVoteHuman");
         ConnectedClientData data = ConnectedClientData.createDefault(profile, false);
         ServerPlayerEntity player = new ServerPlayerEntity(server, world, profile, data.syncedOptions()) {

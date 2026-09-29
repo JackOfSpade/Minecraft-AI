@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.network.PlayerKind;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
@@ -14,6 +15,8 @@ import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.network.DisconnectionInfo;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
@@ -185,57 +188,64 @@ public final class BoatFollowGameTests {
 
     /**
      * Guard for AIPlayerControlledBoatLogicalSideMixin: it may only make the server authoritative
-     * for a boat controlled by our own AIPlayerEntity.  A boat carrying a plain non-AI entity (the
-     * only non-AI passenger seated here: a mock or Fabric FakePlayer was refused by startRiding on a
-     * boat in a GameTest) must answer exactly what an empty boat does, i.e. the mixin
-     * must not leak onto other drivers.  The AI-driven counterpart (true, boat moves) is proven by
-     * aiPlayerBoatMovesWhenSteeredOnOpenWater.
+     * for a boat controlled by our own AIPlayerEntity.  Vanilla answers false on the server for a
+     * boat whose controlling passenger is any PlayerEntity (the real client simulates it and reports
+     * back) and true for an empty boat or one carrying a non-player entity, so only a PLAYER
+     * passenger can show whether the mixin leaks: a human (a real non-AI ServerPlayerEntity over a
+     * LocalChannel, the stand-in the sleep-vote test uses) must keep its boat client-authoritative
+     * (false) while an AIPlayerEntity in an identical boat makes it server-authoritative (true).
      */
-    @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_plain_entity_driven_boat_keeps_vanilla_server_authority", maxTicks = 60)
-    public void plainEntityDrivenBoatKeepsVanillaServerAuthority(TestContext context) {
+    @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_human_driven_boat_stays_client_authoritative_while_ai_driven_is_server_authoritative", maxTicks = 100)
+    public void humanDrivenBoatStaysClientAuthoritativeWhileAiDrivenIsServerAuthoritative(TestContext context) {
         ServerWorld world = context.getWorld();
         BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 3));
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
                 world.setBlockState(feet.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
                 for (int dy = 0; dy <= 3; dy++) {
                     world.setBlockState(feet.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
                 }
             }
         }
-        AbstractBoatEntity emptyBoat = placeBoat(world, feet.add(-1, 0, -1));
-        AbstractBoatEntity plainBoat = placeBoat(world, feet.add(1, 0, 1));
-        net.minecraft.entity.passive.VillagerEntity villager =
-                EntityType.VILLAGER.create(world, SpawnReason.COMMAND);
-        if (villager == null) {
-            throw new IllegalStateException("failed to create villager");
-        }
-        villager.refreshPositionAndAngles(plainBoat.getX(), plainBoat.getY(), plainBoat.getZ(), 0.0F, 0.0F);
-        world.spawnEntity(villager);
-        villager.setAiDisabled(true);
-        require(context, villager.startRiding(plainBoat, true, false), "villager could not board the plain boat");
+        AbstractBoatEntity emptyBoat = placeBoat(world, feet.add(-3, 0, -3));
+        AbstractBoatEntity humanBoat = placeBoat(world, feet.add(3, 0, -3));
+        AbstractBoatEntity aiBoat = placeBoat(world, feet.add(0, 0, 3));
+        AIPlayerEntity bot = spawnBot(world, "BoatAuthorityBotGT", feet.add(-3, 0, 3));
+        boarded(bot, aiBoat);
+        ServerPlayerEntity human = SleepVoteGameTests.connectHuman(world.getServer(), world, humanBoat.getBlockPos());
         context.addFinalTask(() -> {
-            villager.discard();
+            if (human.networkHandler != null) {
+                human.networkHandler.onDisconnected(new DisconnectionInfo(Text.literal("boat authority test over")));
+            }
+            DangerWatcher.INSTANCE.clear(bot);
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), "BoatAuthorityBotGT");
             emptyBoat.discard();
-            plainBoat.discard();
+            humanBoat.discard();
+            aiBoat.discard();
         });
+        require(context, !PlayerKind.isBot(human) && !(human instanceof AIPlayerEntity),
+                "fixture: the stand-in must be a human, not one of our bots");
+        human.teleport(world, humanBoat.getX(), humanBoat.getY(), humanBoat.getZ(), Set.of(), 0.0F, 0.0F, true);
+        require(context, human.startRiding(humanBoat, true, false),
+                "the human could not board its boat: removed=" + humanBoat.isRemoved()
+                        + " passengers=" + humanBoat.getPassengerList());
         AtomicInteger ticks = new AtomicInteger();
         context.runAtEveryTick(() -> {
-            require(context, plainBoat.getPassengerList().contains(villager),
-                    "fixture: the villager left the plain boat");
-            require(context, !(plainBoat.getControllingPassenger() instanceof AIPlayerEntity),
-                    "fixture: the passenger must not be an AIPlayerEntity");
-            require(context, plainBoat.isLogicalSideForUpdatingMovement()
-                            == emptyBoat.isLogicalSideForUpdatingMovement(),
-                    "a plain-entity-driven boat is treated differently from an empty boat: plain="
-                            + plainBoat.isLogicalSideForUpdatingMovement()
-                            + " empty=" + emptyBoat.isLogicalSideForUpdatingMovement());
+            require(context, humanBoat.getControllingPassenger() == human,
+                    "fixture: the human is not the controlling passenger: " + humanBoat.getControllingPassenger());
+            require(context, aiBoat.getControllingPassenger() == bot,
+                    "fixture: the bot is not the controlling passenger: " + aiBoat.getControllingPassenger());
+            require(context, !humanBoat.isLogicalSideForUpdatingMovement(),
+                    "the mixin leaked: a boat driven by a human player must stay client-authoritative on the server");
+            require(context, aiBoat.isLogicalSideForUpdatingMovement(),
+                    "an AIPlayerEntity-driven boat must be server-authoritative");
+            require(context, emptyBoat.isLogicalSideForUpdatingMovement(),
+                    "an empty boat keeps vanilla's server authority");
             if (ticks.incrementAndGet() >= 20) {
                 context.complete();
             }
         });
     }
-
 
     // ---- scenario plumbing -------------------------------------------------------------------
 
