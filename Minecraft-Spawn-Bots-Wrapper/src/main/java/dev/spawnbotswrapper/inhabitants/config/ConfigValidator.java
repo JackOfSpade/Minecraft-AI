@@ -156,7 +156,7 @@ public final class ConfigValidator {
         c.combatLog.maxLinesPerMinute = clamp(w, "combatLog.maxLinesPerMinute", c.combatLog.maxLinesPerMinute, 1, 100000);
     }
 
-    /** A '#tag' under 'structures' belongs in 'tags';a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */
+    /** A '#tag' under 'structures' belongs in 'tags'; a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */
     private static void moveMisplacedKeys(InhabitantsConfig c, List<String> w) {
         Map<String, InhabitantsConfig.RuleOverride> fixedStructures = new LinkedHashMap<>();
         Map<String, InhabitantsConfig.RuleOverride> fixedTags = new LinkedHashMap<>();

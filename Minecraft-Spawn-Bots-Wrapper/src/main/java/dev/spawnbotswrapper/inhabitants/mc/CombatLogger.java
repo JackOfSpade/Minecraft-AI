@@ -58,11 +58,19 @@ public final class CombatLogger {
         }
     }
 
-    /** Server stopping: write what is still pending. */
+    /**
+     * Server stopping: write what is still pending, then drop the ledger. Server ticks restart at 0 on the next
+     * server (quit to title and reopen, integrated restarts, GameTests), so nothing timed in the old server's
+     * ticks may outlive it; the next event lazily creates a fresh ledger.
+     */
     public void flush(long serverTicks) {
         CombatLedger current = ledger;
+        ledger = null;
         if (current != null) {
-            guarded("flush", () -> current.flushAll(serverTicks));
+            guarded("flush", () -> {
+                current.flushAll(serverTicks);
+                current.reset();
+            });
         }
     }
 

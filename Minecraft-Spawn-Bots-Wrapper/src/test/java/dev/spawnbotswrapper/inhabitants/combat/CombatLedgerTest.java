@@ -200,4 +200,47 @@ class CombatLedgerTest {
         assertEquals(2, lines.size());
         assertTrue(lines.get(1).contains("1 time for 5.0 damage"), lines.get(1));
     }
+
+    @Test
+    void aNewServerWhoseTicksRestartAtZeroLogsImmediatelyAndTheBudgetRefills() {
+        budget = 2;
+        // Old server, long-running: its budget is used up, then it stops (flushAll rolls the window at tick 500000).
+        ledger.tick(500_000);
+        ledger.hit(500_000, hit(new Actor("A", Kind.MOB), BOT, 1f, 19f), false);
+        ledger.hit(500_000, hit(new Actor("B", Kind.MOB), BOT, 1f, 19f), false);
+        ledger.hit(500_000, hit(new Actor("C", Kind.MOB), BOT, 1f, 19f), false);
+        ledger.tick(500_100);
+        assertEquals(2, lines.size(), lines.toString());
+        ledger.flushAll(500_150);
+        lines.clear();
+
+        // Same ledger object, new server: ticks are back near zero. It must not stay in the old window.
+        for (int i = 0; i < 2; i++) {
+            ledger.hit(10, hit(new Actor("N" + i, Kind.MOB), BOT, 1f, 19f), false);
+        }
+        ledger.tick(110);
+        assertEquals(2, lines.size(), "logging works right after the restart: " + lines);
+
+        // ...and the budget refills a minute later on the new clock, not 500000 ticks later.
+        ledger.hit(1400, hit(new Actor("M", Kind.MOB), BOT, 1f, 19f), false);
+        ledger.tick(1500);
+        assertEquals(3, lines.size(), lines.toString());
+    }
+
+    @Test
+    void resetDropsPendingSummariesAndBudgetStateWithoutWritingAnything() {
+        budget = 1;
+        ledger.tick(9_000);
+        ledger.hit(9_000, hit(new Actor("A", Kind.MOB), BOT, 1f, 19f), false);
+        ledger.hit(9_000, hit(new Actor("B", Kind.MOB), BOT, 1f, 19f), false);
+        ledger.tick(9_100);
+        assertEquals(1, lines.size());
+        ledger.hit(9_100, hit(BOT, PLAYER, 5f, 15f), false);
+        ledger.reset();
+        assertEquals(0, ledger.pendingPairs());
+        assertEquals(1, lines.size(), "reset writes nothing, not even the suppression notice");
+        ledger.hit(5, hit(BOT, PLAYER, 5f, 15f), false);
+        ledger.tick(105);
+        assertEquals(2, lines.size(), lines.toString());
+    }
 }

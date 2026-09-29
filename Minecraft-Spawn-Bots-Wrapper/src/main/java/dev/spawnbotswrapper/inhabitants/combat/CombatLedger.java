@@ -209,6 +209,14 @@ public final class CombatLedger {
         rollBudgetForce(now);
     }
 
+    /** Drops all pending summaries and budget state without writing anything (a new server starts its own clock). */
+    public void reset() {
+        pending.clear();
+        windowStart = Long.MIN_VALUE;
+        linesInWindow = 0;
+        suppressed = 0;
+    }
+
     // ------------------------------------------------------------------ internals
 
     private void flushInvolving(long now, Actor victim) {
@@ -267,7 +275,8 @@ public final class CombatLedger {
             windowStart = now;
             return;
         }
-        if (now - windowStart >= BUDGET_WINDOW_TICKS) {
+        // now < windowStart: the server-tick clock restarted (a new server in the same JVM); start a fresh window.
+        if (now < windowStart || now - windowStart >= BUDGET_WINDOW_TICKS) {
             rollBudgetForce(now);
         }
     }
