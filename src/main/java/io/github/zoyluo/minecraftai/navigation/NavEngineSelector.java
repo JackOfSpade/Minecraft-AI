@@ -30,6 +30,8 @@ public final class NavEngineSelector {
     private static final AtomicBoolean FAILED = new AtomicBoolean();
     private static volatile boolean live;
     private static volatile String failure = "";
+    /** Best-effort teardown of every Baritone instance and route, registered by the Baritone glue once it exists. */
+    private static volatile Runnable unavailableHook;
     private static final Map<UUID, NavEngine> BOT_OVERRIDES = new ConcurrentHashMap<>();
 
     private NavEngineSelector() {
@@ -115,6 +117,75 @@ public final class NavEngineSelector {
     }
 
     /**
+     * Whether the hooks that run for every bot / every lifecycle event may call into Baritone: it was initialised and has not been
+     * given up on since. A Baritone that failed once is never touched again by them, so a broken class cannot break the legacy
+     * fallback too.
+     */
+    public static boolean baritoneActive() {
+        return live && !FAILED.get();
+    }
+
+    /**
+     * Registers what runs (once, best effort, on the thread that marked the failure) when Baritone is given up on: it lets go of
+     * every bot, cancels every route and forgets every instance. Set by the Baritone glue when it creates its first instance.
+     */
+    public static void setUnavailableHook(Runnable hook) {
+        unavailableHook = hook;
+    }
+
+    /**
+     * Runs a Baritone-side hook (a lifecycle reset, a preempt, ...) only while {@link #baritoneActive()}. Any failure is
+     * handled by {@link #handleFailure}: a linkage-type one retires Baritone, the caller carries on either way.
+     */
+    public static void hook(String where, Runnable work) {
+        if (!baritoneActive()) {
+            return;
+        }
+        try {
+            work.run();
+        } catch (Throwable failed) {
+            handleFailure(where, failed);
+        }
+    }
+
+    /** As {@link #hook} for a question: {@code whenInactive} when Baritone is not active or the question failed. */
+    public static <T> T query(String where, Supplier<T> work, T whenInactive) {
+        if (!baritoneActive()) {
+            return whenInactive;
+        }
+        try {
+            return work.get();
+        } catch (Throwable failed) {
+            handleFailure(where, failed);
+            return whenInactive;
+        }
+    }
+
+    /**
+     * The one place a failure of Baritone-side work that is already running is classified. A true VM error (out of memory, ...) is
+     * rethrown; a linkage-type failure (a class that cannot load or initialise, a mixin failure: see
+     * {@link #isInitialisationFailure}) gives up on Baritone for the session ({@link #markBaritoneUnavailable}); anything else is
+     * only logged (one bad request or tick).
+     *
+     * @return true when the failure retired Baritone (the caller must carry on without it)
+     */
+    public static boolean handleFailure(String where, Throwable failed) {
+        if (failed instanceof VirtualMachineError fatal && !(failed instanceof StackOverflowError)) {
+            throw fatal;
+        }
+        if (isInitialisationFailure(failed)) {
+            markBaritoneUnavailable(where, failed);
+            return true;
+        }
+        try {
+            BotLog.error("nav_baritone_request_failed", failed, "what", where);
+        } catch (Throwable ignored) {
+            // logging must not make a failed request worse
+        }
+        return false;
+    }
+
+    /**
      * Gives up on Baritone for the rest of the session. Logs once; later calls keep the first reason.
      *
      * @return true for the call that marked it
@@ -128,6 +199,14 @@ public final class NavEngineSelector {
             BotLog.error("nav_baritone_unavailable", cause, "where", where, "fallback", NavEngine.LEGACY.configValue());
         } catch (Throwable loggingFailed) {
             System.err.println("[minecraftai] Baritone navigation unavailable (" + failure + "); falling back to the legacy navigator");
+        }
+        Runnable teardown = unavailableHook;
+        if (teardown != null) {
+            try {
+                teardown.run();
+            } catch (Throwable ignored) {
+                // best effort: the flag is what keeps every hook away from Baritone from now on
+            }
         }
         return true;
     }
@@ -149,18 +228,7 @@ public final class NavEngineSelector {
         try {
             return baritoneWork.get();
         } catch (Throwable failed) {
-            if (failed instanceof VirtualMachineError fatal && !(failed instanceof StackOverflowError)) {
-                throw fatal;
-            }
-            if (isInitialisationFailure(failed)) {
-                markBaritoneUnavailable(what, failed);
-            } else {
-                try {
-                    BotLog.error("nav_baritone_request_failed", failed, "what", what);
-                } catch (Throwable ignored) {
-                    // logging must not make a failed request worse
-                }
-            }
+            handleFailure(what, failed);
             return fallback.get();
         }
     }
@@ -187,6 +255,7 @@ public final class NavEngineSelector {
         FAILED.set(false);
         failure = "";
         live = false;
+        unavailableHook = null;
         BOT_OVERRIDES.clear();
     }
 }

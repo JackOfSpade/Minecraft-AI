@@ -17,11 +17,13 @@ public final class NavRoute {
         NEAR
     }
 
-    /** Where a route stands: Baritone still drives it, it arrived, or Baritone let go of the bot short of the goal. */
+    /** Where a route stands: Baritone still drives it, it arrived, Baritone let go of the bot short of the goal, or it keeps being vetoed. */
     public enum Progress {
         RUNNING,
         ARRIVED,
-        ENDED_SHORT
+        ENDED_SHORT,
+        /** Baritone still drives it, but the strict-survival rules have refused its breaks/placements too many times in a row. */
+        POLICY_REFUSED
     }
 
     /**

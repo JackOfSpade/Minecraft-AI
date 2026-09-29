@@ -34,6 +34,17 @@ final class NavEngineLazyBootstrapContractTest {
         assertTrue(count > 0, what + ": expected at least one " + needle);
     }
 
+    /** As {@link #assertGuarded} with several accepted guards. */
+    private static void assertGuardedByAny(String source, String needle, int window, String what, String... guards) {
+        int count = 0;
+        for (int at = source.indexOf(needle); at >= 0; at = source.indexOf(needle, at + 1)) {
+            count++;
+            String before = source.substring(Math.max(0, at - window), at);
+            assertTrue(java.util.Arrays.stream(guards).anyMatch(before::contains), what + ": " + needle + " at offset " + at + " is not behind " + String.join(" or ", guards));
+        }
+        assertTrue(count > 0, what + ": expected at least one " + needle);
+    }
+
     @Test
     void theNavigationPackageNamesNoBaritoneType() throws IOException {
         try (Stream<Path> files = Files.list(MAIN.resolve("navigation"))) {
@@ -48,14 +59,15 @@ final class NavEngineLazyBootstrapContractTest {
     @Test
     void perBotAndLifecycleHooksAreBehindTheLiveFlag() throws IOException {
         String entity = read("entity/AIPlayerEntity.java");
-        assertTrue(entity.contains("NavEngineSelector.baritoneLive() && BaritoneDriver.beforePhysics(this)"),
-                "the per-tick driver hook is only reached once Baritone is live");
-        assertTrue(entity.contains("if (baritoneDrives) {\n                BaritoneDriver.afterPhysics(this);"),
+        assertTrue(entity.contains("boolean baritoneDrives = baritoneBeforePhysics();")
+                        && entity.contains("if (!NavEngineSelector.baritoneActive()) {\n            return false;\n        }\n        try {\n            return BaritoneDriver.beforePhysics(this);"),
+                "the per-tick driver hook is only reached while Baritone is live and has not been given up on");
+        assertTrue(entity.contains("if (baritoneDrives) {\n                baritoneAfterPhysics();"),
                 "afterPhysics only runs for a bot beforePhysics reported as driven");
         String lifecycle = read("runtime/RuntimeLifecycleCoordinator.java");
-        assertGuarded(lifecycle, "BaritoneRegistry.INSTANCE.", "NavEngineSelector.baritoneLive()", 60, "RuntimeLifecycleCoordinator");
+        assertGuarded(lifecycle, "BaritoneRegistry.INSTANCE.", "NavEngineSelector.hook(", 60, "RuntimeLifecycleCoordinator");
         String pack = read("action/ActionPack.java");
-        assertGuarded(pack, "BaritoneRegistry.INSTANCE.", "NavEngineSelector.baritoneLive()", 60, "ActionPack");
+        assertGuardedByAny(pack, "BaritoneRegistry.INSTANCE.", 60, "ActionPack", "NavEngineSelector.hook(", "NavEngineSelector.query(");
     }
 
     @Test

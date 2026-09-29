@@ -86,6 +86,7 @@ public final class BaritoneRegistry {
             });
             entries.put(bot.getUUID(), entry);
             NavEngineSelector.markBaritoneLive();
+            NavEngineSelector.setUnavailableHook(BaritoneRegistry::abandonAll);
             BotLog.lifecycle(bot, "baritone_created", "instances", entries.size());
         } else {
             entry.bot = bot; // the same bot may have been given a new entity (respawn from a saved record)
@@ -240,6 +241,43 @@ public final class BaritoneRegistry {
         BaritoneNavigator.releaseAllRoutes();
         if (!all.isEmpty()) {
             BotLog.lifecycle("baritone_cleared", "count", all.size());
+        }
+    }
+
+    /**
+     * Baritone was given up on ({@link NavEngineSelector#markBaritoneUnavailable}): every bot is let go of and every instance,
+     * route and ledger is dropped, each step best effort (the classes involved may be the very ones that failed). From here on
+     * the hooks skip Baritone ({@link NavEngineSelector#baritoneActive}) and the legacy navigator owns every bot.
+     */
+    static void abandonAll() {
+        INSTANCE.abandon();
+    }
+
+    private void abandon() {
+        List<Entry> all = List.copyOf(entries.values());
+        entries.clear();
+        for (Entry entry : all) {
+            AIPlayerEntity bot = entry.bot;
+            boolean wasDriven = entry.driven;
+            entry.driven = false;
+            entry.waterAllowed = false;
+            bestEffort(() -> cancelAll(entry));
+            bestEffort(() -> NavSafetyNet.INSTANCE.clearBaritoneWater(bot));
+            if (wasDriven) {
+                bestEffort(() -> BotInputBridge.release(bot));
+            }
+            bestEffort(() -> BaritoneHost.destroy(entry.baritone));
+        }
+        bestEffort(BaritoneEdits::clearAll);
+        bestEffort(BaritoneNavigator::releaseAllRoutes);
+        bestEffort(() -> BotLog.lifecycle("baritone_abandoned", "count", all.size()));
+    }
+
+    private static void bestEffort(Runnable step) {
+        try {
+            step.run();
+        } catch (Throwable ignored) {
+            // the step may need the very class that failed
         }
     }
 

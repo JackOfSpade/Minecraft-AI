@@ -51,6 +51,9 @@ public final class BaritoneRefusals {
     }
 
     static void record(AIPlayerEntity bot, Op op, BlockPos pos, String reason, String detail) {
+        if (op == Op.BREAK || op == Op.PLACE) {
+            PolicyRefusalStreak.refused(bot.getUUID());
+        }
         int tick = bot.getServer() == null ? 0 : bot.getServer().getTickCount();
         Deque<Refusal> deque = REFUSALS.computeIfAbsent(bot.getUUID(), id -> new ArrayDeque<>());
         synchronized (deque) {
@@ -88,6 +91,7 @@ public final class BaritoneRefusals {
 
     static void clear(UUID botId) {
         REFUSALS.remove(botId);
+        PolicyRefusalStreak.reset(botId);
         String prefix = botId + "|";
         LAST_LOGGED.keySet().removeIf(key -> key.startsWith(prefix));
     }
@@ -95,6 +99,7 @@ public final class BaritoneRefusals {
     /** Test hook: forgets every bot's refusals. */
     public static void clearAll() {
         REFUSALS.clear();
+        PolicyRefusalStreak.clearAll();
         LAST_LOGGED.clear();
     }
 }

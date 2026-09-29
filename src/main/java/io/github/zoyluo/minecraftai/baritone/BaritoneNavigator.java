@@ -81,40 +81,58 @@ public final class BaritoneNavigator {
         NavRoute.Options options = route.options();
         registry.setPolicy(bot, policyOf(options));
         registry.setWaterAllowed(bot, options.allowWater());
-        if (options.allowWater()) {
-            // The lease starts with the route, not with the first driven tick: a bot that is already in the water when a swim route
-            // is issued would otherwise get one tick of the safety net's rescue in between.
-            NavSafetyNet.INSTANCE.renewBaritoneWater(bot);
-        }
+        // The route's permissions and its water rule shape the admission search itself (Baritone's cost model reads them), so they
+        // are in place before it; but they belong to a route that exists, so a refusal or a failure takes them back out again.
         applyWaterPolicy(bot.getUUID(), options.allowWater());
-        Goal goal = goalOf(bot, route);
-        route.setGoalHandle(goal);
-        registry.clearLastPathEvent(bot);
+        PolicyRefusalStreak.reset(bot.getUUID());
+        boolean accepted = false;
+        try {
+            Goal goal = goalOf(bot, route);
+            route.setGoalHandle(goal);
+            registry.clearLastPathEvent(bot);
 
-        if (admit) {
-            BaritonePlanner.Plan plan = BaritonePlanner.planNow(baritone, goal, ADMISSION_PRIMARY_MS, ADMISSION_FAILURE_MS);
-            PathCalculationResult.Type type = plan.type();
-            BotLog.path(bot, "baritone_admission", "goal", goal, "type", type, "nodes", plan.nodesConsidered(),
-                    "moves", plan.movements().size(), "search_ms", plan.searchMillis(), "policy", policyOf(options));
-            String refusal = admissionFailure(type, plan.searchMillis(), ADMISSION_FAILURE_MS);
-            if (refusal == null && route.shape() == NavRoute.Shape.BLOCK
-                    && exhaustedPartial(type, plan.searchMillis(), ADMISSION_PRIMARY_MS, goalColumnLoaded(bot, route))) {
-                // An exact-cell request whose search ran out of places to look (before its budget) without reaching the goal: the
-                // cell cannot be reached over the loaded terrain. The legacy answer is "unreachable", which is what callers (waypoint
-                // relay, digging, the next candidate cell) switch strategy on; Baritone's partial path to the closest point is
-                // only wanted for approach requests (follow), where walking as far as possible is the point.
-                refusal = NavRouteRules.GOAL_UNREACHABLE;
+            if (admit) {
+                BaritonePlanner.Plan plan = BaritonePlanner.planNow(baritone, goal, ADMISSION_PRIMARY_MS, ADMISSION_FAILURE_MS);
+                PathCalculationResult.Type type = plan.type();
+                BotLog.path(bot, "baritone_admission", "goal", goal, "type", type, "nodes", plan.nodesConsidered(),
+                        "moves", plan.movements().size(), "search_ms", plan.searchMillis(), "policy", policyOf(options));
+                String refusal = admissionFailure(type, plan.searchMillis(), ADMISSION_FAILURE_MS);
+                if (refusal == null && route.shape() == NavRoute.Shape.BLOCK
+                        && exhaustedPartial(type, plan.searchMillis(), ADMISSION_PRIMARY_MS, goalColumnLoaded(bot, route))) {
+                    // An exact-cell request whose search ran out of places to look (before its budget) without reaching the goal: the
+                    // cell cannot be reached over the loaded terrain. The legacy answer is "unreachable", which is what callers (waypoint
+                    // relay, digging, the next candidate cell) switch strategy on; Baritone's partial path to the closest point is
+                    // only wanted for approach requests (follow), where walking as far as possible is the point.
+                    refusal = NavRouteRules.GOAL_UNREACHABLE;
+                }
+                if (refusal != null) {
+                    return Admission.refused(refusal);
+                }
+                if (plan.reachesGoal() && plan.path() != null) {
+                    route.setResolvedGoal(plan.path().getDest());
+                }
             }
-            if (refusal != null) {
-                releaseRoute(bot.getUUID());
-                return Admission.refused(refusal);
+            baritone.getCustomGoalProcess().setGoalAndPath(goal);
+            if (options.allowWater()) {
+                // The lease starts with the route, not with the first driven tick: a bot that is already in the water when a swim route
+                // is issued would otherwise get one tick of the safety net's rescue in between. Granted only to an admitted route
+                // (a refused one must not leave a rescue suppression behind).
+                NavSafetyNet.INSTANCE.renewBaritoneWater(bot);
             }
-            if (plan.reachesGoal() && plan.path() != null) {
-                route.setResolvedGoal(plan.path().getDest());
+            accepted = true;
+            return Admission.ok();
+        } finally {
+            if (!accepted) {
+                abandonStart(bot);
             }
         }
-        baritone.getCustomGoalProcess().setGoalAndPath(goal);
-        return Admission.ok();
+    }
+
+    /** A start that was refused or failed: the route's water rule, its swim permission and its lease are taken back. */
+    private static void abandonStart(AIPlayerEntity bot) {
+        releaseRoute(bot.getUUID());
+        BaritoneRegistry.INSTANCE.setWaterAllowed(bot, false);
+        NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
     }
 
     /**
@@ -136,7 +154,9 @@ public final class BaritoneNavigator {
     /** Whether Baritone still owns the bot, has arrived at the route's goal, or ended short of it. */
     public static NavRoute.Progress progress(AIPlayerEntity bot, NavRoute route) {
         if (BaritoneRegistry.INSTANCE.isBusy(bot)) {
-            return NavRoute.Progress.RUNNING;
+            // Position-level rules (observability, the bot's break permission) are only enforced at execution, so a route through
+            // blocks the bot may not touch is vetoed at its first break, and Baritone may re-plan the same route for ever.
+            return PolicyRefusalStreak.capReached(bot.getUUID()) ? NavRoute.Progress.POLICY_REFUSED : NavRoute.Progress.RUNNING;
         }
         IBaritone baritone = BaritoneRegistry.INSTANCE.find(bot.getUUID());
         if (baritone != null && route.goalHandle() instanceof Goal goal && goal.isInGoal(baritone.getPlayerContext().playerFeet())) {

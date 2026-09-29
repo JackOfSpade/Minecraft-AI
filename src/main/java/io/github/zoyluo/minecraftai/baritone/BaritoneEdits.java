@@ -43,6 +43,7 @@ public final class BaritoneEdits {
     }
 
     static void record(AIPlayerEntity bot, Edit edit) {
+        PolicyRefusalStreak.reset(bot.getUUID());
         Deque<Edit> deque = EDITS.computeIfAbsent(bot.getUUID(), id -> new ArrayDeque<>());
         synchronized (deque) {
             if (deque.size() >= CAPACITY) {

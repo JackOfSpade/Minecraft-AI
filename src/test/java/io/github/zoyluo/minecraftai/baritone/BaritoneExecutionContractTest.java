@@ -27,16 +27,31 @@ class BaritoneExecutionContractTest {
     void baritoneWritesTheInputsBeforeTheBotsPhysicsAndAimsAfterIt() throws IOException {
         String source = read("entity/AIPlayerEntity.java");
         int tick = source.indexOf("public void tick()");
-        int before = source.indexOf("BaritoneDriver.beforePhysics(this)", tick);
+        int before = source.indexOf("boolean baritoneDrives = baritoneBeforePhysics();", tick);
         int physics = source.indexOf("super.tick()", before);
         int doTick = source.indexOf("this.doTick()", physics);
-        int after = source.indexOf("BaritoneDriver.afterPhysics(this)", doTick);
+        int after = source.indexOf("baritoneAfterPhysics();", doTick);
         int legacy = source.indexOf("this.actionPack.onUpdate()", doTick);
         assertTrue(tick >= 0 && before > tick && physics > before && doTick > physics && after > doTick && legacy > doTick,
                 "beforePhysics must precede the physics tick; afterPhysics and the legacy update follow it");
         String between = source.substring(doTick, legacy);
         assertTrue(between.contains("if (baritoneDrives)") && between.contains("else"),
                 "the legacy executor's update must be the alternative to afterPhysics, never run in the same tick");
+    }
+
+    @Test
+    void theEntityHooksReachTheDriverOnlyWhileBaritoneIsActiveAndContainAnyThrowable() throws IOException {
+        String source = read("entity/AIPlayerEntity.java");
+        String before = source.substring(source.indexOf("private boolean baritoneBeforePhysics() {"));
+        before = before.substring(0, before.indexOf("\n    }\n"));
+        assertTrue(before.indexOf("NavEngineSelector.baritoneActive()") < before.indexOf("BaritoneDriver.beforePhysics(this)"),
+                "the driver is asked only while Baritone is initialised and not given up on");
+        assertTrue(before.contains("catch (Throwable failure)") && before.contains("NavEngineSelector.handleFailure("),
+                "a linkage-type failure that escapes the driver retires Baritone and the tick carries on");
+        String after = source.substring(source.indexOf("private void baritoneAfterPhysics() {"));
+        after = after.substring(0, after.indexOf("\n    }\n"));
+        assertTrue(after.contains("catch (Throwable failure)") && after.contains("this.actionPack.onUpdate()"),
+                "when the post-physics hook fails the legacy update still runs this tick");
     }
 
     @Test

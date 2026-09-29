@@ -89,9 +89,7 @@ public final class RuntimeLifecycleCoordinator {
         IntentController.INSTANCE.cancelAll(bot, origin, reason);
         BrainCoordinator.INSTANCE.reset(bot);
         GoalExecutor.INSTANCE.unload(bot);
-        if (NavEngineSelector.baritoneLive()) {
-            BaritoneRegistry.INSTANCE.reset(bot, "runtime_reset");
-        }
+        NavEngineSelector.hook("baritone_reset", () -> BaritoneRegistry.INSTANCE.reset(bot, "runtime_reset"));
         TaskManager.INSTANCE.resetToIdle(bot);
         clearTransient(bot);
         BotLog.lifecycle(bot, "bot_runtime_reset", "reason", reason);
@@ -105,9 +103,7 @@ public final class RuntimeLifecycleCoordinator {
         GoalExecutor.INSTANCE.suspendForDeath(bot);
         IdleCoordinator.INSTANCE.cancelClaimedJob(bot, "bot_died");
         TaskManager.INSTANCE.cancelIntentTasks(bot, "bot_died");
-        if (NavEngineSelector.baritoneLive()) {
-            BaritoneRegistry.INSTANCE.reset(bot, "bot_died");
-        }
+        NavEngineSelector.hook("baritone_reset", () -> BaritoneRegistry.INSTANCE.reset(bot, "bot_died"));
         bot.getActionPack().stopAll();
         BrainCoordinator.INSTANCE.reset(bot);
         clearTransient(bot);
@@ -160,9 +156,7 @@ public final class RuntimeLifecycleCoordinator {
     }
 
     private static void forgetBot(AIPlayerEntity bot) {
-        if (NavEngineSelector.baritoneLive()) {
-            BaritoneRegistry.INSTANCE.forget(bot, "bot_forgotten");
-        }
+        NavEngineSelector.hook("baritone_forget", () -> BaritoneRegistry.INSTANCE.forget(bot, "bot_forgotten"));
         MiningEvidenceAudit.clear(bot);
         MiningAssistRuntime.clearForced(bot.getUUID());
         clearTransient(bot);
@@ -177,9 +171,7 @@ public final class RuntimeLifecycleCoordinator {
     }
 
     private static void clearWorldRuntime() {
-        if (NavEngineSelector.baritoneLive()) {
-            BaritoneRegistry.INSTANCE.clearAll();
-        }
+        NavEngineSelector.hook("baritone_clearAll", () -> BaritoneRegistry.INSTANCE.clearAll());
         GoalExecutor.INSTANCE.clearAllRuntime();
         TaskManager.INSTANCE.clearAllRuntime();
         IdleCoordinator.INSTANCE.clearAllRuntime();

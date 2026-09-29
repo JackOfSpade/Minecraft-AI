@@ -91,8 +91,8 @@ public final class ActionPack {
     private void releaseBaritone(String why) {
         if (route != null) {
             cancelBaritoneRoute(why);
-        } else if (NavEngineSelector.baritoneLive()) {
-            BaritoneRegistry.INSTANCE.preempt(player, why);
+        } else {
+            NavEngineSelector.hook("baritone_preempt", () -> BaritoneRegistry.INSTANCE.preempt(player, why));
         }
     }
 
@@ -471,8 +471,18 @@ public final class ActionPack {
                 || sneaking || sprinting || jumping || jumpTicks > 0) {
             yieldToBaritone();
         }
+        // A route that already ended is recorded as it ended, not as "replaced".
+        settleRoute();
         NavRoute previous = route;
-        BaritoneNavigator.Admission admission = BaritoneNavigator.start(player, request, admit);
+        BaritoneNavigator.Admission admission;
+        try {
+            admission = BaritoneNavigator.start(player, request, admit);
+        } catch (Throwable failure) {
+            if (previous != null) {
+                cancelBaritoneRoute("start_failed");
+            }
+            throw failure;
+        }
         if (!admission.accepted()) {
             if (previous != null) {
                 cancelBaritoneRoute("rejected_request");
@@ -487,6 +497,11 @@ public final class ActionPack {
         double dx = request.target().getX() + 0.5D - player.getX();
         double dz = request.target().getZ() + 0.5D - player.getZ();
         request.setDeadlineTick(now + NavRouteRules.deadlineTicks(Math.sqrt(dx * dx + dz * dz)));
+        if (previous != null && admit) {
+            // A newer request took the bot over: the route it replaced is over and says so. (A deliberate re-goal refresh of the
+            // same follow route, admit=false, is the same route and is not an ending.) The water bookkeeping belongs to the new one.
+            finishRoute(NavOutcome.Status.CANCELLED, NavRouteRules.REPLACED, false);
+        }
         route = request;
         if (identity != null) {
             lastPathRequest = identity;
@@ -519,8 +534,8 @@ public final class ActionPack {
         if (route == null) {
             return false;
         }
-        BaritoneNavigator.cancel(player, why);
-        finishRoute(NavOutcome.Status.CANCELLED, "cancelled: " + why);
+        NavEngineSelector.hook("baritone_cancel", () -> BaritoneNavigator.cancel(player, why));
+        finishRoute(NavOutcome.Status.CANCELLED, "cancelled: " + why, true);
         return true;
     }
 
@@ -537,23 +552,44 @@ public final class ActionPack {
         if (current == null) {
             return;
         }
-        NavRoute.Progress progress = BaritoneNavigator.progress(player, current);
+        if (!NavEngineSelector.baritoneActive()) {
+            // Baritone was given up on while the route ran: there is nothing left to ask, and the bot is the legacy navigator's.
+            finishRoute(NavOutcome.Status.FAILED, NavRouteRules.BARITONE_UNAVAILABLE, false);
+            return;
+        }
+        NavRoute.Progress progress;
+        boolean searchFailed = false;
+        try {
+            progress = BaritoneNavigator.progress(player, current);
+            if (progress == NavRoute.Progress.ENDED_SHORT) {
+                searchFailed = BaritoneNavigator.searchFailed(player);
+            }
+        } catch (Throwable failure) {
+            // Reached from ~40 callers every tick, outside NavEngineSelector.attempt: whatever Baritone throws here ends the route
+            // (a linkage-type failure also retires Baritone) and the callers just see an idle pack.
+            boolean retired = NavEngineSelector.handleFailure("baritone_progress", failure);
+            if (!retired) {
+                NavEngineSelector.hook("baritone_cancel", () -> BaritoneNavigator.cancel(player, "progress_failed"));
+            }
+            finishRoute(NavOutcome.Status.FAILED, retired ? NavRouteRules.BARITONE_UNAVAILABLE : NavRouteRules.BARITONE_ERROR, !retired);
+            return;
+        }
         boolean dryRouteWet = !current.options().allowWater() && player.isInWater();
         boolean pastDeadline = serverTick() > current.deadlineTick();
-        NavRouteRules.Verdict verdict = NavRouteRules.verdict(progress, dryRouteWet, pastDeadline,
-                progress == NavRoute.Progress.ENDED_SHORT && BaritoneNavigator.searchFailed(player));
+        NavRouteRules.Verdict verdict = NavRouteRules.verdict(progress, dryRouteWet, pastDeadline, searchFailed);
         if (!verdict.ended()) {
             return;
         }
-        if (progress == NavRoute.Progress.RUNNING) {
-            // A dry route that got wet (a follower waits on its bank; the drowning safety net owns the bot from here) or one
-            // that ran out of time: Baritone lets go of the bot before the route is recorded.
-            BaritoneNavigator.cancel(player, verdict.reason());
+        if (progress == NavRoute.Progress.RUNNING || progress == NavRoute.Progress.POLICY_REFUSED) {
+            // A dry route that got wet (a follower waits on its bank; the drowning safety net owns the bot from here), one that ran
+            // out of time, or one the strict-survival rules keep vetoing: Baritone lets go of the bot before the route is recorded.
+            NavEngineSelector.hook("baritone_cancel", () -> BaritoneNavigator.cancel(player, verdict.reason()));
         }
-        finishRoute(verdict.status(), verdict.reason());
+        finishRoute(verdict.status(), verdict.reason(), true);
     }
 
-    private void finishRoute(NavOutcome.Status status, String reason) {
+    /** @param releaseWater whether the route's water bookkeeping ends with it (false when a replacement has just registered its own) */
+    private void finishRoute(NavOutcome.Status status, String reason, boolean releaseWater) {
         NavRoute finished = route;
         if (finished == null) {
             return;
@@ -562,7 +598,9 @@ public final class ActionPack {
         BlockPos goal = finished.resolvedGoal() != null ? finished.resolvedGoal() : finished.target();
         NavOutcome outcome = new NavOutcome(status, reason, finished.label(), goal, serverTick() - finished.startTick());
         lastRouteOutcome = outcome;
-        BaritoneNavigator.releaseRoute(player.getUUID());
+        if (releaseWater) {
+            NavEngineSelector.hook("baritone_release_route", () -> BaritoneNavigator.releaseRoute(player.getUUID()));
+        }
         switch (status) {
             case SUCCESS -> BotLog.path(player, outcome.event(), "engine", "baritone", "ticks", outcome.ticks());
             case FAILED -> BotLog.warn(LogCategory.ERROR, player, outcome.event(),
@@ -801,7 +839,7 @@ public final class ActionPack {
     }
 
     public boolean hasActiveActions() {
-        return (NavEngineSelector.baritoneLive() && BaritoneRegistry.INSTANCE.isBusy(player))
+        return NavEngineSelector.query("baritone_busy", () -> BaritoneRegistry.INSTANCE.isBusy(player), false)
                 || pathExecutor != null
                 || walkTo != null
                 || mining != null

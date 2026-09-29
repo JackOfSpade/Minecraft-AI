@@ -77,7 +77,8 @@
       "io.github.zoyluo.minecraftai.baritone.BaritoneSurvivalGameTests",
       "io.github.zoyluo.minecraftai.task.BaritoneEngineFollowGameTests",
       "io.github.zoyluo.minecraftai.task.BaritoneEngineMoveGameTests",
-      "io.github.zoyluo.minecraftai.task.BaritoneEngineWaterGameTests"
+      "io.github.zoyluo.minecraftai.task.BaritoneEngineWaterGameTests",
+      "io.github.zoyluo.minecraftai.task.BaritoneEngineTunnelGameTests"
     ]
   },
   "depends": {

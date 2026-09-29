@@ -46,11 +46,11 @@ public class AIPlayerEntity extends ServerPlayer {
             // While a Baritone process drives this bot it writes the inputs (before the physics tick below, like a client's
             // input handling) and aims; the legacy executor is idle and writes nothing. See BaritoneDriver.
             // (Nothing Baritone-shaped is even loaded until an instance exists: NavEngineSelector.baritoneLive().)
-            boolean baritoneDrives = NavEngineSelector.baritoneLive() && BaritoneDriver.beforePhysics(this);
+            boolean baritoneDrives = baritoneBeforePhysics();
             super.tick();
             this.doTick();
             if (baritoneDrives) {
-                BaritoneDriver.afterPhysics(this);
+                baritoneAfterPhysics();
             } else {
                 this.actionPack.onUpdate();
             }
@@ -61,6 +61,38 @@ public class AIPlayerEntity extends ServerPlayer {
             // player" failure. A stuck bot self-recovers via StuckWatcher's own timeout, so this
             // catch intentionally does not reset actionPack state itself.
             BotLog.error(this, "tick_npe_swallowed", exception);
+        }
+    }
+
+    /**
+     * The driver hook before the physics tick. Reached only while Baritone is active (initialised and not given up on). A failure
+     * that escapes the driver (a class of Baritone that cannot even be loaded on this first driven tick) must not end the bot's tick:
+     * it is classified by NavEngineSelector.handleFailure, which retires Baritone for the session when it is a linkage-type
+     * failure, and the tick carries on on the legacy path.
+     */
+    private boolean baritoneBeforePhysics() {
+        if (!NavEngineSelector.baritoneActive()) {
+            return false;
+        }
+        try {
+            return BaritoneDriver.beforePhysics(this);
+        } catch (Throwable failure) {
+            NavEngineSelector.handleFailure("baritone_before_physics", failure);
+            return false;
+        }
+    }
+
+    /** The driver hook after the physics tick, for a bot the hook before it reported as driven (same containment). */
+    private void baritoneAfterPhysics() {
+        if (!NavEngineSelector.baritoneActive()) {
+            this.actionPack.onUpdate();
+            return;
+        }
+        try {
+            BaritoneDriver.afterPhysics(this);
+        } catch (Throwable failure) {
+            NavEngineSelector.handleFailure("baritone_after_physics", failure);
+            this.actionPack.onUpdate();
         }
     }
 

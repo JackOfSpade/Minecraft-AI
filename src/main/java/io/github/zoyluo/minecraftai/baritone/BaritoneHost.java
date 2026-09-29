@@ -58,6 +58,7 @@ public final class BaritoneHost {
      * {@code <game dir>/baritone/settings.txt}, which is why the game directory is set first.</p>
      */
     public static synchronized void configure(MinecraftServer server) {
+        PaletteAccess.verify(); // a PalettedContainer that Baritone cannot read retires Baritone (a LinkageError); it never crashes the server
         HostEnvironment.setGameDirectory(FabricLoader.getInstance().getGameDir());
         // Block drops are learned from the server's own loot tables; Baritone's fallback (a private registry-only level) reloads
         // every data-pack registry and cannot run inside a Fabric server.

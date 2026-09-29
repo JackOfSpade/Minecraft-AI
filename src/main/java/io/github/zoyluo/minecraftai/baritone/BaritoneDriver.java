@@ -7,6 +7,7 @@ import baritone.api.event.events.type.EventState;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import java.util.function.BiFunction;
 
@@ -46,7 +47,7 @@ public final class BaritoneDriver {
 
     /**
      * Runs steps 1-3 for the bot and reports whether Baritone owns its movement this tick. When it does the caller must skip
-     * every legacy input write for the tick. Server thread only. Never throws: a failing Baritone tick cancels Baritone for the
+     * every legacy input write for the tick. Server thread only. Never throws: a failing Baritone tick (any Throwable but a VM error) cancels Baritone for the
      * bot (and is logged) instead of taking the bot's tick, and the server's, down with it.
      */
     public static boolean beforePhysics(AIPlayerEntity bot) {
@@ -91,9 +92,8 @@ public final class BaritoneDriver {
                 BotLog.lifecycle(bot, "baritone_released", "pos", bot.blockPosition());
             }
             return false;
-        } catch (RuntimeException exception) {
-            BotLog.error(bot, "baritone_tick_failed", exception);
-            BaritoneRegistry.INSTANCE.reset(bot, "tick_failed");
+        } catch (Throwable failure) {
+            tickFailed(bot, "baritone_tick_failed", "tick_failed", failure);
             return false;
         }
     }
@@ -126,9 +126,34 @@ public final class BaritoneDriver {
             // The navigator seam's per-tick check (arrival, failure, timeout, water rule) while this bot is driven; a bot that is
             // not driven gets the same check from ActionPack.onUpdate.
             bot.getActionPack().onBaritoneTick();
-        } catch (RuntimeException exception) {
-            BotLog.error(bot, "baritone_post_tick_failed", exception);
-            BaritoneRegistry.INSTANCE.reset(bot, "post_tick_failed");
+        } catch (Throwable failure) {
+            tickFailed(bot, "baritone_post_tick_failed", "post_tick_failed", failure);
+        }
+    }
+
+    /**
+     * A Baritone call of a driven tick threw. Anything that is not a true VM error is contained here, so a bot's tick (and the
+     * server) never dies of it: a linkage-type failure (a class that cannot load or initialise on this first driven tick: a mixin or
+     * remap problem in some modpack; see {@link NavEngineSelector#isInitialisationFailure}) retires Baritone for the session, which
+     * lets go of every bot and hands all of them to the legacy navigator; any other failure only resets this bot's Baritone.
+     */
+    private static void tickFailed(AIPlayerEntity bot, String event, String reason, Throwable failure) {
+        if (failure instanceof VirtualMachineError fatal && !(failure instanceof StackOverflowError)) {
+            throw fatal;
+        }
+        try {
+            BotLog.error(bot, event, failure);
+        } catch (Throwable ignored) {
+            // logging must not make it worse
+        }
+        if (NavEngineSelector.isInitialisationFailure(failure)) {
+            NavEngineSelector.markBaritoneUnavailable(event, failure);
+            return;
+        }
+        try {
+            BaritoneRegistry.INSTANCE.reset(bot, reason);
+        } catch (Throwable resetFailed) {
+            NavEngineSelector.handleFailure(event + "_reset", resetFailed);
         }
     }
 

@@ -13,6 +13,14 @@ public final class NavRouteRules {
     /** Failure reason of a dry route that got into water. */
     public static final String ROUTE_ENTERED_WATER = "route_entered_water";
     public static final String PATH_TIMEOUT = "path_timeout";
+    /** Failure reason of a route the strict-survival rules kept vetoing (see PolicyRefusalStreak): the caller should choose another way. */
+    public static final String POLICY_REFUSED = "policy_refused";
+    /** Cancel reason of a route that a newer request replaced. */
+    public static final String REPLACED = "replaced";
+    /** Failure reason of a route that was running when Baritone was given up on (the legacy navigator owns the bot now). */
+    public static final String BARITONE_UNAVAILABLE = "baritone_unavailable";
+    /** Failure reason of a route whose state Baritone could not report (an error inside Baritone). */
+    public static final String BARITONE_ERROR = "baritone_error";
 
     private NavRouteRules() {
     }
@@ -58,6 +66,7 @@ public final class NavRouteRules {
         return switch (progress) {
             case ARRIVED -> new Verdict(NavOutcome.Status.SUCCESS, "");
             case ENDED_SHORT -> new Verdict(NavOutcome.Status.FAILED, shortFailureReason(searchFailed));
+            case POLICY_REFUSED -> new Verdict(NavOutcome.Status.FAILED, POLICY_REFUSED);
             case RUNNING -> dryRouteWet
                     ? new Verdict(NavOutcome.Status.FAILED, ROUTE_ENTERED_WATER)
                     : pastDeadline ? new Verdict(NavOutcome.Status.TIMEOUT, PATH_TIMEOUT) : Verdict.CONTINUE;

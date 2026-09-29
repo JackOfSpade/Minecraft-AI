@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
+import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.HashSet;
 import java.util.Optional;
@@ -98,6 +99,8 @@ public final class FollowTask extends AbstractTask {
     private BlockPos baritoneGoalPos;
     private int baritoneRadius = (int) STOP_DISTANCE;
     private NavOutcome handledOutcome;
+    /** The no-progress rule of the running Baritone route (see FollowProgressWindow). */
+    private final FollowProgressWindow baritoneProgress = new FollowProgressWindow();
     private int baritoneStarts;
     private int baritoneRegoals;
 
@@ -187,6 +190,7 @@ public final class FollowTask extends AbstractTask {
         stuckRecovery.reset(bot, elapsed);
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         baritoneGoalPos = null;
+        baritoneProgress.clear();
         baritoneRadius = (int) STOP_DISTANCE;
         handledOutcome = bot.getActionPack().lastRouteOutcome();
     }
@@ -199,6 +203,7 @@ public final class FollowTask extends AbstractTask {
             suspendLandRecovery(bot);
             stopBoatAndActions(bot);
             baritoneGoalPos = null;
+            baritoneProgress.clear();
             waiting = true;
             if (elapsed % 200 == 1) {
                 BotLog.action(bot, "follow_target_offline", "target", targetName.isBlank() ? "owner" : targetName);
@@ -260,6 +265,7 @@ public final class FollowTask extends AbstractTask {
     /** Another follow mode takes the bot: a Baritone land route of this task ends now (single writer). */
     private void dropBaritoneRoute(AIPlayerEntity bot) {
         baritoneGoalPos = null;
+        baritoneProgress.clear();
         if (bot.getActionPack().hasBaritoneRoute()) {
             bot.getActionPack().cancelBaritoneRoute("follow_mode_changed");
         }
@@ -413,12 +419,27 @@ public final class FollowTask extends AbstractTask {
             waiting = true;
             noRouteAnnounced = false;
             baritoneGoalPos = null;
+            baritoneProgress.clear();
             baritoneRadius = (int) STOP_DISTANCE;
             repathBackoff = false;
             return true;
         }
         if (!pack.isPathExecutorIdle()) {
             waiting = false;
+            if (baritoneProgress.stalled(elapsed, bot.distanceTo(target), bot.getX(), bot.getZ())) {
+                // A route that gets the bot nowhere (a door it cannot open, a replan loop) is abandoned with a back-off, the way
+                // the legacy follow abandons a frozen executor, instead of spinning until the route deadline.
+                BotLog.action(bot, "follow_route_no_progress", "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.blockPosition()),
+                        "distance", bot.distanceTo(target));
+                pack.cancelBaritoneRoute("follow_no_progress");
+                baritoneProgress.clear();
+                announceNoRoute(bot, targetPos, "follow_no_progress", FollowNoRoute.GENERIC_MESSAGE);
+                repathBackoff = true;
+                nextRepathTick = elapsed + REPATH_TICKS;
+                baritoneGoalPos = null;
+                waiting = true;
+                return true;
+            }
             if (baritoneGoalPos != null && elapsed >= nextRepathTick
                     && baritoneGoalPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ) {
                 ActionResult regoal = pack.startApproachTo(targetPos, baritoneRadius, true, true);
@@ -437,9 +458,11 @@ public final class FollowTask extends AbstractTask {
         NavOutcome ended = pack.lastRouteOutcome();
         if (ended != null && ended != handledOutcome) {
             handledOutcome = ended;
-            if (ended.status() == NavOutcome.Status.FAILED) {
-                // Ended short of the player and Baritone found no more of a way (a lake between us, a sealed room): wait dry.
-                announceNoRoute(bot, targetPos, ended.reason(), FollowNoRoute.messageFor(ended.reason()));
+            if (ended.status() == NavOutcome.Status.FAILED || ended.status() == NavOutcome.Status.TIMEOUT) {
+                // Ended short of the player and Baritone found no more of a way (a lake between us, a sealed room), was vetoed
+                // again and again, or ran out of time: wait dry, and do not start the same route again at once (a timed-out route
+                // is a failed one).
+                announceNoRoute(bot, targetPos, ended.reason(), noRouteMessage(ended));
                 repathBackoff = true;
                 nextRepathTick = elapsed + REPATH_TICKS;
                 baritoneGoalPos = null;
@@ -467,8 +490,16 @@ public final class FollowTask extends AbstractTask {
         }
         repathBackoff = false;
         baritoneGoalPos = targetPos.immutable();
+        baritoneProgress.clear();
         waiting = false;
         return true;
+    }
+
+    /** What the bot says when a Baritone route ended without getting to the player: the dry-route line only for what it is. */
+    private static String noRouteMessage(NavOutcome ended) {
+        String reason = ended.reason();
+        boolean water = NavRouteRules.ROUTE_ENTERED_WATER.equals(reason) || FollowNoRoute.isGenuine(reason);
+        return water ? FollowNoRoute.messageFor(reason) : FollowNoRoute.GENERIC_MESSAGE;
     }
 
     private void followLand(AIPlayerEntity bot, ServerPlayer target) {

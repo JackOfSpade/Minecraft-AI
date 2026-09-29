@@ -189,6 +189,63 @@ final class NavEngineSelectorTest {
         assertFalse(NavEngineSelector.baritoneLive());
     }
 
+    @Test
+    void hooksAreGatedOnLiveAndNotFailedAndAFailureAfterLiveRetiresBaritoneOnce() throws Exception {
+        AtomicInteger runs = new AtomicInteger();
+        AtomicInteger teardowns = new AtomicInteger();
+        NavEngineSelector.setUnavailableHook(teardowns::incrementAndGet);
+        NavEngineSelector.hook("t", runs::incrementAndGet);
+        assertEquals(0, runs.get(), "never live: the hook does not run");
+        assertFalse(NavEngineSelector.baritoneActive());
+        assertEquals("idle", NavEngineSelector.query("t", () -> "busy", "idle"));
+        NavEngineSelector.markBaritoneLive();
+        assertTrue(NavEngineSelector.baritoneActive());
+        NavEngineSelector.hook("t", runs::incrementAndGet);
+        assertEquals(1, runs.get());
+        assertEquals("busy", NavEngineSelector.query("t", () -> "busy", "idle"));
+        // A class of Baritone that cannot load on a tick after it was live: hook retires it, the caller carries on.
+        NavEngineSelector.hook("tick", () -> {
+            throw new NoClassDefFoundError("baritone/pathing/movement/MovementHelper");
+        });
+        assertTrue(NavEngineSelector.baritoneFailed());
+        assertEquals(1, teardowns.get(), "every instance and route is torn down once, best effort");
+        assertTrue(NavEngineSelector.baritoneLive(), "the flag that a Baritone existed stays");
+        assertFalse(NavEngineSelector.baritoneActive(), "but nothing may call into it any more");
+        NavEngineSelector.hook("t", runs::incrementAndGet);
+        assertEquals(1, runs.get(), "after the failure no hook touches Baritone");
+        assertEquals("idle", NavEngineSelector.query("t", () -> {
+            runs.incrementAndGet();
+            return "busy";
+        }, "idle"));
+        assertEquals(1, runs.get());
+        // Idempotent: the teardown does not run again.
+        assertFalse(NavEngineSelector.markBaritoneUnavailable("later", new LinkageError("again")));
+        assertEquals(1, teardowns.get());
+    }
+
+    @Test
+    void aFailingTeardownDoesNotStopTheFallback() {
+        NavEngineSelector.setUnavailableHook(() -> {
+            throw new NoClassDefFoundError("the very class that failed");
+        });
+        NavEngineSelector.markBaritoneLive();
+        assertTrue(NavEngineSelector.markBaritoneUnavailable("x", new LinkageError("x")));
+        assertFalse(NavEngineSelector.baritoneActive());
+    }
+
+    @Test
+    void handleFailureClassifiesLikeAttempt() {
+        NavEngineSelector.markBaritoneLive();
+        assertFalse(NavEngineSelector.handleFailure("tick", new IllegalStateException("one bad tick")), "an ordinary failure is only logged");
+        assertTrue(NavEngineSelector.baritoneActive());
+        assertThrows(OutOfMemoryError.class, () -> NavEngineSelector.handleFailure("tick", new OutOfMemoryError()));
+        assertTrue(NavEngineSelector.baritoneActive(), "a true VM error is rethrown and does not retire Baritone");
+        assertFalse(NavEngineSelector.handleFailure("tick", new StackOverflowError()), "a stack overflow is contained like an ordinary failure");
+        NavEngineSelector.clearFailureForTests();
+        assertTrue(NavEngineSelector.handleFailure("tick", new RuntimeException("mixin", new NoClassDefFoundError("x"))));
+        assertTrue(NavEngineSelector.baritoneFailed());
+    }
+
     @SuppressWarnings("unchecked")
     private static <T extends Throwable> void sneakyThrow(Throwable t) throws T {
         throw (T) t;
