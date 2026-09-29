@@ -35,10 +35,22 @@ public final class StorageJanitor {
     private static final int NOTHING_TO_DO_BACKOFF_TICKS = 1200;
     private static final int IN_PLACE_RADIUS = 6;
     private static final int MAX_STACKS_PER_CALL = 8;
+    /**
+     * After a player-requested gather or mine task completes, the junk janitor stays out of the way
+     * for this long (two game minutes): what the bot just collected (dirt, cobblestone) is what the
+     * player asked for and is reserved, not surplus to stow at once. See {@link InventoryPolicy}.
+     */
+    static final int USER_GATHER_GRACE_TICKS = 2400;
 
     private final Map<UUID, Integer> nextCheck = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> gatherGraceUntil = new ConcurrentHashMap<>();
 
     private StorageJanitor() {
+    }
+
+    /** A user-origin gather/mine task just completed: reserve what it collected for a grace period. */
+    public void noteUserGather(AIPlayerEntity bot, int tick) {
+        gatherGraceUntil.put(bot.getUUID(), tick + USER_GATHER_GRACE_TICKS);
     }
 
     /** Returns true when it started a task (the caller must not also run idle assignment this tick). */
@@ -49,6 +61,13 @@ public final class StorageJanitor {
             return false;
         }
         int tick = bot.level().getServer().getTickCount();
+        Integer grace = gatherGraceUntil.get(bot.getUUID());
+        if (grace != null) {
+            if (tick < grace) {
+                return false; // the player just asked for these items: not junk yet
+            }
+            gatherGraceUntil.remove(bot.getUUID(), grace);
+        }
         Integer due = nextCheck.get(bot.getUUID());
         if (due != null && tick < due) {
             return false;
@@ -115,5 +134,6 @@ public final class StorageJanitor {
 
     public void forget(AIPlayerEntity bot) {
         nextCheck.remove(bot.getUUID());
+        gatherGraceUntil.remove(bot.getUUID());
     }
 }

@@ -72,6 +72,9 @@ public final class ContainerAction {
 
     /** A double chest's two halves share one identity: the half whose position sorts first. */
     public static BlockPos canonicalPos(Level level, BlockPos pos) {
+        if (!level.hasChunkAt(pos)) {
+            return pos.immutable(); // unloaded is unknown: reading the state would force-load the chunk
+        }
         BlockState state = level.getBlockState(pos);
         if (state.getBlock() instanceof ChestBlock && state.hasProperty(ChestBlock.TYPE)
                 && state.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
@@ -118,6 +121,9 @@ public final class ContainerAction {
      * in plain view never counted as observable. A wall (or any other block) in between still does.
      */
     public static boolean canSee(AIPlayerEntity bot, BlockPos pos) {
+        if (!bot.level().hasChunkAt(pos)) {
+            return false; // a remembered position in an unloaded chunk is unknown, never "seen"
+        }
         return ObservableWorldQuery.canObserveCell(bot, pos);
     }
 
@@ -145,8 +151,8 @@ public final class ContainerAction {
                 : Optional.empty();
         if (container.isPresent()) {
             note(bot, pos, container.get());
-        } else if (!(level.getBlockEntity(pos) instanceof Container)) {
-            forget(bot, pos);
+        } else if (!isStorageBlock(level.getBlockState(pos))) {
+            forget(bot, pos); // the ledger tracks storage blocks only: a furnace or hopper there means the entry is stale
         }
         return container;
     }
@@ -201,9 +207,15 @@ public final class ContainerAction {
         markPersistenceDirty(bot);
     }
 
-    /** A persistence capture walks every bot, so a burst of transfers asks for one flush per two seconds at most. */
+    /**
+     * A persistence capture walks every bot, so a burst of transfers asks for one flush per two
+     * seconds at most. A request inside that window is not lost: it leaves a trailing flush pending
+     * that {@link #tickPersistence} performs once the window has passed, so the last change of a
+     * burst reaches the disk without waiting for the regular save.
+     */
     private static final int PERSIST_MIN_INTERVAL_TICKS = 40;
     private static int lastPersistTick = Integer.MIN_VALUE;
+    private static boolean trailingFlushPending;
 
     private static void markPersistenceDirty(AIPlayerEntity bot) {
         var server = bot.level().getServer();
@@ -214,8 +226,24 @@ public final class ContainerAction {
         synchronized (ContainerAction.class) {
             if (lastPersistTick != Integer.MIN_VALUE && tick >= lastPersistTick
                     && tick - lastPersistTick < PERSIST_MIN_INTERVAL_TICKS) {
-                return; // the regular save (and the shutdown save) still carries the newest ledger
+                trailingFlushPending = true;
+                return;
             }
+            lastPersistTick = tick;
+            trailingFlushPending = false;
+        }
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(server);
+    }
+
+    /** Server tick hook: performs the trailing flush a rate-limited {@link #markPersistenceDirty} left pending. */
+    public static void tickPersistence(net.minecraft.server.MinecraftServer server) {
+        int tick = server.getTickCount();
+        synchronized (ContainerAction.class) {
+            if (!trailingFlushPending
+                    || (tick >= lastPersistTick && tick - lastPersistTick < PERSIST_MIN_INTERVAL_TICKS)) {
+                return;
+            }
+            trailingFlushPending = false;
             lastPersistTick = tick;
         }
         io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(server);

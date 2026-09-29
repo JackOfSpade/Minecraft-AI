@@ -35,6 +35,9 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class ContainerLedgerGameTests {
     private static final String OVERWORLD = "minecraft:overworld";
+    /** Corner of the region reserved for this class's arenas (see {@link #fixture}). */
+    private static final int ARENA_ORIGIN_X = 1_000_000;
+    private static final int ARENA_ORIGIN_Z = 1_000_000;
 
     @GameTest(maxTicks = 400)
     public void depositRemembersWhereItemsAreAndWithdrawPicksTheRightChestAmongSeveral(GameTestHelper context) {
@@ -262,7 +265,165 @@ public final class ContainerLedgerGameTests {
         });
     }
 
+    @GameTest(maxTicks = 400)
+    public void aChestTheLedgerRemembersAsFullIsTriedAgainAfterThePlayerEmptiedIt(GameTestHelper context) {
+        Fixture fixture = fixture(context, "FullGT", 6);
+        AIPlayerEntity bot = fixture.bot;
+        BlockPos a = fixture.feet.offset(2, 0, 0); // nearest, will be remembered as full
+        BlockPos b = fixture.feet.offset(0, 0, 3); // farther, has room
+        chest(fixture.world, a, fullStacks(Items.DIRT));
+        chest(fixture.world, b);
+        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 5));
+        ContainerLedger ledger = BotMemoryStore.INSTANCE.of(bot.getUUID()).containers();
+
+        Deque<Task> steps = new ArrayDeque<>();
+        steps.add(ContainerTask.inspect(a));
+        steps.add(ContainerTask.inspect(b));
+        steps.add(ContainerTask.deposit(null, Items.COBBLESTONE, 5, false));
+        int[] stage = {0};
+        runSteps(context, bot, steps, () -> {
+            stage[0]++;
+            if (stage[0] == 1) {
+                require(context, ledger.get(OVERWORLD, a).map(ContainerLedger.Entry::full).orElse(false),
+                        "the ledger should remember the packed chest A as full");
+                return false;
+            }
+            if (stage[0] == 2) {
+                return false;
+            }
+            if (stage[0] == 3) {
+                require(context, count(fixture.world, b, Items.COBBLESTONE) == 5
+                                && count(fixture.world, a, Items.COBBLESTONE) == 0,
+                        "a known-full chest must be demoted: the roomy chest B takes the items first");
+                // The player empties chest A by hand and breaks chest B; the bot cannot know.
+                container(fixture.world, a).clearContent();
+                fixture.world.setBlock(b, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 4));
+                steps.add(ContainerTask.deposit(null, Items.COBBLESTONE, 4, false));
+                return false;
+            }
+            require(context, count(fixture.world, a, Items.COBBLESTONE) == 4,
+                    "the chest remembered as full was ignored although the player emptied it");
+            require(context, ledger.get(OVERWORLD, a).map(entry -> !entry.full() && entry.count("minecraft:cobblestone") == 4)
+                            .orElse(false),
+                    "opening the chest must refresh its ledger entry");
+            require(context, ledger.get(OVERWORLD, b).isEmpty(), "the dead entry of the broken chest B must be forgotten");
+            return true;
+        });
+    }
+
+    @GameTest(maxTicks = 400)
+    public void staleLedgerEntriesMakeWithdrawFallBackToTheNextCandidateAndForgetTheDeadOne(GameTestHelper context) {
+        Fixture fixture = fixture(context, "StaleGT", 7);
+        AIPlayerEntity bot = fixture.bot;
+        BlockPos broken = fixture.feet.offset(-2, 0, 0); // nearest: will be broken
+        BlockPos emptied = fixture.feet.offset(2, 0, 1); // next: will be emptied by hand
+        BlockPos good = fixture.feet.offset(0, 0, 4);    // farthest: still holds the coal
+        chest(fixture.world, broken, new ItemStack(Items.COAL, 8));
+        chest(fixture.world, emptied, new ItemStack(Items.COAL, 8));
+        chest(fixture.world, good, new ItemStack(Items.COAL, 8));
+        ContainerLedger ledger = BotMemoryStore.INSTANCE.of(bot.getUUID()).containers();
+
+        Deque<Task> steps = new ArrayDeque<>();
+        steps.add(ContainerTask.inspect(broken));
+        steps.add(ContainerTask.inspect(emptied));
+        steps.add(ContainerTask.inspect(good));
+        int[] stage = {0};
+        runSteps(context, bot, steps, () -> {
+            stage[0]++;
+            if (stage[0] < 3) {
+                return false;
+            }
+            if (stage[0] == 3) {
+                require(context, ledger.find(OVERWORLD, "minecraft:coal", bot.blockPosition(), 8, 4).size() == 3,
+                        "all three chests should be remembered as holding coal");
+                fixture.world.setBlock(broken, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                container(fixture.world, emptied).clearContent();
+                steps.add(ContainerTask.withdraw(null, Items.COAL, 8));
+                return false;
+            }
+            require(context, InventoryAction.countItem(bot, Items.COAL) == 8
+                            && count(fixture.world, good, Items.COAL) == 0,
+                    "withdraw must fall back past the broken and the emptied chest to the one that still has coal");
+            require(context, ledger.get(OVERWORLD, broken).isEmpty(), "the broken chest's dead entry must be forgotten");
+            require(context, ledger.get(OVERWORLD, emptied).map(entry -> entry.count("minecraft:coal") == 0).orElse(false),
+                    "the emptied chest's entry must be refreshed to what the bot saw when it opened it");
+            return true;
+        });
+    }
+
+    @GameTest(maxTicks = 300)
+    public void aChestNextToAnObservedSpawnerIsSkipped(GameTestHelper context) {
+        Fixture fixture = fixture(context, "SpawnerGT", 8);
+        AIPlayerEntity bot = fixture.bot;
+        BlockPos loot = fixture.feet.offset(2, 0, 1);
+        BlockPos spawner = fixture.feet.offset(2, 0, 4);
+        BlockPos plain = fixture.feet.offset(-4, 0, -4); // more than the spawner radius away from the spawner
+        fixture.world.setBlock(spawner, Blocks.SPAWNER.defaultBlockState(), Block.UPDATE_ALL);
+        chest(fixture.world, loot);
+        chest(fixture.world, plain);
+        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 5));
+        require(context, io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, spawner),
+                "fixture: the spawner must be in the bot's sight");
+
+        require(context, ContainerTask.nearestContainer(bot, 8).filter(pos -> pos.equals(plain)).isPresent(),
+                "find_container must skip the nearer chest beside the observed spawner: "
+                        + ContainerTask.nearestContainer(bot, 8));
+        Deque<Task> steps = new ArrayDeque<>();
+        steps.add(ContainerTask.deposit(null, Items.COBBLESTONE, 5, false));
+        runSteps(context, bot, steps, () -> {
+            require(context, count(fixture.world, plain, Items.COBBLESTONE) == 5, "the plain chest did not receive the items");
+            require(context, count(fixture.world, loot, Items.COBBLESTONE) == 0, "an automatic deposit went into the spawner chest");
+            return true;
+        });
+    }
+
+    @GameTest(maxTicks = 300)
+    public void junkStowNeverPushesItemsIntoANonStorageBlockAtARememberedPosition(GameTestHelper context) {
+        Fixture fixture = fixture(context, "JunkTargetGT", 9);
+        AIPlayerEntity bot = fixture.bot;
+        BlockPos remembered = fixture.feet.offset(3, 0, 0);
+        chest(fixture.world, remembered);
+        var main = bot.getInventory().getNonEquipmentItems();
+        main.set(0, new ItemStack(Items.COBBLESTONE, 64));
+        main.set(1, new ItemStack(Items.COBBLESTONE, 64));
+        main.set(2, new ItemStack(Items.COBBLESTONE, 64));
+        bot.getInventory().setChanged();
+        ContainerLedger ledger = BotMemoryStore.INSTANCE.of(bot.getUUID()).containers();
+
+        Deque<Task> steps = new ArrayDeque<>();
+        steps.add(ContainerTask.inspect(remembered));
+        ContainerTask[] junk = new ContainerTask[1];
+        runStepsAllowingFailure(context, bot, steps, task -> {
+            if (junk[0] == null) {
+                require(context, task.state() == TaskState.COMPLETED && ledger.get(OVERWORLD, remembered).isPresent(),
+                        "fixture: the chest should have been opened and remembered");
+                // The remembered chest turns into a furnace (which would happily accept cobblestone).
+                fixture.world.setBlock(remembered, Blocks.FURNACE.defaultBlockState(), Block.UPDATE_ALL);
+                junk[0] = ContainerTask.depositJunk(remembered);
+                steps.add(junk[0]);
+                return false;
+            }
+            require(context, task == junk[0] && task.state() == TaskState.FAILED,
+                    "a junk stow aimed at a non-storage block must not succeed: " + task.state());
+            require(context, container(fixture.world, remembered).isEmpty(),
+                    "cobblestone was pushed into the furnace at the remembered position");
+            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 192, "the bot lost cobblestone");
+            require(context, ledger.get(OVERWORLD, remembered).isEmpty(),
+                    "the stale entry of the position that is no longer storage must be forgotten");
+            return true;
+        });
+    }
+
     // ---- helpers ----
+
+    private static ItemStack[] fullStacks(Item item) {
+        ItemStack[] stacks = new ItemStack[27];
+        for (int slot = 0; slot < stacks.length; slot++) {
+            stacks[slot] = new ItemStack(item, 64);
+        }
+        return stacks;
+    }
 
     /** Ticks each queued task in turn; {@code afterTask} returns true when everything is verified. */
     private static void runSteps(GameTestHelper context, AIPlayerEntity bot, Deque<Task> steps,
@@ -359,10 +520,12 @@ public final class ContainerLedgerGameTests {
     private static Fixture fixture(GameTestHelper context, String name, int slot) {
         ServerLevel world = context.getLevel();
         world.setDayTime(1000L);
-        // Each test gets its own arena 200+ blocks from its structure and at least 64 blocks from the other
-        // tests' arenas: this batch runs in parallel next to each other, and a 21x17 arena would
-        // otherwise be wiped by a neighbour's fixture clearing.
-        BlockPos feet = context.absolutePos(new BlockPos(6, 4, 6)).offset(slot * 64, 0, 200 + slot * 48);
+        // Each test builds its 21x17 arena in a region reserved for this class: an ABSOLUTE position a
+        // million blocks out (no other test or structure is ever placed there, whatever the structure
+        // grid looks like) with a per-test slot spaced 64/48 blocks apart, so parallel tests of this
+        // batch can neither wipe each other's arena nor be wiped by another class's fixture.
+        BlockPos feet = new BlockPos(ARENA_ORIGIN_X + slot * 64, context.absolutePos(new BlockPos(6, 4, 6)).getY(),
+                ARENA_ORIGIN_Z + slot * 48);
         for (int dx = -10; dx <= 10; dx++) {
             for (int dz = -8; dz <= 8; dz++) {
                 BlockPos cell = feet.offset(dx, 0, dz);

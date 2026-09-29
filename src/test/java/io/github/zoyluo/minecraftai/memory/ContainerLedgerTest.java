@@ -47,18 +47,80 @@ final class ContainerLedgerTest {
     }
 
     @Test
-    void withRoomSkipsFullContainersAndTheCapEvictsTheStalestEntry() {
+    void withRoomSkipsRecentlyFullContainersAndTheCapEvictsTheStalestEntry() {
         ContainerLedger ledger = new ContainerLedger();
         ledger.record(entry(OVERWORLD, 1, Map.of(), 0, 5));
         ledger.record(entry(OVERWORLD, 2, Map.of(), 3, 6));
         assertEquals(List.of(new BlockPos(2, 64, 0)),
-                ledger.withRoom(OVERWORLD, BlockPos.ZERO, 5).stream().map(ContainerLedger.Entry::pos).toList());
+                ledger.withRoom(OVERWORLD, BlockPos.ZERO, 100L, 5, e -> true).stream().map(ContainerLedger.Entry::pos).toList());
 
         for (int i = 0; i < ContainerLedger.MAX_ENTRIES; i++) {
             ledger.record(entry(OVERWORLD, 100 + i, Map.of(), 3, 1000 + i));
         }
         assertEquals(ContainerLedger.MAX_ENTRIES, ledger.size());
         assertTrue(ledger.get(OVERWORLD, new BlockPos(1, 64, 0)).isEmpty(), "the oldest entry was evicted");
+    }
+
+    @Test
+    void aFullFlagFadesSoAPlayerEmptiedChestIsTriedAgain() {
+        ContainerLedger ledger = new ContainerLedger();
+        ContainerLedger.Entry full = entry(OVERWORLD, 1, Map.of("minecraft:cobblestone", 1728), 0, 1000);
+        ledger.record(full);
+
+        assertTrue(full.full());
+        assertTrue(full.knownFull(1000L + ContainerLedger.FULL_TRUST_TICKS), "still believed at the edge of the window");
+        assertFalse(full.knownFull(1001L + ContainerLedger.FULL_TRUST_TICKS), "the flag fades after the trust window");
+        assertTrue(ledger.withRoom(OVERWORLD, BlockPos.ZERO, 1000L + 10, 5, e -> true).isEmpty());
+        assertEquals(1, ledger.withRoom(OVERWORLD, BlockPos.ZERO, 1001L + ContainerLedger.FULL_TRUST_TICKS, 5, e -> true).size(),
+                "an old full observation no longer excludes the container");
+        assertFalse(entry(OVERWORLD, 2, Map.of(), 3, 1000).knownFull(1000L), "a container with room is never full");
+    }
+
+    @Test
+    void findAndWithRoomApplyTheAcceptFilterBeforeTheLimit() {
+        ContainerLedger ledger = new ContainerLedger();
+        ledger.record(entry(OVERWORLD, 1, Map.of("minecraft:coal", 4), 3, 10));
+        ledger.record(entry(OVERWORLD, 500, Map.of("minecraft:coal", 4), 3, 10));
+        java.util.function.Predicate<ContainerLedger.Entry> near = e -> e.pos().getX() < 100;
+
+        assertEquals(List.of(new BlockPos(1, 64, 0)), ledger.find(OVERWORLD, "minecraft:coal", BlockPos.ZERO, 1, 1, near)
+                .stream().map(ContainerLedger.Entry::pos).toList());
+        assertEquals(List.of(new BlockPos(1, 64, 0)), ledger.withRoom(OVERWORLD, BlockPos.ZERO, 50L, 1, near)
+                .stream().map(ContainerLedger.Entry::pos).toList());
+    }
+
+    @Test
+    void roundTripsThroughTheRealSaveAndLoadStringPath() {
+        java.util.UUID bot = java.util.UUID.fromString("00000000-0000-0000-0000-00000000c0de");
+        BotMemoryStore.INSTANCE.remove(bot);
+        try {
+            ContainerLedger source = BotMemoryStore.INSTANCE.of(bot).containers();
+            source.record(entry(OVERWORLD, 7, Map.of("minecraft:iron_ingot", 12, "minecraft:oak_log", 3), 9, 1234));
+            source.record(new ContainerLedger.Entry("minecraft:the_nether", new BlockPos(-5, 70, 9), "minecraft:barrel",
+                    Map.of(), 27, 27, 99));
+            String snbt = BotMemoryStore.INSTANCE.saveString(bot);
+            assertTrue(snbt.contains("containerLedger"), snbt);
+
+            BotMemoryStore.INSTANCE.remove(bot);
+            assertTrue(BotMemoryStore.INSTANCE.of(bot).containers().isEmpty());
+            BotMemoryStore.INSTANCE.loadString(bot, snbt);
+
+            ContainerLedger loaded = BotMemoryStore.INSTANCE.of(bot).containers();
+            assertEquals(2, loaded.size());
+            ContainerLedger.Entry chest = loaded.get(OVERWORLD, new BlockPos(7, 64, 0)).orElseThrow();
+            assertEquals(12, chest.count("minecraft:iron_ingot"));
+            assertEquals(3, chest.count("minecraft:oak_log"));
+            assertEquals("minecraft:chest", chest.block());
+            assertEquals(9, chest.freeSlots());
+            assertEquals(27, chest.totalSlots());
+            assertEquals(1234L, chest.lastVerified());
+            ContainerLedger.Entry barrel = loaded.get("minecraft:the_nether", new BlockPos(-5, 70, 9)).orElseThrow();
+            assertEquals("minecraft:barrel", barrel.block());
+            assertTrue(barrel.items().isEmpty());
+            assertEquals(27, barrel.freeSlots());
+        } finally {
+            BotMemoryStore.INSTANCE.remove(bot);
+        }
     }
 
     @Test

@@ -18,6 +18,13 @@ import net.minecraft.world.item.Items;
  * goal is collecting. JUNK is a fixed list of cheap filler blocks, and only the part beyond a small
  * configurable throwaway budget (kept for building and pillaring) counts as surplus. Stone-like
  * blocks share one pooled budget; the other junk kinds keep the budget each.
+ *
+ * <p>Known gap: there is no per-item "the player gave me this" keep rule. A junk-kind item a player
+ * hands over (or asks for) is indistinguishable here from one the bot mined itself, so it is only
+ * protected by the throwaway budget, by the quick-stow grace period that follows a player-requested
+ * gather or mine task (see {@code StorageJanitor#noteUserGather}), and by the janitor never running
+ * while a goal plan or task is active. Tracking the origin of individual stacks is deliberately not
+ * attempted.
  */
 public final class InventoryPolicy {
     private static final List<Item> STONE_LIKE = List.of(

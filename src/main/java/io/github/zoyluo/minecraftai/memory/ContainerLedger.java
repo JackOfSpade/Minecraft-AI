@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -23,6 +24,13 @@ import net.minecraft.nbt.ListTag;
 public final class ContainerLedger {
     /** Hard cap on remembered containers; the least recently verified entry is evicted first. */
     public static final int MAX_ENTRIES = 96;
+    /**
+     * How long "no free slot when I last looked" is believed. A player empties chests by hand and the
+     * bot cannot see that from a distance, so a full flag is a hint that fades: after this many
+     * ticks (two game minutes) since the entry was last verified the container counts as
+     * possibly-roomy again and is tried (and re-verified on opening) like any other.
+     */
+    public static final long FULL_TRUST_TICKS = 2400L;
     private static final int MAX_ITEM_KINDS = 64;
 
     private final Map<String, Entry> entries = new LinkedHashMap<>();
@@ -47,6 +55,15 @@ public final class ContainerLedger {
         /** True when every slot is occupied (a stack of the same item might still merge; treat as full). */
         public boolean full() {
             return totalSlots > 0 && freeSlots <= 0;
+        }
+
+        /**
+         * True when the container was full at {@code lastVerified} AND that is recent enough to still
+         * be believed at game time {@code now}. Never an exclusion: callers demote such a container
+         * (try it last) and re-verify by opening it.
+         */
+        public boolean knownFull(long now) {
+            return full() && now - lastVerified <= FULL_TRUST_TICKS;
         }
 
         public int totalItems() {
@@ -107,10 +124,16 @@ public final class ContainerLedger {
      * item when the bot last looked; the caller re-verifies on arrival.
      */
     public synchronized List<Entry> find(String dimension, String itemId, BlockPos from, int wanted, int limit) {
+        return find(dimension, itemId, from, wanted, limit, entry -> true);
+    }
+
+    /** {@link #find(String, String, BlockPos, int, int)} restricted to entries {@code accept} allows (applied before the limit). */
+    public synchronized List<Entry> find(String dimension, String itemId, BlockPos from, int wanted, int limit,
+                                         Predicate<Entry> accept) {
         int need = Math.max(1, wanted);
         List<Entry> hits = new ArrayList<>();
         for (Entry entry : entries.values()) {
-            if (entry.dimension().equals(dimension) && entry.count(itemId) > 0) {
+            if (entry.dimension().equals(dimension) && entry.count(itemId) > 0 && accept.test(entry)) {
                 hits.add(entry);
             }
         }
@@ -121,11 +144,16 @@ public final class ContainerLedger {
         return hits.size() <= limit ? hits : new ArrayList<>(hits.subList(0, Math.max(0, limit)));
     }
 
-    /** Remembered containers that still had a free slot when last seen, nearest first. */
-    public synchronized List<Entry> withRoom(String dimension, BlockPos from, int limit) {
+    /**
+     * Remembered containers that had a free slot when last seen, or whose "full" observation is old
+     * enough to have faded (see {@link #FULL_TRUST_TICKS}), nearest first, restricted to entries
+     * {@code accept} allows (applied before the limit). {@code now} is the current game time.
+     */
+    public synchronized List<Entry> withRoom(String dimension, BlockPos from, long now, int limit,
+                                             Predicate<Entry> accept) {
         List<Entry> result = new ArrayList<>();
         for (Entry entry : entries.values()) {
-            if (entry.dimension().equals(dimension) && !entry.full()) {
+            if (entry.dimension().equals(dimension) && !entry.knownFull(now) && accept.test(entry)) {
                 result.add(entry);
             }
         }

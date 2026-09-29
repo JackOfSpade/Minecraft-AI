@@ -18,9 +18,12 @@ final class ContainerSupport {
 
     /** First horizontally-adjacent standable cell next to {@code pos}, or null if none. */
     static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
+        if (!bot.level().hasChunkAt(pos)) {
+            return null; // an unloaded chunk is unknown: never force-load it just to read a block state
+        }
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos candidate = pos.relative(direction);
-            if (Standability.isStandable(bot.level(), candidate)) {
+            if (bot.level().hasChunkAt(candidate) && Standability.isStandable(bot.level(), candidate)) {
                 return candidate.immutable();
             }
         }

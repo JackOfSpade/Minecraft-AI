@@ -16,6 +16,7 @@ public final class BotTickCoordinator {
 
     public void tick(MinecraftServer server) {
         int tick = server.getTickCount();
+        io.github.zoyluo.minecraftai.action.ContainerAction.tickPersistence(server);
         TpsGuard guard = TpsGuard.INSTANCE;
         boolean runDanger = tick % guard.dangerScanInterval() == 0;
         boolean runBackground = tick % guard.scanInterval() == 0;

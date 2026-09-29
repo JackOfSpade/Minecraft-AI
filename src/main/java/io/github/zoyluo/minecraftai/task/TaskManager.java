@@ -410,6 +410,9 @@ public final class TaskManager {
                 lastFailure.remove(uuid);
                 pendingFailure.remove(uuid);
                 BotLog.task(player, "task_completed", "name", task.name(), "elapsed_ticks", task.elapsedTicks());
+                if ((task instanceof GatherQuotaTask || task instanceof MineTask) && userRequested(origin)) {
+                    StorageJanitor.INSTANCE.noteUserGather(player, server.getTickCount());
+                }
             } else if (task.state() == TaskState.FAILED) {
                 active.remove(uuid);
                 activeOrigins.remove(uuid);
@@ -424,6 +427,14 @@ public final class TaskManager {
                 BotLog.task(player, "task_cancelled", "name", task.name(), "reason", task.failureReason());
             }
         }
+    }
+
+    /** True for work the player asked for (directly, through a mission/job or through the brain), not background upkeep. */
+    private static boolean userRequested(TaskOrigin origin) {
+        return origin != null && switch (origin.kind()) {
+            case PLAYER_COMMAND, PLAYER_PANEL, LLM_TOOL, MISSION, JOB -> true;
+            case SAFETY, SYSTEM_BACKGROUND, VERIFY -> false;
+        };
     }
 
     public void recordFailure(AIPlayerEntity bot, String name, String reason, int tick) {

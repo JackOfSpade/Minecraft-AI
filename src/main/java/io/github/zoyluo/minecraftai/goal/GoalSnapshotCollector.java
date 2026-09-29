@@ -29,6 +29,9 @@ import net.minecraft.world.level.block.Blocks;
 public final class GoalSnapshotCollector {
     private static final int STATION_RADIUS = 8;
     private static final int CONTAINER_RADIUS = 16;
+    private static final int CONTAINER_HEIGHT = 6;
+    /** A ledger entry older than this (five game minutes) no longer counts toward a stored-items goal: the player may have emptied it since. */
+    static final long LEDGER_FRESH_TICKS = 6000L;
 
     private GoalSnapshotCollector() {
     }
@@ -139,16 +142,19 @@ public final class GoalSnapshotCollector {
     /**
      * Item totals in storage as the bot itself last saw them: its container ledger, which is written
      * only when the bot opened a container (deposit, withdraw or inspect). Nothing is read out of a
-     * closed container, so a goal cannot be satisfied by peeking into chests from a distance.
+     * closed container, so a goal cannot be satisfied by peeking into chests from a distance. Only entries verified within
+     * the last {@link #LEDGER_FRESH_TICKS} count, so a chest the player emptied long ago cannot keep
+     * a stockpile goal satisfied (the goal is then replanned and opening the containers again re-verifies them).
      */
     private static Map<String, Integer> containerCounts(AIPlayerEntity bot, Context context) {
         String dimension = bot.level().dimension().identifier().toString();
         var ledger = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID()).containers();
+        long now = bot.level().getGameTime();
         Map<String, Integer> counts = new HashMap<>();
         Set<BlockPos> seen = new HashSet<>();
         if (context.boundContainers().isEmpty()) {
             for (var entry : ledger.inDimension(dimension)) {
-                if (entry.pos().distManhattan(context.origin()) <= CONTAINER_RADIUS * 2) {
+                if (withinContainerBox(entry.pos(), context.origin()) && fresh(entry, now)) {
                     addLedgerEntry(counts, entry);
                 }
             }
@@ -159,9 +165,20 @@ public final class GoalSnapshotCollector {
             if (!seen.add(canonical)) {
                 continue;
             }
-            ledger.get(dimension, canonical).or(() -> ledger.get(dimension, bound)).ifPresent(entry -> addLedgerEntry(counts, entry));
+            ledger.get(dimension, canonical).or(() -> ledger.get(dimension, bound))
+                    .filter(entry -> fresh(entry, now))
+                    .ifPresent(entry -> addLedgerEntry(counts, entry));
         }
         return counts;
+    }
+
+    /** The box the old direct scan used: within the container radius (Manhattan) and +/-6 blocks vertically. */
+    private static boolean withinContainerBox(BlockPos pos, BlockPos origin) {
+        return Math.abs(pos.getY() - origin.getY()) <= CONTAINER_HEIGHT && pos.distManhattan(origin) <= CONTAINER_RADIUS;
+    }
+
+    private static boolean fresh(io.github.zoyluo.minecraftai.memory.ContainerLedger.Entry entry, long now) {
+        return now - entry.lastVerified() <= LEDGER_FRESH_TICKS;
     }
 
     private static void addLedgerEntry(Map<String, Integer> counts,

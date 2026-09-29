@@ -85,8 +85,21 @@ class PrivilegedBoundarySourceTest {
 
     @Test
     void resourceAndEntityDiscoveryUsesObservableBoundary() throws IOException {
+        // Container code reaches the boundary through ContainerAction (whose canSee wraps ObservableWorldQuery),
+        // so each of these files must name its specific gating call, not just any observation call.
+        java.util.Map<String, String> containerGates = java.util.Map.of(
+                "action/ContainerAction.java", "ObservableWorldQuery.canObserveCell(bot, pos)",
+                "task/ContainerTask.java", "ContainerAction.canSee(bot, containerPos)",
+                "task/ResupplyTask.java", "ContainerAction.inReachAndSight(bot, containerPos)",
+                "task/StockpileTask.java", "ContainerAction.inReachAndSight(bot, containerPos)");
+        containerGates.forEach((relative, gate) -> {
+            try {
+                assertTrue(read(relative).contains(gate), relative + " must gate on " + gate);
+            } catch (IOException exception) {
+                throw new java.io.UncheckedIOException(exception);
+            }
+        });
         for (String relative : Set.of(
-                "action/ContainerAction.java",
                 "action/HarvestCore.java",
                 "brain/ToolRegistry.java",
                 "goal/GoalSnapshotCollector.java",
@@ -96,7 +109,6 @@ class PrivilegedBoundarySourceTest {
                 "mining/assist/PoiDetector.java",
                 "mining/assist/ViewSweeper.java",
                 "perception/PerceptionCollector.java",
-                "task/ContainerTask.java",
                 "task/CraftTask.java",
                 "task/CreeperDefenseTask.java",
                 "task/DangerWatcher.java",
@@ -104,14 +116,10 @@ class PrivilegedBoundarySourceTest {
                 "task/FishTask.java",
                 "task/OreDigTask.java",
                 "task/RecoverDropsTask.java",
-                "task/ResupplyTask.java",
                 "task/SiteFinder.java",
                 "task/SmeltTask.java",
-                "task/StockpileTask.java",
                 "task/StripMineTask.java")) {
-            String source = read(relative);
-            // Container tasks reach the boundary through ContainerAction.canSee, which wraps ObservableWorldQuery.
-            assertTrue(source.contains("ObservableWorldQuery") || source.contains("ContainerAction.canSee"), relative);
+            assertTrue(read(relative).contains("ObservableWorldQuery"), relative);
         }
 
         String prospector = read("mining/OreProspector.java");

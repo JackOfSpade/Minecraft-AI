@@ -11,7 +11,6 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.memory.ContainerLedger;
-import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -158,23 +157,42 @@ public final class ContainerTask extends AbstractTask {
     }
 
     /**
+     * Whether the target may be any block-entity container (a caller-supplied coordinate for an
+     * ordinary transfer). A junk stow is always a task on the bot's own initiative even when it is
+     * handed a remembered position, so it keeps the automatic rules: a real, openable storage block
+     * (a chest that has since become a furnace or hopper is refused) with no observed spawner nearby.
+     */
+    private boolean anyContainerAllowed() {
+        return explicitTarget() && !junkOnly;
+    }
+
+    /**
      * Candidate order. Withdraw: containers the ledger remembers holding the item (best first),
-     * then storage in sight (contents unknown until opened). Deposit: storage in sight (ledger-known
-     * full ones skipped), then remembered containers with room, then the remembered base/depot
-     * places. Nothing is ranked by contents the bot has not seen.
+     * then storage in sight (contents unknown until opened). Deposit: storage in sight that the
+     * ledger did not recently see full, then remembered containers with room (a "full" entry fades
+     * after {@link ContainerLedger#FULL_TRUST_TICKS}), then the remembered base/depot places, and
+     * LAST the in-sight containers the ledger recently saw full: full is a demotion, not an
+     * exclusion (a player may have emptied one), and opening it re-verifies. Remembered positions
+     * count only when their chunk is loaded and they are within {@link StorageTargets#LEDGER_MAX_DISTANCE}.
+     * Nothing is ranked by contents the bot has not seen.
      */
     private void buildCandidates(AIPlayerEntity bot) {
         candidates.clear();
         if (explicitTarget()) {
             candidates.add(requestedContainerPos);
-            return;
+            if (!junkOnly) {
+                return;
+            }
+            // A junk stow handed a remembered position keeps the automatic rules and falls back to them.
         }
         String dimension = bot.level().dimension().identifier().toString();
+        long now = bot.level().getGameTime();
         ContainerLedger ledger = StorageTargets.ledger(bot);
         if (mode != Mode.DEPOSIT) {
             if (item != null && mode == Mode.WITHDRAW) {
                 for (ContainerLedger.Entry entry : ledger.find(dimension, BuiltInRegistries.ITEM.getKey(item).toString(),
-                        bot.blockPosition(), targetCount == Integer.MAX_VALUE ? 1 : targetCount, LEDGER_CANDIDATES)) {
+                        bot.blockPosition(), targetCount == Integer.MAX_VALUE ? 1 : targetCount, LEDGER_CANDIDATES,
+                        entry -> StorageTargets.ledgerCandidateOk(bot, entry))) {
                     addCandidate(bot, entry.pos());
                 }
             }
@@ -183,17 +201,32 @@ public final class ContainerTask extends AbstractTask {
             }
             return;
         }
-        for (BlockPos pos : StorageTargets.observedStorage(bot, bot.blockPosition(), SEARCH_RADIUS, true)) {
-            addCandidate(bot, pos);
-        }
-        double stowRadius = junkOnly ? MinecraftAiConfig.get().storage().stowRadius() : Double.MAX_VALUE;
-        for (ContainerLedger.Entry entry : ledger.withRoom(dimension, bot.blockPosition(), LEDGER_CANDIDATES)) {
-            if (Math.sqrt(entry.pos().distSqr(bot.blockPosition())) <= stowRadius) {
-                addCandidate(bot, entry.pos());
+        List<BlockPos> observed = StorageTargets.observedStorage(bot, bot.blockPosition(), SEARCH_RADIUS, true);
+        List<BlockPos> demoted = new ArrayList<>();
+        for (BlockPos pos : observed) {
+            if (StorageTargets.ledgerKnowsFull(bot, pos, true)) {
+                demoted.add(pos);
+            } else {
+                addCandidate(bot, pos);
             }
         }
+        double stowRadius = junkOnly ? MinecraftAiConfig.get().storage().stowRadius() : Double.MAX_VALUE;
+        for (ContainerLedger.Entry entry : ledger.withRoom(dimension, bot.blockPosition(), now, LEDGER_CANDIDATES,
+                entry -> StorageTargets.ledgerCandidateOk(bot, entry)
+                        && Math.sqrt(entry.pos().distSqr(bot.blockPosition())) <= stowRadius)) {
+            addCandidate(bot, entry.pos());
+        }
         if (!junkOnly) {
-            rememberedContainer(bot).ifPresent(pos -> addCandidate(bot, pos));
+            rememberedContainer(bot).ifPresent(pos -> {
+                if (StorageTargets.ledgerKnowsFull(bot, pos, true)) {
+                    demoted.add(pos);
+                } else {
+                    addCandidate(bot, pos);
+                }
+            });
+        }
+        for (BlockPos pos : demoted) {
+            addCandidate(bot, pos);
         }
     }
 
@@ -260,9 +293,9 @@ public final class ContainerTask extends AbstractTask {
         }
     }
 
-    /** An observed candidate that is no longer any container loses its ledger entry (a blocked lid keeps it). */
+    /** An observed candidate that is no longer a storage block loses its ledger entry (a blocked lid or a nearby spawner keeps it). */
     private void dropIfNotStorage(AIPlayerEntity bot, BlockPos pos) {
-        if (!(bot.level().getBlockEntity(pos) instanceof Container)) {
+        if (!ContainerAction.isStorageBlock(bot.level().getBlockState(pos))) {
             ContainerAction.forget(bot, pos);
         }
     }
@@ -285,8 +318,30 @@ public final class ContainerTask extends AbstractTask {
         fail(mode == Mode.WITHDRAW && !doneReason.isBlank() ? doneReason : "no_container");
     }
 
+    private BlockPos spawnerCheckedPos;
+    private boolean spawnerCheckedClose;
+    private boolean spawnerCheckedResult;
+
+    /**
+     * Junk only: an observed spawner near the chest makes it structure loot the bot must not touch.
+     * The scan is costly, so it runs once per container while far and once more when in reach (the
+     * spawner may only come into view when close); the result is reused on every tick in between.
+     */
+    private boolean spawnerNear(AIPlayerEntity bot, BlockPos pos) {
+        boolean close = bot.getEyePosition().distanceToSqr(pos.getCenter()) <= REACH_SQUARED;
+        if (!pos.equals(spawnerCheckedPos) || (close && !spawnerCheckedClose)) {
+            spawnerCheckedPos = pos.immutable();
+            spawnerCheckedClose = close;
+            spawnerCheckedResult = StorageTargets.nearObservedSpawner(bot, pos);
+        }
+        return spawnerCheckedResult;
+    }
+
     private boolean usable(AIPlayerEntity bot, BlockPos pos) {
-        return explicitTarget()
+        if (junkOnly && spawnerNear(bot, pos)) {
+            return false;
+        }
+        return anyContainerAllowed()
                 ? ContainerAction.resolve(bot, pos).isPresent()
                 : ContainerAction.isOpenableStorage(bot.level(), pos);
     }
@@ -322,9 +377,9 @@ public final class ContainerTask extends AbstractTask {
         }
         // Opening is what teaches the bot the contents (recorded in its ledger); the transfer below
         // works through the container it just opened.
-        Container container = ContainerAction.open(bot, containerPos, explicitTarget()).orElse(null);
+        Container container = ContainerAction.open(bot, containerPos, anyContainerAllowed()).orElse(null);
         if (container == null) {
-            if (explicitTarget()) {
+            if (anyContainerAllowed()) {
                 fail("container_missing");
                 return;
             }
@@ -420,7 +475,7 @@ public final class ContainerTask extends AbstractTask {
         OptionalInt slot = InventoryAction.findItem(bot, Items.CHEST);
         BlockPos cell = slot.isPresent() ? chestCell(bot) : null;
         if (cell == null) {
-            fail("no_container");
+            failNoContainer(bot);
             return;
         }
         InventoryAction.equipFromSlot(bot, slot.getAsInt());
@@ -428,7 +483,7 @@ public final class ContainerTask extends AbstractTask {
         if (result.isFailed()) {
             BotLog.warn(LogCategory.TASK, bot, "container_fallback_chest_failed",
                     "cell", cell.toShortString(), "reason", result.reason());
-            fail("no_container");
+            failNoContainer(bot);
             return;
         }
         BotLog.action(bot, "container_fallback_chest_placed", "pos", cell.toShortString());
@@ -436,6 +491,22 @@ public final class ContainerTask extends AbstractTask {
         candidates.add(cell.immutable());
         containerPos = null;
         phase = Phase.FINDING;
+    }
+
+    /**
+     * The carried-chest fallback could not be used. Items that already went into a container are
+     * a real (partial) success, so the task completes with a logged note instead of failing;
+     * with nothing transferred it is the plain no_container failure.
+     */
+    private void failNoContainer(AIPlayerEntity bot) {
+        if (transferred > 0) {
+            BotLog.action(bot, "container_partial_complete",
+                    "item", item == null ? "all" : BuiltInRegistries.ITEM.getKey(item).toString(),
+                    "transferred", transferred, "reason", "no_container_for_the_rest");
+            complete();
+            return;
+        }
+        fail("no_container");
     }
 
     /** A free horizontal neighbour with open air above it (so the lid can open), a visible support and no entity in it. */
