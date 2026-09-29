@@ -196,13 +196,14 @@ Two profile-specific notes:
   This profile pre-creates config/Veinminer/update as a read-only FILE so those
   writes fail harmlessly (a WARN in the log). Keep that file when reinstalling.
 - The Minecraft-AI bots must not vein-mine (it breaks the extra blocks behind their
-  per-block safety, drop and mining-assist checks). The Minecraft-AI mod answers
-  VeinMiner's "veinminer.use" permission with "no" for bots and "yes" for human
-  players; that only takes effect with "permissionRestricted": true in
-  config/Veinminer/settings.json, which this profile sets together with the
-  Minecraft-AI build that contains that permission hook. Without the Minecraft-AI mod,
-  permissionRestricted=true means nobody vein-mines (fabric-permissions-api defaults
-  to "no"), so set it back to false in that case.
+  per-block safety, drop and mining-assist checks). PLANNED, NOT YET BUILT (job r17,
+  2026-09-29): the Minecraft-AI mod will answer VeinMiner's "veinminer.use" permission
+  with "no" for bots and "yes" for human players. That only takes effect with
+  "permissionRestricted": true in config/Veinminer/settings.json, to be set in this
+  profile together with the Minecraft-AI build that contains the hook. Until then the
+  profile keeps VeinMiner's defaults, so bots vein-mine too. Without the Minecraft-AI
+  mod, permissionRestricted=true means nobody vein-mines (fabric-permissions-api
+  defaults to "no"), so leave it false in that case.
 
 (PvP BOT itself is listed under World Generation / Exploration above, since
 that is what it primarily adds; it is a gameplay/combat mod too.)
