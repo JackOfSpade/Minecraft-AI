@@ -11,3 +11,8 @@
 *.zip binary
 *.ttf binary
 *.otf binary
+
+# Vendored upstream Baritone: keep every byte exactly as upstream committed it (no EOL/text normalization).
+third_party/baritone/** -text
+# The patch series must stay byte-exact too (context lines are matched literally by git apply).
+tools/baritone/patches/*.patch -text
