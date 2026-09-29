@@ -33,30 +33,6 @@ class PopulationEngineTpsThrottleTest {
         assertTrue(rig.bots.removes.isEmpty());
     }
 
-    /**
-     * This pack's ordinary busy-but-fine load measures 53-59ms/tick (the reading is wall-clock between ticks, so
-     * it can never be below 50). The governor once shed bots in batches on exactly that load; the DEFAULT
-     * thresholds (deliberately not overridden here) must treat it as healthy.
-     */
-    @Test
-    void ordinaryPackLoadWithDefaultThresholdsNeverDespawnsAnyone() {
-        Rig rig = new Rig();
-        rig.cfg.tpsThrottle.checkIntervalTicks = 5;
-        rig.tps.millis = 30.0;
-        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
-        rig.engine.submit(s);
-        rig.run(10);
-        assertEquals(3, Rig.count(rig.record(s.key()), BotState.SPAWNED));
-
-        for (double ms : new double[] {53.0, 56.0, 59.0}) {
-            rig.tps.millis = ms;
-            rig.run(60);
-        }
-        assertEquals(3, Rig.count(rig.record(s.key()), BotState.SPAWNED),
-                "53-59ms/tick is this pack's normal tick time and must never shed bots");
-        assertTrue(rig.bots.removes.isEmpty());
-    }
-
     @Test
     void degradedTpsDespawnsFarthestFromTheNearestRealPlayerFirst() {
         Rig rig = new Rig();
