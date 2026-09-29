@@ -241,12 +241,15 @@ public final class InhabitantsConfig {
         public boolean enabled = true;
         /** Rolling average ms/tick at or below which the server is healthy: new spawns are unblocked (fully,
          * immediately -- see the class doc on why that is safe) and the shed-escalation level resets to zero.
-         * ~52.6ms/tick is ~19 TPS -- one TPS of hysteresis above {@link #degradedMillis} so a server sitting
-         * right at the target does not flip between the two states every check. */
-        public double healthyMillis = 52.6;
+         * The measured value is the wall-clock time between server ticks, so it can never read below the 50ms
+         * tick budget, and this pack's ordinary busy-but-fine load sits at 53-59ms. 70ms (~14 TPS) keeps that
+         * whole normal band inside "healthy", with hysteresis below {@link #degradedMillis}. (The previous
+         * 52.6/55.6 pair was tighter than the pack's normal tick time and shed bots in batches on plain
+         * ordinary load, which showed up as spurious "Died" bot disconnects.) */
+        public double healthyMillis = 70.0;
         /** Rolling average ms/tick above which the server is degraded: new spawns are hard-blocked and shedding
-         * begins. ~55.6ms/tick is 18 TPS: this starts the moment the server drops below that. */
-        public double degradedMillis = 55.6;
+         * begins. 85ms is ~11.8 TPS: only a genuine, sustained overload trips it, not ordinary busy ticks. */
+        public double degradedMillis = 85.0;
         /** Ticks between checks, so one round's effect on the tick rate is fully measured before reacting again.
          * Matches {@code TpsGateway}'s own rolling sample window (100 ticks) on purpose: a shorter interval
          * would react to a reading still diluted by ticks from before the last shed. */
