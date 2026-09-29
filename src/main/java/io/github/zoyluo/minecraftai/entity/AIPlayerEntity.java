@@ -6,6 +6,8 @@ import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
 import net.minecraft.server.MinecraftServer;
@@ -46,6 +48,46 @@ public class AIPlayerEntity extends ServerPlayerEntity {
             // catch intentionally does not reset actionPack state itself.
             BotLog.error(this, "tick_npe_swallowed", exception);
         }
+    }
+
+    /**
+     * Combat logging: without this a fight left no trace beyond the bare {@code diag_health_drop} (no source, no
+     * attacker), so a bot that lost or won a fight could not be explained from its log. Logged at the moment the
+     * hit is resolved, with the vanilla result (a blocked/shielded/cooldown hit reports {@code applied=false}).
+     */
+    @Override
+    public boolean damage(ServerWorld world, DamageSource source, float amount) {
+        float before = this.getHealth();
+        boolean applied = super.damage(world, source, amount);
+        try {
+            Entity attacker = source == null ? null : source.getAttacker();
+            BotLog.danger(this, "damage_taken",
+                    "source", source == null ? "unknown" : source.getName(),
+                    "attacker", attacker == null ? "-" : attacker.getType().toString(),
+                    "attacker_id", attacker == null ? -1 : attacker.getId(),
+                    "amount", amount,
+                    "applied", applied,
+                    "hp", before + "->" + this.getHealth(),
+                    "blocking", this.isBlocking());
+        } catch (RuntimeException ignored) {
+            // Logging must never affect combat resolution.
+        }
+        return applied;
+    }
+
+    @Override
+    public void onDeath(DamageSource source) {
+        try {
+            Entity attacker = source == null ? null : source.getAttacker();
+            BotLog.danger(this, "bot_death",
+                    "source", source == null ? "unknown" : source.getName(),
+                    "attacker", attacker == null ? "-" : attacker.getType().toString(),
+                    "attacker_id", attacker == null ? -1 : attacker.getId(),
+                    "pos", this.getBlockPos().toShortString());
+        } catch (RuntimeException ignored) {
+            // Logging must never affect death handling.
+        }
+        super.onDeath(source);
     }
 
     @Override

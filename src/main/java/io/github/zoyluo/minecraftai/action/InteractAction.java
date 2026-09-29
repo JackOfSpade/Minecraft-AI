@@ -17,7 +17,8 @@ public final class InteractAction {
         player.swingHand(Hand.MAIN_HAND);
         player.resetTicksSinceLastAttack();
         player.updateLastActionTime();
-        BotLog.action(player, "attack", "target_type", target.getType(), "target_id", target.getId());
+        BotLog.action(player, "attack", "target_type", target.getType(), "target_id", target.getId(),
+                "target_hp", target instanceof net.minecraft.entity.LivingEntity living ? living.getHealth() : -1.0F);
         return ActionResult.SUCCESS;
     }
 

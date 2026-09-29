@@ -149,8 +149,51 @@ public final class CombatTask extends AbstractTask {
         nextPeekabooAttemptElapsed = 0;
     }
 
+    /**
+     * Combat logging wrapper: records phase transitions, target changes and kill credit (with the bot's hp) so a
+     * fight can be reconstructed from the log. Purely observational -- all behaviour lives in {@link #tickCombat}.
+     */
     @Override
     protected void onTick(AIPlayerEntity bot) {
+        Phase phaseBefore = phase;
+        int killsBefore = kills;
+        LivingEntity targetBefore = target;
+        try {
+            tickCombat(bot);
+        } finally {
+            logCombatDelta(bot, phaseBefore, killsBefore, targetBefore);
+        }
+    }
+
+    private void logCombatDelta(AIPlayerEntity bot, Phase phaseBefore, int killsBefore, LivingEntity targetBefore) {
+        try {
+            if (target != targetBefore && target != null) {
+                BotLog.danger(bot, "combat_target",
+                        "type", target.getType().toString(),
+                        "id", target.getId(),
+                        "target_hp", target.getHealth(),
+                        "dist", String.format(java.util.Locale.ROOT, "%.1f", bot.distanceTo(target)),
+                        "hp", bot.getHealth());
+            }
+            if (phase != phaseBefore) {
+                BotLog.danger(bot, "combat_phase",
+                        "from", phaseBefore, "to", phase,
+                        "kills", kills + "/" + targetKills,
+                        "hp", bot.getHealth(),
+                        "target_id", target == null ? -1 : target.getId());
+            }
+            if (kills != killsBefore) {
+                BotLog.danger(bot, "combat_kill",
+                        "kills", kills + "/" + targetKills,
+                        "hp", bot.getHealth(),
+                        "elapsed", elapsed);
+            }
+        } catch (RuntimeException ignored) {
+            // Logging must never affect combat.
+        }
+    }
+
+    private void tickCombat(AIPlayerEntity bot) {
         if (elapsed > 2400) {
             finishRangedLoadout(bot);
             fail("combat_timeout");
