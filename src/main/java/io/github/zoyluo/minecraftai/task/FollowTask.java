@@ -56,7 +56,7 @@ public final class FollowTask extends AbstractTask {
     // throttles its repathing, so backing off from a failed acquisition does not just trade one
     // every-tick scan for another.
     private static final int BOAT_WATER_SCAN_COOLDOWN_TICKS = 30;
-    private static final int BOAT_TARGET_SHORE_RADIUS = 12;
+    private static final int BOAT_TARGET_SHORE_RADIUS = 24;
 
     private final String targetName;
     private int nextRepathTick;

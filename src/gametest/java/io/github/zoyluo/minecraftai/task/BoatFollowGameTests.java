@@ -139,18 +139,57 @@ public final class BoatFollowGameTests {
         BlockPos feet = scenario.feet();
         ServerWorld world = context.getWorld();
         InventoryAction.giveItem(scenario.bot(), new ItemStack(Items.OAK_BOAT, 1));
-        // A boat sitting on dry land in front of the bot, with a two-high stone wall right in the
-        // line to the lake: boarding works, steering east never gets anywhere.
+        // A boat sitting on dry land in front of the bot, with a one-high stone wall right in the
+        // line to the lake: boarding works, steering east never gets anywhere (a hull cannot climb
+        // a block), while a walking bot simply steps over it once it has abandoned the boat.
         BlockState stone = Blocks.STONE.getDefaultState();
         for (int z = 4; z <= 20; z++) {
-            for (int y = 0; y <= 1; y++) {
-                world.setBlockState(feet.add(10, y, z), stone, Block.NOTIFY_ALL);
-            }
+            world.setBlockState(feet.add(10, 0, z), stone, Block.NOTIFY_ALL);
         }
         AbstractBoatEntity beached = placeBoat(world, feet.add(8, 0, FEET_Z));
         beached.setPosition(feet.getX() + 8.5D, feet.getY(), feet.getZ() + FEET_Z + 0.5D);
         runFollow(context, scenario, beached, beached, () -> require(context,
                 beached.getPassengerList().isEmpty(), "the wedged boat still carries the bot"));
+    }
+
+    @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_target_leaving_boat_onto_land_makes_bot_exit_at_dry_shore_and_follow_on_foot", maxTicks = 1800)
+    public void targetLeavingBoatOntoLandMakesBotExitAtDryShoreAndFollowOnFoot(TestContext context) {
+        Scenario scenario = scenario(context, "LeaveBoat");
+        ServerWorld world = context.getWorld();
+        AIPlayerEntity bot = scenario.bot();
+        BlockPos feet = scenario.feet();
+        AbstractBoatEntity botBoat = placeBoat(world, feet.add(22, 0, FEET_Z));
+        boarded(bot, botBoat);
+        FollowTask follow = new FollowTask(scenario.targetName());
+        TaskManager.INSTANCE.assign(bot, follow,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_boat_follow_leave_boat"));
+        AtomicInteger stage = new AtomicInteger();
+        context.runAtEveryTick(() -> {
+            if (follow.state() == TaskState.FAILED || follow.state() == TaskState.CANCELLED) {
+                context.throwGameTestException(Text.of("follow ended early: " + follow.state()
+                        + " reason=" + follow.failureReason() + " botPos=" + bot.getEntityPos()));
+                return;
+            }
+            double toTargetBoat = Math.hypot(botBoat.getX() - scenario.targetBoat().getX(),
+                    botBoat.getZ() - scenario.targetBoat().getZ());
+            if (stage.get() == 0) {
+                if (bot.getVehicle() == botBoat && toTargetBoat <= 9.0D) {
+                    // Bot has sailed up to the boating target; now the target steps out onto the bank.
+                    scenario.target().stopRiding();
+                    scenario.target().teleport(world, feet.getX() + 6.5D, feet.getY(),
+                            feet.getZ() + FEET_Z + 0.5D, Set.of(), 0.0F, 0.0F, true);
+                    stage.set(1);
+                }
+                return;
+            }
+            double toTarget = Math.hypot(bot.getX() - scenario.target().getX(),
+                    bot.getZ() - scenario.target().getZ());
+            if (bot.getVehicle() == null && bot.getX() <= feet.getX() + LAND_MAX_X + 1.0D
+                    && toTarget <= 6.0D) {
+                TaskManager.INSTANCE.abort(bot);
+                despawnAndComplete(context, bot, scenario.target());
+            }
+        });
     }
 
     // ---- scenario plumbing -------------------------------------------------------------------

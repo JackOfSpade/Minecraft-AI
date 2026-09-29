@@ -92,11 +92,13 @@ final class BoatSupport {
     /**
      * Finds a visible local water cell with a dry, supported shore cell from which it can be used.
      *
-     * <p>The shore is either level with the water cell or one block above it. The second shape is
-     * the ordinary vanilla bank (a beach or grass block whose top is flush with the water's
-     * surface: the bot stands one cell above the water block that touches its floor block); the
-     * old same-level-only test matched almost no real terrain, which is why a bot standing a few
-     * blocks from a lake reported {@code no_nearby_water_shore}.</p>
+     * <p>Three things the original test got wrong, all of which made a bot standing a few blocks
+     * from a lake report {@code no_nearby_water_shore}: (1) the shore may be level with the water
+     * cell or one block above it (the ordinary flush vanilla bank puts the bot one cell above the
+     * water block that touches its floor block); (2) the launch water must hold a whole boat (see
+     * {@link #holdsBoat}), so it is a cell or two out from the bank, not the one beside it; (3) a
+     * calm lake is judged visible by rays at its surface ({@link #canObserveWater}), not by the
+     * block-face centres, none of which a lake seen from a bank ever satisfies.</p>
      */
     static Optional<LaunchSite> findLaunchSite(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
