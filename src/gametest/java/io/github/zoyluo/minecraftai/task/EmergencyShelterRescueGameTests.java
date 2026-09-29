@@ -47,19 +47,7 @@ public final class EmergencyShelterRescueGameTests {
         boolean[] sawCriedForHelp = {false};
         int[] firstCriedForHelpTick = {-1};
 
-        boolean[] timeLockAcquired = {false};
-        context.succeedIf(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.failIfEver(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
+        runLocked(context, () -> {
 
             context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
@@ -69,7 +57,7 @@ public final class EmergencyShelterRescueGameTests {
             }
             boolean sealed = shell.stream().allMatch(pos -> isSealed(context, pos));
             if (!lowHealthInjected[0] && sealed) {
-                bot.setHealth(6.0F); // 30% of 20 max: below the 50% give-up-and-fight threshold
+                injectStalledHealing(bot, 6.0F); // 30% of 20 max: below the 50% give-up-and-fight threshold
                 lowHealthInjected[0] = true;
                 return;
             }
@@ -124,19 +112,7 @@ public final class EmergencyShelterRescueGameTests {
         boolean[] foodDelivered = {false};
         boolean[] sawRescuedResumeHealing = {false};
 
-        boolean[] timeLockAcquired = {false};
-        context.succeedIf(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.failIfEver(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
+        runLocked(context, () -> {
 
             context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
@@ -146,7 +122,7 @@ public final class EmergencyShelterRescueGameTests {
             }
             boolean sealed = shell.stream().allMatch(pos -> isSealed(context, pos));
             if (!lowHealthInjected[0] && sealed) {
-                bot.setHealth(4.0F); // 20% of 20 max
+                injectStalledHealing(bot, 4.0F); // 20% of 20 max
                 lowHealthInjected[0] = true;
                 return;
             }
@@ -199,19 +175,7 @@ public final class EmergencyShelterRescueGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_give_up_and_fight"));
         boolean[] healthInjected = {false};
 
-        boolean[] timeLockAcquired = {false};
-        context.succeedIf(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.failIfEver(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
+        runLocked(context, () -> {
 
             context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
@@ -221,7 +185,7 @@ public final class EmergencyShelterRescueGameTests {
             }
             boolean sealed = shell.stream().allMatch(pos -> isSealed(context, pos));
             if (!healthInjected[0] && sealed) {
-                bot.setHealth(12.0F); // 60% of 20 max: at/above the give-up-and-fight threshold
+                injectStalledHealing(bot, 12.0F); // 60% of 20 max: at/above the give-up-and-fight threshold
                 healthInjected[0] = true;
                 return;
             }
@@ -257,19 +221,7 @@ public final class EmergencyShelterRescueGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_full_health_no_food"));
         boolean[] stateInjected = {false};
 
-        boolean[] timeLockAcquired = {false};
-        context.succeedIf(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.failIfEver(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
+        runLocked(context, () -> {
 
             context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
@@ -301,6 +253,18 @@ public final class EmergencyShelterRescueGameTests {
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterFullNoFoodGT");
         });
+    }
+
+    /**
+     * Puts the bot into the genuinely stalled healing state these fixtures describe: hurt, no food item, and a
+     * hunger bar too low for vanilla natural regeneration (it needs 18+). With the spawn default of a full hunger
+     * bar the vanilla regeneration keeps healing the bot, so a 30% bot crosses the 50% give-up-and-fight
+     * threshold within the hold grace period and legitimately leaves instead of waiting for rescue.
+     */
+    private static void injectStalledHealing(AIPlayerEntity bot, float health) {
+        bot.setHealth(health);
+        bot.getFoodData().setFoodLevel(10);
+        bot.getFoodData().setSaturation(0.0F);
     }
 
     private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {
