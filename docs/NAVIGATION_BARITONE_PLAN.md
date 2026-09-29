@@ -2,7 +2,7 @@
 
 Status: **APPROVED design (2026-09-29): pristine vendored Baritone + replayable patch series + our own glue.**
 The mod moved to official Mojang mappings on 2026-09-29 (same names as Baritone), so no cross-mapping build is needed.
-The P0 spike (vendor, patch series, headless boot, physics probes) runs first; P1+ are not built yet.
+The P0 spike is done (verdict go with conditions); P1 (library layer) is done and being hardened, P2 is in progress: see section 0.
 Date: 2026-09-29. Sources analysed (read-only, temporary copies in `C:\Users\PC\Downloads\baritone-analysis`):
 
 | Tree | Version | Mappings | Role |
@@ -13,6 +13,29 @@ Date: 2026-09-29. Sources analysed (read-only, temporary copies in `C:\Users\PC\
 
 Six analysts (calc core, movement, execution/behaviors, processes, server-port references, our integration seams)
 plus a critic produced a per-file reuse matrix (journal: workflow `wf_cc199b6e-769`).
+
+## 0. Status (updated 2026-09-29)
+
+| Phase | State |
+|---|---|
+| P0 Spike | **Done, verdict go (with conditions).** See the results below. |
+| P1 Core port | **Done for the library layer, in progress for hardening.** Vendor, patch series, glue, per-bot instances and a bot walking Baritone paths in GameTests are in; survival/policy holes in driven breaks and placements are being closed. |
+| P2 Integration behind the switch | **In progress** (separate work, not part of this layer): the `navigation.engine = legacy | baritone` switch in ActionPack, fail-soft lazy bootstrap, the water safety-net lease, follow and move adapters. |
+| P3-P5 | Not started. |
+
+### P0 results
+
+| Question | Result |
+|---|---|
+| Can the vendor tree stay pristine? | Yes. `third_party/baritone` is Baritone v1.17.0 (commit 2372389), 351 files byte-identical to upstream, checked by blob hash against `MANIFEST.txt` (unit test and the generator's `verify`). All our changes are 14 numbered patches over 33 files (+131 / -264), 71 excluded files (`exclude.txt`), an overlay of hook and stub classes, and our own glue. A rehearsal of the series on Baritone for 1.21.10 and 26.1 showed what an upgrade costs; the checklist is in `tools/baritone/README.md`. |
+| Does it compile and boot without client classes? | Yes. Baritone is its own source set compiled against the common Minecraft jar only, so a client reference cannot link; the generator scans for them and a unit test scans the class files. The dedicated-server boot GameTest loads every Baritone class and gives a bot an instance. It ships inside the mod jar. |
+| Does the vendored core still pass its own tests? | Yes: upstream's JUnit tests run as the `baritoneTest` source set (41/41). The mod's unit tests: 2243/2243. |
+| Does a bot behave like a client player under Baritone's inputs? | Yes. 11 physics probe GameTests drive a bot only through Baritone's held keys and the real driver/input bridge: walk 4.3168 blocks/s (vanilla 4.3172), sprint 5.6119 (5.6123), sneak 1.2950 (1.2952), jump apex 1.2522, sprint-jump distance 3.6292 (model 3.6292), step-up, gaps, ladders, doors and gates, water, slow blocks, `onGround` against the collision geometry, fall damage 0/2/5/9 for falls of 3/5/8/12 blocks, sneak at a ledge (0.29 overhang), tick order. Three pieces of glue make this hold: sneak scaling applied exactly once, the sprint rules of `LocalPlayer` (no sprint into a wall, at food 6 or less, or without a forward input), and the driver's fall check (a `ServerPlayer` only checks falls on a client move packet, so a bot otherwise takes no fall damage). Tests: `BaritoneInputPhysicsProbeGameTests`. |
+| Can it plan and execute? | Yes. 7 planning courses (wall detour, step, pit, wooden and iron door, water strip), 14 end-to-end navigation tests on a real server (20-block sprint, detour, step and 3-block drop, doors, ladder, bridging and pillaring only when placing is allowed, breaking through a wall via `MiningController`, hand-over with the legacy executor, fall damage) and 8 glue tests (registry lifecycle, bounded worker pool, cancellation, settings, observable entities). |
+| Threading | The A* runs on a bounded daemon pool over a thread-safe chunk snapshot; a search cancelled while queued never starts (patch 0013). |
+
+Known limits carried into P1/P2: Baritone's route costs assume vanilla physics, which the probes now pin; the water safety net still takes over a swimming bot
+unless a lease is held (P2); driven breaks and placements must satisfy the same survival rules as the legacy actions (P1 hardening).
 
 ## 1. What we found
 

@@ -42,7 +42,7 @@ Gradle tasks: `generateBaritoneSources` (runs before `compileBaritoneJava`), `co
 belongs to the `minecraftai` mod in Loom, and is packed into the mod jar (and so remapped to intermediary with the rest).
 `javax.annotation` comes from `jsr305` (compileOnly), and there is deliberately **no nether-pathfinder** dependency.
 
-## The patch series (36 files, +131 / -264 lines)
+## The patch series (14 patches, 33 files, +131 / -264 lines)
 
 The edits are small and mostly deletions of client-only code. Two rules kept them small: types are *generalised*
 (`LocalPlayer` -> `Player`, `ClientChunkCache` -> `ChunkSource`, `ClientLevel` -> `Level`), and where behaviour must
@@ -84,20 +84,54 @@ tools/baritone/apply.sh export --out build/baritone-work   # rewrites tools/bari
 To change an existing patch, commit a `fixup!` (or `git rebase -i` it) in that repo before `export`. A new file that has no
 upstream counterpart goes to `overlay/`, not into a patch.
 
-## Upgrading Baritone
+## Line endings (the CRLF trap)
 
-1. `tools/baritone/vendor-import.sh <baritone clone> <tag or commit>`; update `third_party/baritone/UPSTREAM.md`.
-2. `tools/baritone/apply.sh generate --3way --keep-repo --out build/baritone-work`. Exclusion entries that no longer match, and patches that do not apply,
-   fail with the name. A conflicting patch is left as conflict markers in `build/baritone-work`; resolve, commit with the patch
-   name as subject, then `tools/baritone/apply.sh resume --3way --out build/baritone-work`, then `export --out build/baritone-work`.
-3. The generator ends with a scan for `net.minecraft.client`, `com.mojang.blaze3d` and `Minecraft.getInstance()`; each hit names
-   file and line of *new* client usage upstream introduced. Extend a patch (or `exclude.txt` + an overlay stub), commit, `export`.
-4. `./gradlew compileBaritoneJava baritoneTest test runGameTest` and the navigation GameTests.
-5. Glue that implements upstream interfaces (`IPlayerContext`, `IPlayerController`, `IClientChunkProvider`) fails to compile
-   if upstream changed a signature (26.1 renamed `ClickType` to `ContainerInput` in `windowClick`).
+Upstream commits LF. A Windows clone with `core.autocrlf=true` checks the same files out as CRLF, so a tree copied from its working
+directory (or exported from it with `git archive`) has different bytes than upstream's blobs: every hash in `MANIFEST.txt` stops
+matching and `BaritoneVendorIntegrityTest` and the generator's `verify` fail on every file. Import only with
+`tools/baritone/vendor-import.sh`, which reads blobs with `git cat-file` (bytes exactly as committed) and takes the hashes from the
+object database, never from the files: the manifest is upstream's hash, not ours. The same holds inside this repository:
+`third_party/baritone` must not go through an editor or a tool that normalises line endings.
+editor that normalises line endings.
 
-`tools/baritone/apply.sh report --upstream <dir> --out <dir> [--3way]` tries the series on another version without stopping
-(rehearsal results for 1.21.10 and 26.1 are in the commit that introduced the series).
+`third_party/baritone/UPSTREAM.md` is the only file of the vendor directory that is not upstream's. It is tracked despite the
+repository's `*.md` ignore rule (there is an explicit exception in `.gitignore`); `vendor-import.sh` keeps it and you update it by hand.
+
+## Upgrading Baritone (checklist)
+
+Work in a branch; nothing here needs the vendor tree to be edited in place.
+
+1. **Import.** `tools/baritone/vendor-import.sh <baritone clone> <tag or commit>`. It replaces everything under
+   `third_party/baritone` except `UPSTREAM.md` and rewrites `MANIFEST.txt`. Edit `UPSTREAM.md` (tag, commit, tree, date). Check
+   `tools/baritone/apply.sh verify` and that `git diff --stat third_party/baritone` shows only real upstream changes (a diff of
+   every file means CRLF, see above).
+2. **Replay the patches.** `tools/baritone/apply.sh generate --3way --keep-repo --out build/baritone-work`. It fails naming the
+   first exclusion entry that matches nothing (upstream moved or deleted a file; update `exclude.txt`) or the first patch that
+   does not apply. A conflicting patch is left as conflict markers in `build/baritone-work`.
+3. **Resolve.** Fix the markers in `build/baritone-work`, commit with the patch name as the subject, run
+   `tools/baritone/apply.sh resume --3way --out build/baritone-work` until the series is through, then
+   `tools/baritone/apply.sh export --out build/baritone-work` to rewrite `tools/baritone/patches`. A hunk that upstream made
+   unnecessary is dropped from its patch; a patch that ends up empty is deleted and the rest renumbered (then update the table above).
+4. **Client scan.** The generator ends with a scan for `net.minecraft.client`, `com.mojang.blaze3d` and `Minecraft.getInstance()`.
+   Every hit is new client usage upstream introduced: extend a patch (or `exclude.txt` plus an overlay stub), `export` again.
+5. **Compile the glue against the new API.** Glue that implements upstream interfaces (`IPlayerContext`, `IPlayerController`,
+   `IClientChunkProvider`, `IBaritoneProcess` users) fails to compile when a signature moved (26.1 renamed `ClickType` to
+   `ContainerInput` in `windowClick`). Fix the glue, not the vendor tree. The `Baritone*Mixin` classes are the server
+   counterparts of upstream's `src/launch` mixins (`MixinPalettedContainer`, `MixinItemStack`, `MixinLootTable`,
+   `MixinLootContextBuilder`): diff those upstream files between the two versions to see whether a target moved.
+6. **Tests, in this order.** `./gradlew compileBaritoneJava baritoneTest test` (upstream's own JUnit tests must stay 100%: the
+   pathing core does not change with our patches), then the Baritone GameTests
+   (`./gradlew runGameTest` with filters `baritone_server_game_tests_*`, `baritone_glue_game_tests_*`,
+   `baritone_planning_game_tests_*`, `baritone_navigation_game_tests_*`, `baritone_input_physics_probe_game_tests_*`), then the
+   legacy suites that share the bot tick (`follow_task_game_tests_*`, `gather_tool_policy_game_tests_*`,
+   `mixin_target_class_load_game_tests_*`, `bot_persistence_restore_game_tests_*`). A moved physics number in the probe suite is a
+   Minecraft change: read the probe line before touching Baritone.
+7. **Build the jar** (`./gradlew build -x runGameTest`) and check it: the Baritone classes are in it (remapped to intermediary), it
+   contains `baritone-server-build.properties` with the patch count, every mixin of `minecraftai.mixins.json` is present. The
+   headless boot GameTest fails if a client class is reachable.
+
+`tools/baritone/apply.sh report --upstream <dir> --out <dir> [--3way]` tries the series on another version without stopping; run it first to
+size the work (rehearsal results for 1.21.10 and 26.1 are in the commit that introduced the series).
 
 ## The glue (new code in the mod, `src/main/java/.../minecraftai/baritone` and `.../mixin`)
 
@@ -127,18 +161,31 @@ Covered by `BaritoneNavigationGameTests` (end to end, a bot walks through Barito
 (open floor and through a wall), the whole behavior stack ticking and producing inputs, ore scan through the snapshot and the raw
 palettes, drops matched by loot table and item hash; and by the unit tests `BaritoneVendorIntegrityTest`,
 `BaritoneServerOnlyClassesTest` (no client reference in the class files) and `BaritoneSourceGeneratorTest` (every way the pipeline
-must refuse).
+must refuse). The physics behind the input bridge is pinned by `BaritoneInputPhysicsProbeGameTests` (section below).
 
-## What is still to build before Baritone drives a bot end to end
+## Physics probes and the input contract
 
-None of this needs another patch; it is glue for the next stage.
+`BaritoneInputPhysicsProbeGameTests` (11 GameTests, environments `baritone_input_physics_probe_game_tests_*`) is the permanent
+regression suite for the assumption Baritone's cost tables rest on: a bot whose only controls are Baritone's held keys behaves
+like a vanilla client player. A probe process (`REQUEST_PAUSE` every tick, so Baritone counts as busy but never plans) writes the
+keys in `onTick`; `BaritoneDriver` and `BotInputBridge` apply them, vanilla `super.tick()` moves the bot, and a post-tick
+listener samples the result. It measures walking 4.317 blocks/s (vanilla 4.317), sprinting 5.612, sneaking 1.295, strafing and
+diagonals (the 1/0.98 normalisation), step-up with and without a jump, jump apex 1.2522 / flight time, sprint-jump distance
+against a closed-form model, 2-5 block gaps, fall distance and damage (`doCheckFallDamage` from the driver), sneaking at a ledge
+(0.29 overhang), ladder and vine climbing and sliding, doors and fence gates (right click through the interaction manager; an
+iron door stays shut), swimming, soul sand, honey, slabs, stairs, `onGround` against the collision geometry, pillar jump-and-place,
+sneak bridging, the tick order (keys set in a process tick move the bot in the same tick, keys set from the post-tick event one tick
+later, a release leaves no input behind) and the bridge's sprint rules (a wall ends the sprint, food 6 or less and a missing forward
+input never start one). Each trial prints a `BOTPROBE|<probe>|<trial>|...` line into the log; a failing assertion names the
+measured and the expected value. When a Minecraft or Baritone upgrade moves one of these numbers, this suite says which.
 
-* **Tick driver and input bridge.** Write Baritone's forced inputs into `ActionPack` *before* `super.tick()` (`AIPlayerEntity.tick()`
-  currently runs `super.tick()`, then `actionPack.onUpdate()`, so inputs are one tick late). Dispatch `TickEvent` (the GameTest
-  already does), `PlayerUpdateEvent` (PRE before the player's own tick so `LookBehavior` sets the real rotation, POST after) and
-  `onWorldEvent` to `baritone.getGameEventHandler()`.
+## Still open in this layer
+
 * **Jump/move rotation events** (`RotationMoveEvent` from `Entity.moveRelative` / `LivingEntity.jumpFromGround`) are only needed
-  with `freeLook`; `BaritoneHost` turns `freeLook` off so Baritone sets the real yaw.
-* **Policy per bot.** Baritone reads `Baritone.settings()` live (a global, see `BaritoneAPI.getSettings()`); per-bot rules
-  (strict-survival, protected blocks) belong in a `CalculationContext` subclass, not in mutated global settings.
-* **Cache lifetime.** `WorldProvider` keeps one `WorldData` per dimension under `<game dir>/baritone/cache` (its region packer and saver are two daemon threads per dimension); nothing closes it when the last bot goes away. With `chunkCaching` off it only holds waypoints and empty region files.
+  with `freeLook`; `BaritoneSettings` keeps `freeLook` off so Baritone sets the real yaw.
+* **Cache lifetime.** `WorldProvider` keeps one `WorldData` per dimension under `<game dir>/baritone/cache` (its region packer and saver
+  are two daemon threads per dimension); nothing closes it when the last bot goes away. With `chunkCaching` off it only holds
+  waypoints and empty region files.
+* Which navigation calls go through Baritone (the `navigation.engine` switch, follow and move adapters, the water safety-net lease) and
+  the survival rules for driven breaks and placements are the integration stages that build on this layer; see
+  `docs/NAVIGATION_BARITONE_PLAN.md`.
