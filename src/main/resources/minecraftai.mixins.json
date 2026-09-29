@@ -15,7 +15,14 @@
     "AIPlayerControlledBoatPaddleMixin",
     "ServerCommonNetworkHandlerAccessorMixin",
     "SleepManagerHumansOnlyMixin",
-    "PhantomSpawnerHumansOnlyMixin"
+    "PhantomSpawnerHumansOnlyMixin",
+    "ChunkMapVisibleChunksAccessorMixin",
+    "ServerChunkCacheBaritoneMixin",
+    "BaritonePalettedContainerMixin",
+    "BaritonePalettedContainerDataMixin",
+    "BaritoneItemStackMixin",
+    "BaritoneLootTableMixin",
+    "BaritoneLootContextBuilderMixin"
   ],
   "client": [],
   "server": [],
