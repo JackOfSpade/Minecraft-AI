@@ -5,15 +5,22 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mode.FaceAim;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -38,6 +45,20 @@ public final class BuildAction {
     }
 
     public static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face, InteractionHand hand) {
+        return placeBlock(player, against, face, hand, false);
+    }
+
+    /** Reported by the first pass of {@link #placeBlockAt} for a support that has an interaction of its own. */
+    static final String SUPPORT_INTERACTIVE_DEFERRED = "support_interactive_deferred";
+
+    /**
+     * {@code deferInteractive}: a support whose own use interaction (menu, door, lever, cake, bed, ...) exists is
+     * not clicked but reported {@link #SUPPORT_INTERACTIVE_DEFERRED}, so a plain support is tried first. The
+     * shape is read to aim (a chest or slab face is not the cell face), but whether a click happens, and whether the
+     * support counts as interactive, is only decided after a ray from the eye has proven that exact face visible.
+     */
+    private static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face,
+                                           InteractionHand hand, boolean deferInteractive) {
         double reach = player.blockInteractionRange();
         double sampleRange = exactPlacementSampleRange(
                 MinecraftAiConfig.get().perception().radius(), reach);
@@ -50,7 +71,7 @@ public final class BuildAction {
         }
 
         // Prove the exact support face inside both physical interaction reach and configured
-        // perception before asking vanilla about that support or reading the destination.
+        // perception before deciding anything about that support or the destination (its shape was read only to aim).
         BlockHitResult hit = visibleSupportFaceHit(player, against, face, sampleRange);
         if (hit == null) {
             return ActionResult.failed("support_face_not_visible");
@@ -58,8 +79,11 @@ public final class BuildAction {
         if (!player.isWithinBlockInteractionRange(against, 0.0D)) {
             return ActionResult.failed("support_out_of_reach_or_sight");
         }
+        if (deferInteractive && isInteractiveSupport(player.level(), against)) {
+            return ActionResult.failed(SUPPORT_INTERACTIVE_DEFERRED);
+        }
         BlockPos destination = against.relative(face);
-        Use use = useItemOnHit(player, hit, hand);
+        Use use = useItemOnHitCrouching(player, hit, hand);
         net.minecraft.world.InteractionResult result = use.result();
         if (use.placed()) {
             player.swing(hand);
@@ -70,6 +94,24 @@ public final class BuildAction {
         BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed",
                 "pos", LogFields.pos(destination), "reason", reason);
         return ActionResult.failed("interact_block_" + reason);
+    }
+
+    /**
+     * {@link #useItemOnHit} as a crouching player does it: place, do not use. Vanilla runs the clicked block's own
+     * interaction first (menu, door, lever, crafting table, cake, bed) unless the placer is in secondary use, so our own
+     * placement paths ({@link #placeBlock}, {@link #placeBlockAt}) crouch for the click. The flag is restored at once
+     * and the pose only updates on the entity's own tick, so the eye does not move. A movement driver that hands over its
+     * own hit (Baritone) calls {@link #useItemOnHit} directly and asks for sneak itself: a plain click there must still
+     * be able to open a door or a gate, and a sneaking click opens nothing (the Baritone policy).
+     */
+    private static Use useItemOnHitCrouching(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand) {
+        boolean wasShifting = player.isShiftKeyDown();
+        player.setShiftKeyDown(true);
+        try {
+            return useItemOnHit(player, hit, hand);
+        } finally {
+            player.setShiftKeyDown(wasShifting);
+        }
     }
 
     /**
@@ -215,11 +257,17 @@ public final class BuildAction {
         ActionResult lastFailure = ActionResult.failed("no_adjacent_block");
         // Do not pre-filter supports through canObserveBlock's six face-center rays. A support
         // can expose only a clickable edge. placeBlock provides the strict observation proof by
-        // requiring an exact vanilla ray hit before it reads or interacts with the destination.
+        // requiring an exact vanilla ray hit before it clicks (the support shape is read to aim; the decision is ray-proven).
+        // Supports with an interaction of their own (chest, door, lever, ...) are only used after every
+        // plain support has been tried: placeBlock reports them deferred once their face is proven visible.
+        List<Direction> deferredFaces = new ArrayList<>();
         BlockPos below = pos.below();
-        ActionResult belowResult = placeBlock(player, below, Direction.UP, InteractionHand.MAIN_HAND);
+        ActionResult belowResult = placeBlock(player, below, Direction.UP, InteractionHand.MAIN_HAND, true);
         if (belowResult.isSuccess()) {
             return belowResult;
+        }
+        if (SUPPORT_INTERACTIVE_DEFERRED.equals(belowResult.reason())) {
+            deferredFaces.add(Direction.UP);
         }
         lastFailure = preferPlacementFailure(lastFailure, belowResult);
 
@@ -228,7 +276,18 @@ public final class BuildAction {
             if (against.equals(below)) {
                 continue;
             }
-            ActionResult result = placeBlock(player, against, direction, InteractionHand.MAIN_HAND);
+            ActionResult result = placeBlock(player, against, direction, InteractionHand.MAIN_HAND, true);
+            if (result.isSuccess()) {
+                return result;
+            }
+            if (SUPPORT_INTERACTIVE_DEFERRED.equals(result.reason())) {
+                deferredFaces.add(direction);
+            }
+            lastFailure = preferPlacementFailure(lastFailure, result);
+        }
+        for (Direction direction : deferredFaces) {
+            ActionResult result = placeBlock(player, pos.relative(direction.getOpposite()), direction,
+                    InteractionHand.MAIN_HAND, false);
             if (result.isSuccess()) {
                 return result;
             }
@@ -352,16 +411,13 @@ public final class BuildAction {
                                                    boolean rotate) {
         double sampleRangeSquared = sampleRange * sampleRange;
         Vec3 eye = player.getEyePosition();
-        Vec3 center = Vec3.atCenterOf(against).add(
-                face.getStepX() * 0.5D,
-                face.getStepY() * 0.5D,
-                face.getStepZ() * 0.5D);
+        // Aim at the support's own shape (a chest, slab, farmland, bed or lever face is not the cell
+        // face): the click ray is the OUTLINE ray vanilla uses, so the sample points lie on the face plane
+        // of the outline shape's bounds and the inset grid is scaled to that face.
+        FaceAim.Target aim = FaceAim.aim(player.level(), against, player.level().getBlockState(against),
+                ClipContext.Block.OUTLINE, CollisionContext.of(player));
         for (double[] offset : FACE_SAMPLE_OFFSETS) {
-            Vec3 target = switch (face.getAxis()) {
-                case X -> center.add(0.0D, offset[0], offset[1]);
-                case Y -> center.add(offset[0], 0.0D, offset[1]);
-                case Z -> center.add(offset[0], offset[1], 0.0D);
-            };
+            Vec3 target = FaceAim.facePoint(aim.box(), face, 0.0D, offset[0], offset[1]);
             if (eye.distanceToSqr(target) > sampleRangeSquared) {
                 continue;
             }
@@ -437,5 +493,25 @@ public final class BuildAction {
         BotEdits.notePlaced(player, pos);
         BotLog.action(player, "place_fallback", "pos", LogFields.pos(pos), "item", item);
         return ActionResult.SUCCESS;
+    }
+
+    /**
+     * Whether right-clicking {@code pos} with a block in hand would run the block's own interaction (open a
+     * menu, toggle a door / lever / button, eat a cake, use a bed, ...) unless the placer crouches.
+     */
+    static boolean isInteractiveSupport(Level level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        return state.getMenuProvider(level, pos) != null || isInteractiveKind(state);
+    }
+
+    static boolean isInteractiveKind(BlockState state) {
+        return state.is(BlockTags.DOORS) || state.is(BlockTags.TRAPDOORS) || state.is(BlockTags.FENCE_GATES)
+                || state.is(BlockTags.BUTTONS) || state.is(BlockTags.BEDS) || state.is(BlockTags.CANDLE_CAKES)
+                || state.is(BlockTags.ANVIL) || state.is(BlockTags.SHULKER_BOXES) || state.is(BlockTags.ALL_SIGNS)
+                || state.is(Blocks.CAKE) || state.is(Blocks.LEVER) || state.is(Blocks.NOTE_BLOCK)
+                || state.is(Blocks.REPEATER) || state.is(Blocks.COMPARATOR)
+                || state.is(Blocks.DAYLIGHT_DETECTOR) || state.is(Blocks.JUKEBOX)
+                || state.is(Blocks.CRAFTING_TABLE) || state.is(Blocks.ENCHANTING_TABLE)
+                || state.is(Blocks.LECTERN) || state.is(Blocks.RESPAWN_ANCHOR);
     }
 }

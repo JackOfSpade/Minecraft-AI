@@ -578,7 +578,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (feet.getY() < surfaceFloorY(bot)
                 || !ObservableWorldQuery.canObserveCellWithin(bot, feet, PREY_SIGHT_RANGE)
                 || !ObservableWorldQuery.canObserveCellWithin(bot, feet.above(), PREY_SIGHT_RANGE)
-                || !ObservableWorldQuery.canObserveBlockWithin(bot, feet.below(), PREY_SIGHT_RANGE)) {
+                || !ObservableWorldQuery.canObserveColliderWithin(bot, feet.below(), PREY_SIGHT_RANGE)) {
             return false;
         }
         Standability.clearCache();
@@ -673,7 +673,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (!candidate.equals(current)
                 && (!ObservableWorldQuery.canObserveCellWithin(bot, candidate, PREY_SIGHT_RANGE)
                 || !ObservableWorldQuery.canObserveCellWithin(bot, candidate.above(), PREY_SIGHT_RANGE)
-                || !ObservableWorldQuery.canObserveBlockWithin(bot, candidate.below(), PREY_SIGHT_RANGE))) {
+                || !ObservableWorldQuery.canObserveColliderWithin(bot, candidate.below(), PREY_SIGHT_RANGE))) {
             return false;
         }
         Standability.clearCache();
@@ -1418,7 +1418,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         return ObservableWorldQuery.canObserveCell(bot, stand)
                 && ObservableWorldQuery.canObserveCell(bot, stand.above())
-                && ObservableWorldQuery.canObserveBlock(bot, stand.below());
+                && ObservableWorldQuery.canObserveCollider(bot, stand.below());
     }
 
     private boolean safePickupCellRoute(AIPlayerEntity bot, BlockPos destination) {
@@ -1511,7 +1511,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             if (candidate.equals(bot.blockPosition())
                     || !ObservableWorldQuery.canObserveCell(bot, candidate)
                     || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())
+                    || !ObservableWorldQuery.canObserveCollider(bot, candidate.below())
                     || !Standability.isStandable(world, candidate)
                     || !safePickupCellRoute(bot, candidate)) {
                 continue;

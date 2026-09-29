@@ -1004,7 +1004,7 @@ public final class CombatTask extends AbstractTask {
     private static boolean canStandAt(AIPlayerEntity bot, BlockPos feet) {
         return ObservableWorldQuery.canObserveCell(bot, feet)
                 && ObservableWorldQuery.canObserveCell(bot, feet.above())
-                && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, feet.below());
+                && ObservableWorldQuery.canObserveColliderWithInsetFaces(bot, feet.below());
     }
 
     private static boolean isObservableSolid(AIPlayerEntity bot, BlockPos pos) {

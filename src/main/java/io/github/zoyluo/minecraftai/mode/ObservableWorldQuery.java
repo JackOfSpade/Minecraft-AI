@@ -10,10 +10,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 /** Strict-survival perception filter: nearby, exposed, and actually on the Bot's line of sight. */
 public final class ObservableWorldQuery {
-    private static final double FACE_ENDPOINT_DEPTH = 0.499D;
     /** Shared inset (in blocks) used to sample points around a face center. Also used by BuildAction. */
     public static final double FACE_SAMPLE_INSET = 0.375D;
     private static final double[][] FACE_SAMPLE_OFFSETS = {
@@ -31,6 +31,14 @@ public final class ObservableWorldQuery {
     private ObservableWorldQuery() {
     }
 
+    /**
+     * Whether the bot's eye can see a face of the block at {@code pos}: a block in plain view, as a player
+     * sees it. The ray aims at the block's own shape ({@link FaceAim}): its collision shape, or for a block that
+     * has none (torch, rail, cobweb, plant, crop, banner, snow layer) its selection outline with an OUTLINE ray. This
+     * is a <em>visibility</em> proof, not a solidity proof: a support or standability decision must use
+     * {@link #canObserveCollider}, or read the state and check the collision shape itself, so that
+     * "I can see a torch there" never turns into "I can stand on it".
+     */
     public static boolean canObserveBlock(AIPlayerEntity bot, BlockPos pos) {
         return canObserveBlockWithin(bot, pos, 0);
     }
@@ -43,21 +51,38 @@ public final class ObservableWorldQuery {
      * below the configured perception radius. Ordinary block scans keep the base radius.
      */
     public static boolean canObserveBlockWithin(AIPlayerEntity bot, BlockPos pos, int range) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_block_query").allowed()) {
+        return observeShapeFaces(bot, pos, range, true, "observable_block_query");
+    }
+
+    /**
+     * {@link #canObserveBlock} for a proof that the block is a real collider: the same shape-aware six-ray
+     * test, but a block without a collision shape (torch, rail, cobweb, plant) is never accepted, however
+     * plainly it is in view. Support, ground and standability proofs use this one.
+     */
+    public static boolean canObserveCollider(AIPlayerEntity bot, BlockPos pos) {
+        return canObserveColliderWithin(bot, pos, 0);
+    }
+
+    /** {@link #canObserveCollider} at prey-grounding range ({@link #canObserveBlockWithin}). */
+    public static boolean canObserveColliderWithin(AIPlayerEntity bot, BlockPos pos, int range) {
+        return observeShapeFaces(bot, pos, range, false, "observable_block_query");
+    }
+
+    private static boolean observeShapeFaces(AIPlayerEntity bot, BlockPos pos, int range,
+                                             boolean outlineFallback, String reason) {
+        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, reason).allowed()) {
             return true;
         }
+        // Aim at the exposed face of the block's real shape, not the block center or the cell face. A
+        // center ray to distant flat ground intersects a nearer ground block first and incorrectly
+        // reports the target as hidden, and a chest, bottom slab, farmland or bed does not reach the
+        // cell face at all (see FaceAim). Keep the endpoint just inside the shape: stopping just
+        // outside lets the ray end before entering it and produces MISS for an otherwise visible block.
+        FaceAim.Target aim = FaceAim.aim(bot.level(), pos, bot.level().getBlockState(pos),
+                ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
         for (Direction direction : Direction.values()) {
-            // Aim at the exposed face, not the block center. A center ray to distant flat ground
-            // intersects a nearer ground block first and incorrectly reports the target as hidden.
-            // Keep the endpoint just inside the target block. Stopping just outside the face
-            // lets the ray end before entering the collision shape and produces MISS for an
-            // otherwise visible floor block.
-            var face = pos.getCenter().add(
-                    direction.getStepX() * 0.499D,
-                    direction.getStepY() * 0.499D,
-                    direction.getStepZ() * 0.499D);
-            if (canObserveFaceAfterPolicy(bot, pos, direction, face, range)) {
+            var face = FaceAim.facePoint(aim.box(), direction, FaceAim.OBSERVE_DEPTH, 0.0D, 0.0D);
+            if (canObserveFaceAfterPolicy(bot, pos, direction, face, range, aim.clipShape())) {
                 return true;
             }
         }
@@ -68,9 +93,19 @@ public final class ObservableWorldQuery {
      * Explicit short-range observation for a block whose exposed area may not include any face
      * center. This is intentionally separate from {@link #canObserveBlock(AIPlayerEntity,
      * BlockPos)} so ordinary scans keep their six-ray cost. Callers opt into a deterministic 3x3
-     * inset grid on each face and still need an exact fluid-aware world ray hit.
+     * inset grid on each face and still need an exact fluid-aware world ray hit. Same shape rule as
+     * {@link #canObserveBlock}; {@link #canObserveColliderWithInsetFaces} is the collider-only form.
      */
     public static boolean canObserveBlockWithInsetFaces(AIPlayerEntity bot, BlockPos pos) {
+        return observeShapeInsetFaces(bot, pos, true);
+    }
+
+    /** {@link #canObserveBlockWithInsetFaces} for support and standability proofs: a collision shape is required. */
+    public static boolean canObserveColliderWithInsetFaces(AIPlayerEntity bot, BlockPos pos) {
+        return observeShapeInsetFaces(bot, pos, false);
+    }
+
+    private static boolean observeShapeInsetFaces(AIPlayerEntity bot, BlockPos pos, boolean outlineFallback) {
         if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                 "observable_block_inset_face_query").allowed()) {
             return true;
@@ -80,15 +115,18 @@ public final class ObservableWorldQuery {
                 bot.blockInteractionRange());
         double observationRangeSquared = observationRange * observationRange;
         Vec3 eye = bot.getEyePosition();
+        FaceAim.Target aim = FaceAim.aim(bot.level(), pos, bot.level().getBlockState(pos),
+                ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
         for (Direction direction : Direction.values()) {
             for (double[] offset : FACE_SAMPLE_OFFSETS) {
-                Vec3 endpoint = insetFaceEndpoint(pos, direction, offset[0], offset[1]);
+                Vec3 endpoint = FaceAim.facePoint(
+                        aim.box(), direction, FaceAim.OBSERVE_DEPTH, offset[0], offset[1]);
                 if (eye.distanceToSqr(endpoint) > observationRangeSquared) {
                     continue;
                 }
                 BlockHitResult hit = bot.level().clip(new ClipContext(
                         eye, endpoint,
-                        ClipContext.Block.COLLIDER,
+                        aim.clipShape(),
                         ClipContext.Fluid.ANY,
                         bot));
                 if (hit.getType() == HitResult.Type.BLOCK
@@ -101,33 +139,19 @@ public final class ObservableWorldQuery {
         return false;
     }
 
-    static Vec3 insetFaceEndpoint(BlockPos pos,
-                                   Direction face,
-                                   double firstTangent,
-                                   double secondTangent) {
-        Vec3 center = pos.getCenter().add(
-                face.getStepX() * FACE_ENDPOINT_DEPTH,
-                face.getStepY() * FACE_ENDPOINT_DEPTH,
-                face.getStepZ() * FACE_ENDPOINT_DEPTH);
-        return switch (face.getAxis()) {
-            case X -> center.add(0.0D, firstTangent, secondTangent);
-            case Y -> center.add(firstTangent, 0.0D, secondTangent);
-            case Z -> center.add(firstTangent, secondTangent, 0.0D);
-        };
-    }
-
     private static boolean canObserveFaceAfterPolicy(AIPlayerEntity bot,
                                                       BlockPos pos,
                                                       Direction face,
                                                       net.minecraft.world.phys.Vec3 endpoint,
-                                                      int range) {
+                                                      int range,
+                                                      ClipContext.Block clipShape) {
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
         if (bot.getEyePosition().distanceToSqr(endpoint) > (double) radius * radius) {
             return false;
         }
         BlockHitResult hit = bot.level().clip(new ClipContext(
                 bot.getEyePosition(), endpoint,
-                ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
+                clipShape, ClipContext.Fluid.ANY, bot));
         return hit.getType() == HitResult.Type.BLOCK
                 && hit.getBlockPos().equals(pos)
                 && hit.getDirection() == face;
@@ -172,13 +196,16 @@ public final class ObservableWorldQuery {
 
     /**
      * Farm-cell observation: whether the bot's own eye can see the real outline of a crop or farmland
-     * cell. The generic block query aims collider rays at fixed full-cube face points, which misses
-     * crops (they have an outline but no collider) and the top of farmland (15/16 high, so the fixed
-     * point at y+0.999 lies above the shape). This aims OUTLINE rays at points inside the state's real
-     * shape (its top centre and four inset top points) and needs the exact ray to strike this cell, so
-     * a crop hidden behind a wall or a taller crop stays hidden. An empty (non-shaped) cell falls back
-     * to {@link #canObserveCell}'s policy. Same perception radius and capability gate as the other
-     * observation predicates; it sees nothing a player standing at the bot's eye could not see.
+     * cell, or the empty cell above a field. {@link #canObserveBlock} is shape-aware too (a crop, being
+     * outline-only, is visible to it), but it proves that one of the six <em>face centres</em> of a
+     * <em>block</em> is struck. A farm caller asks a different question over cells that may be crop,
+     * farmland or plain air (the cell a seed goes into): can the eye see the cell's top, where a hoe or
+     * seed click lands, and does an empty cell count as seen (the {@link #canObserveCell} policy)? This
+     * aims OUTLINE rays at points inside the state's real shape (its top centre and four inset top
+     * points, so a crop packed between neighbours is still seen from above) and needs the exact ray to
+     * strike this cell, so a crop hidden behind a wall or a taller crop stays hidden. Same perception
+     * radius and capability gate as the other observation predicates; it sees nothing a player standing
+     * at the bot's eye could not see. It is the one farm-specific query: farm code needs nothing else.
      */
     public static boolean canObserveFarmCell(AIPlayerEntity bot, BlockPos pos) {
         if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,

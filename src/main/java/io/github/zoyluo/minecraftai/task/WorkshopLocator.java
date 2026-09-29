@@ -2,10 +2,12 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.craft.SmeltChain;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mining.SectionPrefilter;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.Comparator;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -13,6 +15,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 
 /**
  * Visible, local workstation lookup shared by the deterministic task executors.
@@ -85,16 +88,27 @@ public final class WorkshopLocator {
         BlockPos origin = bot.blockPosition();
         Set<BlockPos> rejected = excluded == null ? Set.of() : Set.copyOf(excluded);
         int itemCount = Math.max(1, requestedItems);
-        return BlockPos.betweenClosedStream(origin.offset(-FURNACE_RADIUS, -3, -FURNACE_RADIUS),
-                        origin.offset(FURNACE_RADIUS, 4, FURNACE_RADIUS))
-                .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> !rejected.contains(pos))
-                .filter(pos -> isCompatibleFurnace(bot, pos, input, output))
-                .map(BlockPos::immutable)
-                .min(Comparator
-                        .comparingLong((BlockPos pos) -> estimatedCompletionTicks(
-                                pos, origin, bot.level().getBlockState(pos), input, itemCount))
-                        .thenComparingDouble(pos -> pos.distSqr(origin)));
+        // Furnace-family state first (palette-skipped sections, then the state test), the ray last: the set
+        // returned is the observable furnaces, exactly as with a ray-first order, at a fraction of the rays.
+        // The first best candidate in scan order wins a full tie, as it did with Stream.min.
+        BlockPos best = null;
+        long bestTicks = Long.MAX_VALUE;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos cell : observableMatches(bot, origin.offset(-FURNACE_RADIUS, -3, -FURNACE_RADIUS),
+                origin.offset(FURNACE_RADIUS, 4, FURNACE_RADIUS), WorkshopLocator::isFurnaceFamily)) {
+            if (rejected.contains(cell) || !isCompatibleFurnace(bot, cell, input, output)) {
+                continue;
+            }
+            long ticks = estimatedCompletionTicks(
+                    cell, origin, bot.level().getBlockState(cell), input, itemCount);
+            double distance = cell.distSqr(origin);
+            if (best == null || ticks < bestTicks || (ticks == bestTicks && distance < bestDistance)) {
+                best = cell;
+                bestTicks = ticks;
+                bestDistance = distance;
+            }
+        }
+        return Optional.ofNullable(best);
     }
 
     public static boolean hasNearbyCompatibleFurnace(AIPlayerEntity bot, Item input, Item output) {
@@ -146,14 +160,47 @@ public final class WorkshopLocator {
         return NORMAL_COOK_TICKS;
     }
 
+    private static boolean isFurnaceFamily(BlockState state) {
+        return state.is(Blocks.FURNACE) || state.is(Blocks.SMOKER) || state.is(Blocks.BLAST_FURNACE);
+    }
+
     private static Optional<BlockPos> nearestBlock(
-            AIPlayerEntity bot, int horizontalRadius, java.util.function.Predicate<BlockState> matches) {
+            AIPlayerEntity bot, int horizontalRadius, Predicate<BlockState> matches) {
         BlockPos origin = bot.blockPosition();
-        return BlockPos.betweenClosedStream(origin.offset(-horizontalRadius, -3, -horizontalRadius),
-                        origin.offset(horizontalRadius, 4, horizontalRadius))
-                .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> matches.test(bot.level().getBlockState(pos)))
-                .map(BlockPos::immutable)
-                .min(Comparator.comparingDouble(pos -> pos.distSqr(origin)));
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos cell : observableMatches(bot, origin.offset(-horizontalRadius, -3, -horizontalRadius),
+                origin.offset(horizontalRadius, 4, horizontalRadius), matches)) {
+            double distance = cell.distSqr(origin);
+            if (best == null || distance < bestDistance) {
+                best = cell;
+                bestDistance = distance;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /**
+     * The cells of the box that match {@code matches} AND that the bot can observe, in {@link
+     * BlockPos#betweenClosed} order. Cheapest conjunct first: chunk sections whose palette cannot hold a
+     * match are skipped whole, then the cell state is tested, and only a matching cell pays the ray casts of
+     * {@link ObservableWorldQuery#canObserveBlock}. The returned set is identical to ray-check-then-match;
+     * nothing reacts to a match that is not observable.
+     */
+    private static java.util.List<BlockPos> observableMatches(
+            AIPlayerEntity bot, BlockPos min, BlockPos max, Predicate<BlockState> matches) {
+        SectionPrefilter sections = new SectionPrefilter(bot.level(), matches);
+        java.util.List<BlockPos> found = new java.util.ArrayList<>();
+        for (BlockPos cell : BlockPos.betweenClosed(min, max)) {
+            LevelChunkSection section = sections.candidateSection(cell.getX(), cell.getY(), cell.getZ());
+            if (section == null
+                    || !matches.test(SectionPrefilter.stateIn(section, cell.getX(), cell.getY(), cell.getZ()))) {
+                continue;
+            }
+            if (ObservableWorldQuery.canObserveBlock(bot, cell)) {
+                found.add(cell.immutable());
+            }
+        }
+        return found;
     }
 }

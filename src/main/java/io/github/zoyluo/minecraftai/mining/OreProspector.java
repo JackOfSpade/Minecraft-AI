@@ -228,13 +228,19 @@ public final class OreProspector {
         }
 
         /**
-         * Strict-survival search: visibility is decided before any candidate block state is read. A position
-         * whose centre is farther from the eye than the perception radius plus the face slack can never have a
-         * visible face, so it is skipped without a ray or a state read (about half of the search cube's volume).
+         * Strict-survival search. The cheap conjuncts come first and the ray last: a position whose centre is
+         * farther from the eye than the perception radius plus the face slack can never have a visible face
+         * (about half of the search cube's volume), a chunk section whose palette holds no matching state is
+         * skipped whole ({@link SectionPrefilter}), a cell whose state does not match is dropped, and only a
+         * matching cell is ray-checked with {@link ObservableWorldQuery#canObserveBlock}. A cell is still
+         * accepted only when it matches AND is observable, so the result equals the ray-first order (a
+         * hidden match is never reported, nor does any branch react to it); the search merely stops paying
+         * one ray cast for every non-matching cell.
          */
         private void stepObservable(long deadline) {
             Vec3 eye = bot.getEyePosition();
             BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+            SectionPrefilter sections = new SectionPrefilter(world, match);
             int counter = 0;
             while (cursorX <= maxX) {
                 double dx = cursorX + 0.5D - eye.x;
@@ -248,13 +254,17 @@ public final class OreProspector {
                         if (dxy2 + dz * dz > radiusWithSlackSq) {
                             continue;
                         }
-                        pos.set(cursorX, cursorY, z);
-                        if ((posFilter == null || posFilter.test(pos))
-                                && (farmCells
-                                ? ObservableWorldQuery.canObserveFarmCell(bot, pos)
-                                : ObservableWorldQuery.canObserveBlock(bot, pos))) {
-                            BlockState state = world.getBlockState(pos);
-                            if (match.test(state)) {
+                        LevelChunkSection section = sections.candidateSection(cursorX, cursorY, z);
+                        if (section == null) {
+                            cursorZ = Math.max(cursorZ, SectionPrefilter.nextSectionStartZ(z));
+                            continue;
+                        }
+                        if (match.test(SectionPrefilter.stateIn(section, cursorX, cursorY, z))) {
+                            pos.set(cursorX, cursorY, z);
+                            if ((posFilter == null || posFilter.test(pos))
+                                    && (farmCells
+                                    ? ObservableWorldQuery.canObserveFarmCell(bot, pos)
+                                    : ObservableWorldQuery.canObserveBlock(bot, pos))) {
                                 double distance = origin.distSqr(pos);
                                 if (distance < bestDist) {
                                     bestDist = distance;

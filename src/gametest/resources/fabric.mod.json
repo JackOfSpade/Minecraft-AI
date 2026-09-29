@@ -20,6 +20,7 @@
       "io.github.zoyluo.minecraftai.action.ActionPackPhysicalSnapGameTests",
       "io.github.zoyluo.minecraftai.action.ActionPackSuppressedSnapGameTests",
       "io.github.zoyluo.minecraftai.action.BuildActionEdgeVisibilityGameTests",
+      "io.github.zoyluo.minecraftai.action.ObservationShapeGameTests",
       "io.github.zoyluo.minecraftai.action.OffhandExecutionGameTests",
       "io.github.zoyluo.minecraftai.task.AcquireWaterTaskGameTests",
       "io.github.zoyluo.minecraftai.task.CreateObsidianMissionRecoveryGameTests",

@@ -157,6 +157,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
     private OreProspector.Scan prospectScan;  // in-flight budgeted prospect scan (null when none)
+    private int prospectScansFinished;    // test hook: scans that ran to completion (a cheap one can begin and finish in one tick)
+    private long lastProspectScanMaxStepNanos; // test hook: longest single step of the last finished prospect scan
     private OreProspector.Scan exploreScan;   // in-flight budgeted en-route explore scan (null when none); only meaningful in Phase.EXPLORE
     private HarvestCore.NearestScan surveyScan; // in-flight budgeted wide (radius > SEARCH_RADIUS) survey scan; only meaningful in Phase.SURVEY
     // Elevation-difference tolerance: previous prospect target + a blacklist of unreachable
@@ -506,6 +508,8 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         OreProspector.Scan scan = prospectScan;
         prospectScan = null;
+        prospectScansFinished++;
+        lastProspectScanMaxStepNanos = scan.maxStepNanos();
         var world = bot.level();
         BlockPos found = scan.result();
         if (found == null) {
@@ -1060,6 +1064,16 @@ public final class GatherQuotaTask extends AbstractTask {
     /** Test hook: true while a budgeted prospect scan is in flight (ProspectScanBudgetGameTests). */
     boolean prospectScanActive() {
         return prospectScan != null;
+    }
+
+    /** Test hook: number of prospect scans that ran to completion (ProspectScanBudgetGameTests). */
+    int prospectScansFinished() {
+        return prospectScansFinished;
+    }
+
+    /** Test hook: longest single step of the last finished prospect scan, in nanoseconds. */
+    long lastProspectScanMaxStepNanos() {
+        return lastProspectScanMaxStepNanos;
     }
 
     /** A budgeted scan is only meaningful while the bot stays where it began; otherwise it is dropped and redone. */

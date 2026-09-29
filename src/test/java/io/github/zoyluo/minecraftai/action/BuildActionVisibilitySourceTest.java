@@ -49,7 +49,8 @@ class BuildActionVisibilitySourceTest {
                 "six face-center rays must not prevent the exact edge sampler from running");
         assertFalse(body.contains("getBlockState("),
                 "placeBlockAt must not inspect an unproven adjacent support");
-        assertTrue(body.contains("placeBlock(player, against, direction, InteractionHand.MAIN_HAND)"));
+        assertTrue(body.contains("placeBlock(player, against, direction, InteractionHand.MAIN_HAND, true)"),
+                "every support still goes through the exact placeBlock proof (plain supports first)");
 
         int strict = body.indexOf("OperatingProfile.STRICT_SURVIVAL");
         int failedReturn = body.indexOf("return lastFailure;", strict);

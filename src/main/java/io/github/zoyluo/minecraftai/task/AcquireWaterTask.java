@@ -1783,7 +1783,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private static boolean observableStandCell(AIPlayerEntity bot, BlockPos candidate) {
         return ObservableWorldQuery.canObserveCell(bot, candidate)
                 && ObservableWorldQuery.canObserveCell(bot, candidate.above())
-                && ObservableWorldQuery.canObserveBlock(bot, candidate.below());
+                && ObservableWorldQuery.canObserveCollider(bot, candidate.below());
     }
 
     private void rejectAndResumeSearch(AIPlayerEntity bot, String reason) {

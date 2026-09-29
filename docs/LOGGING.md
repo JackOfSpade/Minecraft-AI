@@ -231,7 +231,12 @@ line is either counted on the next line that is written or summarized.
 Gather's treeless-area prospect scan (`gather_prospect_empty` / `gather_prospected`) is a resumable
 `mining/OreProspector.Scan` advanced at most ~2 ms per server tick instead of one 200-600 ms tick; those
 two events gained `scan_steps`, `scan_max_step_us` (and `scan_total_ms` when empty). The visibility rules
-are unchanged: every candidate is still ray-checked before its block state is read.
+are unchanged (a result is still a cell that matches AND passes `ObservableWorldQuery.canObserveBlock`, and
+nothing branches on a match that is not observable), but the order of the conjuncts is now cheapest first: chunk
+sections whose palette cannot hold a match are skipped whole (`mining/SectionPrefilter`, `LevelChunkSection.maybeHas`),
+then the cell state is tested, and only a matching cell pays the observation rays. Before, every cell of the search
+cube paid its rays before its state was read (thousands of ray casts for nothing); the returned set is identical.
+`task/WorkshopLocator` (`nearestBlock`, `nearestCompatibleFurnace`) follows the same order.
 
 Gather's wide survey (search radius 32/48, `HarvestCore.NearestScan`) and the en-route explore scan are
 resumable in the same way (2 ms per tick; at most one walk-reachability A*, itself capped at 30 ms, per

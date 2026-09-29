@@ -253,7 +253,7 @@ public final class SiteFinder {
             return false;
         }
         BlockPos feet = new BlockPos(x, y, z);
-        return ObservableWorldQuery.canObserveBlock(bot, feet.below())
+        return ObservableWorldQuery.canObserveCollider(bot, feet.below())
                 && ObservableWorldQuery.canObserveCell(bot, feet)
                 && ObservableWorldQuery.canObserveCell(bot, feet.above())
                 && Standability.isStandable(world, feet);
@@ -266,7 +266,7 @@ public final class SiteFinder {
         for (int dx = 0; dx < footprintX; dx++) {
             for (int dz = 0; dz < footprintZ; dz++) {
                 BlockPos ground = anchor.offset(dx, -1, dz);
-                if (!ObservableWorldQuery.canObserveBlock(bot, ground)) {
+                if (!ObservableWorldQuery.canObserveCollider(bot, ground)) {
                     return false;
                 }
             }

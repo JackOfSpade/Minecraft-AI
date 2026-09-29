@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,17 +21,23 @@ class ObservableWorldQueryInsetFaceTest {
     @Test
     void insetEndpointUsesDeterministicTangentsInsideTheRequestedFace() {
         BlockPos pos = new BlockPos(10, 20, 30);
+        AABB cell = new AABB(pos);
+        double depth = FaceAim.OBSERVE_DEPTH;
 
-        assertEquals(new Vec3(10.999D, 20.125D, 30.875D),
-                ObservableWorldQuery.insetFaceEndpoint(
-                        pos, Direction.EAST, -0.375D, 0.375D));
-        assertEquals(new Vec3(10.125D, 20.001D, 30.875D),
-                ObservableWorldQuery.insetFaceEndpoint(
-                        pos, Direction.DOWN, -0.375D, 0.375D));
-        assertEquals(new Vec3(10.125D, 20.875D, 30.999D),
-                ObservableWorldQuery.insetFaceEndpoint(
-                        pos, Direction.SOUTH, -0.375D, 0.375D));
+        assertNear(new Vec3(10.999D, 20.125D, 30.875D),
+                FaceAim.facePoint(cell, Direction.EAST, depth, -0.375D, 0.375D));
+        assertNear(new Vec3(10.125D, 20.001D, 30.875D),
+                FaceAim.facePoint(cell, Direction.DOWN, depth, -0.375D, 0.375D));
+        assertNear(new Vec3(10.125D, 20.875D, 30.999D),
+                FaceAim.facePoint(cell, Direction.SOUTH, depth, -0.375D, 0.375D));
     }
+
+    private static void assertNear(Vec3 expected, Vec3 actual) {
+        assertEquals(expected.x, actual.x, 1.0E-9D, "x");
+        assertEquals(expected.y, actual.y, 1.0E-9D, "y");
+        assertEquals(expected.z, actual.z, 1.0E-9D, "z");
+    }
+
 
     @Test
     void insetObservationIsExplicitShortRangeAndFluidAware() throws IOException {
@@ -39,6 +46,8 @@ class ObservableWorldQueryInsetFaceTest {
         int inset = source.indexOf("public static boolean canObserveBlockWithInsetFaces(");
         int facePolicy = source.indexOf("private static boolean canObserveFaceAfterPolicy", inset);
         assertTrue(ordinary >= 0 && inset > ordinary && facePolicy > inset);
+        assertFalse(source.contains("insetFaceEndpoint") || source.contains("FACE_ENDPOINT_DEPTH"),
+                "the cell-face endpoint helper is gone; FaceAim.facePoint is the one point builder");
 
         String ordinaryBody = source.substring(ordinary, inset);
         assertFalse(ordinaryBody.contains("FACE_SAMPLE_OFFSETS"),

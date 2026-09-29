@@ -25,7 +25,8 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * The strict-survival prospect scan used to be one 180-420 ms server tick (real session, roam steps at range
  * 96). It is now a resumable {@link OreProspector.Scan} advanced a couple of milliseconds per tick. These tests
- * pin that the spread scan finds exactly what the synchronous one does and that no single tick carries the
+ * pin that the spread scan finds exactly what the synchronous one does (also with a budget so small that every
+ * step is cut short) and that no single tick carries the
  * scan, and print the before/after timings.
  */
 public final class ProspectScanBudgetGameTests {
@@ -99,6 +100,38 @@ public final class ProspectScanBudgetGameTests {
         });
     }
 
+    /**
+     * The palette prefilter makes a scan of a small fixture finish in one 2 ms step, so the budgeted tests above no
+     * longer prove that a scan is resumable. This one forces it: a 1 ns budget stops the scan at every clock check (each
+     * 8 candidate cells), so the log's chunk section takes hundreds of steps. The scan must still end with exactly the
+     * synchronous answer, the NEAREST of two matches, even though the farther one is met first by the x-major cursor.
+     */
+    @GameTest(environment = "minecraftai-gametest:prospect_scan_budget_game_tests_tiny_budget_scan_resumes_over_many_steps", maxTicks = 700)
+    public void tinyBudgetScanResumesOverManySteps(GameTestHelper context) {
+        Fixture fixture = fixture(context, "TinyBudgetScanGT");
+        AIPlayerEntity bot = fixture.bot();
+        BlockPos near = fixture.start().west(2);
+        BlockPos far = fixture.start().east(4);
+        bot.level().setBlock(near, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        bot.level().setBlock(far, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+
+        BlockPos syncFound = OreProspector.nearest(bot, 96, state -> state.is(Blocks.OAK_LOG));
+        require(context, near.equals(syncFound), "the synchronous scan must pick the nearer log, got " + syncFound);
+
+        OreProspector.Scan scan = OreProspector.begin(bot, 96, state -> state.is(Blocks.OAK_LOG), null);
+        context.failIfEver(() -> {
+            if (!scan.isDone()) {
+                scan.step(1L);
+                return;
+            }
+            LOG.info("[prospect-budget] tiny budget: steps={} result={}", scan.steps(), scan.result());
+            require(context, scan.steps() >= 8, "a 1 ns budget must split the scan into many steps, got " + scan.steps());
+            require(context, near.equals(scan.result()),
+                    "the resumed scan must end with the synchronous answer " + near + ", got " + scan.result());
+            finish(context, fixture);
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:prospect_scan_budget_game_tests_harvest_survey_scan_is_spread_and_matches_synchronous", maxTicks = 700)
     public void harvestSurveyScanIsSpreadAndMatchesSynchronous(GameTestHelper context) {
         Fixture fixture = fixture(context, "SurveyScanGT");
@@ -162,12 +195,14 @@ public final class ProspectScanBudgetGameTests {
         AtomicLong maxAnyTickNanos = new AtomicLong();
         AtomicLong beginTickNanos = new AtomicLong();
         AtomicLong finishTickNanos = new AtomicLong();
+        AtomicLong oneTickScanNanos = new AtomicLong(-1L);
         AtomicInteger scanFinishedAt = new AtomicInteger(-1);
         AtomicInteger tick = new AtomicInteger();
 
         context.failIfEver(() -> {
             int t = tick.incrementAndGet();
             boolean prospectBefore = task.prospectScanActive();
+            int finishedBefore = task.prospectScansFinished();
             boolean surveyBefore = task.surveyScanActive();
             long start = System.nanoTime();
             if (task.state() == TaskState.RUNNING) {
@@ -191,6 +226,11 @@ public final class ProspectScanBudgetGameTests {
                 beginTickNanos.set(spent);
             } else if (prospectBefore) {
                 finishTickNanos.set(spent);
+            } else if (task.prospectScansFinished() > finishedBefore) {
+                // The palette prefilter skips every chunk section without a log, so a scan of a treeless area can
+                // begin and finish inside one tick as a single step far below the ceiling (the tick itself also plans the roam path).
+                oneTickScanNanos.set(task.lastProspectScanMaxStepNanos());
+                scanFinishedAt.compareAndSet(-1, t);
             }
             if ((prospectBefore || prospectAfter) && scanFinishedAt.get() < 0 && !prospectAfter) {
                 scanFinishedAt.set(t);
@@ -203,7 +243,9 @@ public final class ProspectScanBudgetGameTests {
                     surveyScanTicks.get(), maxSurveyScanTickNanos.get() / 1_000_000L,
                     scanTicks.get(), maxScanTickNanos.get() / 1_000_000L,
                     beginTickNanos.get() / 1_000_000L, finishTickNanos.get() / 1_000_000L, maxAnyTickNanos.get() / 1_000_000L);
-            require(context, scanTicks.get() >= 1, "the prospect scan never ran across ticks");
+            require(context, scanTicks.get() >= 1 || (oneTickScanNanos.get() >= 0 && oneTickScanNanos.get() <= ceiling),
+                    "the prospect scan neither ran across ticks nor finished as one scan step under the ceiling ("
+                            + oneTickScanNanos.get() / 1_000_000L + " ms step, ceiling " + ceiling / 1_000_000L + ")");
             if (surveyRef > 10_000_000L) {
                 require(context, surveyScanTicks.get() >= 1,
                         "the wide survey scan (" + surveyRef / 1_000_000L + " ms synchronous) never ran across ticks");

@@ -125,8 +125,16 @@ class PrivilegedBoundarySourceTest {
         String prospector = read("mining/OreProspector.java");
         assertTrue(prospector.contains("private void stepObservable"));
         assertTrue(prospector.contains("private void stepRaw"));
-        assertTrue(prospector.indexOf("ObservableWorldQuery.canObserveBlock(bot, pos)")
-                < prospector.indexOf("BlockState state = world.getBlockState(pos)"));
+        // The palette prefilter and the state match run before the ray, but a candidate is only accepted after
+        // the observation proof.
+        int observeStep = prospector.indexOf("private void stepObservable");
+        int observed = prospector.indexOf("ObservableWorldQuery.canObserveBlock(bot, pos)", observeStep);
+        int accepted = prospector.indexOf("best = pos.immutable()", observeStep);
+        assertTrue(observeStep >= 0 && observed > observeStep && accepted > observed,
+                "an observable-scan candidate must be ray-proven before it can become the result");
+        assertTrue(prospector.indexOf("candidateSection(", observeStep) < observed
+                && prospector.indexOf("match.test(", observeStep) < observed,
+                "the cheap palette and state conjuncts run before the ray casts");
 
         String oreScan = read("mining/OreScan.java");
         assertFalse(oreScan.contains("veinFrom(Level"), "raw world-only vein scans must not be public");

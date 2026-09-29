@@ -129,7 +129,7 @@ public final class LightAreaTask extends AbstractTask {
         BlockPos.betweenClosedStream(origin.offset(-radius, -2, -radius), origin.offset(radius, 3, radius))
                 .map(BlockPos::immutable)
                 .filter(pos -> !pos.equals(origin) && !pos.equals(origin.above()))
-                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.below()))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveCollider(bot, pos.below()))
                 .filter(pos -> isDarkFloorCell(world, pos, threshold))
                 .forEach(pos -> {
                     cells.add(pos);
