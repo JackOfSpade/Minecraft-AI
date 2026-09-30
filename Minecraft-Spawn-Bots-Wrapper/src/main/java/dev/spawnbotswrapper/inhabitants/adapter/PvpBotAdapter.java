@@ -5,6 +5,7 @@ import dev.spawnbotswrapper.inhabitants.adapter.SettingsHygiene.SettingsSnapshot
 import dev.spawnbotswrapper.inhabitants.adapter.StatusAssembler.Assembly;
 import dev.spawnbotswrapper.inhabitants.adapter.StatusAssembler.ProbeInput;
 import dev.spawnbotswrapper.inhabitants.adapter.StatusAssembler.Verdict;
+import dev.spawnbotswrapper.inhabitants.combat.TargetControl;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.commands.CommandSourceStack;
@@ -70,6 +71,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
     private volatile Probed probed;
     private volatile Set<String> settingNames;
 
+    private final PvpBotCombatControl targetControl;
     private final ListedNamesCache listedCache = new ListedNamesCache();
     private final SpawnTracker spawns;
     private final PatrolManager patrols;
@@ -104,7 +106,19 @@ public final class PvpBotAdapter implements PvpBotOperations {
         this.backend = backend == null ? SpawnBackend.AUTO : backend;
         this.spawns = new SpawnTracker(log);
         this.patrols = new PatrolManager(log);
+        this.targetControl = new PvpBotCombatControl(this::usableCalls, log, this::isManaged);
         this.status = notProbed();
+    }
+
+    /** The call layer of the current probe, or null while PvP BOT is not usable. */
+    private UpstreamCalls usableCalls() {
+        Probed p = probed;
+        return p == null || p.calls() == null || !p.verdict().usable() ? null : p.calls();
+    }
+
+    @Override
+    public TargetControl targetControl() {
+        return targetControl;
     }
 
     private Status notProbed() {

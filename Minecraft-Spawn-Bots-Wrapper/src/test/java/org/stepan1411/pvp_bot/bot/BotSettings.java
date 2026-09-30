@@ -44,6 +44,12 @@ public class BotSettings {
     private boolean totemPriority = true;
     private boolean preferSword = true;
     private boolean rangedRetreatOnClose = true;
+    private boolean targetPlayers = true;
+    private boolean targetOtherBots = false;
+    private boolean attackInvincible = false;
+    private boolean factionsEnabled = false;
+    private boolean friendlyFireEnabled = false;
+    private double maxTargetDistance = 64.0;
 
     public static BotSettings get() {
         Recorder.guard("BotSettings.get", "");
@@ -102,6 +108,12 @@ public class BotSettings {
     public boolean isTotemPriority() { return totemPriority; }
     public boolean isPreferSword() { return preferSword; }
     public boolean isRangedRetreatOnClose() { return rangedRetreatOnClose; }
+    public boolean isTargetPlayers() { return targetPlayers; }
+    public boolean isTargetOtherBots() { return targetOtherBots; }
+    public boolean isAttackInvincible() { return attackInvincible; }
+    public boolean isFactionsEnabled() { return factionsEnabled; }
+    public boolean isFriendlyFireEnabled() { return friendlyFireEnabled; }
+    public double getMaxTargetDistance() { return maxTargetDistance; }
 
     public void setBotsRelogs(boolean v) { Recorder.FORBIDDEN.add("setBotsRelogs"); }
     public void setBotLeaveOnDeath(boolean v) { Recorder.FORBIDDEN.add("setBotLeaveOnDeath"); }

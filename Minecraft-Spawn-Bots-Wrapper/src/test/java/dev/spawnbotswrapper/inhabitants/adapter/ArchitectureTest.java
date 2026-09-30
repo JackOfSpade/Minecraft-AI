@@ -44,14 +44,26 @@ class ArchitectureTest {
     private static final Set<String> FORBIDDEN_EVERYWHERE = Set.of("stepan1411", "hero.bane");
     private static final Set<String> MOD_ID_LITERALS = Set.of("pvp_bot", "herobot");
     private static final List<String> NEVER_REFERENCED_UPSTREAM_CLASSES =
-            List.of("BotFaction", "BotNameGenerator", "HerobotMovement");
+            List.of("BotNameGenerator", "HerobotMovement");
+    /**
+     * The faction registry binds to world state in its static initialiser, so it is only ever loaded without
+     * initialisation (by the probe) and invoked (initialising it, as PvP BOT's own combat code does) while
+     * PvP BOT's factions setting is on. Exactly one source file may name it: the constants file.
+     */
+    private static final String FACTION_REGISTRY = "BotFaction";
+    private static final String FACTION_REGISTRY_OWNER = "UpstreamNames.java";
     /** Members probed for presence but never invoked; the call layer must not even mention them. */
     private static final List<String> NEVER_CALLED = List.of("removeAllBots", "saveBots", "updateBotData",
             "reloadBots", "switchWorld", "cleanupDeadBots");
     /** Reflection call-layer files: everything that may invoke an upstream member. */
     private static final List<String> CALL_LAYER = List.of("UpstreamCalls.java", "PvpBotAdapter.java",
             "PatrolManager.java", "CapabilityReader.java");
-    private static final Set<String> ALLOWED_SETTER_LITERALS = Set.of("setLoop", "setAttack", "setWalkType");
+    /**
+     * setLoop/setAttack/setWalkType are path setters; setTarget is BotCombat's forced-target setter (a combat
+     * call, not a settings writer: the aggro range hands PvP BOT a target, it never changes a setting).
+     */
+    private static final Set<String> ALLOWED_SETTER_LITERALS =
+            Set.of("setLoop", "setAttack", "setWalkType", "setTarget");
 
     // ================================================================ the real tree
 
@@ -85,6 +97,24 @@ class ArchitectureTest {
             Lexed lexed = Lexed.of(Files.readString(p));
             violations.addAll(referencedNames(p.getFileName().toString(), lexed, NEVER_REFERENCED_UPSTREAM_CLASSES));
         }
+        assertTrue(violations.isEmpty(), String.join("\n  ", violations));
+    }
+
+    @Test
+    void theFactionRegistryIsNamedOnlyByTheConstantsFile() throws IOException {
+        List<String> violations = new ArrayList<>();
+        boolean owned = false;
+        for (Path p : adapterSources()) {
+            String file = p.getFileName().toString();
+            Lexed lexed = Lexed.of(Files.readString(p));
+            List<String> names = referencedNames(file, lexed, List.of(FACTION_REGISTRY));
+            if (file.equals(FACTION_REGISTRY_OWNER)) {
+                owned = !names.isEmpty();
+            } else {
+                violations.addAll(names);
+            }
+        }
+        assertTrue(owned, FACTION_REGISTRY_OWNER + " no longer names the faction registry; update this rule");
         assertTrue(violations.isEmpty(), String.join("\n  ", violations));
     }
 

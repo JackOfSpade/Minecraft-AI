@@ -185,7 +185,7 @@ class PvpBotAdapterCapabilitiesTest {
     void discoveryListsTheInstanceFieldsAndOnlyThose() {
         AdapterFixture f = AdapterFixture.healthy();
         Set<String> names = f.adapter.discoverUpstreamSettingNames();
-        assertEquals(28, names.size(), names.toString());
+        assertEquals(34, names.size(), names.toString());
         assertTrue(names.containsAll(Set.of("autoEquipArmor", "botsRelogs", "botLeaveOnDeath", "checkInterval",
                 "maxMassSpawn", "useSpecialNames", "clearOnRemove", "cobwebEnabled", "totemPriority", "preferSword",
                 "rangedRetreatOnClose")));

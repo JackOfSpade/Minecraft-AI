@@ -1,5 +1,6 @@
 package dev.spawnbotswrapper.inhabitants.adapter;
 
+import dev.spawnbotswrapper.inhabitants.combat.TargetControl;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.server.MinecraftServer;
@@ -133,4 +134,15 @@ public interface PvpBotOperations {
 
     /** True when the bot currently follows a path created by this addon. */
     boolean isPatrolling(String botName);
+
+    // ---------------------------------------------------------------- targeting (aggro range)
+
+    /**
+     * PvP BOT's target control for the aggro range: read its targeting settings, read a bot's current and forced
+     * target, force or release a target. Never null; {@link TargetControl#available()} is false when PvP BOT is
+     * missing or lacks a member it needs.
+     */
+    default TargetControl targetControl() {
+        return TargetControl.NONE;
+    }
 }

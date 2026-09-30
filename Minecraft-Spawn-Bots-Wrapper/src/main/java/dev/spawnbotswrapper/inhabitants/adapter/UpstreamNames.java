@@ -6,8 +6,13 @@ package dev.spawnbotswrapper.inhabitants.adapter;
  * classes by name at run time and reports what it could not find.
  * <p>
  * Classes that must NEVER appear here: PvP BOT's name generator (its static initialiser performs blocking
- * HTTP on the calling thread), its faction registry and HeroBot's movement helper (both bind to world state
- * in static initialisers before the server is ready). The addon has no use for any of them.
+ * HTTP on the calling thread) and HeroBot's movement helper (binds to world state in its static initialiser
+ * before the server is ready). The addon has no use for either.
+ * <p>
+ * The one deliberate exception is PvP BOT's faction registry ({@link #CLASS_BOT_FACTION}): its static
+ * initialiser also binds to world state, so it is only ever loaded without initialisation by the probe and
+ * only invoked (which initialises it, as PvP BOT's own combat code does) while PvP BOT's factions setting is
+ * on, for the aggro range's "is this player an ally" question. No other file may name it.
  */
 final class UpstreamNames {
 
@@ -26,6 +31,14 @@ final class UpstreamNames {
     static final String CLASS_BOT_SETTINGS = PACKAGE + ".bot.BotSettings";
     static final String CLASS_BOT_PATH = PACKAGE + ".bot.BotPath";
     static final String CLASS_BOT_NAVIGATION = PACKAGE + ".bot.BotNavigation";
+    /** PvP BOT's combat routine: forced targets (set/get/clear) and the per-bot combat state. */
+    static final String CLASS_BOT_COMBAT = PACKAGE + ".bot.BotCombat";
+    /**
+     * PvP BOT's faction registry. Its static initialiser reads a per-world file, so it is only ever LOADED by
+     * the probe (never initialised) and only ever INVOKED (which initialises it, exactly as PvP BOT's own combat
+     * code does) while PvP BOT's factions setting is on. Named nowhere but here (see ArchitectureTest).
+     */
+    static final String CLASS_BOT_FACTION = PACKAGE + ".bot.BotFaction";
     static final String CLASS_MAIN = PACKAGE + ".Pvp_bot";
     static final String FIELD_MOD_ID = "MOD_ID";
 

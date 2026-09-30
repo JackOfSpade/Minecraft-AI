@@ -207,6 +207,15 @@ final class StatusAssembler {
                 + (c.isFollowing.ok() ? "" : " (follower verification unavailable)")
                 + (c.removeState.ok() ? "" : " (navigation cleanup unavailable)")
                 : "patrols DISABLED: " + pathProblems(c)));
+        String combatProblem = c.combatControlProblem();
+        String steeringProblem = c.steeringProblem();
+        details.add("Aggro range (BotCombat targets): " + (combatProblem == null
+                ? "setTarget/getTarget/clearTarget and the forced-target field resolved"
+                + (c.factionAreAllies.ok() ? "" : " (faction check unavailable)")
+                + (c.lastAttackerField != null ? "" : " (revenge memory unreadable: hits count as 'other')")
+                + (steeringProblem == null ? "; walk back via BotNavigation.lookAtPosition/moveTowardPosition"
+                : "; walk back DISABLED, " + steeringProblem)
+                : "DISABLED, " + combatProblem));
         details.add("Commands: " + commandLine(tree));
         details.add("Spawn tier: " + primary.label() + tierChain(order) + " (spawning.backend=" + backend + ")");
         details.add("Removal: " + (removeByClass ? "BotManager.removeBot"

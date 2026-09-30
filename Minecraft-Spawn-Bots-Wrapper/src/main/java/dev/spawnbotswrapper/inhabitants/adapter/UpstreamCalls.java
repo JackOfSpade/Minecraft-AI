@@ -7,6 +7,8 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -191,6 +193,72 @@ final class UpstreamCalls {
             return null;
         }
         return invoke(m.method(), settings) instanceof Integer i ? i : null;
+    }
+
+    /** A boolean getter that only the aggro range reads, or null when it is missing or returns something else. */
+    Boolean readCombatBoolean(Object settings, String getter) throws Throwable {
+        UpstreamContract.Member m = contract.combatGetters.get(getter);
+        if (settings == null || m == null || !m.ok()) {
+            return null;
+        }
+        return invoke(m.method(), settings) instanceof Boolean b ? b : null;
+    }
+
+    /** {@code getMaxTargetDistance}, or null when it is missing or returns something else. */
+    Double readMaxTargetDistance(Object settings) throws Throwable {
+        UpstreamContract.Member m = contract.combatGetters.get(UpstreamContract.MAX_TARGET_DISTANCE_GETTER);
+        if (settings == null || m == null || !m.ok()) {
+            return null;
+        }
+        return invoke(m.method(), settings) instanceof Double d ? d : null;
+    }
+
+    // ---------------------------------------------------------------- combat targets (aggro range)
+
+    /**
+     * The name forced on {@code bot} through {@code BotCombat.setTarget}, or null. Reads the public
+     * {@code forcedTargetName} field of the bot's combat state; upstream creates that state on first access,
+     * as its own combat tick does for every bot.
+     */
+    String forcedTarget(String bot) throws Throwable {
+        Object state = invoke(contract.combatGetState.method(), null, bot);
+        return state == null ? null : (String) contract.forcedTargetField.get(state);
+    }
+
+    /** The entity {@code bot} targets right now (upstream's per-tick result), or null. */
+    Entity currentTarget(String bot) throws Throwable {
+        return invoke(contract.combatGetTarget.method(), null, bot) instanceof Entity e ? e : null;
+    }
+
+    /** True when {@code target} is the bot's last attacker (upstream's revenge memory); false when unknown. */
+    boolean isLastAttacker(String bot, Entity target) throws Throwable {
+        if (contract.lastAttackerField == null || target == null) {
+            return false;
+        }
+        Object state = invoke(contract.combatGetState.method(), null, bot);
+        return state != null && contract.lastAttackerField.get(state) == target;
+    }
+
+    /** One tick of walking toward a point with upstream's own look and move-toward input (its patrols use the same). */
+    void steer(ServerPlayer bot, Vec3 to, double speed) throws Throwable {
+        invoke(contract.navLookAt.method(), null, bot, to);
+        invoke(contract.navMoveToward.method(), null, bot, to, speed);
+    }
+
+    void setTarget(String bot, String target) throws Throwable {
+        invoke(contract.combatSetTarget.method(), null, bot, target);
+    }
+
+    void clearTarget(String bot) throws Throwable {
+        invoke(contract.combatClearTarget.method(), null, bot);
+    }
+
+    /** Whether the two names share a faction. Initialises upstream's faction registry: only call while factions are on. */
+    boolean areAllies(String a, String b) throws Throwable {
+        if (!contract.factionAreAllies.ok()) {
+            throw new IllegalStateException(contract.factionAreAllies.failure());
+        }
+        return truth(invoke(contract.factionAreAllies.method(), null, a, b));
     }
 
     // ---------------------------------------------------------------- paths

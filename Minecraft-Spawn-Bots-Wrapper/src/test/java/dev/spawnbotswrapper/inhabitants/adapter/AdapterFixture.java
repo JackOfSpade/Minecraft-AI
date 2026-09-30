@@ -1,5 +1,8 @@
 package dev.spawnbotswrapper.inhabitants.adapter;
 
+import org.stepan1411.pvp_bot.bot.BotCombat;
+import org.stepan1411.pvp_bot.bot.BotFaction;
+import org.stepan1411.pvp_bot.bot.BotNavigation;
 import org.stepan1411.pvp_bot.bot.BotPath;
 import org.stepan1411.pvp_bot.bot.BotSettings;
 import org.stepan1411.testdouble.Recorder;
@@ -24,6 +27,9 @@ final class AdapterFixture {
         Recorder.reset();
         BotPath.resetAll();
         BotSettings.resetInstance();
+        BotCombat.resetAll();
+        BotFaction.resetAll();
+        BotNavigation.CALLS.clear();
     }
 
     static AdapterFixture healthy() {

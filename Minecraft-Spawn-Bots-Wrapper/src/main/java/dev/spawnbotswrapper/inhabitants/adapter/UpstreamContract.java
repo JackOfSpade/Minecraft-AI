@@ -3,6 +3,7 @@ package dev.spawnbotswrapper.inhabitants.adapter;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -90,6 +91,26 @@ final class UpstreamContract {
     /** Optional: clears the per-bot navigation anchor upstream never clears itself. */
     final Member removeState;
 
+    // ---- BotCombat / BotFaction (aggro range). All optional: none of them affects availability.
+    final Member combatSetTarget;
+    final Member combatGetTarget;
+    final Member combatClearTarget;
+    /** {@code BotCombat.getState(String)}; its result is only used to read {@link #forcedTargetField}. */
+    final Member combatGetState;
+    /** The public {@code forcedTargetName} field of the per-bot combat state; null when it cannot be used. */
+    final Field forcedTargetField;
+    /** Why {@link #forcedTargetField} is null, else null. */
+    final String forcedTargetProblem;
+    /** The public {@code lastAttacker} entity field of the combat state (PvP BOT's revenge memory); null when unusable. */
+    final Field lastAttackerField;
+    /** {@code BotNavigation.lookAtPosition(ServerPlayer, Vec3)} and {@code moveTowardPosition(ServerPlayer, Vec3, double)}: the walk back. */
+    final Member navLookAt;
+    final Member navMoveToward;
+    /** Getter name to member for the settings only the aggro range reads (target filters, factions, chase limit). */
+    final Map<String, Member> combatGetters;
+    /** {@code BotFaction.areAllies(String, String)}; only invoked while PvP BOT's factions setting is on. */
+    final Member factionAreAllies;
+
     /** R13: null when the main class exposes MOD_ID = "pvp_bot", else what is off (detail only). */
     final String modIdNote;
 
@@ -141,7 +162,108 @@ final class UpstreamContract {
         isFollowing = staticMethod(path, "", "isFollowing", boolean.class, String.class, String.class);
         removeState = staticMethod(nav, "", "removeState", void.class, String.class);
 
+        Owner combat = load(locator, UpstreamNames.CLASS_BOT_COMBAT);
+        combatSetTarget = staticMethod(combat, "", "setTarget", void.class, String.class, String.class);
+        combatGetTarget = staticMethod(combat, "", "getTarget", Entity.class, String.class);
+        combatClearTarget = staticMethod(combat, "", "clearTarget", void.class, String.class);
+        combatGetState = staticMethod(combat, "", "getState", Object.class, String.class);
+        String[] fieldProblem = new String[1];
+        forcedTargetField = forcedTargetField(combatGetState, fieldProblem);
+        forcedTargetProblem = forcedTargetField == null ? fieldProblem[0] : null;
+        lastAttackerField = lastAttackerField(combatGetState);
+        navLookAt = staticMethod(nav, "", "lookAtPosition", void.class, ServerPlayer.class, Vec3.class);
+        navMoveToward = staticMethod(nav, "", "moveTowardPosition", void.class, ServerPlayer.class, Vec3.class,
+                double.class);
+        Map<String, Member> cg = new LinkedHashMap<>();
+        for (String name : COMBAT_BOOLEAN_GETTERS) {
+            cg.put(name, instanceMethod(settings, "", name, boolean.class));
+        }
+        cg.put(MAX_TARGET_DISTANCE_GETTER, instanceMethod(settings, "", MAX_TARGET_DISTANCE_GETTER, double.class));
+        combatGetters = Map.copyOf(cg);
+        Owner faction = load(locator, UpstreamNames.CLASS_BOT_FACTION);
+        factionAreAllies = staticMethod(faction, "", "areAllies", boolean.class, String.class, String.class);
+
         modIdNote = checkModId(main);
+    }
+
+    /** BotSettings getters read only by the aggro range (isCombatEnabled / isAutoTargetEnabled are capability getters). */
+    static final List<String> COMBAT_BOOLEAN_GETTERS = List.of("isTargetPlayers", "isTargetOtherBots",
+            "isAttackInvincible", "isFactionsEnabled", "isFriendlyFireEnabled");
+    static final String MAX_TARGET_DISTANCE_GETTER = "getMaxTargetDistance";
+    private static final String FORCED_TARGET_FIELD = "forcedTargetName";
+    private static final String LAST_ATTACKER_FIELD = "lastAttacker";
+
+    /** The revenge-memory field, or null when missing (the cause of an engagement is then inferred as "other"). */
+    private static Field lastAttackerField(Member getState) {
+        if (!getState.ok()) {
+            return null;
+        }
+        Class<?> stateType = getState.method().getReturnType();
+        try {
+            Field f = stateType.getField(LAST_ATTACKER_FIELD);
+            return !Modifier.isStatic(f.getModifiers()) && Entity.class.isAssignableFrom(f.getType())
+                    && Modifier.isPublic(stateType.getModifiers()) ? f : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Field forcedTargetField(Member getState, String[] problem) {
+        if (!getState.ok()) {
+            problem[0] = getState.failure();
+            return null;
+        }
+        Class<?> stateType = getState.method().getReturnType();
+        try {
+            Field f = stateType.getField(FORCED_TARGET_FIELD);
+            if (Modifier.isStatic(f.getModifiers()) || f.getType() != String.class) {
+                problem[0] = stateType.getSimpleName() + "." + FORCED_TARGET_FIELD + " is not an instance String";
+                return null;
+            }
+            if (!Modifier.isPublic(stateType.getModifiers())) {
+                problem[0] = "the combat state class " + stateType.getName() + " is not public";
+                return null;
+            }
+            return f;
+        } catch (NoSuchFieldException e) {
+            problem[0] = stateType.getSimpleName() + "." + FORCED_TARGET_FIELD + " not found";
+            return null;
+        } catch (Throwable t) {
+            problem[0] = stateType.getSimpleName() + "." + FORCED_TARGET_FIELD + " could not be inspected ("
+                    + Diagnostics.describe(t) + ")";
+            return null;
+        }
+    }
+
+    /**
+     * Why the aggro range cannot control targets, or null when it can: it needs the three target calls, the
+     * forced-name field and readable settings. The individual setting getters are handled one by one at read time.
+     */
+    String combatControlProblem() {
+        List<String> missing = new ArrayList<>();
+        for (Member m : List.of(combatSetTarget, combatGetTarget, combatClearTarget)) {
+            if (!m.ok()) {
+                missing.add(m.failure());
+            }
+        }
+        if (forcedTargetField == null) {
+            missing.add(forcedTargetProblem);
+        }
+        if (!settingsGet.ok()) {
+            missing.add(settingsGet.failure());
+        }
+        return missing.isEmpty() ? null : String.join("; ", missing);
+    }
+
+    /** Why the walk back cannot be done, or null when it can. */
+    String steeringProblem() {
+        List<String> missing = new ArrayList<>();
+        for (Member m : List.of(navLookAt, navMoveToward)) {
+            if (!m.ok()) {
+                missing.add(m.failure());
+            }
+        }
+        return missing.isEmpty() ? null : String.join("; ", missing);
     }
 
     private static String capabilityGetterId(String name) {
