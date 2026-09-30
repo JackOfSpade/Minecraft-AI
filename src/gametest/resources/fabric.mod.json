@@ -89,6 +89,7 @@
       "io.github.zoyluo.minecraftai.task.FollowAroundPondGameTests",
       "io.github.zoyluo.minecraftai.task.FarmSurvivalGameTests",
       "io.github.zoyluo.minecraftai.gametest.GameTestCleanupSelfTests",
+      "io.github.zoyluo.minecraftai.gametest.GameTestIsolationSelfTests",
       "io.github.zoyluo.minecraftai.gametest.MixinTargetClassLoadGameTests",
       "io.github.zoyluo.minecraftai.baritone.BaritoneServerGameTests",
       "io.github.zoyluo.minecraftai.baritone.BaritonePlanningGameTests",
@@ -116,6 +117,9 @@
       "io.github.zoyluo.minecraftai.task.EvadeEscortGameTests"
     ]
   },
+  "mixins": [
+    "minecraftai-gametest.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.18.4",
     "minecraft": "1.21.11",

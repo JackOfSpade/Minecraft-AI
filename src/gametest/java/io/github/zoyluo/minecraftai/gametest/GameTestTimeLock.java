@@ -20,6 +20,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * one-time setup plus its real per-tick body from inside the SAME, single, top-level
  * {@code failIfEver} callback it already registers -- never register a second one once
  * the lock is held.</p>
+ *
+ * <p>Since {@link GameTestIsolation} runs every test in a batch of its own, no two scenarios run at the same time any more and the
+ * lock is always free when asked; {@link GameTestSweeper} puts the ambient clock back between tests. The lock stays the contract of
+ * the scenarios that own the clock, for any run that batches tests together again.</p>
  */
 public final class GameTestTimeLock {
     private static final AtomicBoolean HELD = new AtomicBoolean(false);

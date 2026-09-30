@@ -83,11 +83,35 @@ What to look for:
 Caveats: the check runs on a Terralith/Tectonic/Streams Reflowing world generator, but the fixtures build their own blocks, so terrain does
 not matter. A run takes 1 to 3 minutes longer than a plain one because Loader remaps about 30 mods.
 
+## GameTest isolation (every test runs alone)
+
+The whole suite shares one test world and one JVM. The harness (`src/gametest/.../gametest`, GameTest runs only) makes every test find
+the same world, whatever ran before it:
+
+- **One test per batch** (`GameTestIsolation`, `GameTestBatchFactoryOneTestPerBatchMixin`). Vanilla runs up to 50 tests of the same
+  environment at once, 13 blocks apart, while our scenes are far larger (a follow field, a pond, a 24-block corridor, a lake): scenes of
+  a batch overlapped and a test failed because of its neighbour (water from a lake test flooded a follow test). Now the default
+  environment is split into single-test batches like the tests that have an environment of their own; a full run takes about as
+  long as before (about 6 minutes of server time for 1160 tests on a 4-core machine).
+- **Cleanup between tests** (`GameTestSweeper`, `GameTestWorldRestorer`, `GameTestEntityGate`). When the next test starts, every block
+  the last one changed is put back, its entities, bots and mock players are removed (and logged as a leak), the ambient is reset (clock
+  at day 1000, clear weather, the suite's game rules) and the JVM-wide configs and test hooks it may have switched are put back (loudly).
+  Entities loaded from chunks rather than added by code (generated animals, leftovers saved with a chunk) are discarded; natural spawning
+  is off.
+- **Light in step with ticks** (`GameTestLightSync`). The GameTest server runs ticks back to back, far faster than 20 per second, while
+  the light engine works on its own thread; at the end of every tick that changed blocks the server waits (bounded) until their light is
+  published, so the next tick sees it as a real server would.
+- **Unique mock players** (`MockPlayers.mock`): every mock has its own name and UUID and is disconnected when its test ends
+  (vanilla's `makeMockServerPlayerInLevel` names all of them `test-mock-player` and never removes them, and name lookups return the
+  oldest).
+- A test that needs night, rain or another game rule sets it for its premise; it does not have to restore it. Wall-clock things (thread
+  pools, background planners) must be waited for in wall-clock time, not in ticks: a tick count is no clock on this server.
+- `GameTestIsolationSelfTests` checks the batch split, the ambient reset and the light publication.
+
 ## Baritone GameTests: what to run how
 
-- Run the Baritone classes one class glob at a time (`baritone_navigation_game_tests_*`, `baritone_survival_game_tests_*`, `baritone_engine_*`, ...), not as one `baritone_*` glob: the default-batch arenas of different classes were laid out separately and can overlap in one big batch (a survival course then sees the blocks of an engine arena).
+- Every test runs alone (see above), so the Baritone classes can be run together or one class glob at a time.
 - `baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes` proves that the legacy engine loads no Baritone class. Loaded classes cannot be unloaded, so the proof only exists in a fresh JVM: run it alone (`bash gt_filter.sh <repo> <out> baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes`). Selected that way (its own name as the filter, no glob) it FAILS when Baritone was already loaded (inconclusive is a failure there); inside a class glob or the whole suite an earlier test may have used Baritone, the load check is skipped and the result line `gametest_legacy_lazy conclusive=false` says so.
-- The tests of `BaritoneEngineTunnelGameTests` (digging a staircase and a diagonal tunnel in natural stone under strict observability with zero refusals, the refusal cap, route replacement, a refused swim route) and the fail-after-live test each have their own environment (batch), so they run one after the other and never overlap other arenas.
 
 ## Single Isolated Evidence Run
 
