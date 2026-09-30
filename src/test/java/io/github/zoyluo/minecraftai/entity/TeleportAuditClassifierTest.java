@@ -86,11 +86,18 @@ final class TeleportAuditClassifierTest {
 
     @Test
     void thePrivilegedEmergencyRescuesAreRecognised() {
-        assertEquals(Kind.PRIVILEGED, TeleportAudit.classify(stack(f(P + "action.ActionPack", "snapPlayerToNearestStandable")), false));
         assertEquals(Kind.PRIVILEGED, TeleportAudit.classify(stack(f(P + "task.NavSafetyNet", "escapeSuffocation")), false));
         assertEquals(Kind.PRIVILEGED, TeleportAudit.classify(stack(f(P + "task.NavSafetyNet", "emergencyTeleportToAir")), false));
         assertEquals(Kind.PRIVILEGED, TeleportAudit.classify(stack(f(P + "task.DangerWatcher", "escapeToSurface")), false));
         assertEquals(Kind.PRIVILEGED, TeleportAudit.classify(stack(f(P + "task.GatherQuotaTask", "trySurface")), false));
+    }
+
+    @Test
+    void thePathStartSnapIsACorrectionNotPrivileged() {
+        // The user wants no path-correction teleports in any profile, so the snap must be counted as one.
+        assertEquals(Kind.CORRECTION, TeleportAudit.classify(stack(f(P + "action.ActionPack", "snapPlayerToNearestStandable")), false));
+        assertEquals(Kind.CORRECTION, TeleportAudit.classify(
+                stack(f(P + "action.ActionPack", "lambda$snapPlayerToNearestStandable$1")), false));
     }
 
     @Test
@@ -101,8 +108,6 @@ final class TeleportAuditClassifierTest {
                 stack(f(P + "task.NavSafetyNet", "lambda$escapeSuffocation$2"),
                         f(P + "mode.CapabilityRuntime", "run"),
                         f(P + "task.NavSafetyNet", "escapeSuffocation")), false));
-        assertEquals(Kind.PRIVILEGED, TeleportAudit.classify(
-                stack(f(P + "action.ActionPack", "lambda$snapPlayerToNearestStandable$1")), false));
         assertEquals(Kind.PRIVILEGED, TeleportAudit.classify(
                 stack(f(P + "task.GatherQuotaTask", "lambda$trySurface$5")), false));
     }
@@ -167,7 +172,6 @@ final class TeleportAuditClassifierTest {
     @Test
     void thePrivilegedListIsExactlyTheDocumentedOnes() {
         assertEquals(java.util.Set.of(
-                        "ActionPack#snapPlayerToNearestStandable",
                         "NavSafetyNet#escapeSuffocation",
                         "NavSafetyNet#emergencyTeleportToAir",
                         "DangerWatcher#escapeToSurface",

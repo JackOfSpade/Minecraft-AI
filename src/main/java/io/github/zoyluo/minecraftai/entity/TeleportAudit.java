@@ -57,15 +57,14 @@ public final class TeleportAudit {
      * lambda body of it ({@code lambda$<method>$N}, e.g. the runnable handed to {@code CapabilityRuntime.run}). Each of them decides
      * its capability (EMERGENCY_TELEPORT: operator profile only, denied in strict survival) before it moves the bot:
      * <ul>
-     *   <li>{@code ActionPack#snapPlayerToNearestStandable}: the long path-start snap (its physical re-centring goes through
-     *       {@code FakePlayerMotion} and is a correction);</li>
      *   <li>{@code NavSafetyNet#escapeSuffocation} and {@code #emergencyTeleportToAir}: the suffocation and drowning rescues;</li>
      *   <li>{@code DangerWatcher#escapeToSurface}: the dark-trap surfacing;</li>
      *   <li>{@code GatherQuotaTask#trySurface}: the gather surfacing.</li>
      * </ul>
+     * The path-start snap ({@code ActionPack#snapPlayerToNearestStandable}) is deliberately NOT listed: the user wants no
+     * path-correction teleports in any profile, so every snap teleport must show up as a {@link Kind#CORRECTION}.
      */
     static final Set<String> PRIVILEGED_METHODS = Set.of(
-            "ActionPack#snapPlayerToNearestStandable",
             "NavSafetyNet#escapeSuffocation",
             "NavSafetyNet#emergencyTeleportToAir",
             "DangerWatcher#escapeToSurface",

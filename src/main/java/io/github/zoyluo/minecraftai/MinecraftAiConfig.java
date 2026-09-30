@@ -497,7 +497,6 @@ public record MinecraftAiConfig(
     }
 
     /** Same as {@link #behaviourOrDefaults()}: the accessor never returns null. */
-    
     public Behaviour behaviour() {
         return behaviourOrDefaults();
     }
@@ -834,7 +833,7 @@ public record MinecraftAiConfig(
         }
     }
 
-    public record Pickup(double forceRadiusH,double forceRadiusV, double sweepRadius) {
+    public record Pickup(double forceRadiusH, double forceRadiusV, double sweepRadius) {
         Pickup withDefaults(Pickup defaults) {
             return new Pickup(
                     positiveDoubleOrDefault(forceRadiusH, defaults.forceRadiusH),
