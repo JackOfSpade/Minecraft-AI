@@ -234,8 +234,8 @@ public final class OreDigOpportunisticGameTests {
         for (int i = 0; i < veinLength; i++) {
             // Kept close to spawn so the near end of the vein is reliably within ordinary perception radius of a bot still
             // working hub()'s coal near dx=0, regardless of which way OreDigTask's own strip tunnel happens to head first. It
-            // starts at dx=3, clear of the hub: starting at dx=1 put its first members between the hub's coal at (1,1,+-1) and
-            // (2,1,+-2), where the mission's own work took them as bonus ores (two in one run, four in another, depending on
+            // starts at dx=3, clear of the hub: starting at dx=1 put its first members between the hub's coal at (1,+-1) and
+            // (2,+-2) (x,z), where the mission's own work took them as bonus ores (two in one run, four in another, depending on
             // where the coal drops landed), and after four the rest of the vein was excluded and never detoured to.
             BlockPos pos = room.at(3 + i, 1, 0);
             room.world.setBlock(pos, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
@@ -603,7 +603,7 @@ public final class OreDigOpportunisticGameTests {
         Harness h = new Harness(context);
         Room room = h.newRoom(80, -4, 9, -4, 4, 4);
         hub(room);
-        // A generous, purely-local coal supply (dy=1 + roof, same as hub()): the mission's own target count
+        // A generous, purely-local coal supply (dy=1 + roof; kept to the west, behind the bot): the mission's own target count
         // (40) deliberately outlives hub's 6 cells everywhere else in this file, but here the test needs the
         // mission to keep ticking (I1/M6's own sensor sweep is a hook of OreDigTask's own tick, design 8.2
         // hook 9/13, so a completed or wandered-off mission stops sensing anything at all) for the whole
@@ -988,14 +988,18 @@ public final class OreDigOpportunisticGameTests {
     /** A small cluster of the mission's own target ore near spawn: keeps the mission genuinely busy and
      * healthy (real {@code noteProgress()} calls) for the whole run, independent of whatever the detour does. */
     private static void hub(Room room) {
-        // dy=1 + a solid roof at dy=2 (not dy=0): a floor-level target's own support cell (ore.down(), the
-        // room's solid floor slab) is never observable (buried, no exposed face -- the ore itself occludes
-        // the only face that would otherwise face the room), so OreDigTask.needsTargetDropSupport /
-        // hasReliableObservedDropCatch permanently abandons the approach (design's own drop-catch honesty
-        // rule, working as intended against an artificial fixture, not a bug). One level up, the bot
-        // approaches from the room's ordinary floor one level below, where vertical=1 never satisfies
-        // needsTargetDropSupport's own (vertical==0 || vertical==-1) test in the first place.
-        int[][] offsets = {{1, 1, 1}, {1, 1, -1}, {-1, 1, 1}, {-1, 1, -1}, {2, 1, 2}, {2, 1, -2}};
+        // Off the floor (not dy=0): a floor-level target's own support cell (ore.down(), the room's solid floor
+        // slab) is never observable (buried, no exposed face -- the ore itself occludes the only face that would
+        // otherwise face the room), so OreDigTask.needsTargetDropSupport / hasReliableObservedDropCatch permanently
+        // abandons the approach (design's own drop-catch honesty rule, working as intended against an artificial
+        // fixture, not a bug); from the room's floor, vertical=2 never satisfies its (vertical==0 || vertical==-1)
+        // test. And above eye height (dy=2 + a solid roof at dy=3, not dy=1): the bot's eyes are at dy=1.62, so a
+        // coal column at dy=1 stood between them and the stands of every detour candidate further east, and a
+        // detour check made while the bot stood behind one saw no stand (no_pose), excluded the candidate for 600
+        // ticks, and the mission left the room for more coal before that ran out. Which spot the bot checked from
+        // depended on where the coal drops landed: the rare full-suite failures of the detour tests in this file.
+        // Every ray those checks cast runs at or below eye height, so coal at dy=2 is never in the way.
+        int[][] offsets = {{1, 2, 1}, {1, 2, -1}, {-1, 2, 1}, {-1, 2, -1}, {2, 2, 2}, {2, 2, -2}};
         for (int[] o : offsets) {
             room.set(o[0], o[1], o[2], Blocks.COAL_ORE);
             room.set(o[0], o[1] + 1, o[2], Blocks.STONE);
