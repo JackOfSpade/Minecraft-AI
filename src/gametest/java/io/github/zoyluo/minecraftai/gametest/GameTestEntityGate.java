@@ -28,8 +28,9 @@ public final class GameTestEntityGate {
     private static final boolean ENABLED = System.getProperty("fabric-api.gametest") != null;
 
     /**
-     * Entities code added, until they are loaded (an entity added into a chunk that is not yet tracked only announces itself later).
-     * Weak, so an entity that never loads does not stay alive through this set.
+     * Entities code added, for as long as they exist: an entity added into a chunk that is not yet tracked only announces itself
+     * later, and one whose chunk stops being tracked for a while announces itself again when it is tracked again (that second
+     * announcement is not a load from disk). Weak, so this set never keeps an entity alive.
      */
     private static final Set<Entity> FRESH = Collections.newSetFromMap(new WeakHashMap<>());
     private static final List<Entity> LOADED = new ArrayList<>();
@@ -51,7 +52,7 @@ public final class GameTestEntityGate {
         if (!ENABLED || entity instanceof Player) {
             return;
         }
-        if (!FRESH.remove(entity)) {
+        if (!FRESH.contains(entity)) {
             LOADED.add(entity);
         }
     }

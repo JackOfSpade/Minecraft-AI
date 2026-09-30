@@ -50,6 +50,8 @@ public final class MinecraftAiHarnessTestMod implements ModInitializer {
             });
             ServerTickEvents.END_SERVER_TICK.register(server -> GameTestEntityGate.endTick());
             ServerTickEvents.END_SERVER_TICK.register(GameTestSweeper::endTick);
+            // The chunks this tick's scenes (and the next test's surroundings) touched are entity-ticking before the next tick.
+            ServerTickEvents.END_SERVER_TICK.register(GameTestWorldRestorer::awaitHeldChunks);
             // Last: the light of every block this tick changed (tests, bots, the restorer) is published before the next tick.
             ServerTickEvents.END_SERVER_TICK.register(GameTestLightSync::endTick);
         }

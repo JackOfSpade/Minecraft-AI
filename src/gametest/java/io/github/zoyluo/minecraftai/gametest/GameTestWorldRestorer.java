@@ -40,6 +40,14 @@ import org.slf4j.LoggerFactory;
  * was built in such a chunk would be saved with it and come back with it. {@link #keepLoaded} therefore holds every chunk a batch
  * touched with a ticket of its own (entity-ticking, so a mob in it ticks and an item in it is picked up), released only after the
  * restore.</p>
+ *
+ * <p>A ticket only asks for the chunk: it becomes entity-ticking when the chunks around it are generated, on the worker threads, a
+ * while later. Until then the blocks are there but an entity added to it sits in a hidden section: an entity query does not find it
+ * and it does not tick. On the GameTest server, which runs its ticks back to back, "a while" is dozens of ticks on a busy machine in a
+ * part of the world no test has used yet: a husk three blocks from a burning bot was invisible to its danger scan for the whole fire
+ * rescue, and a cobblestone drop could not be found or picked up until a dig-down gave up. So {@link #awaitHeldChunks}, at the end of
+ * every tick, waits (bounded) until every chunk first held in that tick is entity-ticking: a scene is live from the tick after it was
+ * built, as it is on a real server where the chunk system keeps up with 20 ticks a second.</p>
  */
 public final class GameTestWorldRestorer {
     private static final Logger LOG = LoggerFactory.getLogger("minecraftai-gametest-restorer");
@@ -54,6 +62,12 @@ public final class GameTestWorldRestorer {
     private static final Map<Level, Long2ObjectMap<BlockState>> ORIGINAL = new IdentityHashMap<>();
     /** Per level: the chunks this batch holds a ticket for (server thread only). */
     private static final Map<Level, LongSet> HELD = new IdentityHashMap<>();
+    /** Per level: the chunks first held since the end of the last tick, which {@link #awaitHeldChunks} waits for (server thread only). */
+    private static final Map<ServerLevel, LongSet> NEWLY_HELD = new IdentityHashMap<>();
+    private static final long MAX_WAIT_NANOS = 10_000_000_000L;
+    private static final int MAX_TIMEOUTS = 5;
+    private static int timeouts;
+    private static boolean waitDisabled;
     private static boolean restoring;
 
     private GameTestWorldRestorer() {
@@ -77,9 +91,51 @@ public final class GameTestWorldRestorer {
         if (!ENABLED || restoring || !(level instanceof ServerLevel server)) {
             return;
         }
-        if (HELD.computeIfAbsent(level, ignored -> new LongOpenHashSet()).add(ChunkPos.asLong(chunkX, chunkZ))) {
+        long chunk = ChunkPos.asLong(chunkX, chunkZ);
+        if (HELD.computeIfAbsent(level, ignored -> new LongOpenHashSet()).add(chunk)) {
             server.getChunkSource().addTicketWithRadius(HOLD, new ChunkPos(chunkX, chunkZ), HOLD_RADIUS);
+            NEWLY_HELD.computeIfAbsent(server, ignored -> new LongOpenHashSet()).add(chunk);
         }
+    }
+
+    /**
+     * {@code ServerTickEvents.END_SERVER_TICK}: waits until every chunk first held in this tick is entity-ticking, running the chunk
+     * system's main-thread work (ticket updates, the promotions of chunks the workers finished) while it waits. Bounded: a timeout is
+     * logged, and after {@value #MAX_TIMEOUTS} of them the wait switches itself off, loudly, rather than slow the suite down.
+     */
+    public static void awaitHeldChunks(net.minecraft.server.MinecraftServer server) {
+        if (NEWLY_HELD.isEmpty()) {
+            return;
+        }
+        if (!waitDisabled) {
+            long deadline = System.nanoTime() + MAX_WAIT_NANOS;
+            for (Map.Entry<ServerLevel, LongSet> entry : NEWLY_HELD.entrySet()) {
+                ServerLevel level = entry.getKey();
+                int pending = 0;
+                for (long chunk : entry.getValue()) {
+                    BlockPos probe = new BlockPos(ChunkPos.getX(chunk) << 4, level.getMinY(), ChunkPos.getZ(chunk) << 4);
+                    while (!level.isPositionEntityTicking(probe) && System.nanoTime() < deadline) {
+                        if (!level.getChunkSource().pollTask()) {
+                            java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
+                        }
+                    }
+                    if (!level.isPositionEntityTicking(probe)) {
+                        pending++;
+                    }
+                }
+                if (pending > 0) {
+                    timeouts++;
+                    LOG.warn("{} held chunks were not entity-ticking after {} s (timeout {} of {})", pending,
+                            MAX_WAIT_NANOS / 1_000_000_000L, timeouts, MAX_TIMEOUTS);
+                    if (timeouts >= MAX_TIMEOUTS) {
+                        waitDisabled = true;
+                        LOG.error("the wait for held chunks is switched off: scenes may be built in chunks whose entities do not tick yet");
+                    }
+                    break;
+                }
+            }
+        }
+        NEWLY_HELD.clear();
     }
 
     /**
@@ -118,6 +174,7 @@ public final class GameTestWorldRestorer {
                 }
             }
             HELD.clear();
+            NEWLY_HELD.clear();
         } finally {
             restoring = false;
         }

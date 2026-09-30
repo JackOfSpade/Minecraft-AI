@@ -14,8 +14,9 @@ import net.minecraft.world.level.gamerules.GameRules;
 
 /**
  * Self-tests of the isolation every other GameTest relies on: a test runs alone ({@link GameTestIsolation}), starts in the suite's
- * ambient clock, weather and game rules whatever the test before it did ({@link GameTestSweeper}), and sees the light of a block
- * change by the next tick ({@link GameTestLightSync}). They use the default test environment on purpose: that is the environment
+ * ambient clock, weather and game rules whatever the test before it did ({@link GameTestSweeper}), sees the light of a block
+ * change by the next tick ({@link GameTestLightSync}) and finds a scene it built far away live by the next tick
+ * ({@link GameTestWorldRestorer#awaitHeldChunks}). They use the default test environment on purpose: that is the environment
  * vanilla would batch 50 tests into.
  */
 public final class GameTestIsolationSelfTests {
@@ -97,6 +98,37 @@ public final class GameTestIsolationSelfTests {
                         "the open sky was not published " + ticksLater + " tick(s) later: sky light " + world.getBrightness(LightLayer.SKY, cell));
                 context.succeed();
             }
+        });
+    }
+
+    /**
+     * A scene built far from the test's structure (here 200 blocks away, where the world may not even be generated yet) is live by the
+     * next tick: its chunk is entity-ticking and a mob added there is found by an entity query. Before, a husk added to such a scene was
+     * invisible to the bot's danger scan for dozens of ticks on a busy machine ({@link GameTestWorldRestorer#awaitHeldChunks}).
+     */
+    @GameTest(maxTicks = 20)
+    public void sceneBuiltFarFromTheStructureIsLiveByTheNextTick(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos floor = context.absolutePos(new BlockPos(3, 4, 203));
+        world.setBlock(floor, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        net.minecraft.world.entity.monster.zombie.Husk husk = net.minecraft.world.entity.EntityType.HUSK.create(world,
+                net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        require(context, husk != null, "fixture: could not create the husk");
+        husk.setNoAi(true);
+        husk.setPersistenceRequired();
+        husk.snapTo(floor.getX() + 0.5D, floor.getY() + 1.0D, floor.getZ() + 0.5D, 0.0F, 0.0F);
+        world.addFreshEntity(husk);
+        GameTestCleanup.whenFinished(context, husk::discard);
+        long builtAt = world.getGameTime();
+        context.onEachTick(() -> {
+            if (world.getGameTime() == builtAt) {
+                return;
+            }
+            require(context, world.isPositionEntityTicking(husk.blockPosition()),
+                    "the scene's chunk was not entity-ticking " + (world.getGameTime() - builtAt) + " tick(s) after it was built");
+            require(context, !world.getEntitiesOfClass(husk.getClass(), new net.minecraft.world.phys.AABB(floor).inflate(2.0D)).isEmpty(),
+                    "the husk added to the scene was not found by an entity query " + (world.getGameTime() - builtAt) + " tick(s) later");
+            context.succeed();
         });
     }
 
