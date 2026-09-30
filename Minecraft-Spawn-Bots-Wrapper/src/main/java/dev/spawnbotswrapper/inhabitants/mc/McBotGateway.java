@@ -367,6 +367,12 @@ public final class McBotGateway implements BotGateway {
         }
     }
 
+    /**
+     * Whether the bot stands in an area a real player keeps loaded: within the larger of the server's view distance (the chunks
+     * sent to the player) and simulation distance (the chunks that tick around the player), measured in chunks like the
+     * server does (a square around the player's chunk). A player with a smaller client view distance keeps less loaded, so
+     * this errs towards keeping a seen bot awake, never towards putting it to sleep early. True when it cannot be told.
+     */
     @Override
     public boolean loadedByHuman(String botName) {
         try {
@@ -376,18 +382,14 @@ public final class McBotGateway implements BotGateway {
             }
             ServerPlayer bot = found.get();
             net.minecraft.world.level.ChunkPos at = bot.chunkPosition();
-            int simulation = access.server().getPlayerList().getSimulationDistance();
-            for (ServerPlayer p : access.server().getPlayerList().getPlayers()) {
+            var list = access.server().getPlayerList();
+            int chunks = Math.max(list.getSimulationDistance(), list.getViewDistance());
+            for (ServerPlayer p : list.getPlayers()) {
                 if (!isHuman(p) || p.isRemoved() || p.level() != bot.level()) {
                     continue;
                 }
-                // its chunk is sent to the player (view distance) ...
-                if (((net.minecraft.server.level.ServerLevel) bot.level()).getChunkSource().chunkMap.isChunkTracked(p, at.x, at.z)) {
-                    return true;
-                }
-                // ... or lies inside the area that ticks around the player (simulation distance)
                 net.minecraft.world.level.ChunkPos there = p.chunkPosition();
-                if (Math.max(Math.abs(there.x - at.x), Math.abs(there.z - at.z)) <= simulation) {
+                if (Math.max(Math.abs(there.x - at.x), Math.abs(there.z - at.z)) <= chunks) {
                     return true;
                 }
             }

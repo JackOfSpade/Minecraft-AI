@@ -369,22 +369,45 @@ public final class InhabitantStateGameTests {
                     Rig.LOG.info("[dormancy] state before dormancy: {}", expected[0]);
                     InhabitantsConfig cfg = services.config().get();
                     InhabitantsConfig.Dormancy d = cfg.dormancy;
+                    InhabitantsConfig.Allocation alloc = cfg.allocation;
+                    boolean aggro = cfg.aggro.enabled;
                     boolean enabled = d.enabled;
                     double distance = d.distanceBlocks;
-                    int delay = d.delayTicks;
-                    int scan = d.scanIntervalTicks;
+                    int grace = alloc.graceTicks;
+                    int dwell = alloc.dwellTicks;
+                    int interval = alloc.intervalTicks;
+                    var players = rig.server.getPlayerList();
+                    int simulation = players.getSimulationDistance();
+                    int view = players.getViewDistance();
                     rig.onCleanup(() -> {
+                        cfg.aggro.enabled = aggro;
                         d.enabled = enabled;
                         d.distanceBlocks = distance;
-                        d.delayTicks = delay;
-                        d.scanIntervalTicks = scan;
+                        alloc.graceTicks = grace;
+                        alloc.dwellTicks = dwell;
+                        alloc.intervalTicks = interval;
+                        players.setSimulationDistance(simulation);
+                        players.setViewDistance(view);
                         cfg.include.remove(rig.structureId());
                     });
-                    // The mock player stands 48 blocks away: with the distance set to 2 the inhabitant is "far from every player".
+                    // The nearest-first allocation replaced the distance rule: the mock player stands 48 blocks away, and with a simulation
+                    // distance of 2 chunks (32 blocks) the structure is out of the relevance area and the bot's chunk is not loaded by
+                    // the player. Only a bot a player has SEEN is put to sleep with its state (an unseen one is deleted, its slot is vacant):
+                    // the sighting itself is tested by the population tests, here the record just says it was seen.
+                    players.setSimulationDistance(2);
+                    players.setViewDistance(2);
+                    cfg.aggro.enabled = false; // a bot that hunts the player is engaged and never removed; it is not the subject here
                     d.distanceBlocks = 2.0;
-                    d.delayTicks = 0;
-                    d.scanIntervalTicks = 1;
                     d.enabled = true;
+                    alloc.graceTicks = 0;
+                    alloc.dwellTicks = 0;
+                    alloc.intervalTicks = 5;
+                    record(rig).ifPresent(b -> {
+                        b.seen = true;
+                        b.firstSeenMillis = System.currentTimeMillis();
+                        b.lastSeenMillis = b.firstSeenMillis;
+                    });
+                    rig.placeTarget(56.0); // a player that moves lets the allocation look again at once
                     mark[0] = tick;
                     phase[0] = 3;
                 }
@@ -396,7 +419,9 @@ public final class InhabitantStateGameTests {
                             rig.fail("the bot is recorded dormant but its entity is still online");
                         }
                         Rig.LOG.info("[dormancy] went dormant {} ticks after dormancy was switched on", tick - mark[0]);
-                        // The structure's chunk loads again (a real player comes back): the same call the structure detector makes.
+                        // The player comes back and the structure's chunk loads again: the same call the structure detector makes; the
+                        // allocation wakes the sleeper first.
+                        rig.placeTarget(24.0);
                         services.config().get().include.add(rig.structureId());
                         ((PopulationEngine) services.engine()).submit(rig.arena());
                         mark[0] = tick;

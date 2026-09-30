@@ -161,6 +161,9 @@ final class PopulationScene {
         int dwell = cfg.allocation.dwellTicks;
         int interval = cfg.allocation.intervalTicks;
         int seenCheck = cfg.allocation.seenCheckTicks;
+        var players = server.getPlayerList();
+        int simulation = players.getSimulationDistance();
+        int view = players.getViewDistance();
         cfg.dormancy.enabled = true;
         cfg.aggro.enabled = false; // a bot that chases the player over the platform edge is no subject of these tests
         cfg.dormancy.distanceBlocks = radius;
@@ -168,6 +171,11 @@ final class PopulationScene {
         cfg.allocation.dwellTicks = 0;
         cfg.allocation.intervalTicks = 5;
         cfg.allocation.seenCheckTicks = 5;
+        // The relevance area is never smaller than the simulation distance, and a seen bot in a chunk the player keeps loaded is
+        // not put to sleep: so the scene shrinks both (2 chunks at least) to make a player a few dozen blocks away "out of range".
+        int chunks = Math.max(2, (int) Math.ceil(radius / 16.0));
+        players.setSimulationDistance(chunks);
+        players.setViewDistance(chunks);
         onCleanup(() -> {
             cfg.dormancy.enabled = dormancy;
             cfg.aggro.enabled = aggro;
@@ -176,6 +184,8 @@ final class PopulationScene {
             cfg.allocation.dwellTicks = dwell;
             cfg.allocation.intervalTicks = interval;
             cfg.allocation.seenCheckTicks = seenCheck;
+            players.setSimulationDistance(simulation);
+            players.setViewDistance(view);
         });
     }
 
