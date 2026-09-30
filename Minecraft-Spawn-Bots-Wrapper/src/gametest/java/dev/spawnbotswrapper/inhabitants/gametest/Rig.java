@@ -196,6 +196,11 @@ final class Rig {
             return false;
         }
         bot = entity;
+        // PvP BOT switches a new bot to survival with a delayed command of its own, and the GameTest server defaults to
+        // creative: a bot that is looked at before that command ran refuses all damage. A survival server has no such window.
+        if (bot.gameMode.getGameModeForPlayer() != GameType.SURVIVAL) {
+            bot.setGameMode(GameType.SURVIVAL);
+        }
         botName = planned.name;
         return true;
     }
@@ -302,6 +307,28 @@ final class Rig {
         if (sinceDressing % every == 0) {
             LOG.info("[{}] {}", tag, trace());
         }
+    }
+
+    /**
+     * One try at hitting the inhabitant like the target player would (a melee damage source). A fresh bot refuses damage for a
+     * while (a joining client that has not finished loading is protected), so the caller repeats this every tick until it
+     * answers true.
+     */
+    boolean tryHit(float damage) {
+        if (!bot.connection.hasClientLoaded()) {
+            // Left alone the protection lifts after a while, but not always within a test's window; tell the listener the
+            // (imaginary) client has loaded, exactly as MockPlayers does for the player.
+            bot.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket());
+        }
+        net.minecraft.world.damagesource.DamageSource source = level.damageSources().playerAttack(target);
+        boolean applied = bot.hurtServer(level, source, damage);
+        if (!applied && ctx.getTick() % 50 == 0) {
+            LOG.info("[hit-refused] t={} invulnerableTo={} invulnerableTime={} loaded={} gameMode={} health={} removed={} dead={}",
+                    level.getGameTime(), bot.isInvulnerableTo(level, source), bot.invulnerableTime,
+                    bot.connection.hasClientLoaded(), bot.gameMode.getGameModeForPlayer(), bot.getHealth(), bot.isRemoved(),
+                    bot.isDeadOrDying());
+        }
+        return applied;
     }
 
     /** One line of the bot's state for the run log. */

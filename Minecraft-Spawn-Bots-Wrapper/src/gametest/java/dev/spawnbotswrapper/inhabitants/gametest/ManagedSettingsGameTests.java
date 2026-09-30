@@ -68,8 +68,15 @@ public final class ManagedSettingsGameTests {
             require(context, heldAtTheShippedValues(), "before the reload PvP BOT runs with " + held());
             Object before = Upstream.settingsObject();
             try {
-                Files.writeString(settingsFile(), "{ \"autoEquipWeapon\": true, \"maxTargetDistance\": 40.0, "
-                        + "\"rangedMinRange\": 20.0, \"rangedOptimalRange\": 40.0, \"rangedMaxRange\": 60.0 }\n", StandardCharsets.UTF_8);
+                // Only the managed keys go back to PvP BOT's defaults: the file is the whole settings state of the GameTest
+                // world, and every test after this one runs against it.
+                String file = Files.readString(settingsFile(), StandardCharsets.UTF_8)
+                        .replaceAll("\"autoEquipWeapon\": \\w+", "\"autoEquipWeapon\": true")
+                        .replaceAll("\"maxTargetDistance\": [0-9.]+", "\"maxTargetDistance\": 40.0")
+                        .replaceAll("\"rangedMinRange\": [0-9.]+", "\"rangedMinRange\": 20.0")
+                        .replaceAll("\"rangedOptimalRange\": [0-9.]+", "\"rangedOptimalRange\": 40.0")
+                        .replaceAll("\"rangedMaxRange\": [0-9.]+", "\"rangedMaxRange\": 60.0");
+                Files.writeString(settingsFile(), file, StandardCharsets.UTF_8);
             } catch (IOException e) {
                 context.fail(net.minecraft.network.chat.Component.nullToEmpty("cannot write " + settingsFile() + ": " + e));
             }

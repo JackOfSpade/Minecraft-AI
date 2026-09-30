@@ -2,7 +2,6 @@ package dev.spawnbotswrapper.inhabitants.gametest;
 
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
-import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
 
@@ -33,14 +32,16 @@ public final class CombatLogGameTests {
             rig.traceEvery(5, sinceDress, "taken");
             long since = context.getTick() - dressedAt[0];
             // A fresh bot is protected like a client that has not finished loading (up to 60 ticks), as for any joining player.
-            if (!hit[0] && rig.bot.connection.hasClientLoaded()) {
+            if (!hit[0]) {
                 float before = rig.bot.getHealth();
-                ServerPlayer attacker = rig.target;
-                boolean applied = rig.bot.hurtServer(rig.level, rig.level.damageSources().playerAttack(attacker), 4.0F);
-                Rig.LOG.info("[taken] hit applied={} health {} -> {} (fake player class {})", applied, before,
-                        rig.bot.getHealth(), rig.bot.getClass().getName());
-                hit[0] = true;
-                hitAt[0] = context.getTick();
+                if (rig.tryHit(4.0F)) {
+                    Rig.LOG.info("[taken] hit applied: health {} -> {} (fake player class {})", before,
+                            rig.bot.getHealth(), rig.bot.getClass().getName());
+                    hit[0] = true;
+                    hitAt[0] = context.getTick();
+                } else if (since > 200) {
+                    rig.fail("the inhabitant refused every hit for 200 ticks; " + rig.trace());
+                }
             }
             if (hit[0] && context.getTick() >= hitAt[0] + 10) {
                 List<String> lines = capture.containing("Combat taken:");

@@ -37,14 +37,12 @@ public final class TargetingRadiusGameTests {
             rig.traceEvery(20, now - dressedAt[0], "radius");
             if (hitAt[0] < 0) {
                 // a fresh bot is protected like a client that has not finished loading
-                if (rig.bot.connection.hasClientLoaded()) {
-                    boolean applied = rig.bot.hurtServer(rig.level, rig.level.damageSources().playerAttack(rig.target), 2.0F);
-                    Rig.LOG.info("[radius] hit from {} blocks applied={} health now {}", rig.bot.distanceTo(rig.target), applied,
+                if (rig.tryHit(2.0F)) {
+                    Rig.LOG.info("[radius] hit from {} blocks applied, health now {}", rig.bot.distanceTo(rig.target),
                             rig.bot.getHealth());
-                    if (!applied) {
-                        rig.fail("the hit was not applied");
-                    }
                     hitAt[0] = now;
+                } else if (now - dressedAt[0] > 200) {
+                    rig.fail("the inhabitant refused every hit for 200 ticks; " + rig.trace());
                 }
                 return;
             }
