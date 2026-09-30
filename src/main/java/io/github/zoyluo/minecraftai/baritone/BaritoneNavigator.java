@@ -7,6 +7,7 @@ import baritone.api.event.events.PathEvent;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalNear;
+import baritone.api.pathing.goals.GoalRunAway;
 import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.utils.PathCalculationResult;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -232,6 +233,9 @@ public final class BaritoneNavigator {
     static Goal goalOf(AIPlayerEntity bot, NavRoute route) {
         return switch (route.shape()) {
             case NEAR -> new GoalNear(route.target(), route.radius());
+            // Baritone's own flee goal: satisfied at radius blocks (horizontally) from the observed source cell; its search
+            // picks the way, this mod does not project a flee target by hand.
+            case RUN_AWAY -> new GoalRunAway(route.radius(), route.target());
             case BLOCK -> Standability.isStandable(bot.level(), route.target())
                     ? new GoalBlock(route.target())
                     : new GoalNear(route.target(), 1);

@@ -83,7 +83,7 @@ final class NavEngineLazyBootstrapContractTest {
             assertTrue(pack.substring(Math.max(0, at - 120), at).contains("NavEngineSelector.attempt("),
                     "startBaritoneRoute call at offset " + at + " is not inside NavEngineSelector.attempt");
         }
-        assertEquals(3, calls, "path_to, approach and swim_route are the entries of the Baritone engine");
+        assertEquals(4, calls, "path_to, approach, swim_route and run_away are the entries of the Baritone engine");
         // Nothing else in the mod starts Baritone routes.
         try (Stream<Path> files = Files.walk(MAIN)) {
             List<Path> users = files.filter(p -> p.toString().endsWith(".java"))

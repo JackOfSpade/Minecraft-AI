@@ -715,6 +715,22 @@ public final class ActionPack {
                 () -> ActionResult.failed(ENGINE_NOT_BARITONE));
     }
 
+    /**
+     * Baritone-only: flee. Walks until at least {@code distance} blocks (horizontally) from {@code source}, using Baritone's own
+     * run-away goal (no hand-made flee target). Walk-only (no breaking, no placing) and dry, like every surface escape.
+     *
+     * @return {@link #ENGINE_NOT_BARITONE} failure when the engine is not (or no longer) Baritone, or the admission failure: the
+     *         caller then projects its own escape goal and uses the ordinary surface path
+     */
+    public ActionResult startRunAwayFrom(BlockPos source, int distance) {
+        if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
+            return ActionResult.failed(ENGINE_NOT_BARITONE);
+        }
+        NavRoute request = new NavRoute(NavRoute.Shape.RUN_AWAY, source, distance, NavRoute.Options.WALK_ONLY, "run_away", serverTick());
+        return NavEngineSelector.attempt(player.getUUID(), "run_away", () -> startBaritoneRoute(request, null, true),
+                () -> ActionResult.failed(ENGINE_NOT_BARITONE));
+    }
+
     private ActionResult startBaritoneRoute(NavRoute request, PathRequestIdentity identity, boolean admit) {
         int now = serverTick();
         if (identity != null && identity.equals(lastPathRequest) && now < nextPathfindTick) {
@@ -755,7 +771,9 @@ public final class ActionPack {
         }
         double dx = request.target().getX() + 0.5D - player.getX();
         double dz = request.target().getZ() + 0.5D - player.getZ();
-        int deadlineBudget = NavRouteRules.deadlineTicks(Math.sqrt(dx * dx + dz * dz));
+        // A flight is as long as its radius, not as far as the source it runs from.
+        double travel = request.shape() == NavRoute.Shape.RUN_AWAY ? request.radius() : Math.sqrt(dx * dx + dz * dz);
+        int deadlineBudget = NavRouteRules.deadlineTicks(travel);
         request.setDeadlineTick(now + deadlineBudget);
         if (previous != null && admit) {
             // A newer request took the bot over: the route it replaced is over and says so. (A deliberate re-goal refresh of the

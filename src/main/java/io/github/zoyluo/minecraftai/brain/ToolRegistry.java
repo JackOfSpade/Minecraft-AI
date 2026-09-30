@@ -61,6 +61,7 @@ import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
+import io.github.zoyluo.minecraftai.task.WardenRefusal;
 import io.github.zoyluo.minecraftai.task.TradeTask;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -179,7 +180,7 @@ public final class ToolRegistry {
         register("inventory", "Get the bot's current inventory", objectSchema().build(), (bot, args) ->
                 ok(InventoryAction.summarize(bot).toString()));
 
-        register("equip_best_tool", "Equip the best available tool for breaking a block type", objectSchema()
+        register("equip_best_tool", "Equip the least valuable tool that can properly mine a block type and keep its drops (worst-first: a wooden pickaxe before a stone one for stone)", objectSchema()
                 .property("block", stringSchema("block id, for example minecraft:stone"))
                 .required("block")
                 .build(), (bot, args) -> {
@@ -576,8 +577,13 @@ public final class ToolRegistry {
                 .property("count", integerSchema("number of kills"))
                 .required("entity_type")
                 .build(), (bot, args) -> {
+            EntityType<?> attackType = requiredEntityType(args, "entity_type");
+            if (WardenRefusal.refuses(attackType)) {
+                WardenRefusal.logRefused(bot, "tool");
+                return fail(WardenRefusal.MESSAGE);
+            }
             Task task = new CombatTask(
-                    requiredEntityType(args, "entity_type"),
+                    attackType,
                     optionalInt(args, "count", 1),
                     io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp());
             assignLlm(bot, task);
@@ -990,6 +996,10 @@ public final class ToolRegistry {
                     boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(OreScan.oreFamily(block), count));
                     return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
                 }
+            }
+            if ("attack".equals(taskType) && WardenRefusal.refuses(requiredEntityType(params, "entity_type"))) {
+                WardenRefusal.logRefused(bot, "task_type");
+                return fail(WardenRefusal.MESSAGE);
             }
             Task task = createTask(bot, taskType, params);
             assignLlm(bot, task);

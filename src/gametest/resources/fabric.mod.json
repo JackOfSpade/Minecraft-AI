@@ -101,7 +101,9 @@
       "io.github.zoyluo.minecraftai.task.FollowPaceGameTests",
       "io.github.zoyluo.minecraftai.task.FollowPaceBaritoneGameTests",
       "io.github.zoyluo.minecraftai.task.FollowEscortGameTests",
-      "io.github.zoyluo.minecraftai.task.AutoEatSprintLimitGameTests"
+      "io.github.zoyluo.minecraftai.task.AutoEatSprintLimitGameTests",
+      "io.github.zoyluo.minecraftai.task.WardenStealthGameTests",
+      "io.github.zoyluo.minecraftai.task.EvadeEscortGameTests"
     ]
   },
   "depends": {

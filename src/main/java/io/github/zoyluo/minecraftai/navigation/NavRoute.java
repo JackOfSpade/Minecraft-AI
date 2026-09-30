@@ -14,7 +14,9 @@ import net.minecraft.core.BlockPos;
 public final class NavRoute {
     public enum Shape {
         BLOCK,
-        NEAR
+        NEAR,
+        /** Get at least {@code radius} blocks (horizontally) away from the target cell: a {@code GoalRunAway} (retreat, evade). */
+        RUN_AWAY
     }
 
     /** Where a route stands: Baritone still drives it, it arrived, Baritone let go of the bot short of the goal, or it keeps being vetoed. */
@@ -116,6 +118,6 @@ public final class NavRoute {
 
     @Override
     public String toString() {
-        return label + "[" + shape + " " + target.toShortString() + (shape == Shape.NEAR ? " r=" + radius : "") + "]";
+        return label + "[" + shape + " " + target.toShortString() + (shape == Shape.BLOCK ? "" : " r=" + radius) + "]";
     }
 }

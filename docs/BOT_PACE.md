@@ -108,8 +108,8 @@ step, two clear cells ahead).
   veto it) and the sneak is lifted. Near a calm warden this makes noise; the alternative (a per-bot allow-sprint patch, 0018) is
   deferred.
 * **Sneaking, walking and sprinting cannot be sneaked past a claim.** `setSprinting(true)` and `setSneaking(true)` only record the flag
-  while a Baritone route drives the bot; they no longer take the bot over and cancel the route the caller has just started (the
-  evade task sets sprint right after starting its route).
+  while a Baritone route drives the bot; they no longer take the bot over and cancel the route the caller has just started. (Evade
+  asks for its gait with a lease right after starting its route, see below.)
 
 ## Quiet zones and wardens
 
@@ -158,7 +158,34 @@ called on other ticks). The weapon is picked when a candidate is near, at most e
 a hostile that could kill the bot in two hits, lava, drowning and falling. Regroup is skipped while following. A `FollowTask` with a hostile
 within 6 blocks is TaskManager-critical (it ticks even under a degraded TPS).
 
-**Retreat.** The user decision is that evade and retreat legs use the same pace policy and the same escort rule. The pace policy already covers them (aggro pressure sprints, the EVADE lease); a swing at what is in reach while evading is not part of `EvadeTask` yet (it was outside this change).
+## Retreat and wardens (R3, R4)
+
+**Wardens are never fought.** The `attack` tool, `assign_task` with `task_type=attack` and `/minecraftai task assign <bot> attack` refuse a warden
+up front ("I won't fight a warden. I'll sneak away from it instead.", log `combat_refused_warden`, nothing is assigned; `WardenRefusal`).
+What the bot does about a warden is `EvadeTask` (a warden in view within the sonic boom range, or a low-health flight):
+
+* `EvadeTask.fleeGait`: SNEAK from a CALM warden (not hunting: `WardenState`), SPRINT when it hunts the bot or its owner (synced anger,
+  a roar, a recorded hit) or the bot took damage in the last 20 ticks, and for every other threat. `behaviour.warden.sneakAway=false` sprints
+  from every warden as before. The gait is renewed every tick as a tick lease (so a calm warden that starts to hunt turns the creep into a
+  sprint on the next tick, and a hunting one that has stopped chasing turns it back) and requested as a route lease right after each route
+  starts. A flight from a warden is a WARDEN-owned lease, which the calm-warden cap and the aggro pressure do not touch; any other flight is
+  an EVADE lease (a sprint, capped to a walk next to a calm warden unless it hunts or the bot is hurt). The route ceilings still apply: the
+  sneak is lifted on drops, descents, parkour and climbables, so a creeping bot still gets down a ledge.
+* A sneak leg covers about a quarter of the ground of a sprint, so the evade budget counts a sneaking tick as 1/4 tick: the 400-tick budget
+  (`evade_timeout`) is 1600 ticks while creeping.
+* A leg from a warden is 20 blocks (`CombatCore.WARDEN_ESCAPE_DISTANCE`, past the 15-block sonic boom range), any other leg 12.
+* Direction bias (legacy engine and fallback fan): a bot that can see its owner adds 0.3 times the cosine of the angle to the owner to the
+  rank of each escape direction that still leads away from the source (ranks: straight away 1.0, 45 degrees 0.9, 90 degrees 0.8), so it flees
+  toward its owner between two open sides.
+* **On the Baritone engine the flight is Baritone's own run-away goal** (`NavRoute.Shape.RUN_AWAY`, `ActionPack.startRunAwayFrom`, a
+  `GoalRunAway` at the escape distance beyond the bot's current distance from the observed source; walk-only, dry) instead of a hand-made
+  goal; a refused run-away falls back to the fan of surface goals, which is also what the legacy engine uses. Baritone picks the way, so the
+  owner bias does not apply to it.
+
+**Retreat escort.** The user decision is that evade and retreat legs use the same pace policy and the same escort rule as a follower.
+`EvadeTask` runs a `FollowEscort` after its movement decisions: while it flees, it knocks back only what is in its melee reach, on ready
+ticks, and never turns the flight around (the escort is silent next to a calm warden, never touches a creeper or a warden, and needs
+`behaviour.follow.escortOnly`). Tests: `WardenStealthGameTests`, `EvadeEscortGameTests`.
 
 ## Eating at the sprint limit (R6)
 
