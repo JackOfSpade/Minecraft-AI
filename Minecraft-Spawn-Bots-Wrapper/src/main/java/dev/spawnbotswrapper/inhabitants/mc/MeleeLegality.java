@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 
 import java.util.Locale;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 
 /**
@@ -54,6 +55,12 @@ import java.util.function.Supplier;
  * vanilla. Illegal hits return false: no damage, no knockback, no effect. Each veto is a debug line and counted
  * ({@link MeleeVetoLog}); one INFO line per bot per minute reports the count.
  * <p>
+ * <b>Reaction time.</b> Before any of that (and whatever the legality switch says), a melee blow on a PLAYER is vetoed unless the
+ * inhabitant has a CONFIRMED aggro engagement with exactly that player ({@code AggroController#mayAttackPlayer}: the target was
+ * continuously in sight for the full reaction time, again after every re-sighting). This is where PvP BOT's instant revenge is
+ * stopped: it acts in the same tick as the hit that provoked it, before the aggro controller can clear it. Mob victims are not
+ * asked about (PvP BOT's own revenge against mobs is left as it is); projectiles are gated at fire time, not at impact.
+ * <p>
  * Limit: the event fires for normal players and mobs (whom inhabitants hit). A HeroBot fake player re-implements the whole
  * hurt routine and never fires it, so an inhabitant hitting ANOTHER inhabitant is not covered; that is rare and left alone.
  * <p>
@@ -66,10 +73,23 @@ public final class MeleeLegality {
     /** The last legally hit primary victim per attacker (bounded), to let the sweep of the same swing through. */
     private final SweepMemory primaries = new SweepMemory();
     private boolean broken;
+    /** Whether an inhabitant (first name) may hurt a player (second name) now: the reaction-time rule, see the class comment. */
+    private final BiPredicate<String, String> mayHitPlayer;
+    private long reactionVetoes;
 
     public MeleeLegality(Supplier<ServerSession> session, Logger log) {
+        this(session, log, (bot, victim) -> true);
+    }
+
+    public MeleeLegality(Supplier<ServerSession> session, Logger log, BiPredicate<String, String> mayHitPlayer) {
         this.session = session;
         this.log = log;
+        this.mayHitPlayer = mayHitPlayer;
+    }
+
+    /** Melee blows on players vetoed because the inhabitant had no CONFIRMED engagement with them yet (for tests and diagnostics). */
+    public long reactionVetoes() {
+        return reactionVetoes;
     }
 
     /** Registers the damage veto; call once from the mod entrypoint. */
@@ -103,13 +123,24 @@ public final class MeleeLegality {
                 return true;
             }
             InhabitantsConfig cfg = services.config().get();
-            if (cfg == null || cfg.combat == null || cfg.combat.meleeLegality == null
-                    || !cfg.combat.meleeLegality.enabled) {
+            if (cfg == null) {
                 return true;
             }
             String name = attacker.getName().getString();
             if (services.population().findBot(name).isEmpty() || !(attacker.level() instanceof ServerLevel level)
                     || victim.level() != level) {
+                return true;
+            }
+            // The reaction time is enforced here, at damage level: PvP BOT's instant revenge (which acts in the same tick as
+            // the hit that provoked it) cannot land a blow on a player before the engagement is confirmed. Independent of the
+            // legality switch below.
+            if (victim instanceof ServerPlayer target && !mayHitPlayer.test(name, target.getName().getString())) {
+                reactionVetoes++;
+                log.debug("melee legality: vetoed {} on {}: no confirmed engagement yet (the reaction time has not passed)",
+                        name, target.getName().getString());
+                return false;
+            }
+            if (cfg.combat == null || cfg.combat.meleeLegality == null || !cfg.combat.meleeLegality.enabled) {
                 return true;
             }
             return decide(level, attacker, name, victim);

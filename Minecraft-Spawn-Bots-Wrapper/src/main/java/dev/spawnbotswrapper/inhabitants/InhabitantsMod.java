@@ -61,8 +61,8 @@ public final class InhabitantsMod implements ModInitializer {
     /** The line-of-sight hunter (inhabitants notice, chase, search for and walk back from players); see AggroController. */
     private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER);
     /** No cheating: vetoes melee hits by inhabitants that a human client could not make (through walls, beyond reach). */
-    private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER);
-    private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER);
+    private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER, aggro::mayAttackPlayer);
+    private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER, aggro::mayAttackPlayer);
     private final OutOfAmmoGapCloser gapCloser = new OutOfAmmoGapCloser(() -> session, LOGGER);
     /** Vanilla's rule that food is only eaten below a full food bar, which PvP BOT's own eating skips. */
     private final EatGate eatGate = new EatGate(LOGGER);
@@ -119,7 +119,7 @@ public final class InhabitantsMod implements ModInitializer {
     }
 
     /**
-     * Where an inhabitant is in the aggro hunt (IDLE, REACT, CHASE, PURSUE, SEARCH, RETURN), or IDLE when nothing runs. A seam
+     * Where an inhabitant is in the aggro hunt (IDLE, CHASE, PURSUE, SEARCH, RETURN), or IDLE when nothing runs. A seam
      * for the real-server GameTests; nothing in the addon itself calls it.
      */
     public static String aggroPhaseOf(String botName) {
@@ -153,6 +153,24 @@ public final class InhabitantsMod implements ModInitializer {
     public static double[] aggroHomeOf(String botName) {
         InhabitantsMod mod = instance;
         return mod == null ? null : mod.aggro.homeOf(botName);
+    }
+
+    /** The player an inhabitant has a CONFIRMED engagement with (the reaction time served), or null. A seam for the GameTests. */
+    public static String aggroConfirmedTarget(String botName) {
+        InhabitantsMod mod = instance;
+        return mod == null ? null : mod.aggro.confirmedTarget(botName);
+    }
+
+    /** How many vanilla vibration listeners the inhabitants have registered (none may leak). A seam for the GameTests. */
+    public static int hearingListeners() {
+        InhabitantsMod mod = instance;
+        return mod == null ? 0 : mod.aggro.hearingListeners();
+    }
+
+    /** Melee blows on players vetoed for want of a confirmed engagement, and loaded crossbows held back for the same reason: {melee, crossbow}. A seam for the GameTests. */
+    public static long[] reactionHolds() {
+        InhabitantsMod mod = instance;
+        return mod == null ? new long[2] : new long[]{mod.meleeLegality.reactionVetoes(), mod.rangedFire.shotsHeldBack()};
     }
 
     private static void logConfigLoad(ConfigHolder holder, ConfigIO.LoadResult result) {

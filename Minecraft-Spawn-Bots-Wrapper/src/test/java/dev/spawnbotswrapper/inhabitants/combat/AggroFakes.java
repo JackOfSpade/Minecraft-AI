@@ -42,12 +42,18 @@ final class AggroFakes {
         /** Look direction (x, z); null = the fake cannot tell (the controller then uses plain line of sight). */
         double[] look = {1, 0};
         /** What this person is doing, for those who notice it. */
-        Perception.Subject subject = Perception.Subject.player(false, false, false);
+        Perception.Subject subject = Perception.Subject.player(false);
         int canSeeCalls;
         /** Names vanilla's plain eye-to-eye line of sight cannot see (used when perception is off). */
         final Set<String> plainBlind = new HashSet<>();
-        /** Attackers of hits taken since the controller last asked (the hit feed). */
-        final List<Person> hitQueue = new ArrayList<>();
+        /** Hits taken since the controller last asked (the hit feed). */
+        final List<AggroWorld.Hit> hitQueue = new ArrayList<>();
+        /** Sounds heard (vanilla vibrations) since the controller last asked. */
+        final List<AggroWorld.Sound> soundQueue = new ArrayList<>();
+        /** Where a trace back along a projectile's line ends; null = the far end of the line (nothing blocks it). */
+        Pos traceEnd;
+        /** The last trace-back this person was asked for: {dx, dy, dz, limit}. */
+        double[] lastTrace;
         /** Where this person looked to during the last tick (recorded by the control). */
         Pos lookedAt;
 
@@ -128,8 +134,21 @@ final class AggroFakes {
         }
 
         @Override
-        public Body newHitAttacker() {
+        public AggroWorld.Hit newHit() {
             return hitQueue.isEmpty() ? null : hitQueue.remove(0);
+        }
+
+        @Override
+        public List<AggroWorld.Sound> drainSounds() {
+            List<AggroWorld.Sound> out = new ArrayList<>(soundQueue);
+            soundQueue.clear();
+            return out;
+        }
+
+        @Override
+        public Pos traceBack(Pos from, double dx, double dy, double dz, double limit) {
+            lastTrace = new double[]{dx, dy, dz, limit};
+            return traceEnd != null ? traceEnd : new Pos(from.x() + dx * limit, from.y() + dy * limit, from.z() + dz * limit);
         }
 
         @Override
@@ -212,7 +231,9 @@ final class AggroFakes {
      * writes through the {@link TargetControl} interface. Steering moves the bot when {@code walkSpeed} is set.
      */
     static class Control implements TargetControl {
-        Settings settings = new Settings(true, false, true, false, false, false, false, 128.0);
+        Settings settings = new Settings(true, false, true, false, false, false, false, 64.0);
+        /** Whether a look call turns the bot (false: it stays facing where it faced, to prove hearing needs no view cone). */
+        boolean lookTurns = true;
         boolean available = true;
         boolean steering = true;
         boolean settingsFail;
@@ -339,6 +360,9 @@ final class AggroFakes {
             lookCalls++;
             calls.add("look " + p.name);
             p.lookedAt = at;
+            if (!lookTurns) {
+                return;
+            }
             double dx = at.x() - p.x;
             double dz = at.z() - p.z;
             double len = Math.sqrt(dx * dx + dz * dz);
@@ -425,6 +449,20 @@ final class AggroFakes {
         }
     }
 
+    /** A melee hit on {@code victim} by {@code attacker}. */
+    static AggroWorld.Hit melee(Person victim, Person attacker) {
+        double dx = attacker.x - victim.x;
+        double dz = attacker.z - victim.z;
+        double len = Math.max(1e-9, Math.hypot(dx, dz));
+        return new AggroWorld.Hit(attacker, new Pos(victim.x, victim.y + 0.9, victim.z), dx / len, 0.0, dz / len);
+    }
+
+    /** A projectile hit on {@code victim} that came from the direction (dx, dz). */
+    static AggroWorld.Hit projectile(Person victim, double dx, double dz) {
+        double len = Math.max(1e-9, Math.hypot(dx, dz));
+        return new AggroWorld.Hit(null, new Pos(victim.x, victim.y + 0.9, victim.z), dx / len, 0.0, dz / len);
+    }
+
     static final class Lines implements AggroController.Log {
         final List<String> debug = new ArrayList<>();
         final List<String> info = new ArrayList<>();
@@ -493,10 +531,21 @@ final class AggroFakes {
             return controller.phaseOf(bot.name);
         }
 
-        /** Somebody hits the bot: PvP BOT remembers the attacker as its revenge target, and the hit feed reports it. */
+        /** Somebody hits the bot in melee: PvP BOT remembers the attacker as its revenge target, and the hit feed reports it. */
         void hit(Person attacker) {
             up.lastAttacker.put(bot.name, attacker);
-            bot.hitQueue.add(attacker);
+            bot.hitQueue.add(melee(bot, attacker));
+        }
+
+        /** A projectile of {@code shooter} hits the bot; it came from the direction (dx, dz). PvP BOT's revenge names the shooter. */
+        void shot(Person shooter, double dx, double dz) {
+            up.lastAttacker.put(bot.name, shooter);
+            bot.hitQueue.add(projectile(bot, dx, dz));
+        }
+
+        /** The bot hears a sound at a position. */
+        void sound(double x, double z) {
+            bot.soundQueue.add(new AggroWorld.Sound(new Pos(x, 64, z)));
         }
     }
 }

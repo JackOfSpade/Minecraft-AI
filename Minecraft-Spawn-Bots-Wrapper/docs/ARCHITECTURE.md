@@ -242,8 +242,15 @@ in `mc.AggroDriver` (world view) and `mc.VanillaPathPlanner` (vanilla pathfindin
 never added to the level); PvP BOT is only ever touched through the adapter. It runs in a Fabric tick phase ordered after
 PvP BOT's own bot tick (`mc.LateTickPhase`) so that its steering is the last input each tick.
 
-The state machine per inhabitant is IDLE -> CHASE -> PURSUE -> SEARCH -> RETURN -> IDLE (plus REACT, the reaction
-delay after a visible hit); see the README for the rules. Time, not distance, is what noticing is made of
-(`Perception` + `ExposureTracker`, shared with Minecraft-AI through `docs/perception/vectors.json`); the only distance limit
-is the mod maximum of 128 blocks. A Baritone-backed `PathPlanner` can replace the vanilla one without touching the state
-machine.
+The state machine per inhabitant is IDLE -> CHASE -> PURSUE -> SEARCH -> RETURN -> IDLE; a CHASE carries a CONFIRMED flag
+(true only after the reaction time, false on the first unseen tick, restarted by every re-sighting); see the README for the
+rules. Time, not distance, is what noticing is made of (`Perception` + `ExposureTracker`, shared with Minecraft-AI through
+`docs/perception/vectors.json`, one continuous formula in seconds); the only hard-coded distance rule is the 64 block engage
+limit (`AggroController.ENGAGE_LIMIT`). The hunter acts only on what it perceives (no magic): sight, the last known position,
+hearing and the direction a blow came from.
+
+Hearing is vanilla's own vibration system, called directly by `mc.InhabitantEars` (a `VibrationSystem` with its `Listener` in
+a `DynamicGameEventListener` per inhabitant, `Ticker.tick` every tick, the listener removed on every exit path); the
+controller only consumes the sounds (`AggroWorld.Watcher.drainSounds`). The damage-level reaction gate is
+`AggroController.mayAttackPlayer`, asked by `mc.MeleeLegality` (melee blows on players) and `mc.RangedFire` (a loaded
+crossbow). A Baritone-backed `PathPlanner` can replace the vanilla one without touching the state machine.

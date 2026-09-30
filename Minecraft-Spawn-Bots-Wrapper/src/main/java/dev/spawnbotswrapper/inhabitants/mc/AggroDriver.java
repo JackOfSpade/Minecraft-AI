@@ -15,7 +15,7 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemUseAnimation;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -48,10 +48,13 @@ public final class AggroDriver {
     /** Notices hits on inhabitants, also the ones the damage event never delivers; see {@link HitPoller}. */
     private final HitPoller hits = new HitPoller();
     private long lastHitPrune;
+    /** Vanilla vibration listeners of the inhabitants (their hearing); see {@link InhabitantEars}. */
+    private final InhabitantEars ears;
 
     public AggroDriver(Supplier<ServerSession> session, Logger log) {
         this.session = session;
         this.log = log;
+        this.ears = new InhabitantEars(message -> log.warn("aggro: {}", message));
     }
 
     /** Once per server tick, after the session's own tick. */
@@ -85,7 +88,15 @@ public final class AggroDriver {
                         }
                     });
         }
-        controller.tick(server.getTickCount(), new World(server, services, hits));
+        InhabitantsConfig.Aggro aggro = cfg.aggro == null ? new InhabitantsConfig.Aggro() : cfg.aggro;
+        boolean hearing = cfg.enabled && aggro.enabled && (aggro.perception == null || aggro.perception.enabled);
+        World world = new World(server, services, hits, ears);
+        List<ServerPlayer> bodies = new ArrayList<>();
+        for (AggroWorld.Watcher w : world.inhabitants()) {
+            bodies.add(((PlayerBody) w).player);
+        }
+        ears.sync(bodies, hearing, aggro.hearing == null ? 16 : aggro.hearing.listenerRadius);
+        controller.tick(server.getTickCount(), world);
         long now = server.getTickCount();
         if (now - lastHitPrune >= 100 || now < lastHitPrune) {
             lastHitPrune = now;
@@ -104,6 +115,7 @@ public final class AggroDriver {
         controllerSession = null;
         planner.reset();
         hits.reset();
+        ears.closeAll();
         if (c != null) {
             c.reset();
         }
@@ -144,6 +156,27 @@ public final class AggroDriver {
         return c != null && c.isEngaged(botName);
     }
 
+    /** The player {@code botName} has a CONFIRMED engagement with (the reaction time served), or null. A seam for the GameTests. */
+    public String confirmedTarget(String botName) {
+        AggroController c = controller;
+        return c == null ? null : c.confirmedTarget(botName);
+    }
+
+    /**
+     * Whether {@code botName} may hurt the player {@code victim} now: false only while the aggro controller manages the bot
+     * and it has no CONFIRMED engagement with exactly that player (see {@link AggroController#mayAttackPlayer}). The damage
+     * veto of {@link MeleeLegality} and the crossbow gate of {@link RangedFire} ask this.
+     */
+    public boolean mayAttackPlayer(String botName, String victim) {
+        AggroController c = controller;
+        return c == null || c.mayAttackPlayer(botName, victim);
+    }
+
+    /** How many vanilla vibration listeners the inhabitants have registered right now. A seam for the leak tests. */
+    public int hearingListeners() {
+        return ears.listenerCount();
+    }
+
     private static AggroController.Config configOf(CommandServices services) {
         InhabitantsConfig cfg = services.config().get();
         InhabitantsConfig.Aggro a = cfg == null || cfg.aggro == null ? new InhabitantsConfig.Aggro() : cfg.aggro;
@@ -152,40 +185,11 @@ public final class AggroDriver {
                 a.returnArriveDistance, a.stuckTicks, a.returnMaxTicks, a.scanIntervalTicks, perceptionOf(a));
     }
 
-    /** The shared perception rules from the {@code aggro} and {@code aggro.perception} blocks. */
+    /** The shared perception rules from the {@code aggro.perception} block. */
     static Perception.Params perceptionOf(InhabitantsConfig.Aggro a) {
-        Perception.Params d = Perception.Params.defaults();
         InhabitantsConfig.AggroPerception p = a.perception == null ? new InhabitantsConfig.AggroPerception() : a.perception;
-        return new Perception.Params(p.enabled, p.frontHalfAngleDeg, p.peripheralHalfAngleDeg, p.peripheralMultiplier,
-                p.sneakMultiplier, a.reactionTicks, a.distanceReactionTicksPer32, p.hearWalk, p.hearSprint,
-                p.hearCombat, d.hearNoisyMob(), d.hearPrimedCreeper(), d.hearWarden(), d.hearAnimal(),
-                p.combatNoiseTicks);
-    }
-
-    /** Horizontal speed (blocks per tick) above which a body counts as moving, so it makes footstep noise. */
-    private static final double MOVING_SPEED_SQ = 0.02 * 0.02;
-
-    /**
-     * Ticks since the entity last made combat noise: swinging an arm (attacks, and breaking or placing blocks),
-     * getting hurt, or using an item that is heard (eating, drinking, drawing a bow or crossbow, a thrown trident;
-     * raising a shield is silent); {@link Perception#NO_NOISE} when none.
-     */
-    private static int combatNoiseAge(LivingEntity e) {
-        int age = Perception.NO_NOISE;
-        if (e.swinging) {
-            age = Math.min(age, e.swingTime);
-        }
-        if (e.hurtTime > 0) {
-            age = Math.min(age, Math.max(0, e.hurtDuration - e.hurtTime));
-        }
-        if (e.isUsingItem()) {
-            ItemUseAnimation anim = e.getUseItem().getUseAnimation();
-            if (anim == ItemUseAnimation.EAT || anim == ItemUseAnimation.DRINK || anim == ItemUseAnimation.BOW
-                    || anim == ItemUseAnimation.CROSSBOW || anim == ItemUseAnimation.SPEAR) {
-                age = 0;
-            }
-        }
-        return age;
+        return new Perception.Params(p.enabled, p.reactionBaseSeconds, p.reactionAt64Seconds, p.fullAttentionHalfAngleDeg,
+                p.peripheralHalfAngleDeg, p.peripheralMultiplier, p.sneakMultiplier);
     }
 
     /** Eye, look and stance of a living entity for {@link Perception}; null for anything else. */
@@ -195,19 +199,65 @@ public final class AggroDriver {
         }
         Vec3 eye = e.getEyePosition();
         Vec3 look = e.getViewVector(1.0F);
-        double dx = e.getX() - e.xo;
-        double dz = e.getZ() - e.zo;
-        boolean moving = dx * dx + dz * dz > MOVING_SPEED_SQ;
         // Vanilla's visibility (invisibility with armor cover, worn mob heads) with its own sneak factor divided out:
         // sneaking is the perception model's factor, not counted twice.
         double visibility = e.getVisibilityPercent(null);
         if (e.isDiscrete()) {
             visibility /= 0.8;
         }
-        Perception.Subject subject = new Perception.Subject(e.isDiscrete() || e.isCrouching(), moving,
-                e.isSprinting(), combatNoiseAge(e), Perception.MobKind.NONE, visibility);
+        Perception.Subject subject = new Perception.Subject(e.isDiscrete() || e.isCrouching(), visibility);
         return new AggroWorld.Senses(new AggroWorld.Pos(eye.x, eye.y, eye.z),
                 new AggroWorld.Pos(look.x, look.y, look.z), subject);
+    }
+
+    /**
+     * The longest eye-to-eye ray cast for a sighting: vanilla {@code hasLineOfSight}'s own range. It only bounds the cost of
+     * a ray; it is not an engagement rule (that is {@link AggroController#ENGAGE_LIMIT}).
+     */
+    static final double SIGHT_RAY_CAP = 128.0;
+
+    /**
+     * How far a blow from a non-projectile source can be felt as coming from its attacker: melee reach plus slack. A source
+     * farther than this (a remote effect) tells the victim nothing about where it came from.
+     */
+    private static final double FELT_MELEE_RANGE = 8.0;
+
+    /**
+     * What the bot felt of the hit it just took (see {@link AggroWorld.Hit}): NO MAGIC, only the direction a blow came from.
+     * A projectile: the reverse of its velocity at impact, and no attacker. Anything else with an attacker close by (melee):
+     * the adjacent attacker. Everything else (fall, fire, a remote effect): nothing to go on.
+     */
+    static AggroWorld.Hit hitOf(ServerPlayer victim, DamageSource source) {
+        Entity attacker = source.getEntity();
+        Entity direct = source.getDirectEntity();
+        Vec3 at = victim.position().add(0.0, victim.getBbHeight() * 0.5, 0.0);
+        AggroWorld.Pos from = new AggroWorld.Pos(at.x, at.y, at.z);
+        if (direct instanceof Projectile && direct != attacker) {
+            Vec3 velocity = direct.getDeltaMovement();
+            if (velocity.lengthSqr() < 1.0e-6) {
+                return null;
+            }
+            Vec3 toward = velocity.scale(-1.0).normalize();
+            return new AggroWorld.Hit(null, from, toward.x, toward.y, toward.z);
+        }
+        if (attacker != null && attacker != victim && attacker.distanceTo(victim) <= FELT_MELEE_RANGE) {
+            Vec3 toward = attacker.position().add(0.0, attacker.getBbHeight() * 0.5, 0.0).subtract(at);
+            Vec3 unit = toward.lengthSqr() < 1.0e-6 ? new Vec3(0.0, 0.0, 1.0) : toward.normalize();
+            return new AggroWorld.Hit(new EntityBody(attacker), from, unit.x, unit.y, unit.z);
+        }
+        return null;
+    }
+
+    /**
+     * The last free point on the line from {@code from} along {@code toward} (a unit vector), up to {@code limit} blocks: the
+     * first blocking block ends it (vanilla collider clip, fluids ignored), else it runs the whole way.
+     */
+    static AggroWorld.Pos traceBack(ServerPlayer bot, AggroWorld.Pos from, double dx, double dy, double dz, double limit) {
+        Vec3 start = new Vec3(from.x(), from.y(), from.z());
+        Vec3 end = start.add(dx * limit, dy * limit, dz * limit);
+        HitResult hit = bot.level().clip(new ClipContext(start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
+        Vec3 stop = hit.getType() == HitResult.Type.MISS ? end : hit.getLocation().subtract(dx * 0.4, dy * 0.4, dz * 0.4);
+        return new AggroWorld.Pos(stop.x, stop.y, stop.z);
     }
 
     /**
@@ -221,7 +271,7 @@ public final class AggroDriver {
         }
         Vec3 start = from.getEyePosition();
         Vec3 eye = to.getEyePosition();
-        if (start.distanceTo(eye) > AggroController.MOD_MAX) {
+        if (start.distanceTo(eye) > SIGHT_RAY_CAP) {
             return false;
         }
         return clear(level, from, start, eye) || clear(level, from, start, to.position().add(0.0, to.getBbHeight() * 0.5, 0.0));
@@ -389,11 +439,13 @@ public final class AggroDriver {
     private static final class PlayerBody extends EntityBody implements AggroWorld.Watcher {
         private final ServerPlayer player;
         private final HitPoller hits;
+        private final InhabitantEars ears;
 
-        PlayerBody(ServerPlayer player, HitPoller hits) {
+        PlayerBody(ServerPlayer player, HitPoller hits, InhabitantEars ears) {
             super(player);
             this.player = player;
             this.hits = hits;
+            this.ears = ears;
         }
 
         @Override
@@ -407,13 +459,23 @@ public final class AggroDriver {
         }
 
         @Override
-        public AggroWorld.Body newHitAttacker() {
+        public AggroWorld.Hit newHit() {
             DamageSource source = player.getLastDamageSource();
             HitPoller.Hit hit = hits.observe(player.getUUID(), source, player.getHealth() + player.getAbsorptionAmount());
-            if (hit == null || source == null || source.getEntity() == null) {
+            if (hit == null || source == null) {
                 return null;
             }
-            return new EntityBody(source.getEntity());
+            return hitOf(player, source);
+        }
+
+        @Override
+        public List<AggroWorld.Sound> drainSounds() {
+            return ears.drain(player);
+        }
+
+        @Override
+        public AggroWorld.Pos traceBack(AggroWorld.Pos from, double dx, double dy, double dz, double limit) {
+            return AggroDriver.traceBack(player, from, dx, dy, dz, limit);
         }
     }
 
@@ -421,11 +483,13 @@ public final class AggroDriver {
         private final MinecraftServer server;
         private final CommandServices services;
         private final HitPoller hits;
+        private final InhabitantEars ears;
 
-        World(MinecraftServer server, CommandServices services, HitPoller hits) {
+        World(MinecraftServer server, CommandServices services, HitPoller hits, InhabitantEars ears) {
             this.server = server;
             this.services = services;
             this.hits = hits;
+            this.ears = ears;
         }
 
         /** The inhabitants online, found in ONE pass over the player list per tick (this view lives for one tick). */
@@ -442,7 +506,7 @@ public final class AggroDriver {
             for (ServerPlayer p : online) {
                 String name = p.getName().getString();
                 if (services.population().findBot(name).isPresent()) {
-                    PlayerBody body = new PlayerBody(p, hits);
+                    PlayerBody body = new PlayerBody(p, hits, ears);
                     inhabitants.add(body);
                     byName.put(name.toLowerCase(Locale.ROOT), body);
                 }

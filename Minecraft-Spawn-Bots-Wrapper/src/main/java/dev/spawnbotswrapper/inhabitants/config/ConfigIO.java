@@ -44,12 +44,15 @@ public final class ConfigIO {
 
     /**
      * Keys of earlier versions that no longer exist, by block. The rules they belonged to (a 10 block aggro range, a 32
-     * block leash, the 10 s lose-sight timer, crossbow pacing and its aim-settle delay) were replaced by line of sight,
-     * reaction time and the natural weapon cycle; a config that still carries them loads fine and they are ignored.
+     * block leash, the 10 s lose-sight timer, crossbow pacing and its aim-settle delay, the tick-based reaction time, the
+     * own walk/sprint/combat noise radii) were replaced by line of sight, the continuous reaction formula, vanilla
+     * vibrations and the natural weapon cycle; a config that still carries them loads fine and they are ignored.
      */
     private static final java.util.Map<String, List<String>> LEGACY = java.util.Map.of(
-            "aggro", List.of("acquireRange", "leashRange", "loseSightTicks", "returnToOrigin", "returnStuckTicks"),
-            "aggro.perception", List.of("peripheralFactor", "sneakFactor"),
+            "aggro", List.of("acquireRange", "leashRange", "loseSightTicks", "returnToOrigin", "returnStuckTicks", "reactionTicks",
+                    "distanceReactionTicksPer32"),
+            "aggro.perception", List.of("peripheralFactor", "sneakFactor", "frontHalfAngleDeg", "hearWalk", "hearSprint",
+                    "hearCombat", "combatNoiseTicks"),
             "rangedPacing", List.of("enabled", "aimSettleTicks", "crossbowMinShotIntervalTicks"));
 
     /** One INFO line naming the ignored legacy keys found in the parsed file, or none. */
@@ -75,7 +78,7 @@ public final class ConfigIO {
             return List.of();
         }
         return List.of("config: ignoring " + String.join(", ", found) + " - these settings of an earlier version no longer "
-                + "exist: aggro is decided by line of sight and reaction time, and shot speed by the weapon itself (see the README)");
+                + "exist: aggro is decided by line of sight, the continuous reaction time and vanilla vibrations (hearing), and shot speed by the weapon itself (see the README)");
     }
 
     public static LoadResult load(Path file) {

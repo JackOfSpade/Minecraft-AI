@@ -59,7 +59,7 @@ public interface PathPlanner {
      *
      * @param bot      the inhabitant, opaque ({@link AggroWorld.Watcher#handle()})
      * @param goal     where to go
-     * @param maxRange the longest route worth planning, in blocks (the caller passes the mod maximum)
+     * @param maxRange the longest route worth planning, in blocks (the caller passes its route-planning budget)
      */
     Plan plan(Object bot, Pos goal, double maxRange);
 

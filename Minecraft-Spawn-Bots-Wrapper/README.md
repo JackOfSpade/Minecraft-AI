@@ -88,12 +88,13 @@ runs on defaults until you fix it.
   },
 
   // PvP BOT settings the addon holds at these values (see "Managed PvP BOT settings" below); null/absent key = leave alone
-  "pvpbotSettings": { "maxTargetDistance": 128.0, "rangedMinRange": 8.0, "rangedOptimalRange": 12.0,
+  "pvpbotSettings": { "maxTargetDistance": 64.0, "rangedMinRange": 8.0, "rangedOptimalRange": 12.0,
                       "rangedMaxRange": 16.0, "autoEquipWeapon": false, "autoTargetEnabled": false,
                       "bowMinDrawTime": 20 },
-  // how inhabitants notice, chase, search for and walk back from players: line of sight and reaction time, no block
-  // distances (see "The line-of-sight hunter" below)
-  "aggro": { "enabled": true, "reactionTicks": 5, "loseGraceTicks": 10, "searchTicks": 200, "returnArriveDistance": 1.5 },
+  // how inhabitants notice, chase, search for and walk back from players: what they see (no block limit in the view cone,
+  // engagement limited to 64 blocks) and hear (vanilla vibrations), with a reaction time (see "The line-of-sight hunter")
+  "aggro": { "enabled": true, "loseGraceTicks": 10, "searchTicks": 200, "returnArriveDistance": 1.5,
+             "perception": { "reactionBaseSeconds": 0.5, "reactionAt64Seconds": 2.0 }, "hearing": { "listenerRadius": 16 } },
 
   "debugCommands": true,
   "commandPermissionLevel": 2
@@ -343,7 +344,7 @@ therefore holds these settings at chosen values:
 
 ```jsonc
 "pvpbotSettings": {
-  "maxTargetDistance": 128.0,    // blocks, 4..128: the mod's own maximum (PvP BOT's catalog maximum and vanilla's line-of-sight cap)
+  "maxTargetDistance": 64.0,     // blocks, 4..128: PvP BOT's targeting radius; 64 = the aggro engage limit, all it has to cover
   "autoTargetEnabled": false,    // PvP BOT: false; the wrapper's aggro controller acquires targets by line of sight
   "rangedMinRange": 8.0,         // archers back off below this (PvP BOT: 20)
   "rangedOptimalRange": 12.0,    // PvP BOT: 40
@@ -355,9 +356,10 @@ therefore holds these settings at chosen values:
 }
 ```
 
-Inhabitants have no block-distance restriction of their own: what they react to is decided by line of sight, up to
-the mod's maximum, so `maxTargetDistance` is a ceiling only and PvP BOT must neither acquire targets itself
-(`autoTargetEnabled` false) nor drop a chased target early.
+What inhabitants react to is decided by what they see and hear (sight has no block limit in the view cone), and the
+addon itself never engages a target it sees beyond 64 blocks (the one hard-coded distance rule, a constant). So
+`maxTargetDistance` 64 is all PvP BOT has to cover, and PvP BOT must not acquire targets itself (`autoTargetEnabled`
+false).
 
 * A `null` or absent key inside the block leaves PvP BOT's own value alone; a config file without the block at all
   gets the values above. `"pvpbotSettings": null` manages nothing.
@@ -372,14 +374,14 @@ the mod's maximum, so `maxTargetDistance` is a ceiling only and PvP BOT must nei
   into PvP BOT's settings object directly, not through its setters (they clamp the optimal range to at least 10 and
   the maximum to at least 15; the addon writes the fields, so a managed value may deliberately lie outside those
   setter clamps), and then PvP BOT's own save routine writes the settings file once.
-* One INFO line names what changed: `PvP BOT settings: maxTargetDistance 64 -> 128, autoEquipWeapon true -> false`.
+* One INFO line names what changed: `PvP BOT settings: maxTargetDistance 128 -> 64, autoEquipWeapon true -> false`.
   A missing PvP BOT field is one warning and never an exception. `/inhabitants adapter` (and the probe report) warn
   when the effective `rangedMinRange` is above `maxTargetDistance`: ranged bots would back away from every target
   inside their own targeting radius.
 * The other settings stay PvP BOT's. `autoTargetEnabled` false is the intended state under this addon: `/inhabitants
   adapter` no longer warns about it while `aggro.enabled` is on. PvP BOT's revenge logic (`revengeEnabled`, not managed)
-  still handles whoever hit an inhabitant, and it accepts an attacker within `maxTargetDistance`, which at 128 is
-  the mod's maximum.
+  still handles mobs that hit an inhabitant; for players the aggro controller clears that revenge at once and reacts to
+  the hit itself (see "Being hit" below).
 
 ### Sword up close, and out of arrows
 
@@ -479,55 +481,92 @@ accepted in a file, ignored, with a config warning at startup — delete them).
 
 ## The line-of-sight hunter (`aggro`)
 
-PvP BOT's own auto-target notices any player within 64 blocks, through walls. This addon replaces it (the settings
-policy turns PvP BOT's `autoTarget` off) with a hunter that works like a person: **everything is decided by line of
-sight, there is no block-distance rule of any kind** (no aggro range, no leash). The only distance limit is the mod's
-own maximum, 128 blocks (vanilla `hasLineOfSight`'s cap and PvP BOT's largest `maxTargetDistance`, read from PvP BOT's
-effective value and capped at 128). The `aggro` block of `pvpbot_inhabitants.json`:
+PvP BOT's own auto-target notices any player within its radius, through walls. This addon replaces it (the settings
+policy turns PvP BOT's `autoTarget` off) with a hunter that works like a person and **acts only on what it perceives**.
+Sight has **no block limit inside the view cone**; the one hard-coded distance rule is the **engage limit of 64 blocks**
+(a constant, not a setting): a bot never engages a target it sees and measures farther away than that. There is no aggro
+range and no leash. The `aggro` block of `pvpbot_inhabitants.json`:
 
 ```jsonc
 "aggro": {
   "enabled": true,
   "requireLineOfSight": true,          // false: a clear view is not required (sees through walls; not recommended)
-  "reactionTicks": 5,                  // 0..100: a person needs 0.25 s to register somebody
-  "distanceReactionTicksPer32": 5,     // 0..100: extra ticks per 32 blocks of distance; 0 disables. A soft scaling, not a limit
   "loseGraceTicks": 10,                // 1..72000: no line of sight for this long = the target is lost (0.5 s: a tree trunk does not break a chase)
   "searchTicks": 200,                  // 20..72000: the search lasts this long (10 s)
   "returnArriveDistance": 1.5,         // 0.5..16: blocks from home at which the walk back counts as arrived
   "stuckTicks": 40,                    // 10..1200: no progress along a route for this long replans it
   "returnMaxTicks": 1200,              // 20..72000: the longest walk home (60 s); then the bot stays where it is
   "scanIntervalTicks": 3,              // 1..40: how often an idle inhabitant looks around (staggered across inhabitants)
-  "perception": { "enabled": true, "frontHalfAngleDeg": 60, "peripheralHalfAngleDeg": 100, "peripheralMultiplier": 2,
-                  "sneakMultiplier": 2, "hearWalk": 4, "hearSprint": 8, "hearCombat": 12, "combatNoiseTicks": 10 }
+  "perception": {
+    "enabled": true,                   // false = plain vanilla line of sight: a clear line is noticed at once
+    "reactionBaseSeconds": 0.5,        // 0..10: the reaction time up close (a person's)
+    "reactionAt64Seconds": 2.0,        // base..30: the same at 64 blocks; linear in between, continuous (no steps)
+    "fullAttentionHalfAngleDeg": 30,   // 0..180: up to this angle off the look direction the plain time applies
+    "peripheralHalfAngleDeg": 100,     // full..180: nothing is seen beyond this (behind)
+    "peripheralMultiplier": 2,         // 1..20: the time at the edge of the periphery; rises linearly from the full attention edge
+    "sneakMultiplier": 2               // 1..20: a sneaking player takes this many times as long to be spotted
+  },
+  "hearing": { "listenerRadius": 16 }  // 1..64: vanilla vibration radius; 16 is the Warden's (a sculk sensor's is 8)
 }
 ```
 
-An older config with `acquireRange`, `leashRange`, `loseSightTicks`, `returnToOrigin`, `returnStuckTicks`,
-`perception.peripheralFactor` or `perception.sneakFactor` loads fine: they are ignored, with one INFO line, and not
-written back.
+An older config with `acquireRange`, `leashRange`, `loseSightTicks`, `returnToOrigin`, `returnStuckTicks`, `reactionTicks`,
+`distanceReactionTicksPer32`, `perception.peripheralFactor`, `perception.sneakFactor`, `perception.frontHalfAngleDeg`,
+`perception.hearWalk`, `hearSprint`, `hearCombat` or `combatNoiseTicks` loads fine: they are ignored, with one INFO line,
+and not written back.
 
 The states of every inhabitant (`/inhabitants` status and the "Combat taken" lines show them):
 
 ```
 IDLE --(noticed)--> CHASE --(lost)--> PURSUE --(arrived or blocked)--> SEARCH --(10 s)--> RETURN --(home)--> IDLE
-  PURSUE / SEARCH / RETURN --(noticed again)--> CHASE          IDLE / PURSUE / SEARCH / RETURN --(hit)--> REACT or PURSUE
+  PURSUE / SEARCH / RETURN --(noticed again)--> CHASE          IDLE / PURSUE / SEARCH / RETURN --(hit)--> CHASE (confirming) or PURSUE
 ```
 
-* **Noticing** (IDLE, and again while pursuing, searching or walking home). A player, or a companion bot, is noticed after
-  staying in view for the reaction time: 5 ticks (0.25 s) in front, longer when it is harder to see (twice as long in
-  the periphery of the 200 degree field of view, twice as long when sneaking, longer far away: 11 ticks at 40 blocks,
-  15 at 64, 25 at 128, longer still when invisible or disguised). **Nothing is seen from behind**, but close footsteps
-  are heard (walking 4, sprinting 8 and fighting 12 blocks; sneaking or standing still is silent; never through a wall),
-  which counts as seeing in front. Hearing only ADDS awareness from behind; it restricts nothing. So a player walking up
-  behind an inhabitant while sneaking is not noticed until they strike. Details and the shared rules:
-  `docs/PERCEPTION.md`, golden vectors in `docs/perception/vectors.json`. "Valid" follows PvP BOT's own rules (not
-  creative/spectator unless `attackInvincible`, not a faction ally, other bots only with `targetOtherBots`).
-  `perception.enabled=false` is plain vanilla line of sight: in range and unobstructed is noticed at once.
-  The noticed player is handed to PvP BOT as its forced target.
-* **CHASE.** PvP BOT fights and moves. While the target is in sight (occlusion only, no cone: an engaged bot faces its
-  target) the last known position and velocity are recorded. When it has been out of sight for `loseGraceTicks`, or is
-  beyond the 128 block maximum, the target is LOST. A target that is dead, logged out, in another dimension or no longer
-  attackable ends the hunt: PvP BOT's target state is cleared and the bot walks home.
+**No magic.** The bot knows only what it senses: a target's position while it is in view, its last known position and
+last seen velocity, the position of a sound, and the direction a blow came from. It never reads the true position,
+distance, health or life of a target it cannot see. "Too far" (more than 64 blocks) is decided only from a **sighting**:
+seen and measured beyond 64, the bot gives up (`too far`) and walks home. A target that is out of sight is followed by the
+lost-sight rules (last known position, search 10 s, walk home) however far away it really is, and a target that logs out,
+changes level or dies **out of sight** is simply lost; only a death or disappearance the bot SEES ends the engagement at
+once.
+
+* **Noticing** (IDLE, and again while pursuing, searching or walking home). A player, or a companion bot, within 64
+  blocks is noticed after staying in view for one continuous reaction time, in real seconds (`docs/PERCEPTION.md`):
+
+  ```
+  seconds = (0.5 + 1.5 * distance / 64) * angleFactor * sneakFactor / visibility
+  ```
+
+  0.5 s up close, 2.0 s at 64 blocks, every distance its own number (10.3 blocks is 0.741 s). The angle factor is 1 up to
+  30 degrees off the look direction and rises linearly to 2 at 100 degrees; **nothing is seen behind**. Sneaking doubles it,
+  invisibility or a mob head divides it. The exposure runs in real seconds (0.05 per tick), tolerates one missed tick, and
+  the notice is on the first tick that reaches it. "Valid" follows PvP BOT's own rules (not creative/spectator unless
+  `attackInvincible`, not a faction ally, other bots only with `targetOtherBots`). `perception.enabled=false` is plain
+  vanilla line of sight: a clear line is noticed at once.
+* **Hearing is vanilla's.** Each inhabitant listens through vanilla's own vibration system, called directly exactly as the
+  Warden and the sculk sensor use it (a `VibrationSystem` with its `Listener` registered through a
+  `DynamicGameEventListener` and ticked with `VibrationSystem.Ticker`). What is heard, how far (`hearing.listenerRadius`),
+  through what (wool blocks vibrations, other blocks do not), what is silent (a sneaking player's steps, spectators,
+  wool-dampened steps) and how long a vibration takes to arrive are all vanilla's rules. A bot never hears its own
+  vibrations. A sound whose source is a valid player in CLEAR view counts as sighting it without the view cone (the bot turned
+  to the sound; the reaction time still applies), so hearing only removes the cone requirement. A sound with nobody in
+  view near it is only a clue: an idle bot turns to look, a pursuing or searching bot moves its search focus there. A bot
+  engages only once it SEES the target, so a player walking on the far side of a wall is never engaged. A player sneaking up
+  behind an inhabitant is silent and not noticed until they strike.
+* **CHASE and the CONFIRMED flag.** An engagement is CONFIRMED only after the target has been continuously visible for the
+  full reaction time; it stops being confirmed on the FIRST unseen tick, and **every re-sighting restarts the exposure from
+  zero** (a blink behind a tree, a corner or a pillar does not give an instant resume). PvP BOT is handed the target
+  (`setTarget`) only while the engagement is confirmed, so its melee and bow logic cannot start early; at the first unseen
+  tick its target is cleared and the bot steers toward the last known position (it walks toward where it last SAW the
+  player, never toward the true position). A loaded crossbow fires at a player only while the engagement with exactly that
+  player is confirmed and the player is in line of sight, so a pre-loaded crossbow fires at the earliest one reaction time
+  after the player comes into view; and a **melee blow** an inhabitant lands on a player is vetoed at damage level (in the
+  same listener as the melee legality rule, independent of its switch) unless the inhabitant has a confirmed engagement
+  with that player, so PvP BOT's instant revenge cannot counter-hit inside the reaction window. Projectiles already in
+  flight are not vetoed at impact (they were fired legitimately). While the target is visible the last known position and
+  velocity are recorded. Out of sight for `loseGraceTicks` (a delay before the chase turns into a pursuit, never a shortcut
+  to attack) the target is LOST. Mob fights are PvP BOT's own and are not gated (its native revenge against mobs is left as
+  it is).
 * **PURSUE.** PvP BOT's target is cleared (so it does not track the player through walls; that also wipes its revenge
   memory) and the bot walks to the last known position along a route planned around obstacles (see "Routes" below). If the
   player was moving it continues a few blocks along the last heading first. No route, or no progress for `stuckTicks`
@@ -536,20 +575,25 @@ IDLE --(noticed)--> CHASE --(lost)--> PURSUE --(arrived or blocked)--> SEARCH --
   ticks), then repeatedly walks to the most promising nearby spot and looks round again. Spots are scored by alignment with
   the player's last heading, by how much hidden space would open up from there (corners, doorways, corridor branches:
   rays from the candidate to sample points the bot cannot see from where it stands), and by not having been visited; ones
-  it cannot reach in the remaining time are skipped. A sound heard from behind cover (walking, sprinting or fighting
-  within earshot, occluded) moves the search focus there within the same window. Seeing the player again (the reaction
-  time applies) is a new CHASE. When the window is over the bot RETURNs.
+  it cannot reach in the remaining time are skipped. A sound heard while nobody is in view near it (a vanilla vibration,
+  for instance footsteps through a wall) moves the search focus there within the same window. Seeing the player again
+  (the reaction time applies) is a new CHASE. When the window is over the bot RETURNs.
 * **RETURN.** The bot walks back to its **home anchor**: its position and level when it FIRST started aggro'ing. Home
   is kept through every cycle until the bot is back within `returnArriveDistance`; then it is cleared. The bot always
   returns to it, never to a temporary point: if it notices the player again on the way, the new chase (from wherever the
   bot is) does not change the home. If it cannot get home within `returnMaxTicks` it stops where it is (home cleared, one
   INFO line). Never a teleport, and the bot never breaks or places a block for any of this.
-* **Being hit.** A hit by a valid player makes the bot aware of the attacker immediately, and the last known position is
-  where the attacker stood. If the attacker is in sight, the bot turns to the pain (REACT) and reacts after the reaction
-  time (`reactionTicks`); PvP BOT's instant revenge is cleared on the hit tick and the target is handed over when the
-  delay ends. If the attacker is NOT in sight (an arrow from cover) the bot goes to PURSUE at once, to that position. Hits
-  are detected both through PvP BOT's revenge memory and through the damage taken (HeroBot fake players skip the Fabric
-  damage event), from any distance up to the 128 block maximum.
+* **Being hit.** The bot feels where a blow came from, not who struck it. A **melee** hit: the striker is adjacent; the
+  bot turns to the pain and, when it SEES the striker (occlusion only, so a striker behind it counts), confirms the
+  engagement after the reaction delay (the continuous formula with angle factor 1; sneaking does not slow a reaction to
+  pain); PvP BOT's instant revenge is cleared on the hit tick and its counter-hit is vetoed at damage level until then. A
+  **projectile** (an arrow from a shooter the bot does not see): it knows only the direction it came from, the reverse of the
+  projectile's velocity at impact. It turns to look along that line (the sight rules and the reaction time apply to whoever
+  it then sees: seen within 64 blocks, it chases after the reaction time; seen beyond 64, it does not engage) and, if it sees
+  nobody, PURSUES the point found by tracing back along the incoming line from the impact point to the first blocking
+  block (or 64 blocks), then searches. It never learns the shooter's position or identity. Hits are detected through the
+  damage taken (HeroBot fake players skip the Fabric damage event), never through PvP BOT's revenge memory, which names the
+  attacker whether or not the bot could know (for players it is cleared at once).
 * **Mobs.** PvP BOT's native revenge still fights mobs (a forced target cannot name a specific mob): a mob fight is tracked,
   ends when the mob is out of sight for `loseGraceTicks` or gone, and the bot walks home; no pursuit and no search for
   mobs. A mob fight starts a home anchor like any other.
@@ -564,9 +608,9 @@ IDLE --(noticed)--> CHASE --(lost)--> PURSUE --(arrived or blocked)--> SEARCH --
   patrol then restarts from its first point. Bots without a patrol of this addon are unaffected.
 * **Order of work.** All of this runs in a Fabric tick phase ordered after the default phase, after PvP BOT's own bot tick,
   so its steering is the last input written each tick (over idle wander).
-* **Status and logs.** One text per bot, for example `chasing Jack (seen 0.4 s ago; noticed by sight after 0.3 s)`,
-  `pursuing Jack's last position, 6.2 to go`, `searching for Jack, 7.5 s left, 3 points checked`,
-  `returning home, 18.0 to go`, `turning to Jack's hit (reacting)`, `idle`; it is appended to the "Combat taken" line
+* **Status and logs.** One text per bot, for example `chasing Jack (seen 0.0 s ago; noticed by sight after 0.7 s)`,
+  `reacting to Jack (0.3 of 0.7 s)`, `pursuing Jack's last position, 6.2 to go`, `pursuing the shot's line, 12.0 to go`,
+  `searching for Jack, 7.5 s left, 3 points checked`, `returning home, 18.0 to go`, `idle`; it is appended to the "Combat taken" line
   as `aggro[...]`. Every transition is logged at debug; INFO at most one line per bot per 10 s.
 
 ### Routes
@@ -759,9 +803,14 @@ jars as runtime mods (copied into the run directory like a profile, never compil
 inhabitant is requested from the population engine, dressed, and fights a survival mock player. They cover the
 natural crossbow and bow speed (a Quick Charge III crossbow about every 12 ticks, a full-power bow arrow about every 21),
 the managed PvP BOT settings (including their re-application after PvP BOT reloads its settings), the combat log lines
-and the ranged-loop cause text, and the line-of-sight hunter (`AggroGameTests`): the reaction time, nobody noticed from
-behind (but footsteps heard, sneaking silent), a player 40 blocks away noticed and chased, a lost player pursued,
-searched for 10 s and the bot walking home without a teleport, noticing again on the way home, and an arrow from cover.
+and the ranged-loop cause text, and the line-of-sight hunter (`AggroGameTests`, `AggroPerceptionGameTests`): the
+continuous reaction time, nobody noticed from behind, a player 40 blocks away noticed and chased and one 70 blocks away
+never engaged (the 64 block engage limit), hearing through vanilla vibrations (a walker behind is heard, a sneaking one is
+silent, a stone wall gives a clue but no notice, wool blocks the vibration, no listener leaks), a lost player pursued,
+searched for 10 s and the bot walking home without a teleport, noticing again on the way home, an arrow from an unseen
+shooter (the bot turns along the incoming direction and goes to where the line of the shot ends), and the reaction time
+on every sighting (a loaded crossbow does not fire the instant the player appears, a blink behind a pillar restarts the
+reaction, a melee hit gets no counter-hit inside the reaction delay).
 
 ```bash
 ./gradlew runGameTest -PupstreamModsDir=<dir with PVP_bot-*.jar and herobot-*.jar>   # default C:\mcw\_tools\deploycheck\mods

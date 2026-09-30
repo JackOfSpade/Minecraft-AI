@@ -31,8 +31,8 @@ public interface TargetControl {
      * @param attackInvincible  spectator / creative / invulnerable players are valid targets
      * @param factionsEnabled   faction rules are on (allies are skipped unless friendlyFire)
      * @param friendlyFire      faction allies may be attacked
-     * @param maxTargetDistance the mod maximum: a forced target or revenge attacker farther away is ignored (the wrapper
-     *                          manages it at 128, the vanilla line-of-sight cap)
+     * @param maxTargetDistance PvP BOT's targeting radius: a forced target or revenge attacker farther away is ignored (the wrapper
+     *                          manages it at 64, the aggro controller's engage limit; the controller itself never reads it)
      */
     record Settings(boolean combatEnabled, boolean autoTarget, boolean targetPlayers, boolean targetOtherBots,
                     boolean attackInvincible, boolean factionsEnabled, boolean friendlyFire,

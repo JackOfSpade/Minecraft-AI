@@ -86,7 +86,8 @@ final class SettingData {
                         "No per-bot proxy: PvP BOT's own acquisition of the nearest entity within maxTargetDistance (no line of "
                                 + "sight needed). Managed by this addon: config pvpbotSettings.autoTargetEnabled (shipped false), "
                                 + "because the addon's aggro controller (config aggro) acquires instead, by line of sight: players it can see "
-                                + "(no block limit, after a reaction time), plus a chase after a hit from any distance. Revenge, "
+                                + "(sight has no block limit in the view cone, engagement is limited to 64 blocks; after a reaction time "
+                                + "of 0.5 s up close to 2 s at 64 blocks, and again after every re-sighting), plus a reaction to a hit. Revenge, "
                                 + "faction enemies and forced orders (which the hunter uses) still apply. The value is written into the field, like the "
                                 + "others; with aggro.enabled false and this managed as false inhabitants stay passive until hit."),
                 flag("targetPlayers", "target-players", true).global(
@@ -104,10 +105,9 @@ final class SettingData {
                         "No per-bot proxy: search and acceptance radius (blocks, 3D, no dimension check) for forced, "
                                 + "revenge, faction and auto targets; also sizes the per-tick entity query when "
                                 + "auto-target is on. A forced order beyond it is ignored. This addon manages it: config "
-                                + "pvpbotSettings.maxTargetDistance (shipped 128 = PvP BOT's catalog maximum, allowed 4..128) "
-                                + "is written into the settings whenever PvP BOT loads them. 128 is a ceiling only: line of "
-                                + "sight decides when a chase ends, and the high value keeps PvP "
-                                + "BOT from dropping a chased target early and lets a hit from far away register as revenge."),
+                                + "pvpbotSettings.maxTargetDistance (shipped 64 = the aggro controller's engage limit, allowed "
+                                + "4..128) is written into the settings whenever PvP BOT loads them. 64 is all it has to cover: "
+                                + "the addon never engages a target it sees beyond 64 blocks, and line of sight decides when a chase ends."),
                 decimal("meleeRange", "melee-range", 2.0, 6.0, 3.5).global(
                         "No per-bot proxy: global melee reach. Older versions of this addon varied the bot's "
                                 + "entity_interaction_range per bot; an inhabitant now has the attributes of a vanilla player "

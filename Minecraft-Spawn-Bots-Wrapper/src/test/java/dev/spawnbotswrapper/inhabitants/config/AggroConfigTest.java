@@ -26,21 +26,22 @@ class AggroConfigTest {
         InhabitantsConfig.Aggro a = again.config().aggro;
         assertTrue(a.enabled);
         assertTrue(a.requireLineOfSight);
-        assertEquals(5, a.reactionTicks, "0.25 s");
-        assertEquals(5.0, a.distanceReactionTicksPer32);
         assertEquals(10, a.loseGraceTicks, "0.5 s");
         assertEquals(200, a.searchTicks, "10 s");
         assertEquals(1.5, a.returnArriveDistance);
         assertEquals(40, a.stuckTicks);
         assertEquals(1200, a.returnMaxTicks, "60 s");
         assertEquals(3, a.scanIntervalTicks);
+        assertEquals(16, a.hearing.listenerRadius, "the Warden's vanilla listener radius");
         String json = ConfigIO.toJson(again.config());
         for (String gone : new String[]{"acquireRange", "leashRange", "loseSightTicks", "returnToOrigin", "returnStuckTicks",
-                "peripheralFactor", "sneakFactor"}) {
+                "peripheralFactor", "sneakFactor", "reactionTicks", "distanceReactionTicksPer32", "frontHalfAngleDeg",
+                "hearWalk", "hearSprint", "hearCombat", "combatNoiseTicks"}) {
             assertFalse(json.contains("\"" + gone + "\""), gone + " no longer exists:\n" + json);
         }
-        for (String key : new String[]{"reactionTicks", "distanceReactionTicksPer32", "loseGraceTicks", "searchTicks",
-                "stuckTicks", "peripheralMultiplier", "sneakMultiplier"}) {
+        for (String key : new String[]{"reactionBaseSeconds", "reactionAt64Seconds", "fullAttentionHalfAngleDeg",
+                "peripheralHalfAngleDeg", "loseGraceTicks", "searchTicks", "stuckTicks", "peripheralMultiplier",
+                "sneakMultiplier", "listenerRadius"}) {
             assertTrue(json.contains("\"" + key + "\""), key + " is written:\n" + json);
         }
     }
@@ -52,28 +53,25 @@ class AggroConfigTest {
     }
 
     @Test
-    void thereIsNoBlockDistanceAnywhereInTheBlock() {
+    void thereIsNoEngageDistanceKeyOnlyAConstant() {
         for (var field : InhabitantsConfig.Aggro.class.getFields()) {
             String n = field.getName().toLowerCase();
-            assertFalse(n.contains("range") || n.contains("leash") || n.contains("radius"),
-                    "no hard-coded block distance restriction: " + field.getName());
+            assertFalse(n.contains("range") || n.contains("leash") || n.contains("radius") || n.contains("engage"),
+                    "the 64 block engage limit is a constant, not a setting: " + field.getName());
         }
     }
 
     @Test
     void tickCountsAreClamped(@TempDir Path dir) throws IOException {
-        InhabitantsConfig.Aggro low = load(dir, "{ \"reactionTicks\": -3, \"loseGraceTicks\": 0, \"searchTicks\": 1, "
-                + "\"stuckTicks\": 1, \"returnMaxTicks\": 1, \"scanIntervalTicks\": 0, \"distanceReactionTicksPer32\": -1 }");
-        assertEquals(0, low.reactionTicks);
+        InhabitantsConfig.Aggro low = load(dir, "{ \"loseGraceTicks\": 0, \"searchTicks\": 1, "
+                + "\"stuckTicks\": 1, \"returnMaxTicks\": 1, \"scanIntervalTicks\": 0 }");
         assertEquals(1, low.loseGraceTicks);
         assertEquals(20, low.searchTicks);
         assertEquals(10, low.stuckTicks);
         assertEquals(20, low.returnMaxTicks);
         assertEquals(1, low.scanIntervalTicks);
-        assertEquals(0.0, low.distanceReactionTicksPer32, "0 disables the distance term");
-        InhabitantsConfig.Aggro high = load(dir, "{ \"reactionTicks\": 5000, \"loseGraceTicks\": 9999999, \"searchTicks\": 9999999, "
+        InhabitantsConfig.Aggro high = load(dir, "{ \"loseGraceTicks\": 9999999, \"searchTicks\": 9999999, "
                 + "\"stuckTicks\": 99999, \"returnMaxTicks\": 9999999, \"scanIntervalTicks\": 500 }");
-        assertEquals(100, high.reactionTicks);
         assertEquals(72000, high.loseGraceTicks);
         assertEquals(72000, high.searchTicks);
         assertEquals(1200, high.stuckTicks);
@@ -101,7 +99,9 @@ class AggroConfigTest {
         Path f = dir.resolve("cfg.json");
         Files.writeString(f, "{ \"aggro\": { \"enabled\": true, \"acquireRange\": 10.0, \"leashRange\": 32.0, "
                 + "\"loseSightTicks\": 200, \"returnToOrigin\": true, \"returnStuckTicks\": 200, \"returnMaxTicks\": 900, "
-                + "\"perception\": { \"peripheralFactor\": 0.5, \"sneakFactor\": 0.5, \"hearWalk\": 5 } } }",
+                + "\"reactionTicks\": 5, \"distanceReactionTicksPer32\": 5, "
+                + "\"perception\": { \"peripheralFactor\": 0.5, \"sneakFactor\": 0.5, \"hearWalk\": 5, "
+                + "\"hearSprint\": 8, \"hearCombat\": 12, \"combatNoiseTicks\": 10, \"frontHalfAngleDeg\": 60 } } }",
                 StandardCharsets.UTF_8);
         ConfigIO.LoadResult r = ConfigIO.load(f);
         assertNull(r.fatalError());
@@ -109,22 +109,27 @@ class AggroConfigTest {
         assertEquals(1, r.notes().size(), r.notes().toString());
         String note = r.notes().get(0);
         for (String key : new String[]{"aggro.acquireRange", "aggro.leashRange", "aggro.loseSightTicks",
-                "aggro.returnToOrigin", "aggro.returnStuckTicks", "aggro.perception.peripheralFactor",
-                "aggro.perception.sneakFactor"}) {
+                "aggro.returnToOrigin", "aggro.returnStuckTicks", "aggro.reactionTicks", "aggro.distanceReactionTicksPer32",
+                "aggro.perception.peripheralFactor", "aggro.perception.sneakFactor", "aggro.perception.hearWalk",
+                "aggro.perception.hearSprint", "aggro.perception.hearCombat", "aggro.perception.combatNoiseTicks",
+                "aggro.perception.frontHalfAngleDeg"}) {
             assertTrue(note.contains(key), key + " named in: " + note);
         }
         // what still exists keeps its value; the old keys changed nothing
         assertEquals(900, r.config().aggro.returnMaxTicks);
-        assertEquals(5.0, r.config().aggro.perception.hearWalk);
+        assertEquals(0.5, r.config().aggro.perception.reactionBaseSeconds, "the reaction time is its own default now");
+        assertEquals(30.0, r.config().aggro.perception.fullAttentionHalfAngleDeg);
         assertEquals(10, r.config().aggro.loseGraceTicks, "the new grace is its own default, not the old 200 ticks");
         assertEquals(200, r.config().aggro.searchTicks);
-        assertFalse(ConfigIO.toJson(r.config()).contains("acquireRange"), "and they are not written back");
+        String json = ConfigIO.toJson(r.config());
+        assertFalse(json.contains("acquireRange") || json.contains("hearWalk"), "and they are not written back");
     }
 
     @Test
     void aConfigWithoutOldKeysHasNoNote(@TempDir Path dir) throws IOException {
         Path f = dir.resolve("cfg.json");
-        Files.writeString(f, "{ \"aggro\": { \"reactionTicks\": 6 } }", StandardCharsets.UTF_8);
+        Files.writeString(f, "{ \"aggro\": { \"searchTicks\": 300, \"perception\": { \"reactionBaseSeconds\": 0.4 } } }",
+                StandardCharsets.UTF_8);
         assertTrue(ConfigIO.load(f).notes().isEmpty());
     }
 
@@ -147,43 +152,39 @@ class AggroConfigTest {
         assertTrue(again.warnings().isEmpty(), again.warnings().toString());
         InhabitantsConfig.AggroPerception p = again.config().aggro.perception;
         assertTrue(p.enabled);
-        assertEquals(60.0, p.frontHalfAngleDeg);
+        assertEquals(0.5, p.reactionBaseSeconds, "0.5 s up close");
+        assertEquals(2.0, p.reactionAt64Seconds, "2.0 s at 64 blocks");
+        assertEquals(30.0, p.fullAttentionHalfAngleDeg);
         assertEquals(100.0, p.peripheralHalfAngleDeg);
         assertEquals(2.0, p.peripheralMultiplier);
         assertEquals(2.0, p.sneakMultiplier);
-        assertEquals(4.0, p.hearWalk);
-        assertEquals(8.0, p.hearSprint);
-        assertEquals(12.0, p.hearCombat);
-        assertEquals(10, p.combatNoiseTicks);
         assertTrue(ConfigIO.toJson(again.config()).contains("\"perception\""));
     }
 
     @Test
     void thePerceptionBlockCanBeSwitchedOffAndTuned(@TempDir Path dir) throws IOException {
         InhabitantsConfig.AggroPerception p = load(dir,
-                "{ \"perception\": { \"enabled\": false, \"sneakMultiplier\": 3, \"hearWalk\": 6 } }").perception;
+                "{ \"perception\": { \"enabled\": false, \"sneakMultiplier\": 3, \"reactionAt64Seconds\": 4 } }").perception;
         assertFalse(p.enabled);
         assertEquals(3.0, p.sneakMultiplier);
-        assertEquals(6.0, p.hearWalk);
-        assertEquals(60.0, p.frontHalfAngleDeg, "keys left out keep their defaults");
+        assertEquals(4.0, p.reactionAt64Seconds);
+        assertEquals(30.0, p.fullAttentionHalfAngleDeg, "keys left out keep their defaults");
     }
 
     @Test
     void thePerceptionBoundsAreKeptCoherent(@TempDir Path dir) throws IOException {
-        InhabitantsConfig.AggroPerception p = load(dir, "{ \"perception\": { \"frontHalfAngleDeg\": 250, "
+        InhabitantsConfig.AggroPerception p = load(dir, "{ \"perception\": { \"fullAttentionHalfAngleDeg\": 250, "
                 + "\"peripheralHalfAngleDeg\": 30, \"peripheralMultiplier\": 0.2, \"sneakMultiplier\": 99, "
-                + "\"hearWalk\": -2, \"hearSprint\": 999, \"hearCombat\": -1, \"combatNoiseTicks\": -5 } }").perception;
-        assertEquals(180.0, p.frontHalfAngleDeg);
-        assertEquals(180.0, p.peripheralHalfAngleDeg, "the field is never narrower than the front cone");
+                + "\"reactionBaseSeconds\": -1, \"reactionAt64Seconds\": -5 } }").perception;
+        assertEquals(180.0, p.fullAttentionHalfAngleDeg);
+        assertEquals(180.0, p.peripheralHalfAngleDeg, "the field is never narrower than the full attention cone");
         assertEquals(1.0, p.peripheralMultiplier, "the periphery is never faster than the front");
         assertEquals(20.0, p.sneakMultiplier);
-        assertEquals(0.0, p.hearWalk);
-        assertEquals(128.0, p.hearSprint);
-        assertEquals(0.0, p.hearCombat);
-        assertEquals(0, p.combatNoiseTicks);
+        assertEquals(0.0, p.reactionBaseSeconds);
+        assertEquals(0.0, p.reactionAt64Seconds, "the 64 block reaction is never faster than the close one");
         InhabitantsConfig.AggroPerception q = load(dir,
-                "{ \"perception\": { \"frontHalfAngleDeg\": 80, \"peripheralHalfAngleDeg\": 50 } }").perception;
-        assertEquals(80.0, q.frontHalfAngleDeg);
+                "{ \"perception\": { \"fullAttentionHalfAngleDeg\": 80, \"peripheralHalfAngleDeg\": 50 } }").perception;
+        assertEquals(80.0, q.fullAttentionHalfAngleDeg);
         assertEquals(80.0, q.peripheralHalfAngleDeg);
     }
 
@@ -191,5 +192,15 @@ class AggroConfigTest {
     void aMissingPerceptionBlockIsFilledIn(@TempDir Path dir) throws IOException {
         InhabitantsConfig.Aggro a = load(dir, "{ \"perception\": null }");
         assertTrue(a.perception != null && a.perception.enabled);
+    }
+
+    // ---------------------------------------------------------------- hearing block
+
+    @Test
+    void theHearingRadiusIsBoundedAndAMissingBlockIsFilledIn(@TempDir Path dir) throws IOException {
+        assertEquals(1, load(dir, "{ \"hearing\": { \"listenerRadius\": 0 } }").hearing.listenerRadius);
+        assertEquals(64, load(dir, "{ \"hearing\": { \"listenerRadius\": 500 } }").hearing.listenerRadius);
+        assertEquals(8, load(dir, "{ \"hearing\": { \"listenerRadius\": 8 } }").hearing.listenerRadius, "the sculk sensor's own");
+        assertEquals(16, load(dir, "{ \"hearing\": null }").hearing.listenerRadius);
     }
 }

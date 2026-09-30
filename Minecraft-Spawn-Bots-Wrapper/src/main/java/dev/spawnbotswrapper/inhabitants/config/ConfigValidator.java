@@ -182,7 +182,7 @@ public final class ConfigValidator {
         }
     }
 
-    /** Smallest and largest {@code pvpbotSettings.maxTargetDistance} (blocks); 128 is PvP BOT's catalog maximum and vanilla's line-of-sight cap. */
+    /** Smallest and largest {@code pvpbotSettings.maxTargetDistance} (blocks); 128 is PvP BOT's catalog maximum (the shipped value is 64, the aggro engage limit). */
     public static final double MIN_TARGET_DISTANCE = 4.0;
     public static final double MAX_TARGET_DISTANCE = 128.0;
 
@@ -245,8 +245,6 @@ public final class ConfigValidator {
             c.aggro = new InhabitantsConfig.Aggro();
         }
         InhabitantsConfig.Aggro a = c.aggro;
-        a.reactionTicks = clamp(w, "aggro.reactionTicks", a.reactionTicks, 0, 100);
-        a.distanceReactionTicksPer32 = clamp(w, "aggro.distanceReactionTicksPer32", a.distanceReactionTicksPer32, 0.0, 100.0);
         a.loseGraceTicks = clamp(w, "aggro.loseGraceTicks", a.loseGraceTicks, 1, 72000);
         a.searchTicks = clamp(w, "aggro.searchTicks", a.searchTicks, 20, 72000);
         a.returnArriveDistance = clamp(w, "aggro.returnArriveDistance", a.returnArriveDistance, 0.5, 16.0);
@@ -257,15 +255,19 @@ public final class ConfigValidator {
             a.perception = new InhabitantsConfig.AggroPerception();
         }
         InhabitantsConfig.AggroPerception p = a.perception;
-        p.frontHalfAngleDeg = clamp(w, "aggro.perception.frontHalfAngleDeg", p.frontHalfAngleDeg, 0.0, 180.0);
+        p.reactionBaseSeconds = clamp(w, "aggro.perception.reactionBaseSeconds", p.reactionBaseSeconds, 0.0, 10.0);
+        p.reactionAt64Seconds = clamp(w, "aggro.perception.reactionAt64Seconds", p.reactionAt64Seconds,
+                p.reactionBaseSeconds, 30.0);
+        p.fullAttentionHalfAngleDeg = clamp(w, "aggro.perception.fullAttentionHalfAngleDeg", p.fullAttentionHalfAngleDeg,
+                0.0, 180.0);
         p.peripheralHalfAngleDeg = clamp(w, "aggro.perception.peripheralHalfAngleDeg", p.peripheralHalfAngleDeg,
-                p.frontHalfAngleDeg, 180.0);
+                p.fullAttentionHalfAngleDeg, 180.0);
         p.peripheralMultiplier = clamp(w, "aggro.perception.peripheralMultiplier", p.peripheralMultiplier, 1.0, 20.0);
         p.sneakMultiplier = clamp(w, "aggro.perception.sneakMultiplier", p.sneakMultiplier, 1.0, 20.0);
-        p.hearWalk = clamp(w, "aggro.perception.hearWalk", p.hearWalk, 0.0, 128.0);
-        p.hearSprint = clamp(w, "aggro.perception.hearSprint", p.hearSprint, 0.0, 128.0);
-        p.hearCombat = clamp(w, "aggro.perception.hearCombat", p.hearCombat, 0.0, 128.0);
-        p.combatNoiseTicks = clamp(w, "aggro.perception.combatNoiseTicks", p.combatNoiseTicks, 0, 200);
+        if (a.hearing == null) {
+            a.hearing = new InhabitantsConfig.AggroHearing();
+        }
+        a.hearing.listenerRadius = clamp(w, "aggro.hearing.listenerRadius", a.hearing.listenerRadius, 1, 64);
     }
 
     /** A '#tag' under 'structures' belongs in 'tags'; a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */

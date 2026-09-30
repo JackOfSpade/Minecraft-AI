@@ -41,8 +41,10 @@ final class GlobalNotes {
         } else if (!caps.autoTargetEnabled()) {
             out.add("Auto-target is off (PvP BOT's own; the addon's managed setting pvpbotSettings.autoTargetEnabled): this bot "
                     + "never picks a target on sight by itself. While the addon's line-of-sight hunter is on (config aggro) it "
-                    + "notices players it can see (no block-distance limit, after a short reaction time; nobody is seen from "
-                    + "behind), and a hit from any distance starts a chase, so the bot is not passive; with the hunter off it "
+                    + "notices players it can see (sight has no block limit in its view cone, after a reaction time of 0.5 s up "
+                    + "close to 2 s at 64 blocks; it never engages anyone it sees beyond 64 blocks; nobody is seen from behind, "
+                    + "but sounds are heard as a vanilla sculk sensor or Warden hears them), and a hit starts a reaction, so the "
+                    + "bot is not passive; with the hunter off it "
                     + "stays passive until it is attacked (revenge), given a "
                     + "forced target or placed in a hostile faction. It is a global PvP BOT setting, not a per-bot choice.");
         }

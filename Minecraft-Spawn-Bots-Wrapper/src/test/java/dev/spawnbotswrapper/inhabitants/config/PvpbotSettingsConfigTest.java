@@ -25,9 +25,9 @@ class PvpbotSettingsConfigTest {
     }
 
     @Test
-    void theShippedDefaultsAreTheModMaximumCeilingAndTheArcherRanges() {
+    void theShippedDefaultsAreTheEngageLimitAndTheArcherRanges() {
         InhabitantsConfig.PvpbotSettings s = new InhabitantsConfig().pvpbotSettings;
-        assertEquals(128.0, s.maxTargetDistance, "a ceiling only, the mod maximum: line of sight decides");
+        assertEquals(64.0, s.maxTargetDistance, "PvP BOT only has to cover the 64 block engage limit");
         assertEquals(8.0, s.rangedMinRange);
         assertEquals(12.0, s.rangedOptimalRange);
         assertEquals(16.0, s.rangedMaxRange);
@@ -49,7 +49,7 @@ class PvpbotSettingsConfigTest {
     @Test
     void aFileWithoutTheBlockGetsTheShippedValues(@TempDir Path dir) throws IOException {
         InhabitantsConfig c = load(dir, "{ \"enabled\": true }").config();
-        assertEquals(128.0, c.pvpbotSettings.maxTargetDistance);
+        assertEquals(64.0, c.pvpbotSettings.maxTargetDistance);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoTargetEnabled);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoEquipWeapon);
     }
@@ -130,7 +130,7 @@ class PvpbotSettingsConfigTest {
     @Test
     void theWrittenDefaultFileContainsTheBlockWithItsKeys() {
         String json = ConfigIO.toJson(new InhabitantsConfig());
-        for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 128.0", "\"rangedMinRange\": 8.0",
+        for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 64.0", "\"rangedMinRange\": 8.0",
                 "\"rangedOptimalRange\": 12.0", "\"rangedMaxRange\": 16.0", "\"autoEquipWeapon\": false", "\"autoTargetEnabled\": false",
                 "\"bowMinDrawTime\": 20")) {
             assertTrue(json.contains(key), key + " missing from:\n" + json);

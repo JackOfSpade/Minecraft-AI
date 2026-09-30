@@ -13,6 +13,7 @@ import net.minecraft.world.item.Items;
 import org.slf4j.Logger;
 
 import java.util.Optional;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 
 /**
@@ -36,6 +37,11 @@ import java.util.function.Supplier;
  * PvP BOT's mode plays no part in the gate. Bows need no trigger: PvP BOT releases them itself, at
  * {@code pvpbotSettings.bowMinDrawTime} (20 = full power).
  * <p>
+ * <b>Reaction time.</b> A loaded crossbow is fired at a PLAYER only while the aggro engagement with that player is CONFIRMED
+ * (it was continuously in sight for the full reaction time, and again after every re-sighting) and it is in line of sight this
+ * tick, so a pre-loaded crossbow fires at the earliest one reaction time after the player comes into view. Bows are PvP BOT's
+ * own (it draws only while it holds a target, and the target is only handed over once confirmed).
+ * <p>
  * The PvP BOT state it needs (its target) is read through the adapter. Everything is fail-soft: one failure disables
  * the tick with one warning, never a crash.
  */
@@ -47,9 +53,23 @@ public final class RangedFire {
     private long shotsFired;
     private long drawsReleased;
 
+    /** Whether an inhabitant (first name) may hurt a player (second name) now: only within a CONFIRMED engagement (the reaction time). */
+    private final BiPredicate<String, String> mayFirePlayer;
+    private long shotsHeldBack;
+
     public RangedFire(Supplier<ServerSession> session, Logger log) {
+        this(session, log, (bot, victim) -> true);
+    }
+
+    public RangedFire(Supplier<ServerSession> session, Logger log, BiPredicate<String, String> mayFirePlayer) {
         this.session = session;
         this.log = log;
+        this.mayFirePlayer = mayFirePlayer;
+    }
+
+    /** Ticks a loaded crossbow was held back because the engagement with its player target was not confirmed (tests and diagnostics). */
+    public long shotsHeldBack() {
+        return shotsHeldBack;
     }
 
     /** Crossbow shots this addon has fired itself since start (for tests and diagnostics). */
@@ -119,6 +139,13 @@ public final class RangedFire {
         }
         Optional<PvpBotOperations.CombatView> view = adapter.combatView(bot.getName().getString());
         if (view.isPresent() && hasLiveTargetInSight(bot, view.get().target())) {
+            // The reaction time: a loaded crossbow fires at a player only inside a CONFIRMED engagement with exactly that
+            // player (target seen continuously for the full reaction time, and again after every re-sighting).
+            if (view.get().target() instanceof ServerPlayer player
+                    && !mayFirePlayer.test(bot.getName().getString(), player.getName().getString())) {
+                shotsHeldBack++;
+                return;
+            }
             bot.gameMode.useItem(bot, bot.level(), main, InteractionHand.MAIN_HAND);
             shotsFired++;
         }

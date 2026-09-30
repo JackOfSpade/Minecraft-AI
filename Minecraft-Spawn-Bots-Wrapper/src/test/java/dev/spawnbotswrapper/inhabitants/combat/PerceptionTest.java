@@ -4,7 +4,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import dev.spawnbotswrapper.inhabitants.combat.Perception.MobKind;
 import dev.spawnbotswrapper.inhabitants.combat.Perception.Params;
 import dev.spawnbotswrapper.inhabitants.combat.Perception.Reading;
 import dev.spawnbotswrapper.inhabitants.combat.Perception.Sense;
@@ -24,8 +23,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The pure perception function against the golden vectors shared with the Minecraft-AI mod
- * ({@code docs/perception/vectors.json} in the repository root), plus the pieces on their own: the reaction-time table
- * (front 5 ticks, peripheral 10, sneaking 10, invisible never, 64 blocks 15), hearing from behind, occluded sound.
+ * ({@code docs/perception/vectors.json} in the repository root), plus the pieces on their own: the continuous reaction
+ * formula (0.5 s close, 2.0 s at 64 blocks, a different number at every distance), the linear angle factor, sneaking,
+ * hearing as an input, and the exposure runs.
  */
 class PerceptionTest {
 
@@ -49,11 +49,9 @@ class PerceptionTest {
     }
 
     private static Params params(JsonObject p) {
-        return new Params(bool(p, "enabled", true), num(p, "frontHalfAngleDeg", 60), num(p, "peripheralHalfAngleDeg", 100),
-                num(p, "peripheralMultiplier", 2), num(p, "sneakMultiplier", 2), num(p, "reactionTicks", 5),
-                num(p, "distanceTicksPer32", 5), num(p, "hearWalk", 4), num(p, "hearSprint", 8), num(p, "hearCombat", 12),
-                num(p, "hearNoisyMob", 8), num(p, "hearPrimedCreeper", 16), num(p, "hearWarden", 24),
-                num(p, "hearAnimal", 4), (int) num(p, "combatNoiseTicks", 10));
+        return new Params(bool(p, "enabled", true), num(p, "reactionBaseSeconds", 0.5), num(p, "reactionAt64Seconds", 2.0),
+                num(p, "fullAttentionHalfAngleDeg", 30), num(p, "peripheralHalfAngleDeg", 100),
+                num(p, "peripheralMultiplier", 2), num(p, "sneakMultiplier", 2));
     }
 
     private static Params withOverride(JsonObject base, JsonObject override) {
@@ -65,9 +63,7 @@ class PerceptionTest {
     }
 
     private static Subject subject(JsonObject s) {
-        return new Subject(bool(s, "sneaking", false), bool(s, "moving", false), bool(s, "sprinting", false),
-                s.has("combatNoiseAge") ? s.get("combatNoiseAge").getAsInt() : Perception.NO_NOISE,
-                MobKind.valueOf(s.has("mob") ? s.get("mob").getAsString() : "NONE"), num(s, "visibility", 1.0));
+        return new Subject(bool(s, "sneaking", false), num(s, "visibility", 1.0));
     }
 
     @Test
@@ -75,22 +71,48 @@ class PerceptionTest {
         JsonObject root = vectors();
         JsonObject base = root.getAsJsonObject("params");
         JsonArray cases = root.getAsJsonArray("cases");
-        assertTrue(cases.size() >= 45, "the vector file lost cases: " + cases.size());
+        assertTrue(cases.size() >= 30, "the vector file lost cases: " + cases.size());
         for (JsonElement el : cases) {
             JsonObject c = el.getAsJsonObject();
             String name = c.get("name").getAsString();
             Params p = c.has("paramsOverride") ? withOverride(base, c.getAsJsonObject("paramsOverride")) : params(base);
-            Reading got = Perception.read(p, num(c, "modMax", num(root, "modMax", 128)), c.get("angleDeg").getAsDouble(),
-                    c.get("distance").getAsDouble(), subject(c.getAsJsonObject("subject")),
-                    () -> bool(c, "occlusionClear", true));
+            Reading got = Perception.read(p, c.get("angleDeg").getAsDouble(), c.get("distance").getAsDouble(),
+                    subject(c.getAsJsonObject("subject")), bool(c, "heardNear", false), () -> bool(c, "occlusionClear", true));
             assertEquals(Sense.valueOf(c.get("expectSense").getAsString()), got.sense(), name);
-            JsonElement ticks = c.get("expectTicks");
-            if (ticks.isJsonPrimitive() && ticks.getAsJsonPrimitive().isString()) {
-                assertEquals("never", ticks.getAsString(), name);
-                assertEquals(Perception.NEVER, got.requiredTicks(), name);
+            JsonElement seconds = c.get("expectSeconds");
+            if (seconds.isJsonPrimitive() && seconds.getAsJsonPrimitive().isString()) {
+                assertEquals("never", seconds.getAsString(), name);
+                assertEquals(Perception.NEVER, got.requiredSeconds(), name);
             } else {
-                assertEquals(ticks.getAsDouble(), got.requiredTicks(), 1e-9, name);
+                assertEquals(seconds.getAsDouble(), got.requiredSeconds(), 1e-9, name);
             }
+            assertEquals(c.get("expectNoticeTick").getAsLong(), Perception.noticeTick(got.requiredSeconds()), name);
+        }
+    }
+
+    @Test
+    void everyGoldenExposureRunMatches() throws IOException {
+        JsonArray runs = vectors().getAsJsonArray("runs");
+        assertTrue(runs.size() >= 5, "the vector file lost its runs");
+        for (JsonElement el : runs) {
+            JsonObject r = el.getAsJsonObject();
+            String name = r.get("name").getAsString();
+            JsonElement req = r.get("requiredSeconds");
+            double required = req.isJsonPrimitive() && req.getAsJsonPrimitive().isString() ? Perception.NEVER : req.getAsDouble();
+            String sighted = r.get("sighted").getAsString();
+            ExposureTracker tracker = new ExposureTracker();
+            int noticed = -1;
+            for (int i = 0; i < sighted.length() && noticed < 0; i++) {
+                if (sighted.charAt(i) == '1') {
+                    long ticks = tracker.sighted("k", i);
+                    if (Perception.noticed(Perception.exposureSeconds(ticks), required)) {
+                        noticed = i;
+                    }
+                } else {
+                    tracker.missed("k", i);
+                }
+            }
+            assertEquals(r.get("expectNoticeIndex").getAsInt(), noticed, name);
         }
     }
 
@@ -99,96 +121,92 @@ class PerceptionTest {
         assertEquals(Params.defaults(), params(vectors().getAsJsonObject("params")));
     }
 
-    private static final Params NO_DISTANCE_TERM = withoutDistance(Params.defaults());
-
-    private static Params withoutDistance(Params d) {
-        return new Params(d.enabled(), d.frontHalfAngleDeg(), d.peripheralHalfAngleDeg(), d.peripheralMultiplier(),
-                d.sneakMultiplier(), d.reactionTicks(), 0.0, d.hearWalk(), d.hearSprint(), d.hearCombat(),
-                d.hearNoisyMob(), d.hearPrimedCreeper(), d.hearWarden(), d.hearAnimal(), d.combatNoiseTicks());
-    }
+    private static final Subject PLAIN = Subject.player(false);
 
     @Test
-    void theReactionTimeTable() {
-        Params p = NO_DISTANCE_TERM;
-        Subject plain = Subject.player(false, false, false);
-        assertEquals(5.0, Perception.sightTicks(p, 0, 10, plain), 1e-9, "front: 0.25 s");
-        assertEquals(10.0, Perception.sightTicks(p, 80, 10, plain), 1e-9, "peripheral: twice as long");
-        assertEquals(10.0, Perception.sightTicks(p, 0, 10, Subject.player(true, false, false)), 1e-9, "sneaking front");
-        assertEquals(Perception.NEVER, Perception.sightTicks(p, 0, 10,
-                new Subject(false, false, false, Perception.NO_NOISE, MobKind.NONE, 0.0)), "invisible: never");
-        assertEquals(Perception.NEVER, Perception.sightTicks(p, 120, 3, plain), "behind: never");
-        // far: 5 extra ticks per 32 blocks (a soft scaling): 64 blocks is 15
-        assertEquals(15.0, Perception.sightTicks(Params.defaults(), 0, 64, plain), 1e-9);
-        assertEquals(11.25, Perception.sightTicks(Params.defaults(), 0, 40, plain), 1e-9);
-    }
-
-    @Test
-    void theDistanceTermIsSoftAndZeroDisablesIt() {
-        Subject plain = Subject.player(false, false, false);
-        assertEquals(5.0, Perception.sightTicks(NO_DISTANCE_TERM, 0, 128, plain), 1e-9);
-        assertEquals(25.0, Perception.sightTicks(Params.defaults(), 0, 128, plain), 1e-9);
-    }
-
-    @Test
-    void nothingIsSightedBeyondTheModMaximumAndNothingIsHeardThere() {
+    void theReactionTimeIsOneContinuousFormula() {
         Params p = Params.defaults();
-        assertEquals(Sense.SIGHT, Perception.read(p, 128, 0, 128, Subject.player(false, false, false), () -> true).sense());
-        assertEquals(Sense.NONE, Perception.read(p, 128, 0, 128.1, Subject.player(false, false, false), () -> true).sense());
-        assertEquals(Sense.NONE, Perception.read(p.disabled(), 128, 0, 129, Subject.player(false, false, false),
-                () -> true).sense(), "vanilla hasLineOfSight has the same cap");
+        assertEquals(0.5, Perception.requiredSeconds(p, 0, 0, PLAIN, true), 1e-12, "0.5 s up close");
+        assertEquals(2.0, Perception.requiredSeconds(p, 0, 64, PLAIN, true), 1e-12, "2.0 s at 64 blocks");
+        // every distance has its own number: no steps, no rounding
+        double a = Perception.requiredSeconds(p, 0, 10.3, PLAIN, true);
+        double b = Perception.requiredSeconds(p, 0, 10.4, PLAIN, true);
+        assertEquals(0.74140625, a, 1e-12);
+        assertTrue(b > a, "monotone in the distance");
+        assertEquals(1.5 * 0.1 / 64.0, b - a, 1e-12, "linear in the distance");
+        // the angle factor: 1 up to 30 degrees, linear to 2 at 100 degrees, never beyond
+        assertEquals(0.5, Perception.requiredSeconds(p, 30, 0, PLAIN, true), 1e-12);
+        assertEquals(0.75, Perception.requiredSeconds(p, 65, 0, PLAIN, true), 1e-12);
+        assertEquals(1.0, Perception.requiredSeconds(p, 100, 0, PLAIN, true), 1e-12);
+        assertEquals(Perception.NEVER, Perception.requiredSeconds(p, 100.01, 0, PLAIN, true));
+        assertEquals(0.75, Perception.requiredSeconds(p, -65, 0, PLAIN, true), 1e-12, "either side");
+        // sneaking doubles it (unless the reaction is to pain), visibility divides it
+        assertEquals(1.0, Perception.requiredSeconds(p, 0, 0, Subject.player(true), true), 1e-12);
+        assertEquals(0.5, Perception.requiredSeconds(p, 0, 0, Subject.player(true), false), 1e-12, "pain ignores sneaking");
+        assertEquals(1.0, Perception.requiredSeconds(p, 0, 0, new Subject(false, 0.5), true), 1e-12);
+        assertEquals(Perception.NEVER, Perception.requiredSeconds(p, 0, 0, new Subject(false, 0.0), true), "invisible: never");
+    }
+
+    @Test
+    void theNoticeHappensOnTheFirstTickThatReachesTheSeconds() {
+        assertEquals(10, Perception.noticeTick(0.5));
+        assertEquals(15, Perception.noticeTick(0.734375));
+        assertEquals(0, Perception.noticeTick(0.0));
+        assertEquals(-1, Perception.noticeTick(Perception.NEVER));
+        assertFalse(Perception.noticed(Perception.exposureSeconds(9), 0.5));
+        assertTrue(Perception.noticed(Perception.exposureSeconds(10), 0.5));
+        assertFalse(Perception.noticed(Perception.exposureSeconds(14), 0.734375));
+        assertTrue(Perception.noticed(Perception.exposureSeconds(15), 0.734375));
+        assertFalse(Perception.noticed(1000.0, Perception.NEVER));
+        assertTrue(Perception.noticed(0.0, 0.0), "perception off: at once");
     }
 
     @Test
     void occlusionIsAskedLastAndAtMostOnce() {
         AtomicInteger asked = new AtomicInteger();
         Params p = Params.defaults();
-        // Beyond the mod maximum, behind and silent, invisible: the cheap filters say no, no ray is cast.
-        assertEquals(Sense.NONE, Perception.read(p, 128, 0, 130, Subject.player(false, false, false),
+        // Behind and silent, or invisible: the cheap filters say no, no ray is cast.
+        assertEquals(Sense.NONE, Perception.read(p, 170, 2, Subject.player(true), false,
                 () -> asked.incrementAndGet() > 0).sense());
-        assertEquals(Sense.NONE, Perception.read(p, 128, 170, 2, Subject.player(true, true, false),
-                () -> asked.incrementAndGet() > 0).sense());
-        assertEquals(Sense.NONE, Perception.read(p, 128, 0, 2,
-                new Subject(false, false, false, Perception.NO_NOISE, MobKind.NONE, 0.0),
+        assertEquals(Sense.NONE, Perception.read(p, 0, 2, new Subject(false, 0.0), false,
                 () -> asked.incrementAndGet() > 0).sense());
         assertEquals(0, asked.get());
-        // Both sight and hearing hold: one ray decides.
-        assertEquals(Sense.SIGHT, Perception.read(p, 128, 0, 2, Subject.player(false, true, false),
-                () -> asked.incrementAndGet() > 0).sense());
+        // In view: one ray decides.
+        assertEquals(Sense.SIGHT, Perception.read(p, 0, 2, PLAIN, false, () -> asked.incrementAndGet() > 0).sense());
         assertEquals(1, asked.get());
+        // Heard from behind: one ray decides.
+        assertEquals(Sense.HEARING, Perception.read(p, 170, 2, PLAIN, true, () -> asked.incrementAndGet() > 0).sense());
+        assertEquals(2, asked.get());
     }
 
     @Test
     void perceptionOffIsExactlyVanillaHasLineOfSight() {
         Params off = Params.defaults().disabled();
         AtomicInteger asked = new AtomicInteger();
-        // behind, sneaking, invisible, far: all seen at once as long as the line is clear and within the maximum
-        Reading r = Perception.read(off, 128, 179, 100,
-                new Subject(true, false, false, Perception.NO_NOISE, MobKind.NONE, 0.0), () -> {
-                    asked.incrementAndGet();
-                    return true;
-                });
+        // behind, sneaking, invisible, far: all seen at once as long as the line is clear
+        Reading r = Perception.read(off, 179, 100, new Subject(true, 0.0), false, () -> {
+            asked.incrementAndGet();
+            return true;
+        });
         assertEquals(Sense.SIGHT, r.sense());
-        assertEquals(0.0, r.requiredTicks(), "no reaction time");
+        assertEquals(0.0, r.requiredSeconds(), "no reaction time");
         assertEquals(1, asked.get());
-        assertEquals(Sense.NONE, Perception.read(off, 128, 0, 5, Subject.player(false, false, false), () -> false).sense());
+        assertEquals(Sense.NONE, Perception.read(off, 0, 5, PLAIN, false, () -> false).sense());
     }
 
     @Test
-    void anOccludedSoundIsOnlyAHintAndNeverANotice() {
-        Reading r = Perception.read(Params.defaults(), 128, 150, 3, Subject.player(false, true, false), () -> false);
-        assertEquals(Sense.INVESTIGATE, r.sense());
-        assertFalse(r.exposed());
-        assertFalse(Perception.noticed(1000, r.requiredTicks()), "no amount of time turns a hint into a notice");
-    }
-
-    @Test
-    void aNoticeNeedsTheFullExposure() {
-        assertFalse(Perception.noticed(4, 5.0));
-        assertTrue(Perception.noticed(5, 5.0));
-        assertFalse(Perception.noticed(11, 11.25));
-        assertTrue(Perception.noticed(12, 11.25));
-        assertFalse(Perception.noticed(100, Perception.NEVER));
-        assertTrue(Perception.noticed(0, 0.0), "perception off: at once");
+    void hearingIsAnInputThatOnlyRemovesTheViewConeRequirement() {
+        Params p = Params.defaults();
+        // heard behind with a clear line: sighted at angle factor 1
+        Reading behind = Perception.read(p, 150, 6, PLAIN, true, () -> true);
+        assertEquals(Sense.HEARING, behind.sense());
+        assertEquals(Perception.requiredSeconds(p, 0, 6, PLAIN, true), behind.requiredSeconds(), 1e-12);
+        // heard but the line is blocked: not a notice
+        assertEquals(Sense.NONE, Perception.read(p, 150, 6, PLAIN, true, () -> false).sense());
+        // nothing heard and behind: nothing, at any distance
+        assertEquals(Sense.NONE, Perception.read(p, 170, 1, PLAIN, false, () -> true).sense());
+        // hearing never restricts sight: in front and not heard is plainly seen at any distance
+        assertEquals(Sense.SIGHT, Perception.read(p, 0, 90, PLAIN, false, () -> true).sense());
     }
 
     @Test
@@ -200,28 +218,5 @@ class PerceptionTest {
         assertEquals(90.0, Perception.angleDeg(0, 0, 1, 0, 4, 0), 1e-9);
         assertEquals(45.0, Perception.angleDeg(0, 0, 1, 0, 2, 2), 1e-9);
         assertEquals(0.0, Perception.angleDeg(0, 0, 0, 1, 1, 1), "no direction, no angle");
-    }
-
-    @Test
-    void noiseIsTheMaxOfWhatApplies() {
-        Params p = Params.defaults();
-        assertEquals(0.0, Perception.noiseRadius(p, Subject.player(false, false, false)));
-        assertEquals(0.0, Perception.noiseRadius(p, Subject.player(true, true, false)));
-        assertEquals(4.0, Perception.noiseRadius(p, Subject.player(false, true, false)));
-        assertEquals(8.0, Perception.noiseRadius(p, Subject.player(false, true, true)));
-        assertEquals(12.0, Perception.noiseRadius(p, new Subject(true, true, false, 3, MobKind.NONE, 1.0)),
-                "combat noise is heard even by a sneaking player");
-        assertEquals(12.0, Perception.noiseRadius(p, new Subject(false, true, true, 0, MobKind.NONE, 1.0)));
-        assertEquals(0.0, Perception.noiseRadius(p, new Subject(false, false, false, 10, MobKind.NONE, 1.0)));
-    }
-
-    @Test
-    void hearingOnlyAddsAwarenessItNeverRestrictsSight() {
-        // A walking player 30 blocks away in front is out of earshot but still seen: the noise radius is no sight limit.
-        Reading far = Perception.read(Params.defaults(), 128, 0, 30, Subject.player(false, true, false), () -> true);
-        assertEquals(Sense.SIGHT, far.sense());
-        // Silent and behind: not noticed, at any distance.
-        assertEquals(Sense.NONE, Perception.read(Params.defaults(), 128, 170, 1, Subject.player(false, false, false),
-                () -> true).sense());
     }
 }

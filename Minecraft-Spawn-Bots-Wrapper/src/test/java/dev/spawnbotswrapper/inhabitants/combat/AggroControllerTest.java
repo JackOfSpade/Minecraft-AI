@@ -19,8 +19,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Noticing, chasing and the rules around them: reaction time, the view cone, hearing, no distance limit, being hit,
- * mobs, somebody else's forced target, validity, inert modes and failures. The whole hunt (pursue, search, return) is
+ * Noticing, chasing and the rules around them: the continuous reaction time, the view cone, hearing (vanilla vibrations),
+ * the 64 block engage limit, NO MAGIC (only what is perceived), the CONFIRMED engagement state machine, being hit, mobs,
+ * somebody else's forced target, validity, inert modes and failures. The whole hunt (pursue, search, return) is
  * {@link AggroHuntTest}. Everything runs against fakes, including a small stand-in for PvP BOT's own target
  * resolution; no Minecraft, no PvP BOT.
  */
@@ -43,48 +44,68 @@ class AggroControllerTest {
         return t > max ? -1 : t;
     }
 
+    private int sets() {
+        return s.up.callsOf("set").size();
+    }
+
     // ---------------------------------------------------------------- reaction time
 
     @Test
     void aPlayerInFrontIsNoticedOnlyAfterTheReactionTime() {
-        steve.x = 8; // 5 + 5*8/32 = 6.25 ticks of exposure needed
+        steve.x = 8; // (0.5 + 1.5 * 8 / 64) = 0.6875 s = 14 ticks of unbroken exposure
         int ticks = ticksUntilChase(40);
-        // the exposure starts at the first scan (within 3 ticks) and must reach 6.25, i.e. 7 ticks later
-        assertTrue(ticks >= 8 && ticks <= 10, "noticed after " + ticks + " ticks");
+        // the exposure starts at the first scan (within 3 ticks) and must reach 0.6875 s, 14 ticks later
+        assertTrue(ticks >= 15 && ticks <= 17, "noticed after " + ticks + " ticks");
         assertEquals(List.of("set Warden7->Steve"), s.up.callsOf("set"));
         assertEquals(Phase.CHASE, s.phase());
         assertEquals(Cause.ACQUIRED, s.controller.causeOf("Warden7"));
+        assertEquals("Steve", s.controller.confirmedTarget("Warden7"));
     }
 
     @Test
-    void thePeripheralFieldTakesTwiceAsLong() {
-        bot.look = new double[]{0, 1}; // steve at +x is 90 degrees to the side
+    void everyDistanceHasItsOwnReactionTime() {
+        // 0.5 + 1.5 * d / 64: 10 blocks 0.734 s (15 ticks), 30 blocks 1.203 s (25 ticks), 50 blocks 1.672 s (34 ticks)
+        int[] distances = {10, 30, 50};
+        int[] expected = {15, 25, 34};
+        for (int i = 0; i < distances.length; i++) {
+            Sim sim = new Sim();
+            sim.bot.look = new double[]{1, 0};
+            sim.steve.x = distances[i];
+            int t = sim.runUntil(() -> !sim.up.callsOf("set").isEmpty(), 80);
+            assertTrue(t >= expected[i] + 1 && t <= expected[i] + 3, distances[i] + " blocks: " + t + " ticks, expected about "
+                    + expected[i]);
+        }
+    }
+
+    @Test
+    void thePeripheralFieldTakesLongerContinuously() {
+        bot.look = new double[]{0, 1}; // steve at +x is 90 degrees to the side: angle factor 1 + 60/70
         steve.x = 8;
-        int ticks = ticksUntilChase(60);
-        assertTrue(ticks >= 13 && ticks <= 15, "peripheral: 2*5 + 1.25 -> 12 ticks of exposure: " + ticks);
+        int ticks = ticksUntilChase(80);
+        assertTrue(ticks >= 27 && ticks <= 29, "0.6875 * 1.857 = 1.277 s -> 26 ticks of exposure: " + ticks);
     }
 
     @Test
     void aSneakingPlayerTakesTwiceAsLong() {
         steve.x = 8;
-        steve.subject = Perception.Subject.player(true, false, false);
-        int ticks = ticksUntilChase(60);
-        assertTrue(ticks >= 13 && ticks <= 15, "sneaking: 2*5 + 1.25 -> 12 ticks of exposure: " + ticks);
+        steve.subject = Perception.Subject.player(true);
+        int ticks = ticksUntilChase(80);
+        assertTrue(ticks >= 29 && ticks <= 31, "sneaking: 1.375 s -> 28 ticks of exposure: " + ticks);
     }
 
     @Test
     void anInvisiblePlayerIsNeverSeen() {
         steve.x = 4;
-        steve.subject = new Perception.Subject(false, false, false, Perception.NO_NOISE, Perception.MobKind.NONE, 0.0);
+        steve.subject = new Perception.Subject(false, 0.0);
         s.run(200);
         assertEquals(List.of(), s.up.callsOf("set"));
     }
 
     @Test
-    void aFarPlayerTakesLongerButIsNoticedAtAnyDistance() {
-        steve.x = 64; // 5 + 10 = 15 ticks
-        int ticks = ticksUntilChase(60);
-        assertTrue(ticks >= 16 && ticks <= 18, "64 blocks: 15 ticks of exposure: " + ticks);
+    void aPlayerAtTheEdgeOfTheEngageLimitTakesTwoSeconds() {
+        steve.x = 64; // 2.0 s = 40 ticks
+        int ticks = ticksUntilChase(80);
+        assertTrue(ticks >= 41 && ticks <= 43, "64 blocks: 40 ticks of exposure: " + ticks);
     }
 
     @Test
@@ -95,8 +116,8 @@ class AggroControllerTest {
         bot.blind.add("Steve");
         s.run(6); // out of sight for longer than a missed tick
         bot.blind.clear();
-        int ticks = ticksUntilChase(40);
-        assertTrue(ticks >= 8, "the earlier glimpse does not count: " + ticks);
+        int ticks = ticksUntilChase(60);
+        assertTrue(ticks >= 14, "the earlier glimpse does not count: " + ticks);
     }
 
     @Test
@@ -107,32 +128,24 @@ class AggroControllerTest {
         s.run(1); // a leaf, a fence post: one tick without a clear view
         bot.blind.clear();
         int ticks = ticksUntilChase(40);
-        assertTrue(ticks > 0 && ticks <= 5, "noticed soon after despite one missed tick: " + ticks);
+        assertTrue(ticks > 0 && ticks <= 12, "noticed soon after despite one missed tick (a reset would take 14): " + ticks);
     }
 
     @Test
     void oneMissedTickNeverBreaksTheExposureWhereverItFallsInTheScanCycle() {
         for (int offset = 0; offset < 4; offset++) {
-            AggroFakes.Sim sim = new AggroFakes.Sim();
-            sim.bot.look = new double[]{1, 0};
-            sim.steve.x = 8;
-            sim.run(offset); // shifts where in the 3 tick scan cycle the exposure starts
-            int seenTicks = sim.runUntil(() -> sim.controller.stats().chasing() > 0, 40);
-            assertTrue(seenTicks <= 40);
-            // a fresh scene: the exposure runs for 4 ticks, one tick is blocked, then it goes on
+            // a fresh scene: the exposure runs for 3 ticks, one tick is blocked, then it goes on
             AggroFakes.Sim second = new AggroFakes.Sim();
             second.bot.look = new double[]{1, 0};
             second.steve.x = 8;
-            second.run(offset);
-            second.runUntil(() -> second.controller.stats().chasing() > 0 || second.bot.canSeeCalls >= 1, 10);
-            if (second.controller.stats().chasing() == 0) {
-                second.run(2);
-                second.bot.blind.add("Steve");
-                second.run(1);
-                second.bot.blind.clear();
-                int t = second.runUntil(() -> second.controller.stats().chasing() > 0, 40);
-                assertTrue(t <= 9, "offset " + offset + ": noticed " + t + " ticks after the one missed tick; a reset would take 7 more");
-            }
+            second.run(offset); // shifts where in the 3 tick scan cycle the exposure starts
+            second.runUntil(() -> second.bot.canSeeCalls >= 1, 10);
+            second.run(3);
+            second.bot.blind.add("Steve");
+            second.run(1);
+            second.bot.blind.clear();
+            int t = second.runUntil(() -> second.controller.stats().chasing() > 0, 40);
+            assertTrue(t <= 11, "offset " + offset + ": noticed " + t + " ticks after the one missed tick; a reset would take 15");
         }
     }
 
@@ -140,7 +153,7 @@ class AggroControllerTest {
     void perceptionOffMeansPlainLineOfSightAtOnce() {
         s.config = s.config.withPerception(s.config.perception().disabled());
         bot.look = new double[]{-1, 0}; // steve is BEHIND the bot: omnidirectional now
-        steve.x = 100;
+        steve.x = 60;
         int ticks = ticksUntilChase(10);
         assertTrue(ticks > 0 && ticks <= 3, "no cone, no time: the first scan notices: " + ticks);
     }
@@ -178,7 +191,66 @@ class AggroControllerTest {
         assertTrue(ticksUntilChase(40) > 0);
     }
 
-    // ---------------------------------------------------------------- behind, hearing, ambush
+    // ---------------------------------------------------------------- the engage limit (64 blocks, the one hard rule)
+
+    @Test
+    void aPlayerJustInsideTheEngageLimitIsEngagedAndJustOutsideIsNot() {
+        steve.x = 63.9;
+        assertTrue(ticksUntilChase(80) > 0, "63.9 blocks: engaged");
+        Sim far = new Sim();
+        far.bot.look = new double[]{1, 0};
+        far.steve.x = 64.1;
+        far.run(300);
+        assertEquals(List.of(), far.up.callsOf("set"), "64.1 blocks: never engaged, however long it is in plain sight");
+        assertEquals(Phase.IDLE, far.phase());
+        assertEquals(0, far.bot.canSeeCalls, "beyond the limit no ray is cast at all (the cost stays low)");
+    }
+
+    @Test
+    void theChaseContinuesWhileTheTargetIsInSightUpToTheEngageLimit() {
+        steve.x = 63;
+        assertTrue(ticksUntilChase(80) > 0);
+        s.run(400);
+        assertEquals(Phase.CHASE, s.phase());
+        steve.x = 63.9;
+        s.run(200);
+        assertEquals(Phase.CHASE, s.phase(), "63.9 blocks, still in sight and engaged");
+        assertEquals(List.of(), s.up.callsOf("clear"), "never given up");
+    }
+
+    @Test
+    void aTargetSightedBeyondTheEngageLimitIsTooFarAndTheBotGoesHome() {
+        steve.x = 40;
+        assertTrue(ticksUntilChase(80) > 0);
+        bot.x = 3; // it moved on while chasing: home is where it began
+        steve.x = 70; // still in plain sight, now sighted at 67 blocks
+        s.run(1);
+        assertEquals(Phase.RETURN, s.phase(), "sighted beyond 64: too far, back home");
+        assertEquals(1L, s.controller.stats().giveUps().get("too far"));
+        assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"));
+        assertTrue(s.log.debug.stream().anyMatch(l -> l.contains("too far")), s.log.debug.toString());
+        s.run(100);
+        assertEquals(1, sets(), "it does not engage the far player again");
+    }
+
+    @Test
+    void tooFarIsDecidedOnlyFromASightingNotFromTheTrueDistance() {
+        steve.x = 40;
+        assertTrue(ticksUntilChase(80) > 0);
+        bot.blind.add("Steve");
+        steve.x = 200; // far away and unseen: the bot cannot know
+        s.run(9);
+        assertEquals(Phase.CHASE, s.phase(), "the lost-sight rules apply, as for any unseen target");
+        s.run(1);
+        assertEquals(Phase.PURSUE, s.phase());
+        assertNull(s.controller.stats().giveUps().get("too far"), "never judged too far without seeing it");
+        Pos goal = s.planner.goals.isEmpty() ? null : s.planner.goals.get(0);
+        s.run(2);
+        goal = s.planner.goals.get(0);
+        assertEquals(40.0, goal.x(), 1e-9, "it walks to where it LAST SAW the player, not to the true position");
+    }
+
+    // ---------------------------------------------------------------- behind, hearing (vanilla vibrations), ambush
 
     @Test
     void aPlayerStandingStillBehindIsNeverNoticed() {
@@ -189,36 +261,55 @@ class AggroControllerTest {
         assertEquals(0, bot.canSeeCalls, "behind and silent: the cheap filters say no, no ray is cast");
     }
 
+    /** Steve walks: a vibration reaches the bot every 5 ticks (vanilla decides that; here it is fed in). */
+    private int walkingSoundsUntilChase(int max) {
+        for (int i = 0; i < max; i++) {
+            if (i % 5 == 0) {
+                s.sound(steve.x, steve.z);
+            }
+            s.run(1);
+            if (!s.up.callsOf("set").isEmpty()) {
+                return i + 1;
+            }
+        }
+        return -1;
+    }
+
     @Test
-    void aPlayerWalkingBehindAtThreeIsHeard() {
+    void aPlayerWalkingBehindIsHeardAndNoticedWithoutTheViewCone() {
         bot.look = new double[]{-1, 0};
         steve.x = 3;
-        steve.subject = Perception.Subject.player(false, true, false);
-        int ticks = ticksUntilChase(40);
-        assertTrue(ticks > 0 && ticks <= 9, "footsteps at 3 blocks: " + ticks);
-        assertEquals(Perception.Sense.HEARING, noticedHow());
+        s.up.lookTurns = false; // even if the bot never turned its head: hearing removes the view cone requirement
+        int ticks = walkingSoundsUntilChase(60);
+        // heard-led exposure: 0.5 + 1.5 * 3 / 64 = 0.5703 s -> 12 ticks, from the first sound (the sound is drained on tick 1)
+        assertTrue(ticks >= 12 && ticks <= 16, "footsteps at 3 blocks: " + ticks);
+        assertTrue(noticedHow().equals(Perception.Sense.HEARING), "noticed by hearing");
     }
 
     @Test
-    void aPlayerSprintingBehindAtSevenIsHeardButNotAtNine() {
+    void aHeardSoundOnlyCountsWhileTheSourceStaysInClearView() {
         bot.look = new double[]{-1, 0};
-        steve.x = 9;
-        steve.subject = Perception.Subject.player(false, true, true);
-        s.run(100);
-        assertEquals(List.of(), s.up.callsOf("set"), "9 blocks is out of earshot (8)");
-        steve.x = 7;
-        assertTrue(ticksUntilChase(40) > 0, "7 blocks is heard");
+        steve.x = 3;
+        s.up.lookTurns = false;
+        for (int i = 0; i < 40; i++) {
+            if (i % 5 == 0) {
+                s.sound(steve.x, steve.z);
+            }
+            bot.blind.add("Steve"); // a wall: the sound gets through, the line does not
+            s.run(1);
+        }
+        assertEquals(List.of(), s.up.callsOf("set"), "vibrations pass through ordinary walls, a notice does not");
     }
 
     @Test
-    void aPlayerSneakingBehindIsNeverNoticedUntilItHits() {
+    void aPlayerSneakingBehindIsSilentAndNeverNoticedUntilItHits() {
         bot.look = new double[]{-1, 0};
         steve.x = 1.5;
-        steve.subject = Perception.Subject.player(true, true, false);
+        steve.subject = Perception.Subject.player(true); // vanilla emits no step vibrations for it: nothing is fed in
         s.run(300);
         assertEquals(List.of(), s.up.callsOf("set"));
         assertEquals(Phase.IDLE, s.phase());
-        // the stab: being hit makes the bot aware at once
+        // the stab: being hit makes the bot aware of the striker it sees, and it reacts
         s.hit(steve);
         s.run(1);
         assertNotEquals(Phase.IDLE, s.phase());
@@ -231,14 +322,35 @@ class AggroControllerTest {
     }
 
     @Test
-    void anOccludedSoundIsOnlyAHintNeverAChase() {
+    void aSoundWithNoVisiblePlayerNearIsOnlyAPlaceToLookNeverAChase() {
         bot.look = new double[]{-1, 0};
         steve.x = 3;
-        steve.subject = Perception.Subject.player(false, true, false);
         bot.blind.add("Steve");
-        s.run(200);
+        for (int i = 0; i < 60; i++) {
+            if (i % 5 == 0) {
+                s.sound(steve.x, steve.z);
+            }
+            s.run(1);
+        }
         assertEquals(List.of(), s.up.callsOf("set"));
         assertTrue(bot.canSeeCalls > 0, "the sound was heard and the line checked");
+        assertNotNull(bot.lookedAt, "the idle bot turned to look at the sound");
+        assertEquals(3.0, bot.lookedAt.x(), 1e-9, "at the position of the sound");
+        assertEquals(Phase.IDLE, s.phase());
+    }
+
+    @Test
+    void aSoundOnlyMakesAVisiblePlayerNearItTheSourceNotOnesFarAway() {
+        bot.look = new double[]{-1, 0};
+        steve.x = 30; // visible, but 27 blocks from the sound
+        s.up.lookTurns = false;
+        for (int i = 0; i < 60; i++) {
+            if (i % 5 == 0) {
+                s.sound(3, 0);
+            }
+            s.run(1);
+        }
+        assertEquals(List.of(), s.up.callsOf("set"), "behind the bot and not where the sound was: not noticed");
     }
 
     private Perception.Sense noticedHow() {
@@ -254,59 +366,133 @@ class AggroControllerTest {
         assertTrue(d.startsWith("chasing Steve (seen 0.0 s ago; noticed by sight after 0."), d);
     }
 
-    // ---------------------------------------------------------------- chase: no distance limit, lost
+    // ---------------------------------------------------------------- chase: lost, and the CONFIRMED engagement
 
     @Test
-    void theChaseContinuesWhileTheTargetIsInSightAtAnyDistanceUpTo128() {
-        steve.x = 100;
-        assertTrue(ticksUntilChase(60) > 0);
-        s.run(400);
+    void aTreeTrunkDoesNotBreakTheChaseButEveryResightingNeedsTheFullReactionTime() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        assertEquals(1, sets());
+        s.run(5);
+        bot.blind.add("Steve");
+        s.run(1);
         assertEquals(Phase.CHASE, s.phase());
-        steve.x = 127.9;
-        s.run(200);
-        assertEquals(Phase.CHASE, s.phase(), "127.9 blocks, still in sight");
-        assertEquals(List.of(), s.up.callsOf("clear"), "never given up");
+        assertNull(s.controller.confirmedTarget("Warden7"), "the FIRST unseen tick ends the confirmation");
+        assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"), "and PvP BOT's target is cleared at that tick");
+        s.run(8); // 9 unseen ticks: inside the 10 tick grace
+        assertEquals(Phase.CHASE, s.phase());
+        bot.blind.clear();
+        s.run(14); // seen again: exposure 0 .. 13, the reaction takes 14 ticks
+        assertEquals(1, sets(), "no shot at the instant the player reappears: the reaction time applies again");
+        assertNull(s.controller.confirmedTarget("Warden7"));
+        s.run(1);
+        assertEquals(2, sets(), "confirmed again after a full reaction time of unbroken sight");
+        assertEquals("Steve", s.controller.confirmedTarget("Warden7"));
+        bot.blind.add("Steve");
+        s.run(10);
+        assertEquals(Phase.PURSUE, s.phase(), "10 ticks without sight: the target is lost");
     }
 
     @Test
-    void beyondTheModMaximumTheTargetIsLostAtOnce() {
-        steve.x = 100;
-        assertTrue(ticksUntilChase(60) > 0);
-        steve.x = 129; // PvP BOT's own maxTargetDistance (128) drops the target
+    void aBlinkBehindAPillarOfFiveTicksStillNeedsAFullReaction() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        s.run(3);
+        bot.blind.add("Steve");
+        s.run(5);
+        bot.blind.clear();
+        s.run(13);
+        assertEquals(1, sets(), "13 ticks after it reappeared: still reacting");
+        assertFalse(s.controller.mayAttackPlayer("Warden7", "Steve"), "no blow, no shot inside the window");
         s.run(2);
+        assertEquals(2, sets());
+        assertTrue(s.controller.mayAttackPlayer("Warden7", "Steve"), "confirmed: allowed");
+    }
+
+    @Test
+    void whileConfirmingTheBotFacesAndClosesInButPvpBotHoldsNoTarget() {
+        steve.x = 20;
+        assertTrue(ticksUntilChase(80) > 0);
+        bot.blind.add("Steve");
+        s.run(1);
+        bot.blind.clear();
+        s.up.calls.clear();
+        s.run(5);
+        assertTrue(s.up.callsOf("steer").size() >= 4, "closes in on the player it sees again: " + s.up.calls);
+        assertEquals(List.of(), s.up.callsOf("set"));
+        assertNull(s.up.current.get("Warden7"), "PvP BOT holds no target until the reaction is served");
+    }
+
+    @Test
+    void anUnseenTargetIsSteeredToTheLastKnownPositionNotTheTruePosition() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        s.run(2);
+        bot.blind.add("Steve");
+        steve.x = 30; // the true position changes while it is unseen
+        steve.z = 12;
+        s.up.steered.clear();
+        s.run(4);
+        assertFalse(s.up.steered.isEmpty(), "the bot steers while it has lost sight");
+        for (Pos p : s.up.steered) {
+            assertEquals(8.0, p.x(), 1e-9, "toward the last known position");
+            assertEquals(0.0, p.z(), 1e-9);
+        }
+    }
+
+    @Test
+    void aTargetThatDiesOutOfSightIsJustLost() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        bot.blind.add("Steve");
+        s.run(3);
+        steve.alive = false; // not observable
+        s.run(3);
+        assertEquals(Phase.CHASE, s.phase(), "still inside the grace: it does not know");
+        assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"), "only the unseen-tick clear");
+        s.run(4);
+        assertEquals(Phase.PURSUE, s.phase(), "lost, like any unseen target: last known position, search, then home");
+    }
+
+    @Test
+    void aTargetThatLogsOutOutOfSightIsJustLost() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        bot.blind.add("Steve");
+        s.run(2);
+        s.world.online.remove("steve");
+        s.run(2);
+        assertEquals(Phase.CHASE, s.phase());
+        s.run(6);
         assertEquals(Phase.PURSUE, s.phase());
     }
 
     @Test
-    void aTreeTrunkDoesNotBreakTheChase() {
+    void aTargetThatChangesLevelOutOfSightIsJustLost() {
         steve.x = 8;
         assertTrue(ticksUntilChase(40) > 0);
-        s.run(5);
         bot.blind.add("Steve");
-        s.run(9); // 9 unseen ticks: inside the 10 tick grace
+        s.run(2);
+        steve.dimension = "the_nether";
+        s.run(2);
         assertEquals(Phase.CHASE, s.phase());
-        bot.blind.clear();
-        s.run(1);
-        assertEquals(Phase.CHASE, s.phase());
-        bot.blind.add("Steve");
-        s.run(10);
-        assertEquals(Phase.PURSUE, s.phase(), "10 ticks without sight: the target is lost");
-        assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"), "PvP BOT's target is cleared once");
+        s.run(6);
+        assertEquals(Phase.PURSUE, s.phase());
     }
 
     @Test
-    void aDeadTargetSendsTheBotHomeAndClearsPvpBotsState() {
+    void aDeathTheBotSeesSendsItHomeAtOnceAndClearsPvpBotsState() {
         steve.x = 8;
         assertTrue(ticksUntilChase(40) > 0);
         bot.x = 12;
-        steve.alive = false;
+        steve.alive = false; // in plain view a tick ago
         s.run(1);
         assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"));
         assertEquals(Phase.RETURN, s.phase());
     }
 
     @Test
-    void aTargetThatLoggedOutIsCleared() {
+    void aLogoutTheBotSeesEndsTheEngagementAtOnce() {
         steve.x = 8;
         assertTrue(ticksUntilChase(40) > 0);
         s.world.online.remove("steve");
@@ -316,7 +502,7 @@ class AggroControllerTest {
     }
 
     @Test
-    void aTargetInAnotherLevelIsCleared() {
+    void aLevelChangeTheBotSeesEndsTheEngagementAtOnce() {
         steve.x = 8;
         assertTrue(ticksUntilChase(40) > 0);
         steve.dimension = "the_nether";
@@ -325,7 +511,7 @@ class AggroControllerTest {
     }
 
     @Test
-    void aTargetThatBecameCreativeIsDroppedUnlessAttackInvincible() {
+    void aTargetThatBecameCreativeInViewIsDropped() {
         steve.x = 8;
         assertTrue(ticksUntilChase(40) > 0);
         steve.creative = true;
@@ -346,80 +532,171 @@ class AggroControllerTest {
         assertEquals(7.0, home.z(), 1e-9);
     }
 
+    // ---------------------------------------------------------------- the damage-level gate (mayAttackPlayer)
+
+    @Test
+    void noPlayerMayBeHurtWithoutAConfirmedEngagementWithExactlyThatPlayer() {
+        s.run(1);
+        assertFalse(s.controller.mayAttackPlayer("Warden7", "Steve"), "idle: PvP BOT's revenge or stale target may not strike");
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        assertTrue(s.controller.mayAttackPlayer("Warden7", "Steve"));
+        assertTrue(s.controller.mayAttackPlayer("Warden7", "steve"), "names compare ignoring case");
+        assertFalse(s.controller.mayAttackPlayer("Warden7", "Alex"), "not that player");
+    }
+
+    @Test
+    void theGateIsOpenWhenNothingIsManagedOrSomebodyElseForcedTheTarget() {
+        s.config = s.config.withPerception(s.config.perception().disabled());
+        s.run(2);
+        assertTrue(s.controller.mayAttackPlayer("Warden7", "Steve"), "perception off: no reaction time to enforce");
+        Sim other = new Sim();
+        other.run(1);
+        other.up.forced.put("Warden7", "Steve"); // a /pvpbot command
+        assertTrue(other.controller.mayAttackPlayer("Warden7", "Steve"), "an admin's forced fight is not ours to veto");
+        Sim inert = new Sim();
+        inert.up.settings = new Settings(true, true, true, false, false, false, false, 64.0);
+        inert.run(2);
+        assertTrue(inert.controller.mayAttackPlayer("Warden7", "Steve"), "PvP BOT's own acquisition is left alone");
+        Sim broken = new Sim();
+        broken.run(1);
+        broken.up.failEverything = true;
+        assertTrue(broken.controller.mayAttackPlayer("Warden7", "Steve"), "fail-open when the state cannot be read");
+    }
+
     // ---------------------------------------------------------------- being hit
 
     @Test
-    void aVisibleHitIsReactedToAfterTheReactionDelayWhilePvpBotsRevengeIsHeldBack() {
-        steve.x = 6;
-        steve.subject = Perception.Subject.player(false, false, false);
+    void aVisibleMeleeHitIsConfirmedAfterTheReactionDelayWhilePvpBotsRevengeIsHeldBack() {
+        steve.x = 6; // pain: 0.5 + 1.5 * 6 / 64 = 0.6406 s -> 13 ticks
+        steve.subject = Perception.Subject.player(false);
         s.hit(steve);
         s.run(1);
-        assertEquals(Phase.REACT, s.phase());
-        assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"), "the instant revenge is cleared on the hit tick");
-        assertNull(s.up.current.get("Warden7"), "PvP BOT has no target meanwhile");
-        s.run(3);
-        assertEquals(Phase.REACT, s.phase());
-        assertEquals(List.of(), s.up.callsOf("set"), "not yet: the reaction takes 5 ticks");
-        assertTrue(s.up.lookCalls > 0, "the bot turns to the pain");
-        s.run(2);
         assertEquals(Phase.CHASE, s.phase());
+        assertNull(s.controller.confirmedTarget("Warden7"), "the hit starts a reaction, not a fight");
+        assertFalse(s.up.callsOf("clear").isEmpty(), "the instant revenge is cleared on the hit tick");
+        assertNull(s.up.current.get("Warden7"), "PvP BOT has no target meanwhile");
+        assertFalse(s.controller.mayAttackPlayer("Warden7", "Steve"), "so no counter-hit lands inside the window");
+        s.run(12);
+        assertEquals(List.of(), s.up.callsOf("set"), "not yet: 12 ticks after the hit tick");
+        assertTrue(s.up.lookCalls > 0, "the bot turns to the pain");
+        s.run(1);
+        assertEquals(1, sets());
         assertEquals(List.of("set Warden7->Steve"), s.up.callsOf("set"));
         assertEquals(Cause.HIT, s.controller.causeOf("Warden7"));
+        assertTrue(s.controller.mayAttackPlayer("Warden7", "Steve"));
+    }
+
+    @Test
+    void sneakingDoesNotSlowTheReactionToPain() {
+        steve.x = 6;
+        steve.subject = Perception.Subject.player(true);
+        s.hit(steve);
+        s.run(14);
+        assertEquals(1, sets(), "13 ticks, exactly as for a player who does not sneak");
     }
 
     @Test
     void aSecondHitDuringTheDelayDoesNotRestartIt() {
         steve.x = 6;
         s.hit(steve);
-        s.run(3); // ticks 0..2 after the first hit
+        s.run(9);
         s.hit(steve);
-        s.run(3); // ticks 3..5: the reaction is over 5 ticks after the FIRST hit
-        assertEquals(Phase.CHASE, s.phase(), "5 ticks after the FIRST hit");
+        s.run(5); // 14 ticks after the first hit tick
+        assertEquals(1, sets(), "confirmed 13 ticks after the FIRST hit");
     }
 
     @Test
-    void aHitFromCoverPursuesToWhereTheAttackerStood() {
+    void aProjectileFromAnUnseenShooterSendsTheBotAlongTheIncomingLine() {
         steve.x = 20;
         steve.z = 5;
         bot.blind.add("Steve");
         s.up.walkSpeed = 0.2;
+        bot.look = new double[]{-1, 0}; // facing away from the shot
+        bot.traceEnd = new Pos(4.6, 64.9, 0.0); // the first block on the line: a wall
+        s.shot(steve, 1, 0);
+        s.run(2);
+        assertEquals(Phase.PURSUE, s.phase());
+        assertEquals(List.of(), s.up.callsOf("set"), "an unseen shooter is not chased through the wall");
+        assertFalse(s.up.callsOf("clear").isEmpty(), "PvP BOT's revenge is cleared");
+        assertNotNull(bot.lastTrace, "the incoming line was traced back");
+        assertEquals(1.0, bot.lastTrace[0], 1e-9, "from the reverse of the projectile's velocity");
+        assertEquals(0.0, bot.lastTrace[2], 1e-9);
+        assertEquals(64.0, bot.lastTrace[3], 1e-9, "at most the engage limit");
+        Pos goal = s.planner.goals.get(0);
+        assertEquals(4.6, goal.x(), 1e-9, "it goes to where the line ends, NOT to the shooter's position");
+        assertEquals(0.0, goal.z(), 1e-9);
+        assertNotNull(bot.lookedAt);
+        assertTrue(bot.lookedAt.x() > bot.x + 5, "it turned to look along the incoming direction");
+        assertTrue(s.controller.hasHome("Warden7"), "the home is where the bot stood when it was hit");
+        assertTrue(s.controller.describe("Warden7").startsWith("pursuing the shot's line"), s.controller.describe("Warden7"));
+    }
+
+    @Test
+    void anUnblockedShotLineRunsToTheEngageLimit() {
+        bot.blind.add("Steve");
+        steve.x = 90;
+        s.shot(steve, 1, 0);
+        s.run(2);
+        assertEquals(64.0, s.planner.goals.get(0).x(), 1e-9, "no block on the line: it ends at 64 blocks, not at the shooter");
+    }
+
+    @Test
+    void aProjectileFromAShooterThatIsSeenIsChasedOnlyAfterTheReactionTime() {
+        steve.x = 30; // in plain view, 30 blocks ahead: 0.5 + 1.5 * 30 / 64 = 1.203 s
+        s.shot(steve, 1, 0);
+        s.run(20);
+        assertEquals(List.of(), s.up.callsOf("set"), "it turned and looks, but the reaction time applies");
+        int ticks = ticksUntilChase(60);
+        assertTrue(ticks > 0 && ticks <= 12, "noticed by sight once the exposure ran long enough: " + ticks);
+        assertEquals("Steve", s.controller.confirmedTarget("Warden7"));
+    }
+
+    @Test
+    void aProjectileFromBeyondTheEngageLimitIsNotEngaged() {
+        steve.x = 70;
+        s.shot(steve, 1, 0);
+        s.run(200);
+        assertEquals(List.of(), s.up.callsOf("set"), "a shooter seen beyond 64 is never engaged");
+        assertNotEquals(Phase.CHASE, s.phase());
+    }
+
+    @Test
+    void aMeleeHitByAnAttackerItCannotSeeGoesToWhereTheBlowCameFrom() {
+        steve.x = 2;
+        bot.blind.add("Steve");
         s.hit(steve);
         s.run(2);
         assertEquals(Phase.PURSUE, s.phase());
-        assertEquals(List.of(), s.up.callsOf("set"), "an unseen attacker is not chased through the wall");
-        assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"), "PvP BOT's revenge is cleared once");
-        Pos goal = s.planner.goals.get(0);
-        assertEquals(20.0, goal.x(), 1e-9);
-        assertEquals(5.0, goal.z(), 1e-9);
-        assertTrue(s.controller.hasHome("Warden7"), "the home is where the bot stood when it was hit");
+        assertEquals(List.of(), s.up.callsOf("set"));
     }
 
     @Test
     void aHitByAnAttackerThatIsNoValidTargetIsIgnoredLikeAnyOtherCandidate() {
         // the hit feed alone (PvP BOT's revenge is off), so only this controller decides
         steve.x = 6;
-        s.up.settings = new Settings(true, false, false, false, false, false, false, 128.0);
-        bot.hitQueue.add(steve);
+        s.up.settings = new Settings(true, false, false, false, false, false, false, 64.0);
+        bot.hitQueue.add(AggroFakes.melee(bot, steve));
         s.run(12);
         assertEquals(Phase.IDLE, s.phase(), "targetPlayers is off: a player hit does not widen who is hunted");
         assertEquals(List.of(), s.up.callsOf("set"));
-        s.up.settings = new Settings(true, false, true, false, false, false, false, 128.0);
+        s.up.settings = new Settings(true, false, true, false, false, false, false, 64.0);
         s.up.listed.add("Steve");
-        bot.hitQueue.add(steve);
+        bot.hitQueue.add(AggroFakes.melee(bot, steve));
         s.run(12);
         assertEquals(Phase.IDLE, s.phase(), "another PvP BOT bot without targetOtherBots");
-        s.up.settings = new Settings(true, false, true, true, false, false, false, 128.0);
-        bot.hitQueue.add(steve);
-        s.run(12);
+        s.up.settings = new Settings(true, false, true, true, false, false, false, 64.0);
+        bot.hitQueue.add(AggroFakes.melee(bot, steve));
+        s.run(2);
         assertEquals(Phase.CHASE, s.phase(), "with targetOtherBots it is hunted");
     }
 
     @Test
     void aHitByAFactionAllyIsIgnoredUnlessFriendlyFire() {
-        s.up.settings = new Settings(true, false, true, false, false, true, false, 128.0);
+        s.up.settings = new Settings(true, false, true, false, false, true, false, 64.0);
         s.up.allies.add("Warden7,Steve");
         steve.x = 6;
-        bot.hitQueue.add(steve);
+        bot.hitQueue.add(AggroFakes.melee(bot, steve));
         s.run(12);
         assertEquals(Phase.IDLE, s.phase());
         assertEquals(List.of(), s.up.callsOf("set"));
@@ -428,11 +705,12 @@ class AggroControllerTest {
     @Test
     void aHitIsNoticedThroughTheHitFeedEvenWithoutPvpBotsRevenge() {
         steve.x = 6;
-        bot.hitQueue.add(steve); // PvP BOT's revenge did not fire (its own switch is off); the damage feed still reports
+        bot.hitQueue.add(AggroFakes.melee(bot, steve)); // PvP BOT's revenge did not fire; the damage feed still reports
         s.run(1);
-        assertEquals(Phase.REACT, s.phase());
-        s.run(5);
         assertEquals(Phase.CHASE, s.phase());
+        assertEquals(List.of(), s.up.callsOf("set"));
+        s.run(13);
+        assertEquals(1, sets());
     }
 
     @Test
@@ -447,13 +725,25 @@ class AggroControllerTest {
     }
 
     @Test
-    void aHitByAnInvalidAttackerFallsBackToPvpBotsOwnFight() {
-        steve.creative = true; // PvP BOT's revenge bypasses its filters; the wrapper does not hunt an exempt player
+    void aHitByAnExemptPlayerIsNotRetaliatedAgainst() {
+        steve.creative = true; // the wrapper does not hunt an exempt player, and PvP BOT's revenge is not kept for it
         steve.x = 4;
         s.hit(steve);
         s.run(1);
-        assertEquals(List.of(), s.up.callsOf("clear"));
-        assertEquals(Phase.CHASE, s.phase());
+        assertEquals(Phase.IDLE, s.phase());
+        assertEquals(List.of(), s.up.callsOf("set"));
+    }
+
+    @Test
+    void pvpBotsRevengeIsNeverInformationAboutAnUnseenShooter() {
+        // A revenge target without any hit felt (the hit poller missed it): dropped, not followed.
+        steve.x = 30;
+        bot.blind.add("Steve");
+        s.up.lastAttacker.put("Warden7", steve);
+        s.run(3);
+        assertEquals(Phase.IDLE, s.phase());
+        assertFalse(s.up.callsOf("clear").isEmpty());
+        assertEquals(List.of(), s.planner.goals, "it did not walk to the player's true position");
     }
 
     // ---------------------------------------------------------------- mobs
@@ -563,7 +853,7 @@ class AggroControllerTest {
         steve.spectator = true;
         s.run(100);
         assertEquals(List.of(), s.up.callsOf("set"));
-        s.up.settings = new Settings(true, false, true, false, true, false, false, 128.0);
+        s.up.settings = new Settings(true, false, true, false, true, false, false, 64.0);
         assertTrue(ticksUntilChase(40) > 0, "attackInvincible: they are valid");
     }
 
@@ -573,13 +863,13 @@ class AggroControllerTest {
         steve.x = 8;
         s.run(100);
         assertEquals(List.of(), s.up.callsOf("set"));
-        s.up.settings = new Settings(true, false, true, true, false, false, false, 128.0);
+        s.up.settings = new Settings(true, false, true, true, false, false, false, 64.0);
         assertTrue(ticksUntilChase(40) > 0);
     }
 
     @Test
     void realPlayersOnlyWhenTargetPlayers() {
-        s.up.settings = new Settings(true, false, false, false, false, false, false, 128.0);
+        s.up.settings = new Settings(true, false, false, false, false, false, false, 64.0);
         steve.x = 8;
         s.run(100);
         assertEquals(List.of(), s.up.callsOf("set"));
@@ -587,19 +877,19 @@ class AggroControllerTest {
 
     @Test
     void factionAlliesAreSkippedUnlessFriendlyFire() {
-        s.up.settings = new Settings(true, false, true, false, false, true, false, 128.0);
+        s.up.settings = new Settings(true, false, true, false, false, true, false, 64.0);
         s.up.allies.add("Warden7,Steve");
         steve.x = 8;
         s.run(100);
         assertEquals(List.of(), s.up.callsOf("set"));
         assertTrue(s.up.areAlliesCalls > 0);
-        s.up.settings = new Settings(true, false, true, false, false, true, true, 128.0);
+        s.up.settings = new Settings(true, false, true, false, false, true, true, 64.0);
         assertTrue(ticksUntilChase(40) > 0, "friendly fire: allies are fair game");
     }
 
     @Test
     void aFactionCheckThatFailsMeansNoTargetAndOneWarning() {
-        s.up.settings = new Settings(true, false, true, false, false, true, false, 128.0);
+        s.up.settings = new Settings(true, false, true, false, false, true, false, 64.0);
         s.up.failEverything = true;
         steve.x = 8;
         s.run(60);
@@ -629,7 +919,7 @@ class AggroControllerTest {
 
     @Test
     void whenPvpBotsAutoTargetIsOnNothingIsNoticedHereAndItSaysSoOnce() {
-        s.up.settings = new Settings(true, true, true, false, false, false, false, 128.0);
+        s.up.settings = new Settings(true, true, true, false, false, false, false, 64.0);
         steve.x = 8;
         s.run(100);
         assertEquals(Mode.INERT_AUTO_TARGET, s.controller.mode());
@@ -639,7 +929,7 @@ class AggroControllerTest {
 
     @Test
     void inInertAutoTargetModeAHeldTargetIsStillSupervised() {
-        s.up.settings = new Settings(true, true, true, false, false, false, false, 128.0);
+        s.up.settings = new Settings(true, true, true, false, false, false, false, 64.0);
         s.up.other.put("Warden7", steve);
         steve.x = 8;
         s.run(2);
@@ -649,7 +939,7 @@ class AggroControllerTest {
 
     @Test
     void whenPvpBotsCombatIsOffNothingHappens() {
-        s.up.settings = new Settings(false, false, true, false, false, false, false, 128.0);
+        s.up.settings = new Settings(false, false, true, false, false, false, false, 64.0);
         steve.x = 8;
         s.run(100);
         assertEquals(Mode.INERT_COMBAT_OFF, s.controller.mode());

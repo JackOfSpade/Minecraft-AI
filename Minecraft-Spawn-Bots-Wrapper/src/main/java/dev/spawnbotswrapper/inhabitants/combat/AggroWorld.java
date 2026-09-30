@@ -91,13 +91,48 @@ public interface AggroWorld {
         }
 
         /**
-         * The attacker of a hit this inhabitant took since this was last asked (a player, a bot or a mob), or null. It
-         * is how a hit is noticed WITHOUT relying on PvP BOT's revenge memory (which is only set when PvP BOT's own
-         * settings allow it); each hit is reported once.
+         * The hit this inhabitant took since this was last asked, or null. It is how a hit is noticed WITHOUT relying on
+         * PvP BOT's revenge memory (which names the attacker whether or not the bot could know); each hit is reported
+         * once. Only what a victim could feel is reported, see {@link Hit}.
          */
-        default Body newHitAttacker() {
+        default Hit newHit() {
             return null;
         }
+
+        /**
+         * The sounds this inhabitant heard since this was last asked (vanilla vibrations delivered to it: what a sculk
+         * sensor or a Warden would hear), oldest first. Each is reported once.
+         */
+        default List<Sound> drainSounds() {
+            return List.of();
+        }
+
+        /**
+         * Follows the line from {@code from} in the direction {@code (dx, dy, dz)} (a unit vector) until the first blocking
+         * block or {@code limit} blocks, and returns the last free point on it: where the bot goes to look for the shooter
+         * of a projectile it could not see. Defaults to the far end of the line (nothing blocks it).
+         */
+        default Pos traceBack(Pos from, double dx, double dy, double dz, double limit) {
+            return new Pos(from.x() + dx * limit, from.y() + dy * limit, from.z() + dz * limit);
+        }
+    }
+
+    /**
+     * A hit an inhabitant took. NO MAGIC: a victim feels WHERE a blow came from, not who struck it.
+     * <ul>
+     *   <li>Melee: {@code attacker} is the adjacent striker (whether it is seen is the controller's occlusion test).</li>
+     *   <li>Projectile: {@code attacker} is null; only the direction the projectile came from is known.</li>
+     * </ul>
+     *
+     * @param attacker the melee attacker, or null for a projectile
+     * @param from     where the blow landed (the victim's body)
+     * @param towardX  unit vector from the impact point back toward where the blow came from (with y and z)
+     */
+    record Hit(Body attacker, Pos from, double towardX, double towardY, double towardZ) {
+    }
+
+    /** A sound heard at a position (a vanilla vibration: only the position is known, not who made it). */
+    record Sound(Pos pos) {
     }
 
     /** A cell worth walking to when searching, with how much hidden space it would open up (see {@link SearchPlanner}). */

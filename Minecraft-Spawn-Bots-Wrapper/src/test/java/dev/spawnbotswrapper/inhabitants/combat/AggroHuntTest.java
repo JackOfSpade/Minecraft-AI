@@ -55,7 +55,8 @@ class AggroHuntTest {
         noticeThenLoseSteve();
         Pos home = s.controller.homeOf("Warden7");
         assertEquals(0.0, home.x(), 1e-9);
-        assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"), "PvP BOT's target is cleared when the chase is lost");
+        assertFalse(s.up.callsOf("clear").isEmpty(), "PvP BOT's target is cleared when the chase is lost");
+        assertTrue(s.up.callsOf("clear").stream().allMatch("clear Warden7"::equals));
         assertTrue(s.controller.describe("Warden7").startsWith("pursuing Steve's last position"), s.controller.describe("Warden7"));
 
         int toSearch = untilPhase(Phase.SEARCH, 200);
@@ -302,9 +303,10 @@ class AggroHuntTest {
         s.run(3);
         bot.blind.add("Steve");
         untilPhase(Phase.PURSUE, 30);
+        double xAtPursue = bot.x; // (it steered toward the last known position during the grace ticks)
         int t = untilPhase(Phase.SEARCH, 20);
         assertTrue(t <= 3, "no way there: search from here at once: " + t);
-        assertTrue(Math.abs(bot.x) < 1.0, "did not move");
+        assertTrue(Math.abs(bot.x - xAtPursue) < 0.7, "did not walk on: " + bot.x + " from " + xAtPursue);
     }
 
     @Test
@@ -381,12 +383,16 @@ class AggroHuntTest {
         untilPhase(Phase.SEARCH, 200);
         s.run(10);
         foci.clear();
-        // steve walks (noisy) 3 blocks from the bot, behind a wall: heard, occluded -> a hint
+        // steve walks (noisy) 3 blocks from the bot, behind a wall: a vibration is heard, the line is blocked -> a hint
         steve.x = bot.x;
         steve.z = bot.z + 3;
-        steve.subject = Perception.Subject.player(false, true, false);
         bot.look = new double[]{1, 0};
-        s.run(60);
+        for (int i = 0; i < 60; i++) {
+            if (i % 5 == 0) {
+                s.sound(steve.x, steve.z);
+            }
+            s.run(1);
+        }
         assertTrue(foci.stream().anyMatch(f -> Math.abs(f.z() - (bot.z + 3)) < 0.5 || Math.abs(f.z() - 3) < 0.5),
                 "the search focus moved to the sound: " + foci);
         assertEquals(Phase.SEARCH, s.phase(), "and it is still the same search window (a sound is no notice)");
@@ -452,12 +458,12 @@ class AggroHuntTest {
     @Test
     void theReactionTimeComesFromTheConfiguration() {
         Perception.Params p = s.config.perception();
-        Perception.Params slow = new Perception.Params(p.enabled(), p.frontHalfAngleDeg(), p.peripheralHalfAngleDeg(),
-                p.peripheralMultiplier(), p.sneakMultiplier(), 10.0, 0.0, p.hearWalk(), p.hearSprint(), p.hearCombat(),
-                p.hearNoisyMob(), p.hearPrimedCreeper(), p.hearWarden(), p.hearAnimal(), p.combatNoiseTicks());
+        // one second everywhere: 20 ticks of exposure
+        Perception.Params slow = new Perception.Params(p.enabled(), 1.0, 1.0, p.fullAttentionHalfAngleDeg(),
+                p.peripheralHalfAngleDeg(), p.peripheralMultiplier(), p.sneakMultiplier());
         s.config = s.config.withPerception(slow);
         steve.x = 8;
         int t = s.runUntil(() -> s.phase() == Phase.CHASE, 60);
-        assertTrue(t >= 11 && t <= 13, "10 ticks of exposure: " + t);
+        assertTrue(t >= 21 && t <= 23, "20 ticks of exposure: " + t);
     }
 }

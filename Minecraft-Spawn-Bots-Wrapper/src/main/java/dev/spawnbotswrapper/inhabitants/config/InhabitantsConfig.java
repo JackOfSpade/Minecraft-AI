@@ -145,9 +145,9 @@ public final class InhabitantsConfig {
      * can exclude the ranges wanted here (the shipped 8/12/16 happen to sit inside them, but the mechanism stays field writes).  A
      * managed value may therefore deliberately lie outside a setter clamp; PvP BOT itself never re-validates a loaded value.
      * <ul>
-     *   <li>{@link #maxTargetDistance} - the CEILING of PvP BOT's target search (blocks, 4..128). Shipped 128 = the mod's own
-     *       maximum (PvP BOT's catalog maximum and vanilla's line-of-sight cap): line of sight, not a block distance,
-     *       decides who is chased; this only keeps PvP BOT from dropping a chased target early and lets far hits register.</li>
+     *   <li>{@link #maxTargetDistance} - PvP BOT's targeting radius (blocks, allowed 4..128). Shipped 64 = the ENGAGE LIMIT of the
+     *       aggro controller (the one hard-coded distance rule: a target seen farther away is never engaged), so PvP BOT
+     *       only has to cover what may be engaged. Line of sight decides who is chased.</li>
      *   <li>{@link #rangedMinRange}, {@link #rangedOptimalRange}, {@link #rangedMaxRange} - archer distances. Must satisfy
      *       min &lt; optimal &lt;= max &lt;= maxTargetDistance, otherwise all three are left alone (with a warning).</li>
      *   <li>{@link #autoEquipWeapon} - PvP BOT's housekeeping that keeps selecting the best MELEE weapon every
@@ -184,11 +184,11 @@ public final class InhabitantsConfig {
         public PvpbotSettings() {
         }
 
-        /** The values the addon ships with: the mod's 128-block maximum as the ceiling (line of sight decides who is chased), PvP BOT's own target
+        /** The values the addon ships with: PvP BOT's targeting radius at the 64-block engage limit (line of sight decides who is chased), PvP BOT's own target
          * acquisition off (the aggro controller acquires), archers at 8/12/16 and no weapon auto-equip. */
         public static PvpbotSettings shipped() {
             PvpbotSettings s = new PvpbotSettings();
-            s.maxTargetDistance = 128.0;
+            s.maxTargetDistance = 64.0;
             s.rangedMinRange = 8.0;
             s.rangedOptimalRange = 12.0;
             s.rangedMaxRange = 16.0;
@@ -450,14 +450,15 @@ public final class InhabitantsConfig {
 
     /**
      * How the hostile inhabitants hunt players and their companions (see {@code AggroController}); everything is decided
-     * by LINE OF SIGHT, there is no block-distance rule of any kind (the only limit is the mod maximum, 128 blocks).
+     * by what they SEE and HEAR. Sight has no block limit inside the view cone; the one hard-coded distance rule is the
+     * ENGAGE LIMIT of 64 blocks (a constant, not a setting): a target the bot sees farther away is never engaged.
      * <ul>
-     *   <li><b>Noticing.</b> A player is noticed after staying in view for a reaction time: {@link #reactionTicks} (5 =
-     *       0.25 s), longer for what is harder to see (far: {@link #distanceReactionTicksPer32} extra ticks per 32
-     *       blocks, 0 disables; at an angle; sneaking; invisible). From behind nothing is seen, but close footsteps
-     *       and fight noise are heard (see {@link AggroPerception}).</li>
-     *   <li><b>Chase.</b> While the target is in sight (occlusion only) the inhabitant chases; not in sight for
-     *       {@link #loseGraceTicks} (10 = 0.5 s, so a tree trunk does not break the chase) it has LOST the target.</li>
+     *   <li><b>Noticing.</b> A player is noticed after staying in view for a reaction time that is one continuous formula
+     *       (see {@link AggroPerception}): 0.5 s up close, 2.0 s at 64 blocks, longer at an angle, sneaking or when
+     *       hard to see. Nothing is seen behind. Sounds are vanilla vibrations (see {@link AggroHearing}).</li>
+     *   <li><b>Chase.</b> While the target is in sight (occlusion only) the inhabitant chases; the fight starts only after
+     *       the reaction time, and again after EVERY re-sighting. Not in sight for {@link #loseGraceTicks} (10 = 0.5 s) it has
+     *       LOST the target.</li>
      *   <li><b>Pursue, search, return.</b> A lost target: walk to the last place it was seen, search around there for
      *       {@link #searchTicks} (200 = 10 s), then WALK back to where the first hunt began (the home anchor, kept until it
      *       is back within {@link #returnArriveDistance}); seeing the player again starts a new chase, home unchanged.
@@ -472,10 +473,6 @@ public final class InhabitantsConfig {
         public boolean enabled = true;
         /** A player is only noticed when the inhabitant has a line of sight to them (like a vanilla mob). */
         public boolean requireLineOfSight = true;
-        /** Ticks a player must stay in view before an inhabitant reacts (5 = 0.25 s, a human's reaction). Range 0..100. */
-        public int reactionTicks = 5;
-        /** Extra ticks of reaction time per 32 blocks of distance (a soft scaling, not a limit; 0 disables). Range 0..100. */
-        public double distanceReactionTicksPer32 = 5.0;
         /** Ticks without a line of sight to the target after which it counts as lost (10 = 0.5 s). Range 1..72000. */
         public int loseGraceTicks = 10;
         /** Ticks the search lasts after arriving where the target was last seen (200 = 10 s). Range 20..72000. */
@@ -488,41 +485,49 @@ public final class InhabitantsConfig {
         public int returnMaxTicks = 1200;
         /** Ticks between looks for a player, for an idle inhabitant (staggered across inhabitants; 1..40). */
         public int scanIntervalTicks = 3;
-        /** How an inhabitant perceives a player: view cone, sneaking, hearing. See {@link AggroPerception}. */
+        /** How an inhabitant perceives a player: reaction time, view cone, sneaking. See {@link AggroPerception}. */
         public AggroPerception perception = new AggroPerception();
+        /** How an inhabitant hears: vanilla vibrations. See {@link AggroHearing}. */
+        public AggroHearing hearing = new AggroHearing();
     }
 
     /**
      * Realistic noticing for the aggro controller (the {@code aggro.perception} block; see {@code Perception} and
      * {@code docs/PERCEPTION.md}, the same model Minecraft-AI's bots use).
      * <p>
-     * An inhabitant SEES a player in front of it (a {@link #frontHalfAngleDeg} half-angle cone) after the reaction time,
-     * in the peripheral field out to {@link #peripheralHalfAngleDeg} after {@link #peripheralMultiplier} times as long, and
-     * not at all behind it; a sneaking player takes {@link #sneakMultiplier} times as long to be spotted. It HEARS a player
-     * that is close and noisy, even from behind (walking {@link #hearWalk}, sprinting {@link #hearSprint}, fighting
-     * {@link #hearCombat} blocks; sneaking or standing still is silent), never through a wall. These radii only ADD
-     * awareness from behind: they never limit how far an inhabitant can see. {@code enabled=false} is plain vanilla line of
-     * sight: in range and unobstructed is noticed at once, no cone, no sneaking, no reaction time.
+     * The reaction time is ONE continuous formula in real seconds (no steps):
+     * {@code (reactionBaseSeconds + (reactionAt64Seconds - reactionBaseSeconds) * distance / 64) * angleFactor * sneakFactor
+     * / visibility}. The angle factor is 1 up to {@link #fullAttentionHalfAngleDeg} and rises linearly to
+     * {@link #peripheralMultiplier} at {@link #peripheralHalfAngleDeg}; beyond that nothing is seen. A sneaking player takes
+     * {@link #sneakMultiplier} times as long to be spotted. {@code enabled=false} is plain vanilla line of sight: a clear
+     * line is noticed at once, no cone, no sneaking, no reaction time.
      */
     public static final class AggroPerception {
         /** Master switch; off = plain vanilla line of sight (no cone, no sneaking, no reaction time). */
         public boolean enabled = true;
-        /** Half-angle (degrees) of the front cone in which the normal reaction time applies. Range 0..180. */
-        public double frontHalfAngleDeg = 60.0;
-        /** Half-angle (degrees) out to which the peripheral field reaches; behind it nothing is seen. Range front..180. */
+        /** Seconds a player right in front must stay in view before an inhabitant reacts (a human's reaction). Range 0..10. */
+        public double reactionBaseSeconds = 0.5;
+        /** Seconds the same takes for a player 64 blocks away; in between it rises linearly. Range base..30. */
+        public double reactionAt64Seconds = 2.0;
+        /** Half-angle (degrees) of the cone in which the plain reaction time applies. Range 0..180. */
+        public double fullAttentionHalfAngleDeg = 30.0;
+        /** Half-angle (degrees) out to which the peripheral field reaches; behind it nothing is seen. Range full..180. */
         public double peripheralHalfAngleDeg = 100.0;
-        /** How many times longer the reaction takes in the peripheral field. Range 1..20. */
+        /** How many times longer the reaction takes at the edge of the peripheral field. Range 1..20. */
         public double peripheralMultiplier = 2.0;
         /** How many times longer the reaction takes for a sneaking player. Range 1..20. */
         public double sneakMultiplier = 2.0;
-        /** Blocks at which a walking player is heard. Range 0..128. */
-        public double hearWalk = 4.0;
-        /** Blocks at which a sprinting player is heard. Range 0..128. */
-        public double hearSprint = 8.0;
-        /** Blocks at which a player who just fought, shot, ate, drank, broke or placed a block is heard. Range 0..128. */
-        public double hearCombat = 12.0;
-        /** Ticks a swing, hit, bow draw, meal or block change keeps a player noisy. Range 0..200. */
-        public int combatNoiseTicks = 10;
+    }
+
+    /**
+     * Hearing for the aggro controller (the {@code aggro.hearing} block): the vanilla vibration system, called directly
+     * exactly as the Warden and the sculk sensor use it. What is heard, how far, through what and how quickly (sneaking is
+     * silent, wool blocks and dampens, sound needs time to travel) are vanilla's own rules. A heard sound whose source the
+     * inhabitant can see counts as sight without the view cone; a sound it cannot place is only somewhere to look or search.
+     */
+    public static final class AggroHearing {
+        /** Blocks within which a vibration is heard: 16 is the Warden's listener radius (the sculk sensor's is 8). Range 1..64. */
+        public int listenerRadius = 16;
     }
 
     /**
