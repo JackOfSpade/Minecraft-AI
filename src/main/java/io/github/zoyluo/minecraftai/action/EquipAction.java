@@ -250,20 +250,30 @@ public final class EquipAction {
      * is {@link #equipBestWeapon}.
      */
     public static OptionalInt equipWeaponForContext(AIPlayerEntity bot) {
+        return equipWeaponForContext(bot, null);
+    }
+
+    /**
+     * {@link #equipWeaponForContext(AIPlayerEntity)} for a fight whose target the caller knows (a CombatTask target or an attack_entity
+     * order): that target is judged for adequacy even when it is not (yet) a flagged aggressor, so a wooden sword is never picked
+     * against a ravager only because the ravager has not hurt anyone yet. A null or dead target falls back to the aggressor context.
+     */
+    public static OptionalInt equipWeaponForContext(AIPlayerEntity bot, LivingEntity explicitTarget) {
         if (!GearValue.worstFirstEnabled()) {
             return equipBestWeapon(bot);
         }
-        OptionalInt slot = contextWeaponSlot(bot);
+        OptionalInt slot = contextWeaponSlot(bot, explicitTarget);
         slot.ifPresent(value -> InventoryAction.equipFromSlot(bot, value));
         return slot;
     }
 
-    private static OptionalInt contextWeaponSlot(AIPlayerEntity bot) {
+    private static OptionalInt contextWeaponSlot(AIPlayerEntity bot, LivingEntity explicitTarget) {
         List<WeaponCandidate> weapons = qualifiedWeapons(bot);
         if (weapons.isEmpty()) {
             return OptionalInt.empty();
         }
-        LivingEntity target = contextTarget(bot);
+        LivingEntity target = explicitTarget != null && explicitTarget.isAlive() && explicitTarget != bot
+                ? explicitTarget : contextTarget(bot);
         List<WeaponCandidate> pool = weapons;
         if (target != null) {
             pool = adequateAgainst(weapons, target);
@@ -319,7 +329,7 @@ public final class EquipAction {
     /**
      * Worst-first armor, per slot: wears the cheapest real armor piece (armor points above zero, no Binding Curse, not nearly broken)
      * of the inventory, so it fills an empty slot with the worst piece and swaps a worn piece DOWN to a cheaper one carried. A worn
-     * piece that is nearly broken is replaced by the next worst; a worn Binding Curse piece is never touched. Nothing is ever taken
+     * piece that is nearly broken is replaced by the next worst; a worn Binding Curse piece, elytra, carved pumpkin or head (no armor points) is never touched. Nothing is ever taken
      * off without a replacement: the player controls what the bot wears by taking pieces out of its inventory. With
      * {@code behaviour.gear.worstFirst} off this is {@link #equipBestArmor}. Explicit commands (equip_armor, armor-up before a
      * descent) keep calling {@link #equipBestArmor}.
@@ -334,7 +344,9 @@ public final class EquipAction {
         int changed = 0;
         for (EquipmentSlot slot : ARMOR_SLOTS) {
             ItemStack worn = bot.getItemBySlot(slot);
-            if (!worn.isEmpty() && GearValue.hasBindingCurse(worn)) {
+            // Never take off a Binding Curse piece, nor a worn item that is no armor (elytra, carved pumpkin, mob head: 0 armor
+            // points) to put a carried chestplate or helmet on: only an explicit equip command may do that.
+            if (!worn.isEmpty() && (GearValue.hasBindingCurse(worn) || GearValue.armorPointsOf(worn, slot) <= 0.0D)) {
                 continue;
             }
             int bestSlot = -1;

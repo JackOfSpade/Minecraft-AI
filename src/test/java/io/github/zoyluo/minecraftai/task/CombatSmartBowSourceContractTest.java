@@ -20,7 +20,7 @@ final class CombatSmartBowSourceContractTest {
         assertTrue(combat.contains("BOW_MELEE_SWITCH_DISTANCE = CombatCore.ATTACK_RANGE * 1.5D"));
         assertTrue(combat.contains("bot.distanceTo(target) > BOW_MELEE_SWITCH_DISTANCE"));
         assertTrue(combat.contains("EquipAction.bestRangedSlot(bot, target).isPresent()"));
-        assertTrue(combat.contains("finishRangedLoadout(bot);\n        CombatCore.ensureMeleeWeapon(bot);"),
+        assertTrue(combat.contains("finishRangedLoadout(bot);\n        CombatCore.ensureMeleeWeapon(bot, target);"),
                 "crossing back inside the range boundary must restore the offhand and equip melee");
         assertTrue(combat.contains("bot.stopUsingItem();"),
                 "leaving ranged mode must cancel, rather than release, an in-progress bow shot");

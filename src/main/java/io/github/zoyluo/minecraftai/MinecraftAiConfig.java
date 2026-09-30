@@ -54,7 +54,8 @@ public record MinecraftAiConfig(
     /** Pre-rename environment variable; still honoured, but {@link #ENV_API_KEY} wins. */
     public static final String LEGACY_ENV_API_KEY = "DEEPSEEK_API_KEY";
 
-    private static MinecraftAiConfig instance = defaults();
+    /** Volatile: it is read from Baritone's search thread (via {@link io.github.zoyluo.minecraftai.action.GearValue#worstFirstEnabled}) as well as the server thread. */
+    private static volatile MinecraftAiConfig instance = defaults();
 
     public static MinecraftAiConfig get() {
         return instance;

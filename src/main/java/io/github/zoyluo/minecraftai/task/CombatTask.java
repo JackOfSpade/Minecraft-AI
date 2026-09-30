@@ -471,7 +471,7 @@ public final class CombatTask extends AbstractTask {
         // The distance boundary is deliberately broader than hit reach.  At or inside it, select
         // the best physical melee weapon before either closing the remaining gap or striking.
         finishRangedLoadout(bot);
-        CombatCore.ensureMeleeWeapon(bot);
+        CombatCore.ensureMeleeWeapon(bot, target);
         // Contact means a legal strike pose (reach to the target's box and no wall between), not
         // just feet-distance: a mob on the far side of a window keeps being approached, never struck.
         if (CombatCore.canStrikeNow(bot, target)) {
@@ -492,7 +492,7 @@ public final class CombatTask extends AbstractTask {
         }
         if (!shouldUseBow(bot)) {
             finishRangedLoadout(bot);
-            CombatCore.ensureMeleeWeapon(bot);
+            CombatCore.ensureMeleeWeapon(bot, target);
             phase = Phase.APPROACH;
             startApproach(bot);
             return;
@@ -506,7 +506,7 @@ public final class CombatTask extends AbstractTask {
             ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
             if (result.isFailed()) {
                 finishRangedLoadout(bot);
-                CombatCore.ensureMeleeWeapon(bot);
+                CombatCore.ensureMeleeWeapon(bot, target);
                 phase = Phase.APPROACH;
                 startApproach(bot);
                 return;
@@ -548,7 +548,7 @@ public final class CombatTask extends AbstractTask {
         // giving up is a friend standing on the line of fire.
         bot.stopUsingItem();
         finishRangedLoadout(bot);
-        CombatCore.ensureMeleeWeapon(bot);
+        CombatCore.ensureMeleeWeapon(bot, target);
         phase = Phase.APPROACH;
         startApproach(bot);
     }
@@ -577,14 +577,14 @@ public final class CombatTask extends AbstractTask {
             startApproach(bot);
             return;
         }
-        CombatCore.ensureMeleeWeapon(bot);
+        CombatCore.ensureMeleeWeapon(bot, target);
         if (bot.getAttackStrengthScale(0.5F) >= 0.95F) {
             // A ready swing always comes first. The shield is only ever raised BETWEEN swings, so a
             // shield-holding bot at low health still fights instead of turtling forever.
             if (CombatCore.strikeIfReady(bot, target)) {
                 // The hit itself may have consumed the final point of durability. Equip the physical
                 // successor in the same task tick instead of allowing logged empty-hand attacks.
-                CombatCore.ensureMeleeWeapon(bot);
+                CombatCore.ensureMeleeWeapon(bot, target);
                 if (shouldBlock(bot)) {
                     beginBlock(bot);
                 } else {
@@ -681,9 +681,9 @@ public final class CombatTask extends AbstractTask {
         boolean meleeForbidden = CombatCore.isMeleeForbiddenThreat(threat);
         if (!meleeForbidden && distance <= CombatCore.ATTACK_RANGE) {
             CombatCore.lookAt(bot, threat);
-            CombatCore.ensureMeleeWeapon(bot);
+            CombatCore.ensureMeleeWeapon(bot, threat);
             if (CombatCore.strikeIfReady(bot, threat)) {
-                CombatCore.ensureMeleeWeapon(bot);
+                CombatCore.ensureMeleeWeapon(bot, threat);
                 if (!threat.isAlive()) {
                     bot.getActionPack().stopAll();
                     retreatThreat = null;
@@ -931,7 +931,7 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         finishRangedLoadout(bot);
-        CombatCore.ensureMeleeWeapon(bot);
+        CombatCore.ensureMeleeWeapon(bot, target);
         phase = Phase.APPROACH;
         startApproach(bot);
     }
@@ -968,7 +968,7 @@ public final class CombatTask extends AbstractTask {
         rangedLoadout = target == null
                 ? null : EquipAction.equipBestRangedLoadout(bot, target).orElse(null);
         if (rangedLoadout == null) {
-            CombatCore.ensureMeleeWeapon(bot);
+            CombatCore.ensureMeleeWeapon(bot, target);
             phase = Phase.APPROACH;
             startApproach(bot);
             return;
@@ -1112,7 +1112,7 @@ public final class CombatTask extends AbstractTask {
             // Cancel the draw (never release it: releasing a drawn bow fires it without the line-of-fire check).
             bot.stopUsingItem();
             finishRangedLoadout(bot);
-            CombatCore.ensureMeleeWeapon(bot);
+            CombatCore.ensureMeleeWeapon(bot, target);
             phase = Phase.APPROACH;
             startApproach(bot);
             return;
@@ -1138,7 +1138,7 @@ public final class CombatTask extends AbstractTask {
         if (rangedLoadout == null) {
             rangedLoadout = EquipAction.equipBestRangedLoadout(bot, target).orElse(null);
             if (rangedLoadout == null) {
-                CombatCore.ensureMeleeWeapon(bot);
+                CombatCore.ensureMeleeWeapon(bot, target);
                 phase = Phase.APPROACH;
                 startApproach(bot);
                 return;
@@ -1149,7 +1149,7 @@ public final class CombatTask extends AbstractTask {
             OptionalInt bowSlot = EquipAction.bestRangedSlot(bot, target);
             if (bowSlot.isEmpty() || InventoryAction.equipFromSlot(bot, bowSlot.getAsInt()) < 0) {
                 finishRangedLoadout(bot);
-                CombatCore.ensureMeleeWeapon(bot);
+                CombatCore.ensureMeleeWeapon(bot, target);
                 phase = Phase.APPROACH;
                 startApproach(bot);
                 return;
@@ -1159,7 +1159,7 @@ public final class CombatTask extends AbstractTask {
             ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
             if (result.isFailed()) {
                 finishRangedLoadout(bot);
-                CombatCore.ensureMeleeWeapon(bot);
+                CombatCore.ensureMeleeWeapon(bot, target);
                 phase = Phase.APPROACH;
                 startApproach(bot);
                 return;
@@ -1257,7 +1257,7 @@ public final class CombatTask extends AbstractTask {
         peekStage = PeekStage.OUT;
         if (!shouldUseBow(bot)) {
             finishRangedLoadout(bot);
-            CombatCore.ensureMeleeWeapon(bot);
+            CombatCore.ensureMeleeWeapon(bot, target);
             phase = Phase.APPROACH;
             startApproach(bot);
             return;

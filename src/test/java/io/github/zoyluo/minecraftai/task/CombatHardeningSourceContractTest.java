@@ -233,7 +233,7 @@ final class CombatHardeningSourceContractTest {
         assertTrue(hostileBody.indexOf("isFriendly(bot, entity)") < hostileBody.indexOf("HostileBotLedger.isVisibleAggressor(bot, foreign)")
                         && hostileBody.indexOf("HostileBotLedger.isVisibleAggressor(bot, foreign)") < hostileBody.indexOf("hasHurtBotOrOwner(bot, entity)"),
                 "hostileTo asks the ledger right after the friendly check");
-        assertTrue(core.contains("AIPlayerManager.INSTANCE.botsOf(ownerId.get())"), "hasHurtBotOrOwner also counts sibling bots");
+        assertTrue(core.contains("AIPlayerManager.INSTANCE.anySiblingMatches(ownerId.get(), bot,"), "hasHurtBotOrOwner also counts sibling bots");
 
         String vision = read("task/SharedVision.java");
         assertTrue(vision.contains("if (!(entity instanceof ServerPlayer) || entity == bot)"),

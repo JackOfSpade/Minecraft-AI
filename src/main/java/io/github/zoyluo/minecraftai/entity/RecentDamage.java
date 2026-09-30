@@ -51,7 +51,11 @@ public final class RecentDamage {
 
     private static final Map<UUID, ArrayDeque<Hit>> RINGS = new ConcurrentHashMap<>();
     /** The damage of a lethal hit, remembered from ALLOW_DEATH until AFTER_DEATH (AFTER_DAMAGE does not fire for a killing blow). */
-    private static final Map<UUID, Float> LETHAL_AMOUNTS = new ConcurrentHashMap<>();
+    private static final Map<UUID, LethalStamp> LETHAL_AMOUNTS = new ConcurrentHashMap<>();
+
+    /** A lethal hit's damage stamped with the game time of ALLOW_DEATH; a death that a mod vetoed leaves a stamp that goes stale. */
+    record LethalStamp(float amount, long gameTime) {
+    }
     private static final List<Consumer<Hit>> HIT_LISTENERS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<Death>> DEATH_LISTENERS = new CopyOnWriteArrayList<>();
     private static boolean registered;
@@ -69,7 +73,7 @@ public final class RecentDamage {
                 onDamage(entity, source, damageTaken, blocked));
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, damageAmount) -> {
             if (entity instanceof ServerPlayer victim) {
-                LETHAL_AMOUNTS.put(victim.getUUID(), damageAmount);
+                rememberLethal(victim.getUUID(), damageAmount, victim.level().getGameTime());
             }
             return true; // only observes: never vetoes a death
         });
@@ -80,6 +84,8 @@ public final class RecentDamage {
         if (!(entity instanceof ServerPlayer victim)) {
             return;
         }
+        // AFTER_DAMAGE fires only for a victim that survived: a lethal stamp still held for it belongs to a vetoed death.
+        LETHAL_AMOUNTS.remove(victim.getUUID());
         Entity attacker = source == null ? null : source.getEntity();
         Entity direct = source == null ? null : source.getDirectEntity();
         record(new Hit(victim.getUUID(),
@@ -97,7 +103,7 @@ public final class RecentDamage {
         }
         Entity killer = source == null ? null : source.getEntity();
         Entity direct = source == null ? null : source.getDirectEntity();
-        Float lethalAmount = LETHAL_AMOUNTS.remove(victim.getUUID());
+        Float lethalAmount = takeLethal(victim.getUUID(), victim.level().getGameTime());
         // Fabric fires AFTER_DAMAGE only for damage the victim survives, so the killing blow would be missing from the ring: record
         // it here, from the death event, before the ring is dropped below. The hit listeners see it (a ledger marks the killer of a
         // protected victim); the ring itself is gone right after, so RecentDamage queries never return the killing blow of a victim
@@ -120,6 +126,19 @@ public final class RecentDamage {
             }
         }
         RINGS.remove(victim.getUUID());
+    }
+
+    static void rememberLethal(UUID victim, float amount, long gameTime) {
+        LETHAL_AMOUNTS.put(victim, new LethalStamp(amount, gameTime));
+    }
+
+    /**
+     * The remembered lethal damage of {@code victim}, removing it; null when there is none or it was stamped in an earlier tick (a
+     * vetoed death: ALLOW_DEATH and AFTER_DEATH of a real death fire in the same tick).
+     */
+    static Float takeLethal(UUID victim, long gameTime) {
+        LethalStamp stamp = LETHAL_AMOUNTS.remove(victim);
+        return stamp == null || stamp.gameTime() != gameTime ? null : stamp.amount();
     }
 
     /** Stores a hit and tells the listeners (the event handler, and tests that feed the ring directly). */

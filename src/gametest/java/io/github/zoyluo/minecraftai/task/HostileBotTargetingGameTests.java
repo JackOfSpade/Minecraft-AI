@@ -627,20 +627,24 @@ public final class HostileBotTargetingGameTests {
 
         void place(ServerPlayer player, double dx, double dz) {
             player.teleportTo(level, x(dx), feet.getY(), z(dz), Set.of(), player.getYRot(), player.getXRot(), true);
+            HostileBotLedger.invalidateVisionCache();
         }
 
         void face(ServerPlayer looker, Entity target) {
             MockPlayers.faceTowards(looker, target);
+            HostileBotLedger.invalidateVisionCache();
         }
 
         void lookAtPoint(ServerPlayer looker, Vec3 point) {
             looker.lookAt(EntityAnchorArgument.Anchor.EYES, point);
             looker.setYHeadRot(looker.getYRot());
+            HostileBotLedger.invalidateVisionCache();
         }
 
         <T extends Entity> T add(T entity, int dx, int dz) {
             entity.snapTo(x(dx), feet.getY(), z(dz), 90.0F, 0.0F);
             level.addFreshEntity(entity);
+            HostileBotLedger.invalidateVisionCache();
             entities.add(entity);
             return entity;
         }
@@ -681,6 +685,7 @@ public final class HostileBotTargetingGameTests {
                     level.setBlock(feet.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
+            HostileBotLedger.invalidateVisionCache();
         }
 
         void clearWall(int dx) {
@@ -689,6 +694,7 @@ public final class HostileBotTargetingGameTests {
                     level.setBlock(feet.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
+            HostileBotLedger.invalidateVisionCache();
         }
 
         void finish() {

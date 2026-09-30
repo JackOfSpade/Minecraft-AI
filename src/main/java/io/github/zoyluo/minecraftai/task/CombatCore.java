@@ -85,6 +85,14 @@ public final class CombatCore {
         EquipAction.equipWeaponForContext(bot);
     }
 
+    /**
+     * {@link #ensureMeleeWeapon(AIPlayerEntity)} against a known fight target (the CombatTask target, an attack order): the target is
+     * judged for weapon adequacy even before it is flagged as an aggressor.
+     */
+    public static void ensureMeleeWeapon(AIPlayerEntity bot, LivingEntity target) {
+        EquipAction.equipWeaponForContext(bot, target);
+    }
+
     /** Shared combat policy: projectile-capable mobs keep pressure while line of sight remains. */
     static boolean isRangedThreat(LivingEntity entity) {
         return entity instanceof RangedAttackMob || isDrawnRangedForeignBot(entity);
@@ -284,12 +292,10 @@ public final class CombatCore {
         if (owner != null && owner.level() == bot.level() && recentlyHurtBy(owner, entity)) {
             return true;
         }
-        for (AIPlayerEntity sibling : AIPlayerManager.INSTANCE.botsOf(ownerId.get())) {
-            if (sibling != bot && sibling.level() == bot.level() && recentlyHurtBy(sibling, entity)) {
-                return true;
-            }
-        }
-        return false;
+        // No list is built and an owner with a single bot (the common case) skips the sibling walk entirely: this runs for every
+        // scanned entity every tick.
+        return AIPlayerManager.INSTANCE.anySiblingMatches(ownerId.get(), bot,
+                sibling -> sibling.level() == bot.level() && recentlyHurtBy(sibling, entity));
     }
 
     private static boolean recentlyHurtBy(LivingEntity victim, LivingEntity attacker) {

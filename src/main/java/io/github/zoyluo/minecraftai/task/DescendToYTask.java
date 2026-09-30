@@ -394,7 +394,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // best armor in the inventory (the diamond plan already stocked a helmet + chestplate in
         // the preamble). Most deep-descent deaths are survival deaths (lava/mobs/low health), and
         // iron armor directly reduces damage taken; equip it now rather than waiting for combat to
-        // trigger it, since it also protects against passive damage.
+        // trigger it, since it also protects against passive damage. This is an explicit best-first call and a
+        // one-off: the background armor pass is worst-first (behaviour.gear.worstFirst) and swaps a worn better piece back down to
+        // the cheapest one carried, so the effect lasts only while nothing worse is in the inventory.
         io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         initializeSafeLandingHistory(bot);
     }

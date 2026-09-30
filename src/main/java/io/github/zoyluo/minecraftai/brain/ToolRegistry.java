@@ -565,7 +565,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("equip_armor", "Equip the best armor pieces from inventory and select the best weapon", objectSchema().build(), (bot, args) -> {
+        register("equip_armor", "Equip the best armor pieces from inventory and select the best weapon. One-off: the automatic gear choice is worst-first and puts the cheapest adequate armor and weapon back on the next tick, so this does not keep the best gear on (take the worse pieces out of the bot's inventory to keep the best ones worn)", objectSchema().build(), (bot, args) -> {
             int equipped = EquipAction.equipBestArmor(bot);
             EquipAction.equipBestWeapon(bot);
             return ok("equipped_armor_pieces: " + equipped);

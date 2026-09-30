@@ -90,19 +90,24 @@ public final class HostileBotIntent {
 
     /** Called once per server tick from the END_SERVER_TICK hook. Never throws into the tick. */
     public static void tick(MinecraftServer server) {
-        if (!HostileBotLedger.hostileBotsEnabled()) {
-            if (!TRACKS.isEmpty()) {
-                TRACKS.clear();
-            }
-            return;
-        }
         try {
+            // The ledger is pruned whether or not there are intent tracks (or hostile-bot targeting is on): its marks come from
+            // damage events, not from the tracks, so an idle or disabled sampler must not leave expired marks behind.
+            boolean pruneTick = server.getTickCount() % PRUNE_EVERY_TICKS == 0;
+            if (pruneTick) {
+                HostileBotLedger.prune(server.overworld().getGameTime());
+            }
+            if (!HostileBotLedger.hostileBotsEnabled()) {
+                if (!TRACKS.isEmpty()) {
+                    TRACKS.clear();
+                }
+                return;
+            }
             for (ServerLevel level : server.getAllLevels()) {
                 sampleLevel(level);
             }
-            if (!TRACKS.isEmpty() && server.getTickCount() % PRUNE_EVERY_TICKS == 0) {
+            if (pruneTick && !TRACKS.isEmpty()) {
                 prune(server.overworld().getGameTime());
-                HostileBotLedger.prune(server.overworld().getGameTime());
             }
         } catch (RuntimeException exception) {
             io.github.zoyluo.minecraftai.log.BotLog.error("hostile_bot_intent_failed", exception);

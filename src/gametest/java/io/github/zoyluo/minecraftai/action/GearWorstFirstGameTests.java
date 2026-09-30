@@ -393,6 +393,64 @@ public final class GearWorstFirstGameTests {
         finish(context, bot);
     }
 
+    /** G1: the background pass never takes off a worn elytra, carved pumpkin or mob head to put a carried chestplate or helmet on. */
+    @GameTest(environment = ENV + "worn_non_armor_is_never_swapped_by_the_background_pass", maxTicks = 40)
+    public void wornNonArmorIsNeverSwappedByTheBackgroundPass(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearWornKeepGT");
+        clearGear(bot);
+        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
+        bot.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.CARVED_PUMPKIN));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_HELMET));
+        require(context, EquipAction.autoEquipArmor(bot) == 0
+                        && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.ELYTRA)
+                        && bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.CARVED_PUMPKIN),
+                "the worn elytra or carved pumpkin was swapped: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem() + " / "
+                        + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
+        require(context, InventoryAction.countItem(bot, Items.IRON_CHESTPLATE) == 1 && InventoryAction.countItem(bot, Items.LEATHER_HELMET) == 1,
+                "the carried armor pieces were lost");
+        // A worn mob head is kept the same way, and the combat entry point (which runs the same pass) keeps it too.
+        bot.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.ZOMBIE_HEAD));
+        CombatCore.equipMelee(bot);
+        require(context, bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.ZOMBIE_HEAD) && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.ELYTRA),
+                "a worn mob head or elytra was swapped by the combat armor pass: " + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
+        // Control: a slot with nothing worn still gets the worst piece.
+        bot.setItemSlot(EquipmentSlot.HEAD, ItemStack.EMPTY);
+        EquipAction.autoEquipArmor(bot);
+        require(context, bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.LEATHER_HELMET), "an empty head slot was not filled");
+        finish(context, bot);
+    }
+
+    /** G2: a target the bot was told to attack, not yet flagged aggressive, still gets an adequate weapon (not a wooden sword). */
+    @GameTest(environment = ENV + "explicit_attack_target_gets_an_adequate_weapon", maxTicks = 40)
+    public void explicitAttackTargetGetsAnAdequateWeapon(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearExplicitTargetGT");
+        Ravager ravager = EntityType.RAVAGER.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        require(context, ravager != null, "no ravager");
+        ravager.setNoAi(true);
+        ravager.setPersistenceRequired();
+        BlockPos at = bot.blockPosition().south(3);
+        ravager.snapTo(at.getX() + 0.5D, at.getY(), at.getZ() + 0.5D, 0.0F, 0.0F);
+        context.getLevel().addFreshEntity(ravager);
+        require(context, AggroSense.snapshot(bot).aggressorCount() == 0, "the ravager already counts as an aggressor: the fixture proves nothing");
+        fill(bot, new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.STONE_SWORD), new ItemStack(Items.DIAMOND_SWORD),
+                new ItemStack(Items.IRON_SWORD));
+        CombatCore.ensureMeleeWeapon(bot, ravager);
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
+                "against an unflagged ravager the bot picked " + bot.getMainHandItem().getItem() + " instead of the adequate diamond sword");
+        ravager.discard();
+        // Control: an explicit zombie target keeps the cheapest sword (the inventory order changed, so no latch applies).
+        Zombie zombie = spawnZombie(context, bot, 2);
+        zombie.setAggressive(false);
+        fill(bot, new ItemStack(Items.IRON_SWORD), new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.DIAMOND_SWORD),
+                new ItemStack(Items.STONE_SWORD));
+        CombatCore.ensureMeleeWeapon(bot, zombie);
+        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD),
+                "against an unflagged zombie the bot picked " + bot.getMainHandItem().getItem() + " instead of the wooden sword");
+        zombie.discard();
+        finish(context, bot);
+    }
+
     @GameTest(environment = ENV + "weapon_latch_invalidated_by_inventory_swap", maxTicks = 40)
     public void weaponLatchInvalidatedByInventorySwap(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearLatchGT");

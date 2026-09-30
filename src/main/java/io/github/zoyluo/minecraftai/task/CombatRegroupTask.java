@@ -94,7 +94,7 @@ public final class CombatRegroupTask extends AbstractTask {
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .filter(mob -> bot.distanceTo(mob) <= MELEE_STRIKE_RANGE)
                 .ifPresent(mob -> {
-                    CombatCore.ensureMeleeWeapon(bot);
+                    CombatCore.ensureMeleeWeapon(bot, mob);
                     CombatCore.strikeIfReady(bot, mob);
                 });
     }

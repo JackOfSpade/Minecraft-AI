@@ -184,6 +184,8 @@ public final class HostileBotLedger {
 
     public static void clearAll() {
         CORE.clearAll();
+        SEEN_THIS_TICK.clear();
+        seenTick = Long.MIN_VALUE;
         HostileBotIntent.clearAll();
     }
 
@@ -228,7 +230,29 @@ public final class HostileBotLedger {
         if (player.level() != bot.level() || !player.isAlive() || !isMarked(player) || !isMarkableForeignBot(player)) {
             return false;
         }
-        return SharedVision.seenByBotOrOwner(bot, player);
+        return seenThisTick(bot, player);
+    }
+
+    /** One vision result per (observer bot, aggressor, game time): StrikeLegality.isFriendly and hostileTo both ask within a tick. */
+    private record SeenKey(UUID bot, UUID aggressor) {
+    }
+
+    private static final Map<SeenKey, Boolean> SEEN_THIS_TICK = new ConcurrentHashMap<>();
+    private static volatile long seenTick = Long.MIN_VALUE;
+
+    /** Drops the cached vision results; for a test that moves an entity, turns the owner or changes a wall inside one tick. */
+    static void invalidateVisionCache() {
+        SEEN_THIS_TICK.clear();
+    }
+
+    private static boolean seenThisTick(AIPlayerEntity bot, ServerPlayer player) {
+        long now = bot.level().getGameTime();
+        if (now != seenTick) {
+            SEEN_THIS_TICK.clear();
+            seenTick = now;
+        }
+        return SEEN_THIS_TICK.computeIfAbsent(new SeenKey(bot.getUUID(), player.getUUID()),
+                ignored -> SharedVision.seenByBotOrOwner(bot, player));
     }
 
     // ------------------------------------------------------------------ mark sources: real damage
@@ -250,7 +274,7 @@ public final class HostileBotLedger {
     }
 
     private static void onProtectedVictimHurt(LivingEntity victim, DamageSource source) {
-        if (source == null || !isProtectedVictim(victim)) {
+        if (source == null || !hostileBotsEnabled() || !isProtectedVictim(victim)) {
             return;
         }
         Entity attacker = source.getEntity();

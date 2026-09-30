@@ -85,6 +85,13 @@ public final class SharedVision {
         return owner;
     }
 
+    /** Drops the cached owner lookup (it holds a ServerPlayer reference) of a bot that has despawned. */
+    public static void forget(UUID botUuid) {
+        if (botUuid != null) {
+            OWNER_CACHE.remove(botUuid);
+        }
+    }
+
     /** Forgets the per-tick caches (server stop). */
     public static void clearAll() {
         OWNER_CACHE.clear();

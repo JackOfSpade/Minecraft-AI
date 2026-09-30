@@ -216,6 +216,7 @@ public final class AIPlayerManager {
         AIPlayerEntity entity = player.get();
         RuntimeLifecycleCoordinator.INSTANCE.deleteBot(entity);
         players.remove(entity.getUUID());
+        io.github.zoyluo.minecraftai.task.SharedVision.forget(entity.getUUID());
         nameIndex.remove(normalizeName(name));
         skinIndices.remove(entity.getUUID());
         clearOwner(entity.getUUID());
@@ -284,6 +285,30 @@ public final class AIPlayerManager {
             }
         }
         return Collections.unmodifiableList(result);
+    }
+
+    /** How many bots {@code ownerUuid} currently owns (a cheap read: no list is built). */
+    public int botCountOf(UUID ownerUuid) {
+        java.util.LinkedHashSet<UUID> owned = ownerUuid == null ? null : ownerIndex.get(ownerUuid);
+        return owned == null ? 0 : owned.size();
+    }
+
+    /**
+     * True when some live bot of {@code ownerUuid} other than {@code except} satisfies {@code test}. Walks the owner index directly, so
+     * no list is allocated; an owner with fewer than two bots has no sibling and returns at once.
+     */
+    public boolean anySiblingMatches(UUID ownerUuid, AIPlayerEntity except, java.util.function.Predicate<AIPlayerEntity> test) {
+        java.util.LinkedHashSet<UUID> owned = ownerUuid == null ? null : ownerIndex.get(ownerUuid);
+        if (owned == null || owned.size() < 2) {
+            return false;
+        }
+        for (UUID botUuid : owned) {
+            AIPlayerEntity sibling = players.get(botUuid);
+            if (sibling != null && sibling != except && test.test(sibling)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public Optional<UUID> ownerOf(AIPlayerEntity bot) {
