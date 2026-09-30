@@ -224,17 +224,20 @@ final class SettingData {
                 flag("autoTotemEnabled", "auto-totem", true).global(
                         "No per-bot proxy: PvP BOT swaps a totem_of_undying from slots 0-35 into the offhand every tick "
                                 + "(unless the bot is blocking), pushing the offhand item (a shield) into the totem's old "
-                                + "slot. Managed by this addon: config pvpbotSettings.autoTotemEnabled (shipped false), "
+                                + "slot. Managed by this addon: config pvpbotSettings.autoTotemEnabled (shipped false; absent "
+                                + "from a file's block it takes that value, an explicit null leaves PvP BOT's own), "
                                 + "written into the settings whenever PvP BOT loads them. The offhand is then placed by "
                                 + "the addon's offhand policy: the best shield, else a totem; when the offhand item breaks "
                                 + "or pops, the next of the same kind, else the next rung; any other offhand item is left "
                                 + "alone. The pop itself is vanilla and independent. Loadouts roll totems whatever this "
-                                + "setting is."),
+                                + "setting is; with it left on (null or true in the config) the offhand policy is idle and "
+                                + "new loadouts use the earlier layout (totem in the offhand, shield in hotbar slot 1)."),
                 flag("totemPriority", "totem-priority", true).global(
                         "No per-bot proxy: with a totem in the offhand PvP BOT blocks with a shield from the main hand "
                                 + "(through hotbar slot 1, which becomes scratch space); every other shield carrier takes "
                                 + "the offhand route, which overwrites and destroys a non-shield offhand item. Managed by "
-                                + "this addon: config pvpbotSettings.totemPriority (shipped false), so a bot blocks with "
+                                + "this addon: config pvpbotSettings.totemPriority (shipped false; absent from a file's block "
+                                + "it takes that value, an explicit null leaves PvP BOT's own), so a bot blocks with "
                                 + "the shield already in its offhand (the offhand policy puts it there)."),
                 flag("autoEatEnabled", "auto-eat", true).perBot(LOADOUT,
                         "loadout: food item, golden apple for the low-health trigger; vitals.foodLevel: at or below "

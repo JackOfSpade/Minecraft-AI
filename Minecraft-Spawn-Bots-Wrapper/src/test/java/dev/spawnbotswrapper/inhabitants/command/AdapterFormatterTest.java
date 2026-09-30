@@ -67,6 +67,22 @@ class AdapterFormatterTest {
     }
 
     @Test
+    void theManagedAutoTotemIsListedAsManagedWithItsExplanation() {
+        GlobalCapabilities up = GlobalCapabilities.upstreamDefaults();
+        GlobalCapabilities managed = new GlobalCapabilities(up.autoEquipArmor(), up.autoEquipWeapon(), up.combatEnabled(),
+                up.autoTargetEnabled(), up.rangedEnabled(), up.maceEnabled(), up.spearEnabled(), up.crystalPvpEnabled(),
+                up.anchorPvpEnabled(), up.cobwebEnabled(), false, up.autoShieldEnabled(), up.autoEatEnabled(),
+                up.autoPotionEnabled(), up.autoMendEnabled(), up.shieldBreakEnabled(), up.retreatEnabled(), up.botsRelogs(),
+                up.botLeaveOnDeath(), up.clearOnRemove(), false, up.preferSword(), up.rangedRetreatOnClose());
+        List<String> t = text(Fixtures.availableStatus(), managed);
+        assertTrue(contains(t, "switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): autoTarget, spear, autoTotem (managed)"),
+                t.toString());
+        assertTrue(contains(t, "autoTotem is off: that is the intended state, this addon manages it"), t.toString());
+        List<String> upstream = text(Fixtures.availableStatus(), up);
+        assertFalse(contains(upstream, "autoTotem"), "with PvP BOT's own auto-totem on there is nothing to explain: " + upstream);
+    }
+
+    @Test
     void allSwitchesOnMeansNoneOffAndNoHint() {
         List<String> t = text(Fixtures.availableStatus(), GlobalCapabilities.allEnabled());
         assertTrue(contains(t, "switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): none"), t.toString());

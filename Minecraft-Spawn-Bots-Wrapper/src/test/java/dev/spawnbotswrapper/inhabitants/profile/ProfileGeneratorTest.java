@@ -178,6 +178,30 @@ class ProfileGeneratorTest {
     }
 
     /**
+     * The same pin for the managed offhand layout (PvP BOT's auto-totem and totem priority managed off, the shipped state): the shield
+     * takes the offhand, hotbar slot 1 is free for a weapon, and every totem waits in the inventory. The other capabilities are
+     * PvP BOT's defaults, so the first profile is the one above with only the offhand placement changed.
+     */
+    @Test
+    void theManagedOffhandLayoutIsStableAcrossJvmRuns() {
+        GlobalCapabilities up = GlobalCapabilities.upstreamDefaults();
+        GlobalCapabilities managed = new GlobalCapabilities(up.autoEquipArmor(), up.autoEquipWeapon(), up.combatEnabled(),
+                up.autoTargetEnabled(), up.rangedEnabled(), up.maceEnabled(), up.spearEnabled(), up.crystalPvpEnabled(),
+                up.anchorPvpEnabled(), up.cobwebEnabled(), false, up.autoShieldEnabled(), up.autoEatEnabled(),
+                up.autoPotionEnabled(), up.autoMendEnabled(), up.shieldBreakEnabled(), up.retreatEnabled(), up.botsRelogs(),
+                up.botLeaveOnDeath(), up.clearOnRemove(), false, up.preferSword(), up.rangedRetreatOnClose());
+        assertEquals("Smasher | head:0=netherite_helmet+blast_protection4+thorns3~0.77"
+                + " chest:0=netherite_chestplate+blast_protection3+thorns2+unbreaking3~0.46"
+                + " legs:0=netherite_leggings~0.18 feet:0=netherite_boots+blast_protection4~0.67"
+                + " offhand:0=shield hotbar:0=mace+breach2+unbreaking2~0.14"
+                + " hotbar:8=cooked_porkchopx42 inventory:-1=totem_of_undying inventory:-1=totem_of_undying"
+                + " inventory:-1=totem_of_undying inventory:-1=golden_applex2 inventory:-1=potion<healing>"
+                + " inventory:-1=potion<healing> inventory:-1=potion<healing> inventory:-1=water_bucket"
+                + " | hp 0.52 food 12 | STAND true bhop 0.0 0",
+                fingerprint(generator(defaultOptions()).create(1L, managed, new TransientDeckStore())));
+    }
+
+    /**
      * An inhabitant has the stats of a vanilla player: earlier versions rolled permanent attribute modifiers (max health,
      * reach, attack speed, knockback resistance, scale) that no item or effect stands behind, a buff or a nerf no player
      * can have. Under every option, no profile carries one.

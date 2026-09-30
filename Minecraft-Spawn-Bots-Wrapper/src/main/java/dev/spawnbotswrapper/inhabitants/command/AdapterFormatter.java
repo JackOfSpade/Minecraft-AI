@@ -91,7 +91,7 @@ final class AdapterFormatter {
         addIfOff(off, "crystalPvp", c.crystalPvpEnabled());
         addIfOff(off, "anchorPvp", c.anchorPvpEnabled());
         addIfOff(off, "cobweb", c.cobwebEnabled());
-        addIfOff(off, "autoTotem", c.autoTotemEnabled());
+        addIfOff(off, "autoTotem (managed)", c.autoTotemEnabled());
         addIfOff(off, "autoShield", c.autoShieldEnabled());
         addIfOff(off, "autoEat", c.autoEatEnabled());
         addIfOff(off, "autoPotion", c.autoPotionEnabled());
@@ -103,6 +103,10 @@ final class AdapterFormatter {
         addIfOff(off, "clearOnRemove", c.clearOnRemove());
         out.add(label("Global PvP BOT switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): ")
                 + (off.isEmpty() ? good("none") : plain(String.join(", ", off))));
+        if (!c.autoTotemEnabled()) {
+            out.add(label("  autoTotem is off: that is the intended state, this addon manages it (pvpbotSettings.autoTotemEnabled) and places "
+                    + "the offhand itself: the best shield, else a totem of undying (see the README, \"The offhand\")."));
+        }
         if (!c.autoTargetEnabled()) {
             out.add(label("  autoTarget is off: PvP BOT itself never picks a target on sight. That is the intended state while this "
                     + "addon's line-of-sight hunter (config aggro) is on, which notices players by line of sight "

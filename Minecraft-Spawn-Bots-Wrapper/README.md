@@ -87,7 +87,7 @@ runs on defaults until you fix it.
     "allowSubmerged": false
   },
 
-  // PvP BOT settings the addon holds at these values (see "Managed PvP BOT settings" below); null/absent key = leave alone
+  // PvP BOT settings the addon holds at these values (see "Managed PvP BOT settings" below); an explicit null = leave alone, an absent key = its shipped value
   "pvpbotSettings": { "maxTargetDistance": 64.0, "rangedMinRange": 8.0, "rangedOptimalRange": 12.0,
                       "rangedMaxRange": 16.0, "autoEquipWeapon": false, "autoTargetEnabled": false,
                       "bowMinDrawTime": 20 },
@@ -370,17 +370,23 @@ the inventory; without a shield the first totem in the offhand). PvP BOT's own a
 offhand every tick, and its totem priority would keep the totem there and block from the main hand, so both are managed off:
 with `totemPriority` false PvP BOT blocks through `player use continuous` with the shield that is already in the offhand
 and does not swap anything when it stops blocking (verified in the decompiled `BotUtils.startBlocking`/`stopBlocking`).
-If you set `autoTotemEnabled` to `true` (or manage nothing) the addon's offhand policy stays idle, with one warning, because
-the two would swap the offhand back and forth. An existing config file with a `pvpbotSettings` block needs the two new keys
-to apply them (an absent key leaves PvP BOT's value alone).
+If you set `autoTotemEnabled` to `true` (or to `null`, or manage nothing) the addon's offhand policy stays idle, with one
+warning, because the two would swap the offhand back and forth; new inhabitants then get the earlier layout (a totem in the
+offhand, the shield in hotbar slot 1 when `totemPriority` is true, no shield for a bot with a totem when it is false).
+"Best shield" means an enchanted shield before a plain one, then the lowest slot; wear never counts. An existing config file
+whose `pvpbotSettings` block predates these two keys needs no edit: an absent key takes its shipped value (see below).
 
 What inhabitants react to is decided by what they see and hear (sight has no block limit in the view cone), and the
 addon itself never engages a target it sees beyond 64 blocks (the one hard-coded distance rule, a constant). So
 `maxTargetDistance` 64 is all PvP BOT has to cover, and PvP BOT must not acquire targets itself (`autoTargetEnabled`
 false).
 
-* A `null` or absent key inside the block leaves PvP BOT's own value alone; a config file without the block at all
-  gets the values above. `"pvpbotSettings": null` manages nothing.
+* **An explicit `null` leaves PvP BOT's own value alone; an absent key takes its shipped value (the one above).** This holds for
+  every key of a present block, so a file written before a key existed (for example one without `autoTotemEnabled` and
+  `totemPriority`) manages it without being edited, and a partial block manages everything it does not name. One INFO line
+  in the log names the keys that were filled in. To leave a value to PvP BOT write the key as `null`. A config file without the
+  block at all gets the values above; `"pvpbotSettings": null` manages nothing. (Filling in the three archer ranges next to a
+  smaller `maxTargetDistance` can make them disordered; they are then all left alone, with a warning, see below.)
 * `rangedRetreatOnClose` and `meleeRange` are described under "Sword up close, and out of arrows" below; `meleeRange`
   outside 2..6 (PvP BOT's own clamp) is not applied, with a warning.
 * Validation: `maxTargetDistance` is clamped to 4..128; the three ranges must satisfy

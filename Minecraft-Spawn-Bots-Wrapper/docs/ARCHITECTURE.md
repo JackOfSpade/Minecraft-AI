@@ -260,8 +260,8 @@ crossbow). A Baritone-backed `PathPlanner` can replace the vanilla one without t
 PvP BOT snaps an inhabitant's yaw, pitch and head yaw straight onto its target inside its own tick (`lookAtTarget`,
 `lookAtTargetWithPrediction`), which is instant and perfect. `combat.HumanAim` (pure math: the rate limit with the shorter way
 round, the fire tolerance, the settle jitter, the arrow re-aim arithmetic) and `mc.HumanAimDriver` (the glue) put a human
-hand and eye in between. The late tick phase runs `aggro hunter -> out-of-ammo gap closer -> offhand policy (`mc.OffhandPolicy`: best shield, else a totem; see README "The offhand") -> humanAim.tick -> crossbow trigger ->
-rest`, so the driver runs behind every writer of a look direction: it reads the rotation the entity has then (the direction PvP
+hand and eye in between. The late tick phase runs `aggro hunter -> out-of-ammo gap closer -> offhand policy -> humanAim.tick ->
+crossbow trigger -> rest` (the offhand policy is `mc.OffhandPolicy`: best shield, else a totem; see README "The offhand"), so the driver runs behind every writer of a look direction: it reads the rotation the entity has then (the direction PvP
 BOT or the hunt WANTS), turns a TRACKED aim toward it at most `aggro.aim.maxTurnDegPerSec` (540 deg/s = 27 deg per tick), and
 writes the tracked aim back into yaw, pitch and head yaw, so the bot visibly turns at human speed and PvP BOT's next tick starts
 from where the bot really looks. Everything that depends on where the bot looks uses the tracked aim: the aggro view cone

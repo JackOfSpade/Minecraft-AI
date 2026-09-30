@@ -133,10 +133,17 @@ final class GlobalNotes {
             out.add("Carries totems and PvP BOT's own auto-totem is on (not managed by this addon): PvP BOT moves a "
                     + "totem into the offhand, pushing a shield out of it, and the addon's offhand policy stays idle.");
         }
-        if (inv.has(ItemIds.SHIELD) && inv.offhandHolds(ItemIds.TOTEM) && caps.autoShieldEnabled()
-                && !caps.autoTotemEnabled()) {
-            out.add("The offhand holds a totem although the bot carries a shield: the addon's offhand policy moves the "
-                    + "shield into the offhand (the totem takes its place in the inventory) on the next tick.");
+        if (inv.has(ItemIds.SHIELD) && inv.offhandHolds(ItemIds.TOTEM) && caps.autoShieldEnabled()) {
+            if (!caps.autoTotemEnabled()) {
+                out.add("The offhand holds a totem although the bot carries a shield: the addon's offhand policy moves the "
+                        + "shield into the offhand (the totem takes its place in the inventory) on the next tick.");
+            } else {
+                out.add(caps.totemPriority()
+                        ? "The offhand holds a totem, so the shield is used from the main hand (hotbar slot 1)."
+                        : "totem-priority is off globally: raising this shield will overwrite and destroy the "
+                                + "offhand totem instead of using the main hand. This profile should not have been "
+                                + "given both; report it if it was generated after this note was written.");
+            }
         }
     }
 

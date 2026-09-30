@@ -81,6 +81,27 @@ public final class ConfigIO {
                 + "exist: aggro is decided by line of sight, the continuous reaction time and vanilla vibrations (hearing), and shot speed by the weapon itself (see the README)");
     }
 
+    /**
+     * A present {@code pvpbotSettings} block that lacks a managed key (a file written before the key existed, or hand-trimmed) manages it
+     * with its shipped value; only an explicit {@code null} leaves PvP BOT's own value alone. Without the block at all the shipped
+     * block is already in place, and a {@code null} block means nothing is managed. One INFO line names the keys that were filled.
+     */
+    static List<String> backfillManagedSettings(JsonElement tree, InhabitantsConfig parsed) {
+        if (parsed == null || parsed.pvpbotSettings == null || tree == null || !tree.isJsonObject()) {
+            return List.of();
+        }
+        JsonElement block = tree.getAsJsonObject().get("pvpbotSettings");
+        if (block == null || !block.isJsonObject()) {
+            return List.of();
+        }
+        List<String> filled = parsed.pvpbotSettings.backfillAbsent(block.getAsJsonObject()::has);
+        if (filled.isEmpty()) {
+            return List.of();
+        }
+        return List.of("config: pvpbotSettings has no entry for " + String.join(", ", filled) + "; the shipped value is managed for each "
+                + "(write a key as null to leave PvP BOT's own value alone)");
+    }
+
     public static LoadResult load(Path file) {
         if (!Files.exists(file)) {
             InhabitantsConfig defaults = new InhabitantsConfig();
@@ -103,8 +124,10 @@ public final class ConfigIO {
             if (parsed == null) {
                 return fatal("the file is empty");
             }
+            List<String> notes = new ArrayList<>(legacyNotes(tree));
+            notes.addAll(backfillManagedSettings(tree, parsed));
             List<String> warnings = new ArrayList<>(ConfigValidator.validate(parsed));
-            return new LoadResult(parsed, warnings, null, false, legacyNotes(tree));
+            return new LoadResult(parsed, warnings, null, false, notes);
         } catch (Exception e) {
             return fatal(e.getClass().getSimpleName() + ": " + e.getMessage());
         }

@@ -140,7 +140,8 @@ public final class InhabitantsConfig {
 
     /**
      * PvP BOT settings the addon enforces (PvP BOT keeps them per world, in {@code config/pvpbot/worlds/<world>/settings.json}).
-     * A null value means "leave PvP BOT's own value alone". They are written straight into PvP BOT's settings object, NOT
+     * A null value means "leave PvP BOT's own value alone". In a file, a key that is ABSENT from a present block takes its shipped
+     * value (see {@link PvpbotSettings#backfillAbsent}); only an explicit {@code null} (or a {@code null} block) leaves PvP BOT alone. They are written straight into PvP BOT's settings object, NOT
      * through its setters, because the setters clamp to ranges (ranged optimal at least 10, ranged max at least 15) that
      * can exclude the ranges wanted here (the shipped 8/12/16 happen to sit inside them, but the mechanism stays field writes).  A
      * managed value may therefore deliberately lie outside a setter clamp; PvP BOT itself never re-validates a loaded value.
@@ -208,6 +209,33 @@ public final class InhabitantsConfig {
             s.autoTotemEnabled = false;
             s.totemPriority = false;
             return s;
+        }
+
+        /**
+         * Gives every key that the file does NOT contain at all (an absent key, as opposed to an explicit {@code null}) its shipped
+         * value, so a {@code pvpbotSettings} block written before a key existed still manages it (an existing install must not keep
+         * PvP BOT's own auto-totem or totem priority just because its file predates them). An explicit {@code null} stays null: that
+         * is the one way to leave a PvP BOT value alone.
+         *
+         * @param present says whether the file has an entry (of any value, null included) for a key name
+         * @return the names of the keys that were filled, in declaration order
+         */
+        public List<String> backfillAbsent(java.util.function.Predicate<String> present) {
+            PvpbotSettings shipped = shipped();
+            List<String> filled = new ArrayList<>();
+            for (java.lang.reflect.Field field : PvpbotSettings.class.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())
+                        || !java.lang.reflect.Modifier.isPublic(field.getModifiers()) || present.test(field.getName())) {
+                    continue;
+                }
+                try {
+                    field.set(this, field.get(shipped));
+                    filled.add(field.getName());
+                } catch (IllegalAccessException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+            return filled;
         }
 
         /** True when nothing is managed. */

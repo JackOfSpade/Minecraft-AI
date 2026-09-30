@@ -32,6 +32,14 @@ import java.util.function.Supplier;
  * anything when it stops blocking ({@code stopBlocking} only restores an offhand item that it saved itself when it moved a
  * shield in). Vanilla inventory calls only: no mixin, no teleport, no damage change. Fail-soft: one failure switches the tick off
  * with one warning.
+ * <p>
+ * Accepted one-tick legacy window: PvP BOT's own shield code ({@code startBlocking}) still moves a shield from the inventory into the
+ * offhand when it raises one and the offhand holds no shield (saving what was there, which it puts back when it stops blocking).
+ * That can only happen in the tick between an offhand shield breaking and this policy filling the offhand (this policy runs after
+ * PvP BOT's tick, every tick), after which the offhand holds a shield again and PvP BOT just raises it. The window is one tick and
+ * harmless, so it is not guarded against.
+ * <p>
+ * "Best shield" is {@link OffhandRule#bestShield}: an enchanted shield before a plain one, then the lowest slot. Wear never counts.
  */
 public final class OffhandPolicy {
     private final Supplier<ServerSession> session;
@@ -123,16 +131,11 @@ public final class OffhandPolicy {
             return null;
         }
         Inventory inv = bot.getInventory();
-        int shieldSlot = -1;
+        // The best shield: an enchanted one first, then the lowest slot (OffhandRule.bestShield); the first totem.
+        int shieldSlot = OffhandRule.bestShield(i -> inv.getItem(i).is(Items.SHIELD), i -> inv.getItem(i).isEnchanted(), 36);
         int totemSlot = -1;
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = inv.getItem(i);
-            if (stack.is(Items.SHIELD)) {
-                // The best shield: an enchanted one first, then the lowest slot.
-                if (shieldSlot < 0 || stack.isEnchanted() && !inv.getItem(shieldSlot).isEnchanted()) {
-                    shieldSlot = i;
-                }
-            } else if (totemSlot < 0 && stack.is(Items.TOTEM_OF_UNDYING)) {
+        for (int i = 0; i < 36 && totemSlot < 0; i++) {
+            if (inv.getItem(i).is(Items.TOTEM_OF_UNDYING)) {
                 totemSlot = i;
             }
         }

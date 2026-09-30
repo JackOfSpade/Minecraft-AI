@@ -27,7 +27,10 @@ import java.util.TreeMap;
  *   <li>The best weapon (by PvP BOT's own ranking) goes in hotbar slot 0 and ranged weapons sit in the
  *       hotbar, the only place PvP BOT selects them from. Slot 8 is its food/potion scratch slot.</li>
  *   <li>The offhand follows the addon's offhand rule (best shield, else a totem): a shield takes the
- *       offhand and every totem waits in the inventory; without a shield the first totem takes the offhand.</li>
+ *       offhand and every totem waits in the inventory; without a shield the first totem takes the offhand. This
+ *       assumes the managed settings are in force (PvP BOT's auto-totem off). When PvP BOT's own auto-totem is on
+ *       (an explicit {@code null} or {@code true} in the config), the legacy layout applies instead: a totem takes the
+ *       offhand, the shield lives in hotbar slot 1 (totem priority on) or is left out (off), and no weapon takes slot 1.</li>
  *   <li>Armor is worn directly, never carried as a spare, so auto-equip has nothing to swap.</li>
  * </ul>
  * All randomness goes through the {@link Roller} with a stable key per decision; see {@link Roller}.
@@ -76,6 +79,8 @@ final class LoadoutRoller {
     private final List<BotProfile.ItemSpec> melee = new ArrayList<>();
     private final List<BotProfile.ItemSpec> ranged = new ArrayList<>();
     private BotProfile.ItemSpec shield;
+    /** Legacy layout only (PvP BOT's own auto-totem on): the shield lives in hotbar slot 1, where PvP BOT swaps it in. */
+    private boolean shieldInHotbar;
     private int arrows;
     private int totems;
     private Facts.ExplosiveKit explosive = Facts.ExplosiveKit.NONE;
@@ -349,12 +354,17 @@ final class LoadoutRoller {
 
     private void defence() {
         boolean wantsShield = caps.autoShieldEnabled() && r.flag("profile.defence.shield");
-        // Totems are rolled whatever PvP BOT's own auto-totem is set to: the addon manages it OFF and places the offhand itself
-        // (OffhandPolicy: the best shield, else a totem, the next of the same kind when one breaks or pops).
+        if (caps.autoTotemEnabled()) {
+            legacyDefence(wantsShield);
+            return;
+        }
+        // Totems are rolled whatever PvP BOT's own totem priority is set to: with its auto-totem off (the managed setting) the addon
+        // places the offhand itself (OffhandPolicy: the best shield, else a totem, the next of the same kind when one breaks or pops).
         totems = r.count("profile.defence.totems", 0, 4);
 
         // The offhand rule, from the first tick: a shield takes the offhand and every totem waits in the inventory; without a
-        // shield the first totem takes the offhand. PvP BOT blocks with the offhand shield (totemPriority is managed off).
+        // shield the first totem takes the offhand. PvP BOT blocks with the offhand shield (a shield in the offhand is never the
+        // main-hand route, whatever totemPriority says).
         boolean totemInOffhand = true;
         if (wantsShield) {
             shield = BotProfile.ItemSpec.of(ItemIds.SHIELD);
@@ -366,6 +376,31 @@ final class LoadoutRoller {
                 out.offhand(BotProfile.ItemSpec.of(ItemIds.TOTEM));
             } else {
                 out.stock(BotProfile.ItemSpec.of(ItemIds.TOTEM), LoadoutBuilder.TOTEM);
+            }
+        }
+    }
+
+    /**
+     * The layout for PvP BOT's OWN auto-totem switched on (a config that writes {@code pvpbotSettings.autoTotemEnabled: null} or
+     * {@code true}, so the addon does not manage it and its offhand policy stays idle): PvP BOT then forces a totem into the offhand
+     * every tick, so a totem takes the offhand, and a shield only goes along when PvP BOT can use it from elsewhere. With totem
+     * priority on it lives in hotbar slot 1 (where PvP BOT swaps a shield in when a totem occupies the offhand) and no weapon takes
+     * that slot; with it off, raising a shield would overwrite and destroy the offhand totem, so a bot with a totem gets no shield.
+     */
+    private void legacyDefence(boolean wantsShield) {
+        totems = r.count("profile.defence.totems", 0, 4);
+        if (totems >= 1) {
+            out.offhand(BotProfile.ItemSpec.of(ItemIds.TOTEM));
+            for (int i = 1; i < totems; i++) {
+                out.stock(BotProfile.ItemSpec.of(ItemIds.TOTEM), LoadoutBuilder.TOTEM);
+            }
+        }
+        if (wantsShield && (totems == 0 || caps.totemPriority())) {
+            shield = BotProfile.ItemSpec.of(ItemIds.SHIELD);
+            if (totems >= 1) {
+                shieldInHotbar = true;
+            } else {
+                out.offhand(shield);
             }
         }
     }
@@ -493,7 +528,13 @@ final class LoadoutRoller {
         hotbar.addAll(ranged);
         int index = 0;
         for (BotProfile.ItemSpec spec : hotbar) {
+            if (index == 1 && shieldInHotbar) {
+                index++; // the legacy layout keeps slot 1 for the shield
+            }
             out.hotbar(index++, spec);
+        }
+        if (shieldInHotbar) {
+            out.hotbar(1, shield);
         }
     }
 

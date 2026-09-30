@@ -15,7 +15,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The {@code pvpbotSettings} block (and the retired {@code rangedPacing} keys): shipped values, partial blocks, validation. */
+/**
+ * The {@code pvpbotSettings} block (and the retired {@code rangedPacing} keys): shipped values, partial blocks (an absent key takes
+ * its shipped value, an explicit null leaves PvP BOT alone), validation.
+ */
 class PvpbotSettingsConfigTest {
 
     private static ConfigIO.LoadResult load(Path dir, String json) throws IOException {
@@ -44,8 +47,10 @@ class PvpbotSettingsConfigTest {
         assertEquals(5, load(dir, "{ \"pvpbotSettings\": { \"bowMinDrawTime\": 1 } }").config().pvpbotSettings.bowMinDrawTime);
         assertEquals(100, load(dir, "{ \"pvpbotSettings\": { \"bowMinDrawTime\": 900 } }").config().pvpbotSettings.bowMinDrawTime);
         assertEquals(21, load(dir, "{ \"pvpbotSettings\": { \"bowMinDrawTime\": 21 } }").config().pvpbotSettings.bowMinDrawTime);
-        assertNull(load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 20 } }").config().pvpbotSettings.bowMinDrawTime,
-                "an absent key inside a present block leaves PvP BOT's value alone");
+        assertEquals(20, load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 20 } }").config().pvpbotSettings.bowMinDrawTime,
+                "an absent key inside a present block takes the shipped value");
+        assertNull(load(dir, "{ \"pvpbotSettings\": { \"bowMinDrawTime\": null } }").config().pvpbotSettings.bowMinDrawTime,
+                "an explicit null leaves PvP BOT's value alone");
     }
 
     @Test
@@ -54,17 +59,39 @@ class PvpbotSettingsConfigTest {
         assertEquals(64.0, c.pvpbotSettings.maxTargetDistance);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoTargetEnabled);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoEquipWeapon);
+        assertEquals(Boolean.FALSE, c.pvpbotSettings.autoTotemEnabled, "no block: the offhand rule's auto-totem switch is managed off");
+        assertEquals(Boolean.FALSE, c.pvpbotSettings.totemPriority, "no block: totem priority is managed off");
+        assertEquals(List.of(), load(dir, "{ \"enabled\": true }").notes(), "nothing is backfilled, the shipped block is in place");
     }
 
+    /**
+     * Premise since the offhand rule: a partial block used to manage only what it names (an absent key meant "leave PvP BOT alone"),
+     * which left an existing install's offhand rule inert, because its file predates autoTotemEnabled and totemPriority. Now an absent
+     * key takes its shipped value; only an explicit null leaves PvP BOT's value alone (see the next test).
+     */
     @Test
-    void aPartialBlockManagesOnlyWhatItNames(@TempDir Path dir) throws IOException {
-        InhabitantsConfig c = load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }").config();
-        assertEquals(16.0, c.pvpbotSettings.maxTargetDistance);
-        assertNull(c.pvpbotSettings.rangedMinRange);
-        assertNull(c.pvpbotSettings.rangedOptimalRange);
-        assertNull(c.pvpbotSettings.rangedMaxRange);
-        assertNull(c.pvpbotSettings.autoEquipWeapon, "an absent key inside a present block leaves PvP BOT's value alone");
-        assertNull(c.pvpbotSettings.autoTargetEnabled);
+    void aPartialBlockManagesEveryKeyWithItsShippedValueUnlessThatKeyIsExplicitlyNull(@TempDir Path dir) throws IOException {
+        ConfigIO.LoadResult r = load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }");
+        InhabitantsConfig.PvpbotSettings c = r.config().pvpbotSettings;
+        assertEquals(16.0, c.maxTargetDistance, "what the block names is kept");
+        InhabitantsConfig.PvpbotSettings shipped = InhabitantsConfig.PvpbotSettings.shipped();
+        assertEquals(shipped.rangedMinRange, c.rangedMinRange);
+        assertEquals(shipped.rangedOptimalRange, c.rangedOptimalRange);
+        assertEquals(shipped.rangedMaxRange, c.rangedMaxRange);
+        assertEquals(Boolean.FALSE, c.autoEquipWeapon);
+        assertEquals(Boolean.FALSE, c.autoTargetEnabled);
+        assertEquals(Boolean.FALSE, c.rangedRetreatOnClose);
+        assertEquals(2.5, c.meleeRange);
+        assertEquals(20, c.bowMinDrawTime);
+        assertEquals(Boolean.FALSE, c.autoTotemEnabled, "an existing block without the offhand keys still manages auto-totem off");
+        assertEquals(Boolean.FALSE, c.totemPriority, "and totem priority off");
+        assertEquals(1, r.notes().size(), r.notes().toString());
+        assertTrue(r.notes().get(0).contains("autoTotemEnabled") && r.notes().get(0).contains("totemPriority")
+                && !r.notes().get(0).contains("maxTargetDistance"), r.notes().toString());
+        assertEquals(List.of(), r.warnings(), "16 covers the shipped archer ranges, nothing is wrong");
+        // A block that already names every key changes nothing and says nothing.
+        ConfigIO.LoadResult full = load(dir, ConfigIO.toJson(new InhabitantsConfig()));
+        assertEquals(List.of(), full.notes());
     }
 
     @Test
@@ -72,6 +99,17 @@ class PvpbotSettingsConfigTest {
         InhabitantsConfig c = load(dir, "{ \"pvpbotSettings\": { \"autoEquipWeapon\": null, \"maxTargetDistance\": 12 } }").config();
         assertNull(c.pvpbotSettings.autoEquipWeapon);
         assertEquals(12.0, c.pvpbotSettings.maxTargetDistance);
+        // The offhand keys: explicit null = unmanaged (PvP BOT keeps its own auto-totem and totem priority), absent = managed false.
+        InhabitantsConfig optOut = load(dir, "{ \"pvpbotSettings\": { \"autoTotemEnabled\": null, \"totemPriority\": null } }").config();
+        assertNull(optOut.pvpbotSettings.autoTotemEnabled);
+        assertNull(optOut.pvpbotSettings.totemPriority);
+        assertEquals(64.0, optOut.pvpbotSettings.maxTargetDistance, "the other absent keys still take their shipped value");
+        // An explicit true is honoured (the admin gives the offhand back to PvP BOT).
+        InhabitantsConfig back = load(dir, "{ \"pvpbotSettings\": { \"autoTotemEnabled\": true, \"totemPriority\": true } }").config();
+        assertEquals(Boolean.TRUE, back.pvpbotSettings.autoTotemEnabled);
+        assertEquals(Boolean.TRUE, back.pvpbotSettings.totemPriority);
+        // An empty block is a present block: every key takes its shipped value.
+        assertEquals(Boolean.FALSE, load(dir, "{ \"pvpbotSettings\": { } }").config().pvpbotSettings.autoTotemEnabled);
 
         ConfigIO.LoadResult r = load(dir, "{ \"pvpbotSettings\": null }");
         assertNotNull(r.config().pvpbotSettings);
@@ -111,9 +149,16 @@ class PvpbotSettingsConfigTest {
 
     @Test
     void aPartiallyConfiguredRangeSetIsLeftForTheApplyStepToJudge(@TempDir Path dir) throws IOException {
+        // The absent optimal and max ranges take their shipped 12 and 16 (see the partial-block test), so 6 / 12 / 16 is a valid set.
         ConfigIO.LoadResult r = load(dir, "{ \"pvpbotSettings\": { \"rangedMinRange\": 6 } }");
         assertEquals(6.0, r.config().pvpbotSettings.rangedMinRange);
+        assertEquals(12.0, r.config().pvpbotSettings.rangedOptimalRange);
+        assertEquals(16.0, r.config().pvpbotSettings.rangedMaxRange);
         assertEquals(List.of(), r.warnings());
+        // A minimum that does not fit the shipped optimum is judged like any other disordered set: dropped together with a warning.
+        ConfigIO.LoadResult bad = load(dir, "{ \"pvpbotSettings\": { \"rangedMinRange\": 13 } }");
+        assertNull(bad.config().pvpbotSettings.rangedMinRange);
+        assertTrue(bad.warnings().stream().anyMatch(w -> w.contains("must be below")), bad.warnings().toString());
     }
 
     @Test
@@ -134,7 +179,7 @@ class PvpbotSettingsConfigTest {
         String json = ConfigIO.toJson(new InhabitantsConfig());
         for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 64.0", "\"rangedMinRange\": 8.0",
                 "\"rangedOptimalRange\": 12.0", "\"rangedMaxRange\": 16.0", "\"autoEquipWeapon\": false", "\"autoTargetEnabled\": false",
-                "\"bowMinDrawTime\": 20")) {
+                "\"bowMinDrawTime\": 20", "\"autoTotemEnabled\": false", "\"totemPriority\": false")) {
             assertTrue(json.contains(key), key + " missing from:\n" + json);
         }
         assertFalse(json.contains("rangedPacing"), json);
@@ -156,8 +201,10 @@ class PvpbotSettingsConfigTest {
     @Test
     void theShippedDefaultTurnsPvpBotsArcherRetreatOffSoABowCarrierUsesItsMeleeWeaponUpClose(@TempDir Path dir) throws IOException {
         assertEquals(Boolean.FALSE, new InhabitantsConfig().pvpbotSettings.rangedRetreatOnClose);
-        assertNull(load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }").config().pvpbotSettings.rangedRetreatOnClose,
-                "an absent key inside a present block leaves PvP BOT's value alone");
+        assertEquals(Boolean.FALSE, load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }").config().pvpbotSettings.rangedRetreatOnClose,
+                "an absent key inside a present block takes the shipped value");
+        assertNull(load(dir, "{ \"pvpbotSettings\": { \"rangedRetreatOnClose\": null } }").config().pvpbotSettings.rangedRetreatOnClose,
+                "an explicit null leaves PvP BOT's value alone");
         assertEquals(Boolean.TRUE, load(dir, "{ \"pvpbotSettings\": { \"rangedRetreatOnClose\": true } }")
                 .config().pvpbotSettings.rangedRetreatOnClose);
         assertTrue(ConfigIO.toJson(new InhabitantsConfig()).contains("\"rangedRetreatOnClose\": false"));
@@ -166,8 +213,10 @@ class PvpbotSettingsConfigTest {
     @Test
     void theShippedMeleeRangeIsTwoAndAHalfSoTheSwordComesOutAtFiveBlocks(@TempDir Path dir) throws IOException {
         assertEquals(2.5, new InhabitantsConfig().pvpbotSettings.meleeRange);
-        assertNull(load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }").config().pvpbotSettings.meleeRange,
-                "an absent key inside a present block leaves PvP BOT's value alone");
+        assertEquals(2.5, load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }").config().pvpbotSettings.meleeRange,
+                "an absent key inside a present block takes the shipped value");
+        assertNull(load(dir, "{ \"pvpbotSettings\": { \"meleeRange\": null } }").config().pvpbotSettings.meleeRange,
+                "an explicit null leaves PvP BOT's value alone");
         assertEquals(3.0, load(dir, "{ \"pvpbotSettings\": { \"meleeRange\": 3 } }").config().pvpbotSettings.meleeRange);
         assertTrue(ConfigIO.toJson(new InhabitantsConfig()).contains("\"meleeRange\": 2.5"));
     }

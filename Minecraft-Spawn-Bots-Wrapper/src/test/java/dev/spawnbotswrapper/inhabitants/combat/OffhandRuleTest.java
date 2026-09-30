@@ -50,4 +50,20 @@ class OffhandRuleTest {
         assertEquals(Move.TOTEM, OffhandRule.decide(Held.EMPTY, false, true));   // totem 1 popped: totem 2
         assertEquals(Move.NONE, OffhandRule.decide(Held.EMPTY, false, false));   // totem 2 popped: nothing
     }
+
+    private static int best(String slots) {
+        // One character per slot: 's' a plain shield, 'e' an enchanted shield, '.' something else.
+        return OffhandRule.bestShield(i -> slots.charAt(i) != '.', i -> slots.charAt(i) == 'e', slots.length());
+    }
+
+    @Test
+    void theBestShieldIsTheEnchantedOneThenTheLowestSlot() {
+        assertEquals(-1, best("...."));
+        assertEquals(2, best("..s."), "the only shield");
+        assertEquals(1, best(".ss."), "equal plain shields: the lowest slot");
+        assertEquals(2, best("s.es"), "an enchanted shield beats plain ones in lower slots");
+        assertEquals(1, best(".ee."), "equal enchanted shields: the lowest slot");
+        assertEquals(3, best("ss.e"), "the enchanted one wins wherever it is");
+        assertEquals(0, best("es.s"), "an enchanted shield in the lowest slot stays the best");
+    }
 }

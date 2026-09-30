@@ -216,11 +216,12 @@ class ProfileInvariantsTest {
 
     @Test
     void theOffhandIsTheShieldElseATotemAndTheSpareTotemsWaitInTheInventory() {
-        // The offhand rule from the first tick: the best shield, else a totem. PvP BOT's auto-totem and totem priority are managed
-        // off, so the shield is raised where it is and is never pushed out by a totem; every other totem waits in the inventory.
+        // The offhand rule from the first tick: the best shield, else a totem. With PvP BOT's auto-totem managed off (whatever the
+        // totem priority is: a shield in the offhand is never the main-hand route) the shield is raised where it is and is never
+        // pushed out by a totem; every other totem waits in the inventory.
         int totemAndShield = 0;
         int shieldOffhand = 0;
-        for (GlobalCapabilities caps : List.of(allOn(), allOnExcept("autoTotemEnabled", "totemPriority"))) {
+        for (GlobalCapabilities caps : List.of(allOnExcept("autoTotemEnabled", "totemPriority"), allOnExcept("autoTotemEnabled"))) {
         for (BotProfile p : profiles(generate(SAMPLES, caps, everythingOptions(), 8))) {
             int totems = countOf(p, ItemIds.TOTEM);
             BotProfile.ItemSpec offhand = null;
@@ -247,6 +248,39 @@ class ProfileInvariantsTest {
                 assertNull(offhand);
             }
         }
+        }
+        assertTrue(totemAndShield > 100 && shieldOffhand > 100);
+    }
+
+    @Test
+    void withPvpBotsOwnAutoTotemOnATotemOwnsTheOffhandAndTheShieldMovesToHotbarSlotOne() {
+        // The legacy layout (an explicit null or true for pvpbotSettings.autoTotemEnabled: the addon does not manage PvP BOT's auto-totem).
+        int totemAndShield = 0;
+        int shieldOffhand = 0;
+        for (BotProfile p : profiles(generate(SAMPLES, allOn(), everythingOptions(), 8))) {
+            int totems = countOf(p, ItemIds.TOTEM);
+            BotProfile.ItemSpec offhand = null;
+            for (BotProfile.PlacedItem placed : p.loadout().items()) {
+                if (BotProfile.Slot.OFFHAND.equals(placed.slot())) {
+                    offhand = placed.spec();
+                }
+            }
+            boolean shield = has(p, i -> i.equals(NS + "shield"));
+            if (totems >= 1) {
+                assertNotNull(offhand);
+                assertEquals(ItemIds.TOTEM, offhand.item(), "a totem always takes the offhand");
+                if (shield) {
+                    assertNotNull(hotbar(p, 1));
+                    assertEquals(ItemIds.SHIELD, hotbar(p, 1).item(), "with a totem in the offhand the shield lives in hotbar 1");
+                    totemAndShield++;
+                }
+            } else if (shield) {
+                assertNotNull(offhand);
+                assertEquals(ItemIds.SHIELD, offhand.item());
+                shieldOffhand++;
+            } else {
+                assertNull(offhand);
+            }
         }
         assertTrue(totemAndShield > 100 && shieldOffhand > 100);
     }
@@ -470,6 +504,42 @@ class ProfileInvariantsTest {
         assertTrue(mending);
     }
 
+    @Test
+    void withPvpBotsOwnAutoTotemOnAShieldNeverAccompaniesAnOffhandTotemWhenTotemPriorityIsOff() {
+        // The legacy layout: the addon does not manage PvP BOT's auto-totem (explicit null or true in the config).
+        // Verified upstream behaviour: with totemPriority off, equipping the shield overwrites the offhand
+        // outright instead of routing through hotbar slot 1, destroying whatever was there - including an
+        // emergency totem. A profile that hands out both would defeat the very reason autoTotemEnabled
+        // exists the first time the bot raises its shield.
+        for (BotProfile p : profiles(generate(2000, allOnExcept("totemPriority"), everythingOptions()))) {
+            boolean offhandTotem = p.loadout().items().stream()
+                    .anyMatch(i -> BotProfile.Slot.OFFHAND.equals(i.slot()) && i.spec() != null
+                            && ItemIds.TOTEM.equals(i.spec().item()));
+            boolean hasShield = specs(p).stream().anyMatch(s -> ItemIds.SHIELD.equals(s.item()));
+            assertFalse(offhandTotem && hasShield,
+                    "profile combines an offhand totem with a shield although totemPriority is off: " + p);
+        }
+        // the combination must still be reachable once totemPriority is back on, so this is really gated on
+        // the capability and not accidentally disabled altogether
+        boolean sawBoth = false;
+        for (BotProfile p : profiles(generate(2000, allOn(), everythingOptions()))) {
+            boolean offhandTotem = p.loadout().items().stream()
+                    .anyMatch(i -> BotProfile.Slot.OFFHAND.equals(i.slot()) && i.spec() != null
+                            && ItemIds.TOTEM.equals(i.spec().item()));
+            sawBoth |= offhandTotem && specs(p).stream().anyMatch(s -> ItemIds.SHIELD.equals(s.item()));
+        }
+        assertTrue(sawBoth, "with totemPriority on, some bot should still carry both");
+    }
+
+    @Test
+    void withTheAutoTotemManagedOffTheTotemPriorityDecidesNothing() {
+        // The managed layout puts the shield in the offhand, which is never the main-hand route, so the live totem priority
+        // (managed off, or an explicit null / true in the config) changes no loadout.
+        List<BotProfile> on = profiles(generate(400, allOnExcept("autoTotemEnabled"), everythingOptions(), 31));
+        List<BotProfile> off = profiles(generate(400, allOnExcept("autoTotemEnabled", "totemPriority"), everythingOptions(), 31));
+        assertEquals(on, off);
+    }
+
     /**
      * The cobweb escape needs a water bucket (PvP BOT never refills one, and pearls are never stocked), so every
      * combat-capable inhabitant carries exactly one; with combat switched off globally nobody fights, and the old coin
@@ -497,7 +567,7 @@ class ProfileInvariantsTest {
     void flagsWithoutAnyItemFootprintDoNotChangeWhatIsGenerated() {
         // These switches change how PvP BOT uses a loadout, not which items make sense.
         for (String flag : List.of("autoEquipArmor", "autoEquipWeapon", "shieldBreakEnabled", "retreatEnabled",
-                "botsRelogs", "botLeaveOnDeath", "clearOnRemove", "autoTargetEnabled", "autoTotemEnabled", "totemPriority")) {
+                "botsRelogs", "botLeaveOnDeath", "clearOnRemove", "autoTargetEnabled")) {
             List<BotProfile> on = profiles(generate(200, allOn(), everythingOptions(), 1));
             List<BotProfile> off = profiles(generate(200, allOnExcept(flag), everythingOptions(), 1));
             assertEquals(on, off, flag);

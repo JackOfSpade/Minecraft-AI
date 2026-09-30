@@ -269,6 +269,7 @@ class ProfileFormatterTest {
         assertTrue(anyNoteContains(notes(totem, allOn()), "auto-totem is on"));
 
         BotProfile both = profile(List.of(offhand(spec("totem_of_undying")), hotbar(1, spec("shield"))));
+        assertTrue(anyNoteContains(notes(both, allOn()), "shield is used from the main hand"));
         assertTrue(anyNoteContains(notes(both, allOnExcept("autoTotemEnabled")), "moves the shield into the offhand"));
 
         BotProfile food = profile(List.of(hotbar(8, spec("bread", 10))));
