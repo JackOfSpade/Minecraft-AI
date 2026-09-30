@@ -64,7 +64,8 @@ runs on defaults until you fix it.
     "scaleVariation": false,
     "behaviorVariation": true,
     "allowExplosiveKits": false,
-    "allowElytra": false
+    "allowElytra": false,
+    "disabledEnchantments": ["minecraft:piercing"]
   },
 
   "deterministic": { "enabled": false, "salt": "" },
@@ -210,6 +211,27 @@ else in PvP BOT 0.0.15, so:
   other bots; nothing else in the inventory changes. The first removal per bot is logged once at INFO
   (`Removed N ender pearl(s) from inhabitant ...`), later ones only in debug mode. Profiles stored before this change
   keep their pearls in `populations.json`, but a re-dressing (`profiles.reapplyOnRestore`) drops them too.
+
+## Disabled enchantments: no Piercing crossbows
+
+In vanilla Java a **Piercing** bolt ignores a raised shield (the game skips shield blocking for arrows with a pierce
+level above zero). A hostile inhabitant with a piercing crossbow therefore could not be blocked at all, which is too
+strong for a structure guardian, so Piercing is **off by default**. The list is `profiles.disabledEnchantments`
+(default `["minecraft:piercing"]`):
+
+* ids are accepted with or without the `minecraft:` namespace and in any letter case; an entry that is not a valid id
+  or names a `minecraft:` enchantment that does not exist gets one WARN at load and is otherwise ignored; `[]` turns
+  the feature off (any enchantment can be listed, not just Piercing);
+* new loadouts **never contain a disabled enchantment**. The roller still consumes the same random draws, so a seeded
+  loadout differs from the old one only by the missing enchantment; nothing is substituted (no Multishot);
+* every inhabitant is **sanitized**: when it is dressed (spawn or `profiles.reapplyOnRestore`), right after a restore and
+  then about every 5 seconds while it is online, the disabled enchantments are removed from every stack it carries or
+  wears (hotbar, main inventory, armor, offhand, stored enchantments of books). The item, its count and its other
+  enchantments stay; real players and other bots are never touched. The first removal per bot is logged once at INFO
+  (`Removed disabled enchantment(s) from inhabitant ...`), later ones only in debug mode;
+* stored profiles (`populations.json`) are **not migrated**: the file keeps what was rolled and old saves load unchanged,
+  but the application filters the loadout, so a re-dressing can never put a disabled enchantment back. Removing an
+  id from the list makes stored loadouts whole again on their next re-dressing.
 
 ## Managed PvP BOT setting: critical-hit fall phase
 

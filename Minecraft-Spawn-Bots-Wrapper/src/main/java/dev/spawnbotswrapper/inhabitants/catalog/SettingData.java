@@ -159,7 +159,9 @@ final class SettingData {
                                 + "held) plus at least one arrow in slots 0-35 (offhand arrows do not count) puts the "
                                 + "bot in ranged mode. Varies: archer or not. Does not vary: an archer cannot also "
                                 + "melee at the default ranged-retreat, so bow plus sword is an archer. Traps: a bow "
-                                + "without arrows is inert; a charged crossbow is never fired (unverified). Audits "
+                                + "without arrows is inert; a charged crossbow is never fired (unverified). Rolled "
+                                + "crossbows never carry Piercing (profiles.disabledEnchantments, on by default: a "
+                                + "piercing bolt ignores a raised shield, so it could not be blocked). Audits "
                                 + "split: partial versus truthful."),
                 flag("maceEnabled", "mace", true).perBot(LOADOUT,
                         "loadout: hotbar mace, optionally wind_charge",
