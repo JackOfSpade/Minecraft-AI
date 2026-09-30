@@ -112,16 +112,19 @@ public final class AggroGameTests {
     public void aggroAPlayerStandingStillThreeBlocksBehindIsNeverNoticed(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
-        rig.createTarget(-3.0);
         boolean[] dressed = {false};
         long[] dressedAt = {0};
+        boolean[] started = {false};
         context.onEachTick(() -> {
             if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.MELEE_ONLY, "behind-still")) {
                 return;
             }
             long since = context.getTick() - dressedAt[0];
-            if (since <= 1) {
+            if (!started[0]) {
+                // The player arrives only now and the bot already looks east, so it never had the player in front of it.
+                started[0] = true;
                 rig.faceDirection(1.0, 0.0); // east: the player at -x is directly behind
+                rig.createTarget(-3.0);
             }
             rig.placeTargetAt(rig.homeX() - 3.0, rig.bot.getY(), rig.homeZ());
             if (rig.hasTarget() || !rig.phase().equals("IDLE")) {
@@ -138,16 +141,18 @@ public final class AggroGameTests {
     public void aggroAPlayerWalkingThreeBlocksBehindIsHeard(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
-        rig.createTarget(-3.0);
         boolean[] dressed = {false};
         long[] dressedAt = {0};
+        boolean[] started = {false};
         context.onEachTick(() -> {
             if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.MELEE_ONLY, "behind-walk")) {
                 return;
             }
             long since = context.getTick() - dressedAt[0];
-            if (since <= 1) {
+            if (!started[0]) {
+                started[0] = true;
                 rig.faceDirection(1.0, 0.0);
+                rig.createTarget(-3.0);
             }
             if (rig.hasTarget() || rig.phase().equals("CHASE")) {
                 Rig.LOG.info("[behind-walk] noticed after {} ticks of walking behind the bot", since);
@@ -171,17 +176,20 @@ public final class AggroGameTests {
     public void aggroAPlayerSneakingBehindIsNeverNoticedUntilItHits(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
-        rig.createTarget(-1.5);
         boolean[] dressed = {false};
         long[] dressedAt = {0};
         long[] hitAt = {-1};
+        boolean[] started = {false};
         context.onEachTick(() -> {
             if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.MELEE_ONLY, "behind-sneak")) {
                 return;
             }
             long since = context.getTick() - dressedAt[0];
-            if (since <= 1) {
+            if (!started[0]) {
+                // sneaking from the moment it arrives, behind a bot that already looks the other way
+                started[0] = true;
                 rig.faceDirection(1.0, 0.0);
+                rig.createTarget(-1.5);
                 rig.setSneaking(true);
             }
             if (hitAt[0] < 0) {
