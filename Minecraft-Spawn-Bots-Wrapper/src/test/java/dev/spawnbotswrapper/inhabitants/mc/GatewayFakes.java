@@ -168,12 +168,16 @@ final class GatewayFakes {
         final Map<ServerPlayer, Boolean> marked = new IdentityHashMap<>();
         final List<ServerPlayer> stripped = new ArrayList<>();
         int strippedCount;
+        int pearlsRemoved;
+        List<String> enchantmentsRemoved = List.of();
+        final List<ServerPlayer> enchantmentStripped = new ArrayList<>();
+        List<String> strippedEnchantments = List.of();
 
         @Override
         public Result apply(ServerPlayer bot, BotProfile profile, boolean clearInventoryFirst) {
             clearFlags.add(clearInventoryFirst);
             profiles.add(profile);
-            return new Result(loadoutApplied, vitalsApplied, warnings);
+            return new Result(loadoutApplied, vitalsApplied, warnings, pearlsRemoved, enchantmentsRemoved);
         }
 
         @Override
@@ -190,6 +194,12 @@ final class GatewayFakes {
         public int stripEnderPearls(ServerPlayer bot) {
             stripped.add(bot);
             return strippedCount;
+        }
+
+        @Override
+        public List<String> stripDisabledEnchantments(ServerPlayer bot) {
+            enchantmentStripped.add(bot);
+            return strippedEnchantments;
         }
     }
 

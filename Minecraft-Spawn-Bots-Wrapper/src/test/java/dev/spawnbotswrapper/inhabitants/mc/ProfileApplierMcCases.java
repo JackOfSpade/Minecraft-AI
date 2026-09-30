@@ -9,9 +9,14 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityEquipment;
@@ -23,6 +28,8 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -115,6 +122,139 @@ public final class ProfileApplierMcCases {
         assertTrue(inventory.getItem(0).is(Items.DIAMOND_SWORD));
         assertEquals(1, warnings.size(), warnings.toString());
         assertTrue(warnings.get(0).contains("8 ender pearls"), warnings.get(0));
+    }
+
+    // ------------------------------------------------------------------------------ disabled enchantments (Piercing)
+
+    private static final Set<String> NO_PIERCING = Set.of("minecraft:piercing");
+
+    private static Holder<Enchantment> enchantment(String id) {
+        return McBootstrap.registries()
+                .get(ResourceKey.create(Registries.ENCHANTMENT, Identifier.parse(id)))
+                .orElseThrow(() -> new AssertionError("enchantment " + id + " is missing from the registry"));
+    }
+
+    private static ItemStack enchanted(String item, int count, Map<String, Integer> enchantments) {
+        List<String> warnings = new ArrayList<>();
+        ItemStack stack = new ItemStackFactory(McBootstrap.registries())
+                .build(new ItemSpec(item, count, enchantments, 0.0, null), warnings).orElseThrow();
+        assertTrue(warnings.isEmpty(), warnings.toString());
+        return stack;
+    }
+
+    private static int level(ItemStack stack, String id) {
+        return stack.getOrDefault(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY).getLevel(enchantment(id));
+    }
+
+    private static int storedLevel(ItemStack stack, String id) {
+        return stack.getOrDefault(DataComponents.STORED_ENCHANTMENTS, ItemEnchantments.EMPTY).getLevel(enchantment(id));
+    }
+
+    /** Only the disabled enchantment goes, from every kind of slot; items, counts and other enchantments stay. */
+    public static void removeDisabledEnchantmentsTakesOnlyThoseEnchantmentsFromEverySlot() {
+        Inventory inventory = newInventory();
+        inventory.setItem(1, enchanted("minecraft:crossbow", 1,
+                Map.of("minecraft:piercing", 3, "minecraft:quick_charge", 2, "minecraft:unbreaking", 1)));
+        inventory.setItem(20, enchanted("minecraft:crossbow", 1, Map.of("minecraft:piercing", 4)));   // only piercing
+        inventory.setItem(SlotPlanner.CHEST, enchanted("minecraft:diamond_chestplate", 1, Map.of("minecraft:protection", 4)));
+        inventory.setItem(SlotPlanner.OFFHAND, enchanted("minecraft:enchanted_book", 1,
+                Map.of("minecraft:piercing", 2, "minecraft:mending", 1)));                            // stored enchantments
+        inventory.setItem(21, enchanted("minecraft:diamond_sword", 1, Map.of("minecraft:sharpness", 5)));
+        inventory.setItem(22, new ItemStack(Items.ARROW, 64));
+        List<ItemStack> before = new ArrayList<>();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            before.add(inventory.getItem(slot).copy());
+        }
+
+        List<String> removed = ProfileApplier.removeDisabledEnchantments(inventory, NO_PIERCING);
+
+        assertEquals(3, removed.size(), removed.toString());
+        assertTrue(removed.contains("minecraft:piercing (crossbow)"), removed.toString());
+        assertTrue(removed.contains("minecraft:piercing (enchanted_book)"), removed.toString());
+        ItemStack mixed = inventory.getItem(1);
+        assertTrue(mixed.is(Items.CROSSBOW));
+        assertEquals(1, mixed.getCount());
+        assertEquals(0, level(mixed, "minecraft:piercing"));
+        assertEquals(2, level(mixed, "minecraft:quick_charge"), "the other enchantments stay");
+        assertEquals(1, level(mixed, "minecraft:unbreaking"));
+        ItemStack bare = inventory.getItem(20);
+        assertTrue(bare.is(Items.CROSSBOW), "the item itself is kept");
+        assertEquals(0, level(bare, "minecraft:piercing"));
+        assertFalse(bare.has(DataComponents.ENCHANTMENTS), "nothing left: the empty component goes too");
+        ItemStack book = inventory.getItem(SlotPlanner.OFFHAND);
+        assertTrue(book.is(Items.ENCHANTED_BOOK));
+        assertEquals(0, storedLevel(book, "minecraft:piercing"));
+        assertEquals(1, storedLevel(book, "minecraft:mending"));
+        for (int slot : new int[]{SlotPlanner.CHEST, 21, 22}) {
+            assertTrue(ItemStack.matches(before.get(slot), inventory.getItem(slot)), "slot " + slot + " must be untouched");
+        }
+        assertEquals(64, inventory.getItem(22).getCount());
+
+        assertEquals(List.of(), ProfileApplier.removeDisabledEnchantments(inventory, NO_PIERCING), "idempotent");
+    }
+
+    public static void anEmptyDenylistChangesNothing() {
+        Inventory inventory = newInventory();
+        inventory.setItem(1, enchanted("minecraft:crossbow", 1, Map.of("minecraft:piercing", 3)));
+        assertEquals(List.of(), ProfileApplier.removeDisabledEnchantments(inventory, Set.of()));
+        assertEquals(List.of(), ProfileApplier.removeDisabledEnchantments(inventory, null));
+        assertEquals(3, level(inventory.getItem(1), "minecraft:piercing"));
+    }
+
+    public static void everyDisabledEnchantmentOfTheListGoes() {
+        Inventory inventory = newInventory();
+        inventory.setItem(1, enchanted("minecraft:crossbow", 1,
+                Map.of("minecraft:piercing", 3, "minecraft:quick_charge", 2)));
+        inventory.setItem(2, enchanted("minecraft:bow", 1, Map.of("minecraft:power", 5, "minecraft:punch", 2)));
+        List<String> removed = ProfileApplier.removeDisabledEnchantments(inventory,
+                Set.of("minecraft:quick_charge", "minecraft:power"));
+        assertEquals(2, removed.size(), removed.toString());
+        assertEquals(3, level(inventory.getItem(1), "minecraft:piercing"));
+        assertEquals(2, level(inventory.getItem(2), "minecraft:punch"));
+        assertEquals(0, level(inventory.getItem(2), "minecraft:power"));
+    }
+
+    /**
+     * A stored profile (populations.json) written before Piercing was disabled still lists a piercing crossbow. Nothing
+     * is migrated in the file: the application filters it, so old saves keep loading and re-enabling the enchantment
+     * makes stored loadouts whole again. A dressing over an inventory that is not wiped is cleaned the same way.
+     */
+    public static void aStoredProfileWithPiercingNeverPutsItBackOnABot() {
+        BotProfile.Loadout stored = new BotProfile.Loadout(List.of(
+                new PlacedItem(Slot.HOTBAR, 0, ItemSpec.of("minecraft:diamond_sword")),
+                new PlacedItem(Slot.HOTBAR, 1, new ItemSpec("minecraft:crossbow", 1,
+                        Map.of("minecraft:piercing", 4, "minecraft:quick_charge", 3), 0.0, null))));
+        Inventory inventory = newInventory();
+        inventory.setItem(30, enchanted("minecraft:crossbow", 1, Map.of("minecraft:piercing", 1))); // old, unplanned slot
+        List<String> warnings = new ArrayList<>();
+
+        ProfileApplier.Sanitized sanitized = ProfileApplier.fill(inventory, McBootstrap.registries(), stored, false,
+                warnings, NO_PIERCING);
+
+        assertEquals(2, sanitized.enchantments().size(), sanitized.toString());
+        assertEquals(0, sanitized.pearls());
+        ItemStack crossbow = inventory.getItem(1);
+        assertTrue(crossbow.is(Items.CROSSBOW));
+        assertEquals(0, level(crossbow, "minecraft:piercing"));
+        assertEquals(3, level(crossbow, "minecraft:quick_charge"), "the rest of the stored item is applied");
+        assertEquals(0, level(inventory.getItem(30), "minecraft:piercing"));
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.get(0).contains("minecraft:piercing"), warnings.get(0));
+
+        // With the enchantment enabled again the same stored profile is applied whole.
+        Inventory enabled = newInventory();
+        ProfileApplier.fill(enabled, McBootstrap.registries(), stored, true, new ArrayList<>(), Set.of());
+        assertEquals(4, level(enabled.getItem(1), "minecraft:piercing"));
+    }
+
+    public static void theApplierReadsTheDenylistOnEveryCallAndRefusesNonBots() {
+        Set<String> disabled = new java.util.HashSet<>();
+        ProfileApplier applier = new ProfileApplier(p -> false, () -> disabled);
+        disabled.add("minecraft:piercing");
+        // A non-bot is refused before its inventory is looked at (the opaque entity has none).
+        assertEquals(List.of(), applier.stripDisabledEnchantments(opaquePlayer("SomeRealPerson")));
+        ProfileApplier broken = new ProfileApplier(p -> true, () -> disabled);
+        assertEquals(List.of(), broken.stripDisabledEnchantments(opaquePlayer("Inh_Broken")), "failures are contained");
     }
 
     public static void aLoadoutLandsInTheRightVanillaSlots() {

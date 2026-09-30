@@ -1,8 +1,11 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
+import dev.spawnbotswrapper.inhabitants.config.DisabledEnchantments;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -14,6 +17,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.Team;
@@ -21,7 +25,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Applies a {@link BotProfile} to a live bot using the vanilla API only: inventory contents, vanilla
@@ -45,10 +51,21 @@ public final class ProfileApplier implements ProfileApplication {
     public static final String MARKER_TAG = "pvpbot_inhabitants";
 
     private final Predicate<ServerPlayer> isBot;
+    private final Supplier<Set<String>> disabledEnchantments;
 
-    /** @param isBot true for entities that are bots (never for real players) */
+    /** @param isBot true for entities that are bots (never for real players); no enchantment is disabled */
     public ProfileApplier(Predicate<ServerPlayer> isBot) {
+        this(isBot, Set::of);
+    }
+
+    /**
+     * @param isBot true for entities that are bots (never for real players)
+     * @param disabledEnchantments canonical ids (see {@link DisabledEnchantments}) no bot may carry; read on every
+     *                             call so a config reload takes effect at once
+     */
+    public ProfileApplier(Predicate<ServerPlayer> isBot, Supplier<Set<String>> disabledEnchantments) {
         this.isBot = isBot;
+        this.disabledEnchantments = disabledEnchantments;
     }
 
     @Override
@@ -59,9 +76,12 @@ public final class ProfileApplier implements ProfileApplication {
                 warnings.add("refused to apply a profile to " + bot.getGameProfile().name() + ": it is not a bot");
                 return new Result(false, false, warnings);
             }
-            boolean loadout = applyLoadout(bot, profile.loadout(), clearInventoryFirst, warnings);
+            Sanitized sanitized = applyLoadout(bot, profile.loadout(), clearInventoryFirst, warnings,
+                    disabledEnchantments.get());
             boolean vitals = applyVitals(bot, profile.vitals(), warnings);
-            return new Result(loadout, vitals, warnings);
+            return new Result(sanitized != null, vitals, warnings,
+                    sanitized == null ? 0 : sanitized.pearls(),
+                    sanitized == null ? List.of() : sanitized.enchantments());
         } catch (RuntimeException e) {
             // Nothing here may propagate: the caller is the population engine in the middle of a tick.
             warnings.add("profile could not be applied: " + e);
@@ -107,14 +127,19 @@ public final class ProfileApplier implements ProfileApplication {
         scoreboard.addPlayerToTeam(bot.getGameProfile().name(), team);
     }
 
-    private static boolean applyLoadout(ServerPlayer bot, BotProfile.Loadout loadout, boolean clear, List<String> warnings) {
+    /** The sanitize step's findings, or null when the loadout could not be applied. */
+    private static Sanitized applyLoadout(ServerPlayer bot, BotProfile.Loadout loadout, boolean clear,
+                                          List<String> warnings, Set<String> disabled) {
         try {
-            fill(bot.getInventory(), bot.registryAccess(), loadout, clear, warnings);
-            return true;
+            return fill(bot.getInventory(), bot.registryAccess(), loadout, clear, warnings, disabled);
         } catch (RuntimeException e) {
             warnings.add("loadout could not be applied: " + e);
-            return false;
+            return null;
         }
+    }
+
+    /** What the sanitize step of a dressing took out: ender pearls (items) and disabled enchantments (one line each). */
+    record Sanitized(int pearls, List<String> enchantments) {
     }
 
     /**
@@ -122,8 +147,14 @@ public final class ProfileApplier implements ProfileApplication {
      * the first hotbar item is what the bot holds. Separated from the entity so it can be tested against a
      * bare {@link Inventory}.
      */
-    static void fill(Inventory inventory, HolderLookup.Provider registries, BotProfile.Loadout loadout,
-                     boolean clear, List<String> warnings) {
+    static Sanitized fill(Inventory inventory, HolderLookup.Provider registries, BotProfile.Loadout loadout,
+                          boolean clear, List<String> warnings) {
+        return fill(inventory, registries, loadout, clear, warnings, Set.of());
+    }
+
+    /** As above, and afterwards no item carries an enchantment in {@code disabled} (canonical ids). */
+    static Sanitized fill(Inventory inventory, HolderLookup.Provider registries, BotProfile.Loadout loadout,
+                          boolean clear, List<String> warnings, Set<String> disabled) {
         SlotPlanner.Plan plan = SlotPlanner.plan(loadout.items());
         warnings.addAll(plan.warnings());
         ItemStackFactory factory = new ItemStackFactory(registries);
@@ -141,7 +172,14 @@ public final class ProfileApplier implements ProfileApplication {
             warnings.add("removed " + pearls + " ender pearl" + (pearls == 1 ? "" : "s")
                     + " (they make PvP BOT's cobweb escape loop cancel attacks)");
         }
+        // Same for a disabled enchantment (Piercing by default): a stored profile from before it was disabled, or an
+        // item already on a bot that is not wiped, never survives a dressing. Only that enchantment goes.
+        List<String> enchantments = removeDisabledEnchantments(inventory, disabled);
+        if (!enchantments.isEmpty()) {
+            warnings.add("removed disabled enchantments: " + String.join(", ", enchantments));
+        }
         inventory.setSelectedSlot(0);
+        return new Sanitized(pearls, enchantments);
     }
 
     /**
@@ -168,6 +206,66 @@ public final class ProfileApplier implements ProfileApplication {
             return isBot.test(bot) ? removeEnderPearls(bot.getInventory()) : 0;
         } catch (RuntimeException e) {
             return 0;
+        }
+    }
+
+    /**
+     * Removes the enchantments in {@code disabled} (canonical ids; see {@link DisabledEnchantments}) from every stack
+     * in every slot of the inventory (hotbar, main, armor, offhand), on the enchantments component and on the
+     * stored-enchantments component of enchanted books. The item, its count and all its other enchantments stay. One
+     * description per removal, {@code <id> (<item>)}, so a caller can log what went from where.
+     */
+    static List<String> removeDisabledEnchantments(Inventory inventory, Set<String> disabled) {
+        List<String> removed = new ArrayList<>();
+        if (disabled == null || disabled.isEmpty()) {
+            return removed;
+        }
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String item = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
+            strip(stack, DataComponents.ENCHANTMENTS, item, disabled, removed);
+            strip(stack, DataComponents.STORED_ENCHANTMENTS, item, disabled, removed);
+        }
+        return removed;
+    }
+
+    private static void strip(ItemStack stack, DataComponentType<ItemEnchantments> type, String item,
+                              Set<String> disabled, List<String> removed) {
+        ItemEnchantments present = stack.getOrDefault(type, ItemEnchantments.EMPTY);
+        if (present.isEmpty()) {
+            return;
+        }
+        ItemEnchantments.Mutable kept = new ItemEnchantments.Mutable(present);
+        List<String> found = new ArrayList<>();
+        kept.removeIf(holder -> {
+            String id = holder.unwrapKey().map(key -> key.identifier().toString()).orElse(null);
+            if (id != null && disabled.contains(id)) {
+                found.add(id + " (" + item + ")");
+                return true;
+            }
+            return false;
+        });
+        if (found.isEmpty()) {
+            return;
+        }
+        ItemEnchantments left = kept.toImmutable();
+        if (left.isEmpty()) {
+            stack.remove(type);
+        } else {
+            stack.set(type, left);
+        }
+        removed.addAll(found);
+    }
+
+    @Override
+    public List<String> stripDisabledEnchantments(ServerPlayer bot) {
+        try {
+            return isBot.test(bot) ? removeDisabledEnchantments(bot.getInventory(), disabledEnchantments.get()) : List.of();
+        } catch (RuntimeException e) {
+            return List.of();
         }
     }
 

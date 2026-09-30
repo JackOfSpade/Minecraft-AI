@@ -77,6 +77,15 @@ public interface BotGateway {
      */
     int stripEnderPearls(String botName);
 
+    /**
+     * Removes every enchantment the config disables (profiles.disabledEnchantments, Piercing by default) from an online
+     * inhabitant's items, keeping the items and their other enchantments, and returns one description per removal, for
+     * example {@code minecraft:piercing (crossbow)} (empty when nothing was removed, when it is not online or not a bot).
+     * Includes what its dressing already removed since the last call. Cheap and idempotent; the engine calls it beside
+     * {@link #stripEnderPearls} so an old crossbow that still carries Piercing loses just that enchantment.
+     */
+    List<String> stripDisabledEnchantments(String botName);
+
     // ------------------------------------------------------------------ value types
 
     record SpawnRequest(String dimensionId, String name, double x, double y, double z, float yaw) {

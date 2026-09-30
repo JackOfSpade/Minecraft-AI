@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Supplier;
 import net.minecraft.server.level.ServerLevel;
@@ -40,6 +41,13 @@ public final class McBotGateway implements BotGateway {
     private final Map<Long, PvpBotOperations.SpawnTicket> tickets = new HashMap<>();
     private final Map<Long, String> rejected = new HashMap<>();
     private long localIds;
+    /**
+     * What a dressing already took out of a bot (ender pearls, disabled enchantments), by lower-case name, until the
+     * next sweep of that bot reports it: the dressing removes it first, so without this the roster's sweep would find
+     * nothing and the first removal would never be logged.
+     */
+    private final Map<String, Integer> pendingPearls = new HashMap<>();
+    private final Map<String, List<String>> pendingEnchantments = new HashMap<>();
 
     public McBotGateway(ServerAccess access, PvpBotOperations adapter, ProfileApplication applier,
                         Supplier<InhabitantsConfig> config) {
@@ -141,6 +149,7 @@ public final class McBotGateway implements BotGateway {
         // Only a bot the addon has not dressed yet is wiped first; a second application overwrites in place.
         boolean fresh = !applier.isMarked(bot);
         ProfileApplication.Result applied = applier.apply(bot, profile, fresh);
+        stash(botName, applied);
         warnings.addAll(applied.warnings());
         if (applied.loadoutApplied() && applied.vitalsApplied()) {
             applier.mark(bot);
@@ -189,6 +198,8 @@ public final class McBotGateway implements BotGateway {
 
     @Override
     public void forget(String botName) {
+        pendingPearls.remove(key(botName));
+        pendingEnchantments.remove(key(botName));
         try {
             adapter.clearPatrol(botName);
         } catch (RuntimeException e) {
@@ -220,6 +231,7 @@ public final class McBotGateway implements BotGateway {
             Optional<ServerPlayer> entity = findBot(botName);
             if (entity.isPresent() && !applier.isMarked(entity.get())) {
                 ProfileApplication.Result applied = applier.apply(entity.get(), profile, true);
+                stash(botName, applied);
                 if (applied.loadoutApplied() && applied.vitalsApplied()) {
                     applier.mark(entity.get());
                 }
@@ -231,7 +243,37 @@ public final class McBotGateway implements BotGateway {
 
     @Override
     public int stripEnderPearls(String botName) {
-        return findBot(botName).map(applier::stripEnderPearls).orElse(0);
+        Optional<ServerPlayer> bot = findBot(botName);
+        if (bot.isEmpty()) {
+            return 0;
+        }
+        Integer dressed = pendingPearls.remove(key(botName));
+        return applier.stripEnderPearls(bot.get()) + (dressed == null ? 0 : dressed);
+    }
+
+    @Override
+    public List<String> stripDisabledEnchantments(String botName) {
+        Optional<ServerPlayer> bot = findBot(botName);
+        if (bot.isEmpty()) {
+            return List.of();
+        }
+        List<String> removed = new ArrayList<>(pendingEnchantments.getOrDefault(key(botName), List.of()));
+        pendingEnchantments.remove(key(botName));
+        removed.addAll(applier.stripDisabledEnchantments(bot.get()));
+        return removed;
+    }
+
+    private void stash(String botName, ProfileApplication.Result applied) {
+        if (applied.pearlsRemoved() > 0) {
+            pendingPearls.merge(key(botName), applied.pearlsRemoved(), Integer::sum);
+        }
+        if (!applied.enchantmentsRemoved().isEmpty()) {
+            pendingEnchantments.computeIfAbsent(key(botName), k -> new ArrayList<>()).addAll(applied.enchantmentsRemoved());
+        }
+    }
+
+    private static String key(String botName) {
+        return botName == null ? "" : botName.toLowerCase(Locale.ROOT);
     }
 
     /** Gives a bot back its path if it no longer follows one. True only when a path was actually assigned. */

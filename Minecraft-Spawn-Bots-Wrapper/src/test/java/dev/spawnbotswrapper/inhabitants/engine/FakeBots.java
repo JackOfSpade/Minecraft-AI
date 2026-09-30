@@ -58,6 +58,11 @@ final class FakeBots implements BotGateway {
     final List<String> pearlStripCalls = new ArrayList<>();
     /** Pearls "found" per strip call, by lower-case name; the fake keeps answering the same number. */
     final Map<String, Integer> pearlsToStrip = new HashMap<>();
+    final List<String> enchantmentStripCalls = new ArrayList<>();
+    /** Disabled enchantments "found" per strip call, by lower-case name; the fake keeps answering the same list. */
+    final Map<String, List<String>> enchantmentsToStrip = new HashMap<>();
+    /** Lower-case names for whom both strip calls throw (one bad bot must not stop the sweep of the others). */
+    final Set<String> throwStripFor = new HashSet<>();
     int availableCalls;
     int restoreCalls;
     /** When non-null, available() throws this (any Throwable, including Errors). */
@@ -74,6 +79,7 @@ final class FakeBots implements BotGateway {
     boolean throwRemove;
     boolean throwRestore;
     boolean throwStrip;
+    boolean throwStripEnchantments;
     boolean throwCapabilities;
     boolean nullHandle;
 
@@ -255,10 +261,19 @@ final class FakeBots implements BotGateway {
     @Override
     public int stripEnderPearls(String botName) {
         pearlStripCalls.add(botName);
-        if (throwStrip) {
+        if (throwStrip || throwStripFor.contains(key(botName))) {
             throw new IllegalStateException("injected stripEnderPearls failure");
         }
         return pearlsToStrip.getOrDefault(key(botName), 0);
+    }
+
+    @Override
+    public List<String> stripDisabledEnchantments(String botName) {
+        enchantmentStripCalls.add(botName);
+        if (throwStripEnchantments || throwStripFor.contains(key(botName))) {
+            throw new IllegalStateException("injected stripDisabledEnchantments failure");
+        }
+        return enchantmentsToStrip.getOrDefault(key(botName), List.of());
     }
 
     @SuppressWarnings("unchecked")

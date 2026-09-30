@@ -33,7 +33,7 @@ final class BotRoster {
     /** A complete pass over the roster takes this many ticks. */
     static final int SCAN_PERIOD_TICKS = 20;
 
-    /** Each online inhabitant is swept for ender pearls at most this often (5 s). */
+    /** Each online inhabitant's inventory is swept (ender pearls, disabled enchantments) at most this often (5 s). */
     static final int PEARL_SWEEP_TICKS = 100;
 
     private static final class Tracked {
@@ -44,9 +44,11 @@ final class BotRoster {
         long offlineSince = -1;
         boolean restored;
         boolean forgotten;
-        /** Tick from which the next ender-pearl sweep is due. */
+        /** Tick from which the next inventory sweep is due. */
         long nextPearlSweep;
+        /** The first removal of each kind is logged at INFO, later ones only in debug mode. */
         boolean pearlsLogged;
+        boolean enchantmentsLogged;
 
         Tracked(StructureKey structure, BotRecord bot) {
             this.structure = structure;
@@ -288,11 +290,13 @@ final class BotRoster {
     }
 
     /**
-     * Removes ender pearls from an online inhabitant, at most once per {@link #PEARL_SWEEP_TICKS} per bot (so a
-     * freshly restored bot is cleaned on its first visit and a pearl picked up later goes within seconds). PvP
-     * BOT's cobweb escape throws pearls in a loop that keeps switching the held slot, which cancels the bot's own
-     * crossbow charge and attacks; see {@code LoadoutRoller}. Logged at INFO once per bot (the count removed), then
-     * only in debug mode. Never throws.
+     * Sweeps an online inhabitant's inventory, at most once per {@link #PEARL_SWEEP_TICKS} per bot (so a freshly
+     * restored bot is cleaned on its first visit and something picked up later goes within seconds): ender pearls,
+     * which make PvP BOT's cobweb escape loop switch the held slot every tick and cancel the bot's own crossbow charge
+     * and attacks (see {@code LoadoutRoller}), and every enchantment the config disables (Piercing by default: a
+     * piercing bolt ignores a raised shield). Each kind is contained on its own, and so is each bot: a failure is
+     * logged and never reaches the caller or the other bots. The first removal per bot and kind is logged at INFO,
+     * later ones only in debug mode. Never throws.
      */
     private void sweepPearls(Tracked t, long now, InhabitantsConfig cfg) {
         if (!t.online || now < t.nextPearlSweep) {
@@ -301,20 +305,35 @@ final class BotRoster {
         t.nextPearlSweep = now + PEARL_SWEEP_TICKS;
         try {
             int removed = ctx.bots.stripEnderPearls(t.bot.name);
-            if (removed <= 0) {
-                return;
-            }
-            if (!t.pearlsLogged) {
-                t.pearlsLogged = true;
-                ctx.info("Removed {} ender pearl(s) from inhabitant {} (they make PvP BOT's cobweb escape loop cancel its attacks)",
-                        removed, t.bot.name);
-            } else {
-                ctx.debug(cfg, "Removed {} more ender pearl(s) from inhabitant {}", removed, t.bot.name);
+            if (removed > 0) {
+                if (!t.pearlsLogged) {
+                    t.pearlsLogged = true;
+                    ctx.info("Removed {} ender pearl(s) from inhabitant {} (they make PvP BOT's cobweb escape loop cancel its attacks)",
+                            removed, t.bot.name);
+                } else {
+                    ctx.debug(cfg, "Removed {} more ender pearl(s) from inhabitant {}", removed, t.bot.name);
+                }
             }
         } catch (OutOfMemoryError e) {
             throw e;
         } catch (Throwable e) {
             ctx.log.error("stripEnderPearls", t.bot.name, e);
+        }
+        try {
+            List<String> removed = ctx.bots.stripDisabledEnchantments(t.bot.name);
+            if (removed != null && !removed.isEmpty()) {
+                if (!t.enchantmentsLogged) {
+                    t.enchantmentsLogged = true;
+                    ctx.info("Removed disabled enchantment(s) from inhabitant {}: {} (profiles.disabledEnchantments)",
+                            t.bot.name, removed);
+                } else {
+                    ctx.debug(cfg, "Removed more disabled enchantment(s) from inhabitant {}: {}", t.bot.name, removed);
+                }
+            }
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable e) {
+            ctx.log.error("stripDisabledEnchantments", t.bot.name, e);
         }
     }
 

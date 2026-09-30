@@ -3,6 +3,7 @@ package dev.spawnbotswrapper.inhabitants.mc;
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
 import dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
+import dev.spawnbotswrapper.inhabitants.config.DisabledEnchantments;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.config.StartupCommands;
 import dev.spawnbotswrapper.inhabitants.engine.PopulationEngine;
@@ -179,7 +180,8 @@ public final class ServerSession {
     private void startEngine() {
         PvpBotOperations adapter = shared.adapter();
         ServerAccess access = new McServerAccess(server);
-        ProfileApplier applier = new ProfileApplier(adapter::isBotEntity);
+        ProfileApplier applier = new ProfileApplier(adapter::isBotEntity,
+                () -> DisabledEnchantments.parse(shared.config().get().profiles.disabledEnchantments));
         McBotGateway bots = new McBotGateway(access, adapter, applier, shared.config());
         engine = new PopulationEngine(
                 shared.config(),

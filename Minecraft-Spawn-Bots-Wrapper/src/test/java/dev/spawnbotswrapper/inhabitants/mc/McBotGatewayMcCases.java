@@ -331,6 +331,58 @@ public final class McBotGatewayMcCases {
         assertTrue(rig.applier.stripped.isEmpty());
     }
 
+    // ------------------------------------------------------------------------------ disabled-enchantment sanitize
+
+    public static void stripDisabledEnchantmentsGoesThroughTheApplierAndReportsWhatWasRemoved() {
+        Rig rig = new Rig();
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.strippedEnchantments = List.of("minecraft:piercing (crossbow)");
+        assertEquals(List.of("minecraft:piercing (crossbow)"), rig.gateway.stripDisabledEnchantments("Inh_Bot"));
+        assertEquals(1, rig.applier.enchantmentStripped.size());
+        assertSame(rig.bot, rig.applier.enchantmentStripped.get(0));
+
+        rig.adapter.entity = Optional.empty();
+        assertEquals(List.of(), rig.gateway.stripDisabledEnchantments("Nobody"), "no bot entity: nothing to strip");
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.adapter.findFailure = new IllegalStateException("boom");
+        assertEquals(List.of(), rig.gateway.stripDisabledEnchantments("Inh_Bot"));
+        assertEquals(1, rig.applier.enchantmentStripped.size());
+    }
+
+    /**
+     * A dressing (fresh spawn or restore) removes pearls and disabled enchantments before the roster's first sweep of
+     * that bot, so the gateway holds on to what the dressing removed and the next sweep of that bot reports it once:
+     * otherwise the first removal would never be logged.
+     */
+    public static void whatADressingRemovedIsReportedByTheNextSweepExactlyOnce() {
+        Rig rig = new Rig();
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.pearlsRemoved = 4;
+        rig.applier.enchantmentsRemoved = List.of("minecraft:piercing (crossbow)");
+        rig.applier.strippedCount = 1;
+        rig.applier.strippedEnchantments = List.of();
+
+        assertTrue(rig.gateway.applyProfile("Inh_Bot", standing()).loadoutApplied());
+        assertEquals(5, rig.gateway.stripEnderPearls("INH_BOT"), "the dressing's 4 plus the sweep's own 1 (names are case-insensitive)");
+        assertEquals(1, rig.gateway.stripEnderPearls("Inh_Bot"), "reported once, then only what the sweep finds");
+        assertEquals(List.of("minecraft:piercing (crossbow)"), rig.gateway.stripDisabledEnchantments("Inh_Bot"));
+        assertEquals(List.of(), rig.gateway.stripDisabledEnchantments("Inh_Bot"));
+    }
+
+    public static void aRestoreRedressingIsReportedTooAndForgettingDropsWhatWasPending() {
+        Rig rig = new Rig();
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.adapter.managed = true;
+        rig.online("Inh_Bot");
+        rig.applier.enchantmentsRemoved = List.of("minecraft:piercing (crossbow)");
+        assertTrue(rig.gateway.restore("Inh_Bot", standing()));
+        assertEquals(List.of("minecraft:piercing (crossbow)"), rig.gateway.stripDisabledEnchantments("Inh_Bot"));
+
+        assertTrue(rig.gateway.applyProfile("Inh_Bot", standing()).loadoutApplied());
+        rig.gateway.forget("Inh_Bot");
+        assertEquals(List.of(), rig.gateway.stripDisabledEnchantments("Inh_Bot"));
+    }
+
     // ------------------------------------------------------------------------------ restore
 
     public static void restoreDoesNothingForABotThatIsNotOnlineAndListed() {

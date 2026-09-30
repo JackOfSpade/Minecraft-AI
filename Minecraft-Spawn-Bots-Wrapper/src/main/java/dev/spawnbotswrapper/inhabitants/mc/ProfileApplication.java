@@ -31,14 +31,30 @@ public interface ProfileApplication {
     int stripEnderPearls(ServerPlayer bot);
 
     /**
+     * Removes every enchantment listed in {@code profiles.disabledEnchantments} from every stack a bot carries or
+     * wears (never for a non-bot), keeping the items and their other enchantments. Returns one description per
+     * removal (for example {@code minecraft:piercing (crossbow)}); empty when nothing was removed, when the entity is not
+     * a bot, or on any failure.
+     */
+    List<String> stripDisabledEnchantments(ServerPlayer bot);
+
+    /**
      * @param loadoutApplied the inventory section ran to completion (individual items may still have been
      *                       skipped, see the warnings)
      * @param vitalsApplied  the attribute / health / hunger section ran to completion
      * @param warnings       everything that was skipped or adjusted, one line each
+     * @param pearlsRemoved  ender pearls the dressing took out of the inventory (see {@link #stripEnderPearls})
+     * @param enchantmentsRemoved  disabled enchantments the dressing took off items (see {@link #stripDisabledEnchantments})
      */
-    record Result(boolean loadoutApplied, boolean vitalsApplied, List<String> warnings) {
+    record Result(boolean loadoutApplied, boolean vitalsApplied, List<String> warnings, int pearlsRemoved,
+                  List<String> enchantmentsRemoved) {
         public Result {
             warnings = warnings == null ? List.of() : List.copyOf(warnings);
+            enchantmentsRemoved = enchantmentsRemoved == null ? List.of() : List.copyOf(enchantmentsRemoved);
+        }
+
+        public Result(boolean loadoutApplied, boolean vitalsApplied, List<String> warnings) {
+            this(loadoutApplied, vitalsApplied, warnings, 0, List.of());
         }
     }
 }
