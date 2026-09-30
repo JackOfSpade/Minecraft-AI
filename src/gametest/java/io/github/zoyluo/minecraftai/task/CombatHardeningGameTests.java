@@ -752,6 +752,11 @@ public final class CombatHardeningGameTests {
         skeleton.setItemSlot(net.minecraft.world.entity.EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
         // Behind the husk in the bot's view (the bot turns to its fight, east): a skeleton behind the bot would not be noticed at all.
         BlockPos skeletonFeet = origin.east(6);
+        // The skeleton must tick (its draw advances only then): six blocks away can be a neighbouring chunk that is merely loaded, as
+        // the structure lands on chunk borders at random. Its chunks are forced like any wide fixture's (skeleton to bot, +-2).
+        io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing.forceForTest(context,
+                (Math.min(skeletonFeet.getX(), origin.getX()) - 2) >> 4, (Math.max(skeletonFeet.getX(), origin.getX()) + 2) >> 4,
+                (origin.getZ() - 2) >> 4, (origin.getZ() + 2) >> 4);
         // Facing east, away from the bot: yaw -90 points the head along +x.
         skeleton.snapTo(skeletonFeet.getX() + 0.5D, skeletonFeet.getY(), skeletonFeet.getZ() + 0.5D, -90.0F, 0.0F);
         skeleton.setYHeadRot(-90.0F);
