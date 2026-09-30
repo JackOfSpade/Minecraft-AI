@@ -80,10 +80,19 @@ final class Rig {
             if (services == null || services.adapter() == null) {
                 return;
             }
+            int mocks = 0;
             for (ServerPlayer p : new java.util.ArrayList<>(server.getPlayerList().getPlayers())) {
                 if (services.adapter().isBotEntity(p)) {
                     services.adapter().removeBot(server, p.getName().getString());
+                } else if (p.getName().getString().equals("test-mock-player")) {
+                    // a mock player an earlier test left standing in the same arena: to a bot it is a player in plain view
+                    server.getPlayerList().remove(p);
+                    p.discard();
+                    mocks++;
                 }
+            }
+            if (mocks > 0) {
+                LOG.info("removed {} stale mock player(s) of earlier tests", mocks);
             }
         } catch (RuntimeException e) {
             LOG.warn("removing stale bots failed: {}", e.toString());
@@ -137,6 +146,7 @@ final class Rig {
         try {
             if (target != null) {
                 server.getPlayerList().remove(target);
+                target.discard();
             }
         } catch (RuntimeException e) {
             LOG.warn("cleanup of the mock player failed: {}", e.toString());

@@ -335,10 +335,10 @@ public final class AggroGameTests {
             lastZ = rig.bot.getZ();
             haveLast = true;
             if (!phase.equals(lastPhase)) {
-                Rig.LOG.info("[hunt] test tick {}: {} -> {} at ({}, {}) {} from the start, {} from the last known position",
+                Rig.LOG.info("[hunt] test tick {}: {} -> {} at ({}, {}) {} from the start, {} from the last known position | {}",
                         context.getTick(), lastPhase.isEmpty() ? "-" : lastPhase, phase, fmt(rig.bot.getX() - rig.homeX()),
                         fmt(rig.bot.getZ() - rig.homeZ()), fmt(rig.horizontalTo(rig.homeX(), rig.homeZ())),
-                        hiddenAt < 0 ? "?" : fmt(rig.horizontalTo(lkpX, lkpZ)));
+                        hiddenAt < 0 ? "?" : fmt(rig.horizontalTo(lkpX, lkpZ)), InhabitantsMod.aggroDescribe(rig.botName));
                 if (phase.equals("SEARCH")) {
                     searchStart = context.getTick();
                     searches++;

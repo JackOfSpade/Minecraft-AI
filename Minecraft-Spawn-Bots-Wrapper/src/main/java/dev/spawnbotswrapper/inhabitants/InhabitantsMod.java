@@ -125,6 +125,13 @@ public final class InhabitantsMod implements ModInitializer {
         return mod == null ? new long[3] : mod.aggro.plannerStats();
     }
 
+    /** What the aggro hunter is doing about an inhabitant, as the status text. A seam for the real-server GameTests. */
+    public static String aggroDescribe(String botName) {
+        InhabitantsMod mod = instance;
+        String text = mod == null ? null : mod.aggro.describe(botName);
+        return text == null ? "?" : text;
+    }
+
     /** The unique ids of the aggro route planner's helper mobs (none may ever be found in a level). A seam for the GameTests. */
     public static java.util.List<java.util.UUID> aggroPlannerHelperIds() {
         InhabitantsMod mod = instance;
