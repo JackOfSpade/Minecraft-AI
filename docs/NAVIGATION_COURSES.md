@@ -123,6 +123,53 @@ with the bot dry and on its own side). `cliff6` is unreached on both, without da
 Blocks walked (legacy/Baritone; the straight line is 14..16 on most courses): `wall` 16/16, `lakedry` 21/18, `lava` 21/18, `stairs` 31/26,
 `gate` 51 (legacy never gets through) / 16, `lakenone` 124 / 9 (legacy wanders along the bank), `moving` 64/73, `long` 76/79.
 
+## With the pace policy
+
+The same 38 tests after the pace policy (`docs/BOT_PACE.md`: sprint far from the goal, walk for the last 4.5 blocks, the vanilla sprint rules). One full run; "before" is the table above (pace did not exist). Damage is 0.0 everywhere (the legacy `cactus` point is gone). `reached` did not change in any row.
+
+| course | engine | reached | ticks before | ticks with pace | change | damage |
+|---|---|---|---|---|---|---|
+| wall | legacy | y | 70 | 69 | -1 | 0.0 |
+| wall | baritone | y | 61 | 64 | +3 | 0.0 |
+| wallpick | legacy | y | 70 | 69 | -1 | 0.0 |
+| wallpick | baritone | y | 61 | 64 | +3 | 0.0 |
+| sealed | legacy | y | 113 | 114 | +1 | 0.0 |
+| sealed | baritone | y | 100 | 104 | +4 | 0.0 |
+| steps | legacy | y | 71 | 65 | -6 | 0.0 |
+| steps | baritone | y | 46 | 48 | +2 | 0.0 |
+| pit | legacy | y | 68 | 67 | -1 | 0.0 |
+| pit | baritone | y | 61 | 41 | -20 | 0.0 |
+| stairs | legacy | y | 136 | 125 | -11 | 0.0 |
+| stairs | baritone | y | 96 | 102 | +6 | 0.0 |
+| lakedry | legacy | y | 86 | 70 | -16 | 0.0 |
+| lakedry | baritone | y | 69 | 73 | +4 | 0.0 |
+| lakenone | legacy | n | 800 | 800 | 0 | 0.0 |
+| lakenone | baritone | n | 800 | 800 | 0 | 0.0 |
+| lava | legacy | y | 85 | 69 | -16 | 0.0 |
+| lava | baritone | y | 69 | 73 | +4 | 0.0 |
+| cactus | legacy | y | 82 | 79 | -3 | 0.0 |
+| cactus | baritone | y | 79 | 84 | +5 | 0.0 |
+| cliff3 | legacy | y | 89 | 90 | +1 | 0.0 |
+| cliff3 | baritone | y | 44 | 48 | +4 | 0.0 |
+| cliff6 | legacy | n | 500 | 500 | 0 | 0.0 |
+| cliff6 | baritone | n | 500 | 500 | 0 | 0.0 |
+| house | legacy | n | 900 | 900 | 0 | 0.0 |
+| house | baritone | y | 69 | 81 | +12 | 0.0 |
+| gate | legacy | n | 600 | 600 | 0 | 0.0 |
+| gate | baritone | y | 63 | 66 | +3 | 0.0 |
+| ladder | legacy | n | 500 | 500 | 0 | 0.0 |
+| ladder | baritone | y | 76 | 75 | -1 | 0.0 |
+| forest | legacy | y | 105 | 103 | -2 | 0.0 |
+| forest | baritone | y | 95 | 99 | +4 | 0.0 |
+| moving | legacy | y | 421 | 421 | 0 | 0.0 |
+| moving | baritone | y | 421 | 421 | 0 | 0.0 |
+| twobots | legacy | y | 70 | 99 | +29 | 0.0 |
+| twobots | baritone | y | 53 | 57 | +4 | 0.0 |
+| long | legacy | y | 290 | 281 | -9 | 0.0 |
+| long | baritone | y | 289 | 292 | +3 | 0.0 |
+
+Baritone routes are 2 to 6 ticks slower (3 to 5 on most): the last 4.5 blocks are walked (about 21 ticks instead of 16). `house` has two legs (into the house, out again), so +12. Legacy routes are the same within a few ticks, mostly a little faster (`lakedry`, `lava` -16, `stairs` -11, `long` -9; not analysed further, most likely the sprint now follows the distance to the goal instead of each sub-target), with one exception, `twobots` +29, which is a symmetry artefact of the course and not a pace defect: both bots now sprint in step and reach the one-wide gap together (see "Course timing with pace on" in `docs/BOT_PACE.md`). `pit` on Baritone (61 -> 41) is not explained by pace (walking cannot shorten a route): the pre-pace table was measured on an older tree.
+
 ## Verdict per course
 
 | course | verdict | why |

@@ -19,6 +19,28 @@ Code: `action/Gait`, `PaceOwner`, `PaceRules`, `PacePolicy`, `QuietZone`, the en
 legacy walker's time limit and progress limits scale with the pace (`paceClockWeight`, `lastInputScale`), so a bot that
 deliberately sneaks or holds a shield up is not timed out or declared stuck for it.
 
+**Deadline credit is capped.** A sneaking tick would move a route's deadline out by 0.77 ticks, so without a limit a long SNEAK lease
+(a SILENT quiet zone, a warden) never met its deadline however stuck the bot was. `DeadlineCredit` caps the total credit of a route at
+one original deadline budget (600 + 20 ticks per block): at most twice the ordinary time, then the deadline is a deadline again.
+
+**The route lease survives the hand-over to Baritone.** `BaritoneDriver` calls `ActionPack.yieldToBaritone()` on the first tick it drives
+a new route, i.e. after the caller has requested the lease. `yieldToBaritone` therefore drops the legacy executor without ending the
+lease (`dropPathExecutor`); only `clearActivePathExecutor` (a new path/walk/mining, `stopNavigation`, `stopAll`) also ends it.
+`PaceBaritoneGameTests.sneakRouteLeaseHoldsAfterBaritoneTakesOver` / `walkRouteLeaseHoldsAfterBaritoneTakesOver` pin it: measured on the
+version that lost the lease, a SNEAK lease sprinted 37 of 57 ticks and a WALK lease 87 of 106; with the fix 0 sprint ticks and 212 of 213
+moving ticks sneaking.
+
+## Course timing with pace on
+
+The 38 navigation courses (`docs/NAVIGATION_COURSES.md`, "With the pace policy") take about 4 ticks longer on Baritone (WALK for the last
+4.5 blocks: 21 ticks instead of 16, once per leg: `house` has two legs, +12) and about the same on the legacy engine. One legacy course
+got much slower and it is not a pace defect: `twobots` 70 -> 99 ticks. Two bots that start side by side and follow the same player
+through a one-block gap now sprint identically (SPRINT the whole way, no pressure, WALK only in the last 4.2 blocks; traced tick by
+tick) and reach the gap at the same tick, so they push each other off it for about 45 ticks until the walker's sidle recovery frees
+them. Before pace, the legacy walker's own sub-target sprint rule (`nav.sprintMinDist`) happened to put the two bots out of step, so
+one passed the gap before the other arrived (a 12 tick brush against the wall for the first, none for the second). The Baritone
+`twobots` is 53 -> 57 (the walk-in only). Nothing lifts or fails to lift a WALK cap here.
+
 ## What decides the gait (in this order)
 
 `PacePolicy.resolve(bot, goalDistance, travelling)`. The first rule that applies decides; ceilings apply afterwards.
@@ -108,4 +130,4 @@ step, two clear cells ahead).
 
 ## Tests
 
-Unit: `PaceRulesTest`, `PacePolicyTest`. GameTests: `PaceGameTests` (legacy engine) and `PaceBaritoneGameTests` (Baritone).
+Unit: `PaceRulesTest`, `PacePolicyTest`, `DeadlineCreditTest` (also pins that `yieldToBaritone` keeps the route lease). GameTests: `PaceGameTests` (legacy engine) and `PaceBaritoneGameTests` (Baritone).
