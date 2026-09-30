@@ -1322,7 +1322,7 @@ public final class DangerWatcher {
                         LivingEntity.class,
                         bot.getBoundingBox().inflate(CombatCore.hostilePressureScanRange()),
                         entity -> isActiveHostileThreat(bot, entity)
-                                && ObservableWorldQuery.canObserveEntity(bot, entity)
+                                && SharedVision.seenByBotOrOwner(bot, entity)
                                 && CombatCore.isWithinHostilePressureEnvelope(bot, entity));
     }
 
@@ -1643,7 +1643,8 @@ public final class DangerWatcher {
     // it up either -- none of these count as a current threat (they'll be re-detected once they come
     // around or into view).
     private static boolean canReachThreat(AIPlayerEntity bot, LivingEntity mob) {
-        return CombatCore.hasLineOfSight(bot, mob);
+        // A foreign bot the owner is looking at counts as reachable: the owner nominates it, the strike gate still needs the bot's own line.
+        return CombatCore.hasLineOfSightOrOwnerSees(bot, mob);
     }
 
     /**

@@ -87,7 +87,17 @@ public final class CombatCore {
 
     /** Shared combat policy: projectile-capable mobs keep pressure while line of sight remains. */
     static boolean isRangedThreat(LivingEntity entity) {
-        return entity instanceof RangedAttackMob;
+        return entity instanceof RangedAttackMob || isDrawnRangedForeignBot(entity);
+    }
+
+    /**
+     * A MARKED foreign bot that is drawing a bow (or raising a trident) or holds a charged crossbow counts as a ranged attacker,
+     * like a skeleton. The hostility itself (and who can see it) is decided by {@link HostileBotLedger}; this is only its weapon.
+     */
+    static boolean isDrawnRangedForeignBot(LivingEntity entity) {
+        return entity instanceof ServerPlayer player
+                && HostileBotLedger.isMarked(player)
+                && HostileBotIntent.holdsDrawnRanged(player);
     }
 
     /**
@@ -215,12 +225,20 @@ public final class CombatCore {
      *   <li>A spider is neutral in daylight unless it is visibly aggressive.</li>
      *   <li>Any other mob (a wolf, a golem, a bee) becomes a threat only when it hurt the bot or
      *       its owner: the victim knows who hurt it. A calm bystander is never auto-attacked.</li>
+     *   <li>A foreign bot (a fake player that is not ours, such as a PvP BOT inhabitant) is hostile only while it is a visible MARKED
+     *       aggressor: it hit the owner or a Minecraft-AI bot (or aimed at one exclusively) and the bot or its owner sees it
+     *       ({@link HostileBotLedger}). Sibling bots of the same owner count like the bot itself for the hurt-by rule.</li>
      * </ul>
-     * Owner and other bots are never hostile. This is for DEFENCE decisions only.
+     * The owner and every Minecraft-AI bot are never hostile. This is for DEFENCE decisions only.
      */
     public static boolean hostileTo(AIPlayerEntity bot, LivingEntity entity) {
         if (entity == null || entity == bot || !entity.isAlive() || isFriendly(bot, entity)) {
             return false;
+        }
+        // A foreign bot (a PvP BOT inhabitant) that hit, or visibly took aim at, the owner or a Minecraft-AI bot is an enemy while the
+        // bot or its owner can see it (HostileBotLedger); it is friendly to every strike check until then.
+        if (entity instanceof ServerPlayer foreign && HostileBotLedger.isVisibleAggressor(bot, foreign)) {
+            return true;
         }
         if (hasHurtBotOrOwner(bot, entity)) {
             return true;
@@ -250,7 +268,10 @@ public final class CombatCore {
         return entity instanceof Enemy || entity instanceof Monster;
     }
 
-    /** True when {@code entity} hurt the bot, or the bot's owner, within the last ten seconds. */
+    /**
+     * True when {@code entity} hurt the bot, the bot's owner, or a sibling bot of the same owner within the last ten seconds. The owner
+     * and the sibling list are looked up once per call.
+     */
     public static boolean hasHurtBotOrOwner(AIPlayerEntity bot, LivingEntity entity) {
         if (recentlyHurtBy(bot, entity)) {
             return true;
@@ -260,7 +281,15 @@ public final class CombatCore {
             return false;
         }
         ServerPlayer owner = bot.level().getServer().getPlayerList().getPlayer(ownerId.get());
-        return owner != null && owner.level() == bot.level() && recentlyHurtBy(owner, entity);
+        if (owner != null && owner.level() == bot.level() && recentlyHurtBy(owner, entity)) {
+            return true;
+        }
+        for (AIPlayerEntity sibling : AIPlayerManager.INSTANCE.botsOf(ownerId.get())) {
+            if (sibling != bot && sibling.level() == bot.level() && recentlyHurtBy(sibling, entity)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean recentlyHurtBy(LivingEntity victim, LivingEntity attacker) {
@@ -295,7 +324,7 @@ public final class CombatCore {
                                 && !isMeleeForbiddenThreat(entity)
                                 && allowed.test(entity))
                 .stream()
-                .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
+                .filter(entity -> SharedVision.seenByBotOrOwner(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
@@ -317,6 +346,15 @@ public final class CombatCore {
                 ClipContext.Fluid.NONE,
                 bot));
         return hit.getType() == HitResult.Type.MISS;
+    }
+
+    /**
+     * {@link #hasLineOfSight} for combat bookkeeping (the lost-sight timer, whether a threat is worth a task): the bot's own line
+     * of sight, or, for a foreign bot only, the owner's nomination ({@link SharedVision#ownerSees}). It nominates, it never permits a
+     * strike: {@code StrikeLegality.strikeRefusal} still needs the bot's own reach and collider line of sight.
+     */
+    public static boolean hasLineOfSightOrOwnerSees(AIPlayerEntity bot, LivingEntity target) {
+        return hasLineOfSight(bot, target) || SharedVision.ownerSees(bot, target);
     }
 
     public static void lookAt(AIPlayerEntity bot, LivingEntity target) {

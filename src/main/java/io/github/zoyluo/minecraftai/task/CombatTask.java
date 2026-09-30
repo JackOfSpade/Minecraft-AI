@@ -283,7 +283,7 @@ public final class CombatTask extends AbstractTask {
         if (hidingOnPurpose) {
             // Peekaboo puts the bot's own column between it and the target: no sight is the plan.
             lostSightTicks = 0;
-        } else if (target != null && target.isAlive() && !CombatCore.hasLineOfSight(bot, target)) {
+        } else if (target != null && target.isAlive() && !CombatCore.hasLineOfSightOrOwnerSees(bot, target)) {
             if (++lostSightTicks > LOST_SIGHT_LIMIT) {
                 lostSightTicks = 0;
                 finishRangedLoadout(bot);
@@ -854,9 +854,9 @@ public final class CombatTask extends AbstractTask {
                 bot.getBoundingBox().inflate(CombatCore.hostilePressureScanRange()),
                 entity -> entity != bot
                         && DangerWatcher.isActiveHostileThreat(bot, entity)
-                        && ObservableWorldQuery.canObserveEntity(bot, entity)
+                        && SharedVision.seenByBotOrOwner(bot, entity)
                         && CombatCore.isWithinHostilePressureEnvelope(bot, entity)
-                        && CombatCore.hasLineOfSight(bot, entity));
+                        && CombatCore.hasLineOfSightOrOwnerSees(bot, entity));
     }
 
     private static boolean isObservablePressure(AIPlayerEntity bot, LivingEntity entity) {

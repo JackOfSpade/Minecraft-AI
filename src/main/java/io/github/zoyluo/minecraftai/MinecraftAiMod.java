@@ -88,15 +88,20 @@ public class MinecraftAiMod implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(RuntimeLifecycleCoordinator.INSTANCE::onServerStopping);
         // Damage records (who hurt whom, in level game time) and the teleport counters are per server run.
         io.github.zoyluo.minecraftai.entity.RecentDamage.register();
+        io.github.zoyluo.minecraftai.task.HostileBotLedger.install();
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             io.github.zoyluo.minecraftai.entity.RecentDamage.clear();
             io.github.zoyluo.minecraftai.entity.TeleportAudit.clearAll();
+            io.github.zoyluo.minecraftai.task.HostileBotLedger.clearAll();
+            io.github.zoyluo.minecraftai.task.SharedVision.clearAll();
+            io.github.zoyluo.minecraftai.task.AggroSense.clearAll();
         });
         ServerTickEvents.START_SERVER_TICK.register(server -> MiningAssistRuntime.beginTick());
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TpsGuard.INSTANCE.tick(server);
             TaskManager.INSTANCE.tickAll(server);
             BotTickCoordinator.INSTANCE.tick(server);
+            io.github.zoyluo.minecraftai.task.HostileBotIntent.tick(server);
             AmbientConversationCoordinator.INSTANCE.tick(server);
             MinecraftAiServerNetworking.INSTANCE.tick(server);
             io.github.zoyluo.minecraftai.log.DiagnosticLogger.INSTANCE.tick(server);

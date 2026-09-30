@@ -89,7 +89,8 @@
       "io.github.zoyluo.minecraftai.task.BaritoneEngineTunnelGameTests",
       "io.github.zoyluo.minecraftai.task.NavigationCourseGameTests",
       "io.github.zoyluo.minecraftai.task.BotFallAndKnockbackGameTests",
-      "io.github.zoyluo.minecraftai.gametest.FoundationHarnessGameTests"
+      "io.github.zoyluo.minecraftai.gametest.FoundationHarnessGameTests",
+      "io.github.zoyluo.minecraftai.task.HostileBotTargetingGameTests"
     ]
   },
   "depends": {

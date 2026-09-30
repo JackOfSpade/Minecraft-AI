@@ -1,0 +1,271 @@
+package io.github.zoyluo.minecraftai.task;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+
+/**
+ * Visible hostile INTENT of foreign bots toward the Minecraft-AI side, sampled once per server tick (END_SERVER_TICK) over
+ * markable foreign bots x protected victims in the same level within {@link #SAMPLE_RANGE} blocks. Every counter here is the
+ * sampler's own, in level game ticks: a mock player is not ticked, so {@code swingTime}, {@code useItemRemaining} and
+ * {@code tickCount} of the aggressor are never relied on (a swing START is an edge of {@code swinging} or a falling
+ * {@code swingTime}).
+ *
+ * <p>Presence, patrolling or holding a weapon never counts. EXCLUSIVITY applies to every signal: the victim must be the nearest
+ * living entity inside the aggressor's view cone, so a bot fighting a zombie next to the owner is never taken for hostile to the
+ * owner. For a swing and a charge no hostile mob ({@link Enemy}) may additionally be within the aggressor's reach + 1.</p>
+ * <ul>
+ *   <li>DRAW: a bow used for {@link #DRAW_TICKS} consecutive sampled ticks, a trident raised, or a charged crossbow in hand, aimed at
+ *       the victim (dot &gt;= {@link #AIM_DOT}, within {@link #AIM_RANGE}), exclusive: MARKED ("aim").</li>
+ *   <li>SWING: a swing starts while facing the victim (dot &gt;= {@link #FACING_DOT}) within the interaction range + 1, exclusive, no
+ *       hostile mob in reach: SUSPECT ("swing").</li>
+ *   <li>ARMED CHARGE: a sword, axe, mace, spear or trident in the main hand, facing the victim, within {@link #CHARGE_RANGE}, the distance
+ *       down by {@link #CHARGE_DROP} over {@link #CHARGE_WINDOW} ticks, sustained {@link #CHARGE_SUSTAIN} ticks, exclusive, no hostile
+ *       mob in reach: SUSPECT ("charge").</li>
+ * </ul>
+ */
+public final class HostileBotIntent {
+    static final double SAMPLE_RANGE = 48.0D;
+    static final int DRAW_TICKS = 12;
+    static final double AIM_DOT = 0.94D;
+    static final double AIM_RANGE = 40.0D;
+    static final double FACING_DOT = 0.9D;
+    static final double CHARGE_RANGE = 6.0D;
+    static final double CHARGE_DROP = 1.0D;
+    static final int CHARGE_WINDOW = 10;
+    static final int CHARGE_SUSTAIN = 10;
+    private static final int HISTORY = 16; // power of two, larger than CHARGE_WINDOW
+    private static final int PRUNE_EVERY_TICKS = 200;
+
+    /** Per victim state of one aggressor. */
+    private static final class Pair {
+        long lastTick = Long.MIN_VALUE;
+        int drawTicks;
+        int chargeTicks;
+        final double[] distance = new double[HISTORY];
+        final long[] distanceTick = new long[HISTORY];
+
+        void push(long tick, double value) {
+            int slot = (int) (tick & (HISTORY - 1));
+            distance[slot] = value;
+            distanceTick[slot] = tick;
+            lastTick = tick;
+        }
+
+        /** The distance sampled exactly {@code ticksAgo} before {@code now}, or NaN when that tick was not sampled. */
+        double distanceAgo(long now, int ticksAgo) {
+            long wanted = now - ticksAgo;
+            int slot = (int) (wanted & (HISTORY - 1));
+            return distanceTick[slot] == wanted ? distance[slot] : Double.NaN;
+        }
+    }
+
+    /** Per aggressor state: the swing edge detector and the pairs. */
+    private static final class Track {
+        long lastTick = Long.MIN_VALUE;
+        boolean lastSwinging;
+        int lastSwingTime;
+        final Map<UUID, Pair> pairs = new HashMap<>();
+    }
+
+    private static final Map<UUID, Track> TRACKS = new HashMap<>();
+
+    private HostileBotIntent() {
+    }
+
+    /** Called once per server tick from the END_SERVER_TICK hook. Never throws into the tick. */
+    public static void tick(MinecraftServer server) {
+        if (!HostileBotLedger.hostileBotsEnabled()) {
+            if (!TRACKS.isEmpty()) {
+                TRACKS.clear();
+            }
+            return;
+        }
+        try {
+            for (ServerLevel level : server.getAllLevels()) {
+                sampleLevel(level);
+            }
+            if (!TRACKS.isEmpty() && server.getTickCount() % PRUNE_EVERY_TICKS == 0) {
+                prune(server.overworld().getGameTime());
+                HostileBotLedger.prune(server.overworld().getGameTime());
+            }
+        } catch (RuntimeException exception) {
+            io.github.zoyluo.minecraftai.log.BotLog.error("hostile_bot_intent_failed", exception);
+        }
+    }
+
+    private static void sampleLevel(ServerLevel level) {
+        List<ServerPlayer> players = level.players();
+        if (players.size() < 2) {
+            return;
+        }
+        List<ServerPlayer> aggressors = null;
+        List<ServerPlayer> victims = null;
+        for (ServerPlayer player : players) {
+            if (HostileBotLedger.isMarkableForeignBot(player)) {
+                if (aggressors == null) {
+                    aggressors = new ArrayList<>(2);
+                }
+                aggressors.add(player);
+            } else if (HostileBotLedger.isProtectedVictim(player)) {
+                if (victims == null) {
+                    victims = new ArrayList<>(4);
+                }
+                victims.add(player);
+            }
+        }
+        if (aggressors == null) {
+            return;
+        }
+        long now = level.getGameTime();
+        for (ServerPlayer aggressor : aggressors) {
+            Track track = TRACKS.computeIfAbsent(aggressor.getUUID(), ignored -> new Track());
+            if (track.lastTick == now) {
+                continue; // one sample per game tick, however often the hook runs
+            }
+            boolean swingStart = aggressor.swinging && (!track.lastSwinging || aggressor.swingTime < track.lastSwingTime);
+            track.lastSwinging = aggressor.swinging;
+            track.lastSwingTime = aggressor.swingTime;
+            track.lastTick = now;
+            if (victims == null || !aggressor.isAlive() || aggressor.isSpectator()) {
+                continue;
+            }
+            for (ServerPlayer victim : victims) {
+                if (!victim.isAlive() || aggressor.distanceToSqr(victim) > SAMPLE_RANGE * SAMPLE_RANGE) {
+                    continue;
+                }
+                samplePair(aggressor, victim, track.pairs.computeIfAbsent(victim.getUUID(), ignored -> new Pair()), now, swingStart);
+            }
+        }
+    }
+
+    private static void samplePair(ServerPlayer aggressor, ServerPlayer victim, Pair pair, long now, boolean swingStart) {
+        double distance = aggressor.distanceTo(victim);
+        pair.push(now, distance);
+        double facing = facing(aggressor, victim);
+
+        // DRAW: a drawn bow / raised trident / charged crossbow aimed at the victim, exclusively, sustained.
+        if (holdsDrawnRanged(aggressor) && distance <= AIM_RANGE && facing >= AIM_DOT && isNearestInCone(aggressor, victim, AIM_DOT)) {
+            if (++pair.drawTicks >= DRAW_TICKS) {
+                HostileBotLedger.markPlayer(aggressor, victim, now, "aim");
+            }
+        } else {
+            pair.drawTicks = 0;
+        }
+
+        // SWING: a fresh swing at the victim inside the reach (+1), exclusively, with no hostile mob in reach.
+        if (swingStart && facing >= FACING_DOT && aggressor.isWithinEntityInteractionRange(victim, 1.0D)
+                && isNearestInCone(aggressor, victim, FACING_DOT) && !hostileMobInReach(aggressor)) {
+            HostileBotLedger.suspectPlayer(aggressor, victim, now, "swing");
+        }
+
+        // ARMED CHARGE: closing on the victim with a melee weapon, facing it, sustained.
+        boolean charging = false;
+        if (distance <= CHARGE_RANGE && facing >= FACING_DOT && holdsMeleeWeapon(aggressor)) {
+            double before = pair.distanceAgo(now, CHARGE_WINDOW);
+            charging = !Double.isNaN(before) && before - distance >= CHARGE_DROP
+                    && isNearestInCone(aggressor, victim, FACING_DOT) && !hostileMobInReach(aggressor);
+        }
+        if (charging) {
+            if (++pair.chargeTicks >= CHARGE_SUSTAIN) {
+                HostileBotLedger.suspectPlayer(aggressor, victim, now, "charge");
+            }
+        } else {
+            pair.chargeTicks = 0;
+        }
+    }
+
+    // ------------------------------------------------------------------ geometry and item predicates
+
+    /** Dot product of the looker's view direction with the direction to the middle of the target's box. */
+    static double facing(LivingEntity looker, LivingEntity target) {
+        Vec3 toTarget = target.getBoundingBox().getCenter().subtract(looker.getEyePosition());
+        double length = toTarget.length();
+        if (length < 1.0E-6D) {
+            return 1.0D;
+        }
+        return looker.getViewVector(1.0F).dot(toTarget.scale(1.0D / length));
+    }
+
+    /**
+     * True when no other living entity is nearer to {@code looker} than {@code victim} inside the looker's view cone
+     * ({@code facing >= minDot}): the victim is the nearest thing it could be aiming or swinging at.
+     */
+    static boolean isNearestInCone(ServerPlayer looker, LivingEntity victim, double minDot) {
+        Vec3 eye = looker.getEyePosition();
+        double victimDistanceSquared = eye.distanceToSqr(victim.getBoundingBox().getCenter());
+        AABB box = looker.getBoundingBox().inflate(Math.sqrt(victimDistanceSquared) + 1.0D);
+        return looker.level().getEntitiesOfClass(LivingEntity.class, box,
+                other -> other != looker && other != victim && other.isAlive() && !other.isSpectator()
+                        && eye.distanceToSqr(other.getBoundingBox().getCenter()) < victimDistanceSquared
+                        && facing(looker, other) >= minDot).isEmpty();
+    }
+
+    /** True when a hostile mob ({@link Enemy}) is within the aggressor's entity interaction range + 1. */
+    static boolean hostileMobInReach(ServerPlayer aggressor) {
+        double reach = aggressor.entityInteractionRange() + 1.0D;
+        return !aggressor.level().getEntitiesOfClass(Mob.class, aggressor.getBoundingBox().inflate(reach),
+                mob -> mob instanceof Enemy && mob.isAlive() && aggressor.isWithinEntityInteractionRange(mob, 1.0D)).isEmpty();
+    }
+
+    /** A bow being drawn, a trident raised, or a charged crossbow in either hand. */
+    static boolean holdsDrawnRanged(LivingEntity shooter) {
+        if (shooter.isUsingItem()) {
+            ItemStack used = shooter.getUseItem();
+            if (used.is(Items.BOW) || used.is(Items.TRIDENT)) {
+                return true;
+            }
+        }
+        return isChargedCrossbow(shooter.getMainHandItem()) || isChargedCrossbow(shooter.getOffhandItem());
+    }
+
+    private static boolean isChargedCrossbow(ItemStack stack) {
+        return stack.is(Items.CROSSBOW) && CrossbowItem.isCharged(stack);
+    }
+
+    /** A sword, axe, mace, spear or trident in the main hand (item tags, so modded tiers count). */
+    static boolean holdsMeleeWeapon(LivingEntity entity) {
+        ItemStack stack = entity.getMainHandItem();
+        return stack.is(ItemTags.SWORDS) || stack.is(ItemTags.AXES) || stack.is(ItemTags.SPEARS)
+                || stack.is(Items.MACE) || stack.is(Items.TRIDENT);
+    }
+
+    // ------------------------------------------------------------------ housekeeping
+
+    private static void prune(long now) {
+        Iterator<Map.Entry<UUID, Track>> tracks = TRACKS.entrySet().iterator();
+        while (tracks.hasNext()) {
+            Track track = tracks.next().getValue();
+            if (now - track.lastTick > PRUNE_EVERY_TICKS) {
+                tracks.remove();
+                continue;
+            }
+            track.pairs.values().removeIf(pair -> now - pair.lastTick > PRUNE_EVERY_TICKS);
+        }
+    }
+
+    /** Forgets everything one aggressor was doing (its death). */
+    static void forget(UUID aggressor) {
+        TRACKS.remove(aggressor);
+    }
+
+    static void clearAll() {
+        TRACKS.clear();
+    }
+
+}

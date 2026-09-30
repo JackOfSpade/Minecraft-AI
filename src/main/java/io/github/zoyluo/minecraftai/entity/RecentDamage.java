@@ -25,7 +25,8 @@ import java.util.function.Consumer;
  * {@code tickCount} is never used: a mock player is not ticked and its {@code tickCount} never advances.</p>
  *
  * <p>Each victim keeps a bounded ring of {@link #RING_SIZE} hits. Rings are cleared on server stop, and a victim's own ring is
- * dropped when it dies. Everything runs on the server thread; the maps are concurrent only so a stray reader cannot corrupt them.</p>
+ * dropped when it dies. AFTER_DAMAGE is not fired for a lethal hit, so the killing blow is recorded from the death event (see
+ * {@code onDeath}): the hit listeners receive it, and the ring is dropped right after. Everything runs on the server thread; the maps are concurrent only so a stray reader cannot corrupt them.</p>
  */
 public final class RecentDamage {
     /** Hits kept per victim. */
@@ -49,6 +50,8 @@ public final class RecentDamage {
     }
 
     private static final Map<UUID, ArrayDeque<Hit>> RINGS = new ConcurrentHashMap<>();
+    /** The damage of a lethal hit, remembered from ALLOW_DEATH until AFTER_DEATH (AFTER_DAMAGE does not fire for a killing blow). */
+    private static final Map<UUID, Float> LETHAL_AMOUNTS = new ConcurrentHashMap<>();
     private static final List<Consumer<Hit>> HIT_LISTENERS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<Death>> DEATH_LISTENERS = new CopyOnWriteArrayList<>();
     private static boolean registered;
@@ -64,6 +67,12 @@ public final class RecentDamage {
         registered = true;
         ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamageTaken, damageTaken, blocked) ->
                 onDamage(entity, source, damageTaken, blocked));
+        ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, damageAmount) -> {
+            if (entity instanceof ServerPlayer victim) {
+                LETHAL_AMOUNTS.put(victim.getUUID(), damageAmount);
+            }
+            return true; // only observes: never vetoes a death
+        });
         ServerLivingEntityEvents.AFTER_DEATH.register(RecentDamage::onDeath);
     }
 
@@ -87,6 +96,21 @@ public final class RecentDamage {
             return;
         }
         Entity killer = source == null ? null : source.getEntity();
+        Entity direct = source == null ? null : source.getDirectEntity();
+        Float lethalAmount = LETHAL_AMOUNTS.remove(victim.getUUID());
+        // Fabric fires AFTER_DAMAGE only for damage the victim survives, so the killing blow would be missing from the ring: record
+        // it here, from the death event, before the ring is dropped below. The hit listeners see it (a ledger marks the killer of a
+        // protected victim); the ring itself is gone right after, so RecentDamage queries never return the killing blow of a victim
+        // that is dead.
+        if (killer != null || direct != null) {
+            record(new Hit(victim.getUUID(),
+                    killer == null ? null : killer.getUUID(),
+                    killer == null ? -1 : killer.getId(),
+                    direct == null ? -1 : direct.getId(),
+                    lethalAmount == null ? 0.0F : lethalAmount,
+                    false,
+                    victim.level().getGameTime()));
+        }
         Death death = new Death(victim.getUUID(), killer == null ? null : killer.getUUID(), victim.level().getGameTime());
         for (Consumer<Death> listener : DEATH_LISTENERS) {
             try {
@@ -185,5 +209,6 @@ public final class RecentDamage {
     /** Forgets every ring (server stop). Listeners stay: they are registered once at start-up. */
     public static void clear() {
         RINGS.clear();
+        LETHAL_AMOUNTS.clear();
     }
 }

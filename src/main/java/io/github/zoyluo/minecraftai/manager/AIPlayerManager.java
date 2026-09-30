@@ -290,6 +290,18 @@ public final class AIPlayerManager {
         return Optional.ofNullable(botOwners.get(bot.getUUID()));
     }
 
+    /**
+     * True when {@code playerUuid} currently owns at least one Minecraft-AI bot. Used only to define the protected victims of the
+     * hostile-bot ledger (a player who owns a bot, or any bot); it is never a friendliness test.
+     */
+    public boolean isAnyBotOwner(UUID playerUuid) {
+        if (playerUuid == null) {
+            return false;
+        }
+        java.util.LinkedHashSet<UUID> owned = ownerIndex.get(playerUuid);
+        return owned != null && !owned.isEmpty();
+    }
+
     public Collection<AIPlayerEntity> all() {
         return Collections.unmodifiableCollection(players.values());
     }

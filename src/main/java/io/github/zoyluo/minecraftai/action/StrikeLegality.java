@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.network.PlayerKind;
+import io.github.zoyluo.minecraftai.task.HostileBotLedger;
 import java.util.Optional;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -37,19 +38,31 @@ public final class StrikeLegality {
     private StrikeLegality() {
     }
 
-    /** Owner or another bot (our own or a fake-player mod's): never a target for this bot. */
+    /**
+     * Owner or another bot (our own or a fake-player mod's): never a target for this bot, EXCEPT a foreign bot (a fake player that is
+     * not ours, such as a PvP BOT inhabitant) that has acted against the Minecraft-AI side and that this bot or its owner can see
+     * ({@link HostileBotLedger#isVisibleAggressor}).
+     *
+     * <p>Order: the bot itself, any Minecraft-AI bot (any owner), a non-player, the bot's own owner (before the bot test: a GameTest
+     * owner is a mock on an EmbeddedChannel), then a foreign bot (friendly unless a visible aggressor). Any other human, including the
+     * owner of another bot, is not friendly here, exactly as before: such a player becomes hostile only through
+     * {@code CombatCore.hasHurtBotOrOwner}.
+     */
     public static boolean isFriendly(AIPlayerEntity bot, Entity entity) {
-        if (entity == bot) {
+        if (entity == bot || entity instanceof AIPlayerEntity) {
             return true;
         }
         if (!(entity instanceof ServerPlayer player)) {
             return false;
         }
-        if (PlayerKind.isBot(player)) {
+        Optional<java.util.UUID> owner = AIPlayerManager.INSTANCE.ownerOf(bot);
+        if (owner.isPresent() && owner.get().equals(player.getUUID())) {
             return true;
         }
-        Optional<java.util.UUID> owner = AIPlayerManager.INSTANCE.ownerOf(bot);
-        return owner.isPresent() && owner.get().equals(player.getUUID());
+        if (PlayerKind.isBot(player) && !AIPlayerManager.INSTANCE.isAnyBotOwner(player.getUUID())) {
+            return !HostileBotLedger.isVisibleAggressor(bot, player);
+        }
+        return false;
     }
 
     /** True when the target's bounding box is inside the bot's vanilla entity interaction range. */

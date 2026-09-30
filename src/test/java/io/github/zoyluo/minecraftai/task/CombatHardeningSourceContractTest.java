@@ -205,6 +205,48 @@ final class CombatHardeningSourceContractTest {
                 "cover-hide re-checks that the bow is still in the plan");
     }
 
+    /**
+     * R1: the bot-kind test of isFriendly is now "a foreign bot is friendly unless a visible marked aggressor" (the literal
+     * PlayerKind.isBot(player) pin above stays), the owner is tested BEFORE the bot kind (a GameTest owner is a mock on an
+     * EmbeddedChannel), hostileTo asks the ledger right after the friendly check, and the owner's eyes only ever nominate
+     * (StrikeLegality.strikeRefusal is unchanged: reach and collider line of sight are still the bot's own).
+     */
+    @Test
+    void foreignBotsAreFriendlyUnlessAVisibleMarkedAggressorAndOwnerVisionOnlyNominates() throws IOException {
+        String legality = read("action/StrikeLegality.java");
+        int friendly = legality.indexOf("public static boolean isFriendly");
+        String body = legality.substring(friendly, legality.indexOf("public static boolean isWithinReach"));
+        int ownerTest = body.indexOf("ownerOf(bot)");
+        int botTest = body.indexOf("PlayerKind.isBot(player)");
+        assertTrue(ownerTest > 0 && botTest > ownerTest, "the owner is tested before the bot kind");
+        assertTrue(body.contains("entity instanceof AIPlayerEntity") && body.contains("HostileBotLedger.isVisibleAggressor(bot, player)"),
+                "a Minecraft-AI bot is always friendly, a foreign bot only until it is a visible marked aggressor");
+        assertTrue(body.contains("isAnyBotOwner(player.getUUID())"), "a human that owns a bot is not a foreign bot");
+        String strike = legality.substring(legality.indexOf("public static String strikeRefusal"),
+                legality.indexOf("public static boolean friendlyOnLineOfFire"));
+        assertFalse(strike.contains("SharedVision") && strike.contains("ownerSees"),
+                "the owner's sight must never permit a strike: strikeRefusal stays on the bot's own reach and line of sight");
+
+        String core = read("task/CombatCore.java");
+        int hostile = core.indexOf("public static boolean hostileTo");
+        String hostileBody = core.substring(hostile, core.indexOf("public static boolean hasHurtBotOrOwner"));
+        assertTrue(hostileBody.indexOf("isFriendly(bot, entity)") < hostileBody.indexOf("HostileBotLedger.isVisibleAggressor(bot, foreign)")
+                        && hostileBody.indexOf("HostileBotLedger.isVisibleAggressor(bot, foreign)") < hostileBody.indexOf("hasHurtBotOrOwner(bot, entity)"),
+                "hostileTo asks the ledger right after the friendly check");
+        assertTrue(core.contains("AIPlayerManager.INSTANCE.botsOf(ownerId.get())"), "hasHurtBotOrOwner also counts sibling bots");
+
+        String vision = read("task/SharedVision.java");
+        assertTrue(vision.contains("if (!(entity instanceof ServerPlayer) || entity == bot)"),
+                "owner vision is used for players only, never for mobs");
+        String watcher = read("task/DangerWatcher.java");
+        assertTrue(watcher.contains("SharedVision.seenByBotOrOwner(bot, entity)") && watcher.contains("CombatCore.hasLineOfSightOrOwnerSees(bot, mob)"),
+                "the threat pressure list and the reachability test accept an owner-seen foreign bot");
+        String mod = read("MinecraftAiMod.java");
+        assertTrue(mod.contains("HostileBotLedger.install()") && mod.contains("HostileBotIntent.tick(server)")
+                        && mod.contains("HostileBotLedger.clearAll()"),
+                "the ledger handlers, the once-per-tick intent sampler and the server-stop clear must stay wired");
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(MAIN.resolve(relative));
     }
