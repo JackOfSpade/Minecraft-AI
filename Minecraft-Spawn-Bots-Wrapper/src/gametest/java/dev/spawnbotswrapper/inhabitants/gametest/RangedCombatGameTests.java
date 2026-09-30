@@ -40,7 +40,7 @@ public final class RangedCombatGameTests {
             List<HarnessMod.Shot> shots = HarnessMod.shotsBy(rig.bot.getUUID());
             if (!shots.isEmpty()) {
                 Rig.LOG.info("[unhit] first shot {} ticks after dressing: {}", since, shots.get(0));
-                context.succeed();
+                rig.succeed();
             } else if (since > 400) {
                 rig.fail("the crossbow inhabitant did not fire once in " + since + " ticks; " + rig.trace());
             }
@@ -92,7 +92,7 @@ public final class RangedCombatGameTests {
             if (closest < PACING_TICKS) {
                 rig.fail("two shots only " + closest + " ticks apart (pacing interval " + PACING_TICKS + "); gaps: " + deltas);
             }
-            context.succeed();
+            rig.succeed();
         });
     }
 
@@ -113,9 +113,47 @@ public final class RangedCombatGameTests {
             List<HarnessMod.Shot> shots = HarnessMod.shotsBy(rig.bot.getUUID());
             if (!shots.isEmpty()) {
                 Rig.LOG.info("[bow+sword] first arrow {} ticks after dressing: {}", since, shots.get(0));
-                context.succeed();
+                rig.succeed();
             } else if (since > 400) {
                 rig.fail("the bow-and-sword inhabitant did not release one arrow in " + since + " ticks; " + rig.trace());
+            }
+        });
+    }
+
+    /**
+     * The trigger asks for line of sight: with a wall between the crossbow inhabitant and the player, PvP BOT still draws
+     * and loads the crossbow, but the addon does not fire it (nothing would be hit and the bolt would only hit the wall).
+     */
+    @GameTest(environment = ENV + "crossbow_no_los", maxTicks = 500)
+    public void loadedCrossbowIsNotFiredThroughAWall(GameTestHelper context) {
+        Rig rig = new Rig(context);
+        rig.buildPlatform();
+        for (int dz = -12; dz <= 12; dz++) {
+            for (int dy = 0; dy <= 5; dy++) {
+                rig.level.setBlock(rig.botFeet.offset(3, dy, dz), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(),
+                        net.minecraft.world.level.block.Block.UPDATE_ALL);
+            }
+        }
+        rig.createTarget(6.0);
+        boolean[] dressed = {false};
+        long[] dressedAt = {0};
+        boolean[] wasLoaded = {false};
+        context.onEachTick(() -> {
+            if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.SKIRMISHER, "wall")) {
+                return;
+            }
+            long since = context.getTick() - dressedAt[0];
+            rig.traceEvery(20, since, "wall");
+            wasLoaded[0] |= net.minecraft.world.item.CrossbowItem.isCharged(rig.bot.getMainHandItem());
+            int shots = HarnessMod.shotsBy(rig.bot.getUUID()).size();
+            if (shots > 0) {
+                rig.fail("the inhabitant fired " + shots + " projectile(s) although a wall stands between it and the player; " + rig.trace());
+            }
+            if (since >= 250) {
+                if (!wasLoaded[0]) {
+                    rig.fail("the crossbow was never loaded, so the absence of shots proves nothing; " + rig.trace());
+                }
+                rig.succeed();
             }
         });
     }
@@ -137,7 +175,7 @@ public final class RangedCombatGameTests {
             List<HarnessMod.Shot> shots = HarnessMod.shotsBy(rig.bot.getUUID());
             if (!shots.isEmpty()) {
                 Rig.LOG.info("[bow] first arrow {} ticks after dressing: {}", since, shots.get(0));
-                context.succeed();
+                rig.succeed();
             } else if (since > 400) {
                 rig.fail("the bow inhabitant did not release one arrow in " + since + " ticks; " + rig.trace());
             }

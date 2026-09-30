@@ -101,6 +101,13 @@ public interface PvpBotOperations {
     }
 
     /**
+     * How far (blocks) PvP BOT looks for targets right now, as its settings hold it; empty when unreadable. Read-only.
+     */
+    default java.util.OptionalDouble targetRadius() {
+        return java.util.OptionalDouble.empty();
+    }
+
+    /**
      * What PvP BOT currently intends for this bot: its target (null when none) and combat mode/bow state where readable.
      * Empty when the bot is not listed or the state cannot be read. Read-only.
      */

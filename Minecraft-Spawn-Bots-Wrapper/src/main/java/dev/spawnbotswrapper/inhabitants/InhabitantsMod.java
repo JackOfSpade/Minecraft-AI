@@ -10,6 +10,7 @@ import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
+import dev.spawnbotswrapper.inhabitants.mc.RangedFire;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
 import dev.spawnbotswrapper.inhabitants.mc.StepGuard;
 import dev.spawnbotswrapper.inhabitants.mc.StructureDetector;
@@ -55,6 +56,7 @@ public final class InhabitantsMod implements ModInitializer {
     private final CombatLogger combat = new CombatLogger(() -> session, LOGGER);
     /** The aggro range (inhabitants notice players within a short range, chase far); see AggroController. */
     private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER);
+    private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER);
 
     @Override
     public void onInitialize() {
@@ -77,9 +79,11 @@ public final class InhabitantsMod implements ModInitializer {
         });
         combat.register();
         combat.aggroState(aggro::describe);
+        rangedFire.register();
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
-        // After PvP BOT's own bot tick (default phase), so the walk back is the last input written; see LateTickPhase.
+        // After PvP BOT's own bot tick (default phase), so the walk back is the last input written and the crossbow
+        // trigger sees the state PvP BOT left this tick (its target, its mode, the loaded crossbow); see LateTickPhase.
         LateTickPhase.register(ServerTickEvents.END_SERVER_TICK, this::onLateServerTick);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPED.register(this::onServerStopped);
@@ -153,6 +157,7 @@ public final class InhabitantsMod implements ModInitializer {
         ServerSession current = session;
         if (current != null && current.server() == server) {
             shared.guard().run("aggro range", () -> aggro.tick(server));
+            rangedFire.tick(server);
         }
     }
 
@@ -161,6 +166,7 @@ public final class InhabitantsMod implements ModInitializer {
         if (current != null && current.server() == server) {
             combat.flush(server.getTickCount());
             aggro.reset();
+            rangedFire.reset();
             current.shutdown();
         }
     }

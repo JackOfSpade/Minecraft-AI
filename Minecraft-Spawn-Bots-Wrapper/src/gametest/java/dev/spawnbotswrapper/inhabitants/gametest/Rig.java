@@ -56,6 +56,9 @@ final class Rig {
     ServerPlayer target;
     String botName;
     private boolean requested;
+    private boolean cleaned;
+    /** Unique per scene: the population store remembers a structure key for good, so a reused key would be refused. */
+    private final String structureId = "gametest:arena_" + Long.toHexString(System.nanoTime());
 
     Rig(GameTestHelper ctx) {
         this.ctx = ctx;
@@ -65,8 +68,40 @@ final class Rig {
     }
 
     void fail(String message) {
+        cleanup();
         ctx.fail(Component.nullToEmpty(message));
         throw new IllegalStateException(message);
+    }
+
+    void succeed() {
+        cleanup();
+        ctx.succeed();
+    }
+
+    /**
+     * The inhabitant and the mock player live outside the test structure, so the framework does not remove them: the next
+     * test at the same place would meet them. The engine forgets the structure and removes its bots through PvP BOT.
+     */
+    void cleanup() {
+        if (cleaned) {
+            return;
+        }
+        cleaned = true;
+        try {
+            CommandServices services = InhabitantsMod.servicesOf(server);
+            if (services != null && requested) {
+                services.engine().reset(key(), true);
+            }
+        } catch (RuntimeException e) {
+            LOG.warn("cleanup of the inhabitant failed: {}", e.toString());
+        }
+        try {
+            if (target != null) {
+                server.getPlayerList().remove(target);
+            }
+        } catch (RuntimeException e) {
+            LOG.warn("cleanup of the mock player failed: {}", e.toString());
+        }
     }
 
     /** A 25x25 stone floor with a high air ceiling around the bot's cell. */
@@ -98,7 +133,7 @@ final class Rig {
     }
 
     private StructureKey key() {
-        return new StructureKey(level.dimension().identifier().toString(), "gametest:arena",
+        return new StructureKey(level.dimension().identifier().toString(), structureId,
                 botFeet.getX() >> 4, botFeet.getZ() >> 4);
     }
 

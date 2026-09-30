@@ -273,6 +273,37 @@ therefore holds these settings at chosen values:
   `maxTargetDistance`, so the bot stays put until you come inside that radius (within those 30 seconds it then
   attacks you); melee hits are always inside it.
 
+## Crossbow trigger and shot pacing (`rangedPacing`)
+
+On this Minecraft version PvP BOT can never fire a **loaded** crossbow: its routine ends every cycle by releasing an
+item that is not being used, which does nothing, so a crossbow inhabitant charged its weapon and then held it loaded
+for ever, until a player hit it (a held shield "use" action, which right-clicks the crossbow every tick, then fired
+it, about twice a second). The addon closes this in two vanilla-API pieces (no mixin, no PvP BOT internals beyond the
+read-only target/mode getters):
+
+* **Trigger.** Once per server tick, after PvP BOT's own tick, every inhabitant holding a **loaded crossbow in its
+  main hand** is fired through the vanilla right-click path (`ServerPlayerGameMode.useItem`, exactly what a player's
+  click does; no projectile is created here, damage and accuracy are vanilla) when ALL hold: the bot is not using an
+  item; PvP BOT's current target is alive, in the same dimension, within PvP BOT's targeting radius
+  (`maxTargetDistance`) and in line of sight; PvP BOT is in ranged mode (when its mode can be read); the crossbow has
+  been loaded for `aimSettleTicks`; and `crossbowMinShotIntervalTicks` have passed since the bot's last shot. Bows need
+  no trigger (`BowItem` fires on release once `autoEquipWeapon` no longer cancels the draw).
+* **Pacing.** After ANY crossbow projectile an inhabitant launches (ours, or one from a held "use" action) the addon
+  puts the crossbow on the **vanilla item cooldown** for the interval. Vanilla refuses to use an item on cooldown, so
+  the interval binds every shooter: shots are never closer together than `crossbowMinShotIntervalTicks`.
+
+```jsonc
+"rangedPacing": {
+  "enabled": true,                       // false: leave crossbows entirely to PvP BOT
+  "aimSettleTicks": 4,                   // 0..40: how long a crossbow must have been loaded before it is fired
+  "crossbowMinShotIntervalTicks": 26     // 1..200: PvP BOT's own cycle is a 25-tick draw plus one
+}
+```
+
+Fail-soft: a missing PvP BOT name is one warning and the trigger then never fires (the pacing keeps working); a bug in
+the tick switches the trigger off with one warning. Only inhabitants (the addon's own roster) are touched, never real
+players or other bots.
+
 ## Managed PvP BOT setting: critical-hit fall phase
 
 PvP BOT's melee routine only swings after a jump-crit with `crit-fall-ticks` ticks of descent (its default is

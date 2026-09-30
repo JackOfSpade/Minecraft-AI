@@ -329,6 +329,21 @@ public final class PvpBotAdapter implements PvpBotOperations {
     }
 
     @Override
+    public java.util.OptionalDouble targetRadius() {
+        try {
+            Probed p = probed;
+            if (p == null || p.calls() == null || !p.verdict().usable() || !p.calls().contract().settingsGet.ok()) {
+                return java.util.OptionalDouble.empty();
+            }
+            Double value = p.calls().readDouble(p.calls().settingsInstance(), "getMaxTargetDistance");
+            return value == null ? java.util.OptionalDouble.empty() : java.util.OptionalDouble.of(value);
+        } catch (Throwable t) {
+            log.failure("reading the targeting radius", t);
+            return java.util.OptionalDouble.empty();
+        }
+    }
+
+    @Override
     public Optional<CombatView> combatView(String botName) {
         try {
             Probed p = probed;
