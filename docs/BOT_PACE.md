@@ -128,6 +128,47 @@ step, two clear cells ahead).
 `behaviour.pace.enabled`, `itemUseSlowdown`, `movementExhaustion`, `routeSprintDistance` (8), `routeWalkDistance` (4.5),
 `quietZoneCaution`. See `docs/OPERATING_PROFILES.md`.
 
+## Following a player (R4)
+
+`FollowTask` decides its gait with `FollowPace` (pure, unit-tested) and leases it every tick as a FOLLOW tick lease
+(`ActionPack.requestPace(gait, PaceOwner.FOLLOW)`), in every land mode (legacy path or walk, Baritone route, holding at arrival). It reads
+what an observer can see of the player: the gap, the horizontal speed over the last ten game ticks, the synced sprint flag, how long the
+player has been sneaking (consecutive ticks), plus the quiet zone, wardens and aggro pressure. Rules, the first that applies decides:
+
+1. A hunting warden, or aggro pressure (hostiles after the bot, its owner, the followed player or a Minecraft-AI bot): SPRINT. A calm
+   warden within 16 blocks that is not hunting caps it to WALK.
+2. Gap at most 4.5: SNEAK if the player has sneaked for 4 ticks, else WALK.
+3. The player sneaks: SNEAK up to a gap of 8, then WALK, SPRINT only from 14 blocks and outside quiet zones.
+4. The player sprints (flag, or 5.0 blocks per second): SPRINT.
+5. SILENT zone: SNEAK up to 8, else WALK. CAUTION: SPRINT only from 16.
+6. The player walks (between 1.5 and 5.0 blocks per second): WALK unless the gap is at least `follow.sprintGap` (10).
+7. Otherwise SPRINT from `follow.sprintGap`, WALK up to `follow.walkGap` (6), in between the gait it had (never a sneak).
+
+An upgrade is immediate, a downgrade needs 10 ticks at the current gait (a lease skips the pace policy's own dwell). Measured before this
+change (old code, follow of a moving mock player): a sprinting player left the follower 15.3 blocks behind, a sneaking player was followed at
+a walk, an aggro'd zombie did not make the follower run, and a calm warden 14 blocks away made it evade.
+
+**The escort (`FollowEscort`).** A follower never goes off to fight. What is in its melee reach it knocks away, on ready ticks only, while
+it keeps following: candidates are what `CombatCore.hostileTo` calls hostile (a MARKED foreign bot, never a SUSPECT one) within 4.5 blocks that
+the bot's own eyes see and melee is allowed against (no creeper, no warden). A swing is made only when the cooldown is full, no item is in use
+and the reach is legal (`strikeIfReady` turns the bot toward its target first, and on the legacy engine that steers the next tick, so it is not
+called on other ticks). The weapon is picked when a candidate is near, at most every 40 ticks. Next to a calm warden (16 blocks) it is silent
+(no swing, no weapon swap) unless the bot was hurt in the last 40 ticks. `DangerWatcher` does not pause a follow for an ordinary hostile
+(`behaviour.follow.escortOnly`): it still hands over for low health, a creeper (CreeperDefense), a warden that is hunting or within 8 blocks,
+a hostile that could kill the bot in two hits, lava, drowning and falling. Regroup is skipped while following. A `FollowTask` with a hostile
+within 6 blocks is TaskManager-critical (it ticks even under a degraded TPS).
+
+**Retreat.** The user decision is that evade and retreat legs use the same pace policy and the same escort rule. The pace policy already covers them (aggro pressure sprints, the EVADE lease); a swing at what is in reach while evading is not part of `EvadeTask` yet (it was outside this change).
+
+## Eating at the sprint limit (R6)
+
+A player cannot sprint at 6 food points or fewer, so a bot eats when its food is at 7 or lower (`DangerWatcher.SPRINT_LIMIT_FOOD`), whatever
+`survival.hungerEatThreshold` is, and it does not wait for its walk to end (a follower on a long route would otherwise reach 6 first). It does
+not eat in the middle of a fight (a hostile in view, or hurt this tick) or while an Evade/Combat task runs, and it defers next to a calm
+warden (20 blocks) unless its health is 6 or lower; it eats as soon as they allow. The normal food rules apply (`FoodPolicy`: no reserve food,
+no poison, harmful food last), and a protected transaction (a mining break, craft, smelt, container) still finishes first below the critical
+level. Tests: `AutoEatSprintLimitGameTests`.
+
 ## Tests
 
-Unit: `PaceRulesTest`, `PacePolicyTest`, `DeadlineCreditTest` (also pins that `yieldToBaritone` keeps the route lease). GameTests: `PaceGameTests` (legacy engine) and `PaceBaritoneGameTests` (Baritone).
+Unit: `PaceRulesTest`, `PacePolicyTest`, `DeadlineCreditTest` (also pins that `yieldToBaritone` keeps the route lease). GameTests: `PaceGameTests` (legacy engine) and `PaceBaritoneGameTests` (Baritone); for following: unit `FollowPaceTest`, `FollowEscortSourceContractTest`, GameTests `FollowPaceGameTests` (legacy) and `FollowPaceBaritoneGameTests` (Baritone) with shared scenarios in `FollowPaceScenarios`, and `FollowEscortGameTests`.
