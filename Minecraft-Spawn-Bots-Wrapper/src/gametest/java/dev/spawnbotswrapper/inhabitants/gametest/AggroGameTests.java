@@ -471,7 +471,8 @@ public final class AggroGameTests {
 
     /**
      * (f) An arrow from a player the bot cannot see (a wall between them): the bot is aware of the shooter, does not chase it
-     * through the wall, walks to where the shot came from, and gets within 2.5 blocks of it.
+     * through the wall, walks a planned route round the wall to where the shot came from, and gets within melee range (3.6
+     * blocks) of it, or is already fighting the shooter it found there.
      */
     @GameTest(environment = ENV + "aggro_hit_from_cover", maxTicks = 900)
     public void aggroAnArrowFromAPlayerOutOfSightSendsTheBotToTheShootersPosition(GameTestHelper context) {
@@ -531,16 +532,18 @@ public final class AggroGameTests {
             }
             closest[0] = Math.min(closest[0], rig.horizontalTo(shooter[0], shooter[1]));
             detour[0] = Math.max(detour[0], Math.abs(rig.bot.getZ() - rig.homeZ()));
-            if (closest[0] <= 2.5) {
-                Rig.LOG.info("[cover] reached within {} blocks of the shooter's position {} ticks after the hit; the detour reached {} "
-                        + "blocks to the side (the wall ends at 4.5)", fmt(closest[0]), n, fmt(detour[0]));
+            // Arrived: within melee range of where the shot came from (PvP BOT's melee range is 3.5 and it stops there to fight),
+            // or already fighting the shooter after walking round the wall to find it.
+            if (closest[0] <= 3.6 || (phase.equals("CHASE") && detour[0] >= 4.0)) {
+                Rig.LOG.info("[cover] reached within {} blocks of the shooter's position {} ticks after the hit (phase {}); the detour "
+                        + "reached {} blocks to the side (the wall ends at 4.5)", fmt(closest[0]), n, phase, fmt(detour[0]));
                 if (detour[0] < 4.0) {
                     rig.fail("the bot got to the shooter without walking around the wall (largest sideways distance "
                             + fmt(detour[0]) + "): it did not walk a planned route");
                 }
                 requireCleanPlanner(rig);
                 rig.succeed();
-            } else if (n > 500) {
+            } else if (n > 400) {
                 rig.fail("the bot got no closer than " + fmt(closest[0]) + " blocks to the shooter's position; phase " + phase);
             }
         });
