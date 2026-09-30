@@ -111,6 +111,32 @@ class AggroControllerTest {
     }
 
     @Test
+    void oneMissedTickNeverBreaksTheExposureWhereverItFallsInTheScanCycle() {
+        for (int offset = 0; offset < 4; offset++) {
+            AggroFakes.Sim sim = new AggroFakes.Sim();
+            sim.bot.look = new double[]{1, 0};
+            sim.steve.x = 8;
+            sim.run(offset); // shifts where in the 3 tick scan cycle the exposure starts
+            int seenTicks = sim.runUntil(() -> sim.controller.stats().chasing() > 0, 40);
+            assertTrue(seenTicks <= 40);
+            // a fresh scene: the exposure runs for 4 ticks, one tick is blocked, then it goes on
+            AggroFakes.Sim second = new AggroFakes.Sim();
+            second.bot.look = new double[]{1, 0};
+            second.steve.x = 8;
+            second.run(offset);
+            second.runUntil(() -> second.controller.stats().chasing() > 0 || second.bot.canSeeCalls >= 1, 10);
+            if (second.controller.stats().chasing() == 0) {
+                second.run(2);
+                second.bot.blind.add("Steve");
+                second.run(1);
+                second.bot.blind.clear();
+                int t = second.runUntil(() -> second.controller.stats().chasing() > 0, 40);
+                assertTrue(t <= 9, "offset " + offset + ": noticed " + t + " ticks after the one missed tick; a reset would take 7 more");
+            }
+        }
+    }
+
+    @Test
     void perceptionOffMeansPlainLineOfSightAtOnce() {
         s.config = s.config.withPerception(s.config.perception().disabled());
         bot.look = new double[]{-1, 0}; // steve is BEHIND the bot: omnidirectional now

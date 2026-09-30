@@ -651,7 +651,11 @@ public final class AggroController {
             return false;
         }
         Long until = watching.get(name);
-        boolean due = (until != null && until >= now) || (now + stagger(name, cfg.scanIntervalTicks())) % cfg.scanIntervalTicks() == 0;
+        boolean watched = until != null && until >= now;
+        if (until != null && !watched) {
+            watching.remove(name);
+        }
+        boolean due = watched || (now + stagger(name, cfg.scanIntervalTicks())) % cfg.scanIntervalTicks() == 0;
         if (!due) {
             return false;
         }
@@ -686,9 +690,9 @@ public final class AggroController {
             }
         }
         if (anyExposure) {
+            // Watched every tick from now on until a few ticks after the last exposure: an exposure run is only alive
+            // for a couple of missed ticks (ExposureTracker), so a run must not be left to the sparse idle cadence.
             watching.put(name, now + WATCH_TICKS);
-        } else {
-            watching.remove(name);
         }
         return false;
     }
