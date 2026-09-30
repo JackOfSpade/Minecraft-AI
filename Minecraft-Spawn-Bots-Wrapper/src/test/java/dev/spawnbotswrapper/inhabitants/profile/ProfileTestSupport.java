@@ -37,12 +37,16 @@ final class ProfileTestSupport {
         return new InhabitantsConfig.Profiles();
     }
 
-    /** Every opt-in switched on: explosive kits, elytra, scale variation (plus the defaults that are on). */
+    /**
+     * Every opt-in switched on: explosive kits, elytra, scale variation (plus the defaults that are on), and no
+     * disabled enchantments, so the vocabulary and coverage tests still see everything the roller can produce.
+     */
     static InhabitantsConfig.Profiles everythingOptions() {
         InhabitantsConfig.Profiles o = new InhabitantsConfig.Profiles();
         o.allowExplosiveKits = true;
         o.allowElytra = true;
         o.scaleVariation = true;
+        o.disabledEnchantments = new ArrayList<>();
         return o;
     }
 

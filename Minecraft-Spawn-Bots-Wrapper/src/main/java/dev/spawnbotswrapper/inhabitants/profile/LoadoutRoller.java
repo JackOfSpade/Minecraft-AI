@@ -1,5 +1,6 @@
 package dev.spawnbotswrapper.inhabitants.profile;
 
+import dev.spawnbotswrapper.inhabitants.config.DisabledEnchantments;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.profile.ItemIds.ArmorSlot;
 import dev.spawnbotswrapper.inhabitants.profile.ItemIds.ArmorTier;
@@ -10,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -65,6 +67,8 @@ final class LoadoutRoller {
     private final Roller r;
     private final GlobalCapabilities caps;
     private final InhabitantsConfig.Profiles options;
+    /** Canonical ids of profiles.disabledEnchantments: rolled as usual (same draws) but never put on an item. */
+    private final Set<String> disabled;
     private final LoadoutBuilder out = new LoadoutBuilder();
 
     private Facts.ArmorMode armorMode = Facts.ArmorMode.NONE;
@@ -84,6 +88,7 @@ final class LoadoutRoller {
         this.r = r;
         this.caps = caps;
         this.options = options;
+        this.disabled = DisabledEnchantments.parse(options == null ? null : options.disabledEnchantments);
     }
 
     static Rolled roll(Roller r, GlobalCapabilities caps, InhabitantsConfig.Profiles options) {
@@ -151,14 +156,14 @@ final class LoadoutRoller {
         Map<String, Integer> enchants = new TreeMap<>();
         int protection = r.level(key + ".protection", ItemIds.maxEnchantmentLevel(ItemIds.PROTECTION));
         if (protection > 0) {
-            enchants.put(r.pick(key + ".protectionType", ItemIds.PROTECTION_TYPES), protection);
+            put(enchants, r.pick(key + ".protectionType", ItemIds.PROTECTION_TYPES), protection);
         }
         enchant(enchants, ItemIds.UNBREAKING, key + ".unbreaking");
         if (caps.autoMendEnabled() && r.flag(key + ".mending")) {
-            enchants.put(ItemIds.MENDING, 1);
+            put(enchants, ItemIds.MENDING, 1);
         }
         if (r.oneIn(key + ".thorns", 8)) {
-            enchants.put(ItemIds.THORNS, r.count(key + ".thornsLevel", 1, ItemIds.maxEnchantmentLevel(ItemIds.THORNS)));
+            put(enchants, ItemIds.THORNS, r.count(key + ".thornsLevel", 1, ItemIds.maxEnchantmentLevel(ItemIds.THORNS)));
         }
         double wear = r.fraction(key + ".damage", 0.0, MAX_WEAR, 2);
         out.wear(slot.slot, new BotProfile.ItemSpec(item, 1, enchants, wear, null));
@@ -303,13 +308,17 @@ final class LoadoutRoller {
         enchant(e, ItemIds.POWER, "profile.ranged.bow.power");
         enchant(e, ItemIds.PUNCH, "profile.ranged.bow.punch");
         if (r.flag("profile.ranged.bow.infinity")) {
-            e.put(ItemIds.INFINITY, 1);
+            put(e, ItemIds.INFINITY, 1);
         }
         enchant(e, ItemIds.UNBREAKING, "profile.ranged.bow.unbreaking");
         return new BotProfile.ItemSpec(ItemIds.BOW, 1, e, 0.0, null);
     }
 
-    /** Piercing and multishot are exclusive in vanilla; only piercing is rolled. */
+    /**
+     * Piercing and multishot are exclusive in vanilla; only piercing is rolled, and by default (profiles.disabledEnchantments)
+     * it is rolled but never applied: piercing bolts ignore shields, so a hostile inhabitant's crossbow could not be blocked.
+     * The draw is still consumed, so nothing else about a seeded loadout changes and multishot is NOT substituted.
+     */
     private BotProfile.ItemSpec crossbow() {
         Map<String, Integer> e = new TreeMap<>();
         enchant(e, ItemIds.QUICK_CHARGE, "profile.ranged.crossbow.quickCharge");
@@ -492,6 +501,13 @@ final class LoadoutRoller {
     private void enchant(Map<String, Integer> into, String id, String key) {
         int level = r.level(key, ItemIds.maxEnchantmentLevel(id));
         if (level > 0) {
+            put(into, id, level);
+        }
+    }
+
+    /** The only way an enchantment gets onto a rolled item, so a disabled one can never slip in. */
+    private void put(Map<String, Integer> into, String id, int level) {
+        if (!disabled.contains(id)) {
             into.put(id, level);
         }
     }

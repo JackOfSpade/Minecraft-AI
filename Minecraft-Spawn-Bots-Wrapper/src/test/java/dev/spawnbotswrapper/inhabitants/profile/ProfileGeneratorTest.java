@@ -167,7 +167,7 @@ class ProfileGeneratorTest {
                 + " max_healthv17.0 | STAND true bhop 0.0 0",
                 fingerprint(generator.create(1L, caps, new TransientDeckStore())));
         assertEquals("Smasher | hotbar:0=mace+density5+fire_aspect1+unbreaking2+wind_burst3~0.15"
-                + " hotbar:1=crossbow+piercing3+quick_charge2 hotbar:8=golden_carrotx59 inventory:-1=wind_chargex31"
+                + " hotbar:1=crossbow+quick_charge2 hotbar:8=golden_carrotx59 inventory:-1=wind_chargex31"
                 + " inventory:-1=arrowx64 inventory:-1=arrowx64 inventory:-1=arrowx54 inventory:-1=spectral_arrowx13"
                 + " inventory:-1=enchanted_golden_apple inventory:-1=potion<strong_healing>"
                 + " inventory:-1=potion<strong_healing> inventory:-1=potion<strong_healing>"

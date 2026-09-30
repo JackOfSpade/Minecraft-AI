@@ -64,6 +64,13 @@ public final class ConfigValidator {
             c.profiles = new InhabitantsConfig.Profiles();
         }
         c.profiles.coverageBuckets = clamp(w, "profiles.coverageBuckets", c.profiles.coverageBuckets, 2, 64);
+        if (c.profiles.disabledEnchantments == null) {
+            c.profiles.disabledEnchantments = new ArrayList<>(DisabledEnchantments.DEFAULT);
+            w.add("profiles.disabledEnchantments is null; using " + DisabledEnchantments.DEFAULT);
+        } else {
+            c.profiles.disabledEnchantments = DisabledEnchantments.clean(
+                    c.profiles.disabledEnchantments, "profiles.disabledEnchantments", w);
+        }
 
         if (c.deterministic == null) {
             c.deterministic = new InhabitantsConfig.Deterministic();

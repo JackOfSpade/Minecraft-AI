@@ -168,6 +168,15 @@ public final class InhabitantsConfig {
          * has a target, which sends bots soaring out of their structure. Off by default.
          */
         public boolean allowElytra = false;
+        /**
+         * Enchantments no inhabitant is given or keeps (ids with or without the {@code minecraft:} namespace; an
+         * empty list disables the feature). Default: Piercing, because a piercing bolt ignores a raised shield in
+         * vanilla Java, so a hostile inhabitant's crossbow could not be blocked. New loadouts never contain them
+         * (the rolls are otherwise unchanged), inhabitants that already carry one are stripped of just that
+         * enchantment (dressing, after a restore and about every 5 s), and stored profiles are filtered when
+         * re-applied.
+         */
+        public List<String> disabledEnchantments = new ArrayList<>(DisabledEnchantments.DEFAULT);
     }
 
     public static final class Deterministic {
