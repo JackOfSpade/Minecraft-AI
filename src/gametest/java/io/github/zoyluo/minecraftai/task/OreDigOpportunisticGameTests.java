@@ -225,21 +225,21 @@ public final class OreDigOpportunisticGameTests {
     @GameTest(environment = ENV_PREFIX + "vein_follow_respects_cap_and_lease", maxTicks = 2200)
     public void veinFollowRespectsCapAndLease(GameTestHelper context) {
         Harness h = new Harness(context);
-        Room room = h.newRoom(30, -3, 17, -4, 4, 4);
+        Room room = h.newRoom(30, -3, 22, -4, 4, 4);
         hub(room);
         int veinLength = 15;
         List<BlockPos> vein = new ArrayList<>();
         // dy=1 + a solid roof strip (not dy=0): see test 1's pose comment -- every member needs
         // approachGoalFor's below-stand, never poseFor's same-level cardinal one.
         for (int i = 0; i < veinLength; i++) {
-            // Kept close to spawn so the near end of the vein is reliably within ordinary perception radius of a bot still
-            // working hub()'s coal near dx=0, regardless of which way OreDigTask's own strip tunnel happens to head first. It
-            // starts at dx=3, clear of the hub: starting at dx=1 put its first members between the hub's coal at (1,+-1) and
-            // (2,+-2) (x,z), where the mission's own work took them as bonus ores (two in one run, four in another, depending on
-            // where the coal drops landed), and after four the rest of the vein was excluded and never detoured to.
-            BlockPos pos = room.at(3 + i, 1, 0);
+            // It starts at dx=6. A member within two blocks of the bot is the mission's own bonus ore (OreDigTask's bonusOwns,
+            // skipped by the detour), and the hub work takes the bot up to dx=3: starting at dx=1 the mission took two to four
+            // members as bonus ores, and starting at dx=3 the first member the detour could rank was the fourth or fifth one,
+            // whose stands the vein's own nearer members (at eye height) hid, so it got no_pose and the whole vein was excluded
+            // (one targeted run in six). From dx=6 the nearest member is never a bonus ore, and its west stand is in plain view.
+            BlockPos pos = room.at(6 + i, 1, 0);
             room.world.setBlock(pos, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
-            room.world.setBlock(room.at(3 + i, 2, 0), STONE, Block.UPDATE_ALL);
+            room.world.setBlock(room.at(6 + i, 2, 0), STONE, Block.UPDATE_ALL);
             vein.add(pos);
         }
 
