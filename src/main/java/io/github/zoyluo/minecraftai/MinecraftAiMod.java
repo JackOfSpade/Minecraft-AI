@@ -88,6 +88,8 @@ public class MinecraftAiMod implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(RuntimeLifecycleCoordinator.INSTANCE::onServerStopping);
         // Damage records (who hurt whom, in level game time) and the teleport counters are per server run.
         io.github.zoyluo.minecraftai.entity.RecentDamage.register();
+        // Pace: hostiles after the bot, its owner, the followed player or a Minecraft-AI bot keep it at a sprint (see AggroSense).
+        io.github.zoyluo.minecraftai.action.PacePolicy.setDefaultPressureProbe(bot -> io.github.zoyluo.minecraftai.task.AggroSense.snapshot(bot).pressure());
         io.github.zoyluo.minecraftai.task.HostileBotLedger.install();
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             io.github.zoyluo.minecraftai.entity.RecentDamage.clear();

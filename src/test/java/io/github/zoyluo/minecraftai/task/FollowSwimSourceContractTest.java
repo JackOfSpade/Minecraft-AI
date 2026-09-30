@@ -125,7 +125,7 @@ final class FollowSwimSourceContractTest {
             assertTrue(body.contains("suspendLandRecovery(bot)"), owner + " must reset land recovery / cancel the dig-out");
         }
         int tick = follow.indexOf("protected void onTick(");
-        String onTick = follow.substring(tick, follow.indexOf("private static void faceTarget"));
+        String onTick = follow.substring(tick, follow.indexOf("private void faceTarget"));
         assertTrue(count(onTick, "suspendLandRecovery(bot)") >= 5,
                 "offline, boat, swim, leave-boat and exit-water ticks must each suspend land recovery");
         String recovery = read("task/FollowStuckRecovery.java");

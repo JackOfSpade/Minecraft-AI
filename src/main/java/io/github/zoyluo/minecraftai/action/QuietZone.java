@@ -101,6 +101,27 @@ public final class QuietZone {
         return nearestCalmWarden <= range;
     }
 
+    /**
+     * A one-off answer (no cache, no bot state) to "does this bot observe a calm warden within {@code range} blocks?", for the
+     * decisions that are not travel (the follow escort, eating): the same observation and hunting rules as the cached scan.
+     */
+    public static boolean calmWardenObservedWithin(AIPlayerEntity bot, double range) {
+        long now = bot.level().getGameTime();
+        List<Warden> wardens = bot.level().getEntitiesOfClass(Warden.class, bot.getBoundingBox().inflate(range), Warden::isAlive);
+        if (wardens.isEmpty()) {
+            return false;
+        }
+        List<LivingEntity> victims = victims(bot);
+        for (Warden warden : wardens) {
+            if (bot.distanceTo(warden) <= range
+                    && ObservableWorldQuery.canObserveEntityWithin(bot, warden, (int) WARDEN_SCAN_RANGE)
+                    && !WardenState.isHunting(warden, victims, now)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** True when an observed warden within 24 blocks is hunting the bot or its owner. */
     public boolean huntingWardenObserved() {
         return huntingWarden;
@@ -148,6 +169,11 @@ public final class QuietZone {
     }
 
     /** The bot and its owner when the owner is online: the ones a warden hunting "us" is hunting. */
+    /** The bot and its owner: who a warden hunting "us" is hunting (for the callers outside this package). */
+    public static List<LivingEntity> victimsOf(AIPlayerEntity bot) {
+        return victims(bot);
+    }
+
     static List<LivingEntity> victims(AIPlayerEntity bot) {
         List<LivingEntity> victims = new ArrayList<>(2);
         victims.add(bot);

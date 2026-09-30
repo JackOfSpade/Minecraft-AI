@@ -102,6 +102,12 @@ public final class AggroSense {
         return fresh;
     }
 
+    /** Forgets the cached snapshot and distance history of one bot (it despawned or was unloaded). */
+    public static void clear(AIPlayerEntity bot) {
+        CACHE.remove(bot.getUUID());
+        CLOSING.remove(bot.getUUID());
+    }
+
     /** Forgets every cached snapshot and distance history (server stop). */
     public static void clearAll() {
         CACHE.clear();
@@ -117,6 +123,13 @@ public final class AggroSense {
         victims.add(bot);
         if (ownerHere) {
             victims.add(owner);
+        }
+        // The player the bot is following is protected like its owner (they may be another player than the owner).
+        ServerPlayer followed = TaskManager.INSTANCE.getActive(bot)
+                .filter(FollowTask.class::isInstance).map(FollowTask.class::cast)
+                .flatMap(FollowTask::currentTarget).orElse(null);
+        if (followed != null && followed != owner && followed != bot && followed.isAlive() && followed.level() == bot.level()) {
+            victims.add(followed);
         }
         for (ServerPlayer player : bot.level().players()) {
             if (player instanceof AIPlayerEntity other && other != bot && other.isAlive()

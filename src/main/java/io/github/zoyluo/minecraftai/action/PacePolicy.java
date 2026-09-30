@@ -46,13 +46,21 @@ public final class PacePolicy {
 
     /** Whether the bot is under aggro pressure; AggroSense installs the real one. Static, default: never. */
     private static volatile Predicate<AIPlayerEntity> pressureProbe = bot -> false;
+    /** What {@link #setPressureProbe} restores on {@code null}: the production probe ({@link #setDefaultPressureProbe}), else never. */
+    private static volatile Predicate<AIPlayerEntity> defaultPressureProbe = bot -> false;
 
     private PacePolicy() {
     }
 
-    /** Replaces the pressure probe; {@code null} restores the default (never under pressure). */
+    /** Replaces the pressure probe; {@code null} restores the default (the production probe, else never under pressure). */
     public static void setPressureProbe(Predicate<AIPlayerEntity> probe) {
-        pressureProbe = probe == null ? bot -> false : probe;
+        pressureProbe = probe == null ? defaultPressureProbe : probe;
+    }
+
+    /** Installs the production pressure probe: it is used now and restored whenever a scoped probe is removed. */
+    public static void setDefaultPressureProbe(Predicate<AIPlayerEntity> probe) {
+        defaultPressureProbe = probe == null ? bot -> false : probe;
+        pressureProbe = defaultPressureProbe;
     }
 
     /** True when the probe says {@code bot} is under aggro pressure. */

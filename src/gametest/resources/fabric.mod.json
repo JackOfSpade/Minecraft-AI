@@ -95,7 +95,11 @@
       "io.github.zoyluo.minecraftai.gametest.FoundationHarnessGameTests",
       "io.github.zoyluo.minecraftai.task.HostileBotTargetingGameTests",
       "io.github.zoyluo.minecraftai.action.PaceGameTests",
-      "io.github.zoyluo.minecraftai.baritone.PaceBaritoneGameTests"
+      "io.github.zoyluo.minecraftai.baritone.PaceBaritoneGameTests",
+      "io.github.zoyluo.minecraftai.task.FollowPaceGameTests",
+      "io.github.zoyluo.minecraftai.task.FollowPaceBaritoneGameTests",
+      "io.github.zoyluo.minecraftai.task.FollowEscortGameTests",
+      "io.github.zoyluo.minecraftai.task.AutoEatSprintLimitGameTests"
     ]
   },
   "depends": {

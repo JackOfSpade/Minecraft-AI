@@ -2,8 +2,13 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.BoatAction;
+import io.github.zoyluo.minecraftai.action.Gait;
 import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.PaceOwner;
+import io.github.zoyluo.minecraftai.action.PacePolicy;
+import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -11,6 +16,7 @@ import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
@@ -103,6 +109,37 @@ public final class FollowTask extends AbstractTask {
     private final FollowProgressWindow baritoneProgress = new FollowProgressWindow();
     private int baritoneStarts;
     private int baritoneRegoals;
+    // ---- pace (see FollowPace) and escort (see FollowEscort)
+    /** How long the recent positions of the followed player are kept for measuring its speed (game ticks). */
+    private static final int SPEED_WINDOW_TICKS = 10;
+    private final QuietZone quietZone = new QuietZone();
+    private final FollowEscort escort = new FollowEscort();
+    /** Recent positions of the followed player as {gameTime, x, z}, oldest first. */
+    private final ArrayDeque<double[]> targetSamples = new ArrayDeque<>();
+    private long targetSneakSince = -1L;
+    private Gait paceGait = Gait.WALK;
+    private long paceSince;
+    private ServerPlayer lastTarget;
+
+    /** The player this task resolved on its last tick (empty before the first tick, or while the player is offline). */
+    public Optional<ServerPlayer> currentTarget() {
+        return Optional.ofNullable(lastTarget);
+    }
+
+    /** True while the escort sees a hostile within a few blocks: the task then ticks even under a degraded TPS. */
+    boolean escortEngaged() {
+        return escort.engaged();
+    }
+
+    /** Package-visible for GameTests: swings the escort has landed. */
+    int escortStrikes() {
+        return escort.strikes();
+    }
+
+    /** Package-visible for GameTests: the gait this task last asked for. */
+    Gait paceGait() {
+        return paceGait;
+    }
 
     /** Package-visible for GameTests: how many Baritone routes land follow has started (not counting re-targeting of a running one). */
     int baritoneStarts() {
@@ -193,12 +230,21 @@ public final class FollowTask extends AbstractTask {
         baritoneProgress.clear();
         baritoneRadius = (int) STOP_DISTANCE;
         handledOutcome = bot.getActionPack().lastRouteOutcome();
+        escort.reset();
+        targetSamples.clear();
+        targetSneakSince = -1L;
+        paceGait = Gait.WALK;
+        paceSince = bot.level().getGameTime() - FollowPace.DWELL_TICKS;
+        lastTarget = null;
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
         ServerPlayer target = target(bot).orElse(null);
         if (target == null || target.level() != bot.level()) {
+            lastTarget = null;
+            escort.disengage();
+            targetSamples.clear();
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             suspendLandRecovery(bot);
             stopBoatAndActions(bot);
@@ -212,6 +258,8 @@ public final class FollowTask extends AbstractTask {
             return;
         }
 
+        lastTarget = target;
+        observeTarget(bot, target);
         faceTarget(bot, target);
 
         // The owner/name lookup above is explicit player authority, not a radius- or
@@ -225,6 +273,7 @@ public final class FollowTask extends AbstractTask {
         boolean targetInBoat = target.getVehicle() instanceof AbstractBoat;
         boolean targetSwimming = !targetInBoat && isWaterborne(target);
         if (targetInBoat) {
+            escort.disengage();
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             suspendLandRecovery(bot);
             dropBaritoneRoute(bot);
@@ -232,6 +281,7 @@ public final class FollowTask extends AbstractTask {
             return;
         }
         if (targetSwimming) {
+            escort.disengage();
             suspendLandRecovery(bot);
             abandonBoatChild(bot);
             // Swim-follow stays the legacy controller's (Baritone swimming is not what follows a swimmer in P1); a land route
@@ -246,6 +296,7 @@ public final class FollowTask extends AbstractTask {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         abandonBoatChild(bot);
         if (leaveBoatForLand(bot, target)) {
+            escort.disengage();
             suspendLandRecovery(bot);
             dropBaritoneRoute(bot);
             waiting = true;
@@ -254,12 +305,74 @@ public final class FollowTask extends AbstractTask {
         // The player has left the water but the bot is still in it: swim to a dry landing near
         // them first (this renews the narrow swim lease itself), then ordinary land follow runs.
         if (swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)) {
+            escort.disengage();
             suspendLandRecovery(bot);
             dropBaritoneRoute(bot);
             waiting = swimming.isWaiting();
             return;
         }
+        publishPace(bot, target);
         followLand(bot, target);
+        // After the movement decisions of this tick: a swing never stops or redirects the follow.
+        escort.tick(bot, target);
+    }
+
+    /**
+     * Keeps the last ten ticks of the followed player's horizontal position (by game time, so a throttled tick is fine) and counts
+     * how long they have been sneaking: the two things the follow pace reads off the player.
+     */
+    private void observeTarget(AIPlayerEntity bot, ServerPlayer target) {
+        long now = bot.level().getGameTime();
+        double[] last = targetSamples.peekLast();
+        if (last == null || (long) last[0] != now) {
+            targetSamples.addLast(new double[] {now, target.getX(), target.getZ()});
+        }
+        while (targetSamples.size() > 2 && now - (long) targetSamples.peekFirst()[0] > SPEED_WINDOW_TICKS) {
+            targetSamples.pollFirst();
+        }
+        if (target.isShiftKeyDown()) {
+            if (targetSneakSince < 0L) {
+                targetSneakSince = now;
+            }
+        } else {
+            targetSneakSince = -1L;
+        }
+    }
+
+    /** Horizontal blocks per second of the followed player over the kept window; 0 until two samples are apart. */
+    private double targetSpeedBps() {
+        double[] first = targetSamples.peekFirst();
+        double[] last = targetSamples.peekLast();
+        if (first == null || last == null || last[0] - first[0] < 2.0D) {
+            return 0.0D;
+        }
+        double dx = last[1] - first[1];
+        double dz = last[2] - first[2];
+        return Math.sqrt(dx * dx + dz * dz) / ((last[0] - first[0]) / 20.0D);
+    }
+
+    /** Decides the gait of this tick (FollowPace) and leases it to the pace policy: the same for every land mode of the task. */
+    private void publishPace(AIPlayerEntity bot, ServerPlayer target) {
+        if (!MinecraftAiConfig.get().behaviour().paceOrDefaults().paceEnabled()) {
+            return;
+        }
+        long now = bot.level().getGameTime();
+        quietZone.refresh(bot);
+        MinecraftAiConfig.Follow follow = MinecraftAiConfig.get().behaviour().followOrDefaults();
+        int sneakTicks = targetSneakSince < 0L ? 0 : (int) Math.min(Integer.MAX_VALUE, now - targetSneakSince);
+        FollowPace.Input input = new FollowPace.Input(bot.distanceTo(target), targetSpeedBps(), target.isSprinting(), sneakTicks,
+                quietZone.level(), PacePolicy.underPressure(bot), quietZone.huntingWardenObserved(),
+                quietZone.calmWardenWithin(PacePolicy.CALM_WARDEN_RANGE), paceGait,
+                (int) Math.min(Integer.MAX_VALUE, now - paceSince), follow.walkGap(), follow.sprintGap());
+        Gait gait = FollowPace.decide(input);
+        if (gait != paceGait) {
+            BotLog.path(bot, "follow_pace", "from", paceGait, "to", gait, "gap", Math.round(input.gap() * 10.0D) / 10.0D,
+                    "target_bps", Math.round(input.targetSpeedBps() * 10.0D) / 10.0D, "target_sprint", input.targetSprinting(),
+                    "target_sneak_ticks", sneakTicks, "quiet", input.quiet(), "pressure", input.pressure());
+            paceGait = gait;
+            paceSince = now;
+        }
+        bot.getActionPack().requestPace(gait, PaceOwner.FOLLOW);
     }
 
     /** Another follow mode takes the bot: a Baritone land route of this task ends now (single writer). */
@@ -284,7 +397,7 @@ public final class FollowTask extends AbstractTask {
      * timeout). While anything is navigating only the pitch follows the player; when idle or
      * arrived the bot turns to face them completely.
      */
-    private static void faceTarget(AIPlayerEntity bot, ServerPlayer target) {
+    private void faceTarget(AIPlayerEntity bot, ServerPlayer target) {
         if (bot.getActionPack().hasBaritoneRoute()) {
             // A Baritone route owns the aim, yaw AND pitch (single writer, see BaritoneDriver): it looks where the next break or door
             // click needs it to, often steeply down at the lower block of a two-high dig. Pitching the head at the player here, at the
@@ -295,7 +408,8 @@ public final class FollowTask extends AbstractTask {
         boolean steering = !bot.getActionPack().isPathExecutorIdle() || !bot.getActionPack().isWalkToIdle();
         if (steering) {
             LookAction.lookPitchAt(bot, target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D));
-        } else {
+        } else if (!escort.holdsFacing(bot.level().getGameTime())) {
+            // Right after a swing at a hostile the follower stays as it is instead of turning back to the player at once.
             CombatCore.lookAt(bot, target);
         }
     }
@@ -731,6 +845,7 @@ public final class FollowTask extends AbstractTask {
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
+        escort.disengage();
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
         swimming.reset();
@@ -752,6 +867,8 @@ public final class FollowTask extends AbstractTask {
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
+        escort.disengage();
+        lastTarget = null;
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
         swimming.reset();

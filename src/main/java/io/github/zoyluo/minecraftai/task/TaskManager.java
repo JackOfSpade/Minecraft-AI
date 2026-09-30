@@ -513,7 +513,9 @@ public final class TaskManager {
                 || task instanceof EmergencyShelterTask
                 || task instanceof MiningBarricadeTask
                 || task instanceof EatTask
-                || task instanceof ResupplyTask;
+                || task instanceof ResupplyTask
+                // A follower with a hostile in its face swings on ready ticks: it must tick on every one of them.
+                || task instanceof FollowTask follow && follow.escortEngaged();
     }
 
     public record FailureRecord(String name, String reason, int count, int tick) {

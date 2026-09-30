@@ -3,6 +3,8 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.PaceRules;
+import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -19,6 +21,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
+import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -48,6 +51,7 @@ public final class DangerWatcher {
     private final Map<UUID, Map<UUID, Integer>> leashCooldowns = new ConcurrentHashMap<>();
     /** Counts how often a bot was judged trapped in the dark (before any surface escape is attempted); read by tests. */
     private final Map<UUID, Integer> darkTrapDetections = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> nextFollowKeepLogTick = new ConcurrentHashMap<>();
 
     // Layer 1 trapped backoff: an evasion-class task (evade/shelter) repeatedly firing on the same
     // cell without the bot escaping counts as "trapped". Back off for a while and stop dispatching,
@@ -60,6 +64,16 @@ public final class DangerWatcher {
     private static final int DARK_STUCK_TICKS = 160;     // Mitigation: standing still in a dark underground spot for 8s is judged a "trapped in the dark" hazard; retreat to the surface
     /** Shelter is a final response, not a generic low-health/night-time behaviour. */
     private static final float LAST_RESORT_HEALTH_CAP = 10.0F;
+    /** Vanilla stops a player's sprint at 6 food points or fewer: the bot eats at 7 so its food never gets there (R6). */
+    static final int SPRINT_LIMIT_FOOD = PaceRules.SPRINT_FOOD_FLOOR + 1;
+    /** Eating is put off while a calm warden is observed this close (its bites are vibrations) ... */
+    static final double CALM_WARDEN_EAT_RANGE = 20.0D;
+    /** ... unless the bot's health is at or below this (then the meal is worth the risk). */
+    static final float CALM_WARDEN_EAT_HEALTH = 6.0F;
+    /** The follow keeps an ordinary hostile threat instead of pausing for it, log at most this often (ticks). */
+    private static final int FOLLOW_KEEP_LOG_TICKS = 100;
+    /** A warden this close (even a calm one) is escaped, not followed past. */
+    private static final double FOLLOW_WARDEN_EVADE_RANGE = 8.0D;
     private static final double DROP_RECOVERY_MAX_DISTANCE = 80.0D;
     private static final int DROP_RECOVERY_MAX_VERTICAL_DELTA = 24;
     private static final int SHELTER_RETRY_COOLDOWN = 100;
@@ -90,6 +104,8 @@ public final class DangerWatcher {
         nextEscapeHelpTick.remove(id);
         nextShelterAttemptTick.remove(id);
         shelterEpisodes.remove(id);
+        nextFollowKeepLogTick.remove(id);
+        AggroSense.clear(bot);
     }
 
     public void clearAll() {
@@ -108,6 +124,7 @@ public final class DangerWatcher {
         nextEscapeHelpTick.clear();
         nextShelterAttemptTick.clear();
         shelterEpisodes.clear();
+        nextFollowKeepLogTick.clear();
     }
 
     private record TrapRecord(BlockPos pos, int repeatCount, int lastHelpTick) {
@@ -433,7 +450,9 @@ public final class DangerWatcher {
         }
         if (threat.isPresent()) {
             Threat top = threat.get();
-            if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
+            boolean followKeeps = followKeepsThreat(server, bot, active, top);
+            if (!followKeeps
+                    && top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
                     && shouldAssignThreatTask(active, top)
                     && canAssignThreatTask(server, bot, top)) {
                 Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot), hostilePressure);
@@ -585,7 +604,48 @@ public final class DangerWatcher {
         TaskManager.INSTANCE.assign(bot, rescue, TaskOrigin.safety(why));
     }
 
+    /** The active task is an ordinary (non-safety) follow and the follow keeps its escort-only stance (config follow.escortOnly). */
+    private static boolean isEscortFollow(AIPlayerEntity bot, Optional<Task> active) {
+        return active.isPresent()
+                && active.get() instanceof FollowTask
+                && MinecraftAiConfig.get().behaviour().followOrDefaults().escortOnlyEnabled()
+                && !TaskManager.INSTANCE.activeOrigin(bot).map(TaskOrigin::safety).orElse(false);
+    }
+
+    /**
+     * R4: a bot that follows a player does not stop following for an ordinary hostile: the escort (FollowEscort) knocks back whatever
+     * is in reach and the follow pace sprints while anyone is under attack. What still takes the bot off the follow is what is not
+     * ordinary: low health, a creeper (CreeperDefense), a hunting or close warden, a hostile that could kill the bot in two hits
+     * (last-resort shelter), lava, drowning and falling (other threat types).
+     */
+    private boolean followKeepsThreat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active, Threat top) {
+        if (!isEscortFollow(bot, active)
+                || top.type() != Threat.Type.HOSTILE
+                || top.entity() == null
+                || top.entity() instanceof Creeper
+                || bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
+                || shouldStartLastResortShelter(bot, top)) {
+            return false;
+        }
+        if (top.entity() instanceof Warden warden
+                && (bot.distanceTo(warden) <= FOLLOW_WARDEN_EVADE_RANGE
+                || WardenState.isHunting(warden, QuietZone.victimsOf(bot), bot.level().getGameTime()))) {
+            return false;
+        }
+        int now = server.getTickCount();
+        if (now >= nextFollowKeepLogTick.getOrDefault(bot.getUUID(), 0)) {
+            nextFollowKeepLogTick.put(bot.getUUID(), now + FOLLOW_KEEP_LOG_TICKS);
+            BotLog.danger(bot, "follow_escort_keeps_threat", "threat", top.entity().getType(),
+                    "distance", Math.round(bot.distanceTo(top.entity()) * 10.0D) / 10.0D, "hp", (int) bot.getHealth());
+        }
+        return true;
+    }
+
     private boolean maybeRegroup(AIPlayerEntity bot, Optional<Task> active) {
+        // A follower does not fall back to a rally point: it keeps following (the escort knocks back whatever is in reach).
+        if (isEscortFollow(bot, active)) {
+            return false;
+        }
         Task regroupCandidate = active.filter(CombatRegroupTask.class::isInstance)
                 .orElseGet(() -> active.isEmpty()
                         ? TaskManager.INSTANCE.peekPaused(bot)
@@ -737,7 +797,12 @@ public final class DangerWatcher {
         boolean regenStall = isRegenStall(bot)
                 && !hasNakedEatHostilePressure(bot, hostilePressure)
                 && !isSafetyTaskActive(bot, active);
+        // R6: a player cannot sprint at food 6 or lower, so the bot eats at 7 (the food it still has above the sprint limit) whatever
+        // the configured eat threshold, and does not wait for a walk to finish: a follower on a long walk would otherwise run out
+        // of sprint before it ever ate. Combat/evade, a hostile in view and a protected transaction still defer it (below).
+        boolean sprintLimitHunger = foodLevel <= SPRINT_LIMIT_FOOD;
         if (foodLevel > survival.hungerEatThreshold()
+                && !sprintLimitHunger
                 && !healingEmergency
                 && !shelterCleanupRecovery
                 && !regenStall) {
@@ -748,7 +813,7 @@ public final class DangerWatcher {
         if (TaskManager.INSTANCE.isUserPaused(bot) && !urgent) {
             return false;
         }
-        if (bot.getActionPack().hasActiveActions() && !urgent) {
+        if (bot.getActionPack().hasActiveActions() && !urgent && !sprintLimitHunger) {
             return false; // Non-urgent eating waits for the current action to finish; critical starvation can still preempt to save the bot's life.
         }
         if (active.isPresent() && active.get() instanceof EatTask) {
@@ -769,6 +834,11 @@ public final class DangerWatcher {
         }
         int now = server.getTickCount();
         if (now < nextEatAttemptTick.getOrDefault(bot.getUUID(), 0)) {
+            return false;
+        }
+        // Chewing is a sound a calm warden hears: wait until it is out of range, unless the bot is badly hurt.
+        if (bot.getHealth() > CALM_WARDEN_EAT_HEALTH && QuietZone.calmWardenObservedWithin(bot, CALM_WARDEN_EAT_RANGE)) {
+            nextEatAttemptTick.put(bot.getUUID(), now + 20);
             return false;
         }
         if (!InventoryAction.hasFood(bot)) {
@@ -1230,6 +1300,13 @@ public final class DangerWatcher {
         return true;
     }
 
+    private volatile int surfaceScans;
+
+    /** Test hook: how many upward column scans {@link #escapeToSurface} has started (none while the emergency teleport is denied). */
+    int surfaceScanCount() {
+        return surfaceScans;
+    }
+
     /** How many times this bot was judged trapped in the dark since it was last cleared. */
     int darkTrapDetections(AIPlayerEntity bot) {
         return darkTrapDetections.getOrDefault(bot.getUUID(), 0);
@@ -1254,7 +1331,15 @@ public final class DangerWatcher {
     }
 
     // teleport upward to the nearest open-sky standable spot directly above (life-saving fallback, resets fallDistance).
-    private boolean escapeToSurface(AIPlayerEntity bot) {
+    boolean escapeToSurface(AIPlayerEntity bot) {
+        // Ask first: the column scan below reads cells the bot cannot see, and a profile without the emergency teleport (strict
+        // survival) must not do that work for an answer it may not use.
+        if (!io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(
+                bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                "danger_dark_trap_surface").allowed()) {
+            return false;
+        }
+        surfaceScans++;
         var world = bot.level();
         BlockPos feet = bot.blockPosition();
         int top = world.getMinY() + world.getHeight();
@@ -1262,13 +1347,10 @@ public final class DangerWatcher {
             BlockPos cand = feet.above(dy);
             if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, cand)
                     && world.canSeeSky(cand)) {
-                return io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
-                        bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
-                        "danger_dark_trap_surface", () -> {
-                            bot.getActionPack().stopAll();
-                            bot.teleportTo(world, cand.getX() + 0.5D, cand.getY(), cand.getZ() + 0.5D,
-                                    java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-                        });
+                bot.getActionPack().stopAll();
+                bot.teleportTo(world, cand.getX() + 0.5D, cand.getY(), cand.getZ() + 0.5D,
+                        java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+                return true;
             }
         }
         return false;
@@ -1468,8 +1550,10 @@ public final class DangerWatcher {
      * merely cautious combat retreat from creating a dirt enclosure.
      */
     private static boolean shouldStartLastResortShelter(AIPlayerEntity bot, Threat threat) {
+        // Building a shelter next to a warden is a stream of vibrations that wakes it: a warden is escaped (Evade), never walled off.
         if (!isHostileBacked(threat)
                 || isCreeperThreat(threat)
+                || threat.entity() instanceof Warden
                 || !ObservableWorldQuery.canObserveEntity(bot, threat.entity())
                 || !CombatCore.hasLineOfSight(bot, threat.entity())
                 || !CombatCore.isWithinHostilePressureEnvelope(bot, threat.entity())) {
