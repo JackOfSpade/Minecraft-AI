@@ -125,6 +125,12 @@ public final class InhabitantsMod implements ModInitializer {
         return mod == null ? new long[3] : mod.aggro.plannerStats();
     }
 
+    /** The unique ids of the aggro route planner's helper mobs (none may ever be found in a level). A seam for the GameTests. */
+    public static java.util.List<java.util.UUID> aggroPlannerHelperIds() {
+        InhabitantsMod mod = instance;
+        return mod == null ? java.util.List.of() : mod.aggro.plannerHelperIds();
+    }
+
     /** The aggro home anchor of an inhabitant as {x, y, z}, or null. A seam for the real-server GameTests. */
     public static double[] aggroHomeOf(String botName) {
         InhabitantsMod mod = instance;

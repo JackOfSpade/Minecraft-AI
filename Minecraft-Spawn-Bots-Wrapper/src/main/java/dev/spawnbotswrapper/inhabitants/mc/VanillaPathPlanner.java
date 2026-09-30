@@ -113,6 +113,15 @@ public final class VanillaPathPlanner implements PathPlanner {
         return helpers.size();
     }
 
+    /** The unique ids of the helpers (none of them may ever be found in a level), for tests. */
+    public java.util.List<java.util.UUID> helperIds() {
+        java.util.List<java.util.UUID> ids = new ArrayList<>();
+        for (Zombie z : helpers.values()) {
+            ids.add(z.getUUID());
+        }
+        return ids;
+    }
+
     /** Plans made, for diagnostics. */
     public long plans() {
         return plans;

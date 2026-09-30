@@ -126,6 +126,11 @@ public final class AggroDriver {
         return new long[]{planner.plans(), planner.reached(), planner.helperCount()};
     }
 
+    /** The unique ids of the route planner's detached helper mobs; a seam for the GameTests. */
+    public java.util.List<java.util.UUID> plannerHelperIds() {
+        return planner.helperIds();
+    }
+
     /** The home anchor of {@code botName} as {x, y, z}, or null. */
     public double[] homeOf(String botName) {
         AggroController c = controller;

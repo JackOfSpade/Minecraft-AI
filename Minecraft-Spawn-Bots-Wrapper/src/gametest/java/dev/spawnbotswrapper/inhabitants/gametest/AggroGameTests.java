@@ -33,19 +33,24 @@ public final class AggroGameTests {
 
     /**
      * The route planner ran (the bot walked AROUND the wall, which a straight walk cannot do) and its detached helper mob
-     * never reached the world: no zombie exists in the level, and there is at most one helper per level.
+     * never reached the world: no entity with a helper's id exists in the level (natural zombies may, the helper may not),
+     * and there is at most one helper per level.
      */
     private static void requireCleanPlanner(Rig rig) {
         long[] stats = InhabitantsMod.aggroPlannerStats();
-        int zombies = rig.level.getEntities(net.minecraft.world.level.entity.EntityTypeTest.forClass(
-                net.minecraft.world.entity.monster.zombie.Zombie.class), z -> true).size();
-        Rig.LOG.info("[planner] {} plans, {} reached their goal, {} helper mob(s) held, {} zombie(s) in the level", stats[0],
-                stats[1], stats[2], zombies);
+        int inWorld = 0;
+        for (java.util.UUID id : InhabitantsMod.aggroPlannerHelperIds()) {
+            if (rig.level.getEntity(id) != null) {
+                inWorld++;
+            }
+        }
+        Rig.LOG.info("[planner] {} plans, {} reached their goal, {} helper mob(s) held, {} of them found in the level", stats[0],
+                stats[1], stats[2], inWorld);
         if (stats[0] < 1) {
             rig.fail("no route was planned: the walk around the wall cannot have been planned");
         }
-        if (zombies != 0) {
-            rig.fail("the planner's helper mob is in the world (" + zombies + " zombie(s) found)");
+        if (inWorld != 0) {
+            rig.fail("the planner's helper mob is in the world (" + inWorld + " found by its id)");
         }
         if (stats[2] > 3) {
             rig.fail("the planner keeps " + stats[2] + " helper mobs (one per level is expected)");
