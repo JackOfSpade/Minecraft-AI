@@ -30,6 +30,8 @@ public class AIPlayerEntity extends ServerPlayer {
     private double tickFromY;
     private double tickFromZ;
     private boolean fallChecked;
+    // Nesting of the overridden teleport calls (see auditTeleport).
+    private int teleportAuditDepth;
 
     public AIPlayerEntity(MinecraftServer server,
                           ServerLevel world,
@@ -145,30 +147,65 @@ public class AIPlayerEntity extends ServerPlayer {
     // a respawn of a bot killed in mid-air, a panel recall, a dark-trap surfacing) would be charged for the fall it never finished on
     // its next grounded tick, and the jump itself would be measured as a fall of that many blocks. Overridden here, once, for every
     // caller: the fall is over, and this tick's fall check is not to measure the jump.
+    // Every override also records the move in TeleportAudit (kind, caller, distance) before it happens: logging and counting only.
 
     @Override
     public boolean teleportTo(ServerLevel level, double x, double y, double z, java.util.Set<Relative> relatives,
                               float yaw, float pitch, boolean resetCamera) {
-        boolean moved = super.teleportTo(level, x, y, z, relatives, yaw, pitch, resetCamera);
-        if (moved) {
-            fallEndedByTeleport();
+        auditTeleport(new net.minecraft.world.phys.Vec3(x, y, z));
+        try {
+            boolean moved = super.teleportTo(level, x, y, z, relatives, yaw, pitch, resetCamera);
+            if (moved) {
+                fallEndedByTeleport();
+            }
+            return moved;
+        } finally {
+            endAuditedTeleport();
         }
-        return moved;
     }
 
     @Override
     public void teleportTo(double x, double y, double z) {
-        super.teleportTo(x, y, z);
-        fallEndedByTeleport();
+        auditTeleport(new net.minecraft.world.phys.Vec3(x, y, z));
+        try {
+            super.teleportTo(x, y, z);
+            fallEndedByTeleport();
+        } finally {
+            endAuditedTeleport();
+        }
     }
 
     @Override
     public ServerPlayer teleport(TeleportTransition transition) {
-        ServerPlayer moved = super.teleport(transition);
-        if (moved != null) {
-            fallEndedByTeleport();
+        auditTeleport(transition == null ? null : transition.position());
+        try {
+            ServerPlayer moved = super.teleport(transition);
+            if (moved != null) {
+                fallEndedByTeleport();
+            }
+            return moved;
+        } finally {
+            endAuditedTeleport();
         }
-        return moved;
+    }
+
+    /**
+     * Records the outermost teleport call only: vanilla routes {@code teleportTo(level, ...)} through {@code teleport(transition)}, and
+     * both are overridden here, so the inner call of one move must not count as a second teleport.
+     */
+    private void auditTeleport(net.minecraft.world.phys.Vec3 to) {
+        if (this.teleportAuditDepth++ > 0) {
+            return;
+        }
+        try {
+            TeleportAudit.record(this, this.position(), to);
+        } catch (RuntimeException ignored) {
+            // An audit line must never stop a teleport.
+        }
+    }
+
+    private void endAuditedTeleport() {
+        this.teleportAuditDepth--;
     }
 
     private void fallEndedByTeleport() {

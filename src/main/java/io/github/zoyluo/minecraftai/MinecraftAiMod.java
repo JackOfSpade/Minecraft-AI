@@ -58,6 +58,7 @@ public class MinecraftAiMod implements ModInitializer {
                 "perception_radius", config.perception().radius(),
                 "nav_lookahead", config.nav().lookahead(),
                 "pickup_force_radius", config.pickup().forceRadiusH(),
+                "behaviour", config.behaviourOrDefaults(),
                 "logging_enabled", config.logging().enabled());
         // Mining assist: optional "miningAssist" section of the same minecraftai.json (separate parse pass; never throws).
         MiningAssistRuntime.load(FabricLoader.getInstance().getConfigDir().resolve("minecraftai.json"));
@@ -85,6 +86,12 @@ public class MinecraftAiMod implements ModInitializer {
             RuntimeLifecycleCoordinator.INSTANCE.onServerStarted(server, config);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(RuntimeLifecycleCoordinator.INSTANCE::onServerStopping);
+        // Damage records (who hurt whom, in level game time) and the teleport counters are per server run.
+        io.github.zoyluo.minecraftai.entity.RecentDamage.register();
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            io.github.zoyluo.minecraftai.entity.RecentDamage.clear();
+            io.github.zoyluo.minecraftai.entity.TeleportAudit.clearAll();
+        });
         ServerTickEvents.START_SERVER_TICK.register(server -> MiningAssistRuntime.beginTick());
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TpsGuard.INSTANCE.tick(server);

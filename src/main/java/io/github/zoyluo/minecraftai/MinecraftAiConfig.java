@@ -44,7 +44,9 @@ public record MinecraftAiConfig(
         Nav nav,
         Pickup pickup,
         Conversation conversation,
-        Storage storage
+        Storage storage,
+        // Companion behaviour switches (pace, hostile-bot targeting, gear choice, follow, warden). See docs/OPERATING_PROFILES.md.
+        Behaviour behaviour
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     /** Environment variable that overrides the API key from the config file (any provider). */
@@ -148,16 +150,16 @@ public record MinecraftAiConfig(
     }
 
     public MinecraftAiConfig withLlm(Llm llm) {
-        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage());
+        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage(), behaviourOrDefaults());
     }
 
     /** A copy with another navigation section (tests swap the Baritone capability switches with it). */
     public MinecraftAiConfig withNav(Nav nav) {
-        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav, pickup(), conversation(), storage());
+        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav, pickup(), conversation(), storage(), behaviourOrDefaults());
     }
 
     private MinecraftAiConfig withProfile(OperatingProfile profile) {
-        return new MinecraftAiConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage());
+        return new MinecraftAiConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage(), behaviourOrDefaults());
     }
 
     private MinecraftAiConfig withDefaults() {
@@ -180,7 +182,8 @@ public record MinecraftAiConfig(
                 nav == null ? defaults.nav : nav.withDefaults(defaults.nav),
                 pickup == null ? defaults.pickup : pickup.withDefaults(defaults.pickup),
                 conversation == null ? defaults.conversation : conversation.withDefaults(defaults.conversation),
-                storage == null ? defaults.storage : storage.withDefaults(defaults.storage));
+                storage == null ? defaults.storage : storage.withDefaults(defaults.storage),
+                behaviour == null ? defaults.behaviour : behaviour.withDefaults(defaults.behaviour));
     }
 
     public static MinecraftAiConfig defaults() {
@@ -220,7 +223,8 @@ public record MinecraftAiConfig(
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue(), BaritoneCaps.defaults()),
                 new Pickup(2.75D, 2.5D, 8.0D), // measured 1.5/1.0 as too small: tree-drop items with a vertical gap >1 don't get pulled in → countSoFar=0 infinite loop
                 new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100),
-                new Storage(64, 16, 3, 24, true));
+                new Storage(64, 16, 3, 24, true),
+                Behaviour.defaults());
     }
 
     private static void logProfileResolution(ProfileResolver.Resolution resolution,
@@ -473,6 +477,31 @@ public record MinecraftAiConfig(
         }
     }
 
+    /** Source-compatible constructor for callers that predate the behaviour section: it carries the behaviour defaults. */
+    public MinecraftAiConfig(OperatingProfile profile, OperatorCapabilities operatorCapabilities, Llm llm,
+                             Perception perception, Brain brain, Watchdog watchdog, Logging logging,
+                             Survival survival, Combat combat, Night night, Mining mining, Goal goal, Nav nav,
+                             Pickup pickup, Conversation conversation, Storage storage) {
+        this(profile, operatorCapabilities, llm, perception, brain, watchdog, logging, survival, combat, night,
+                mining, goal, nav, pickup, conversation, storage, Behaviour.defaults());
+    }
+
+    /** A copy with another behaviour section (tests swap the pace, targeting, gear, follow and warden switches with it). */
+    public MinecraftAiConfig withBehaviour(Behaviour behaviour) {
+        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage(), behaviour);
+    }
+
+    /** The behaviour switches; never null (a config built without the section carries the defaults). */
+    public Behaviour behaviourOrDefaults() {
+        return behaviour == null ? Behaviour.defaults() : behaviour;
+    }
+
+    /** Same as {@link #behaviourOrDefaults()}: the accessor never returns null. */
+    
+    public Behaviour behaviour() {
+        return behaviourOrDefaults();
+    }
+
     /** Source-compatible constructor for callers that predate the storage section. */
     public MinecraftAiConfig(OperatingProfile profile, OperatorCapabilities operatorCapabilities, Llm llm,
                              Perception perception, Brain brain, Watchdog watchdog, Logging logging,
@@ -619,7 +648,193 @@ public record MinecraftAiConfig(
         }
     }
 
-    public record Pickup(double forceRadiusH, double forceRadiusV, double sweepRadius) {
+    /**
+     * Companion behaviour switches (the {@code "behaviour"} section of {@code minecraftai.json}); both operating profiles use the
+     * same defaults. Every section is null-tolerant: a missing section, key or Boolean is the default, a number that is missing,
+     * zero, negative or NaN is the default. See docs/OPERATING_PROFILES.md ("Behaviour switches").
+     */
+    public record Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden) {
+        public static Behaviour defaults() {
+            return new Behaviour(Pace.defaults(), Targeting.defaults(), Gear.defaults(), Follow.defaults(), Warden.defaults());
+        }
+
+        Behaviour withDefaults(Behaviour defaults) {
+            return new Behaviour(
+                    pace == null ? defaults.paceOrDefaults() : pace.withDefaults(defaults.paceOrDefaults()),
+                    targeting == null ? defaults.targetingOrDefaults() : targeting.withDefaults(defaults.targetingOrDefaults()),
+                    gear == null ? defaults.gearOrDefaults() : gear.withDefaults(defaults.gearOrDefaults()),
+                    follow == null ? defaults.followOrDefaults() : follow.withDefaults(defaults.followOrDefaults()),
+                    warden == null ? defaults.wardenOrDefaults() : warden.withDefaults(defaults.wardenOrDefaults()));
+        }
+
+        /** The pace section; never null. */
+        public Pace paceOrDefaults() {
+            return pace == null ? Pace.defaults() : pace;
+        }
+
+        /** The targeting section; never null. */
+        public Targeting targetingOrDefaults() {
+            return targeting == null ? Targeting.defaults() : targeting;
+        }
+
+        /** The gear section; never null. */
+        public Gear gearOrDefaults() {
+            return gear == null ? Gear.defaults() : gear;
+        }
+
+        /** The follow section; never null. */
+        public Follow followOrDefaults() {
+            return follow == null ? Follow.defaults() : follow;
+        }
+
+        /** The warden section; never null. */
+        public Warden wardenOrDefaults() {
+            return warden == null ? Warden.defaults() : warden;
+        }
+    }
+
+    /**
+     * Walking pace of controller-driven travel. {@code enabled}: the natural sprint/walk/sneak policy at all;
+     * {@code itemUseSlowdown}: the 0.2 movement scale while using an item; {@code movementExhaustion}: hunger from moving;
+     * {@code routeSprintDistance} / {@code routeWalkDistance}: a route sprints from that far to its goal and walks below the
+     * second one; {@code quietZoneCaution}: cap the pace in sculk/warden zones.
+     */
+    public record Pace(Boolean enabled,
+                       Boolean itemUseSlowdown,
+                       Boolean movementExhaustion,
+                       double routeSprintDistance,
+                       double routeWalkDistance,
+                       Boolean quietZoneCaution) {
+        public static Pace defaults() {
+            return new Pace(true, true, true, 8.0D, 4.5D, true);
+        }
+
+        Pace withDefaults(Pace defaults) {
+            double sprint = positiveFiniteOrDefault(routeSprintDistance, defaults.routeSprintDistance);
+            double walk = positiveFiniteOrDefault(routeWalkDistance, defaults.routeWalkDistance);
+            if (walk >= sprint) {
+                // An inverted (or equal) pair would make the pace flap: both fall back together.
+                sprint = defaults.routeSprintDistance;
+                walk = defaults.routeWalkDistance;
+            }
+            return new Pace(
+                    boolOrDefault(enabled, defaults.enabled),
+                    boolOrDefault(itemUseSlowdown, defaults.itemUseSlowdown),
+                    boolOrDefault(movementExhaustion, defaults.movementExhaustion),
+                    sprint,
+                    walk,
+                    boolOrDefault(quietZoneCaution, defaults.quietZoneCaution));
+        }
+
+        public boolean paceEnabled() {
+            return boolOrTrue(enabled, defaults().enabled);
+        }
+
+        public boolean itemUseSlowdownEnabled() {
+            return boolOrTrue(itemUseSlowdown, defaults().itemUseSlowdown);
+        }
+
+        public boolean movementExhaustionEnabled() {
+            return boolOrTrue(movementExhaustion, defaults().movementExhaustion);
+        }
+
+        public boolean quietZoneCautionEnabled() {
+            return boolOrTrue(quietZoneCaution, defaults().quietZoneCaution);
+        }
+    }
+
+    /**
+     * Who counts as an enemy. {@code hostileBots}: a foreign bot (a fake player that is not one of ours) that attacks the owner or a
+     * Minecraft-AI bot is a target; {@code ownerVision}: what the owner can see may nominate such a target (within
+     * {@code ownerVisionRange} blocks and inside the owner's view cone, {@code ownerViewConeDot} = the minimum dot product of the
+     * look vector and the direction, in (0, 1]); {@code aggressorMemoryTicks}: how long a mark lasts after the last hostile act.
+     */
+    public record Targeting(Boolean hostileBots,
+                            Boolean ownerVision,
+                            int aggressorMemoryTicks,
+                            int ownerVisionRange,
+                            double ownerViewConeDot) {
+        public static Targeting defaults() {
+            return new Targeting(true, true, 600, 48, 0.5D);
+        }
+
+        Targeting withDefaults(Targeting defaults) {
+            return new Targeting(
+                    boolOrDefault(hostileBots, defaults.hostileBots),
+                    boolOrDefault(ownerVision, defaults.ownerVision),
+                    positiveOrDefault(aggressorMemoryTicks, defaults.aggressorMemoryTicks),
+                    positiveOrDefault(ownerVisionRange, defaults.ownerVisionRange),
+                    // A dot product lives in [-1, 1]; 0 and below is "unset" (a missing key reads as 0), above 1 is impossible.
+                    ownerViewConeDot > 0.0D && ownerViewConeDot <= 1.0D ? ownerViewConeDot : defaults.ownerViewConeDot);
+        }
+
+        public boolean hostileBotsEnabled() {
+            return boolOrTrue(hostileBots, defaults().hostileBots);
+        }
+
+        public boolean ownerVisionEnabled() {
+            return boolOrTrue(ownerVision, defaults().ownerVision);
+        }
+    }
+
+    /**
+     * Gear choice. {@code worstFirst}: tools, weapons and armour are always the cheapest item that can still do the job
+     * (enchantments add value); the player controls it by taking items out of the bot's inventory. There is no escalation.
+     */
+    public record Gear(Boolean worstFirst) {
+        public static Gear defaults() {
+            return new Gear(true);
+        }
+
+        Gear withDefaults(Gear defaults) {
+            return new Gear(boolOrDefault(worstFirst, defaults.worstFirst));
+        }
+
+        public boolean worstFirstEnabled() {
+            return boolOrTrue(worstFirst, defaults().worstFirst);
+        }
+    }
+
+    /**
+     * Following a player. {@code escortOnly}: a following bot only knocks back what is in melee range and keeps following;
+     * {@code walkGap} / {@code sprintGap}: the follower walks at or below the first gap and sprints from the second one.
+     */
+    public record Follow(Boolean escortOnly, double walkGap, double sprintGap) {
+        public static Follow defaults() {
+            return new Follow(true, 6.0D, 10.0D);
+        }
+
+        Follow withDefaults(Follow defaults) {
+            double walk = positiveFiniteOrDefault(walkGap, defaults.walkGap);
+            double sprint = positiveFiniteOrDefault(sprintGap, defaults.sprintGap);
+            if (walk >= sprint) {
+                walk = defaults.walkGap;
+                sprint = defaults.sprintGap;
+            }
+            return new Follow(boolOrDefault(escortOnly, defaults.escortOnly), walk, sprint);
+        }
+
+        public boolean escortOnlyEnabled() {
+            return boolOrTrue(escortOnly, defaults().escortOnly);
+        }
+    }
+
+    /** Wardens are never fought. {@code sneakAway}: creep away from a calm one (a hunting one is outrun at a sprint). */
+    public record Warden(Boolean sneakAway) {
+        public static Warden defaults() {
+            return new Warden(true);
+        }
+
+        Warden withDefaults(Warden defaults) {
+            return new Warden(boolOrDefault(sneakAway, defaults.sneakAway));
+        }
+
+        public boolean sneakAwayEnabled() {
+            return boolOrTrue(sneakAway, defaults().sneakAway);
+        }
+    }
+
+    public record Pickup(double forceRadiusH,double forceRadiusV, double sweepRadius) {
         Pickup withDefaults(Pickup defaults) {
             return new Pickup(
                     positiveDoubleOrDefault(forceRadiusH, defaults.forceRadiusH),
@@ -714,6 +929,14 @@ public record MinecraftAiConfig(
 
     private static int positiveOrDefault(int value, int defaultValue) {
         return value > 0 ? value : defaultValue;
+    }
+
+    private static double positiveFiniteOrDefault(double value, double defaultValue) {
+        return value > 0.0D && Double.isFinite(value) ? value : defaultValue;
+    }
+
+    private static boolean boolOrTrue(Boolean value, Boolean defaultValue) {
+        return value == null ? Boolean.TRUE.equals(defaultValue) : value;
     }
 
     private static double positiveDoubleOrDefault(double value, double defaultValue) {
