@@ -88,8 +88,8 @@ public final class CombatCore {
     }
 
     /**
-     * {@link #ensureMeleeWeapon(AIPlayerEntity)} against a known fight target (the CombatTask target, an attack order): the target is
-     * judged for weapon adequacy even before it is flagged as an aggressor.
+     * {@link #ensureMeleeWeapon(AIPlayerEntity)} for a known fight target (the CombatTask target, an attack order). The choice is the
+     * best weapon whatever the target: best-first needs no per-target adequacy rule, and wear never counts.
      */
     public static void ensureMeleeWeapon(AIPlayerEntity bot, LivingEntity target) {
         EquipAction.equipWeaponForContext(bot, target);

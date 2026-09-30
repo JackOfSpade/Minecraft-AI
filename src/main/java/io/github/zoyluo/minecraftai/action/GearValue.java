@@ -20,7 +20,7 @@ import net.minecraft.world.item.enchantment.ItemEnchantments;
  * Either way an item is used until it actually breaks, and its successor (the next worst tool, the next best non-tool) takes over.
  *
  * <p>Pure: it reads item stacks only (no world, no player), because {@link ToolSelector#choose} also runs on Baritone's search
- * thread over copied stacks. The one piece of shared state it may read is the {@code behaviour.gear.worstFirst} switch (tools only)
+ * thread over copied stacks. The one piece of shared state it may read is the {@code behaviour.gear.worstFirst} switch (tools, and plain-arrows-first ammunition)
  * through {@link #worstFirstEnabled()}, an immutable config record behind a volatile reference (see {@link MinecraftAiConfig#get()}),
  * so a read from another thread sees a complete, current value. The numbers live in {@link Core}, which needs
  * no Minecraft bootstrap and is unit tested on its own.
@@ -33,7 +33,7 @@ public final class GearValue {
     private GearValue() {
     }
 
-    /** True unless {@code behaviour.gear.worstFirst} (tools only) is switched off. */
+    /** True unless {@code behaviour.gear.worstFirst} (tools, and plain-arrows-first ammunition) is switched off. */
     public static boolean worstFirstEnabled() {
         MinecraftAiConfig config = MinecraftAiConfig.get();
         return config == null || config.behaviour() == null || config.behaviour().gearOrDefaults().worstFirstEnabled();

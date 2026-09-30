@@ -619,13 +619,16 @@ public final class GearWorstFirstGameTests {
         breakHeldAll(bot);
         require(context, OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.TOTEM_OF_UNDYING),
                 "after the last shield broke a totem was not equipped: " + bot.getOffhandItem());
-        // The totem pops: the next totem.
-        bot.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+        // The totem pops for real (a lethal hit, vanilla uses the stack up): the next totem.
+        popTotem(context, bot);
+        require(context, bot.getOffhandItem().isEmpty(), "the totem did not pop: " + bot.getOffhandItem());
         require(context, OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.TOTEM_OF_UNDYING)
                         && InventoryAction.countItem(bot, Items.TOTEM_OF_UNDYING) == 1,
                 "after the first totem popped the next totem was not equipped: " + bot.getOffhandItem());
-        // The last totem pops: nothing.
-        bot.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+        // The last totem pops for real: nothing.
+        popTotem(context, bot);
+        require(context, bot.getOffhandItem().isEmpty() && InventoryAction.countItem(bot, Items.TOTEM_OF_UNDYING) == 0,
+                "the last totem did not pop: " + bot.getOffhandItem());
         require(context, !OffhandPolicy.apply(bot) && bot.getOffhandItem().isEmpty(), "an item came from nowhere: " + bot.getOffhandItem());
         finish(context, bot);
     }
@@ -645,6 +648,52 @@ public final class GearWorstFirstGameTests {
         bot.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.TORCH, 8));
         require(context, !OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.TORCH), "an unmanaged offhand item was replaced");
         finish(context, bot);
+    }
+
+    /**
+     * The armor and offhand pass runs on every tick before the safety net, so it is not skipped while a rescue owns the tick. A bot
+     * under water (NavSafetyNet takes over as soon as it notices) that has no offhand item is handed a totem once the rescue is seen
+     * running: the totem must be in the offhand within a few ticks while the rescue is STILL active, not after it ends.
+     */
+    @GameTest(environment = ENV + "equipment_pass_runs_during_a_water_rescue", maxTicks = 80)
+    public void equipmentPassRunsDuringAWaterRescue(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearRescueGT");
+        clearGear(bot);
+        BlockPos feet = bot.blockPosition().immutable();
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                for (int dy = 0; dy <= 3; dy++) {
+                    context.getLevel().setBlock(feet.offset(dx, dy, dz), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        bot.teleportTo(context.getLevel(), feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        bot.setDeltaMovement(Vec3.ZERO);
+        require(context, bot.getOffhandItem().isEmpty() && InventoryAction.countItem(bot, Items.TOTEM_OF_UNDYING) == 0,
+                "the fixture's bot already had a totem");
+        int[] tick = {0};
+        int[] givenAt = {-1};
+        context.onEachTick(() -> {
+            tick[0]++;
+            boolean rescueActive = io.github.zoyluo.minecraftai.task.NavSafetyNet.INSTANCE.isWaterRescueActive(bot);
+            if (givenAt[0] < 0) {
+                if (rescueActive) {
+                    InventoryAction.giveItem(bot, new ItemStack(Items.TOTEM_OF_UNDYING));
+                    givenAt[0] = tick[0];
+                } else if (tick[0] > 30) {
+                    context.fail(Component.nullToEmpty("the water rescue never started (underwater=" + bot.isUnderWater() + ")"));
+                }
+                return;
+            }
+            if (bot.getOffhandItem().is(Items.TOTEM_OF_UNDYING)) {
+                require(context, rescueActive, "the totem was equipped only after the water rescue ended (tick " + tick[0] + ")");
+                io.github.zoyluo.minecraftai.task.NavSafetyNet.INSTANCE.clear(bot);
+                finish(context, bot);
+            } else if (tick[0] > givenAt[0] + 5) {
+                context.fail(Component.nullToEmpty("no totem in the offhand " + (tick[0] - givenAt[0]) + " ticks after it was given in the middle of a water rescue (rescue active="
+                        + rescueActive + ", underwater=" + bot.isUnderWater() + ")"));
+            }
+        });
     }
 
     /** Through the real tick: a bot that carries a shield and a totem wears the shield in the offhand without being asked, and the totem after it. */
@@ -670,6 +719,20 @@ public final class GearWorstFirstGameTests {
         });
     }
 
+    /**
+     * A lethal hit on a bot that holds a totem in a hand: vanilla pops it (the stack is used up, health and effects are restored).
+     * A fake connection protects a player for 60 ticks until its client "loaded", so the load is accepted first.
+     */
+    private static void popTotem(GameTestHelper context, AIPlayerEntity bot) {
+        if (!bot.connection.hasClientLoaded()) {
+            bot.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket());
+        }
+        bot.invulnerableTime = 0; // a fresh hit, not one swallowed by the invulnerability frames of an earlier one
+        bot.hurtServer(context.getLevel(), context.getLevel().damageSources().generic(), 1000.0F);
+        require(context, bot.isAlive(), "the lethal hit killed the bot: the totem did not protect it");
+        bot.setHealth(bot.getMaxHealth());
+    }
+
     private static void breakHeldAll(AIPlayerEntity bot) {
         while (!bot.getOffhandItem().isEmpty()) {
             breakHeld(bot, EquipmentSlot.OFFHAND);
@@ -678,27 +741,45 @@ public final class GearWorstFirstGameTests {
 
     // ---------------------------------------------------------------------------------------------------------- ranged: next best on break
 
-    /** The best bow is held until it breaks, and the next best ranged weapon (a crossbow) is chosen the moment it is gone. */
+    /**
+     * The best ranged weapon is held until it breaks, however worn, and the next best one is chosen the moment it is gone: a Power V
+     * bow at its last use, then a Quick Charge III crossbow that is ALSO at its last use (a worn crossbow is still used until it
+     * breaks, ahead of a fresh plain bow), then the plain bow. Each step names the specific weapon expected.
+     */
     @GameTest(environment = ENV + "ranged_weapon_breaks_then_the_next_best_is_chosen", maxTicks = 40)
     public void rangedWeaponBreaksThenTheNextBestIsChosen(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearRangedBreakGT");
         clearGear(bot);
         ItemStack power = enchanted(context, Items.BOW, Enchantments.POWER, 5);
         power.setDamageValue(power.getMaxDamage() - 1);
+        ItemStack quickCharge = enchanted(context, Items.CROSSBOW, Enchantments.QUICK_CHARGE, 3);
+        quickCharge.setDamageValue(quickCharge.getMaxDamage() - 1);
         InventoryAction.giveItem(bot, power);
-        InventoryAction.giveItem(bot, new ItemStack(Items.CROSSBOW));
+        InventoryAction.giveItem(bot, quickCharge);
         InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 8));
-        Optional<EquipAction.RangedLoadout> loadout = EquipAction.equipBestRangedLoadout(bot, null);
-        require(context, loadout.isPresent() && bot.getMainHandItem().is(Items.BOW) && bot.getMainHandItem().isEnchanted(),
+
+        Optional<EquipAction.RangedLoadout> first = EquipAction.equipBestRangedLoadout(bot, null);
+        require(context, first.isPresent() && bot.getMainHandItem().is(Items.BOW)
+                        && GearValue.enchantmentLevel(bot.getMainHandItem(), "power") == 5
+                        && GearValue.remaining(bot.getMainHandItem()) == 1,
                 "the Power V bow at its last use was not the chosen ranged weapon: " + bot.getMainHandItem());
         breakHeld(bot, EquipmentSlot.MAINHAND);
         require(context, bot.getMainHandItem().isEmpty(), "the bow did not break");
-        loadout.ifPresent(lease -> lease.restore(bot));
-        OptionalInt next = EquipAction.bestRangedSlot(bot, null);
-        require(context, next.isPresent() && !bot.getInventory().getItem(next.getAsInt()).isEmpty()
-                        && !bot.getInventory().getItem(next.getAsInt()).isEnchanted(),
-                "no next best ranged weapon after the bow broke: " + next);
+        first.ifPresent(lease -> lease.restore(bot));
+
+        Optional<EquipAction.RangedLoadout> second = EquipAction.equipBestRangedLoadout(bot, null);
+        require(context, second.isPresent() && bot.getMainHandItem().is(Items.CROSSBOW)
+                        && GearValue.enchantmentLevel(bot.getMainHandItem(), "quick_charge") == 3
+                        && GearValue.remaining(bot.getMainHandItem()) == 1,
+                "after the Power V bow broke the next best was not the Quick Charge III crossbow (at its last use): " + bot.getMainHandItem());
+        breakHeld(bot, EquipmentSlot.MAINHAND);
+        require(context, bot.getMainHandItem().isEmpty(), "the crossbow did not break");
+        second.ifPresent(lease -> lease.restore(bot));
+
+        Optional<EquipAction.RangedLoadout> third = EquipAction.equipBestRangedLoadout(bot, null);
+        require(context, third.isPresent() && bot.getMainHandItem().is(Items.BOW) && !bot.getMainHandItem().isEnchanted(),
+                "after both enchanted weapons broke the plain bow was not chosen: " + bot.getMainHandItem());
         finish(context, bot);
     }
 

@@ -183,7 +183,7 @@ class GearValueTest {
     void theDangerWatcherResupplyNeedsASingleUseLeftNotAWornTool() throws IOException {
         String watcher = read("task/DangerWatcher.java");
         assertFalse(watcher.contains("max * 0.10D"), "no ten-percent wear rule in the danger layer");
-        assertTrue(watcher.contains("ItemStackUtil.isNearlyBroken(stack)"));
+        assertTrue(watcher.contains("ItemStackUtil.isNearlyBroken(held)"));
     }
 
     @Test
@@ -192,6 +192,9 @@ class GearValueTest {
         int warn = tick.indexOf("DurabilityWarnings.tickBot(bot);");
         assertTrue(warn > 0, "the warning pass is wired");
         assertTrue(warn < tick.indexOf("NavSafetyNet.INSTANCE.tickBot(server, bot)"), "it runs before the safety net can `continue` the tick");
+        int equip = tick.indexOf("EquipAction.autoEquipArmor(bot);");
+        assertTrue(equip > warn && equip < tick.indexOf("NavSafetyNet.INSTANCE.tickBot(server, bot)"),
+                "the armor and offhand pass runs next to the warnings, before the safety net, so a lava or drowning rescue does not skip it");
         String warnings = read("action/DurabilityWarnings.java");
         assertTrue(warnings.contains("BrainCoordinator.INSTANCE.sendBotReply("), "the warning uses the bot's ordinary chat path");
         for (String forbidden : new String[] {"TaskManager", "pauseFor", "equipFromSlot", "submit(", "AsyncDecisionExecutor"}) {

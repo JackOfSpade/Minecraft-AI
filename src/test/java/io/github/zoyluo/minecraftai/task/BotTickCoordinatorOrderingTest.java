@@ -67,16 +67,20 @@ class BotTickCoordinatorOrderingTest {
                 "            if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {\n"
                         + "                continue;\n"
                         + "            }\n"));
-        // The equipment pass (armor, then the offhand) runs on the background cadence BEFORE the mission executor, which owns the tick for
-        // a whole mission; it is paused while a player has the bot's inventory screen open (it edits by hand).
-        int equipment = source.indexOf("            if (!handled && runBackground\n"
-                + "                    && !io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {\n");
-        assertTrue(equipment > 0, "the equipment pass exists and is gated by the inventory screen");
+        // The equipment pass (armor, then the offhand) runs on every tick BEFORE the safety net, the danger scan and the mission executor
+        // (which owns the tick for a whole mission), so a broken piece or a popped totem is replaced during a mission and in the middle of
+        // a lava or drowning rescue too; it is paused only while a player has the bot's inventory screen open (it edits by hand).
+        int equipment = source.indexOf("            if (!io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {\n"
+                + "                io.github.zoyluo.minecraftai.action.EquipAction.autoEquipArmor(bot);\n");
+        assertTrue(equipment > 0, "the equipment pass exists and is gated by the inventory screen only");
         int goalExecutor = source.indexOf("GoalExecutor.INSTANCE.tickBot(server, bot)");
-        assertTrue(equipment < goalExecutor, "the equipment pass runs before the mission executor");
-        String equipmentBlock = source.substring(equipment, goalExecutor);
+        int safetyNet = source.indexOf("NavSafetyNet.INSTANCE.tickBot(server, bot)");
+        assertTrue(equipment < safetyNet && safetyNet < goalExecutor, "the equipment pass runs before the safety net and the mission executor");
+        String equipmentBlock = source.substring(equipment, source.indexOf("}", equipment));
         assertTrue(equipmentBlock.contains("io.github.zoyluo.minecraftai.action.EquipAction.autoEquipArmor(bot);"));
         assertTrue(equipmentBlock.contains("io.github.zoyluo.minecraftai.action.OffhandPolicy.apply(bot);"));
+        assertFalse(equipmentBlock.contains("handled") || equipmentBlock.contains("runBackground"),
+                "no other gate: the pass never consumes the tick and needs no scan cadence");
         // The background block still ticks the idle coordinator.
         int background = source.indexOf("            if (!handled && runBackground) {\n");
         assertTrue(background > goalExecutor, "the background block exists");

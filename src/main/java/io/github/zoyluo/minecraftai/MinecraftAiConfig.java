@@ -966,7 +966,8 @@ public record MinecraftAiConfig(
      * Gear choice. {@code worstFirst} applies to TOOLS only (pickaxe, shovel, hoe, shears, fishing rod, an axe that chops): a tool is
      * the cheapest one that can still do the job (enchantments add value), used until it breaks, then the next worst takes over.
      * NON-TOOLS (melee weapons, bows, crossbows, shields, armour, elytra) are always best-first and are replaced by the next best
-     * one when they break; that has no switch. The player controls both by taking items out of the bot's inventory.
+     * one when they break; that has no switch. The same switch also keeps plain arrows before tipped and spectral ones (ammunition,
+     * not gear). The player controls both by taking items out of the bot's inventory.
      * {@code durabilityWarnings}: the companion tells its owner in chat, once per item, when an eligible item drops below
      * {@code thresholdPercent} of its durability. Chat only, it never interrupts anything.
      */
@@ -985,7 +986,10 @@ public record MinecraftAiConfig(
                             : durabilityWarnings.withDefaults(defaults.durabilityWarningsOrDefaults()));
         }
 
-        /** Tools are used worst-first (the only thing this switch decides). */
+        /**
+         * Tools are used worst-first, and ammunition plain-arrows-first (arrows are ammunition, not gear: the cheapest kind goes before
+         * tipped and spectral ones). Nothing else: non-tools are always best-first.
+         */
         public boolean worstFirstEnabled() {
             return boolOrTrue(worstFirst, defaults().worstFirst);
         }

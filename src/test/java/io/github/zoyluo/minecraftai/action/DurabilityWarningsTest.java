@@ -33,22 +33,28 @@ class DurabilityWarningsTest {
     @Test
     void theEligibleItemsAreDiamondAndNetheriteGearPlusTheItemsWithNoOreTier() {
         // What vanilla repairs with a diamond or a netherite ingot (the repairable component) is passed in as the flag.
-        assertTrue(DurabilityWarnings.Core.isEligible("diamond_pickaxe", true));
-        assertTrue(DurabilityWarnings.Core.isEligible("netherite_chestplate", true));
-        assertFalse(DurabilityWarnings.Core.isEligible("iron_pickaxe", false));
-        assertFalse(DurabilityWarnings.Core.isEligible("golden_sword", false));
-        assertFalse(DurabilityWarnings.Core.isEligible("stone_axe", false));
-        assertFalse(DurabilityWarnings.Core.isEligible("leather_helmet", false));
-        assertFalse(DurabilityWarnings.Core.isEligible("turtle_helmet", false));
+        assertTrue(DurabilityWarnings.Core.isEligible("minecraft", "diamond_pickaxe", true));
+        assertTrue(DurabilityWarnings.Core.isEligible("minecraft", "netherite_chestplate", true));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "iron_pickaxe", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "golden_sword", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "stone_axe", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "leather_helmet", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "turtle_helmet", false));
         // The items without an ore tier: shield, bow, crossbow, trident, mace, elytra, fishing rod.
         for (String path : new String[] {"shield", "bow", "crossbow", "trident", "mace", "elytra", "fishing_rod"}) {
-            assertTrue(DurabilityWarnings.Core.isEligible(path, false), path);
+            assertTrue(DurabilityWarnings.Core.isEligible("minecraft", path, false), path);
         }
         // Items that merely share a word are not eligible (no substring matching).
-        assertFalse(DurabilityWarnings.Core.isEligible("shears", false));
-        assertFalse(DurabilityWarnings.Core.isEligible("carrot_on_a_stick", false));
-        assertFalse(DurabilityWarnings.Core.isEligible("flint_and_steel", false));
-        assertFalse(DurabilityWarnings.Core.isEligible(null, false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "shears", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "carrot_on_a_stick", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", "flint_and_steel", false));
+        // The namespace counts: another mod's shield or bow is not one of the covered vanilla items (it is eligible only if vanilla's
+        // repairable component says diamond or netherite).
+        assertFalse(DurabilityWarnings.Core.isEligible("othermod", "shield", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("othermod", "bow", false));
+        assertTrue(DurabilityWarnings.Core.isEligible("othermod", "shield", true));
+        assertFalse(DurabilityWarnings.Core.isEligible(null, "shield", false));
+        assertFalse(DurabilityWarnings.Core.isEligible("minecraft", null, false));
     }
 
     @Test

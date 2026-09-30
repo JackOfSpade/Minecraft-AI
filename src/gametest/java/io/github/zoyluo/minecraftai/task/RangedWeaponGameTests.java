@@ -388,6 +388,11 @@ public final class RangedWeaponGameTests {
         setKit(bot, new ItemStack(Items.BOW), wornPlain, new ItemStack(Items.ARROW, 8));
         require(context, chosen(bot, zombie).getDamageValue() == wornDamage,
                 "a fresh bow was used before the equal but worn one: " + chosen(bot, zombie).getDamageValue());
+        // 3c. The same for a crossbow: a Quick Charge III crossbow at its last use still goes before a fresh plain bow.
+        ItemStack wornCrossbow = enchanted(context, Items.CROSSBOW, Enchantments.QUICK_CHARGE, 3);
+        wornCrossbow.setDamageValue(wornCrossbow.getMaxDamage() - 1);
+        setKit(bot, new ItemStack(Items.BOW), wornCrossbow, new ItemStack(Items.ARROW, 8));
+        require(context, chosen(bot, zombie).is(Items.CROSSBOW), "a crossbow at one use left was skipped: " + chosen(bot, zombie));
         // 4. No arrows at all: a bow cannot fire, a loaded crossbow can (its shot needs no ammunition).
         ItemStack loaded = new ItemStack(Items.CROSSBOW);
         loaded.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(new ItemStack(Items.ARROW)));

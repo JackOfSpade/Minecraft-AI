@@ -337,14 +337,12 @@ public final class GoalPlanner {
         if (stack.isEmpty()) {
             return;
         }
-        // A tool/piece of equipment about to break (same threshold as ToolSelector: damage>=max-1)
-        // is not counted toward inventory: pick-selection safety would never use it anyway, and if
-        // the planner treated it as "have a pick" it would not craft a new one -> deadlock between
-        // mining's need_better_tool and "already have a pick" (measured in real_armor: mining 26 iron
-        // wears the stone pick down to near-breaking; being counted as "have a stone pick" meant no
-        // replacement was crafted -> mine_ore repeatedly failed with need_better_tool:stone_pickaxe).
-        // Not counting it -> ensurePickaxeTier crafts a fresh stone pick from cobblestone in
-        // inventory, pick-selection safety switches to the new one, and the chain continues.
+        // A tool/piece of equipment with a single use left (damage>=max-1, the boundary ToolTier and the OreDig channel use) is not
+        // counted toward inventory FOR PLANNING: mining's need_better_tool (ToolTier reports such a pick as none) and "already have a
+        // pick" must agree, otherwise the planner never crafts the replacement (measured in real_armor: mining 26 iron wears the stone
+        // pick down to its last use; counted as "have a stone pick" no replacement was crafted and mine_ore repeatedly failed with
+        // need_better_tool:stone_pickaxe). Not counting it -> ensurePickaxeTier crafts a fresh stone pick ahead of the break and the
+        // chain continues. This is planning only: the item itself is never set aside, ToolSelector still uses it until it breaks.
         if (stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1) {
             return;
         }

@@ -46,8 +46,9 @@ public final class DangerWatcherLowHealthGameTests {
         bot.setHealth(bot.getMaxHealth());
         bot.getFoodData().setFoodLevel(20);
 
-        // Give the damaged pick first so it is genuinely held. Raw 33 means exactly 32 usable
-        // breaks: sufficient for this mission, but well inside DangerWatcher's generic 10% band.
+        // Give the damaged pick first so it is genuinely held. Raw 33 means exactly 32 usable breaks: sufficient for this mission. It is
+        // far above the single use left at which the generic resupply starts, so this is the regression proof that nothing swaps or crafts
+        // around the exact-budget pick; the one-use variant that really exercises the ownership exclusions is the next test.
         ItemStack diamond = new ItemStack(Items.DIAMOND_PICKAXE);
         diamond.setDamageValue(diamond.getMaxDamage() - 33);
         InventoryAction.giveItem(bot, diamond);
@@ -87,6 +88,139 @@ public final class DangerWatcherLowHealthGameTests {
         requireUnpreempted(context, bot, create, "paused CreateObsidianTask");
         require(context, MiningServiceTask.usableDurability(bot.getMainHandItem()) == 32,
                 "paused exact-budget owner triggered generic local tool crafting");
+        despawnAndComplete(context, bot);
+    }
+
+    /**
+     * The ownership exclusions at the threshold that really starts a generic resupply: the only pick is a diamond one with a single use
+     * left and nothing else of its kind is carried, so a bare scan WOULD start a ResupplyTask (the control is
+     * {@code rawOnePickOnNonOwnerStillTriggersGenericResupply}). An active MiningService, an active CreateObsidian and a paused
+     * CreateObsidian each own that pick's break transaction and must not be preempted, and the pick stays as it was.
+     */
+    @GameTest(maxTicks = 40)
+    public void oneUsePickOwnedByAMiningTransactionIsNotPreemptedByGenericResupply(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "ObsidianOneUseOwnerGT", 2);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        ItemStack diamond = new ItemStack(Items.DIAMOND_PICKAXE);
+        diamond.setDamageValue(diamond.getMaxDamage() - 1);
+        InventoryAction.giveItem(bot, diamond);
+        InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 2));
+        InventoryAction.giveItem(bot, new ItemStack(Items.WATER_BUCKET));
+        InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 52));
+        InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 24));
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_PICKAXE) && rawDurability(bot.getMainHandItem()) == 1
+                        && InventoryAction.countItem(bot, Items.DIAMOND_PICKAXE) == 1
+                        && InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 0,
+                "fixture did not hold the only pick, a diamond one with a single use left");
+
+        MiningServiceTask service = new MiningServiceTask(
+                Set.of(Blocks.OBSIDIAN), Map.of(),
+                ServicePolicy.obsidianPreflight(1));
+        TaskManager.INSTANCE.assign(bot, service,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_one_use_service"));
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        requireUnpreempted(context, bot, service, "MiningServiceTask");
+
+        TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_one_use_service_probe_complete");
+        CreateObsidianTask create = new CreateObsidianTask(1);
+        TaskManager.INSTANCE.assign(bot, create,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_one_use_create_obsidian"));
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        requireUnpreempted(context, bot, create, "CreateObsidianTask");
+
+        TaskManager.INSTANCE.pauseFor(bot, "gametest_one_use_safety_pause");
+        require(context, TaskManager.INSTANCE.peekPaused(bot).orElse(null) == create,
+                "fixture did not preserve the paused CreateObsidianTask");
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        requireUnpreempted(context, bot, create, "paused CreateObsidianTask");
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_PICKAXE) && rawDurability(bot.getMainHandItem()) == 1
+                        && InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 0,
+                "a mining-transaction owner's last-use pick was swapped, or a generic local craft ran");
+        despawnAndComplete(context, bot);
+    }
+
+    /**
+     * Use it until it breaks: a one-use WEAPON, bow, crossbow, trident or mace never starts a generic resupply and is never swapped for a
+     * fresher stack; only a real tool does (see {@code lastUseOfAToolWithNoSuccessor}).
+     */
+    @GameTest(maxTicks = 60)
+    public void oneUseNonToolsNeverStartAGenericResupply(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "OneUseNonToolGT", 2);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        for (net.minecraft.world.item.Item item : new net.minecraft.world.item.Item[] {
+                Items.WOODEN_SWORD, Items.IRON_SWORD, Items.BOW, Items.CROSSBOW, Items.TRIDENT, Items.MACE}) {
+            bot.getInventory().clearContent();
+            ItemStack worn = new ItemStack(item);
+            worn.setDamageValue(worn.getMaxDamage() - 1);
+            bot.getInventory().setItem(0, worn);
+            // A fresher stack of the same item is carried too: it must not be swapped in for the one-use one.
+            bot.getInventory().setItem(1, new ItemStack(item));
+            bot.getInventory().setSelectedSlot(0);
+            HoldingTask work = new HoldingTask();
+            TaskManager.INSTANCE.assign(bot, work,
+                    TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_one_use_non_tool_" + item));
+            DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+            require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == work && !TaskManager.INSTANCE.hasPaused(bot)
+                            && work.state() == TaskState.RUNNING,
+                    "a one-use " + item + " started a generic resupply: "
+                            + TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse("idle"));
+            require(context, bot.getMainHandItem().is(item) && rawDurability(bot.getMainHandItem()) == 1,
+                    "the one-use " + item + " was swapped away for the fresher stack: " + bot.getMainHandItem());
+            TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_one_use_non_tool_done");
+        }
+        despawnAndComplete(context, bot);
+    }
+
+    /**
+     * A one-use TOOL with another tool of its kind in the pack is simply used up (the next worst takes over when it breaks): no
+     * resupply, no swap. A one-use axe counts as a tool only while a task is working, and with no other axe it does start one.
+     */
+    @GameTest(maxTicks = 60)
+    public void oneUseToolWithASuccessorIsUsedUpNotSwapped(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "OneUseToolSuccessorGT", 2);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        ItemStack worn = new ItemStack(Items.WOODEN_PICKAXE);
+        worn.setDamageValue(worn.getMaxDamage() - 1);
+        bot.getInventory().setItem(0, worn);
+        bot.getInventory().setItem(1, new ItemStack(Items.STONE_PICKAXE));
+        bot.getInventory().setSelectedSlot(0);
+        HoldingTask work = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, work,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_one_use_tool_successor"));
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == work && !TaskManager.INSTANCE.hasPaused(bot),
+                "a one-use pick with a stone pick in the pack started a resupply: "
+                        + TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse("idle"));
+        require(context, bot.getMainHandItem().is(Items.WOODEN_PICKAXE) && rawDurability(bot.getMainHandItem()) == 1,
+                "the one-use pick was swapped for the fresher one before it broke: " + bot.getMainHandItem());
+        // It breaks: the next tool takes over through the ordinary tool choice, still no resupply.
+        bot.getMainHandItem().hurtAndBreak(1, bot, net.minecraft.world.entity.EquipmentSlot.MAINHAND);
+        require(context, bot.getMainHandItem().isEmpty(), "the pick did not break");
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == work && !TaskManager.INSTANCE.hasPaused(bot),
+                "a resupply started after the pick broke although a stone pick was carried");
+        TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_one_use_tool_successor_done");
+
+        // A one-use axe, no other axe: a tool while a task works (resupply), nothing while the bot is idle.
+        bot.getInventory().clearContent();
+        ItemStack axe = new ItemStack(Items.WOODEN_AXE);
+        axe.setDamageValue(axe.getMaxDamage() - 1);
+        bot.getInventory().setItem(0, axe);
+        bot.getInventory().setSelectedSlot(0);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        require(context, !(TaskManager.INSTANCE.getActive(bot).orElse(null) instanceof ResupplyTask),
+                "an idle bot started a resupply for a one-use axe");
+        HoldingTask chopping = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, chopping,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_one_use_axe_working"));
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) instanceof ResupplyTask,
+                "a working bot's last-use axe (no other axe) did not start a resupply: "
+                        + TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse("idle"));
         despawnAndComplete(context, bot);
     }
 
@@ -212,15 +346,18 @@ public final class DangerWatcherLowHealthGameTests {
         AIPlayerEntity bot = spawnOnPlatform(context, "CraftHeldPickOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
         bot.getFoodData().setFoodLevel(20);
+        // One use left, the threshold that starts a generic resupply, and no other pickaxe carried: a bare scan would start one (see
+        // rawOnePickOnNonOwnerStillTriggersGenericResupply), so the CraftTask exclusion is what keeps the sealed craft inputs intact.
         ItemStack nearlyBroken = new ItemStack(Items.STONE_PICKAXE);
-        nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 2);
+        nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 1);
         InventoryAction.giveItem(bot, nearlyBroken);
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 15));
         InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 10));
         require(context, bot.getMainHandItem().is(Items.STONE_PICKAXE)
-                        && rawDurability(bot.getMainHandItem()) == 2,
-                "fixture did not hold the nearly-broken stone pick");
+                        && rawDurability(bot.getMainHandItem()) == 1
+                        && InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 1,
+                "fixture did not hold the only pick, a stone one with a single use left");
 
         CraftTask craft = new CraftTask(Items.STONE_PICKAXE, 5);
         TaskManager.INSTANCE.assign(bot, craft,
@@ -317,6 +454,12 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
+    /**
+     * Premise since the gear rule (use it until it breaks): a weapon at its last use is never a resupply trigger for ANY task (see
+     * {@code oneUseNonToolsNeverStartAGenericResupply}), so no ResupplyTask can travel for it any more. Earlier the suppression here came
+     * from the paused mining owner alone; now it holds for every state. The assertions are unchanged: the paused owner is resumed in
+     * place and nothing starts a base trip.
+     */
     @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_paused_mining_owner_does_not_travel_for_damaged_combat_weapon", maxTicks = 40)
     public void pausedMiningOwnerDoesNotTravelForDamagedCombatWeapon(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PausedMineWeaponBoundaryGT", 2);

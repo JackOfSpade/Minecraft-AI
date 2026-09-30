@@ -208,11 +208,14 @@ public final class ToolSelector {
 
 
     /**
-     * OreDig channel policy: use the lowest pickaxe that can harvest the block (one with a single use left is left out only here: the channel serves exact break/pickup/return transactions, and ToolTier reports a raw-one pick as no pick; elsewhere a worn tool is used until it breaks). With {@code behaviour.gear.worstFirst}
-     * (the default) that is the lowest {@link GearValue} (a wooden or golden pick digs stone and coal, a stone pick iron ore, an
-     * iron pick diamond, obsidian selects diamond) with no stone floor: missions are worst-first too. With it off, the earlier
-     * policy applies: never below stone for ordinary rock, then the lowest tier and the most durable pick. Ordinary rock is never
-     * dug with an iron or diamond pick in either mode. Other BlockMiner users keep {@link #equipBestTool} unchanged.
+     * OreDig channel policy: use the lowest pickaxe that can harvest the block. A pick with a single use left is left out here and
+     * only here: the channel serves exact break/pickup/return transactions, and ToolTier reports such a pick as no pick; everywhere
+     * else a worn tool is used until it breaks. With {@code behaviour.gear.worstFirst} (the default) the choice is the lowest
+     * {@link GearValue} (a wooden or golden pick digs stone and coal, a stone pick iron ore, an iron pick diamond, obsidian selects
+     * diamond) with no stone floor: missions are worst-first too. With it off, the earlier policy applies: never below stone for
+     * ordinary rock, then the lowest tier. In both modes, of two equal picks the more worn one goes first (used up, never set aside
+     * for a fresh one). Ordinary rock is never dug with an iron or diamond pick in either mode. Other BlockMiner users keep
+     * {@link #equipBestTool} unchanged.
      */
     public static Selection equipMiningChannelTool(AIPlayerEntity player, BlockState state) {
         if (!state.requiresCorrectToolForDrops()) {
@@ -293,7 +296,7 @@ public final class ToolSelector {
     /**
      * Is the candidate pickaxe better for the channel than the best so far? Worst-first: no Silk Touch, then the lower
      * {@link GearValue}, then the more worn one (the first candidate always wins). Best-first (the earlier policy): the lower tier,
-     * then the more durable one.
+     * then the more worn one as well (a worn pick is used up, never set aside for a fresh one).
      */
     private static boolean channelBetter(boolean worstFirst, int tier, int remaining, ItemStack stack,
                                          int bestTier, int bestRemaining, ItemStack bestStack) {
@@ -301,7 +304,7 @@ public final class ToolSelector {
             return true;
         }
         if (!worstFirst) {
-            return tier < bestTier || (tier == bestTier && remaining > bestRemaining);
+            return tier < bestTier || (tier == bestTier && remaining < bestRemaining);
         }
         boolean silk = GearValue.hasSilkTouch(stack);
         boolean bestSilk = GearValue.hasSilkTouch(bestStack);

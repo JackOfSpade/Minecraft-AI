@@ -729,7 +729,11 @@ public final class DangerWatcher {
         // still be selected. Generic tool resupply here would pause that atomic craft and consume
         // the sealed stick/stone inputs before the five-pick hand-off is complete.
         boolean taskDoesNotUseHeldTool = active.filter(CraftTask.class::isInstance).isPresent();
-        if (isNearlyBroken(mainHand)
+        // Only a TOOL at its last use with no successor starts a generic resupply (see lastUseOfAToolWithNoSuccessor): a weapon, bow,
+        // crossbow, shield or armor piece is used until it breaks and never triggers one, and a one-use tool with another tool of its
+        // kind in the pack is simply used up (the next worst takes over when it breaks).
+        boolean lastToolUse = lastUseOfAToolWithNoSuccessor(bot, mainHand, active.isPresent() || paused.isPresent());
+        if (lastToolUse
                 && mainHand.is(ItemTags.PICKAXES)
                 && pausedDigDownOwnsReturnDebt
                 && !taskDoesNotUseHeldTool) {
@@ -737,9 +741,9 @@ public final class DangerWatcher {
             // safety displacement. Service it from carried materials only; travelling to a
             // remembered base would compound that displacement. MiningService/CreateObsidian/
             // OreDig retain their own exact-budget or typed, persisted service boundaries instead
-            // of spending materials through this generic ten-percent threshold.
+            // of spending materials through this generic last-use threshold.
             task = ResupplyTask.toolInPlace(mainHand.getItem());
-        } else if (isNearlyBroken(mainHand)
+        } else if (lastToolUse
                 && !activeTaskOwnsMiningTransaction
                 && !pausedTaskOwnsMiningTransaction
                 && !taskDoesNotUseHeldTool) {
@@ -1492,11 +1496,41 @@ public final class DangerWatcher {
         return task instanceof EvadeTask ? 80 : 40;
     }
 
-    private static boolean isNearlyBroken(ItemStack stack) {
-        // Use it until it breaks: wear alone never starts a resupply (the old rule fired below 10 percent of the maximum, which swapped
-        // a worn tool for a fresher one and interrupted the work; the owner gets a chat warning instead, see DurabilityWarnings). Only a
-        // stack with a single use left counts, the same threshold ToolTier and ToolSelector use to treat a pick as already gone.
-        return !stack.isEmpty() && io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(stack);
+    /**
+     * True when {@code held} is a TOOL (pickaxe, shovel, hoe, shears, or an axe while a task is working) that is down to its last use
+     * AND the bot carries no other usable tool of that kind to take over when it breaks: the one case where a resupply has to start
+     * before the break. Wear alone never starts one (that would swap or interrupt an item because it is worn, and the owner gets a chat
+     * warning instead, see DurabilityWarnings); weapons, bows, crossbows, shields, armor, tridents and maces are never tools here, they
+     * are used until they break and the next best is equipped by EquipAction. A successor is any other non-raw-one stack of the same
+     * tool kind (main inventory or offhand); which tier a mission needs is the planner's business, not this reflex's.
+     */
+    static boolean lastUseOfAToolWithNoSuccessor(AIPlayerEntity bot, ItemStack held, boolean working) {
+        if (held.isEmpty() || !io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(held)) {
+            return false;
+        }
+        java.util.function.Predicate<ItemStack> sameKind;
+        if (held.is(ItemTags.PICKAXES)) {
+            sameKind = stack -> stack.is(ItemTags.PICKAXES);
+        } else if (held.is(ItemTags.SHOVELS)) {
+            sameKind = stack -> stack.is(ItemTags.SHOVELS);
+        } else if (held.is(ItemTags.HOES)) {
+            sameKind = stack -> stack.is(ItemTags.HOES);
+        } else if (held.is(net.minecraft.world.item.Items.SHEARS)) {
+            sameKind = stack -> stack.is(net.minecraft.world.item.Items.SHEARS);
+        } else if (working && held.is(ItemTags.AXES)) {
+            sameKind = stack -> stack.is(ItemTags.AXES);
+        } else {
+            return false;
+        }
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (stack != held && !stack.isEmpty() && sameKind.test(stack)
+                    && !io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(stack)) {
+                return false;
+            }
+        }
+        ItemStack offhand = bot.getOffhandItem();
+        return offhand == held || offhand.isEmpty() || !sameKind.test(offhand)
+                || io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(offhand);
     }
 
     /** Natural regeneration only runs at food >= 18 (vanilla FoodData). */

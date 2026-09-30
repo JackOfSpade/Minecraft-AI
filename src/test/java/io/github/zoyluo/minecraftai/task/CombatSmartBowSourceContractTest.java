@@ -53,7 +53,10 @@ final class CombatSmartBowSourceContractTest {
         String equip = read("action/EquipAction.java");
 
         assertTrue(equip.contains("inventory.getNonEquipmentItems().set(choice.mainSlot(), displacedOffhand)"));
-        assertTrue(equip.contains("ItemStack.matches(inventory.getNonEquipmentItems().get(restoreSlot), storedOffhand)"));
+        // The restore still verifies that the stored stack is the one it put there (same item, count and components) before it overwrites
+        // anything; only the durability warning's own "already warned" marker, which may have been set or cleared in the pack, is ignored.
+        assertTrue(equip.contains("ItemStack.matches(DurabilityWarnings.withoutMarker(inventory.getNonEquipmentItems().get(restoreSlot)),"));
+        assertTrue(equip.contains("DurabilityWarnings.withoutMarker(storedOffhand)"));
         assertTrue(equip.contains("ItemStack.isSameItemSameComponents(currentOffhand, ammunition)"));
         assertFalse(equip.contains("drop("),
                 "ranged preparation/restoration must be an inventory swap, never a drop");

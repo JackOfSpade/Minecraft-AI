@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.GearValue;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
@@ -19,6 +20,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.projectile.FishingHook;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -229,7 +231,25 @@ public final class FishTask extends AbstractTask {
         transition(Phase.FIND_WATER);
     }
 
+    /**
+     * Fishing rods are tools, so they go worst-first (the lowest {@link GearValue}, an enchanted rod last; of two equal ones the
+     * more worn first) and a rod is used until it breaks, then the next worst takes over. A rod in the offhand is only used when the
+     * pack holds none.
+     */
     private boolean equipRod(AIPlayerEntity bot) {
+        var stacks = bot.getInventory().getNonEquipmentItems();
+        int chosen = -1;
+        for (int slot = 0; slot < stacks.size(); slot++) {
+            ItemStack stack = stacks.get(slot);
+            if (stack.is(Items.FISHING_ROD) && (chosen < 0 || GearValue.Core.compare(
+                    GearValue.toolValue(stack), GearValue.remaining(stack),
+                    GearValue.toolValue(stacks.get(chosen)), GearValue.remaining(stacks.get(chosen))) < 0)) {
+                chosen = slot;
+            }
+        }
+        if (chosen >= 0) {
+            return InventoryAction.equipFromSlot(bot, chosen) >= 0;
+        }
         return InventoryAction.findItem(bot, Items.FISHING_ROD)
                 .stream()
                 .anyMatch(slot -> InventoryAction.equipFromSlot(bot, slot) >= 0);

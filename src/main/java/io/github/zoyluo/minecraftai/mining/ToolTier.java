@@ -112,11 +112,11 @@ public final class ToolTier {
         return false;
     }
 
-    // Durability gate: a pickaxe with 1 durability left is treated as having none at all -- discovering
-    // mid-dig that the pickaxe just broke is the worst possible moment (left empty-handed against deep-layer
-    // ore), so we trip need_better_tool one point early and let GoalExecutor's existing replan chain source
-    // a replacement pickaxe on the spot. This matches ToolSelector's "near-exhausted score of 0.001" at the
-    // same threshold, keeping the two layers consistent.
+    // Planning gate: a pickaxe with 1 durability left is treated as having none at all -- discovering mid-dig that the
+    // pickaxe just broke is the worst possible moment (left empty-handed against deep-layer ore), so we trip
+    // need_better_tool one use early and let GoalExecutor's existing replan chain source a replacement pickaxe on the spot.
+    // The same boundary is used by GoalPlanner's inventory count and the OreDig channel tool choice. It is not a wear rule: the
+    // general tool choice (ToolSelector.choose) still uses such a pick until it breaks, and the next worst takes over.
     private static boolean nearlyBroken(ItemStack stack) {
         return stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1;
     }

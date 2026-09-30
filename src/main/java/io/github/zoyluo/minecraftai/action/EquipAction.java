@@ -588,7 +588,10 @@ public final class EquipAction {
             ItemStack currentOffhand = bot.getOffhandItem();
             boolean expectedAmmo = currentOffhand.isEmpty()
                     || ItemStack.isSameItemSameComponents(currentOffhand, ammunition);
-            if (!expectedAmmo || !ItemStack.matches(inventory.getNonEquipmentItems().get(restoreSlot), storedOffhand)) {
+            // The durability warning's marker may have been set or cleared on the stored stack while it sat in the pack (a shield at
+            // 9 percent, repaired): that is the same item, so the comparison ignores it.
+            if (!expectedAmmo || !ItemStack.matches(DurabilityWarnings.withoutMarker(inventory.getNonEquipmentItems().get(restoreSlot)),
+                    DurabilityWarnings.withoutMarker(storedOffhand))) {
                 return false;
             }
             bot.setItemSlot(EquipmentSlot.OFFHAND, inventory.getNonEquipmentItems().get(restoreSlot).copy());

@@ -80,9 +80,17 @@ final class ReviewNitsSourceContractTest {
         assertTrue(resupply.contains("!io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(stack)"),
                 "only a stack with a single use left is refused as a replacement tool");
         String watcher = read("task/DangerWatcher.java");
-        assertTrue(between(watcher, "private static boolean isNearlyBroken(ItemStack stack)", "Natural regeneration")
-                        .contains("ItemStackUtil.isNearlyBroken(stack)"),
-                "the generic tool resupply starts at a single use left, never at a wear percentage");
+        String helper = between(watcher, "static boolean lastUseOfAToolWithNoSuccessor(", "/** Natural regeneration only runs");
+        assertTrue(helper.contains("ItemStackUtil.isNearlyBroken(held)") && helper.contains("ItemTags.PICKAXES")
+                        && helper.contains("ItemTags.SHOVELS") && helper.contains("ItemTags.HOES") && helper.contains("Items.SHEARS"),
+                "the generic tool resupply starts at a single use left of a real tool, never at a wear percentage");
+        assertFalse(helper.contains("SWORDS") || helper.contains("Items.BOW") || helper.contains("Items.CROSSBOW")
+                        || helper.contains("Items.SHIELD") || helper.contains("TRIDENT") || helper.contains("MACE"),
+                "a weapon, bow, crossbow, shield, trident or mace is used until it breaks and never starts a resupply");
+        assertTrue(helper.contains("return false;\n            }\n        }\n        ItemStack offhand"),
+                "a one-use tool with another usable tool of its kind in the pack starts no resupply (the next worst takes over on break)");
+        assertFalse(watcher.contains("isNearlyBroken(mainHand)"),
+                "the resupply reads the held stack only through lastUseOfAToolWithNoSuccessor");
     }
 
     // G4
