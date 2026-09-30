@@ -4,11 +4,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 public final class RecipeRegistry {
     public record Ingredient(List<Item> anyOf, int count) {
+        /**
+         * Whether {@code stack} can stand in for this ingredient: vanilla's {@code Ingredient#test}, which looks at the item only
+         * (a renamed, damaged or enchanted stack of an accepted item is accepted, as in a crafting grid).
+         */
+        public boolean matches(ItemStack stack) {
+            return !stack.isEmpty() && anyOf.contains(stack.getItem());
+        }
+
         /**
          * Consumes up to {@code count} units of this ingredient from {@code counts} (mutated in
          * place), taking greedily from each candidate item in {@link #anyOf()} order. Shared by
@@ -31,7 +41,24 @@ public final class RecipeRegistry {
         }
     }
 
-    public record Recipe(Item output, int outputCount, List<Ingredient> ingredients, boolean needsCraftingTable) {
+    /**
+     * {@code resultComponents}: the components the vanilla recipe puts on its result over the item's defaults (empty for the
+     * handwritten table, taken from the real recipe result by the runtime index), so a crafted stack is the stack vanilla makes.
+     */
+    public record Recipe(Item output, int outputCount, List<Ingredient> ingredients, boolean needsCraftingTable,
+                         DataComponentPatch resultComponents) {
+        public Recipe(Item output, int outputCount, List<Ingredient> ingredients, boolean needsCraftingTable) {
+            this(output, outputCount, ingredients, needsCraftingTable, DataComponentPatch.EMPTY);
+        }
+
+        /** The stack one craft of {@code crafts} crafts of this recipe produces, components included. */
+        public ItemStack result(int totalCount) {
+            ItemStack stack = new ItemStack(output, totalCount);
+            if (!resultComponents.isEmpty()) {
+                stack.applyComponents(resultComponents);
+            }
+            return stack;
+        }
     }
 
     public static final List<Item> LOGS = List.of(
@@ -185,8 +212,9 @@ public final class RecipeRegistry {
                 new Ingredient(List.of(Items.IRON_INGOT), 1)), true));
 
         // S1: animal husbandry/pen infrastructure (Module E) -- fence, hay block.
+        // Vanilla's oak_fence is 4 OAK planks + 2 sticks (each wood has its own fence).
         put(new Recipe(Items.OAK_FENCE, 3, List.of(
-                new Ingredient(PLANKS, 4),
+                new Ingredient(List.of(Items.OAK_PLANKS), 4),
                 new Ingredient(STICKS, 2)), true));
         put(new Recipe(Items.HAY_BLOCK, 1, List.of(new Ingredient(List.of(Items.WHEAT), 9)), false));
     }

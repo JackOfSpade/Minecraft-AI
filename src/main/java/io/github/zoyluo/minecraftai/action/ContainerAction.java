@@ -145,6 +145,10 @@ public final class ContainerAction {
         if (!inReachAndSight(bot, pos)) {
             return Optional.empty();
         }
+        // Opening a container is a right click on it: inside spawn protection or outside the world border vanilla refuses it.
+        if (BuildAction.isProtectedArea(bot, pos)) {
+            return Optional.empty();
+        }
         Level level = bot.level();
         Optional<Container> container = explicit || isStorageBlock(level.getBlockState(pos))
                 ? resolve(bot, pos)

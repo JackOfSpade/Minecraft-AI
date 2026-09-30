@@ -56,7 +56,7 @@ public final class RuntimeRecipeIndex {
                 }
                 boolean needsTable = needsCraftingTable(crafting, ingredients);
                 RecipeRegistry.Recipe candidate = new RecipeRegistry.Recipe(
-                        result.getItem(), result.getCount(), ingredients, needsTable);
+                        result.getItem(), result.getCount(), ingredients, needsTable, result.getComponentsPatch());
                 RecipeRegistry.Recipe existing = fresh.get(result.getItem());
                 // Same item, multiple recipes: pick the one with the fewest distinct ingredient
                 // types (faster, deterministic reverse-derivation convergence); ties keep whichever came first.

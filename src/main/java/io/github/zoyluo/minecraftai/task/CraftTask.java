@@ -325,6 +325,10 @@ public final class CraftTask extends AbstractTask {
                     prepared.missingIngredient(), prepared.missingCount()));
             return;
         }
+        if (prepared.remainderOverflow() != null) {
+            fail("craft_remainder_capacity:item=" + prepared.remainderOverflow());
+            return;
+        }
         if (prepared.availableOutput() < step.outputCount()) {
             fail("craft_output_capacity:item=" + BuiltInRegistries.ITEM.getKey(recipe.output())
                     + ":count=" + step.outputCount()
@@ -433,68 +437,91 @@ public final class CraftTask extends AbstractTask {
      * Builds the complete post-craft inventory on deep copies. The live inventory is not touched
      * until every ingredient has been consumed and the entire output has been proven insertable.
      */
-    private static PreparedCraft prepareCraft(
+    static PreparedCraft prepareCraft(
             AIPlayerEntity bot, CraftingHelper.CraftStep step) {
         List<ItemStack> main = copyStacks(bot.getInventory().getNonEquipmentItems());
         List<ItemStack> offHand = copyStacks(List.of(bot.getItemBySlot(EquipmentSlot.OFFHAND)));
+        // What a crafting grid hands back besides the result (an empty bucket for every milk bucket of a cake, ...).
+        List<ItemStack> remainders = new ArrayList<>();
         for (RecipeRegistry.Ingredient ingredient : step.recipe().ingredients()) {
             int required = ingredient.count() * step.crafts();
-            if (!removeIngredient(main, offHand, ingredient, required)) {
-                return new PreparedCraft(main, offHand, ingredient, required, 0);
+            if (!removeIngredient(main, offHand, ingredient, required, remainders)) {
+                return new PreparedCraft(main, offHand, ingredient, required, 0, null);
             }
         }
+        for (ItemStack remainder : remainders) {
+            if (outputCapacity(main, remainder) < remainder.getCount()) {
+                return new PreparedCraft(main, offHand, null, 0, 0,
+                        BuiltInRegistries.ITEM.getKey(remainder.getItem()).toString());
+            }
+            insertEntireStack(main, remainder);
+        }
 
-        ItemStack output = new ItemStack(step.recipe().output(), step.outputCount());
+        // The stack the vanilla recipe makes: its result components included, not a bare item.
+        ItemStack output = step.recipe().result(step.outputCount());
         int available = outputCapacity(main, output);
         if (available >= output.getCount()) {
             insertEntireStack(main, output);
         }
-        return new PreparedCraft(main, offHand, null, 0, available);
+        return new PreparedCraft(main, offHand, null, 0, available, null);
     }
 
     private static List<ItemStack> copyStacks(List<ItemStack> source) {
         return source.stream().map(ItemStack::copy).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
     }
 
-    private static boolean removeIngredient(
+    /**
+     * Takes {@code count} units of {@code ingredient} out of the (copied) inventory, like a crafting grid does: a stack is
+     * accepted when vanilla's ingredient test accepts it (the ingredient's items are tried in their preference order), and
+     * the plain stacks of an item are used up before a renamed, damaged or enchanted one (a careful player does not put an
+     * enchanted item in the grid while plain ones lie next to it). Every consumed unit whose item leaves a container
+     * behind adds that remainder to {@code remainders}.
+     */
+    static boolean removeIngredient(
             List<ItemStack> main,
             List<ItemStack> offHand,
             RecipeRegistry.Ingredient ingredient,
-            int count) {
-        int total = 0;
-        for (Item item : ingredient.anyOf()) {
-            total += countItem(main, offHand, item);
-        }
-        if (total < count) {
+            int count,
+            List<ItemStack> remainders) {
+        if (countMatching(main, offHand, ingredient) < count) {
             return false;
         }
         int remaining = count;
         for (Item item : ingredient.anyOf()) {
-            if (remaining <= 0) {
-                return true;
-            }
-            for (List<ItemStack> region : List.of(main, offHand)) {
-                for (ItemStack stack : region) {
-                    if (remaining <= 0) {
-                        return true;
+            for (boolean plainOnly : new boolean[]{true, false}) {
+                for (List<ItemStack> region : List.of(main, offHand)) {
+                    for (ItemStack stack : region) {
+                        if (remaining <= 0) {
+                            return true;
+                        }
+                        if (!stack.is(item) || !ingredient.matches(stack) || (plainOnly && !isPlain(stack))) {
+                            continue;
+                        }
+                        int take = Math.min(remaining, stack.getCount());
+                        ItemStack remainder = stack.getItem().getCraftingRemainder();
+                        if (!remainder.isEmpty()) {
+                            remainders.add(remainder.copyWithCount(remainder.getCount() * take));
+                        }
+                        stack.shrink(take);
+                        remaining -= take;
                     }
-                    if (!stack.is(item)) {
-                        continue;
-                    }
-                    int take = Math.min(remaining, stack.getCount());
-                    stack.shrink(take);
-                    remaining -= take;
                 }
             }
         }
         return remaining == 0;
     }
 
-    private static int countItem(List<ItemStack> main, List<ItemStack> offHand, Item item) {
+    /** A stack with nothing but its item's default components: not renamed, damaged, enchanted or otherwise customised. */
+    private static boolean isPlain(ItemStack stack) {
+        return stack.getComponentsPatch().isEmpty();
+    }
+
+    private static int countMatching(
+            List<ItemStack> main, List<ItemStack> offHand, RecipeRegistry.Ingredient ingredient) {
         int count = 0;
         for (List<ItemStack> region : List.of(main, offHand)) {
             for (ItemStack stack : region) {
-                if (stack.is(item)) {
+                if (ingredient.matches(stack)) {
                     count += stack.getCount();
                 }
             }
@@ -540,7 +567,7 @@ public final class CraftTask extends AbstractTask {
         }
     }
 
-    private static void commitPreparedCraft(AIPlayerEntity bot, PreparedCraft prepared) {
+    static void commitPreparedCraft(AIPlayerEntity bot, PreparedCraft prepared) {
         var inventory = bot.getInventory();
         List<ItemStack> mainStacks = inventory.getNonEquipmentItems();
         for (int slot = 0; slot < mainStacks.size(); slot++) {
@@ -550,12 +577,14 @@ public final class CraftTask extends AbstractTask {
         inventory.setChanged();
     }
 
-    private record PreparedCraft(
+    /** {@code remainderOverflow}: the item id of a container the craft hands back that does not fit the inventory, or null. */
+    record PreparedCraft(
             List<ItemStack> main,
             List<ItemStack> offHand,
             RecipeRegistry.Ingredient missingIngredient,
             int missingCount,
-            int availableOutput) {
+            int availableOutput,
+            String remainderOverflow) {
     }
 
     private static BlockPos adjacentAir(AIPlayerEntity bot) {

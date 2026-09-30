@@ -80,6 +80,11 @@ class BuildActionVisibilitySourceTest {
         assertEquals(3, uses, "useItemOnHit, useItemOnFace and useItemOnCell are the only block-use sites");
         assertTrue(source.contains("ActionResult.failed(PROTECTED_AREA)"));
         assertEquals("protected_area", BuildAction.PROTECTED_AREA);
+        String container = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/action/ContainerAction.java"));
+        int open = container.indexOf("public static Optional<Container> open(");
+        assertTrue(open > 0 && container.indexOf("BuildAction.isProtectedArea(bot, pos)", open) > open,
+                "opening a container is a right click on it: the same protected-area refusal applies");
     }
     @Test
     void exactPlacementSampleRangeUsesTheSmallerPhysicalBoundary() {

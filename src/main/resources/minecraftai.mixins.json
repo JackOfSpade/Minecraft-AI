@@ -8,6 +8,7 @@
     "ClientConnectionAccessorMixin",
     "PlayerManagerFakePlayerMixin",
     "MerchantEntityInvokerMixin",
+    "VillagerInvokerMixin",
     "ServerWorldEntityManagerAccessorMixin",
     "ServerEntityManagerCacheAccessorMixin",
     "LoginTimeoutMixin",

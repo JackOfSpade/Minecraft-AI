@@ -22,6 +22,7 @@
       "io.github.zoyluo.minecraftai.action.NaturalMovementGameTests",
       "io.github.zoyluo.minecraftai.action.BuildActionEdgeVisibilityGameTests",
       "io.github.zoyluo.minecraftai.manager.BotRespawnStateGameTests",
+      "io.github.zoyluo.minecraftai.task.VanillaParityGameTests",
       "io.github.zoyluo.minecraftai.action.ObservationShapeGameTests",
       "io.github.zoyluo.minecraftai.action.OffhandExecutionGameTests",
       "io.github.zoyluo.minecraftai.action.GearWorstFirstGameTests",

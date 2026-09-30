@@ -5,15 +5,17 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mixin.MerchantEntityInvokerMixin;
+import io.github.zoyluo.minecraftai.mixin.VillagerInvokerMixin;
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.stats.Stats;
 import net.minecraft.world.entity.npc.villager.Villager;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.trading.ItemCost;
 import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.phys.AABB;
 
@@ -124,7 +126,26 @@ public final class TradeTask extends AbstractTask {
             fail("villager_lost");
             return;
         }
+        // Villager#mobInteract's own gate: a sleeping, baby or busy villager (or one with nothing to sell) does not trade.
+        String refusal = TradeRules.refusal(villager.isAlive(), villager.isBaby(), villager.isSleeping(),
+                villager.isTrading() && villager.getTradingPlayer() != bot, !villager.getOffers().isEmpty());
+        if (refusal != null) {
+            fail(refusal);
+            return;
+        }
         LookAction.lookAt(bot, villager.position().add(0.0D, villager.getBbHeight() * 0.5D, 0.0D));
+        // Opening the trade screen prices the offers for this player (reputation, hero of the village) and makes them the
+        // trading player; closing it resets the prices. Everything below happens inside that window, as it does for a client.
+        ((VillagerInvokerMixin) villager).minecraftai$invokeUpdateSpecialPrices(bot);
+        villager.setTradingPlayer(bot);
+        try {
+            completeTrade(bot);
+        } finally {
+            villager.setTradingPlayer(null);
+        }
+    }
+
+    private void completeTrade(AIPlayerEntity bot) {
         MerchantOffer offer = selectOffer(bot).orElse(null);
         if (offer == null) {
             fail("no_affordable_offer");
@@ -132,24 +153,30 @@ public final class TradeTask extends AbstractTask {
         }
         ItemStack firstBuy = offer.getCostA();
         ItemStack sell = offer.assemble();
-        if (!canFit(bot, sell)) {
-            fail("inventory_full");
-            return;
-        }
-        if (!InventoryAction.removeItems(bot, firstBuy.getItem(), firstBuy.getCount())) {
+        List<Paid> paid = takePayment(bot, offer.getItemCostA(), firstBuy.getCount());
+        if (paid == null) {
             fail("missing_buy_item");
             return;
         }
-        ActionResult give = InventoryAction.giveItem(bot, sell.copy());
-        if (give.isFailed()) {
-            fail("give_failed:" + give.reason());
+        // The WHOLE result has to fit before the payment is kept: a partial insert would lose the rest of the stack.
+        if (insertable(bot, sell) < sell.getCount()) {
+            refund(bot, paid);
+            fail("inventory_full");
             return;
         }
-        offer.increaseUses();
-        if (!afterUsing(villager, offer)) {
-            fail("after_using_failed");
+        ItemStack delivered = sell.copy();
+        ActionResult give = InventoryAction.giveItem(bot, delivered);
+        if (give.isFailed() || !delivered.isEmpty()) {
+            // Not reachable after the room check above; undo instead of keeping a half trade.
+            int inserted = sell.getCount() - delivered.getCount();
+            refund(bot, paid);
+            fail("give_failed:" + (give.isFailed() ? give.reason() : "partial_insert_" + inserted));
             return;
         }
+        // The villager's own bookkeeping for a completed trade: uses, trader XP (and its orb), the level-up and the
+        // reputation event that goes with it, the ambient sound timer and the trade criterion.
+        villager.notifyTrade(offer);
+        bot.awardStat(Stats.TRADED_WITH_VILLAGER);
         // task_completed only carries elapsed_ticks; without this, what was actually bought/sold
         // (the whole point of this task) leaves no trace at all once it succeeds.
         BotLog.action(bot, "trade_completed",
@@ -162,7 +189,8 @@ public final class TradeTask extends AbstractTask {
         double range = Math.min(maxDistance, SEARCH_RANGE);
         AABB box = bot.getBoundingBox().inflate(range);
         return bot.level()
-                .getEntitiesOfClass(Villager.class, box, entity -> entity.isAlive() && !entity.isBaby())
+                .getEntitiesOfClass(Villager.class, box,
+                        entity -> entity.isAlive() && !entity.isBaby() && !entity.isSleeping() && !entity.isTrading())
                 .stream()
                 .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
@@ -183,44 +211,70 @@ public final class TradeTask extends AbstractTask {
 
     private boolean canAfford(AIPlayerEntity bot, MerchantOffer offer) {
         ItemStack firstBuy = offer.getCostA();
-        return !firstBuy.isEmpty()
-                && InventoryAction.countItem(bot, firstBuy.getItem()) >= firstBuy.getCount();
+        if (firstBuy.isEmpty()) {
+            return false;
+        }
+        ItemCost cost = offer.getItemCostA();
+        int have = 0;
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (cost.test(stack)) {
+                have += stack.getCount();
+            }
+        }
+        return have >= firstBuy.getCount();
     }
 
-    private boolean canFit(AIPlayerEntity bot, ItemStack output) {
-        Inventory inventory = bot.getInventory();
-        for (ItemStack stack : inventory.getNonEquipmentItems()) {
+    /** A stack taken out of an inventory slot as payment, kept so the trade can be undone exactly. */
+    private record Paid(int slot, ItemStack stack) {
+    }
+
+    /** Takes {@code count} matching items (real stacks, whatever their components) from the main inventory, or nothing. */
+    private static List<Paid> takePayment(AIPlayerEntity bot, ItemCost cost, int count) {
+        List<Paid> taken = new ArrayList<>();
+        List<ItemStack> main = bot.getInventory().getNonEquipmentItems();
+        int remaining = count;
+        for (int slot = 0; slot < main.size() && remaining > 0; slot++) {
+            ItemStack stack = main.get(slot);
+            if (!cost.test(stack)) {
+                continue;
+            }
+            int take = Math.min(remaining, stack.getCount());
+            taken.add(new Paid(slot, stack.split(take)));
+            remaining -= take;
+        }
+        if (remaining > 0) {
+            refund(bot, taken);
+            return null;
+        }
+        bot.getInventory().setChanged();
+        return taken;
+    }
+
+    private static void refund(AIPlayerEntity bot, List<Paid> paid) {
+        List<ItemStack> main = bot.getInventory().getNonEquipmentItems();
+        for (Paid piece : paid) {
+            ItemStack slotStack = main.get(piece.slot());
+            if (slotStack.isEmpty()) {
+                main.set(piece.slot(), piece.stack());
+            } else {
+                slotStack.grow(piece.stack().getCount());
+            }
+        }
+        bot.getInventory().setChanged();
+    }
+
+    /** How many of {@code output} the main inventory can take right now, counting every partly filled and empty slot. */
+    private static int insertable(AIPlayerEntity bot, ItemStack output) {
+        List<Integer> matching = new ArrayList<>();
+        int empty = 0;
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) {
-                return true;
-            }
-            if (stack.is(output.getItem()) && stack.getCount() < Math.min(stack.getMaxStackSize(), output.getMaxStackSize())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean afterUsing(Villager villager, MerchantOffer offer) {
-        try {
-            ((MerchantEntityInvokerMixin) villager).minecraftai$invokeAfterUsing(offer);
-            return true;
-        } catch (LinkageError | RuntimeException ignored) {
-            // Keep the reflection path as a runtime fallback for loader or mapping edge cases.
-        }
-        for (String methodName : new String[]{"rewardTradeXp", "method_18008"}) {
-            Class<?> type = villager.getClass();
-            while (type != null) {
-                try {
-                    Method method = type.getDeclaredMethod(methodName, MerchantOffer.class);
-                    method.setAccessible(true);
-                    method.invoke(villager, offer);
-                    return true;
-                } catch (ReflectiveOperationException ignored) {
-                    type = type.getSuperclass();
-                }
+                empty++;
+            } else if (ItemStack.isSameItemSameComponents(stack, output)) {
+                matching.add(stack.getCount());
             }
         }
-        return false;
+        return TradeRules.insertable(output.getMaxStackSize(), matching, empty);
     }
 
     private void transition(Phase next) {

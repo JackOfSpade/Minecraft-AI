@@ -536,19 +536,18 @@ public final class SmeltTask extends AbstractTask {
             }
         }
         if (inputToLoad > 0) {
-            if (!InventoryAction.removeItems(bot, input, inputToLoad)) {
+            if (moveIntoFurnaceSlot(bot, furnace, 0, input, inputToLoad) <= 0) {
                 fail("missing " + BuiltInRegistries.ITEM.getKey(input) + " x" + inputToLoad);
                 return;
             }
-            furnace.setItem(0, new ItemStack(input, inputSlot.getCount() + inputToLoad));
         }
 
         if (fuel != null) {
-            if (!InventoryAction.removeItems(bot, fuel.item(), fuel.count())) {
+            // Whatever does not fit the fuel slot stays in the inventory; it is loaded on a later refuel.
+            if (moveIntoFurnaceSlot(bot, furnace, 1, fuel.item(), fuel.count()) <= 0) {
                 fail("out_of_fuel: " + BuiltInRegistries.ITEM.getKey(fuel.item()));
                 return;
             }
-            furnace.setItem(1, new ItemStack(fuel.item(), fuel.count()));
         }
         furnace.setChanged();
         phase = Phase.SMELTING;
@@ -592,20 +591,80 @@ public final class SmeltTask extends AbstractTask {
             fail("unexpected_output: " + BuiltInRegistries.ITEM.getKey(outputSlot.getItem()));
             return;
         }
-        int take = Math.min(targetCount - collected, outputSlot.getCount());
-        ActionResult result = InventoryAction.giveItem(bot, new ItemStack(output, take));
-        if (result.isFailed()) {
-            fail(result.reason());
+        int inserted = takeOutput(bot, furnace, Math.min(targetCount - collected, outputSlot.getCount()));
+        if (inserted <= 0) {
+            fail("inventory_full");
             return;
         }
-        outputSlot.shrink(take);
-        furnace.setChanged();
-        collected += take;
+        collected += inserted;
         if (collected >= targetCount) {
             complete();
         } else {
             phase = Phase.LOADING;
         }
+    }
+
+    /**
+     * Takes up to {@code max} items out of the furnace's output slot the way a player does: the real stack leaves the furnace
+     * (its components with it) and only what the inventory really took is removed, because {@code Inventory.add} returns true
+     * on a partial insert and leaves the rest in the stack it was given. Taking the output also pays out the recipe experience
+     * the furnace has stored (as orbs at the bot, exactly what a player at the output slot receives). Returns the count taken.
+     */
+    static int takeOutput(AIPlayerEntity bot, AbstractFurnaceBlockEntity furnace, int max) {
+        ItemStack outputSlot = furnace.getItem(2);
+        int take = Math.min(max, outputSlot.getCount());
+        if (take <= 0) {
+            return 0;
+        }
+        ItemStack piece = outputSlot.copyWithCount(take);
+        InventoryAction.giveItem(bot, piece);
+        int inserted = take - piece.getCount();
+        if (inserted <= 0) {
+            return 0;
+        }
+        outputSlot.shrink(inserted);
+        furnace.setChanged();
+        furnace.awardUsedRecipesAndPopExperience(bot);
+        return inserted;
+    }
+
+    /**
+     * Moves up to {@code want} of {@code item} from the bot's inventory into furnace {@code slot} (0 input, 1 fuel) the way a
+     * player shift-clicks them: the real stacks are split (their components travel with them), a slot only takes stacks that
+     * match what it already holds, and it takes no more than the stack maximum of the item. Returns how many were moved; the rest
+     * stays in the inventory.
+     */
+    static int moveIntoFurnaceSlot(AIPlayerEntity bot, AbstractFurnaceBlockEntity furnace, int slot, Item item, int want) {
+        int moved = 0;
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (moved >= want) {
+                break;
+            }
+            if (stack.isEmpty() || !stack.is(item)) {
+                continue;
+            }
+            ItemStack current = furnace.getItem(slot);
+            if (!current.isEmpty() && !ItemStack.isSameItemSameComponents(current, stack)) {
+                continue;
+            }
+            int room = Math.min(furnace.getMaxStackSize(), stack.getMaxStackSize()) - current.getCount();
+            int take = Math.min(Math.min(want - moved, room), stack.getCount());
+            if (take <= 0) {
+                continue;
+            }
+            ItemStack piece = stack.split(take);
+            if (current.isEmpty()) {
+                furnace.setItem(slot, piece);
+            } else {
+                current.grow(take);
+                furnace.setItem(slot, current);
+            }
+            moved += take;
+        }
+        if (moved > 0) {
+            bot.getInventory().setChanged();
+        }
+        return moved;
     }
 
     private AbstractFurnaceBlockEntity furnace(AIPlayerEntity bot) {
