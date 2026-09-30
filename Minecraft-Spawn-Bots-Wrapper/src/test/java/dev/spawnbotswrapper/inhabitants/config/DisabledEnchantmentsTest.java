@@ -49,10 +49,11 @@ class DisabledEnchantmentsTest {
     }
 
     @Test
-    void defaultConfigDisablesPiercingWithoutWarnings() {
+    void defaultConfigDisablesPiercingAndMendingWithoutWarnings() {
+        assertEquals(List.of("minecraft:piercing", "minecraft:mending"), DisabledEnchantments.DEFAULT);
         InhabitantsConfig c = new InhabitantsConfig();
         List<String> warnings = ConfigValidator.validate(c);
-        assertEquals(List.of("minecraft:piercing"), c.profiles.disabledEnchantments);
+        assertEquals(List.of("minecraft:piercing", "minecraft:mending"), c.profiles.disabledEnchantments);
         assertTrue(warnings.stream().noneMatch(w -> w.contains("disabledEnchantments")), warnings.toString());
     }
 
@@ -65,7 +66,7 @@ class DisabledEnchantmentsTest {
 
         c.profiles.disabledEnchantments = null;
         List<String> warnings = ConfigValidator.validate(c);
-        assertEquals(List.of("minecraft:piercing"), c.profiles.disabledEnchantments);
+        assertEquals(List.of("minecraft:piercing", "minecraft:mending"), c.profiles.disabledEnchantments);
         assertEquals(1, warnings.size(), warnings.toString());
     }
 
@@ -81,12 +82,18 @@ class DisabledEnchantmentsTest {
     }
 
     @Test
-    void anOldConfigFileWithoutTheKeyGetsThePiercingDefaultAndAWrittenListIsHonoured(@TempDir Path dir) throws IOException {
+    void anOldConfigFileWithoutTheKeyGetsTheDefaultAndAWrittenListIsHonoured(@TempDir Path dir) throws IOException {
         Path old = dir.resolve("old.json");
         Files.writeString(old, "{ \"profiles\": { \"randomize\": true } }", StandardCharsets.UTF_8);
         ConfigIO.LoadResult loaded = ConfigIO.load(old);
         assertNull(loaded.fatalError());
-        assertEquals(List.of("minecraft:piercing"), loaded.config().profiles.disabledEnchantments);
+        assertEquals(List.of("minecraft:piercing", "minecraft:mending"), loaded.config().profiles.disabledEnchantments);
+
+        // A config that explicitly lists only piercing keeps that choice: Mending is allowed again.
+        Path piercingOnly = dir.resolve("piercing_only.json");
+        Files.writeString(piercingOnly, "{ \"profiles\": { \"disabledEnchantments\": [\"minecraft:piercing\"] } }",
+                StandardCharsets.UTF_8);
+        assertEquals(List.of("minecraft:piercing"), ConfigIO.load(piercingOnly).config().profiles.disabledEnchantments);
 
         Path custom = dir.resolve("custom.json");
         Files.writeString(custom, "{ \"profiles\": { \"disabledEnchantments\": [\"multishot\", \"minecraft:mending\"] } }",

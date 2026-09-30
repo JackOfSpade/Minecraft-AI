@@ -33,8 +33,43 @@ class ProfileDisabledEnchantmentsTest {
     }
 
     @Test
-    void theDefaultIsPiercing() {
-        assertEquals(List.of("minecraft:piercing"), new InhabitantsConfig.Profiles().disabledEnchantments);
+    void theDefaultIsPiercingAndMending() {
+        assertEquals(List.of("minecraft:piercing", "minecraft:mending"), new InhabitantsConfig.Profiles().disabledEnchantments);
+    }
+
+    @Test
+    void defaultRollsNeverContainMendingButStillStockExperienceBottlesAsBefore() {
+        // Mending is denied by default; the rng stream is untouched, so the seeded loadouts equal the ones rolled with
+        // only piercing denied except for the missing +mending1, and every experience bottle count is identical.
+        List<String> mendingAllowed = fingerprints(options("minecraft:piercing"));
+        List<String> byDefault = fingerprints(options("minecraft:piercing", "minecraft:mending"));
+        int mendingSeen = 0;
+        int bottles = 0;
+        for (int i = 0; i < N; i++) {
+            String expected = mendingAllowed.get(i).replaceAll("\\+mending\\d+", "");
+            assertEquals(expected, byDefault.get(i), "profile " + i + ": only mending may differ");
+            assertFalse(byDefault.get(i).contains("+mending"), byDefault.get(i));
+            if (!expected.equals(mendingAllowed.get(i))) {
+                mendingSeen++;
+            }
+            bottles += byDefault.get(i).split("experience_bottle", -1).length - 1;
+        }
+        assertTrue(mendingSeen > 100, "mending must occur when allowed, saw " + mendingSeen);
+        assertTrue(bottles > 100, "experience bottles are still stocked as loot, saw " + bottles);
+        for (BotProfile p : profiles(generate(N, allOn(), defaultOptions(), BASE))) {
+            for (BotProfile.ItemSpec s : specs(p)) {
+                assertFalse(s.enchantments().containsKey(NS + "mending"), fingerprint(p));
+            }
+        }
+    }
+
+    @Test
+    void aListThatOnlyDeniesPiercingKeepsMendingOnArmor() {
+        boolean mending = false;
+        for (BotProfile p : profiles(generate(500, allOn(), options("minecraft:piercing"), BASE))) {
+            mending |= specs(p).stream().anyMatch(s -> s.enchantments().containsKey(NS + "mending"));
+        }
+        assertTrue(mending, "an explicit user list is honoured: Mending is allowed when it is not listed");
     }
 
     @Test

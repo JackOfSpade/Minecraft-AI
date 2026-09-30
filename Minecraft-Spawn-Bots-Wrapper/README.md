@@ -65,7 +65,7 @@ runs on defaults until you fix it.
     "behaviorVariation": true,
     "allowExplosiveKits": false,
     "allowElytra": false,
-    "disabledEnchantments": ["minecraft:piercing"]
+    "disabledEnchantments": ["minecraft:piercing", "minecraft:mending"]
   },
 
   "deterministic": { "enabled": false, "salt": "" },
@@ -228,12 +228,17 @@ else in PvP BOT 0.0.15, so:
   (`Removed N ender pearl(s) from inhabitant ...`), later ones only in debug mode. Profiles stored before this change
   keep their pearls in `populations.json`, but a re-dressing (`profiles.reapplyOnRestore`) drops them too.
 
-## Disabled enchantments: no Piercing crossbows
+## Disabled enchantments: no Piercing crossbows, no Mending gear
 
 In vanilla Java a **Piercing** bolt ignores a raised shield (the game skips shield blocking for arrows with a pierce
 level above zero). A hostile inhabitant with a piercing crossbow therefore could not be blocked at all, which is too
-strong for a structure guardian, so Piercing is **off by default**. The list is `profiles.disabledEnchantments`
-(default `["minecraft:piercing"]`):
+strong for a structure guardian, so Piercing is **off by default**. **Mending** is off by default too: an
+inhabitant's gear is a one-time reward. A player who beats a guardian in gear well above what they can access gets to
+use it, but it cannot be repaired without its base material (netherite, say) and, without Mending, not with experience
+either, so the advantage is temporary. PvP BOT's auto-mend routine needs worn Mending armor, so it stays inactive; the
+experience bottles inhabitants carry stay in their loadouts as loot for the player. The list is
+`profiles.disabledEnchantments` (default `["minecraft:piercing", "minecraft:mending"]`). A config that lists its own
+ids, for example only Piercing, replaces the default: that choice is kept and Mending is allowed again:
 
 * ids are accepted with or without the `minecraft:` namespace and in any letter case; an entry that is not a valid id
   or names a `minecraft:` enchantment that does not exist gets one WARN at load and is otherwise ignored; `[]` turns

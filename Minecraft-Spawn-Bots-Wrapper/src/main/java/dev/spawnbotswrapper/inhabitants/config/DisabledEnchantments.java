@@ -15,11 +15,14 @@ import java.util.regex.Pattern;
  * {@code namespace:path} form produced here. The default is Piercing: a piercing crossbow bolt ignores a raised
  * shield in vanilla Java (it skips shield blocking for arrows with a pierce level above zero), so a player could
  * not block a hostile inhabitant's crossbow at all, which is too strong for something that is supposed to be a
- * beatable structure guardian. An empty list turns the feature off.
+ * beatable structure guardian. Mending is the second default: an inhabitant's gear is a one-time reward that cannot
+ * be repaired without access to its base material (netherite, say), so it must not be repairable with experience
+ * either; PvP BOT's auto-mend routine therefore stays inactive (it needs worn Mending armor). A config that lists its
+ * own {@code disabledEnchantments} replaces the default entirely. An empty list turns the feature off.
  */
 public final class DisabledEnchantments {
     /** What a config without the key gets. */
-    public static final List<String> DEFAULT = List.of("minecraft:piercing");
+    public static final List<String> DEFAULT = List.of("minecraft:piercing", "minecraft:mending");
 
     private static final Pattern NAMESPACE = Pattern.compile("[a-z0-9_.-]+");
     private static final Pattern PATH = Pattern.compile("[a-z0-9_./-]+");

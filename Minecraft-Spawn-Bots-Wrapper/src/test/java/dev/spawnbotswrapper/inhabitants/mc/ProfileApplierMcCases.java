@@ -128,6 +128,27 @@ public final class ProfileApplierMcCases {
 
     private static final Set<String> NO_PIERCING = Set.of("minecraft:piercing");
 
+    /** Mending armor an inhabitant already wears (an old save, a stored profile) loses just Mending. */
+    public static void removeDisabledEnchantmentsTakesMendingOffWornArmorAndKeepsTheRest() {
+        Inventory inventory = newInventory();
+        inventory.setItem(SlotPlanner.CHEST, enchanted("minecraft:netherite_chestplate", 1,
+                Map.of("minecraft:mending", 1, "minecraft:protection", 4)));
+        inventory.setItem(SlotPlanner.HEAD, enchanted("minecraft:diamond_helmet", 1, Map.of("minecraft:mending", 1)));
+        Set<String> defaults = Set.of("minecraft:piercing", "minecraft:mending");
+
+        List<String> removed = ProfileApplier.removeDisabledEnchantments(inventory, defaults);
+
+        assertEquals(2, removed.size(), removed.toString());
+        assertTrue(removed.contains("minecraft:mending (netherite_chestplate)"), removed.toString());
+        ItemStack chest = inventory.getItem(SlotPlanner.CHEST);
+        assertTrue(chest.is(Items.NETHERITE_CHESTPLATE));
+        assertEquals(0, level(chest, "minecraft:mending"));
+        assertEquals(4, level(chest, "minecraft:protection"));
+        assertTrue(inventory.getItem(SlotPlanner.HEAD).is(Items.DIAMOND_HELMET), "the item itself stays");
+        assertEquals(0, level(inventory.getItem(SlotPlanner.HEAD), "minecraft:mending"));
+        assertEquals(List.of(), ProfileApplier.removeDisabledEnchantments(inventory, defaults), "idempotent");
+    }
+
     private static Holder<Enchantment> enchantment(String id) {
         return McBootstrap.registries()
                 .get(ResourceKey.create(Registries.ENCHANTMENT, Identifier.parse(id)))

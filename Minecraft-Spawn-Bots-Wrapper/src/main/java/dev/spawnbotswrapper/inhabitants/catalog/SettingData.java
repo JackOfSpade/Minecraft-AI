@@ -248,7 +248,10 @@ final class SettingData {
                 flag("autoMendEnabled", "auto-mend", true).perBot(LOADOUT,
                         "loadout: experience_bottle + worn Mending armor with damageFraction",
                         "Truthful. Needs an experience_bottle in slots 0-35 and WORN armor with Mending whose "
-                                + "durability fraction is below mendDurabilityThreshold. Varies: mender or not. Does "
+                                + "durability fraction is below mendDurabilityThreshold. Inactive while Mending is on "
+                                + "profiles.disabledEnchantments (the default): no inhabitant wears Mending armor, "
+                                + "so the routine never starts; experience bottles stay in loadouts as loot for "
+                                + "players. Varies: mender or not (only with Mending allowed). Does "
                                 + "not vary: the trigger threshold; fresh gear never triggers it, so a loadout must "
                                 + "pre-damage the armor to show it. While mending the bot stops fighting and throws "
                                 + "bottles at its feet (whether bots collect the orbs is unverified)."),
