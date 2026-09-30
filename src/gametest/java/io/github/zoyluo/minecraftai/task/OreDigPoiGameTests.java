@@ -1348,9 +1348,10 @@ public final class OreDigPoiGameTests {
         Room room = h.newRoom(170, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiDegradedTpsGT", room, 0, 0);
         h.enablePoi(bot, null);
-        MiningAssistRuntime.setTestTpsDegraded(Boolean.TRUE);
+        MiningAssistRuntime.forceTpsDegradedForTests(bot.getUUID(), true);
         AtomicBoolean transportCalled = new AtomicBoolean(false);
         h.onCleanup(() -> {
+            MiningAssistRuntime.forceTpsDegradedForTests(bot.getUUID(), false);
             PoiAdvisor.setTestTransport(null);
             PoiConsultBudget.clearAll();
             PoiCache.clearAll();

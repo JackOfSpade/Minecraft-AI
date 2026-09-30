@@ -2,7 +2,6 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.observe.TpsGuard;
-import java.lang.reflect.Field;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -96,8 +95,9 @@ final class FollowPaceScenarios {
         target.setShiftKeyDown(true);
         FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_follow_pace_sneak");
         if (tpsThrottled) {
-            setDegraded(true);
-            f.onFinish(() -> TpsGuard.INSTANCE.reset());
+            // Only this follower runs on the "degraded server": every other scenario keeps the normal scan rates.
+            TpsGuard.forceDegradedForTests(bot.getUUID(), true);
+            f.onFinish(() -> TpsGuard.forceDegradedForTests(bot.getUUID(), false));
         }
         Watch watch = new Watch(bot);
         int[] tick = {0};
@@ -106,9 +106,6 @@ final class FollowPaceScenarios {
         context.failIfEver(() -> {
             int now = ++tick[0];
             f.require(follow.state() == TaskState.RUNNING, "follow ended: " + follow.state() + " " + follow.failureReason());
-            if (tpsThrottled) {
-                setDegraded(true); // the guard's own sampling may flip it back at any time: hold the scenario's premise
-            }
             // The player creeps away along +x at 1 block per second.
             f.place(target, 1.0D + now * 0.05D, 0.0D);
             target.setShiftKeyDown(true);
@@ -301,16 +298,5 @@ final class FollowPaceScenarios {
     /** The TPS guard's degraded state makes the task tick one tick in five; the creeping must not stutter. */
     static void sneakPersistsUnderTpsThrottle(GameTestHelper context, boolean baritone, String prefix) {
         matchesSneakingPlayer(context, baritone, prefix, true);
-    }
-
-    /** Test hook: forces the guard's degraded flag (the guard itself only flips it on measured tick times). */
-    private static void setDegraded(boolean degraded) {
-        try {
-            Field field = TpsGuard.class.getDeclaredField("lastDegraded");
-            field.setAccessible(true);
-            field.setBoolean(TpsGuard.INSTANCE, degraded);
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("TpsGuard.lastDegraded is not reachable", exception);
-        }
     }
 }

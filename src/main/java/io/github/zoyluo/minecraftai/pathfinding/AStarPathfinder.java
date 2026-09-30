@@ -66,6 +66,17 @@ public final class AStarPathfinder {
     private final long maxMillis;
     private static volatile long cacheVersion;
 
+    /**
+     * Harness switch (GameTest and verify lanes): every search keeps its node budget but its wall-clock budget is this many times longer,
+     * so a cold JIT, a garbage collection or another process on a shared machine cannot turn a reachable goal into a TIMEOUT. A
+     * GameTest is counted in ticks, never in milliseconds. Production never sets this.
+     */
+    private static volatile long harnessTimeScale = 1L;
+
+    public static void setHarnessTimeScale(long scale) {
+        harnessTimeScale = Math.max(1L, scale);
+    }
+
     public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal) {
         this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, false);
     }
@@ -143,7 +154,7 @@ public final class AStarPathfinder {
         this.heuristicWeight = heuristicWeight;
         this.enumerator = new NeighborEnumerator(bot, canPillar, allowDig);
         this.maxNodes = maxNodes;
-        this.maxMillis = maxMillis;
+        this.maxMillis = maxMillis * harnessTimeScale;
     }
 
     public static void invalidateCache(String reason) {

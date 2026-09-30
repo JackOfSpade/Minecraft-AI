@@ -370,7 +370,7 @@ public final class TaskManager {
             AIPlayerEntity player = bot.get();
             TaskOrigin origin = activeOrigins.get(uuid);
             if ((origin == null || !origin.safety()) && !isCritical(task)
-                    && !TpsGuard.INSTANCE.shouldTickNonCriticalTask(server)) {
+                    && !TpsGuard.INSTANCE.shouldTickNonCriticalTask(server, uuid)) {
                 BotProfiler.INSTANCE.record(player, "task_tick_skipped", 0L);
                 continue;
             }

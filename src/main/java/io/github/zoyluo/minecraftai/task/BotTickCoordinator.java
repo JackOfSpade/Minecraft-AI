@@ -18,9 +18,9 @@ public final class BotTickCoordinator {
         int tick = server.getTickCount();
         io.github.zoyluo.minecraftai.action.ContainerAction.tickPersistence(server);
         TpsGuard guard = TpsGuard.INSTANCE;
-        boolean runDanger = tick % guard.dangerScanInterval() == 0;
-        boolean runBackground = tick % guard.scanInterval() == 0;
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
+            boolean runDanger = tick % guard.dangerScanInterval(bot.getUUID()) == 0;
+            boolean runBackground = tick % guard.scanInterval(bot.getUUID()) == 0;
             // Realistic perception (docs/PERCEPTION.md): what this bot has noticed, read once per tick before anything asks. It never
             // consumes the tick and never throws.
             io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.tickBot(server, bot);

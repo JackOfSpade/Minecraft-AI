@@ -1,6 +1,9 @@
 package io.github.zoyluo.minecraftai.observe;
 
 import io.github.zoyluo.minecraftai.log.BotLog;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.server.MinecraftServer;
 
 public final class TpsGuard {
@@ -14,6 +17,14 @@ public final class TpsGuard {
     private static final int DEGRADED_DANGER_SCAN_INTERVAL = 5;
     private static final int NON_CRITICAL_TASK_INTERVAL = 5;
 
+    /**
+     * Harness switch (GameTest and verify lanes): the guard never measures wall-clock tick times, so a busy test server cannot flip
+     * every bot in the JVM into degraded scanning halfway through a scenario. A scenario that needs the degraded behaviour asks for it
+     * for its own bot with {@link #forceDegradedForTests}. Production never sets this.
+     */
+    private static volatile boolean harnessPinned;
+    private static final Set<UUID> FORCED_DEGRADED = ConcurrentHashMap.newKeySet();
+
     private long lastSampleNanos;
     private double averageTickMs = 20.0D;
     private final TpsDegradationLatch latch = new TpsDegradationLatch();
@@ -23,7 +34,27 @@ public final class TpsGuard {
     private TpsGuard() {
     }
 
+    public static void setHarnessPinned(boolean pinned) {
+        harnessPinned = pinned;
+    }
+
+    public static boolean isForcedDegraded(UUID botId) {
+        return FORCED_DEGRADED.contains(botId);
+    }
+
+    /** Test hook: treats one bot as running on a degraded server (or not), leaving every other bot alone. */
+    public static void forceDegradedForTests(UUID botId, boolean degraded) {
+        if (degraded) {
+            FORCED_DEGRADED.add(botId);
+        } else {
+            FORCED_DEGRADED.remove(botId);
+        }
+    }
+
     public synchronized void tick(MinecraftServer server) {
+        if (harnessPinned) {
+            return;
+        }
         long now = System.nanoTime();
         if (lastSampleNanos == 0L) {
             lastSampleNanos = now;
@@ -66,6 +97,11 @@ public final class TpsGuard {
         return lastDegraded;
     }
 
+    /** The degraded verdict for one bot: the server-wide one, or a scenario's forced one for that bot. */
+    public synchronized boolean degraded(UUID botId) {
+        return lastDegraded || FORCED_DEGRADED.contains(botId);
+    }
+
     public synchronized int continuationDelaySeconds() {
         return lastDegraded ? DEGRADED_CONTINUATION_SECONDS : NORMAL_CONTINUATION_SECONDS;
     }
@@ -76,6 +112,18 @@ public final class TpsGuard {
 
     public synchronized int dangerScanInterval() {
         return lastDegraded ? DEGRADED_DANGER_SCAN_INTERVAL : NORMAL_SCAN_INTERVAL;
+    }
+
+    public synchronized int scanInterval(UUID botId) {
+        return degraded(botId) ? DEGRADED_SCAN_INTERVAL : NORMAL_SCAN_INTERVAL;
+    }
+
+    public synchronized int dangerScanInterval(UUID botId) {
+        return degraded(botId) ? DEGRADED_DANGER_SCAN_INTERVAL : NORMAL_SCAN_INTERVAL;
+    }
+
+    public synchronized boolean shouldTickNonCriticalTask(MinecraftServer server, UUID botId) {
+        return !degraded(botId) || server.getTickCount() % NON_CRITICAL_TASK_INTERVAL == 0;
     }
 
     public synchronized boolean shouldTickNonCriticalTask(MinecraftServer server) {

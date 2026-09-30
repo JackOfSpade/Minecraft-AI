@@ -229,6 +229,12 @@ public final class MiningAssistRuntime {
         GATE.clear();
     }
 
+    /** Treats one bot as running on a degraded server (tests): unlike {@link #setTestTpsDegraded} it touches no other bot. */
+    public static void forceTpsDegradedForTests(UUID botId, boolean degraded) {
+        TpsGuard.forceDegradedForTests(botId, degraded);
+        GATE.remove(botId);
+    }
+
     public static Boolean testTpsDegraded() {
         return testTpsDegraded;
     }
@@ -393,6 +399,9 @@ public final class MiningAssistRuntime {
 
     /** P1 contract M3: made public so {@code task/DetourSafetyGate} (item 2) can read the live TPS verdict. */
     public static boolean tpsDegraded(AIPlayerEntity bot) {
+        if (TpsGuard.isForcedDegraded(bot.getUUID())) {
+            return true;
+        }
         Boolean override = testTpsDegraded;
         if (override != null) {
             return override;

@@ -967,7 +967,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
                         h.require(p.tick - stageStart[0] < 1200, "the detour never started");
                         return;
                     }
-                    MiningAssistRuntime.setTestTpsDegraded(Boolean.TRUE);
+                    MiningAssistRuntime.forceTpsDegradedForTests(id, true);
                     stage[0] = 1;
                     stageStart[0] = p.tick;
                 }
@@ -979,7 +979,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
                                         + phase);
                         return;
                     }
-                    MiningAssistRuntime.setTestTpsDegraded(Boolean.FALSE);
+                    MiningAssistRuntime.forceTpsDegradedForTests(id, false);
                     LOG.info("[detour-gametest] degraded_tps aborted_into={} after_ticks={}", phase, p.tick - stageStart[0]);
                     h.pass();
                 }
