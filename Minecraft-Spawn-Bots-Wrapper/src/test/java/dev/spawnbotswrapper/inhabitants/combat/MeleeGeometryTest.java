@@ -32,16 +32,16 @@ class MeleeGeometryTest {
     }
 
     @Test
-    void reachIsVanillaPlusTheDocumentedTolerance() {
-        assertTrue(MeleeGeometry.withinReach(3.0, MeleeGeometry.VANILLA_REACH));
-        assertTrue(MeleeGeometry.withinReach(3.2, MeleeGeometry.VANILLA_REACH));
-        assertFalse(MeleeGeometry.withinReach(3.25, MeleeGeometry.VANILLA_REACH));
-        // 3.8 blocks centre to centre is 3.5 to the box: beyond reach.
+    void aRayEntryIsReachableWithinTheRangePlusTheDocumentedTolerance() {
+        assertTrue(MeleeGeometry.withinReach(3.0, 3.0));
+        assertTrue(MeleeGeometry.withinReach(3.2, 3.0));
+        assertFalse(MeleeGeometry.withinReach(3.25, 3.0));
+        // 3.8 blocks centre to centre is 3.5 to the box: beyond a 3.0 range plus the tolerance (the vanilla range test itself is covered by MeleeLegalityMcCases).
         assertFalse(MeleeGeometry.withinReach(MeleeGeometry.distanceToBox(0.0, EYE_Y, 0.0, player(3.8)),
-                MeleeGeometry.VANILLA_REACH));
+                3.0));
         // 2.2 blocks centre to centre (the smoke test through a wall) is within reach: the wall is what stops it.
         assertTrue(MeleeGeometry.withinReach(MeleeGeometry.distanceToBox(0.0, EYE_Y, 0.0, player(2.2)),
-                MeleeGeometry.VANILLA_REACH));
+                3.0));
         assertFalse(MeleeGeometry.withinReach(-1.0, 3.0), "no entry is never reachable");
     }
 

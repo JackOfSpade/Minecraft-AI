@@ -18,7 +18,7 @@ public final class MeleeVetoLog {
     public enum Reason {
         /** A block with a collision shape stands between the eye and every point of the victim a client could aim at. */
         BLOCKED,
-        /** The victim's box is farther from the eye than the entity interaction range. */
+        /** Vanilla's attack range of the weapon does not accept the victim's box: too far, or closer than the weapon's minimum range. */
         OUT_OF_REACH
     }
 
@@ -34,7 +34,6 @@ public final class MeleeVetoLog {
     }
 
     private final Map<String, PerBot> bots = new HashMap<>();
-    private long totalVetoes;
 
     /**
      * Registers one veto.
@@ -52,7 +51,6 @@ public final class MeleeVetoLog {
             p = new PerBot();
             bots.put(key, p);
         }
-        totalVetoes++;
         p.total++;
         p.sinceInfo++;
         if (reason == Reason.BLOCKED) {
@@ -68,7 +66,7 @@ public final class MeleeVetoLog {
         }
         p.lastInfo = now;
         String line = String.format(Locale.ROOT,
-                "melee legality: vetoed %d hit(s) by %s since the last line (%d without a clear line, %d beyond reach); "
+                "melee legality: vetoed %d hit(s) by %s since the last line (%d without a clear line, %d outside its attack range); "
                         + "latest on %s at %.2f blocks (reach %.2f); %d vetoed by it in total",
                 p.sinceInfo, bot, p.sinceInfoBlocked, p.sinceInfoReach, victim, distance, reach, p.total);
         p.sinceInfo = 0;
@@ -77,35 +75,17 @@ public final class MeleeVetoLog {
         return line;
     }
 
-    /** Hits vetoed so far for this bot, all reasons. */
-    public long total(String bot) {
-        PerBot p = bots.get(bot.toLowerCase(Locale.ROOT));
-        return p == null ? 0 : p.total;
-    }
-
-    /** Hits vetoed so far for this bot for one reason. */
-    public long total(String bot, Reason reason) {
-        PerBot p = bots.get(bot.toLowerCase(Locale.ROOT));
-        return p == null ? 0 : reason == Reason.BLOCKED ? p.blocked : p.reach;
-    }
-
-    /** Hits vetoed so far for all bots. */
-    public long totalAll() {
-        return totalVetoes;
-    }
-
     /** A short diagnostic text about one bot, or null when nothing was vetoed for it. */
     public String describe(String bot) {
         PerBot p = bots.get(bot.toLowerCase(Locale.ROOT));
         if (p == null) {
             return null;
         }
-        return String.format(Locale.ROOT, "meleeVetoes=%d (no-line %d, reach %d, farthest %.2f)", p.total, p.blocked,
+        return String.format(Locale.ROOT, "vetoes %d (wall %d, reach %d, farthest %.2f)", p.total, p.blocked,
                 p.reach, p.farthest);
     }
 
     public void reset() {
         bots.clear();
-        totalVetoes = 0;
     }
 }

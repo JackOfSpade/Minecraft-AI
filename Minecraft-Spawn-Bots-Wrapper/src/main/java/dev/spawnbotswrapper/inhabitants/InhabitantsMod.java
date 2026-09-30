@@ -10,8 +10,8 @@ import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
 import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
-import dev.spawnbotswrapper.inhabitants.mc.MeleeLegality;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
+import dev.spawnbotswrapper.inhabitants.mc.MeleeLegality;
 import dev.spawnbotswrapper.inhabitants.mc.RangedFire;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
 import dev.spawnbotswrapper.inhabitants.mc.StepGuard;
@@ -84,6 +84,7 @@ public final class InhabitantsMod implements ModInitializer {
         });
         combat.register();
         combat.aggroState(aggro::describe);
+        combat.meleeVetoState(meleeLegality::describe);
         rangedFire.register();
         meleeLegality.register();
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);

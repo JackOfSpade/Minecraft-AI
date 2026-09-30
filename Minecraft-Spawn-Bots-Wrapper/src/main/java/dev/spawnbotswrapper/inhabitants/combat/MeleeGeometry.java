@@ -3,8 +3,9 @@ package dev.spawnbotswrapper.inhabitants.combat;
 /**
  * The pure geometry of "could a human client have targeted this entity with a melee swing", free of Minecraft types so
  * it is unit-testable. A human's crosshair ray starts at the eye; the entity is picked when the ray enters its bounding
- * box within the entity interaction range (vanilla survival: 3.0 blocks) and no block with a collision shape stands
- * closer on that ray. The block test needs the world and lives in {@code MeleeLegality}; this class only answers where
+ * box within the weapon's attack range and no block with a collision shape stands closer on that ray. The range itself
+ * is vanilla's ({@code AttackRange}, per weapon: 3.0 blocks for a sword, up to 4.5 for a spear) and is decided in
+ * {@code MeleeLegality} by calling vanilla; so is the block test, which needs the world. This class only answers where
  * a human could aim and how far along the ray the box is entered.
  * <p>
  * Aim points: a human can aim at any visible part of the box, not only its nearest point (a head above a fence is
@@ -12,14 +13,13 @@ package dev.spawnbotswrapper.inhabitants.combat;
  * (the eye clamped into the box) plus the centre, a head point and a foot point of the box; a swing is legal when ANY of
  * them is reachable on a clear ray.
  * <p>
- * Tolerance: {@link #TOLERANCE} (0.2 blocks) is added to the range. The victim's position the server sees can be a tick
- * or two ahead of what a client's crosshair saw, and vanilla's own server-side check is more lenient than the client's
- * pick (it adds a buffer to the range). 0.2 keeps the rule at vanilla reach for every practical purpose: a bot at
- * 3.5 blocks centre to centre (3.2 to the box) stays illegal only just, one at 3.8 clearly.
+ * Tolerance: {@link #TOLERANCE} (0.2 blocks) is added to the range (as the tolerance argument of vanilla's
+ * {@code AttackRange.isInRange}, and to the aim rays' length). The victim's position the server sees can be a tick or
+ * two ahead of what a client's crosshair saw. Vanilla's own server-side check passes a tolerance of 3.0 blocks, an
+ * anti-cheat slack for a pick the client already made, which would make this rule meaningless; the client's own pick
+ * uses none, so only a small allowance for lag is kept.
  */
 public final class MeleeGeometry {
-    /** Vanilla entity interaction range of a survival player, blocks. The real value is read from the attribute. */
-    public static final double VANILLA_REACH = 3.0;
     /** Blocks added to the range for server/client position lag; see the class comment. */
     public static final double TOLERANCE = 0.2;
     /** How far short of the box the block test stops, so the box's own surface is never counted as a block. */

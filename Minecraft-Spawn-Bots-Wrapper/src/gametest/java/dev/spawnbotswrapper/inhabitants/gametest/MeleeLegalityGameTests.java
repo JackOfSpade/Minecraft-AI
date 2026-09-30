@@ -3,6 +3,8 @@ package dev.spawnbotswrapper.inhabitants.gametest;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -21,8 +23,11 @@ import java.util.regex.Pattern;
  *   <li>behind a one-block wall: no damage for 100 ticks, and the veto log proves the bot did try;</li>
  *   <li>in the open (the control): damage, and no veto;</li>
  *   <li>behind a wall that is removed: no damage first, damage after;</li>
- *   <li>3.8 blocks away (beyond the 3.0 reach), the bot held in place: no damage, and a direct swing is vetoed as
- *       "beyond reach".</li>
+ *   <li>3.8 blocks away (beyond the sword's vanilla 3.0 reach), the bot held in place: no damage, and a direct swing is
+ *       vetoed as outside its attack range;</li>
+ *   <li>the same bot with a spear (vanilla attack range 2.0 to 4.5 blocks): a hit 4.0 blocks from its box, beyond any
+ *       sword but inside the spear's range, is NOT vetoed; one 1.2 blocks from its box, closer than the spear's minimum
+ *       range, is vetoed as vanilla refuses it.</li>
  * </ul>
  * The bot is pinned to face the player (yaw and head yaw) so that no test depends on where the spawn happened to look.
  */
@@ -31,7 +36,7 @@ public final class MeleeLegalityGameTests {
     /** Yaw of a body looking toward +x (east). */
     private static final float EAST = -90.0F;
     private static final Pattern VETO = Pattern.compile("vetoed (\\d+) hit\\(s\\) by (\\S+) since the last line "
-            + "\\((\\d+) without a clear line, (\\d+) beyond reach\\)");
+            + "\\((\\d+) without a clear line, (\\d+) outside its attack range\\)");
 
     private static final class Scene {
         final Rig rig;
@@ -64,6 +69,14 @@ public final class MeleeLegalityGameTests {
                 Rig.LOG.info("[melee] scene placed at tick {}: bot at {}, player {} blocks east", placedAt, fmt(home), dx);
             }
             return true;
+        }
+
+        /** Swaps the sword for an iron spear (idempotent); PvP BOT's spear mode is off, so it only ever melees with it. */
+        void equipSpear() {
+            if (!rig.bot.getMainHandItem().is(Items.IRON_SPEAR)) {
+                rig.bot.getInventory().setItem(0, new ItemStack(Items.IRON_SPEAR));
+                rig.bot.getInventory().setSelectedSlot(0);
+            }
         }
 
         void face() {
@@ -229,7 +242,7 @@ public final class MeleeLegalityGameTests {
     /**
      * Beyond vanilla reach: the player stands 3.8 blocks from the bot (3.5 to its box, reach 3.0), the bot is held in
      * place (else it would simply walk up). No damage for 100 ticks although the bot has him as its target, and a swing
-     * made directly by the bot is vetoed as "beyond reach".
+     * made directly by the bot is vetoed as outside its attack range.
      */
     @GameTest(environment = ENV + "melee_reach", maxTicks = 500)
     public void playerBeyondVanillaReachTakesNoMeleeDamage(GameTestHelper context) {
@@ -251,7 +264,9 @@ public final class MeleeLegalityGameTests {
             }
             if (since == 30 && !swung[0]) {
                 swung[0] = true;
-                // A human standing there could not have hit; the bot's own attack goes through the same damage path.
+                // Exercises the veto path directly: the bot is held in place above, so this test makes the attack call
+                // itself (PvP BOT would not swing from here). A human standing there could not have hit; the bot's attack
+                // goes through the same damage path as PvP BOT's own swing would.
                 s.rig.bot.attack(s.rig.target);
             }
             if (s.damaged()) {
@@ -263,6 +278,87 @@ public final class MeleeLegalityGameTests {
                 Rig.LOG.info("[reach] after {} ticks: vetoes {}", since, s.vetoLines());
                 if (counts == null || counts[1] < 1) {
                     s.rig.fail("the swing at 3.8 blocks was not vetoed as beyond reach: " + s.vetoLines());
+                }
+                s.rig.succeed();
+            }
+        });
+    }
+
+    /**
+     * The 1.21.11 spear has its own vanilla attack range (2.0 to 4.5 blocks, plus a 0.125 hitbox margin): the player
+     * stands 4.3 blocks from the bot (4.0 to his box), beyond any sword's 3.0 (3.2 with the tolerance) yet inside the
+     * spear's range. The bot, held in place, attacks directly until it lands a hit: the hit must not be vetoed.
+     */
+    @GameTest(environment = ENV + "melee_spear_far", maxTicks = 500)
+    public void aSpearHitBeyondSwordReachButInsideTheSpearsRangeIsNotVetoed(GameTestHelper context) {
+        Scene s = new Scene(context);
+        s.rig.buildPlatform();
+        s.rig.createTarget(4.3);
+        context.onEachTick(() -> {
+            if (!s.ready(4.3)) {
+                return;
+            }
+            long since = context.getTick() - s.placedAt;
+            s.equipSpear();
+            s.engage();
+            s.rig.bot.teleportTo(s.rig.level, s.home.x, s.home.y, s.home.z, java.util.Set.of(), EAST, 0.0F, true);
+            s.rig.bot.setDeltaMovement(Vec3.ZERO);
+            if (since % 20 == 0) {
+                Rig.LOG.info("[spear far] {}", s.status());
+            }
+            // A spear needs a full charge: the first swing at 40 ticks, a retry every 20 (the swap resets the cooldown).
+            if (since >= 40 && since % 20 == 0 && !s.damaged()) {
+                s.rig.bot.attack(s.rig.target);
+            }
+            int[] counts = s.vetoCounts();
+            if (counts != null && counts[1] > 0) {
+                s.rig.fail("a spear hit 4.0 blocks from the box (inside the spear's vanilla range) was vetoed as out of range: "
+                        + s.vetoLines() + "; " + s.status());
+            }
+            if (s.damaged()) {
+                Rig.LOG.info("[spear far] damaged after {} ticks; {}; vetoes={}", since, s.status(), s.vetoLines());
+                s.rig.succeed();
+            } else if (since > 200) {
+                s.rig.fail("the spear hit inside the spear's range did not land in " + since + " ticks; " + s.status()
+                        + " vetoes=" + s.vetoLines());
+            }
+        });
+    }
+
+    /**
+     * Below the spear's minimum range (2.0 blocks, minus the 0.125 margin and the 0.2 tolerance) vanilla refuses the
+     * jab: the player stands 1.5 blocks from the bot (1.2 to his box). No damage for 120 ticks although the bot swings
+     * (its own routine and a direct call), and the swings are vetoed as outside the attack range.
+     */
+    @GameTest(environment = ENV + "melee_spear_close", maxTicks = 500)
+    public void aSpearHitCloserThanTheSpearsMinimumRangeIsVetoed(GameTestHelper context) {
+        Scene s = new Scene(context);
+        s.rig.buildPlatform();
+        s.rig.createTarget(1.5);
+        context.onEachTick(() -> {
+            if (!s.ready(1.5)) {
+                return;
+            }
+            long since = context.getTick() - s.placedAt;
+            s.equipSpear();
+            s.engage();
+            s.rig.bot.teleportTo(s.rig.level, s.home.x, s.home.y, s.home.z, java.util.Set.of(), EAST, 0.0F, true);
+            s.rig.bot.setDeltaMovement(Vec3.ZERO);
+            if (since % 20 == 0) {
+                Rig.LOG.info("[spear close] {}", s.status());
+            }
+            if (since >= 40 && since % 20 == 0) {
+                s.rig.bot.attack(s.rig.target);
+            }
+            if (s.damaged()) {
+                s.rig.fail("the player closer than the spear's minimum range took melee damage after " + since + " ticks; "
+                        + s.status() + " vetoes=" + s.vetoLines());
+            }
+            if (since >= 120) {
+                int[] counts = s.vetoCounts();
+                Rig.LOG.info("[spear close] after {} ticks: vetoes {}", since, s.vetoLines());
+                if (counts == null || counts[1] < 1) {
+                    s.rig.fail("the spear swing below its minimum range was not vetoed as out of range: " + s.vetoLines());
                 }
                 s.rig.succeed();
             }

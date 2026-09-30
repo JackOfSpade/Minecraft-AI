@@ -16,6 +16,7 @@ public final class McObjects {
     private static final Method OBJECT_OFFSET;
     private static final Method PUT_OBJECT;
     private static final Method PUT_INT;
+    private static final Method PUT_FLOAT;
 
     static {
         try {
@@ -27,6 +28,7 @@ public final class McObjects {
             OBJECT_OFFSET = unsafe.getMethod("objectFieldOffset", Field.class);
             PUT_OBJECT = unsafe.getMethod("putObject", Object.class, long.class, Object.class);
             PUT_INT = unsafe.getMethod("putInt", Object.class, long.class, int.class);
+            PUT_FLOAT = unsafe.getMethod("putFloat", Object.class, long.class, float.class);
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -50,6 +52,17 @@ public final class McObjects {
             Field field = declaring.getDeclaredField(name);
             long offset = (Long) OBJECT_OFFSET.invoke(UNSAFE, field);
             PUT_OBJECT.invoke(UNSAFE, target, offset, value);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("cannot set " + declaring.getSimpleName() + "." + name, e);
+        }
+    }
+
+    /** Sets a float instance field on an object made by {@link #opaque}. */
+    public static void setFloat(Object target, Class<?> declaring, String name, float value) {
+        try {
+            Field field = declaring.getDeclaredField(name);
+            long offset = (Long) OBJECT_OFFSET.invoke(UNSAFE, field);
+            PUT_FLOAT.invoke(UNSAFE, target, offset, value);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("cannot set " + declaring.getSimpleName() + "." + name, e);
         }

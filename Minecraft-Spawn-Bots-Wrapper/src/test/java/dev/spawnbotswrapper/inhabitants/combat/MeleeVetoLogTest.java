@@ -17,12 +17,10 @@ class MeleeVetoLogTest {
         String first = log.veto(100, "DuskRaven", Reason.BLOCKED, "Steve", 1.7, 3.0);
         assertNotNull(first);
         assertTrue(first.contains("vetoed 1 hit(s) by DuskRaven"), first);
-        assertTrue(first.contains("1 without a clear line, 0 beyond reach"), first);
+        assertTrue(first.contains("1 without a clear line, 0 outside its attack range"), first);
         assertNull(log.veto(101, "DuskRaven", Reason.BLOCKED, "Steve", 1.7, 3.0));
         assertNull(log.veto(1299, "DuskRaven", Reason.OUT_OF_REACH, "Steve", 3.5, 3.0));
-        assertEquals(3, log.total("duskraven"));
-        assertEquals(2, log.total("DuskRaven", Reason.BLOCKED));
-        assertEquals(1, log.total("DuskRaven", Reason.OUT_OF_REACH));
+        assertEquals("vetoes 3 (wall 2, reach 1, farthest 3.50)", log.describe("duskraven"));
     }
 
     @Test
@@ -33,7 +31,7 @@ class MeleeVetoLogTest {
         log.veto(20, "A", Reason.BLOCKED, "Steve", 1.7, 3.0);
         String next = log.veto(MeleeVetoLog.INFO_INTERVAL_TICKS, "A", Reason.BLOCKED, "Steve", 1.7, 3.0);
         assertNotNull(next);
-        assertTrue(next.contains("vetoed 3 hit(s) by A since the last line (2 without a clear line, 1 beyond reach)"), next);
+        assertTrue(next.contains("vetoed 3 hit(s) by A since the last line (2 without a clear line, 1 outside its attack range)"), next);
         assertTrue(next.contains("4 vetoed by it in total"), next);
     }
 
@@ -42,9 +40,8 @@ class MeleeVetoLogTest {
         MeleeVetoLog log = new MeleeVetoLog();
         assertNotNull(log.veto(0, "A", Reason.BLOCKED, "Steve", 1.7, 3.0));
         assertNotNull(log.veto(1, "B", Reason.BLOCKED, "Steve", 1.7, 3.0));
-        assertEquals(2, log.totalAll());
-        assertEquals(1, log.total("B"));
-        assertEquals(0, log.total("C"));
+        assertEquals("vetoes 1 (wall 1, reach 0, farthest 1.70)", log.describe("B"));
+        assertNull(log.describe("C"));
     }
 
     @Test
@@ -60,9 +57,8 @@ class MeleeVetoLogTest {
         assertNull(log.describe("A"));
         log.veto(0, "A", Reason.BLOCKED, "Steve", 1.7, 3.0);
         log.veto(1, "A", Reason.OUT_OF_REACH, "Steve", 3.5, 3.0);
-        assertEquals("meleeVetoes=2 (no-line 1, reach 1, farthest 3.50)", log.describe("A"));
+        assertEquals("vetoes 2 (wall 1, reach 1, farthest 3.50)", log.describe("A"));
         log.reset();
         assertNull(log.describe("A"));
-        assertEquals(0, log.totalAll());
     }
 }

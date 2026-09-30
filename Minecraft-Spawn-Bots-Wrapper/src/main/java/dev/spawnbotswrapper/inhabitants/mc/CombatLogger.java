@@ -84,6 +84,8 @@ public final class CombatLogger {
 
     /** The aggro range's state for one bot (name) as text, appended to the damage-taken line. */
     private volatile Function<String, String> aggroState = bot -> null;
+    /** One bot's vetoed melee hits (name to text, null for none), appended to the damage-taken line. */
+    private volatile Function<String, String> meleeVetoState = bot -> null;
 
     public CombatLogger(Supplier<ServerSession> session, Logger log) {
         this.session = session;
@@ -93,6 +95,11 @@ public final class CombatLogger {
     /** Lets the damage-taken diagnostic show whether the aggro range holds a forced target on the victim. */
     public void aggroState(Function<String, String> aggroState) {
         this.aggroState = aggroState;
+    }
+
+    /** Lets the damage-taken diagnostic show the melee hits the bot itself had vetoed (see MeleeLegality). */
+    public void meleeVetoState(Function<String, String> meleeVetoState) {
+        this.meleeVetoState = meleeVetoState;
     }
 
     /** Registers the two Fabric events; call once from the mod entrypoint. */
@@ -228,6 +235,10 @@ public final class CombatLogger {
         String aggro = aggroState.apply(c.victim.name());
         if (aggro != null) {
             snapshot = snapshot + " aggro[" + aggro + "]";
+        }
+        String melee = meleeVetoState.apply(c.victim.name());
+        if (melee != null) {
+            snapshot = snapshot + " melee[" + melee + "]";
         }
         log.info(DamageTakenLog.line(new DamageTakenLog.Taken(c.victim.name(), population,
                 c.attacker == null ? null : c.attacker.name(),
