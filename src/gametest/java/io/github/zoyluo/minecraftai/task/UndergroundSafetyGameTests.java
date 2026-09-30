@@ -945,8 +945,12 @@ public final class UndergroundSafetyGameTests {
         require(context, !staleRoute.isFailed() && !bot.getActionPack().isPathExecutorIdle(),
                 "fixture did not open the route that must be retired after suffocation recovery");
         BlockPos blockedHead = start.above();
-        // A block that stays where it is: the exit now takes real ticks, and a gravel block over an open cell would fall away (or onto
-        // the bot) while it does. The falling-gravel burial itself is covered by NaturalMovementGameTests.
+        // Blocks that stay where they are: the exit now takes real ticks, and a gravel block over an open cell would fall away (or onto
+        // the bot) while it does. Both of the bot's cells are filled, as a collapsed two-high gravel column fills them: with only the head
+        // cell blocked a player (and so a bot) just crawls (its pose shrinks to 0.6 blocks) and is not inside the block at all. The
+        // falling-gravel burial itself is covered by NaturalMovementGameTests.
+        context.getLevel().setBlock(
+                start, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         context.getLevel().setBlock(
                 blockedHead, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();

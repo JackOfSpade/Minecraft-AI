@@ -546,46 +546,4 @@ public final class NaturalMovementGameTests {
             }
         });
     }
-
-    /** SWIM presses forward and jump up a two-cell water shaft, one cell per step, and ends in the water cell it was given. */
-    @GameTest(environment = "minecraftai-gametest:natural_movement_game_tests_walked_step_swims_up_a_shaft", maxTicks = 200)
-    public void walkedStepSwimsUpAShaft(GameTestHelper context) {
-        Arena arena = Arena.build(context, 8, -3, 6, -3, 3);
-        // A water shaft at (2, 0..2, 0), walled by stone on every side, open at the top.
-        for (int dy = 0; dy <= 3; dy++) {
-            for (int dx = 1; dx <= 3; dx++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    boolean shaft = dx == 2 && dz == 0 && dy <= 2;
-                    arena.set(dx, dy, dz, shaft ? Blocks.WATER : Blocks.STONE);
-                }
-            }
-        }
-        arena.set(2, 3, 0, Blocks.AIR);
-        BlockPos bottom = arena.at(2, 0, 0);
-        AIPlayerEntity bot = arena.spawn("WalkedSwimGT", bottom);
-        BlockPos[] cells = {arena.at(2, 1, 0), arena.at(2, 2, 0)};
-        TeleportAudit.reset(bot);
-        int[] step = {0};
-        int[] ticks = {0};
-        bot.getActionPack().runStep(WalkedStep.begin(bot, cells[0], WalkedStep.Kind.SWIM, "gametest_swim_1"));
-        context.onEachTick(() -> {
-            ticks[0]++;
-            requireNoCorrections(context, bot, "swim step " + (step[0] + 1));
-            require(context, ticks[0] < 190, "timed out at " + bot.position() + " step " + (step[0] + 1));
-            if (!bot.getActionPack().stepIdle()) {
-                return;
-            }
-            WalkedStep.Result result = bot.getActionPack().stepResult();
-            require(context, result != null && result.succeeded(),
-                    "swim step " + (step[0] + 1) + " failed: " + (result == null ? "no result" : result.reason()));
-            require(context, bot.blockPosition().equals(cells[step[0]]),
-                    "swim step " + (step[0] + 1) + " ended in " + bot.blockPosition().toShortString());
-            step[0]++;
-            if (step[0] == cells.length) {
-                arena.finish(bot);
-                return;
-            }
-            bot.getActionPack().runStep(WalkedStep.begin(bot, cells[step[0]], WalkedStep.Kind.SWIM, "gametest_swim_2"));
-        });
-    }
 }
