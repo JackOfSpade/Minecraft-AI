@@ -197,7 +197,7 @@ final class DetourStartSelector {
 
             DetourHost.Pose pose = host.poseFor(pos, anchor, Set.of());
             if (pose == null) {
-                logSkip(host, pos, blockId, value, "no_pose");
+                logSkip(host, pos, blockId, value, "no_pose", "feet", host.feet());
                 excludeCluster(host, r.cluster(), CLUSTER_EXCLUDE_TICKS);
                 continue;
             }
@@ -209,13 +209,13 @@ final class DetourStartSelector {
                 }
                 ObservedReach.Result reach = host.observedReach(host.feet(), pose.stand());
                 if (reach.status() == ObservedReach.Status.UNREACHABLE) {
-                    logSkip(host, pos, blockId, value, "unreachable_observed");
+                    logSkip(host, pos, blockId, value, "unreachable_observed", "from", host.feet(), "stand", pose.stand());
                     excludeCluster(host, r.cluster(), CLUSTER_EXCLUDE_TICKS);
                     continue;
                 }
                 if (reach.status() == ObservedReach.Status.REACHABLE
                         && !DetourPolicy.pathLengthOk(reach.length(), host.config())) {
-                    logSkip(host, pos, blockId, value, "path_too_long");
+                    logSkip(host, pos, blockId, value, "path_too_long", "from", host.feet(), "stand", pose.stand());
                     excludeCluster(host, r.cluster(), CLUSTER_EXCLUDE_TICKS);
                     continue;
                 }
@@ -258,6 +258,17 @@ final class DetourStartSelector {
     private static void logSkip(DetourHost host, BlockPos pos, String blockId, int value, String reason) {
         if (host.shouldLogSkip(pos)) {
             host.log("ore_dig_detour_skip", "reason", reason, "pos", pos, "block", blockId, "value", value);
+        }
+    }
+
+    /** {@link #logSkip} with the positions the verdict was taken from: a pose or reach verdict depends on where the bot stood. */
+    private static void logSkip(DetourHost host, BlockPos pos, String blockId, int value, String reason, Object... where) {
+        if (host.shouldLogSkip(pos)) {
+            Object[] kv = new Object[8 + where.length];
+            Object[] head = {"reason", reason, "pos", pos, "block", blockId, "value", value};
+            System.arraycopy(head, 0, kv, 0, head.length);
+            System.arraycopy(where, 0, kv, head.length, where.length);
+            host.log("ore_dig_detour_skip", kv);
         }
     }
 
