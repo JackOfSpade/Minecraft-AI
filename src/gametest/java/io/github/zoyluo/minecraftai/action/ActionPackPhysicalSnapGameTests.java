@@ -1,8 +1,12 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
+import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.navigation.NavEngine;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.MoveType;
 import io.github.zoyluo.minecraftai.pathfinding.Node;
@@ -31,50 +35,64 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Strict-survival regression for a one-cell physical recovery from an invalid A* start. */
 public final class ActionPackPhysicalSnapGameTests {
-    @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_center_return_clears_residual_walk_velocity_before_next_server_tick", maxTicks = 20)
-    public void centerReturnClearsResidualWalkVelocityBeforeNextServerTick(
-            GameTestHelper context) {
+    /**
+     * A start whose body overlaps a wall column (the lower corner of a standable cell) is left by walking: nothing recentres the bot by
+     * a teleport. The safety net shoves it clear of the block with real inputs and the route it asked for is walked to its goal.
+     */
+    @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_an_overlap_start_walks_off_without_a_teleport", maxTicks = 200)
+    public void anOverlapStartWalksOffWithoutATeleport(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos anchor = context.absolutePos(new BlockPos(3, 3, 3));
-        world.setBlock(anchor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(anchor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(anchor.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(anchor.south(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(anchor.south().above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos goal = anchor.south(3);
+        for (int dz = -1; dz <= 4; dz++) {
+            BlockPos feet = anchor.south(dz);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        // The wall column north of the anchor: the bot's 0.6-wide body reaches into it.
+        world.setBlock(anchor.north(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.north().above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
-        String name = "CenterReturnVelocityGT";
+        String name = "OverlapWalkOffGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(anchor),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, anchor.getX() + 0.5D, anchor.getY(), anchor.getZ() + 0.95D,
-                Set.of(), 0.0F, 0.0F, true);
+        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+        BotFixtureMoves.place(bot, new Vec3(anchor.getX() + 0.5D, anchor.getY(), anchor.getZ() + 0.15D));
         bot.setOnGround(true);
-        bot.setDeltaMovement(0.0D, 0.0D, 0.85D);
+        Standability.clearCache();
+        require(context, Standability.isStandable(world, anchor) && !FakePlayerMotion.isBlockCollisionFree(bot),
+                "fixture: the start must be a standable cell whose body overlaps the wall");
+        TeleportAudit.reset(bot);
+        Vec3 start = bot.position();
+        ActionResult started = bot.getActionPack().startPathTo(goal);
+        require(context, !started.isFailed(), "an overlapping start was refused: " + started.reason());
+        require(context, bot.position().distanceToSqr(start) < 1.0E-12D, "starting the route moved the bot");
 
-        require(context, FakePlayerMotion.returnToBlockCenter(
-                        bot, anchor, "gametest_residual_walk_velocity"),
-                "supported same-cell return was rejected");
-        require(context, bot.getDeltaMovement().lengthSqr() == 0.0D && bot.onGround(),
-                "center return did not publish a stationary grounded pose");
-        AtomicInteger observedTicks = new AtomicInteger();
-        context.failIfEver(() -> {
-            if (observedTicks.incrementAndGet() < 3) {
-                return;
+        AtomicInteger ticks = new AtomicInteger();
+        context.onEachTick(() -> {
+            int tick = ticks.incrementAndGet();
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "the overlap was corrected by a teleport (" + TeleportAudit.lastCaller(bot) + ")");
+            if (bot.getActionPack().isPathExecutorIdle() && tick > 8 && !bot.blockPosition().closerThan(goal, 1.5D)) {
+                // The safety net's shove took the bot over for a moment: the owner asks again, as a task does.
+                bot.getActionPack().startPathTo(goal);
             }
-            require(context, bot.blockPosition().equals(anchor),
-                    "residual walk velocity moved the centered player to "
-                            + bot.blockPosition().toShortString());
-            require(context, bot.position().distanceToSqr(Vec3.atBottomCenterOf(anchor))
-                            < 1.0E-6D,
-                    "centered player drifted before the next service transaction");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
+            if (bot.blockPosition().closerThan(goal, 1.5D) && FakePlayerMotion.isBlockCollisionFree(bot)) {
+                require(context, Math.abs(bot.getX() - (anchor.getX() + 0.5D)) < 1.0D, "the bot left its column");
+                bot.getActionPack().stopAll();
+                NavEngineSelector.clearBotEngine(bot.getUUID());
+                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                context.succeed();
+            }
+            require(context, tick < 190, "the bot did not walk off the wall to the goal: " + bot.blockPosition().toShortString());
         });
     }
 
     @GameTest(maxTicks = 20)
-    public void standableBodySnapPreservesSafeOffsetAndRecentersRealCornerOverlap(
+    public void standableBodySnapKeepsEveryPoseAndNeverTeleportsACornerOverlap(
             GameTestHelper context) {
         var world = context.getLevel();
         BlockPos anchor = context.absolutePos(new BlockPos(7, 3, 7));
@@ -114,20 +132,25 @@ public final class ActionPackPhysicalSnapGameTests {
                 "corner fixture logical column was not standable");
         require(context, !FakePlayerMotion.isBlockCollisionFree(bot),
                 "corner fixture did not produce a real body collision");
+        TeleportAudit.reset(bot);
+        Vec3 corner = bot.position();
+        // R5: the overlap is not repaired by moving the bot. The cell is a valid start as it is (the bot walks off it), so the
+        // snap accepts it without a single teleport, however often it is asked.
         require(context, bot.getActionPack().snapPlayerToNearestStandable(
                         "gametest_corner_overlap"),
-                "standable corner overlap did not recover physically");
-        Vec3 centered = Vec3.atBottomCenterOf(anchor);
-        require(context, bot.position().distanceToSqr(centered) < 1.0E-12D
-                        && FakePlayerMotion.isBlockCollisionFree(bot),
-                "corner snap returned before reaching a collision-free centre");
+                "a standable corner overlap must be accepted as a start");
+        require(context, bot.position().distanceToSqr(corner) < 1.0E-12D,
+                "the corner overlap was recentred by a move");
+        require(context, bot.getActionPack().startCell().equals(anchor),
+                "the search must start from the bot's own cell");
 
-        Vec3 after = bot.position();
         require(context, bot.getActionPack().snapPlayerToNearestStandable(
                         "gametest_corner_overlap_idempotent"),
-                "already-cleared centre was rejected");
-        require(context, bot.position().distanceToSqr(after) < 1.0E-12D,
-                "idempotent snap moved an already-cleared centre");
+                "the same start was rejected the second time");
+        require(context, bot.position().distanceToSqr(corner) < 1.0E-12D,
+                "the repeated snap moved the bot");
+        require(context, TeleportAudit.corrections(bot) == 0,
+                "a snap teleported the bot (" + TeleportAudit.lastCaller(bot) + ")");
 
         AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
         context.succeed();
@@ -171,8 +194,12 @@ public final class ActionPackPhysicalSnapGameTests {
         context.succeed();
     }
 
-    @GameTest(maxTicks = 20)
-    public void consecutiveHorizontalJumpsPublishEachVerifiedLanding(GameTestHelper context) {
+    /**
+     * Three one-block hops in a row, each a real jump onto the next step with the forward and jump keys (no teleport): every landing is
+     * verified (block position, grounded) before the next hop starts.
+     */
+    @GameTest(maxTicks = 240)
+    public void consecutiveWalkedHopsLandOnEachStep(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         BlockPos first = start.east().above();
@@ -182,46 +209,48 @@ public final class ActionPackPhysicalSnapGameTests {
             world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
 
-        String name = "HorizontalJumpGT";
+        String name = "WalkedHopsGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(start),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
+        BotFixtureMoves.place(bot, start);
         bot.setOnGround(true);
+        Standability.clearCache();
+        TeleportAudit.reset(bot);
 
-        require(context, FakePlayerMotion.jumpTo(bot, first, "gametest_first_natural_jump"),
-                "first horizontal jump was rejected");
-        require(context, bot.blockPosition().equals(first) && bot.onGround(),
-                "first verified landing was not published as grounded");
-        // Reproduce the server tick that overwrites a clientless player's grounded flag even
-        // though its collision box is still resting exactly on the verified first landing.
-        bot.setOnGround(false);
-        require(context, FakePlayerMotion.jumpTo(bot, second, "gametest_second_natural_jump"),
-                "second supported jump was rejected because onGround was stale");
-        require(context, bot.blockPosition().equals(second) && bot.onGround(),
-                "second verified landing was not published as grounded");
-
-        // A standable block below is not enough: lift the same collision box 2.5 cm so the
-        // vanilla support probe no longer touches it. This must remain a real airborne rejection.
-        bot.teleportTo(world, second.getX() + 0.5D, second.getY() + 0.025D,
-                second.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
-        bot.setOnGround(false);
-        require(context, !FakePlayerMotion.jumpTo(bot, third, "gametest_airborne_jump_rejected"),
-                "airborne fake player was accepted as a stale-grounded landing");
-        require(context, bot.blockPosition().equals(second)
-                        && Math.abs(bot.getY() - (second.getY() + 0.025D)) < 1.0E-6D,
-                "rejected airborne jump still changed the player pose");
-
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
+        BlockPos[] landings = {first, second, third};
+        int[] hop = {0};
+        int[] ticks = {0};
+        bot.getActionPack().runStep(WalkedStep.begin(bot, landings[0], WalkedStep.Kind.STEP_UP, "gametest_hop_1"));
+        context.onEachTick(() -> {
+            ticks[0]++;
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "a hop teleported the bot (" + TeleportAudit.lastCaller(bot) + ")");
+            if (bot.getActionPack().stepIdle()) {
+                WalkedStep.Result result = bot.getActionPack().stepResult();
+                require(context, result != null && result.succeeded(),
+                        "hop " + (hop[0] + 1) + " did not succeed: " + (result == null ? "no result" : result.reason()));
+                require(context, bot.blockPosition().equals(landings[hop[0]]) && WalkedStep.supported(bot),
+                        "hop " + (hop[0] + 1) + " did not publish a verified landing: " + bot.blockPosition().toShortString());
+                hop[0]++;
+                if (hop[0] == landings.length) {
+                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                    context.succeed();
+                    return;
+                }
+                bot.getActionPack().runStep(WalkedStep.begin(bot, landings[hop[0]], WalkedStep.Kind.STEP_UP, "gametest_hop_" + (hop[0] + 1)));
+            }
+            require(context, ticks[0] < 230, "timed out at hop " + (hop[0] + 1) + " " + bot.blockPosition().toShortString());
+        });
     }
 
-    @GameTest(maxTicks = 20)
-    public void horizontalJumpRejectsLivingEntityOnLanding(GameTestHelper context) {
+    /** A living entity standing on the landing stops a walked hop before it starts: the step fails, the bot does not move. */
+    @GameTest(maxTicks = 40)
+    public void walkedHopRejectsLivingEntityOnLanding(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(9, 3, 3));
         BlockPos landing = start.east().above();
@@ -233,29 +262,45 @@ public final class ActionPackPhysicalSnapGameTests {
         world.setBlock(landing, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(landing.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
-        String name = "OccupiedJumpGT";
+        String name = "OccupiedHopGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(start),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
+        BotFixtureMoves.place(bot, start);
         bot.setOnGround(true);
+        Standability.clearCache();
+        TeleportAudit.reset(bot);
         var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
-        require(context, cow != null, "failed to create occupied-jump cow");
+        require(context, cow != null, "failed to create occupied-hop cow");
+        cow.setNoAi(true);
         cow.snapTo(Vec3.atBottomCenterOf(landing), 0.0F, 0.0F);
-        require(context, world.addFreshEntity(cow), "failed to spawn occupied-jump cow");
+        require(context, world.addFreshEntity(cow), "failed to spawn occupied-hop cow");
 
-        require(context, !FakePlayerMotion.jumpTo(bot, landing, "gametest_occupied_landing"),
-                "horizontal jump entered a living entity's landing box");
-        require(context, bot.blockPosition().equals(start) && bot.onGround(),
-                "rejected occupied jump changed the player pose");
-        require(context, world.getBlockState(landing.below()).is(Blocks.STONE),
-                "rejected occupied jump changed its natural support");
-
-        cow.discard();
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
+        Vec3 before = bot.position();
+        require(context, WalkedStep.refusal(bot, landing, WalkedStep.Kind.STEP_UP) != null,
+                "the hop validator accepted a landing occupied by a living entity");
+        bot.getActionPack().runStep(WalkedStep.begin(bot, landing, WalkedStep.Kind.STEP_UP, "gametest_occupied_landing"));
+        AtomicInteger ticks = new AtomicInteger();
+        context.onEachTick(() -> {
+            ticks.incrementAndGet();
+            if (bot.getActionPack().stepIdle()) {
+                WalkedStep.Result result = bot.getActionPack().stepResult();
+                require(context, result != null && result.failed() && result.reason().contains("entity_occupied"),
+                        "the hop into a living entity was not refused as entity_occupied: "
+                                + (result == null ? "no result" : result.status() + " " + result.reason()));
+                require(context, bot.blockPosition().equals(start) && bot.position().distanceTo(before) < 0.05D,
+                        "the rejected hop moved the bot to " + bot.position());
+                require(context, world.getBlockState(landing.below()).is(Blocks.STONE),
+                        "the rejected hop changed the natural support");
+                require(context, TeleportAudit.corrections(bot) == 0, "a rejected hop teleported the bot");
+                cow.discard();
+                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                context.succeed();
+                return;
+            }
+            require(context, ticks.get() < 30, "the occupied hop never ended");
+        });
     }
 
     @GameTest(maxTicks = 20)
@@ -744,8 +789,12 @@ public final class ActionPackPhysicalSnapGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
-    public void invalidStartUsesAdjacentPhysicalLandingBeforePrivilegedSnap(GameTestHelper context) {
+    /**
+     * A route from a cell that is not standable begins with a walked step onto the adjacent standable cell (the bot first settles in
+     * the layer below, then steps east onto the landing); no snap, teleport or privileged relocation exists on the way.
+     */
+    @GameTest(maxTicks = 220)
+    public void invalidStartUsesAdjacentWalkedLandingWithoutAnySnap(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos invalid = context.absolutePos(new BlockPos(5, 6, 5));
         BlockPos landing = invalid.offset(1, -1, 0);
@@ -760,33 +809,55 @@ public final class ActionPackPhysicalSnapGameTests {
         world.setBlock(invalid.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(invalid, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(invalid.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        // Floor under the hole so the bot settles one layer down instead of falling out of the world.
+        world.setBlock(invalid.below().below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "PhysicalSnapGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(invalid),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, false);
+        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+        BotFixtureMoves.place(bot, invalid);
+        Standability.clearCache();
 
         require(context, !Standability.isStandable(world, invalid),
                 "fixture start unexpectedly standable");
+        TeleportAudit.reset(bot);
+        Vec3 before = bot.position();
         ActionResult result = bot.getActionPack().startPathTo(goal);
         require(context, !result.isFailed(), "strict physical start recovery failed: " + result.reason());
-        require(context, bot.blockPosition().equals(landing),
-                "recovery was not the adjacent physical landing: " + bot.blockPosition().toShortString());
-        require(context, Standability.isStandable(world, bot.blockPosition()),
-                "physical recovery ended on a non-standable cell");
-
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
+        require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
+                "starting the route moved the bot to " + bot.blockPosition().toShortString());
+        AtomicInteger ticks = new AtomicInteger();
+        AtomicBoolean visitedLanding = new AtomicBoolean();
+        context.onEachTick(() -> {
+            int tick = ticks.incrementAndGet();
+            require(context, TeleportAudit.corrections(bot) == 0 && TeleportAudit.count(bot, TeleportAudit.Kind.PRIVILEGED) == 0,
+                    "the start was corrected by a teleport (" + TeleportAudit.lastCaller(bot) + ")");
+            if (bot.blockPosition().equals(landing)) {
+                visitedLanding.set(true);
+            }
+            if (bot.getActionPack().isPathExecutorIdle() && tick > 3) {
+                require(context, visitedLanding.get(), "the bot never stood on the adjacent landing cell");
+                require(context, bot.blockPosition().closerThan(goal, 1.5D),
+                        "the walked route ended away from the goal: " + bot.blockPosition().toShortString());
+                require(context, Standability.isStandable(world, bot.blockPosition()),
+                        "the walked recovery ended on a non-standable cell");
+                NavEngineSelector.clearBotEngine(bot.getUUID());
+                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                context.succeed();
+            }
+            require(context, tick < 210, "timed out at " + bot.blockPosition().toShortString());
+        });
     }
 
     /**
      * Session log 01:51:50-01:53:02: 42 path_start_physical_snap events while the bot yo-yoed
      * between two cells -- a straight-line walk kept carrying it back into the invalid start cell
-     * and every failed search snapped it out again.  A second snap out of the same cell inside the
-     * stall window must be refused (strict survival then reports NO_START) instead of repeating.
+     * and every failed search snapped it out again.  A second start out of the same cell inside the
+     * stall window must be refused (strict survival then reports NO_START) instead of repeating. The first start now plans a
+     * walked step and does not move the bot.
      */
     @GameTest(maxTicks = 20)
     public void secondPhysicalSnapOutOfTheSameCellIsRefusedInsteadOfYoYoing(GameTestHelper context) {
@@ -810,20 +881,23 @@ public final class ActionPackPhysicalSnapGameTests {
                         world.getServer(), name, world, Vec3.atBottomCenterOf(invalid),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, false);
+        BotFixtureMoves.place(bot, invalid);
+        Standability.clearCache();
+        TeleportAudit.reset(bot);
         require(context, bot.getActionPack().snapPlayerToNearestStandable("gametest_first_snap")
-                        && bot.blockPosition().equals(landing),
-                "the first snap out of the invalid start did not land on the adjacent cell: "
-                        + bot.blockPosition().toShortString());
+                        && bot.getActionPack().startCell().equals(landing)
+                        && bot.blockPosition().equals(invalid),
+                "the first start out of the invalid cell did not plan the adjacent cell without moving the bot: "
+                        + bot.getActionPack().startCell().toShortString() + " / " + bot.blockPosition().toShortString());
 
         // Something (the old straight-line walk fallback) carries the bot back into the same cell.
-        bot.teleportTo(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, false);
+        BotFixtureMoves.place(bot, invalid);
+        Standability.clearCache();
         require(context, !bot.getActionPack().snapPlayerToNearestStandable("gametest_second_snap"),
-                "a second snap out of the same cell inside the stall window was not refused");
+                "a second start out of the same cell inside the stall window was not refused");
         require(context, bot.blockPosition().equals(invalid),
-                "the refused snap still moved the bot to " + bot.blockPosition().toShortString());
+                "the refused start still moved the bot to " + bot.blockPosition().toShortString());
+        require(context, TeleportAudit.corrections(bot) == 0, "a start teleported the bot (" + TeleportAudit.lastCaller(bot) + ")");
 
         AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
         context.succeed();

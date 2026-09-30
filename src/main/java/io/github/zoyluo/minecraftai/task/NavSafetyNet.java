@@ -132,6 +132,7 @@ public final class NavSafetyNet {
         baritoneWaterLeaseUntil.remove(id);
         waterEscapeCache.remove(id);
         breathableStandableCache.remove(id);
+        suffocationEscapes.remove(id);
     }
 
     public void clearAll() {
@@ -142,6 +143,7 @@ public final class NavSafetyNet {
         baritoneWaterLeaseUntil.clear();
         waterEscapeCache.clear();
         breathableStandableCache.clear();
+        suffocationEscapes.clear();
     }
 
     /**
@@ -238,11 +240,13 @@ public final class NavSafetyNet {
         // bank seats its passenger a little below the hull, i.e. inside the ground.  Snapping the
         // bot out of the seat every tick (then re-boarding, forever) is what made a beached boat
         // impossible to use.  Other vehicles (minecart, horse, ...) keep the normal snap.
-        if (!(bot.getVehicle() instanceof AbstractBoat)
-                && !FakePlayerMotion.isBlockCollisionFree(bot)
-                && escapeSuffocation(bot, world, feet)) {
+        boolean buried = !(bot.getVehicle() instanceof AbstractBoat) && !FakePlayerMotion.isBlockCollisionFree(bot);
+        if (buried && escapeSuffocation(bot, world, feet)) {
             throttledLog(server, bot, "navsafe_suffocation_snap", feet);
             return true;
+        }
+        if (!buried && !suffocationEscapes.isEmpty()) {
+            releaseSuffocationEscape(bot);
         }
 
         // 1) Lava: standing in lava / lava underfoot -> escape immediately (highest priority)
@@ -480,62 +484,133 @@ public final class NavSafetyNet {
     }
 
     /**
-     * Escaping suffocation: prefer finding the first standable cell **straight up** (toward the
-     * surface) first and teleport onto it.
-     * Fixes "rescued deeper each time" -- the old implementation used
-     * snapPlayerToNearestStandable to find the Euclidean-nearest standable cell, but while the bot
-     * is buried that nearest cell is often below/diagonally below it, so repeated snaps dragged the
-     * bot one cell at a time deeper into the pit (measured: at column 994 it got stuck going
-     * 64->63->62->61). Climbing straight up is the correct fix for being buried
-     * (Standability.isStandable already guarantees the landing cell has air at feet and head, with
-     * support underfoot = can stand and breathe); only fall back to the omnidirectional nearest
-     * standable cell -- at least escaping the current suffocating cell -- if nothing works within
-     * SUFFOCATION_CLIMB_UP cells upward (buried deep, capped overhead).
+     * Escaping suffocation. The EMERGENCY_TELEPORT decision is made FIRST (the operator profile allows it, strict survival never does),
+     * and when it is denied nothing is scanned: the climb-up column scan below looks at blocks the bot cannot see, which only a
+     * privileged rescue may do. With it, the old rescue stays: the first standable cell **straight up** (toward the surface) is
+     * teleported to (fixes "rescued deeper each time" -- the old omnidirectional snap of a buried bot dragged it one cell at a time
+     * deeper into the pit, measured 64->63->62->61). Without it, or when nothing is standable within SUFFOCATION_CLIMB_UP cells
+     * upward, the bot gets out the way a player does: {@link #escapeSuffocationByInputs}.
      */
     private boolean escapeSuffocation(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
-        // The cache must be invalidated: reaching this "buried" branch means a block just changed
-        // (a cave-in / live-burial scenario calling setBlockState), so the Standability cache still
-        // reflects the world before the change -- judging "no standable cell upward" from stale
-        // values would fall back to the omnidirectional snap and drag the bot into a distant hole
-        // (measured: a plains live-burial case where 2 cells up was clearly standable, but the bot
-        // was still snapped into a y20 black hole and then triggered a life-saving teleport,
-        // aborting the scenario).
-        Standability.clearCache();
-        int top = world.getMinY() + world.getHeight();
-        for (int dy = 1; dy <= SUFFOCATION_CLIMB_UP && feet.getY() + dy < top - 1; dy++) {
-            BlockPos candidate = feet.above(dy);
-            if (Standability.isStandable(world, candidate)) {
-                boolean moved = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
-                        bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
-                        "navsafe_suffocation", () -> {
-                            bot.getActionPack().stopAll();
-                            bot.teleportTo(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
-                                    Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-                        });
-                if (moved) {
+        boolean emergency = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(
+                bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                "navsafe_suffocation").allowed();
+        if (emergency && suffocationEscapeIdle(bot)) {
+            // The cache must be invalidated: reaching this "buried" branch means a block just changed (a cave-in / live-burial
+            // scenario calling setBlockState), so the Standability cache still reflects the world before the change.
+            Standability.clearCache();
+            int top = world.getMinY() + world.getHeight();
+            for (int dy = 1; dy <= SUFFOCATION_CLIMB_UP && feet.getY() + dy < top - 1; dy++) {
+                BlockPos candidate = feet.above(dy);
+                if (Standability.isStandable(world, candidate)) {
+                    bot.getActionPack().stopAll();
+                    bot.teleportTo(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
+                            Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
                     Standability.clearCache();
                     return true;
                 }
-                // strict_survival deliberately denies the long-range upward teleport.  That denial
-                // must not suppress the ordinary adjacent escape below: a freshly collapsed gravel
-                // column commonly leaves the previous tunnel cell one physical step away.  The old
-                // early return left OreDig driving forward while the bot suffocated in place.
-                break;
             }
         }
-        // No solution upward (buried deep / capped overhead) -> fall back to the original logic: nearest standable cell in any direction.
-        boolean escaped = bot.getActionPack().snapPlayerToNearestStandable("navsafe_suffocation");
-        if (escaped) {
-            // The path that entered the collision is no longer valid after an emergency side-step.
-            // Keeping its executor alive lets it replay the same blocked edge on the next entity
-            // tick. In strict survival that produced an endless two-cell jump oscillation: the
-            // safety net escaped onto a standable neighbour, then the stale hunt route drove the
-            // clientless player straight back into the obstruction. Retire every old controller;
-            // the owning task will observe an idle route and choose a fresh waypoint.
-            bot.getActionPack().stopAll();
-        }
-        return escaped;
+        return escapeSuffocationByInputs(bot, world, feet);
     }
+
+    /** The state of one bot's escape from a block, kept across ticks: the break it is doing and when it last logged. */
+    private static final class SuffocationEscape {
+        final io.github.zoyluo.minecraftai.action.BlockMiner miner = new io.github.zoyluo.minecraftai.action.BlockMiner();
+        int lastLogTick = -1000;
+    }
+
+    private final Map<UUID, SuffocationEscape> suffocationEscapes = new ConcurrentHashMap<>();
+    private static final double SUFFOCATION_VIEW_RANGE = 6.0D;
+
+    /** No privileged escape may start while the bot is already walking or digging its own way out (that one carries on). */
+    private boolean suffocationEscapeIdle(AIPlayerEntity bot) {
+        SuffocationEscape state = suffocationEscapes.get(bot.getUUID());
+        return bot.getActionPack().stepIdle() && (state == null || state.miner.target() == null);
+    }
+
+    /** The bot is not (or no longer) inside a block: whatever it was digging for its escape is over. */
+    private void releaseSuffocationEscape(AIPlayerEntity bot) {
+        SuffocationEscape state = suffocationEscapes.remove(bot.getUUID());
+        if (state != null && state.miner.target() != null) {
+            state.miner.cancel(bot);
+        }
+    }
+
+    /**
+     * Getting out of a block with real inputs and real digging (no teleport, no scan of what the bot cannot see):
+     * (1) a body that only partly overlaps a block is shoved out the way a vanilla client shoves it (a small horizontal
+     * velocity toward the nearest free side); (2) else a walked step onto an adjacent standable cell (the rules and the
+     * once-per-origin-cell guard of a route's start); (3) else the bot digs itself out with the tool it has, at the real break
+     * time: the block at its head first, then the one at its feet, only blocks it can see (a view ray from its own eye);
+     * (4) else it logs {@code navsafe_suffocation_trapped}. A step or a break in flight carries on across ticks.
+     *
+     * @return true when this tick was taken over (an escape is in flight or was started)
+     */
+    boolean escapeSuffocationByInputs(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        var pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            return true;
+        }
+        SuffocationEscape state = suffocationEscapes.computeIfAbsent(bot.getUUID(), ignored -> new SuffocationEscape());
+        int now = world.getServer().getTickCount();
+        if (state.miner.target() != null) {
+            return tickEscapeBreak(bot, state);
+        }
+        Standability.clearCache();
+        if (io.github.zoyluo.minecraftai.action.WalkedStep.canPushOut(bot)) {
+            pack.stopAll();
+            pack.runStep(io.github.zoyluo.minecraftai.action.WalkedStep.begin(bot, bot.position(),
+                    io.github.zoyluo.minecraftai.action.WalkedStep.Kind.PUSH_OUT, "navsafe_suffocation"));
+            return true;
+        }
+        var walked = pack.adjacentStandableStep("navsafe_suffocation");
+        if (walked != null) {
+            pack.stopAll();
+            pack.runStep(walked);
+            return true;
+        }
+        BlockPos target = escapeBreakTarget(bot, world, feet);
+        if (target != null) {
+            pack.stopAll();
+            state.miner.begin(bot, target);
+            BotLog.danger(bot, "navsafe_suffocation_dig", "at", target.toShortString());
+            return tickEscapeBreak(bot, state);
+        }
+        if (now - state.lastLogTick >= 40) {
+            state.lastLogTick = now;
+            BotLog.danger(bot, "navsafe_suffocation_trapped", "pos", feet.toShortString(),
+                    "hp", String.format(java.util.Locale.ROOT, "%.1f", bot.getHealth()));
+        }
+        return false;
+    }
+
+    private boolean tickEscapeBreak(AIPlayerEntity bot, SuffocationEscape state) {
+        var status = state.miner.tick(bot);
+        if (status == io.github.zoyluo.minecraftai.action.BlockMiner.Status.FAILED) {
+            BotLog.danger(bot, "navsafe_suffocation_dig_failed", "reason", state.miner.failureReason());
+            return false;
+        }
+        return true;
+    }
+
+    /** The block to dig first: the one at the head, else the one at the feet, and only a block a view ray from the bot's eye reaches. */
+    private static BlockPos escapeBreakTarget(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        for (BlockPos candidate : new BlockPos[]{feet.above(), feet}) {
+            BlockState state = world.getBlockState(candidate);
+            if (state.getCollisionShape(world, candidate).isEmpty() || state.getDestroySpeed(world, candidate) < 0.0F) {
+                continue;
+            }
+            var center = candidate.getCenter().subtract(bot.getEyePosition());
+            var view = io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.castViewRay(bot, center.x, center.y, center.z,
+                    SUFFOCATION_VIEW_RANGE, io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.ViewShape.COLLIDER);
+            if (view.hit() && candidate.equals(view.pos())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
 
     // Whether the bot can surface and breathe within BREATHE_SCAN_UP cells above its head (a non-water passable cell = can breathe; hitting a solid block ceiling = sealed off)
     private static boolean breathableAbove(ServerLevel world, BlockPos feet) {
@@ -555,22 +630,23 @@ public final class NavSafetyNet {
     }
 
     private boolean emergencyTeleportToAir(AIPlayerEntity bot, ServerLevel world, BlockPos feet, int now) {
+        // The capability decision comes first: the search for a breathable spot scans the whole volume around the bot, cells it may
+        // not be able to see, so it only runs for a rescue that is allowed to happen (never in strict survival).
+        if (!io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(
+                bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                "navsafe_drowning").allowed()) {
+            return false;
+        }
         Optional<BlockPos> safe = cachedFindNearestBreathableStandable(bot, world, feet, now);
         if (safe.isEmpty()) {
             return false;
         }
         BlockPos to = safe.get();
-        boolean moved = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
-                bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
-                "navsafe_drowning", () -> {
-                    bot.getActionPack().stopAll();
-                    bot.teleportTo(world, to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D,
-                            Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-                });
-        if (moved) {
-            Standability.clearCache();
-        }
-        return moved;
+        bot.getActionPack().stopAll();
+        bot.teleportTo(world, to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D,
+                Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+        Standability.clearCache();
+        return true;
     }
 
     // The nearest landing spot that is both standable and has air at feet and head (breathable, not water)

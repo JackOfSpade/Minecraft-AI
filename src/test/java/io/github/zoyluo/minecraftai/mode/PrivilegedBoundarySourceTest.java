@@ -25,7 +25,6 @@ class PrivilegedBoundarySourceTest {
     @Test
     void directTeleportsStayInsideReviewedAdapters() throws IOException {
         Set<String> expected = Set.of(
-                "action/ActionPack.java",
                 "entity/AIPlayerEntity.java", // only the super delegation of the teleport overrides that end a fall (no teleport of its own)
                 "manager/AIPlayerManager.java",
                 "mode/FakePlayerMotion.java",
@@ -51,12 +50,48 @@ class PrivilegedBoundarySourceTest {
                     || entry.getValue().contains("MANUAL_TELEPORT"), entry.getKey());
         }
 
+        // R5: no path correction moves a bot in any profile. The path-start snap has no privileged relocation any more: a valid
+        // start is used as it is, anything else is left by a walked step, and neither ActionPack nor PathExecutor calls a
+        // FakePlayerMotion teleport primitive (the safety net's privileged rescues are the only relocations that remain).
         String actionPack = read("action/ActionPack.java");
         int snapMethod = actionPack.indexOf("boolean snapPlayerToNearestStandable");
         int currentStandable = actionPack.indexOf("Standability.isStandable(world, current)", snapMethod);
-        int emergencyGate = actionPack.indexOf("CapabilityRuntime.decide", currentStandable);
-        assertTrue(snapMethod >= 0 && currentStandable > snapMethod && emergencyGate > currentStandable,
-                "ordinary pathfinding from a valid start must run before the emergency-teleport gate");
+        int plan = actionPack.indexOf("planAdjacentStep(world, current, reason)", currentStandable);
+        assertTrue(snapMethod >= 0 && currentStandable > snapMethod && plan > currentStandable,
+                "a valid start is used as it is, before any step is planned");
+        assertFalse(actionPack.contains("EMERGENCY_TELEPORT") || actionPack.contains("CapabilityRuntime"),
+                "the path-start snap has no privileged relocation");
+        for (String primitive : new String[]{"stepTo(", "stepToStandable(", "jumpTo(", "returnToBlockCenter(", "swimStepTo("}) {
+            String call = "FakePlayerMotion." + primitive;
+            // descendInto (DigDown/Descend/OreDig, converted by their own jobs) is the one remaining caller of stepToStandable.
+            String pack = actionPack.replace("io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(", "");
+            assertFalse(pack.contains(call), "ActionPack must not call " + call);
+            assertFalse(read("pathfinding/PathExecutor.java").contains(call), "PathExecutor must not call " + call);
+        }
+    }
+
+    
+    void suffocationAndDrowningRescuesDecideTheCapabilityBeforeAnyColumnScan() throws IOException {
+        String safety = read("task/NavSafetyNet.java");
+        int suffocation = safety.indexOf("private boolean escapeSuffocation(");
+        int decide = safety.indexOf("PrivilegedCapability.EMERGENCY_TELEPORT", suffocation);
+        int scan = safety.indexOf("Standability.isStandable(world, candidate)", suffocation);
+        int byInputs = safety.indexOf("return escapeSuffocationByInputs(bot, world, feet);", suffocation);
+        assertTrue(suffocation >= 0 && decide > suffocation && scan > decide && byInputs > scan,
+                "the EMERGENCY_TELEPORT decision comes first; the unobserved climb scan runs only when it is allowed");
+        String suffocationBody = safety.substring(suffocation, byInputs);
+        assertFalse(suffocationBody.contains("snapPlayerToNearestStandable"),
+                "the strict suffocation branch must walk, shove or dig out, not snap");
+        int drowning = safety.indexOf("private boolean emergencyTeleportToAir(");
+        int drownDecide = safety.indexOf("PrivilegedCapability.EMERGENCY_TELEPORT", drowning);
+        int drownScan = safety.indexOf("cachedFindNearestBreathableStandable(bot, world, feet, now)", drowning);
+        assertTrue(drowning >= 0 && drownDecide > drowning && drownScan > drownDecide,
+                "the drowning rescue decides the capability before it scans the volume around the bot");
+        int inputs = safety.indexOf("boolean escapeSuffocationByInputs(");
+        String byInputsBody = safety.substring(inputs, safety.indexOf("private boolean tickEscapeBreak(", inputs));
+        assertFalse(byInputsBody.contains("teleportTo("), "the input escape never teleports");
+        assertTrue(byInputsBody.contains("castViewRay") || safety.contains("castViewRay"),
+                "the escape only digs a block a view ray from the bot's eye reaches");
     }
 
     @Test

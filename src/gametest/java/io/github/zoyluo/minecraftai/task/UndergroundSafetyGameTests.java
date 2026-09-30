@@ -460,10 +460,17 @@ public final class UndergroundSafetyGameTests {
         AIPlayerEntity bot = spawn(context, "StandableStepGT", start);
         require(context, !FakePlayerMotion.stepToStandable(bot, unsupported, "gametest_unsupported"),
                 "standable step entered an unsupported air cell");
+        // The walked step that replaces the teleporting primitive applies the same landing rules before it presses a key.
+        require(context, io.github.zoyluo.minecraftai.action.WalkedStep.refusal(bot, unsupported,
+                        io.github.zoyluo.minecraftai.action.WalkedStep.Kind.FLAT) != null,
+                "a walked step accepted an unsupported air cell as its landing");
         require(context, bot.blockPosition().equals(start),
                 "unsupported step moved the bot: " + bot.blockPosition().toShortString());
         require(context, !FakePlayerMotion.stepToStandable(bot, water, "gametest_water"),
                 "standable step entered a water cell");
+        require(context, io.github.zoyluo.minecraftai.action.WalkedStep.refusal(bot, water,
+                        io.github.zoyluo.minecraftai.action.WalkedStep.Kind.FLAT) != null,
+                "a walked step accepted a water cell as its landing");
         require(context, bot.blockPosition().equals(start),
                 "water step moved the bot: " + bot.blockPosition().toShortString());
         finish(context, bot, "StandableStepGT");
@@ -489,6 +496,9 @@ public final class UndergroundSafetyGameTests {
 
         require(context, !FakePlayerMotion.stepToStandable(bot, occupied, "gametest_occupied"),
                 "fake-player step entered an entity-occupied landing");
+        require(context, io.github.zoyluo.minecraftai.action.WalkedStep.refusal(bot, occupied,
+                        io.github.zoyluo.minecraftai.action.WalkedStep.Kind.FLAT) != null,
+                "a walked step accepted an entity-occupied landing");
         require(context, bot.blockPosition().equals(start),
                 "occupied landing moved the bot: " + bot.blockPosition().toShortString());
 
@@ -815,8 +825,8 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "DescendOvershootGT");
     }
 
-    @GameTest(maxTicks = 20)
-    public void standableCornerOverlapRecentersOnceAndRetiresStaleRoute(
+    @GameTest(maxTicks = 80)
+    public void standableCornerOverlapIsShovedClearOnceAndRetiresStaleRoute(
             GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(5, 12, 5));
         preparePlatform(context, start, 3);
@@ -846,34 +856,47 @@ public final class UndergroundSafetyGameTests {
         require(context, !FakePlayerMotion.isBlockCollisionFree(bot),
                 "fixture exact-corner body did not overlap the raised north terrain");
 
+        io.github.zoyluo.minecraftai.entity.TeleportAudit.reset(bot);
         boolean handled = NavSafetyNet.INSTANCE.tickBot(
                 context.getLevel().getServer(), bot);
 
-        Vec3 centered = Vec3.atBottomCenterOf(start);
+        // R5: the overlap is not repaired by a teleport onto the cell centre. The safety net retires the stale route and shoves the
+        // body clear of the block the way a client does (a small horizontal velocity), inside the same cell.
         require(context, handled,
                 "real corner overlap was not handled by the safety net");
-        require(context, bot.blockPosition().equals(start)
-                        && bot.position().distanceToSqr(centered) < 1.0E-12D,
-                "same-cell recovery did not physically recenter the body: " + bot.position());
-        require(context, FakePlayerMotion.isBlockCollisionFree(bot),
-                "same-cell recovery reported success before clearing the body collision");
-        require(context, context.getLevel().getBlockState(north).is(Blocks.GRASS_BLOCK)
-                        && context.getLevel().getBlockState(northWest).is(Blocks.GRASS_BLOCK),
-                "corner recovery removed the neighbouring terrain");
         require(context, bot.getActionPack().isPathExecutorIdle()
                         && bot.getActionPack().isWalkToIdle()
                         && bot.getActionPack().isMiningIdle(),
                 "corner recovery left the stale route active");
+        int[] ticks = {0};
+        context.onEachTick(() -> {
+            ticks[0]++;
+            require(context, io.github.zoyluo.minecraftai.entity.TeleportAudit.corrections(bot) == 0,
+                    "the corner overlap was corrected by a teleport ("
+                            + io.github.zoyluo.minecraftai.entity.TeleportAudit.lastCaller(bot) + ")");
+            if (!FakePlayerMotion.isBlockCollisionFree(bot)) {
+                require(context, ticks[0] < 50, "the body never left the raised terrain: " + bot.position());
+                return;
+            }
+            require(context, bot.blockPosition().equals(start),
+                    "same-cell recovery left the cell: " + bot.blockPosition().toShortString());
+            require(context, context.getLevel().getBlockState(north).is(Blocks.GRASS_BLOCK)
+                            && context.getLevel().getBlockState(northWest).is(Blocks.GRASS_BLOCK),
+                    "corner recovery removed the neighbouring terrain");
+            require(context, bot.getActionPack().isPathExecutorIdle()
+                            && bot.getActionPack().isWalkToIdle()
+                            && bot.getActionPack().isMiningIdle(),
+                    "corner recovery left the stale route active");
+            Vec3 after = bot.position();
+            require(context, !NavSafetyNet.INSTANCE.tickBot(
+                            context.getLevel().getServer(), bot),
+                    "cleared corner overlap triggered a second false suffocation recovery");
+            require(context, bot.position().distanceToSqr(after) < 1.0E-12D,
+                    "idempotent safety tick moved the already-cleared body");
 
-        Vec3 after = bot.position();
-        require(context, !NavSafetyNet.INSTANCE.tickBot(
-                        context.getLevel().getServer(), bot),
-                "cleared corner overlap triggered a second false suffocation recovery");
-        require(context, bot.position().distanceToSqr(after) < 1.0E-12D,
-                "idempotent safety tick moved the already-cleared body");
-
-        NavSafetyNet.INSTANCE.clear(bot);
-        finish(context, bot, "CornerOverlapSuffocationGT");
+            NavSafetyNet.INSTANCE.clear(bot);
+            finish(context, bot, "CornerOverlapSuffocationGT");
+        });
     }
 
     @GameTest(maxTicks = 20)
@@ -911,7 +934,7 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "DirtPathSuffocationGT");
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(maxTicks = 80)
     public void strictSuffocationDenialFallsBackToAdjacentPhysicalExit(GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(12, 12, 12));
         clearVolume(context, start, 4);
@@ -936,30 +959,47 @@ public final class UndergroundSafetyGameTests {
         require(context, !FakePlayerMotion.isBlockCollisionFree(bot),
                 "fixture gravel did not actually overlap the player's body");
         float healthBefore = bot.getHealth();
+        io.github.zoyluo.minecraftai.entity.TeleportAudit.reset(bot);
 
         boolean handled = NavSafetyNet.INSTANCE.tickBot(context.getLevel().getServer(), bot);
 
-        BlockPos after = bot.blockPosition();
-        int horizontal = Math.abs(after.getX() - start.getX())
-                + Math.abs(after.getZ() - start.getZ());
         require(context, handled,
                 "strict suffocation denial did not fall through to physical recovery");
-        require(context, after.getY() == start.getY() && horizontal == 1,
-                "suffocation recovery was not one adjacent physical step: "
-                        + start.toShortString() + " -> " + after.toShortString());
-        require(context, Standability.isStandable(context.getLevel(), after),
-                "physical suffocation exit was not standable: " + after.toShortString());
-        require(context, context.getLevel().getBlockState(blockedHead).is(Blocks.GRAVEL),
-                "physical suffocation exit silently removed the obstruction");
-        require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                "bot took damage before the adjacent suffocation exit");
         require(context, bot.getActionPack().isPathExecutorIdle()
                         && bot.getActionPack().isWalkToIdle()
                         && bot.getActionPack().isMiningIdle(),
                 "suffocation recovery left the stale route able to replay its blocked edge");
+        // R5: the exit is a real shove out of the gravel (no teleport), so the bot is inside the block for the few ticks it takes: a
+        // physical exit cannot cost nothing. It may cost the suffocation damage of those ticks, never more than two hearts.
+        int[] ticks = {0};
+        context.onEachTick(() -> {
+            ticks[0]++;
+            require(context, io.github.zoyluo.minecraftai.entity.TeleportAudit.corrections(bot) == 0,
+                    "the suffocation exit was a teleport (" + io.github.zoyluo.minecraftai.entity.TeleportAudit.lastCaller(bot) + ")");
+            if (!FakePlayerMotion.isBlockCollisionFree(bot)) {
+                require(context, ticks[0] < 70, "the bot never left the gravel: " + bot.position());
+                return;
+            }
+            BlockPos after = bot.blockPosition();
+            int horizontal = Math.abs(after.getX() - start.getX())
+                    + Math.abs(after.getZ() - start.getZ());
+            require(context, after.getY() == start.getY() && horizontal == 1,
+                    "suffocation recovery was not one adjacent physical step: "
+                            + start.toShortString() + " -> " + after.toShortString());
+            require(context, Standability.isStandable(context.getLevel(), after),
+                    "physical suffocation exit was not standable: " + after.toShortString());
+            require(context, context.getLevel().getBlockState(blockedHead).is(Blocks.GRAVEL),
+                    "physical suffocation exit silently removed the obstruction");
+            require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 4.0F,
+                    "bot took more than two hearts before the adjacent suffocation exit: " + bot.getHealth());
+            require(context, bot.getActionPack().isPathExecutorIdle()
+                            && bot.getActionPack().isWalkToIdle()
+                            && bot.getActionPack().isMiningIdle(),
+                    "suffocation recovery left the stale route able to replay its blocked edge");
 
-        NavSafetyNet.INSTANCE.clear(bot);
-        finish(context, bot, "StrictSuffocationGT");
+            NavSafetyNet.INSTANCE.clear(bot);
+            finish(context, bot, "StrictSuffocationGT");
+        });
     }
 
     @GameTest(maxTicks = 40)

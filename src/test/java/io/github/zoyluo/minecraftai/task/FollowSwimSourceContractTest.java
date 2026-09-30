@@ -150,11 +150,12 @@ final class FollowSwimSourceContractTest {
     void aSuppressedPhysicalSnapDoesNotEscalateToTheEmergencyTeleport() throws IOException {
         String pack = read("action/ActionPack.java");
         int suppressed = pack.indexOf("if (physicalSnapSuppressed(current, reason))");
-        int physical = pack.indexOf("if (tryPhysicalSnap(world, current, reason))");
-        int teleport = pack.indexOf("PrivilegedCapability.EMERGENCY_TELEPORT,\n                \"action_pack_snap:");
-        assertTrue(suppressed >= 0 && physical > suppressed && teleport > physical);
-        String between = pack.substring(suppressed, physical);
-        assertTrue(between.contains("return false;"), "a suppressed snap must return, not fall through to the teleport");
+        int planned = pack.indexOf("planAdjacentStep(world, current, reason)", suppressed);
+        assertTrue(suppressed >= 0 && planned > suppressed);
+        String between = pack.substring(suppressed, planned);
+        assertTrue(between.contains("return false;"), "a suppressed snap must return, not plan another step");
+        assertFalse(pack.contains("teleportTo(") || pack.contains("EMERGENCY_TELEPORT"),
+                "no path-start relocation exists in any profile, so a suppressed snap cannot become one");
     }
 
     @Test

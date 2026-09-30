@@ -395,7 +395,7 @@ public final class FakePlayerMotion {
      * by construction), so they are excluded; the occupant is reported so a rejected step is
      * diagnosable from the log.
      */
-    private static net.minecraft.world.entity.Entity landingOccupant(AIPlayerEntity bot, AABB landingBox) {
+    public static net.minecraft.world.entity.Entity landingOccupant(AIPlayerEntity bot, AABB landingBox) {
         var world = bot.level();
         var manager = ((ServerWorldEntityManagerAccessorMixin) (Object) world)
                 .minecraftai$getEntityManager();

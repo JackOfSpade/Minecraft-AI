@@ -7,7 +7,6 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
@@ -18,8 +17,6 @@ import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
 import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
 import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import java.util.Collections;
-import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -62,6 +59,9 @@ public final class ActionPack {
     /** Game time before which the running mining controller does nothing (the post-break delay); 0 when none. */
     private long nextBreakAt;
     private PathExecutor pathExecutor;
+    /** The input-driven step this pack runs (see {@link WalkedStep}); it has the bot to itself while it is in flight. */
+    private WalkedStep step;
+    private WalkedStep.Result lastStepResult;
     private PathRequestIdentity lastPathRequest;
     private PathRequestIdentity activePathRequest;
     private BlockPos activePathGoal;
@@ -123,6 +123,7 @@ public final class ActionPack {
      */
     public void yieldToBaritone() {
         dropPathExecutor(); // keeps the route lease (requested after the route was started)
+        cancelStep();
         stopMining();
         this.walkTo = null;
         stopMovement();
@@ -340,6 +341,18 @@ public final class ActionPack {
         }
     }
 
+    /**
+     * A Baritone request that did not start a route (rejected, or threw) with no Baritone route of this pack behind it: the legacy route
+     * that {@link #yieldToBaritone} dropped just before the admission (it keeps the route lease so a route that DOES start owns it)
+     * has nothing left to own the lease, so a clockless ROUTE lease of the old route would stay in force for a bot that is idle. The
+     * legacy route is over either way, so its lease is too. (Only this pack's own lease: a tick lease of a task is untouched.)
+     */
+    private void dropStaleRouteLease() {
+        if (pathExecutor == null && walkTo == null && step == null) {
+            clearRouteLease();
+        }
+    }
+
     /** The route lease ends with the route it was requested for. */
     private void clearRouteLease() {
         this.routeLease = null;
@@ -372,7 +385,8 @@ public final class ActionPack {
     private void enforcePace(MinecraftAiConfig.Pace config) {
         Gait gait = PacePolicy.resolve(player, goalDistance(), true);
         WalkToController walker = walkTo != null ? walkTo : pathExecutor != null ? pathExecutor.activeWalker() : null;
-        boolean edge = (pathExecutor != null && pathExecutor.onEdgeDescentNode()) || player.onClimbable();
+        boolean edge = (pathExecutor != null && pathExecutor.onEdgeDescentNode())
+                || (step != null && step.descends()) || player.onClimbable();
         boolean effectiveSneak = sneaking || (gait == Gait.SNEAK && !edge);
         boolean geometry = walker == null || walker.geometryAllowsSprint();
         boolean effectiveSprint = gait == Gait.SPRINT && geometry && PaceRules.sprintAllowed(player, forward, effectiveSneak);
@@ -387,7 +401,7 @@ public final class ActionPack {
 
     private boolean controllerDriven() {
         // A raw-input driver marks its tick from a task tick, which may run just before or just after this bot's own tick.
-        return pathExecutor != null || walkTo != null
+        return pathExecutor != null || walkTo != null || step != null
                 || (controllerInputTick != Long.MIN_VALUE && player.level().getGameTime() - controllerInputTick <= 1L);
     }
 
@@ -437,7 +451,8 @@ public final class ActionPack {
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: NO_START");
         }
-        PathfindingResult result = new AStarPathfinder(player, player.level(), player.blockPosition(), goal,
+        WalkedStep startStep = takeStartStep();
+        PathfindingResult result = new AStarPathfinder(player, player.level(), startCell(), goal,
                 DIG_APPROACH_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true, 10.0D).findPath();
         if (!result.success()) {
             lastPathRequest = request;
@@ -451,6 +466,7 @@ public final class ActionPack {
         activePathRequest = request;
         this.pathExecutor = new PathExecutor(
                 result.path(), resolvedGoal, canPillar, true, reserve);
+        this.pathExecutor.prefixStep(startStep);
         this.walkTo = null;
         this.mining = null;
         return ActionResult.IN_PROGRESS;
@@ -553,7 +569,8 @@ public final class ActionPack {
             return ActionResult.failed("pathfinding_failed: NO_START");
         }
         ServerLevel world = player.level();
-        BlockPos from = player.blockPosition();
+        WalkedStep startStep = routeContract.constrained() ? null : takeStartStep();
+        BlockPos from = routeContract.constrained() ? player.blockPosition() : startCell();
         // NAV-OPT two-phase pathfinding: try pure walking first (no digging allowed, search
         // space = air cells, so it converges fast and won't be blown out to SEARCH_LIMIT by
         // dig-through neighbors); only if pure walking has no solution do we allow the dig-through
@@ -619,6 +636,7 @@ public final class ActionPack {
                 result.path(), resolvedGoal, canPillar, allowDigFallback, reserve, routeContract)
                 : new PathExecutor(
                 result.path(), resolvedGoal, canPillar, allowDigFallback, reserve);
+        this.pathExecutor.prefixStep(startStep);
         this.walkTo = null;
         this.mining = null;
         return ActionResult.IN_PROGRESS;
@@ -717,12 +735,16 @@ public final class ActionPack {
         } catch (Throwable failure) {
             if (previous != null) {
                 cancelBaritoneRoute("start_failed");
+            } else {
+                dropStaleRouteLease();
             }
             throw failure;
         }
         if (!admission.accepted()) {
             if (previous != null) {
                 cancelBaritoneRoute("rejected_request");
+            } else {
+                dropStaleRouteLease();
             }
             if (identity != null) {
                 lastPathRequest = identity;
@@ -869,104 +891,91 @@ public final class ActionPack {
     }
 
     /**
-     * Repairs only fractional body overlap inside the current supported cell.
-     * Constrained routes must never relocate to another block before their full contract is proven.
+     * Whether a constrained route may start from the current cell. Constrained routes never relocate the bot before their contract is
+     * proven, and nothing here moves it at all: the cell must already be standable. A body that overlaps a neighbouring column
+     * is not repaired by a move, it simply walks off (the first leg of the route leaves it, the safety net shoves a suffocating body
+     * out with real inputs).
      */
     public boolean recenterPlayerInCurrentStandableCell(String reason) {
-        ServerLevel world = player.level();
-        BlockPos current = player.blockPosition();
         Standability.clearCache();
-        if (!Standability.isStandable(world, current)) {
-            return false;
-        }
-        if (FakePlayerMotion.isBlockCollisionFree(player)) {
-            return true;
-        }
-        if (!FakePlayerMotion.returnToBlockCenter(
-                player, current, "path_start_body_collision:" + reason)) {
-            return false;
-        }
-        Standability.clearCache();
-        return player.blockPosition().equals(current)
-                && Standability.isStandable(world, current)
-                && FakePlayerMotion.isBlockCollisionFree(player);
+        return Standability.isStandable(player.level(), player.blockPosition());
     }
 
+    /**
+     * What a route search starts from and how the bot gets there: {@code from} is the cell the search starts at, {@code prefix} the walk
+     * that takes the bot from where it stands onto it (null when it already stands there).
+     */
+    private record StartPlan(BlockPos from, WalkedStep prefix) {
+    }
+
+    private StartPlan startPlan;
+
+    /**
+     * Makes the bot's current position a valid start for a route search, WITHOUT moving it: a standable cell is the start as it is (a
+     * body that overlaps a wall column just walks off it); a cell that is not standable is left by a real, input-driven step onto an
+     * adjacent standable cell (same level first, then one down, then one up; at most once per origin cell per
+     * {@link SnapRepeatGuard#WINDOW_TICKS}), which the route executor performs before its first node. The caller takes the plan with
+     * {@link #startCell()} / {@link #takeStartStep()}. Nothing here teleports the bot in any profile: no privileged long-distance
+     * relocation exists for a path start any more.
+     *
+     * @return false when there is no legal start (the caller's search fails with NO_START)
+     */
     public boolean snapPlayerToNearestStandable(String reason) {
+        this.startPlan = null;
         ServerLevel world = player.level();
         BlockPos current = player.blockPosition();
         Standability.clearCache();
-        boolean currentCellStandable = Standability.isStandable(world, current);
-        if (currentCellStandable && FakePlayerMotion.isBlockCollisionFree(player)) {
+        if (Standability.isStandable(world, current)) {
+            this.startPlan = new StartPlan(current.immutable(), null);
             return true;
         }
-        // A floored air column can be standable while an off-centre 0.6-wide player body overlaps
-        // raised terrain in a neighbouring column. Dedicated-server console commands spawn at the
-        // lower corner of the world-spawn BlockPos, which reproduced this exact condition on seed
-        // 3000. Re-centre only the collided pose; collision-free fractional positions are valid
-        // physical state and must be preserved for edge/pickup transactions.
-        if (currentCellStandable
-                && FakePlayerMotion.returnToBlockCenter(
-                        player, current, "path_start_body_collision:" + reason)) {
-            Standability.clearCache();
-            if (FakePlayerMotion.isBlockCollisionFree(player)) {
-                return true;
-            }
-        }
-        // A fake player can end a jump/drop fractionally inside the neighbouring cell even though
-        // an adjacent legal landing exists. Recover that one-cell movement physically before asking
-        // for the privileged long-distance snap. In strict_survival this is the difference between
-        // continuing a hunt and every subsequent path request failing NO_START in one tick.
         if (physicalSnapSuppressed(current, reason)) {
-            // A suppressed snap is a refusal to re-snap out of a cell the bot was just walked back into --
-            // it must NOT fall through to the privileged relocation below, which would turn the
-            // yo-yo guard into a teleport. The caller's search simply fails this time.
+            // A suppressed snap is a refusal to step out of a cell the bot was just walked back into: whatever walked it
+            // back in would just be undone again (see SnapRepeatGuard). The caller's search simply fails this time.
             return false;
         }
-        if (tryPhysicalSnap(world, current, reason)) {
-            return true;
-        }
-        // A valid current start is ordinary pathfinding and must not require an emergency
-        // capability. Only the fallback relocation to a different cell is privileged.
-        if (!io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(
-                player, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
-                "action_pack_snap:" + reason).allowed()) {
+        StartPlan planned = planAdjacentStep(world, current, reason);
+        if (planned == null) {
+            BotLog.warn(LogCategory.PATH, player, "path_start_no_adjacent_step", "reason", reason, "from", LogFields.pos(current));
             return false;
         }
-        Optional<BlockPos> snapped = Standability.findNearestStandable(world, current, 8, 128, 32);
-        if (snapped.isEmpty()) {
-            BotLog.warn(LogCategory.PATH, player, "path_start_snap_failed", "reason", reason, "from", io.github.zoyluo.minecraftai.log.LogFields.pos(current));
-            return false;
-        }
-        BlockPos safe = snapped.get();
-        stopMovement();
-        player.teleportTo(world,
-                safe.getX() + 0.5D,
-                safe.getY(),
-                safe.getZ() + 0.5D,
-                Collections.emptySet(),
-                player.getYRot(),
-                player.getXRot(),
-                true);
-        // findNearestStandable only just verified a solid landing at `safe`; this can relocate the
-        // player up to 128 blocks vertically (e.g. away from a genuine, in-progress vanilla fall),
-        // so any real fallDistance/velocity carried into the jump must be cleared here too, or a
-        // later unrelated on-ground transition applies stale fall damage for a fall that this exact
-        // teleport already resolved.
-        player.setDeltaMovement(Vec3.ZERO);
-        player.fallDistance = 0.0F;
-        player.setOnGround(true);
-        Standability.clearCache();
-        BotLog.path(player, "path_start_snapped",
-                "reason", reason,
-                "from", io.github.zoyluo.minecraftai.log.LogFields.pos(current),
-                "to", io.github.zoyluo.minecraftai.log.LogFields.pos(safe));
+        this.startPlan = planned;
         return true;
     }
 
     /**
-     * True when a second physical snap out of the same cell inside the guard window is being refused:
-     * whatever walked the bot back in would just be undone again (see SnapRepeatGuard). One re-snap
+     * An input-driven step onto an adjacent standable cell for a bot that stands in a cell it cannot use (the suffocation escape),
+     * chosen by the same rules and under the same once-per-origin-cell guard as the start of a route; null when there is none
+     * or the guard refuses. The caller runs it with {@link #runStep}.
+     */
+    public WalkedStep adjacentStandableStep(String reason) {
+        BlockPos current = player.blockPosition();
+        Standability.clearCache();
+        if (physicalSnapSuppressed(current, reason)) {
+            return null;
+        }
+        StartPlan planned = planAdjacentStep(player.level(), current, reason);
+        return planned == null ? null : planned.prefix();
+    }
+
+    /** The cell a search for the route must start from after a successful {@link #snapPlayerToNearestStandable}. */
+    public BlockPos startCell() {
+        return startPlan != null ? startPlan.from() : player.blockPosition();
+    }
+
+    /** The walk onto {@link #startCell()} that the route must begin with (null when the bot already stands on it); hands it over once. */
+    public WalkedStep takeStartStep() {
+        StartPlan plan = startPlan;
+        if (plan == null) {
+            return null;
+        }
+        startPlan = new StartPlan(plan.from(), null);
+        return plan.prefix();
+    }
+
+    /**
+     * True when a second physical step out of the same cell inside the guard window is being refused:
+     * whatever walked the bot back in would just be undone again (see SnapRepeatGuard). One step
      * per stall.
      */
     private boolean physicalSnapSuppressed(BlockPos current, String reason) {
@@ -979,42 +988,41 @@ public final class ActionPack {
         return true;
     }
 
-    private boolean tryPhysicalSnap(ServerLevel world, BlockPos current, String reason) {
+    private StartPlan planAdjacentStep(ServerLevel world, BlockPos current, String reason) {
         int nowTick = player.level().getServer().getTickCount();
-        // Same-level steps first, then a one-block drop, finally a vanilla-style jump. A vertical
-        // move may include one horizontal axis; three-axis corner jumps are never legitimate.
+        // Same-level steps first, then a one-block drop (up to the drop a walk survives), finally a vanilla-style hop. A vertical
+        // move includes one horizontal axis at most; a corner hop is never legitimate.
         int[][] horizontalOffsets = {
                 {1, 0}, {-1, 0}, {0, 1}, {0, -1},
-                {1, 1}, {1, -1}, {-1, 1}, {-1, -1}, {0, 0}
+                {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
         };
         for (int dy : new int[]{0, -1, 1}) {
             for (int[] offset : horizontalOffsets) {
                 int dx = offset[0];
                 int dz = offset[1];
-                if ((dx == 0 && dz == 0 && dy == 0)
-                        || (dy != 0 && Math.abs(dx) + Math.abs(dz) > 1)) {
+                if (dy != 0 && Math.abs(dx) + Math.abs(dz) > 1) {
                     continue;
                 }
                 BlockPos candidate = current.offset(dx, dy, dz);
                 if (!Standability.isStandable(world, candidate)) {
                     continue;
                 }
-                boolean moved = dy > 0
-                        ? FakePlayerMotion.jumpTo(player, candidate, "path_start_physical_snap:" + reason)
-                        : FakePlayerMotion.stepTo(player, candidate, "path_start_physical_snap:" + reason);
-                if (!moved) {
+                WalkedStep.Kind kind = dy > 0 ? WalkedStep.Kind.STEP_UP
+                        : dy < 0 ? WalkedStep.Kind.STEP_DOWN : WalkedStep.Kind.FLAT;
+                if (WalkedStep.refusal(player, candidate, kind) != null) {
                     continue;
                 }
-                Standability.clearCache();
                 physicalSnapGuard.record(current, nowTick);
-                BotLog.path(player, "path_start_physical_snap",
+                BotLog.path(player, "path_start_walked_step",
                         "reason", reason,
-                        "from", io.github.zoyluo.minecraftai.log.LogFields.pos(current),
-                        "to", io.github.zoyluo.minecraftai.log.LogFields.pos(candidate));
-                return true;
+                        "from", LogFields.pos(current),
+                        "to", LogFields.pos(candidate),
+                        "kind", kind);
+                return new StartPlan(candidate.immutable(),
+                        WalkedStep.begin(player, candidate, kind, "path_start:" + reason));
             }
         }
-        return false;
+        return null;
     }
 
     /**
@@ -1073,6 +1081,7 @@ public final class ActionPack {
         if (route != null) {
             cancelBaritoneRoute("stop_navigation");
         }
+        cancelStep();
         clearActivePathExecutor();
         this.walkTo = null;
         clearRouteLease();
@@ -1081,6 +1090,7 @@ public final class ActionPack {
 
     public void stopAll() {
         releaseBaritone("stop_all");
+        cancelStep();
         clearActivePathExecutor();
         stopMining();
         this.walkTo = null;
@@ -1093,6 +1103,7 @@ public final class ActionPack {
     public boolean hasActiveActions() {
         return NavEngineSelector.query("baritone_busy", () -> BaritoneRegistry.INSTANCE.isBusy(player), false)
                 || pathExecutor != null
+                || step != null
                 || walkTo != null
                 || mining != null
                 || forward != 0.0F
@@ -1119,9 +1130,13 @@ public final class ActionPack {
 
     public void onUpdate() {
         settleRoute();
-        tickPathExecutor();
-        tickWalkTo();
-        tickMining();
+        // A step in flight has the bot to itself: whatever route, walk or break another owner left running waits (it was stopped by
+        // the owner that started the step, and a controller a task starts meanwhile must not fight the step for the keys).
+        if (!tickStep()) {
+            tickPathExecutor();
+            tickWalkTo();
+            tickMining();
+        }
 
         MinecraftAiConfig.Pace pace = MinecraftAiConfig.get().behaviour().paceOrDefaults();
         if (pace.paceEnabled() && controllerDriven()) {
@@ -1139,6 +1154,53 @@ public final class ActionPack {
         if (jumpTicks > 0) {
             jumpTicks--;
         }
+    }
+
+    /**
+     * Runs {@code next} as this pack's controller: it is ticked once per game tick in {@link #onUpdate} (so the bot counts as
+     * controller-driven and the pace enforcer applies the pace and the vanilla rules to its keys) until it succeeds or fails;
+     * {@link #stepResult()} then holds the answer. Takes the bot over from a route, a walk and a break in progress.
+     */
+    public void runStep(WalkedStep next) {
+        claim("run_step");
+        cancelStep();
+        clearActivePathExecutor();
+        stopMining();
+        this.walkTo = null;
+        this.step = next;
+        this.lastStepResult = null;
+    }
+
+    /** True when no step is in flight. */
+    public boolean stepIdle() {
+        return step == null;
+    }
+
+    /** How the last step this pack ran ended (null while it is in flight or before the first). */
+    public WalkedStep.Result stepResult() {
+        return lastStepResult;
+    }
+
+    /** Abandons the step in flight (its keys are released; no result is recorded). */
+    public void cancelStep() {
+        if (step != null) {
+            step.cancel();
+            step = null;
+        }
+    }
+
+    /** Ticks the step; true while it is still in flight (the other controllers do not run this tick). */
+    private boolean tickStep() {
+        if (step == null) {
+            return false;
+        }
+        WalkedStep.Result result = step.tick();
+        if (result.inProgress()) {
+            return true;
+        }
+        lastStepResult = result;
+        step = null;
+        return false;
     }
 
     private void tickWalkTo() {

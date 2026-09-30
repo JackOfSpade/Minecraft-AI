@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
@@ -20,17 +21,15 @@ import java.lang.reflect.Field;
 import java.util.Set;
 
 /**
- * Real-server proof of the snap guard ({@code SnapRepeatGuard}): a second physical snap out of the same
- * cell inside the guard window is refused, and the refusal must NOT fall through to the privileged
- * relocation in {@code ActionPack.snapPlayerToNearestStandable}, which would turn the yo-yo guard into a
- * teleport (a bot walked back into a cell over water would be teleported out of it, across the water).
+ * Real-server proof of the snap guard ({@code SnapRepeatGuard}) under the R5 rule that no path correction teleports a bot in any profile:
+ * {@code ActionPack.snapPlayerToNearestStandable} never moves the bot (a first snap out of a cell with no footing plans a walked step onto
+ * the neighbouring strip, a second one out of the same cell inside the guard window is refused) and there is no privileged long-distance
+ * relocation left behind it (a cell with no adjacent footing is simply refused).
  *
- * <p>The default GameTest profile (strict_survival) denies the emergency teleport, which would make
- * "no teleport happened" trivially true. So the test runs under the operator profile with every
- * capability enabled, proves the teleport really is available (a control snap from a cell with no
- * adjacent footing does relocate the bot), and only then checks the guarded second snap leaves the
- * bot exactly where it stood. The source-order contract in {@code FollowSwimSourceContractTest} pins the
- * same invariant textually; this pins the behaviour.
+ * <p>The default GameTest profile (strict_survival) denies the emergency teleport, which would make "no teleport happened" trivially
+ * true. So the test runs under the operator profile with every capability enabled, proves the teleport really is available, and
+ * only then checks that the snap neither moved the bot nor left a correction or a privileged teleport in {@code TeleportAudit}. The
+ * source contract in {@code FollowSwimSourceContractTest} pins the same invariant textually; this pins the behaviour.</p>
  */
 public final class ActionPackSuppressedSnapGameTests {
     @GameTest(maxTicks = 20)
@@ -65,32 +64,40 @@ public final class ActionPackSuppressedSnapGameTests {
                             "suppressed_snap_gametest").allowed(),
                     "fixture: the emergency teleport must be available so a fall-through would be visible");
 
-            // 1) Over a cell with no footing, one step from the strip: the first snap is a physical step.
+            // 1) Over a cell with no footing, one step from the strip: the first snap plans a walked step onto the strip and
+            //    does not move the bot.
             place(world, bot, hanging);
             require(context, !Standability.isStandable(world, hanging), "fixture: the hanging cell is standable");
+            Vec3 first = bot.position();
             require(context, bot.getActionPack().snapPlayerToNearestStandable("gametest_first_snap"),
-                    "the first snap out of a footing-less cell should step onto the strip");
-            require(context, bot.blockPosition().equals(anchor.offset(3, 0, 0)),
-                    "the first snap did not step west onto the strip: " + bot.blockPosition());
+                    "the first snap out of a footing-less cell should plan a step onto the strip");
+            require(context, bot.getActionPack().startCell().equals(anchor.offset(3, 0, 0)),
+                    "the first snap did not plan the step west onto the strip: " + bot.getActionPack().startCell());
+            require(context, bot.position().distanceToSqr(first) < 1.0E-12D, "the first snap moved the bot");
+            bot.getActionPack().takeStartStep();
 
-            // 2) Whatever walked the bot back into that cell is not undone again inside the window: the
-            //    snap is refused, and the refusal must not become a teleport onto the strip.
+            // 2) Whatever walked the bot back into that cell is not undone again inside the window: the snap is refused,
+            //    and the refusal must not become a teleport onto the strip.
             place(world, bot, hanging);
             Vec3 before = bot.position();
             boolean second = bot.getActionPack().snapPlayerToNearestStandable("gametest_second_snap");
             require(context, !second, "a repeated snap out of the same cell inside the window must be refused");
             require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
                     "the refused snap moved the bot from " + before + " to " + bot.position()
-                            + " (a suppressed snap fell through to the emergency teleport)");
+                            + " (a suppressed snap fell through to a relocation)");
 
-            // 3) Control: a cell with no adjacent footing (so no physical step exists) and no guard entry
-            //    IS relocated by the very same call under this profile -- the teleport was reachable.
+            // 3) Control: a cell with no adjacent footing (so no walked step exists) and no guard entry is REFUSED by the very
+            //    same call under a profile that allows the emergency teleport: nothing relocates a bot for a path start any more.
             place(world, bot, farOut);
-            require(context, bot.getActionPack().snapPlayerToNearestStandable("gametest_control_teleport"),
-                    "control: the emergency relocation did not run although the profile allows it");
-            require(context, Standability.isStandable(world, bot.blockPosition())
-                            && !bot.blockPosition().equals(farOut),
-                    "control: the bot was not relocated onto footing: " + bot.blockPosition());
+            Vec3 stranded = bot.position();
+            require(context, !bot.getActionPack().snapPlayerToNearestStandable("gametest_control_no_relocation"),
+                    "control: a start with no adjacent footing was accepted");
+            require(context, bot.position().distanceToSqr(stranded) < 1.0E-12D,
+                    "control: the bot was relocated to " + bot.blockPosition() + " although no path start may move it");
+            require(context, TeleportAudit.corrections(bot) == 0
+                            && TeleportAudit.count(bot, TeleportAudit.Kind.PRIVILEGED) == 0,
+                    "a snap teleported the bot (corrections=" + TeleportAudit.corrections(bot) + " privileged="
+                            + TeleportAudit.count(bot, TeleportAudit.Kind.PRIVILEGED) + ")");
         } finally {
             setConfig(original);
             AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
