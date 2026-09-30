@@ -83,7 +83,12 @@ final class Rig {
             int mocks = 0;
             for (ServerPlayer p : new java.util.ArrayList<>(server.getPlayerList().getPlayers())) {
                 if (services.adapter().isBotEntity(p)) {
+                    // PvP BOT no longer lists a bot that is being removed, yet it stays in the world for a while (it "falls out of
+                    // the world"): to the next inhabitant it is an ordinary player in plain view. Take it out at once.
                     services.adapter().removeBot(server, p.getName().getString());
+                    server.getPlayerList().remove(p);
+                    p.discard();
+                    mocks++;
                 } else if (p.getName().getString().equals("test-mock-player")) {
                     // a mock player an earlier test left standing in the same arena: to a bot it is a player in plain view
                     server.getPlayerList().remove(p);
@@ -139,6 +144,10 @@ final class Rig {
             // The engine removes the bot a few ticks later; the next test starts at the same place at once.
             if (services != null && services.adapter() != null && botName != null) {
                 services.adapter().removeBot(server, botName);
+                if (bot != null) {
+                    server.getPlayerList().remove(bot);
+                    bot.discard();
+                }
             }
         } catch (RuntimeException e) {
             LOG.warn("cleanup of the inhabitant failed: {}", e.toString());
