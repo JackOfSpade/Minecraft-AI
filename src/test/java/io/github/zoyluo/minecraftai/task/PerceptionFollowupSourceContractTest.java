@@ -55,9 +55,10 @@ final class PerceptionFollowupSourceContractTest {
                 "a bot in the middle of an action (step, dig, route, item use) keeps its head where the action needs it");
         String ears = read("perception/BotEars.java");
         String receive = between(ears, "public boolean canReceiveVibration(", "public void onReceiveVibration(");
-        assertTrue(receive.contains("context.sourceEntity() != bot")
-                        && receive.contains("instanceof net.minecraft.world.entity.item.ItemEntity item && item.getOwner() == bot"),
-                "a bot does not hear its own steps and blows, nor an item it dropped itself");
+        assertTrue(receive.contains("Entity source = context.sourceEntity();") && receive.contains("source != bot")
+                        && receive.contains("instanceof net.minecraft.world.entity.item.ItemEntity item && item.getOwner() == bot")
+                        && receive.contains("instanceof net.minecraft.world.entity.projectile.Projectile projectile && projectile.getOwner() == bot"),
+                "a bot does not hear its own steps and blows, nor an item it dropped itself, nor a projectile it shot landing");
     }
 
     @Test
@@ -101,8 +102,10 @@ final class PerceptionFollowupSourceContractTest {
         assertTrue(senses.contains("static boolean isPassive(LivingEntity e)")
                         && senses.contains("!(mob instanceof Enemy) && !(mob instanceof NeutralMob) && mob.getTarget() == null"),
                 "a mob that is neither an Enemy nor a NeutralMob and hunts nothing is never scanned");
-        assertTrue(senses.contains("!(throttle && isPassive(e))") && senses.contains("(throttle && isPassive(creature))"),
-                "passive creatures are filtered out of the scan and answered by the plain test on demand");
+        assertTrue(senses.contains("if (throttle && isPassive(c)) {") && senses.contains("(throttle && isPassive(creature))"),
+                "passive creatures are not read by the scan and are answered by the plain test on demand");
+        assertFalse(senses.contains("!(throttle && isPassive(e))"),
+                "passive creatures stay sound-match candidates: a cow's steps are explained by the cow, never an unexplained hint");
         assertTrue(senses.contains("public static final int SCAN_CADENCE_TICKS = 2;")
                         && senses.contains("!s.exposure.inProgress(id, now) && (now + c.getId()) % SCAN_CADENCE_TICKS != 0L"),
                 "a creature with no run of exposure and no sound at it is read every second tick, alternating by entity");

@@ -132,8 +132,17 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   hunts nothing: animals, villagers, fish) are not scanned at all and answer the plain omnidirectional test on demand (the scope
   rule: animals and villagers keep omnidirectional observation); every other creature is read every second tick (alternating by
   entity) unless it already has a run of exposure or a sound at it, so the reaction time keeps its tick granularity and a creature
-  entering the view is seen at most one tick later; one clear-view answer per creature per scan. The scan time is recorded per bot
-  as the `perception_scan` section of `BotProfiler`. A scan that throws never leaves the bot blind: for that tick (and the next) every
+  entering the view is seen at most one tick later; one clear-view answer per creature per scan. Passive creatures are not read, but
+  they stay candidates for explaining a sound, so a cow's steps are the cow's and never an unexplained hint. A noticed creature's line
+  is verified every second tick while it is clear and every tick once a check fails, so a line lost on the unverified tick ends the
+  awareness at most one tick (50 ms, one scan cadence) later than an every-tick check would. The scan time is recorded per bot
+  as the `perception_scan` section of `BotProfiler`.
+  *Measurement* (`companion_perception_game_tests_the_scan_cost_with_five_bots_in_a_crowd_is_throttled`, prints `PERCEPTION_COST`):
+  five idle bots among 66 mobs (30 calm zombified piglins, 20 of them in front, 24 cows, 12 villagers), the SAME scene measured over
+  100 ticks with the cost limits off, then 100 ticks with them on; the figure is the sum over the five bots of the mean
+  `perception_scan` time per tick. Three runs on the 4-CPU cloud machine shared with another test server (2026-09-30): unthrottled
+  0.663 / 1.500 / 1.407 ms/tick, throttled 0.242 / 0.614 / 0.255 ms/tick (median 1.41 -> 0.26 ms/tick); rays cast 234 -> 60 per tick in
+  every run (the deterministic part: wall times vary with the machine's load). A scan that throws never leaves the bot blind: for that tick (and the next) every
   creature question is answered by the old omnidirectional test, and the failure is logged once per bot.
 * **Peeking takes the reaction time.** A creature out of sight for more than a tick is forgotten and is noticed again only after the
   reaction time of looking at it, so a bot that peeks (round its cover column, through the observation port of its shelter) must

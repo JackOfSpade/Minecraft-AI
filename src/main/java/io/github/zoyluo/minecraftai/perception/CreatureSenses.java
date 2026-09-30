@@ -324,7 +324,7 @@ public final class CreatureSenses {
         Map<UUID, Boolean> clear = new HashMap<>();
         List<LivingEntity> around = new ArrayList<>(level.getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(radius),
                 e -> e != bot && e.isAlive() && !e.isSpectator() && (e instanceof Mob || e instanceof Player)
-                        && bot.distanceToSqr(e) <= (double) radius * radius && !(throttle && isPassive(e))));
+                        && bot.distanceToSqr(e) <= (double) radius * radius));
         if (WARDEN_SIGHT_RANGE > radius) {
             // A warden is watched farther (the quiet-zone scan): a class-specific query, far cheaper than widening the general one.
             for (Warden warden : level.getEntitiesOfClass(Warden.class, bot.getBoundingBox().inflate(WARDEN_SIGHT_RANGE),
@@ -363,13 +363,20 @@ public final class CreatureSenses {
 
         Set<UUID> seen = new HashSet<>();
         for (LivingEntity c : around) {
+            if (throttle && isPassive(c)) {
+                // A creature that is no threat by nature is not read (it answers the plain omnidirectional test on demand); it stays
+                // in {@code around} above only so that its own sounds (a cow's steps) are explained by it and never become a hint.
+                continue;
+            }
             UUID id = c.getUUID();
             seen.add(id);
             Track track = s.noticed.get(id);
             if (track != null) {
                 // Awareness: tracked by plain occlusion. The line lost for more than a tick ends it; the next sighting is a new reaction.
-                // Throttled, the line is verified every second tick (a creature seen clear this tick or the last is taken as still in view)
-                // and the tolerance for a lost line grows by the same tick.
+                // Throttled, the line is verified every second tick while it is clear (a creature seen clear this tick or the last is taken
+                // as still in view) and every tick once a check has failed; the tolerance for a lost line grows by that unverified tick. So a
+                // line lost on the unverified tick ends the awareness one tick (50 ms, one scan cadence) later than unthrottled, never more:
+                // the same cadence bound as noticing itself (PerceptionFixtures.SCAN_SLACK_TICKS), and no knowledge the bot never had.
                 if (throttle && now - track.lastClear <= 1) {
                     continue;
                 }

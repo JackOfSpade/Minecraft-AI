@@ -408,6 +408,47 @@ public final class CompanionPerceptionGameTests {
         });
     }
 
+    /**
+     * The throttle does not read passive animals, but they still explain their own sounds: an idle bot among walking cows (real AI,
+     * real STEP vibrations, in clear view) gets no unexplained-sound hint from them and does not turn its head at every step.
+     */
+    @GameTest(environment = ENV + "walking_cows_in_view_are_heard_as_cows_not_as_unexplained_sounds", maxTicks = 160)
+    public void walkingCowsInViewAreHeardAsCowsNotAsUnexplainedSounds(GameTestHelper context) {
+        Fixture f = new Fixture(context);
+        AIPlayerEntity bot = f.bot("PerceptionCowStepsGT", 0, 0);
+        List<net.minecraft.world.entity.animal.cow.Cow> cows = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            net.minecraft.world.entity.animal.cow.Cow cow = EntityType.COW.create(f.level, EntitySpawnReason.COMMAND);
+            cow.setPersistenceRequired();
+            cows.add(f.add(cow, -3 + 3 * i, 5));
+        }
+        PerceptionFixtures.facePoint(bot, cows.get(1).getEyePosition());
+        float yaw = bot.getYRot();
+        float pitch = bot.getXRot();
+        List<Vec3> start = cows.stream().map(net.minecraft.world.entity.Entity::position).toList();
+        context.onEachTick(() -> {
+            int tick = (int) context.getTick();
+            for (int i = 0; i < cows.size(); i++) {
+                // Each cow walks (its own AI and move control, real steps) to and fro along the row in front of the bot.
+                double x = f.x(-3 + 3 * i + ((tick / 30) % 2 == 0 ? 2.5D : -2.5D));
+                cows.get(i).getMoveControl().setWantedPosition(x, f.feet.getY(), f.z(5), 1.0D);
+            }
+            f.require(CreatureSenses.INSTANCE.hint(bot).isEmpty(),
+                    "a walking cow in clear view became an unexplained sound: " + CreatureSenses.INSTANCE.hint(bot));
+            f.require(bot.getYRot() == yaw && bot.getXRot() == pitch,
+                    "the idle bot turned its head at a cow's step: yaw " + yaw + " -> " + bot.getYRot());
+            if (tick >= 140) {
+                double walked = 0.0D;
+                for (int i = 0; i < cows.size(); i++) {
+                    walked = Math.max(walked, cows.get(i).position().distanceTo(start.get(i)));
+                }
+                f.require(walked >= 1.5D, "control: the cows did not walk, so no step was made (" + walked + ")");
+                cows.forEach(net.minecraft.world.entity.Entity::discard);
+                f.finish();
+            }
+        });
+    }
+
     // ------------------------------------------------------------------ the fail-safe
 
     @GameTest(environment = ENV + "a_failing_scan_falls_back_to_omnidirectional_sight_never_blindness", maxTicks = 80)

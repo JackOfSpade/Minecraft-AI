@@ -25,8 +25,9 @@ import net.minecraft.world.phys.Vec3;
  * <p>What is heard, how far ({@code behaviour.perception.hearing.listenerRadius}, 16 = the Warden's), through what (wool blocks
  * vibrations, other blocks do not), what stays silent (a sneaking player's steps, spectators, wool-dampened steps) and how long a
  * vibration takes to arrive are all vanilla rules: {@code isValidVibration}, {@code getListenableEvents = GameEventTags.VIBRATIONS} and
- * {@code calculateTravelTimeInTicks} keep their vanilla defaults. The only additions: a bot does not hear its OWN events, and a dead or
- * removed bot hears nothing.
+ * {@code calculateTravelTimeInTicks} keep their vanilla defaults. The only additions: a bot does not hear its OWN events (its steps and
+ * blows, an item it dropped itself, an arrow or other projectile it shot landing: it knows what it made, so they never become
+ * unexplained sounds), and a dead or removed bot hears nothing.
  *
  * <p>NO MAGIC: a received vibration is recorded as a sound at its position only ({@code onReceiveVibration}'s block position) and its
  * event kind (a shot); the source entity and the projectile owner are ignored.
@@ -127,9 +128,12 @@ final class BotEars implements VibrationSystem {
         @Override
         public boolean canReceiveVibration(ServerLevel level, BlockPos pos, Holder<GameEvent> event,
                                            GameEvent.Context context) {
-            // Dead or gone bots hear nothing; a bot does not hear its own steps and blows, nor wonder about an item it dropped itself.
-            return bot.isAlive() && !bot.isRemoved() && context.sourceEntity() != bot
-                    && !(context.sourceEntity() instanceof net.minecraft.world.entity.item.ItemEntity item && item.getOwner() == bot);
+            // Dead or gone bots hear nothing; a bot does not hear its own steps and blows, nor wonder about an item it dropped itself or
+            // a projectile it shot itself (an arrow landing).
+            Entity source = context.sourceEntity();
+            return bot.isAlive() && !bot.isRemoved() && source != bot
+                    && !(source instanceof net.minecraft.world.entity.item.ItemEntity item && item.getOwner() == bot)
+                    && !(source instanceof net.minecraft.world.entity.projectile.Projectile projectile && projectile.getOwner() == bot);
         }
 
         @Override
