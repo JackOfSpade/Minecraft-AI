@@ -689,22 +689,26 @@ public final class SurfaceWaterRecoveryGameTests {
                 "DigDown consumed the protected crafting table as a water seal");
         int blocksAfterSeal = InventoryAction.countItem(bot, Items.COBBLESTONE);
 
-        for (int i = 0; i < 12 && bot.blockPosition().equals(start); i++) {
+        // The descent onto the dry east stair is a walked step now (several game ticks), so the task is driven tick by tick and the
+        // seal invariants are held on every tick until the bot stands on the east landing.
+        int[] ticks = {0};
+        context.failIfEver(() -> {
             task.tick(bot);
+            ticks[0]++;
             require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
-                    "DigDown mined its own water seal on tick " + i);
+                    "DigDown mined its own water seal on tick " + ticks[0]);
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == blocksAfterSeal,
                     "DigDown consumed another emergency block after sealing one ingress");
             require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1,
                     "DigDown lost the protected crafting table after sealing");
-        }
-        require(context, bot.blockPosition().equals(eastLanding),
-                "DigDown did not rotate onto the dry east stair: "
-                        + bot.blockPosition().toShortString());
-
-        task.cancel(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
+            require(context, ticks[0] < 70, "DigDown did not rotate onto the dry east stair: "
+                    + bot.blockPosition().toShortString());
+            if (bot.blockPosition().equals(eastLanding)) {
+                task.cancel(bot, "gametest_complete");
+                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                context.succeed();
+            }
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_horizontal_fallback_never_mines_the_owned_water_seal", maxTicks = 40)

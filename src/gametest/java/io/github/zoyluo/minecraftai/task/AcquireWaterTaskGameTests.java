@@ -1758,6 +1758,10 @@ public final class AcquireWaterTaskGameTests {
                     Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        // The arenas of the earlier tests of the run are not reset: a well one of them built within the walk of this search is
+        // a foreign source the task finds first (its approach then fails for the whole test, the void around it leaves no route).
+        // The test is about its own well, so foreign water in the reach of the search is removed.
+        removeForeignWater(world, start, 48, water);
 
         String name = "WaterPastHundredGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
@@ -2722,6 +2726,21 @@ public final class AcquireWaterTaskGameTests {
         bot.getFoodData().setFoodLevel(20);
         InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
         return new WaterFixture(name, bot, start.immutable(), water.immutable());
+    }
+
+    /** Removes every water block within {@code radius} horizontally (and 8 vertically) of {@code center} except {@code keep}. */
+    private static void removeForeignWater(net.minecraft.server.level.ServerLevel world, BlockPos center, int radius, BlockPos keep) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -8; dy <= 8; dy++) {
+                    BlockPos cell = center.offset(dx, dy, dz);
+                    if (!cell.equals(keep) && world.hasChunkAt(cell)
+                            && world.getFluidState(cell).is(FluidTags.WATER)) {
+                        world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                    }
+                }
+            }
+        }
     }
 
     private static void require(GameTestHelper context, boolean condition, String message) {
