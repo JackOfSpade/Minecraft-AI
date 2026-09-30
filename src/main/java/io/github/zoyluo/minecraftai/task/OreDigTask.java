@@ -3137,7 +3137,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 HarvestCore.nearestDropAnyOf(bot, targetDrops, 16.0D);
         visibleDrop.ifPresent(drop ->
                 pendingPickupLastSeenPos = drop.blockPosition().immutable());
-        if (pendingPickupGainTick < 0
+        // A gain does not end the recovery while a target drop is still in sight: the confirmation below waits for it to
+        // vanish. The gain can belong to another drop (the break before this one, collected late, against an inventory
+        // baseline taken before it arrived), and this drop then lay two cells away until the deadline failed the task
+        // (ore_dig_drop_unrecovered with the item in plain view). Once the gain has settled, the visible drop is chased.
+        boolean gainSettledWithDropInSight = pendingPickupGainTick >= 0
+                && totalBudget() - pendingPickupGainTick >= 5
+                && visibleDrop.isPresent();
+        if ((pendingPickupGainTick < 0 || gainSettledWithDropInSight)
                 && age >= 3
                 && bot.getActionPack().isPathExecutorIdle()
                 && bot.getActionPack().isWalkToIdle()) {
