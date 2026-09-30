@@ -462,6 +462,41 @@ public final class InhabitantsConfig {
         public int returnStuckTicks = 200;
         /** The walk back is abandoned after this many ticks in any case (per leg). */
         public int returnMaxTicks = 1200;
+        /** How an inhabitant perceives a player: view cone, sneaking, hearing. See {@link AggroPerception}. */
+        public AggroPerception perception = new AggroPerception();
+    }
+
+    /**
+     * Realistic noticing for the aggro range (the {@code aggro.perception} block; see {@code Perception} and
+     * {@code docs/PERCEPTION.md}, the same model Minecraft-AI's bots use). {@link Aggro#acquireRange} is the base
+     * sight range; {@link Aggro#requireLineOfSight} stays the switch for occlusion; the awareness of an engaged
+     * inhabitant is {@link Aggro#loseSightTicks}.
+     * <p>
+     * An inhabitant SEES a player in front of it (a {@link #frontHalfAngleDeg} half-angle cone) out to the base range,
+     * out to {@link #peripheralHalfAngleDeg} at {@link #peripheralFactor} of it, and not at all behind it; a sneaking
+     * player only from {@link #sneakFactor} of that distance. It HEARS a player that is close and noisy, even from
+     * behind (walking {@link #hearWalk}, sprinting {@link #hearSprint}, fighting {@link #hearCombat} blocks; sneaking
+     * or standing still is silent), never through a wall. {@code enabled=false} is the old omnidirectional sight.
+     */
+    public static final class AggroPerception {
+        /** Master switch; off = plain omnidirectional line of sight within the acquire range, as before. */
+        public boolean enabled = true;
+        /** Half-angle (degrees) of the front cone in which the full sight range applies. Range 0..180. */
+        public double frontHalfAngleDeg = 60.0;
+        /** Half-angle (degrees) out to which the peripheral field reaches; behind it nothing is seen. Range front..180. */
+        public double peripheralHalfAngleDeg = 100.0;
+        /** Share of the sight range that applies in the peripheral field. Range 0..1. */
+        public double peripheralFactor = 0.5;
+        /** Share of the sight range that applies to a sneaking player. Range 0..1. */
+        public double sneakFactor = 0.5;
+        /** Blocks at which a walking player is heard. Range 0..64. */
+        public double hearWalk = 4.0;
+        /** Blocks at which a sprinting player is heard. Range 0..64. */
+        public double hearSprint = 8.0;
+        /** Blocks at which a player who just fought, shot, ate, drank, broke or placed a block is heard. Range 0..64. */
+        public double hearCombat = 12.0;
+        /** Ticks a swing, hit, bow draw, meal or block change keeps a player noisy. Range 0..200. */
+        public int combatNoiseTicks = 10;
     }
 
     /**

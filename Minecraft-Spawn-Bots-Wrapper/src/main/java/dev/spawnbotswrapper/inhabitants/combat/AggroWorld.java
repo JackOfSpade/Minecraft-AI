@@ -19,6 +19,17 @@ public interface AggroWorld {
         }
     }
 
+    /**
+     * What noticing needs to know about a body (see {@link Perception}): where its eyes are, where it looks, and what
+     * it is doing this tick.
+     *
+     * @param eye     eye position
+     * @param look    look direction (head yaw and pitch), a vector of any length
+     * @param subject its stance, noise and visibility
+     */
+    record Senses(Pos eye, Pos look, Perception.Subject subject) {
+    }
+
     /** Something that can be a target: a real player, another bot or a mob. */
     interface Body {
         String name();
@@ -44,11 +55,23 @@ public interface AggroWorld {
 
         /** The underlying entity, opaque to the controller; what {@link TargetControl.Target#entity()} refers to. */
         Object handle();
+
+        /**
+         * Eye, look direction and stance for realistic noticing, or null when unknown (a view that cannot tell: the
+         * controller then falls back to plain line of sight, omnidirectional, as before perception existed).
+         */
+        default Senses senses() {
+            return null;
+        }
     }
 
     /** An inhabitant, which also has eyes. */
     interface Watcher extends Body {
-        /** Eye-to-eye line of sight to {@code other}. */
+        /**
+         * Whether nothing blocks the view to {@code other}: a ray from the eye to its eye and, if that is blocked, a
+         * second one to its body centre (a head over a wall or a body peeking round cover counts). Occlusion only:
+         * the view cone, sneaking and noise are {@link Perception}'s business.
+         */
         boolean canSee(Body other);
     }
 

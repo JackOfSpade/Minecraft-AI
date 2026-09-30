@@ -2,13 +2,20 @@ package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.combat.AggroController;
 import dev.spawnbotswrapper.inhabitants.combat.AggroWorld;
+import dev.spawnbotswrapper.inhabitants.combat.Perception;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemUseAnimation;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -93,7 +100,86 @@ public final class AggroDriver {
         boolean on = cfg != null && cfg.enabled && a.enabled;
         return new AggroController.Config(on, a.acquireRange, a.requireLineOfSight, a.scanIntervalTicks,
                 a.leashRange, a.loseSightTicks, a.returnToOrigin, a.returnArriveDistance, a.returnStuckTicks,
-                a.returnMaxTicks);
+                a.returnMaxTicks, perceptionOf(a));
+    }
+
+    /** The shared perception rules from the {@code aggro.perception} block; the awareness is the chase's own 10 s rule. */
+    static Perception.Params perceptionOf(InhabitantsConfig.Aggro a) {
+        Perception.Params d = Perception.Params.defaults();
+        InhabitantsConfig.AggroPerception p = a.perception == null ? new InhabitantsConfig.AggroPerception() : a.perception;
+        return new Perception.Params(p.enabled, p.frontHalfAngleDeg, p.peripheralHalfAngleDeg, p.peripheralFactor,
+                p.sneakFactor, p.hearWalk, p.hearSprint, p.hearCombat, d.hearNoisyMob(), d.hearPrimedCreeper(),
+                d.hearWarden(), d.hearAnimal(), p.combatNoiseTicks, a.loseSightTicks);
+    }
+
+    /** Horizontal speed (blocks per tick) above which a body counts as moving, so it makes footstep noise. */
+    private static final double MOVING_SPEED_SQ = 0.02 * 0.02;
+
+    /**
+     * Ticks since the entity last made combat noise: swinging an arm (attacks, and breaking or placing blocks),
+     * getting hurt, or using an item that is heard (eating, drinking, drawing a bow or crossbow, a thrown trident;
+     * raising a shield is silent); {@link Perception#NO_NOISE} when none.
+     */
+    private static int combatNoiseAge(LivingEntity e) {
+        int age = Perception.NO_NOISE;
+        if (e.swinging) {
+            age = Math.min(age, e.swingTime);
+        }
+        if (e.hurtTime > 0) {
+            age = Math.min(age, Math.max(0, e.hurtDuration - e.hurtTime));
+        }
+        if (e.isUsingItem()) {
+            ItemUseAnimation anim = e.getUseItem().getUseAnimation();
+            if (anim == ItemUseAnimation.EAT || anim == ItemUseAnimation.DRINK || anim == ItemUseAnimation.BOW
+                    || anim == ItemUseAnimation.CROSSBOW || anim == ItemUseAnimation.SPEAR) {
+                age = 0;
+            }
+        }
+        return age;
+    }
+
+    /** Eye, look and stance of a living entity for {@link Perception}; null for anything else. */
+    static AggroWorld.Senses sensesOf(Entity entity) {
+        if (!(entity instanceof LivingEntity e)) {
+            return null;
+        }
+        Vec3 eye = e.getEyePosition();
+        Vec3 look = e.getViewVector(1.0F);
+        double dx = e.getX() - e.xo;
+        double dz = e.getZ() - e.zo;
+        boolean moving = dx * dx + dz * dz > MOVING_SPEED_SQ;
+        // Vanilla's visibility (invisibility with armor cover, worn mob heads) with its own sneak factor divided out:
+        // sneaking is the perception model's factor, not counted twice.
+        double visibility = e.getVisibilityPercent(null);
+        if (e.isDiscrete()) {
+            visibility /= 0.8;
+        }
+        Perception.Subject subject = new Perception.Subject(e.isDiscrete() || e.isCrouching(), moving,
+                e.isSprinting(), combatNoiseAge(e), Perception.MobKind.NONE, visibility);
+        return new AggroWorld.Senses(new AggroWorld.Pos(eye.x, eye.y, eye.z),
+                new AggroWorld.Pos(look.x, look.y, look.z), subject);
+    }
+
+    /**
+     * A clear view from {@code from}'s eye to {@code to}: a ray to its eye and, when that is blocked, a second to its
+     * body centre. Vanilla's clip rules (collider shapes, fluids ignored): the blocks a vanilla mob cannot see through.
+     */
+    static boolean hasClearView(Entity from, Entity to) {
+        Level level = from.level();
+        if (to.level() != level) {
+            return false;
+        }
+        Vec3 start = from.getEyePosition();
+        Vec3 eye = to.getEyePosition();
+        if (start.distanceTo(eye) > 128.0) {
+            return false;
+        }
+        return clear(level, from, start, eye) || clear(level, from, start, to.position().add(0.0, to.getBbHeight() * 0.5, 0.0));
+    }
+
+    private static boolean clear(Level level, Entity from, Vec3 start, Vec3 end) {
+        return level.clip(new ClipContext(start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, from))
+                .getType() == HitResult.Type.MISS;
     }
 
     // ------------------------------------------------------------------ world view
@@ -155,6 +241,11 @@ public final class AggroDriver {
         public Object handle() {
             return entity;
         }
+
+        @Override
+        public AggroWorld.Senses senses() {
+            return sensesOf(entity);
+        }
     }
 
     private static final class PlayerBody extends EntityBody implements AggroWorld.Watcher {
@@ -167,7 +258,7 @@ public final class AggroDriver {
 
         @Override
         public boolean canSee(AggroWorld.Body other) {
-            return other instanceof EntityBody b && player.hasLineOfSight(b.entity);
+            return other instanceof EntityBody b && hasClearView(player, b.entity);
         }
     }
 

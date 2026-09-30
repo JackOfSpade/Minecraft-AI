@@ -226,6 +226,19 @@ public final class ConfigValidator {
         a.returnArriveDistance = clamp(w, "aggro.returnArriveDistance", a.returnArriveDistance, 0.5, 16.0);
         a.returnStuckTicks = clamp(w, "aggro.returnStuckTicks", a.returnStuckTicks, 1, 72000);
         a.returnMaxTicks = clamp(w, "aggro.returnMaxTicks", a.returnMaxTicks, 1, 72000);
+        if (a.perception == null) {
+            a.perception = new InhabitantsConfig.AggroPerception();
+        }
+        InhabitantsConfig.AggroPerception p = a.perception;
+        p.frontHalfAngleDeg = clamp(w, "aggro.perception.frontHalfAngleDeg", p.frontHalfAngleDeg, 0.0, 180.0);
+        p.peripheralHalfAngleDeg = clamp(w, "aggro.perception.peripheralHalfAngleDeg", p.peripheralHalfAngleDeg,
+                p.frontHalfAngleDeg, 180.0);
+        p.peripheralFactor = clamp(w, "aggro.perception.peripheralFactor", p.peripheralFactor, 0.0, 1.0);
+        p.sneakFactor = clamp(w, "aggro.perception.sneakFactor", p.sneakFactor, 0.0, 1.0);
+        p.hearWalk = clamp(w, "aggro.perception.hearWalk", p.hearWalk, 0.0, 64.0);
+        p.hearSprint = clamp(w, "aggro.perception.hearSprint", p.hearSprint, 0.0, 64.0);
+        p.hearCombat = clamp(w, "aggro.perception.hearCombat", p.hearCombat, 0.0, 64.0);
+        p.combatNoiseTicks = clamp(w, "aggro.perception.combatNoiseTicks", p.combatNoiseTicks, 0, 200);
     }
 
     /** A '#tag' under 'structures' belongs in 'tags'; a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */

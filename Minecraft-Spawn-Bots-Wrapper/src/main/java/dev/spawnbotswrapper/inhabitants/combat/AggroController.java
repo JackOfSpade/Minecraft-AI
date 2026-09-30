@@ -17,15 +17,20 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
  * The aggro range and the leash of the hostile inhabitants.
  * <p>
- * <b>Noticing.</b> An idle inhabitant notices a player only within {@code acquireRange} blocks (default 10) AND in
- * line of sight. It then hands that player to PvP BOT as a forced target. PvP BOT's own auto-target (a 64 block
- * box without line of sight) must be off for this; while it is on, PvP BOT acquires by itself and this class
- * only supervises (inert mode).
+ * <b>Noticing.</b> An idle inhabitant notices a player like a person would, by {@link Perception}: by SIGHT only what
+ * is in front (a 120 degree cone out to {@code acquireRange} blocks, default 10; a 200 degree field at half of it;
+ * nothing behind), a sneaking player from half as far, and by HEARING what is close and noisy even from behind
+ * (walking 4, sprinting 8, combat 12; a sneaking player is silent), never through a wall. So a player sneaking up
+ * from behind is not noticed until they strike (being hit engages at once, see below). Then it hands that player
+ * to PvP BOT as a forced target. {@code perception.enabled=false} restores plain omnidirectional line of sight.
+ * PvP BOT's own auto-target (a 64 block box without line of sight) must be off for this; while it is on, PvP BOT
+ * acquires by itself and this class only supervises (inert mode).
  * <p>
  * <b>Being hit.</b> Any target PvP BOT holds that this class did not hand over (its revenge memory after a hit
  * from any distance, or a mob fight) starts an engagement too, so a hit from far away is chased as well.
@@ -57,9 +62,17 @@ public final class AggroController {
     /** Tunables; see {@code InhabitantsConfig.Aggro}. */
     public record Config(boolean enabled, double acquireRange, boolean requireLineOfSight, int scanIntervalTicks,
                          double leashRange, int loseSightTicks, boolean returnToOrigin, double returnArriveDistance,
-                         int returnStuckTicks, int returnMaxTicks) {
+                         int returnStuckTicks, int returnMaxTicks, Perception.Params perception) {
         public static Config defaults() {
             return new Config(true, 10.0, true, 5, 32.0, 200, true, 1.5, 200, 1200);
+        }
+
+        /** With the default perception rules. */
+        public Config(boolean enabled, double acquireRange, boolean requireLineOfSight, int scanIntervalTicks,
+                      double leashRange, int loseSightTicks, boolean returnToOrigin, double returnArriveDistance,
+                      int returnStuckTicks, int returnMaxTicks) {
+            this(enabled, acquireRange, requireLineOfSight, scanIntervalTicks, leashRange, loseSightTicks,
+                    returnToOrigin, returnArriveDistance, returnStuckTicks, returnMaxTicks, Perception.Params.defaults());
         }
 
         public Config {
@@ -67,6 +80,13 @@ public final class AggroController {
             loseSightTicks = Math.max(1, loseSightTicks);
             returnStuckTicks = Math.max(1, returnStuckTicks);
             returnMaxTicks = Math.max(1, returnMaxTicks);
+            perception = perception == null ? Perception.Params.defaults() : perception;
+        }
+
+        /** The same configuration with other perception rules. */
+        public Config withPerception(Perception.Params p) {
+            return new Config(enabled, acquireRange, requireLineOfSight, scanIntervalTicks, leashRange, loseSightTicks,
+                    returnToOrigin, returnArriveDistance, returnStuckTicks, returnMaxTicks, p);
         }
     }
 
@@ -148,6 +168,8 @@ public final class AggroController {
         /** True when {@link #origin} is a temporary origin (the engagement began while walking back home). */
         final boolean temporary;
         final long startTick;
+        /** How the target was noticed (sight or hearing); null for a hit or an engagement PvP BOT began itself. */
+        final Perception.Notice noticed;
         /** Somebody else's forced target: tracked, never leashed or cleared. */
         boolean external;
         /** The forced name this controller set, or null. */
@@ -158,7 +180,8 @@ public final class AggroController {
         double homeDistance;
 
         Engagement(Object entity, String name, Cause cause, Origin origin, boolean temporary, long startTick,
-                   boolean external, String forcedByUs) {
+                   boolean external, String forcedByUs, Perception.Notice noticed) {
+            this.noticed = noticed;
             this.entity = entity;
             this.name = name;
             this.firstName = name;
@@ -379,7 +402,7 @@ public final class AggroController {
         } else {
             origin = beginOrigin(bot, st, temporary);
         }
-        Engagement e = new Engagement(t.entity(), t.name(), cause, origin, temporary[0], now, external, null);
+        Engagement e = new Engagement(t.entity(), t.name(), cause, origin, temporary[0], now, external, null, null);
         st.engagement = e;
         if (temporary[0]) {
             e.homeDistance = homeDistance(bot, st);
@@ -618,7 +641,8 @@ public final class AggroController {
             if (!validTarget(bot, candidate, s, cfg.acquireRange())) {
                 continue;
             }
-            if (cfg.requireLineOfSight() && !bot.canSee(candidate)) {
+            Perception.Notice how = noticeOf(bot, candidate, cfg);
+            if (how == Perception.Notice.NONE) {
                 continue;
             }
             up.setTarget(bot.name(), candidate.name());
@@ -626,18 +650,43 @@ public final class AggroController {
             boolean[] temporary = {false};
             Origin origin = beginOrigin(bot, st, temporary);
             Engagement e = new Engagement(candidate.handle(), candidate.name(), Cause.ACQUIRED, origin, temporary[0],
-                    now, false, candidate.name());
+                    now, false, candidate.name(), how);
             st.engagement = e;
             if (temporary[0]) {
                 e.homeDistance = homeDistance(bot, st);
             }
             acquisitions++;
             logInfo(now, bot.name(), "aggro: " + bot.name() + " noticed " + candidate.name() + " at "
-                    + fmt(bot.distanceTo(candidate)) + " blocks"
+                    + fmt(bot.distanceTo(candidate)) + " blocks by " + noticedText(how)
                     + (temporary[0] ? " while walking home (temporary origin, home " + fmt(e.homeDistance)
                     + " away)" : ""));
             return;
         }
+    }
+
+    /**
+     * Whether {@code bot} notices {@code candidate} now, and how: {@link Perception#notice} over the two bodies' eyes,
+     * look direction and stance, with occlusion (a clear view, when {@code requireLineOfSight} is on) asked last.
+     * Without perception (switched off, or a view that cannot tell the eyes and the stance) it is the plain,
+     * omnidirectional line of sight of before.
+     */
+    private Perception.Notice noticeOf(Watcher bot, Body candidate, Config cfg) {
+        BooleanSupplier clear = () -> !cfg.requireLineOfSight() || bot.canSee(candidate);
+        Perception.Params p = cfg.perception();
+        AggroWorld.Senses me = p.enabled() ? bot.senses() : null;
+        AggroWorld.Senses them = me == null ? null : candidate.senses();
+        double distance = bot.distanceTo(candidate);
+        if (me == null || them == null) {
+            return Perception.notice(p.disabled(), cfg.acquireRange(), 0.0, distance, Perception.Subject.player(false,
+                    false, false), clear);
+        }
+        double theta = Perception.angleDeg(me.look().x(), me.look().y(), me.look().z(),
+                them.eye().x() - me.eye().x(), them.eye().y() - me.eye().y(), them.eye().z() - me.eye().z());
+        return Perception.notice(p, cfg.acquireRange(), theta, distance, them.subject(), clear);
+    }
+
+    private static String noticedText(Perception.Notice how) {
+        return how == Perception.Notice.HEARING ? "hearing" : "sight";
     }
 
     /**
@@ -827,7 +876,8 @@ public final class AggroController {
 
     /**
      * One short text about one bot for the status output, e.g.
-     * {@code engaged Steve (acquired) 12.3 from origin, unseen 40t}, {@code engaged Steve (hit) 5.2 from temp origin, home 20.1 away, unseen 0t}, {@code returning home, 18.0 to go} or
+     * {@code engaged Steve (acquired by sight) 12.3 from origin, unseen 40t} ({@code by hearing} when the player was
+     * heard rather than seen), {@code engaged Steve (hit) 5.2 from temp origin, home 20.1 away, unseen 0t}, {@code returning home, 18.0 to go} or
      * {@code idle}. Distances are as of the last tick.
      */
     public String describe(String botName) {
@@ -835,6 +885,7 @@ public final class AggroController {
         if (s != null && s.engagement != null) {
             Engagement e = s.engagement;
             return "engaged " + e.name + " (" + e.cause.name().toLowerCase(Locale.ROOT)
+                    + (e.noticed != null ? " by " + noticedText(e.noticed) : "")
                     + (e.external ? ", external" : "") + ") " + fmt(e.leashDistance)
                     + (e.temporary ? " from temp origin, home " + fmt(e.homeDistance) + " away" : " from origin")
                     + ", unseen " + e.unseen + "t";

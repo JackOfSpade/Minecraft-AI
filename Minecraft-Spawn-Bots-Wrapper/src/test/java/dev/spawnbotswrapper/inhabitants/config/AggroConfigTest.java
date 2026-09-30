@@ -81,4 +81,58 @@ class AggroConfigTest {
         Files.writeString(f, "{ \"aggro\": { \"acquireRange\": 500 } }", StandardCharsets.UTF_8);
         assertTrue(ConfigIO.load(f).warnings().stream().anyMatch(w -> w.contains("aggro.acquireRange")));
     }
+
+    @Test
+    void thePerceptionBlockDefaultsToTheSharedModel(@TempDir Path dir) {
+        Path f = dir.resolve("cfg.json");
+        ConfigIO.load(f);
+        ConfigIO.LoadResult again = ConfigIO.load(f);
+        assertTrue(again.warnings().isEmpty(), again.warnings().toString());
+        InhabitantsConfig.AggroPerception p = again.config().aggro.perception;
+        assertTrue(p.enabled);
+        assertEquals(60.0, p.frontHalfAngleDeg);
+        assertEquals(100.0, p.peripheralHalfAngleDeg);
+        assertEquals(0.5, p.peripheralFactor);
+        assertEquals(0.5, p.sneakFactor);
+        assertEquals(4.0, p.hearWalk);
+        assertEquals(8.0, p.hearSprint);
+        assertEquals(12.0, p.hearCombat);
+        assertEquals(10, p.combatNoiseTicks);
+        assertTrue(ConfigIO.toJson(again.config()).contains("\"perception\""));
+    }
+
+    @Test
+    void thePerceptionBlockCanBeSwitchedOffAndTuned(@TempDir Path dir) throws IOException {
+        InhabitantsConfig.AggroPerception p = load(dir,
+                "{ \"perception\": { \"enabled\": false, \"sneakFactor\": 0.25, \"hearWalk\": 6 } }").perception;
+        assertFalse(p.enabled);
+        assertEquals(0.25, p.sneakFactor);
+        assertEquals(6.0, p.hearWalk);
+        assertEquals(60.0, p.frontHalfAngleDeg, "keys left out keep their defaults");
+    }
+
+    @Test
+    void thePerceptionBoundsAreKeptCoherent(@TempDir Path dir) throws IOException {
+        InhabitantsConfig.AggroPerception p = load(dir, "{ \"perception\": { \"frontHalfAngleDeg\": 250, "
+                + "\"peripheralHalfAngleDeg\": 30, \"peripheralFactor\": 3, \"sneakFactor\": -1, "
+                + "\"hearWalk\": -2, \"hearSprint\": 999, \"hearCombat\": -1, \"combatNoiseTicks\": -5 } }").perception;
+        assertEquals(180.0, p.frontHalfAngleDeg);
+        assertEquals(180.0, p.peripheralHalfAngleDeg, "the field is never narrower than the front cone");
+        assertEquals(1.0, p.peripheralFactor);
+        assertEquals(0.0, p.sneakFactor);
+        assertEquals(0.0, p.hearWalk);
+        assertEquals(64.0, p.hearSprint);
+        assertEquals(0.0, p.hearCombat);
+        assertEquals(0, p.combatNoiseTicks);
+        InhabitantsConfig.AggroPerception q = load(dir,
+                "{ \"perception\": { \"frontHalfAngleDeg\": 80, \"peripheralHalfAngleDeg\": 50 } }").perception;
+        assertEquals(80.0, q.frontHalfAngleDeg);
+        assertEquals(80.0, q.peripheralHalfAngleDeg);
+    }
+
+    @Test
+    void aMissingPerceptionBlockIsFilledIn(@TempDir Path dir) throws IOException {
+        InhabitantsConfig.Aggro a = load(dir, "{ \"perception\": null }");
+        assertTrue(a.perception != null && a.perception.enabled);
+    }
 }

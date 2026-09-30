@@ -391,7 +391,8 @@ PvP BOT's own auto-target notices any player within 64 blocks, through walls. Th
 policy turns PvP BOT's `autoTarget` off) with the rules below, applied to every inhabitant (`aggro` block in
 `pvpbot_inhabitants.json`):
 
-* **Noticing.** An idle inhabitant notices the nearest valid player within `acquireRange` (10) blocks **and** in line
+* **Noticing.** An idle inhabitant notices the nearest valid player like a person would (see **Realistic perception**
+  below): within `acquireRange` (10) blocks, in front of it, **and** in line
   of sight (`requireLineOfSight`), checked every `scanIntervalTicks` (5). "Valid" follows PvP BOT's own rules (not
   creative/spectator unless `attackInvincible`, not a faction ally, other bots only with `targetOtherBots`). The
   player is handed to PvP BOT as a forced target.
@@ -423,9 +424,30 @@ policy turns PvP BOT's `autoTarget` off) with the rules below, applied to every 
   at INFO), but the leash and the walk back still apply. A `WARN` is logged when `leashRange + acquireRange` exceeds
   PvP BOT's `maxTargetDistance`, since PvP BOT may then drop a target before the leash decides.
 * The walk back runs in a Fabric tick phase ordered after the default phase, so it is the last input written each tick,
-  after PvP BOT's own bot tick (idle wander, patrol movement). The state of a bot (`aggro[engaged Steve (acquired)
+  after PvP BOT's own bot tick (idle wander, patrol movement). The state of a bot (`aggro[engaged Steve (acquired by sight)
   12.3 from origin, unseen 40t]`, `aggro[engaged Steve (hit) 5.2 from temp origin, home 20.1 away, unseen 0t]`, `aggro[returning home, 18.0 to go]`) is appended to the "Combat taken" line; starts,
   give-ups and returns are logged at debug (one INFO per bot per 10 s at most).
+
+### Realistic perception (`aggro.perception`)
+
+Noticing is not omnidirectional and does not ignore sneaking: an inhabitant cannot see you behind it, so a player can
+walk up on one and ambush it. The rules (the same model Minecraft-AI's bots use; `docs/PERCEPTION.md` in the
+repository root, golden vectors in `docs/perception/vectors.json`):
+
+* **Sight.** In front (`frontHalfAngleDeg` 60, a 120 degree cone) the player is seen out to `acquireRange` (10);
+  in the peripheral field (out to `peripheralHalfAngleDeg` 100) at `peripheralFactor` (0.5) of it; behind, not seen.
+  A sneaking player is seen from `sneakFactor` (0.5) of that distance; invisibility and worn mob heads shrink it
+  further (vanilla's factor). A clear view (eye ray, then a body-centre ray) is required: `requireLineOfSight`
+  stays the switch for that.
+* **Hearing.** A close, noisy player is noticed even from behind: walking within `hearWalk` (4), sprinting within
+  `hearSprint` (8), and for `combatNoiseTicks` (10) after a swing, hit taken, bow draw, meal, or block broken or placed
+  within `hearCombat` (12), never beyond `acquireRange`. Sneaking or standing still is silent, and hearing never
+  works through a wall. So a player sneaking up from behind is not noticed until they strike; being hit engages at
+  once (the attacker is aware from then on, as before).
+* **Awareness.** Once engaged (noticed or hit) the inhabitant keeps following its target while a plain clear view
+  holds, and gives up after `loseSightTicks` (10 s) without one: the view cone and sneaking no longer matter.
+* The status line and the "noticed" log line say how: `acquired by sight`, `acquired by hearing`, `hit`.
+* `perception.enabled=false` restores the old omnidirectional line of sight exactly. Light level is not modelled.
 
 ### Diagnostic lines: hits an inhabitant TAKES, and bow/crossbow loops
 

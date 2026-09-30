@@ -47,6 +47,11 @@ class AggroControllerTest {
         boolean player = true;
         /** Names this person cannot see (line of sight blocked). */
         final Set<String> blind = new HashSet<>();
+        /** Look direction (x, z); null = the fake cannot tell (the controller then uses plain line of sight). */
+        double[] look;
+        /** What this person is doing, for those who notice it. */
+        Perception.Subject subject = Perception.Subject.player(false, false, false);
+        int canSeeCalls;
 
         Person(String name, double x) {
             this.name = name;
@@ -106,7 +111,14 @@ class AggroControllerTest {
 
         @Override
         public boolean canSee(Body other) {
+            canSeeCalls++;
             return !blind.contains(other.name());
+        }
+
+        @Override
+        public AggroWorld.Senses senses() {
+            return look == null ? null : new AggroWorld.Senses(new Pos(x, 65.62, z), new Pos(look[0], 0, look[1]),
+                    subject);
         }
     }
 
@@ -1443,7 +1455,7 @@ class AggroControllerTest {
         steve.x = 5;
         scan();
         String engaged = controller.describe("Warden7");
-        assertTrue(engaged.startsWith("engaged Steve (acquired) 0.0 from origin, unseen 0t"), engaged);
+        assertTrue(engaged.startsWith("engaged Steve (acquired by sight) 0.0 from origin, unseen 0t"), engaged);
         bot.blind.add("Steve");
         run(40);
         assertTrue(controller.describe("Warden7").endsWith("unseen 40t"), controller.describe("Warden7"));
@@ -1497,5 +1509,211 @@ class AggroControllerTest {
         assertEquals(1, stats.returned());
         assertEquals(Map.of("leash", 1L), stats.giveUps());
         assertEquals(0, stats.engaged());
+    }
+
+    // ---------------------------------------------------------------- realistic perception (see Perception)
+
+    /** The bot at x=0 looks along +x; Steve is a plain standing player. Positive x is in front, negative behind. */
+    void perceive() {
+        bot.look = new double[]{1, 0};
+        steve.look = new double[]{-1, 0};
+    }
+
+    private static Perception.Subject sneakingWalk() {
+        return Perception.Subject.player(true, true, false);
+    }
+
+    private static Perception.Subject walking() {
+        return Perception.Subject.player(false, true, false);
+    }
+
+    private static Perception.Subject sprinting() {
+        return Perception.Subject.player(false, true, true);
+    }
+
+    /** A player standing at {@code degrees} off the bot's look direction, {@code distance} blocks away. */
+    void placeAt(double degrees, double distance) {
+        steve.x = Math.cos(Math.toRadians(degrees)) * distance;
+        steve.z = Math.sin(Math.toRadians(degrees)) * distance;
+    }
+
+    @Test
+    void aPlayerSneakingUpFromBehindIsNeverNoticedUntilTheyHit() {
+        perceive();
+        steve.x = -2;
+        steve.subject = sneakingWalk();
+        run(200);
+        assertEquals(List.of(), up.callsOf("set"), "nobody sees a sneaking player behind them, at 2 blocks");
+        assertNull(controller.engagedWith("Warden7"));
+        hit(steve);
+        run(1);
+        assertEquals("Steve", controller.engagedWith("Warden7"), "the hit makes the bot aware of the attacker");
+        assertEquals(Cause.HIT, controller.causeOf("Warden7"));
+        assertTrue(controller.describe("Warden7").startsWith("engaged Steve (hit) "), controller.describe("Warden7"));
+    }
+
+    @Test
+    void aStandingPlayerBehindIsNotNoticedEitherBecauseSightHasNoBack() {
+        perceive();
+        steve.x = -2;
+        run(100);
+        assertEquals(List.of(), up.callsOf("set"));
+    }
+
+    @Test
+    void aPlayerWalkingBehindAtThreeBlocksIsHeard() {
+        perceive();
+        steve.x = -3;
+        steve.subject = walking();
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+        assertEquals(Cause.ACQUIRED, controller.causeOf("Warden7"));
+        assertTrue(controller.describe("Warden7").startsWith("engaged Steve (acquired by hearing) "),
+                controller.describe("Warden7"));
+        assertTrue(log.info.stream().anyMatch(s -> s.contains("noticed Steve") && s.contains("by hearing")),
+                log.info.toString());
+    }
+
+    @Test
+    void aPlayerWalkingBehindAtFiveBlocksIsNot() {
+        perceive();
+        steve.x = -5;
+        steve.subject = walking();
+        run(100);
+        assertEquals(List.of(), up.callsOf("set"));
+    }
+
+    @Test
+    void aSprintingPlayerBehindIsHeardAtSevenButNotAtNine() {
+        perceive();
+        steve.subject = sprinting();
+        steve.x = -9;
+        scan();
+        assertEquals(List.of(), up.callsOf("set"));
+        steve.x = -7;
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+    }
+
+    @Test
+    void aPlayerInFrontAtNinePointFiveIsSeenStanding() {
+        perceive();
+        steve.x = 9.5;
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+        assertTrue(controller.describe("Warden7").startsWith("engaged Steve (acquired by sight) "),
+                controller.describe("Warden7"));
+    }
+
+    @Test
+    void aSneakingPlayerInFrontIsSeenFromHalfTheDistance() {
+        perceive();
+        steve.subject = sneakingWalk();
+        steve.x = 6;
+        run(100);
+        assertEquals(List.of(), up.callsOf("set"), "6 blocks is beyond half of the 10 block range");
+        steve.x = 4.5;
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+    }
+
+    @Test
+    void thePeripheralFieldReachesHalfAsFar() {
+        perceive();
+        placeAt(70, 5.1);
+        run(100);
+        assertEquals(List.of(), up.callsOf("set"));
+        placeAt(70, 4.9);
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+    }
+
+    @Test
+    void hearingNeverPassesAWall() {
+        perceive();
+        steve.x = -2;
+        steve.subject = walking();
+        bot.blind.add("Steve");
+        run(100);
+        assertEquals(List.of(), up.callsOf("set"), "a walking player behind a wall is not heard");
+        bot.blind.clear();
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+    }
+
+    @Test
+    void aPlayerWhoJustFoughtIsHeardFromBehindEvenWhenSneaking() {
+        perceive();
+        steve.x = -9;
+        steve.subject = new Perception.Subject(true, false, false, 2, Perception.MobKind.NONE, 1.0);
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+        assertTrue(controller.describe("Warden7").contains("by hearing"), controller.describe("Warden7"));
+    }
+
+    @Test
+    void theOcclusionRayIsOnlyCastWhenRangeAndAngleAlreadyAllowNoticing() {
+        perceive();
+        steve.x = -2;
+        steve.subject = sneakingWalk();
+        run(50);
+        steve.x = 12;
+        steve.subject = Perception.Subject.player(false, false, false);
+        run(50);
+        assertEquals(0, bot.canSeeCalls, "behind and silent, or out of range: no ray is cast");
+        steve.x = 5;
+        scan();
+        assertTrue(bot.canSeeCalls > 0, "in front and in range: the ray decides");
+    }
+
+    @Test
+    void anEngagedBotKeepsFollowingWhoeverItHasNoticedEvenFromBehindOrSneaking() {
+        perceive();
+        steve.x = 5;
+        scan();
+        assertEquals("Steve", controller.engagedWith("Warden7"));
+        steve.x = -3;
+        steve.subject = sneakingWalk();
+        run(400);
+        assertEquals("Steve", controller.engagedWith("Warden7"), "awareness uses plain occlusion, not the view cone");
+        assertTrue(controller.describe("Warden7").endsWith("unseen 0t"), controller.describe("Warden7"));
+        bot.blind.add("Steve");
+        run(config.loseSightTicks());
+        assertNull(controller.engagedWith("Warden7"), "behind a wall for 10 seconds the chase is given up");
+    }
+
+    @Test
+    void withPerceptionOffSightIsOmnidirectionalAgainAndSneakingDoesNotMatter() {
+        config = config.withPerception(Perception.Params.defaults().disabled());
+        perceive();
+        steve.x = -9;
+        steve.subject = sneakingWalk();
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
+        assertTrue(controller.describe("Warden7").startsWith("engaged Steve (acquired by sight) "),
+                controller.describe("Warden7"));
+    }
+
+    @Test
+    void withoutLineOfSightRequiredHearingAndSightAreStillDirectional() {
+        config = new Config(true, 10.0, false, 5, 32.0, 200, true, 1.5, 200, 1200);
+        perceive();
+        steve.x = -2;
+        steve.subject = sneakingWalk();
+        bot.blind.add("Steve");
+        run(100);
+        assertEquals(List.of(), up.callsOf("set"), "requireLineOfSight only switches occlusion off, not the cone");
+        steve.x = 5;
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"), "no occlusion check: seen through a wall");
+    }
+
+    @Test
+    void aViewThatCannotTellEyesAndStanceFallsBackToPlainLineOfSight() {
+        // No look direction on either fake: exactly the pre-perception behaviour (omnidirectional).
+        steve.x = -9;
+        steve.subject = sneakingWalk();
+        scan();
+        assertEquals(List.of("set Warden7->Steve"), up.callsOf("set"));
     }
 }
