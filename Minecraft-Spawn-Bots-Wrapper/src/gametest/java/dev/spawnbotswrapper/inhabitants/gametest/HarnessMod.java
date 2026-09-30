@@ -24,6 +24,10 @@ public final class HarnessMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        // Natural hostile mobs spawn around the platforms (a bot and a mock player are players to the spawner) and would
+        // fight the inhabitant: an aggro test then measures the zombie, not the rule. No monsters in the GameTest world.
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server ->
+                server.overworld().getGameRules().set(net.minecraft.world.level.gamerules.GameRules.SPAWN_MONSTERS, false, server));
         ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
             if (entity instanceof Projectile projectile) {
                 Entity owner = projectile.getOwner();

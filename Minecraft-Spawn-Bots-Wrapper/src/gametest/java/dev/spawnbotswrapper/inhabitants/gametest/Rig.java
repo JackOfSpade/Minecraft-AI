@@ -122,8 +122,18 @@ final class Rig {
         buildPlatform(12);
     }
 
+    /** Removes hostile mobs that already stand around the scene (natural spawns would fight the inhabitant). */
+    void clearHostiles() {
+        net.minecraft.world.phys.AABB area = new net.minecraft.world.phys.AABB(botFeet).inflate(60.0, 20.0, 60.0);
+        for (net.minecraft.world.entity.Entity e : level.getEntities((net.minecraft.world.entity.Entity) null, area,
+                x -> x instanceof net.minecraft.world.entity.monster.Enemy)) {
+            e.discard();
+        }
+    }
+
     /** A stone floor {@code radius} blocks to every side of the bot's cell with a high air ceiling. */
     void buildPlatform(int radius) {
+        clearHostiles();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 level.setBlock(botFeet.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
@@ -165,6 +175,7 @@ final class Rig {
 
     /** A floor strip 7 wide, from 3 blocks west of the bot to {@code length + 3} blocks east, with a high air ceiling. */
     void buildStrip(int length) {
+        clearHostiles();
         fill(-3, -1, -3, length + 3, -1, 3, Blocks.STONE);
         fill(-3, 0, -3, length + 3, 6, 3, Blocks.AIR);
     }
