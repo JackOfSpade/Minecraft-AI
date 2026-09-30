@@ -51,6 +51,16 @@ public final class TpsGuard {
         }
     }
 
+    /**
+     * Test hook: forgets every per-bot override and returns how many there were. The GameTest sweeper calls it between batches, so an
+     * override a scenario forgot to lift cannot leak into the next scenario (a bot name, and so its UUID, can come back).
+     */
+    public static int clearForcedForTests() {
+        int leaked = FORCED_DEGRADED.size();
+        FORCED_DEGRADED.clear();
+        return leaked;
+    }
+
     public synchronized void tick(MinecraftServer server) {
         if (harnessPinned) {
             return;

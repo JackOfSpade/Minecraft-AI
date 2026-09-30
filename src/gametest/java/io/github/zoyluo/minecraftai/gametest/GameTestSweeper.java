@@ -121,6 +121,10 @@ public final class GameTestSweeper {
                     io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime.testTpsDegraded(), tests);
             io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime.setTestTpsDegraded(null);
         }
+        int forcedDegraded = io.github.zoyluo.minecraftai.observe.TpsGuard.clearForcedForTests();
+        if (forcedDegraded > 0) {
+            LOG.warn("a test left {} per-bot TPS-degraded override(s) behind, clearing them; tests: {}", forcedDegraded, tests);
+        }
         if (io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled() != baselinePerception) {
             LOG.warn("a test left realistic perception switched {}, switching it back; tests: {}",
                     io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled() ? "on" : "off", tests);
