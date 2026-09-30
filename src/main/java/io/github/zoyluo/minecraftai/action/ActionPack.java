@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.action;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.baritone.BaritoneNavigator;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -71,6 +72,22 @@ public final class ActionPack {
     private NavRoute route;
     private NavOutcome lastRouteOutcome;
 
+    // Pace (see PacePolicy): leases and ceilings requested by tasks, the per-bot policy memory and quiet-zone cache. None of this
+    // counts as an active action and none of it claims the bot from Baritone.
+    private final PacePolicy.Lease[] tickLeases = new PacePolicy.Lease[PaceOwner.values().length];
+    private PacePolicy.Lease routeLease;
+    private Gait capGait;
+    private long capUntil;
+    private String capReason = "";
+    private long controllerInputTick = Long.MIN_VALUE;
+    private final PacePolicy.State paceState = new PacePolicy.State();
+    private final QuietZone quietZone = new QuietZone();
+    // What the enforcer wrote on the last controller-driven tick (the walkers scale their progress limits with the input scale).
+    private float lastInputScale = 1.0F;
+    private Gait lastPaceGait = Gait.SPRINT;
+    private double deadlineCredit;
+    private double lastClockWeight = 1.0D;
+
     public ActionPack(AIPlayerEntity player) {
         this.player = player;
     }
@@ -125,8 +142,18 @@ public final class ActionPack {
         this.strafing = clampInput(value);
     }
 
+    /**
+     * Sneak and sprint are pace requests, not movement: while a Baritone route (or a direct Baritone caller) drives this bot they only
+     * record the flag (the input bridge reads it as the task's wish), they do not take the bot over and so cannot cancel the route
+     * the caller has just started. Held keys, walks, paths and mining still claim.
+     */
+    private boolean baritoneOwnsBot() {
+        return route != null
+                || NavEngineSelector.query("baritone_busy", () -> BaritoneRegistry.INSTANCE.isBusy(player), false);
+    }
+
     public void setSneaking(boolean sneaking) {
-        if (sneaking) {
+        if (sneaking && !baritoneOwnsBot()) {
             claim("set_sneaking");
         }
         this.sneaking = sneaking;
@@ -137,7 +164,7 @@ public final class ActionPack {
     }
 
     public void setSprinting(boolean sprinting) {
-        if (sprinting) {
+        if (sprinting && !baritoneOwnsBot()) {
             claim("set_sprinting");
         }
         this.sprinting = sprinting;
@@ -159,6 +186,212 @@ public final class ActionPack {
         this.jumpTicks = 2;
     }
 
+    // ==================== Pace (see PacePolicy) ====================
+    // Requests about HOW the bot moves, not movement: none of them claims the bot from Baritone and none counts in hasActiveActions.
+
+    /**
+     * A TICK lease: {@code gait} is wanted for the next {@value PacePolicy.Lease#TICK_LEASE_TICKS} game ticks (renew it every time the
+     * task ticks; it survives the TaskManager's 1-in-5 throttle). The highest-priority valid lease decides the gait of controller-driven
+     * travel; see {@link PacePolicy} for what still overrules it.
+     */
+    public void requestPace(Gait gait, PaceOwner owner) {
+        long now = player.level().getGameTime();
+        this.tickLeases[owner.ordinal()] = PacePolicy.Lease.tick(gait, owner, now);
+    }
+
+    /**
+     * A ROUTE lease: {@code gait} for the whole route that is running now. Ended only by {@link #stopAll}, {@link #stopNavigation},
+     * the start of a new path/walk/route and the settling (complete or failed) of the route; {@link #stopMovement} does not end it
+     * (the walkers call that at every sub-target). Request it AFTER starting the route: starting one ends the previous lease.
+     */
+    public void requestRoutePace(Gait gait, PaceOwner owner) {
+        this.routeLease = PacePolicy.Lease.route(gait, owner);
+    }
+
+    /**
+     * A per-tick hard ceiling: the gait is at most {@code max} on this tick and the next, whoever asks for more (the legacy executor
+     * caps to a walk on jump, drop, pillar, bridge and dig nodes; raw-input drivers use it for their steps). Ceilings combine to the
+     * lowest.
+     */
+    public void capPace(Gait max, String reason) {
+        long now = player.level().getGameTime();
+        if (capGait != null && capUntil > now) {
+            capGait = Gait.min(capGait, max);
+        } else {
+            capGait = max;
+        }
+        capReason = reason == null ? "" : reason;
+        capUntil = now + 2;
+    }
+
+    /**
+     * A raw-input driver (it writes {@code setForward}/{@code setStrafing} itself, like the walked combat step) calls this every
+     * tick it drives, so the legacy enforcer applies the pace and the vanilla rules to its keys this tick.
+     */
+    public void markControllerInput() {
+        this.controllerInputTick = player.level().getGameTime();
+    }
+
+    /** The gait of the winning valid lease (tick or route), or null. */
+    public Gait leasedGait() {
+        PacePolicy.Lease lease = leaseAt(player.level().getGameTime());
+        return lease == null ? null : lease.gait();
+    }
+
+    /** The owner of the winning valid lease, or null. */
+    public PaceOwner leasedOwner() {
+        PacePolicy.Lease lease = leaseAt(player.level().getGameTime());
+        return lease == null ? null : lease.owner();
+    }
+
+    /** The task asked for sprinting ({@link #setSprinting}). */
+    public boolean sprintRequested() {
+        return sprinting;
+    }
+
+    /** The task asked for sneaking ({@link #setSneaking}). */
+    public boolean sneakRequested() {
+        return sneaking;
+    }
+
+    /** Drops every lease and ceiling and forgets the hysteresis of the policy. */
+    public void clearPace() {
+        java.util.Arrays.fill(tickLeases, null);
+        routeLease = null;
+        capGait = null;
+        capUntil = 0L;
+        capReason = "";
+        controllerInputTick = Long.MIN_VALUE;
+        paceState.reset();
+        quietZone.invalidate();
+        lastInputScale = 1.0F;
+        lastClockWeight = 1.0D;
+    }
+
+    /** The winning valid lease at {@code now} (package-visible: the policy reads it). */
+    PacePolicy.Lease leaseAt(long now) {
+        PacePolicy.Lease best = routeLease != null && routeLease.validAt(now) ? routeLease : null;
+        for (PacePolicy.Lease lease : tickLeases) {
+            best = PacePolicy.Lease.best(lease, best, now);
+        }
+        return best;
+    }
+
+    /** The active ceiling at {@code now}, or null. */
+    Gait capAt(long now) {
+        return capGait != null && now < capUntil ? capGait : null;
+    }
+
+    /** Why the current ceiling was set (for logs and tests). */
+    public String capReason() {
+        return capReason;
+    }
+
+    PacePolicy.State paceState() {
+        return paceState;
+    }
+
+    QuietZone quietZone() {
+        return quietZone;
+    }
+
+    /** The gait the enforcer applied on its last controller-driven tick (SPRINT before the first). */
+    public Gait lastPaceGait() {
+        return lastPaceGait;
+    }
+
+    /** The input scale the enforcer applied on its last controller-driven tick (sneak 0.3, item use 0.2, both multiply). */
+    public float lastInputScale() {
+        return lastInputScale;
+    }
+
+    /**
+     * How much of a tick the controllers count for their own time limits: the slower the bot deliberately moves, the less "late"
+     * it is. Sneaking counts 1/4.4 and walking 1/1.3 of a tick against a sprint's 1, and using an item scales it further (input 0.2).
+     */
+    public double paceClockWeight() {
+        return lastClockWeight;
+    }
+
+    /**
+     * What an enforcer (legacy or Baritone bridge) really applied this tick: the gait the bot moves at, the input scale and whether the
+     * item-use slowdown is part of it. The walkers scale their limits by it, and a route's deadline moves out for a slow tick.
+     */
+    public void noteEnforced(Gait actual, float inputScale, boolean itemSlowdown) {
+        this.lastInputScale = inputScale;
+        this.lastClockWeight = actual.clockWeight() * (itemSlowdown ? PaceRules.USE_ITEM_SCALE : 1.0F);
+        notePaceTick(actual);
+    }
+
+    /**
+     * Records that a route ran a tick at {@code gait} (Baritone bridge and legacy enforcer): the route's deadline moves out by the
+     * part of the tick a slow gait does not count, so a bot that deliberately sneaks past a sculk sensor is not timed out for it.
+     */
+    public void notePaceTick(Gait gait) {
+        this.lastPaceGait = gait;
+        NavRoute current = route;
+        if (current == null || gait == Gait.SPRINT) {
+            return;
+        }
+        deadlineCredit += 1.0D - gait.clockWeight();
+        int whole = (int) deadlineCredit;
+        if (whole > 0) {
+            deadlineCredit -= whole;
+            current.setDeadlineTick(current.deadlineTick() + whole);
+        }
+    }
+
+    /** The route lease ends with the route it was requested for. */
+    private void clearRouteLease() {
+        this.routeLease = null;
+    }
+
+    /** Horizontal distance to the goal of the path, walk or route that is running, or NaN when there is none. */
+    private double goalDistance() {
+        double gx;
+        double gz;
+        if (walkTo != null) {
+            gx = walkTo.target().x;
+            gz = walkTo.target().z;
+        } else {
+            BlockPos goal = activePathGoal();
+            if (goal == null) {
+                return Double.NaN;
+            }
+            gx = goal.getX() + 0.5D;
+            gz = goal.getZ() + 0.5D;
+        }
+        double dx = gx - player.getX();
+        double dz = gz - player.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    /**
+     * Legacy enforcer: the pace policy and the vanilla rules applied to the keys of controller-driven movement (see
+     * {@link PacePolicy}). Runs in {@link #onUpdate} after the controllers have written their keys.
+     */
+    private void enforcePace(MinecraftAiConfig.Pace config) {
+        Gait gait = PacePolicy.resolve(player, goalDistance(), true);
+        WalkToController walker = walkTo != null ? walkTo : pathExecutor != null ? pathExecutor.activeWalker() : null;
+        boolean edge = (pathExecutor != null && pathExecutor.onEdgeDescentNode()) || player.onClimbable();
+        boolean effectiveSneak = sneaking || (gait == Gait.SNEAK && !edge);
+        boolean geometry = walker == null || walker.geometryAllowsSprint();
+        boolean effectiveSprint = gait == Gait.SPRINT && geometry && PaceRules.sprintAllowed(player, forward, effectiveSneak);
+        player.setShiftKeyDown(effectiveSneak);
+        player.setSprinting(effectiveSprint);
+        float scale = PaceRules.inputScale(effectiveSneak, player.isUsingItem(), config.itemUseSlowdownEnabled());
+        player.zza = forward * scale;
+        player.xxa = strafing * scale;
+        noteEnforced(effectiveSneak ? Gait.SNEAK : effectiveSprint ? Gait.SPRINT : Gait.WALK, scale,
+                player.isUsingItem() && config.itemUseSlowdownEnabled());
+    }
+
+    private boolean controllerDriven() {
+        // A raw-input driver marks its tick from a task tick, which may run just before or just after this bot's own tick.
+        return pathExecutor != null || walkTo != null
+                || (controllerInputTick != Long.MIN_VALUE && player.level().getGameTime() - controllerInputTick <= 1L);
+    }
+
     public ActionResult startWalkTo(Vec3 target) {
         return startWalkTo(target, 0.6D);
     }
@@ -168,6 +401,7 @@ public final class ActionPack {
         claim("walk_to");
         logEngine("walk_to", BlockPos.containing(target), NavEngine.LEGACY, "straight_line_walk");
         clearActivePathExecutor();
+        clearRouteLease();
         this.walkTo = new WalkToController(target, arrivalThreshold);
         this.mining = null;
         return ActionResult.IN_PROGRESS;
@@ -507,6 +741,11 @@ public final class ActionPack {
             finishRoute(NavOutcome.Status.CANCELLED, NavRouteRules.REPLACED, false);
         }
         route = request;
+        if (previous == null || admit) {
+            // A new route (not a re-goal refresh of the follow route) ends the lease of the one before.
+            clearRouteLease();
+            deadlineCredit = 0.0D;
+        }
         if (identity != null) {
             lastPathRequest = identity;
             nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
@@ -599,6 +838,11 @@ public final class ActionPack {
             return;
         }
         route = null;
+        deadlineCredit = 0.0D;
+        if (releaseWater) {
+            // A replacement route (releaseWater=false) has registered itself; only a route that really ended takes its lease with it.
+            clearRouteLease();
+        }
         BlockPos goal = finished.resolvedGoal() != null ? finished.resolvedGoal() : finished.target();
         NavOutcome outcome = new NavOutcome(status, reason, finished.label(), goal, serverTick() - finished.startTick());
         lastRouteOutcome = outcome;
@@ -830,6 +1074,7 @@ public final class ActionPack {
         }
         clearActivePathExecutor();
         this.walkTo = null;
+        clearRouteLease();
         stopMovement();
     }
 
@@ -838,6 +1083,7 @@ public final class ActionPack {
         clearActivePathExecutor();
         stopMining();
         this.walkTo = null;
+        clearRouteLease();
         stopMovement();
         // Cancel, never release: releasing a drawn bow fires it, and stopAll is an interruption, not a shot.
         player.stopUsingItem();
@@ -876,9 +1122,17 @@ public final class ActionPack {
         tickWalkTo();
         tickMining();
 
-        float velocity = sneaking ? 0.3F : 1.0F;
-        player.zza = forward * velocity;
-        player.xxa = strafing * velocity;
+        MinecraftAiConfig.Pace pace = MinecraftAiConfig.get().behaviour().paceOrDefaults();
+        if (pace.paceEnabled() && controllerDriven()) {
+            enforcePace(pace);
+        } else {
+            // Raw keys (a task's own setForward/setSneaking/setSprinting, the walked combat step) go through exactly as written.
+            float velocity = sneaking ? PaceRules.SNEAK_SCALE : 1.0F;
+            player.zza = forward * velocity;
+            player.xxa = strafing * velocity;
+            lastInputScale = 1.0F;
+            lastClockWeight = 1.0D;
+        }
         boolean jumpNow = jumping || jumpTicks > 0;
         player.setJumping(jumpNow);
         if (jumpTicks > 0) {
@@ -902,6 +1156,7 @@ public final class ActionPack {
             BotLog.warn(LogCategory.ERROR, player, "walk_failed", "reason", result.reason());
         }
         walkTo = null;
+        clearRouteLease();
         forward = 0.0F;
         strafing = 0.0F;
         jumping = false;
@@ -926,6 +1181,7 @@ public final class ActionPack {
         pathExecutor = null;
         activePathGoal = null;
         activePathRequest = null;
+        clearRouteLease();
         forward = 0.0F;
         strafing = 0.0F;
         jumping = false;
@@ -998,6 +1254,7 @@ public final class ActionPack {
             pathExecutor.abort(this);
             pathExecutor = null;
         }
+        clearRouteLease();
         activePathGoal = null;
         activePathRequest = null;
     }

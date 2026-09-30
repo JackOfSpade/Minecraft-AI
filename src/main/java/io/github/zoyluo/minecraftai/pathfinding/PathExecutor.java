@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.Gait;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
@@ -137,6 +138,11 @@ public final class PathExecutor {
             return ActionResult.failed("danger_at_node: " + danger);
         }
 
+        // Pace ceiling (see PacePolicy): a jump, a drop, a pillar, a bridge or a dig is never sprinted, whatever else asks for it.
+        // The old per-node setSprinting(false) calls stay; they are harmless, this is the veto that also beats an aggro sprint.
+        if (next.moveType() != MoveType.WALK && next.moveType() != MoveType.DIAGONAL) {
+            pack.capPace(Gait.WALK, "node_" + next.moveType());
+        }
         ActionResult result = switch (next.moveType()) {
             case WALK, DIAGONAL, JUMP_UP -> tickWalk(pack, next);
             case DROP_DOWN -> tickDrop(pack, next);
@@ -159,6 +165,29 @@ public final class PathExecutor {
 
     public int totalTicks() {
         return totalTicks;
+    }
+
+    /** The controller that walks the current leg (its ground check decides whether a sprint is allowed), or null between legs. */
+    public WalkToController activeWalker() {
+        return subWalker;
+    }
+
+    /**
+     * True while the bot is going down: the current node is a drop, or it (or a node the string-pulled leg reaches) lies lower than the
+     * one before. A sneaking player does not walk off an edge, so the pace enforcer lifts a sneak here.
+     */
+    public boolean onEdgeDescentNode() {
+        if (index < 1 || index >= path.size()) {
+            return false;
+        }
+        int last = Math.min(path.size() - 1, Math.max(index, activeWalkTargetIndex));
+        for (int i = index; i <= last; i++) {
+            Node node = path.get(i);
+            if (node.moveType() == MoveType.DROP_DOWN || node.pos().getY() < path.get(i - 1).pos().getY()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean hasPlaceableBlock(AIPlayerEntity player) {
@@ -528,7 +557,9 @@ public final class PathExecutor {
 
     private ActionResult checkProgress(ActionPack pack, Node next) {
         Vec3 current = pack.player().position();
-        if (lastPos != null && current.distanceTo(lastPos) < 0.03D) {
+        // A bot that sneaks or holds an item up moves at a fraction of a stride per tick: the limit scales with its input.
+        double scale = Math.max(0.05D, Math.min(1.0D, pack.lastInputScale()));
+        if (lastPos != null && current.distanceTo(lastPos) < 0.03D * scale) {
             stuckTicks++;
         } else {
             stuckTicks = 0;

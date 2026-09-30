@@ -113,13 +113,20 @@ class BaritoneExecutionContractTest {
     @Test
     void sneakScalingIsAppliedExactlyOnce() throws IOException {
         String bridge = read("baritone/BotInputBridge.java");
-        Matcher scale = Pattern.compile("\\*= SNEAK_SCALE").matcher(bridge);
+        // Paced path (PaceRules.inputScale carries the sneak 0.3 and the item-use 0.2 factors): one write each, one multiplication each.
+        assertEquals(1, occurrences(bridge, "bot.zza = forward * scale;"), "forward is scaled once, in apply()");
+        assertEquals(1, occurrences(bridge, "bot.xxa = left * scale;"), "left is scaled once, in apply()");
+        // pace.enabled=false path: the sneak factor, once each.
+        assertEquals(2, occurrences(bridge, "*= PaceRules.SNEAK_SCALE"), "forward and left are scaled once each in the unpaced path");
+        assertEquals(0.3F, BotInputBridge.SNEAK_SCALE);
+    }
+
+    private static int occurrences(String text, String needle) {
         int count = 0;
-        while (scale.find()) {
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {
             count++;
         }
-        assertEquals(2, count, "forward and left are scaled once each, in apply()");
-        assertEquals(0.3F, BotInputBridge.SNEAK_SCALE);
+        return count;
     }
 
     @Test

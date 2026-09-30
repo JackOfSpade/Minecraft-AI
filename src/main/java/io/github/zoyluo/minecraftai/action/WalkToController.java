@@ -30,7 +30,10 @@ public final class WalkToController {
     private int noProgressTicks;
     private int hardStuckTicks;
     private int sidleTicks;
-    private int elapsed;
+    // Ticks of this walk against its time limit: a tick at a deliberately slow pace counts for less (ActionPack#paceClockWeight).
+    private double elapsed;
+    // The last tick's answer about the ground ahead (jump, blocked, clear) for the pace enforcer; true until the first tick says otherwise.
+    private boolean geometryAllowsSprint = true;
 
     public WalkToController(Vec3 target) {
         this(target, ARRIVAL_THRESHOLD);
@@ -41,13 +44,26 @@ public final class WalkToController {
         this.arrivalThreshold = Math.max(MIN_ARRIVAL_THRESHOLD, Math.min(MAX_ARRIVAL_THRESHOLD, arrivalThreshold));
     }
 
+    /** The point this walk is heading for. */
+    public Vec3 target() {
+        return target;
+    }
+
+    /**
+     * Whether the ground ahead lets the bot sprint: no jump or blocked step to take, the two cells ahead clear. The distance to
+     * this walk's own target is NOT part of it (how fast to go is the pace policy's business, see {@link PacePolicy}).
+     */
+    public boolean geometryAllowsSprint() {
+        return geometryAllowsSprint;
+    }
+
     /** Package-visible for tests: the effective (clamped) arrival tolerance in use. */
     double arrivalThreshold() {
         return arrivalThreshold;
     }
 
     public ActionResult tick(ActionPack pack) {
-        elapsed++;
+        elapsed += Math.min(1.0D, pack.paceClockWeight());
         if (elapsed > MAX_TICKS) {
             pack.stopMovement();
             return ActionResult.failed("timeout");
@@ -80,15 +96,21 @@ public final class WalkToController {
             pack.jumpOnce();
         }
         pack.setJumping(false);
-        pack.setSprinting(shouldSprint(horizontalDistance, jump, current, move, world, nav));
+        geometryAllowsSprint = sprintGeometryClear(jump, current, move, world);
+        if (!MinecraftAiConfig.get().behaviour().paceOrDefaults().paceEnabled()) {
+            // pace.enabled=false: the sprint rule this controller always had (far from its own target and a clear way), written directly.
+            pack.setSprinting(horizontalDistance >= nav.sprintMinDist() && geometryAllowsSprint);
+        }
 
-        if (lastPos != null && current.distanceTo(lastPos) < PROGRESS_EPSILON) {
+        // A bot that sneaks or holds an item up moves at a fraction of a stride per tick: the limits scale with its input.
+        double scale = Math.max(0.05D, Math.min(1.0D, pack.lastInputScale()));
+        if (lastPos != null && current.distanceTo(lastPos) < PROGRESS_EPSILON * scale) {
             noProgressTicks++;
         } else {
             noProgressTicks = 0;
             sidleTicks = 0;
         }
-        if (lastPos != null && current.distanceTo(lastPos) < HARD_PROGRESS_EPSILON) {
+        if (lastPos != null && current.distanceTo(lastPos) < HARD_PROGRESS_EPSILON * scale) {
             hardStuckTicks++;
         } else {
             hardStuckTicks = 0;
@@ -158,10 +180,7 @@ public final class WalkToController {
                 && hasCollision(world.getBlockState(landing.below()), world, landing.below());
     }
 
-    private static boolean shouldSprint(double horizontalDistance, JumpDecision jump, Vec3 current, Vec3 move, ServerLevel world, MinecraftAiConfig.Nav nav) {
-        if (horizontalDistance < nav.sprintMinDist()) {
-            return false;
-        }
+    private static boolean sprintGeometryClear(JumpDecision jump, Vec3 current, Vec3 move, ServerLevel world) {
         if (jump.blocked || (jump.jump && !jump.gap)) {
             return false;
         }

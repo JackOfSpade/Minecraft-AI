@@ -90,7 +90,9 @@
       "io.github.zoyluo.minecraftai.task.NavigationCourseGameTests",
       "io.github.zoyluo.minecraftai.task.BotFallAndKnockbackGameTests",
       "io.github.zoyluo.minecraftai.gametest.FoundationHarnessGameTests",
-      "io.github.zoyluo.minecraftai.task.HostileBotTargetingGameTests"
+      "io.github.zoyluo.minecraftai.task.HostileBotTargetingGameTests",
+      "io.github.zoyluo.minecraftai.action.PaceGameTests",
+      "io.github.zoyluo.minecraftai.baritone.PaceBaritoneGameTests"
     ]
   },
   "depends": {

@@ -30,6 +30,8 @@ public class AIPlayerEntity extends ServerPlayer {
     private double tickFromY;
     private double tickFromZ;
     private boolean fallChecked;
+    // A teleport moved the bot during this tick: its displacement is not walking (movement exhaustion skips the tick).
+    private boolean teleportedThisTick;
     // Nesting of the overridden teleport calls (see auditTeleport).
     private int teleportAuditDepth;
 
@@ -52,6 +54,7 @@ public class AIPlayerEntity extends ServerPlayer {
         }
 
         this.fallChecked = false;
+        this.teleportedThisTick = false;
         this.tickFromX = this.getX();
         this.tickFromY = this.getY();
         this.tickFromZ = this.getZ();
@@ -70,6 +73,7 @@ public class AIPlayerEntity extends ServerPlayer {
                 checkFallDamageOnce();
                 this.actionPack.onUpdate();
             }
+            chargeMovementExhaustion();
             logDamageSummary(damageLog.flushIfIdle(this.tickCount));
         } catch (RuntimeException exception) {
             // Was NullPointerException-only; widened so any unexpected exception here (not just an
@@ -78,6 +82,32 @@ public class AIPlayerEntity extends ServerPlayer {
             // catch intentionally does not reset actionPack state itself.
             BotLog.error(this, "tick_npe_swallowed", exception);
         }
+    }
+
+    /** The most a bot legitimately moves horizontally in one tick (sprint-jumping is ~0.35); a longer displacement was not walking. */
+    private static final double MAX_WALKED_TICK_DISTANCE = 4.0D;
+
+    /**
+     * Movement costs food: a client's move packet ends in { ServerPlayer.checkMovementStatistics}, which awards the movement
+     * statistics and charges the exhaustion of sprinting (0.1 per metre), swimming and so on; a bot has no client and so paid nothing
+     * for running. This is that packet's tail, with the displacement of the tick. Jumping exhaustion is charged by vanilla itself
+     * ({ jumpFromGround}), so it is not repeated. Not on a tick a teleport moved the bot, not while it is a passenger, not while
+     * it is dead. Switch: { behaviour.pace.movementExhaustion}.
+     */
+    private void chargeMovementExhaustion() {
+        if (this.teleportedThisTick || this.isPassenger() || !this.isAlive() || this.isRemoved() || this.isSpectator()) {
+            return;
+        }
+        if (!io.github.zoyluo.minecraftai.MinecraftAiConfig.get().behaviour().paceOrDefaults().movementExhaustionEnabled()) {
+            return;
+        }
+        double dx = this.getX() - this.tickFromX;
+        double dy = this.getY() - this.tickFromY;
+        double dz = this.getZ() - this.tickFromZ;
+        if (Math.sqrt(dx * dx + dz * dz) > MAX_WALKED_TICK_DISTANCE) {
+            return;
+        }
+        this.checkMovementStatistics(dx, dy, dz);
     }
 
     /**
@@ -211,6 +241,7 @@ public class AIPlayerEntity extends ServerPlayer {
     private void fallEndedByTeleport() {
         this.resetFallDistance();
         this.fallChecked = true;
+        this.teleportedThisTick = true;
     }
 
     /** The Baritone driver has run this tick's fall check (with its own measured movement); the bot's tick must not run it again. */
