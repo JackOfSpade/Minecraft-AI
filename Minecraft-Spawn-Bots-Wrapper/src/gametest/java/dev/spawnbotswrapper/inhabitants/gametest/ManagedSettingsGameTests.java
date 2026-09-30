@@ -32,7 +32,8 @@ public final class ManagedSettingsGameTests {
     private static String held() {
         return "autoEquipWeapon=" + Upstream.setting("isAutoEquipWeapon") + " autoTarget=" + Upstream.setting("isAutoTargetEnabled") + " maxTargetDistance="
                 + Upstream.setting("getMaxTargetDistance") + " ranged=" + Upstream.setting("getRangedMinRange") + "/"
-                + Upstream.setting("getRangedOptimalRange") + "/" + Upstream.setting("getRangedMaxRange");
+                + Upstream.setting("getRangedOptimalRange") + "/" + Upstream.setting("getRangedMaxRange") + " retreatOnClose="
+                + Upstream.setting("isRangedRetreatOnClose") + " meleeRange=" + Upstream.setting("getMeleeRange");
     }
 
     private static boolean heldAtTheShippedValues() {
@@ -41,7 +42,9 @@ public final class ManagedSettingsGameTests {
                 && Boolean.FALSE.equals(Upstream.setting("isAutoTargetEnabled"))
                 && Double.valueOf(8.0).equals(Upstream.setting("getRangedMinRange"))
                 && Double.valueOf(12.0).equals(Upstream.setting("getRangedOptimalRange"))
-                && Double.valueOf(16.0).equals(Upstream.setting("getRangedMaxRange"));
+                && Double.valueOf(16.0).equals(Upstream.setting("getRangedMaxRange"))
+                && Boolean.FALSE.equals(Upstream.setting("isRangedRetreatOnClose"))
+                && Double.valueOf(2.5).equals(Upstream.setting("getMeleeRange"));
     }
 
     /** PvP BOT starts with auto-equip on and a 64 block radius in nothing but its own defaults; the wrapper must have fixed that. */
@@ -77,7 +80,9 @@ public final class ManagedSettingsGameTests {
                         .replaceAll("\"maxTargetDistance\": [0-9.]+", "\"maxTargetDistance\": 40.0")
                         .replaceAll("\"rangedMinRange\": [0-9.]+", "\"rangedMinRange\": 20.0")
                         .replaceAll("\"rangedOptimalRange\": [0-9.]+", "\"rangedOptimalRange\": 40.0")
-                        .replaceAll("\"rangedMaxRange\": [0-9.]+", "\"rangedMaxRange\": 60.0");
+                        .replaceAll("\"rangedMaxRange\": [0-9.]+", "\"rangedMaxRange\": 60.0")
+                        .replaceAll("\"rangedRetreatOnClose\": \\w+", "\"rangedRetreatOnClose\": true")
+                        .replaceAll("\"meleeRange\": [0-9.]+", "\"meleeRange\": 3.5");
                 Files.writeString(settingsFile(), file, StandardCharsets.UTF_8);
             } catch (IOException e) {
                 context.fail(net.minecraft.network.chat.Component.nullToEmpty("cannot write " + settingsFile() + ": " + e));

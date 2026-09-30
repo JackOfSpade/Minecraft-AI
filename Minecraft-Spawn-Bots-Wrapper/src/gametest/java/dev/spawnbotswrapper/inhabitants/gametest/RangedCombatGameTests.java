@@ -49,7 +49,9 @@ public final class RangedCombatGameTests {
 
     /**
      * The "machine gun" after the player swings at the inhabitant: within four blocks of a swinging player PvP BOT raises
-     * its shield through HeroBot's continuous "use" action, and that action right-clicks the crossbow every tick. Whatever
+     * its shield through HeroBot's continuous "use" action, and that action right-clicks the crossbow every tick. The bot
+     * has no sword here: a bot that carries one takes it out within five blocks (see OutOfAmmoGameTests) and no longer holds
+     * the crossbow at three blocks. Whatever
      * fires the crossbow, shots must never be closer together than the pacing interval.
      */
     @GameTest(environment = ENV + "crossbow_swing", maxTicks = 900)
@@ -60,7 +62,7 @@ public final class RangedCombatGameTests {
         boolean[] dressed = {false};
         long[] dressedAt = {0};
         context.onEachTick(() -> {
-            if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.SKIRMISHER, "swing")) {
+            if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.CROSSBOW_SHIELD, "swing")) {
                 return;
             }
             // The target stays three blocks from the bot and keeps swinging (a mock player is never ticked, so the swing lasts).

@@ -150,6 +150,12 @@ final class Rig {
         target.teleportTo(level, spot.x, spot.y, spot.z, Set.of(), 90.0F, 0.0F, true);
     }
 
+    /** Puts the player {@code dx} blocks east of where the bot stands NOW (an archer backs away from a close player, so the cell moves). */
+    void placeTargetBesideBot(double dx) {
+        Vec3 spot = bot.position().add(dx, 0, 0);
+        target.teleportTo(level, spot.x, spot.y, spot.z, Set.of(), 90.0F, 0.0F, true);
+    }
+
     private StructureKey key() {
         return new StructureKey(level.dimension().identifier().toString(), structureId,
                 botFeet.getX() >> 4, botFeet.getZ() >> 4);
@@ -213,9 +219,23 @@ final class Rig {
 
     /** The Skirmisher-like loadout of the user's log: sword 0, shield 1, crossbow (quick charge 3, piercing 1) 2, arrows, totem. */
     void dressSkirmisher() {
+        dressSkirmisher(true);
+    }
+
+    /**
+     * The Skirmisher without its sword: a crossbow bot with nothing to melee with, which (unlike the sword carrier) keeps
+     * its crossbow in hand however close the player stands.
+     */
+    void dressCrossbowShield() {
+        dressSkirmisher(false);
+    }
+
+    private void dressSkirmisher(boolean sword) {
         Inventory inv = bot.getInventory();
         inv.clearContent();
-        inv.setItem(0, new ItemStack(Items.NETHERITE_SWORD));
+        if (sword) {
+            inv.setItem(0, new ItemStack(Items.NETHERITE_SWORD));
+        }
         inv.setItem(1, new ItemStack(Items.SHIELD));
         ItemStack crossbow = new ItemStack(Items.CROSSBOW);
         crossbow.enchant(enchantment(Enchantments.QUICK_CHARGE), 3);
@@ -257,6 +277,49 @@ final class Rig {
         finishDressing();
     }
 
+    /** What {@link #dressHybrid} gives the bot (set before {@link #awaitDressed} with {@link Loadout#HYBRID}). */
+    int hybridArrows;
+    boolean hybridCrossbow = true;
+    boolean hybridLoaded;
+
+    /**
+     * A sword in slot 0, a crossbow (or a bow) in slot 1 and {@link #hybridArrows} arrows in slot 2; the crossbow starts
+     * with a bolt in it when {@link #hybridLoaded}. The bot that ran out of ammunition (0 arrows) is the subject of the
+     * out-of-ammo tests.
+     */
+    void dressHybrid() {
+        Inventory inv = bot.getInventory();
+        inv.clearContent();
+        inv.setItem(0, new ItemStack(Items.IRON_SWORD));
+        ItemStack ranged = new ItemStack(hybridCrossbow ? Items.CROSSBOW : Items.BOW);
+        if (hybridCrossbow && hybridLoaded) {
+            ranged.set(net.minecraft.core.component.DataComponents.CHARGED_PROJECTILES,
+                    net.minecraft.world.item.component.ChargedProjectiles.of(new ItemStack(Items.ARROW)));
+        }
+        inv.setItem(1, ranged);
+        if (hybridArrows > 0) {
+            inv.setItem(2, new ItemStack(Items.ARROW, hybridArrows));
+        }
+        inv.setSelectedSlot(0);
+        finishDressing();
+    }
+
+    /** Arrows of any kind in slots 0-35 plus a charged crossbow in the hotbar or hands: what the bot can still shoot. */
+    int ammunitionLeft() {
+        Inventory inv = bot.getInventory();
+        int n = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.getItem() instanceof net.minecraft.world.item.ArrowItem) {
+                n += s.getCount();
+            }
+            if (net.minecraft.world.item.CrossbowItem.isCharged(s)) {
+                n++;
+            }
+        }
+        return n + (net.minecraft.world.item.CrossbowItem.isCharged(bot.getOffhandItem()) ? 1 : 0);
+    }
+
     private void finishDressing() {
         bot.setHealth(bot.getMaxHealth());
         bot.getFoodData().setFoodLevel(20);
@@ -288,9 +351,11 @@ final class Rig {
     /** Which loadout {@link #awaitDressed} gives the inhabitant. */
     enum Loadout {
         SKIRMISHER,
+        CROSSBOW_SHIELD,
         BOW_ONLY,
         MELEE_ONLY,
-        BOW_AND_SWORD
+        BOW_AND_SWORD,
+        HYBRID
     }
 
     /**
@@ -312,17 +377,20 @@ final class Rig {
         }
         switch (loadout) {
             case SKIRMISHER -> dressSkirmisher();
+            case CROSSBOW_SHIELD -> dressCrossbowShield();
             case BOW_ONLY -> dressBowOnly();
             case MELEE_ONLY -> dressMeleeOnly();
             case BOW_AND_SWORD -> dressBowAndSword();
+            case HYBRID -> dressHybrid();
         }
         faceTarget();
         dressed[0] = true;
         dressedAt[0] = ctx.getTick();
-        LOG.info("[{}] dressed {} at test tick {}; PvP BOT settings: autoEquipWeapon={} autoTarget={} maxTarget={} ranged={}/{}/{}",
+        LOG.info("[{}] dressed {} at test tick {}; PvP BOT settings: autoEquipWeapon={} autoTarget={} maxTarget={} ranged={}/{}/{} melee={} retreatOnClose={}",
                 tag, botName, dressedAt[0], Upstream.setting("isAutoEquipWeapon"), Upstream.setting("isAutoTargetEnabled"),
                 Upstream.setting("getMaxTargetDistance"), Upstream.setting("getRangedMinRange"),
-                Upstream.setting("getRangedOptimalRange"), Upstream.setting("getRangedMaxRange"));
+                Upstream.setting("getRangedOptimalRange"), Upstream.setting("getRangedMaxRange"), Upstream.setting("getMeleeRange"),
+                Upstream.setting("isRangedRetreatOnClose"));
         return false;
     }
 
