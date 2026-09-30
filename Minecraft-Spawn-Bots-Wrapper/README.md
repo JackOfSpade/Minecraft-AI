@@ -488,8 +488,12 @@ IDLE --(noticed)--> CHASE --(lost)--> PURSUE --(arrived or blocked)--> SEARCH --
   revenge target and is not "somebody else's".
 * **Inert mode.** While PvP BOT's `autoTarget` is on, PvP BOT notices by itself: nothing is noticed here (logged once at
   INFO), but the lost-target pursuit, the search and the walk home still apply.
+* **Patrols.** PvP BOT applies a patrolling inhabitant's movement toward its next patrol point every tick, which would pull
+  it against the pursuit, the search and the walk home. While the hunt walks the bot (from PURSUE or the walk home until it
+  is home, abandoned or switched off) the addon pauses that bot's follower (the path is kept) and resumes it afterwards; the
+  patrol then restarts from its first point. Bots without a patrol of this addon are unaffected.
 * **Order of work.** All of this runs in a Fabric tick phase ordered after the default phase, after PvP BOT's own bot tick,
-  so its steering is the last input written each tick (over idle wander and patrol movement).
+  so its steering is the last input written each tick (over idle wander).
 * **Status and logs.** One text per bot, for example `chasing Jack (seen 0.4 s ago; noticed by sight after 0.3 s)`,
   `pursuing Jack's last position, 6.2 to go`, `searching for Jack, 7.5 s left, 3 points checked`,
   `returning home, 18.0 to go`, `turning to Jack's hit (reacting)`, `idle`; it is appended to the "Combat taken" line
