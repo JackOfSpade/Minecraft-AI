@@ -45,6 +45,20 @@ class SettingsPolicyTest {
     }
 
     @Test
+    void theOffhandKeysArePlannedAsBooleanChanges() {
+        ManagedSettings wanted = new ManagedSettings(null, null, null, null, null, null, null, null, null, false, false);
+        Plan plan = SettingsPolicy.plan(wanted, new Current(null, null, null, null, null, null, null, null, null, true, true));
+        assertEquals(List.of("autoTotemEnabled", "totemPriority"), names(plan));
+        assertEquals("autoTotemEnabled true -> false, totemPriority true -> false", plan.summary());
+        assertEquals(List.of(), SettingsPolicy.plan(wanted,
+                new Current(null, null, null, null, null, null, null, null, null, false, false)).changes());
+        assertEquals(List.of("autoTotemEnabled"), names(SettingsPolicy.plan(
+                new ManagedSettings(null, null, null, null, null, null, null, null, null, false, null),
+                new Current(null, null, null, null, null, null, null, null, null, true, false))));
+        assertTrue(new ManagedSettings(null, null, null, null, null, null, null, null, null, null, false).isEmpty() == false);
+    }
+
+    @Test
     void theRealShippedValuesRaiseTheCeilingToTheModMaximumAndTurnPvpBotsOwnAcquisitionOff() {
         ManagedSettings real = new ManagedSettings(128.0, 8.0, 12.0, 16.0, false, false);
         Plan plan = SettingsPolicy.plan(real, UPSTREAM);

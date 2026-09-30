@@ -29,23 +29,30 @@ final class SettingsPolicy {
     /** What PvP BOT has right now; a null component could not be read. */
     record Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
                    Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose,
-                   Double meleeRange, Integer bowMinDrawTime) {
+                   Double meleeRange, Integer bowMinDrawTime, Boolean autoTotemEnabled, Boolean totemPriority) {
+        Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
+                Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose,
+                Double meleeRange, Integer bowMinDrawTime) {
+            this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
+                    autoTargetEnabled, rangedRetreatOnClose, meleeRange, bowMinDrawTime, null, null);
+        }
+
         Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
                 Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
             this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
-                    autoTargetEnabled, null, null, null);
+                    autoTargetEnabled, null, null, null, null, null);
         }
 
         Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
                 Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose) {
             this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
-                    autoTargetEnabled, rangedRetreatOnClose, null, null);
+                    autoTargetEnabled, rangedRetreatOnClose, null, null, null, null);
         }
 
         Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
                 Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose, Double meleeRange) {
             this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
-                    autoTargetEnabled, rangedRetreatOnClose, meleeRange, null);
+                    autoTargetEnabled, rangedRetreatOnClose, meleeRange, null, null, null);
         }
     }
 
@@ -128,6 +135,12 @@ final class SettingsPolicy {
         addDouble(changes, "meleeRange", current.meleeRange(), melee);
         if (wanted.bowMinDrawTime() != null && !wanted.bowMinDrawTime().equals(current.bowMinDrawTime())) {
             changes.add(new Change("bowMinDrawTime", current.bowMinDrawTime(), wanted.bowMinDrawTime()));
+        }
+        if (wanted.autoTotemEnabled() != null && !wanted.autoTotemEnabled().equals(current.autoTotemEnabled())) {
+            changes.add(new Change("autoTotemEnabled", current.autoTotemEnabled(), wanted.autoTotemEnabled()));
+        }
+        if (wanted.totemPriority() != null && !wanted.totemPriority().equals(current.totemPriority())) {
+            changes.add(new Change("totemPriority", current.totemPriority(), wanted.totemPriority()));
         }
         return new Plan(changes, warnings);
     }

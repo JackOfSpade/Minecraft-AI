@@ -182,7 +182,7 @@ public final class ServerSession {
     static ManagedSettings managedSettings(InhabitantsConfig.PvpbotSettings s) {
         return s == null ? ManagedSettings.NONE : new ManagedSettings(s.maxTargetDistance, s.rangedMinRange,
                 s.rangedOptimalRange, s.rangedMaxRange, s.autoEquipWeapon, s.autoTargetEnabled, s.rangedRetreatOnClose,
-                s.meleeRange, s.bowMinDrawTime);
+                s.meleeRange, s.bowMinDrawTime, s.autoTotemEnabled, s.totemPriority);
     }
 
     private void probeUpstream() {

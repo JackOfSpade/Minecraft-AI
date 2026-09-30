@@ -283,8 +283,6 @@ class SettingCatalogTest {
             Map.entry("spearEnabled", Mechanism.LOADOUT),
             Map.entry("crystalPvpEnabled", Mechanism.LOADOUT),
             Map.entry("anchorPvpEnabled", Mechanism.LOADOUT),
-            Map.entry("autoTotemEnabled", Mechanism.LOADOUT),
-            Map.entry("totemPriority", Mechanism.LOADOUT),
             Map.entry("autoEatEnabled", Mechanism.LOADOUT),
             Map.entry("autoShieldEnabled", Mechanism.LOADOUT),
             Map.entry("autoMendEnabled", Mechanism.LOADOUT),
@@ -333,7 +331,7 @@ class SettingCatalogTest {
             "minHungerToEat", "retreatHealthPercent", "criticalHealthPercent", "factionsEnabled",
             "friendlyFireEnabled", "missChance", "mistakeChance", "shieldBreakChance", "attackInvincible",
             "aimSpeed", "shieldMace", "arrowPredictionEnabled", "rangedStrafeEnabled", "rangedRetreatOnClose",
-            "meleeRange", "attackCooldown");
+            "meleeRange", "attackCooldown", "autoTotemEnabled", "totemPriority");
 
     @Test
     void behaviourSettingsWithoutATruthfulProxyAreNeverRandomized() {
@@ -419,8 +417,8 @@ class SettingCatalogTest {
         }
 
         assertEquals(68, total);
-        assertEquals(19, parts.get(Category.PER_BOT_RANDOMIZABLE).size());
-        assertEquals(40, parts.get(Category.GLOBAL_ONLY).size());
+        assertEquals(17, parts.get(Category.PER_BOT_RANDOMIZABLE).size());
+        assertEquals(42, parts.get(Category.GLOBAL_ONLY).size());
         assertEquals(9, parts.get(Category.ADMIN_OPERATIONAL).size());
         assertEquals(0, parts.get(Category.UNSUPPORTED).size());
     }

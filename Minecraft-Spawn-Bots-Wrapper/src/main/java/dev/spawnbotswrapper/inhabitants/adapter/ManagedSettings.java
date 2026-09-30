@@ -15,10 +15,23 @@ package dev.spawnbotswrapper.inhabitants.adapter;
  * @param meleeRange         PvP BOT's melee range: a bot switches to its melee weapon within twice this (2.5 gives 5 blocks)
  *                           and attacks within it (within PvP BOT's clamp {@code 2..6})
  * @param bowMinDrawTime     ticks PvP BOT holds a bow draw before it releases (5..100; 20 = vanilla full power)
+ * @param autoTotemEnabled   PvP BOT's "keep a totem in the offhand whenever the bot is not blocking" (it swaps the offhand shield
+ *                           out for a totem): false leaves the offhand to the addon's offhand policy (best shield, else a totem)
+ * @param totemPriority      PvP BOT's "a totem in the offhand stays there and a shield is blocked with from the main hand (hotbar
+ *                           slot 1)": false makes PvP BOT block with the shield that is already in the offhand
  */
 public record ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
                               Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled,
-                              Boolean rangedRetreatOnClose, Double meleeRange, Integer bowMinDrawTime) {
+                              Boolean rangedRetreatOnClose, Double meleeRange, Integer bowMinDrawTime,
+                              Boolean autoTotemEnabled, Boolean totemPriority) {
+
+    /** The settings without the offhand keys (those are then left alone). */
+    public ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
+                           Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled,
+                           Boolean rangedRetreatOnClose, Double meleeRange, Integer bowMinDrawTime) {
+        this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon, autoTargetEnabled,
+                rangedRetreatOnClose, meleeRange, bowMinDrawTime, null, null);
+    }
 
     /** The settings without the archer close-range behaviour, the melee range and the draw time (those are left alone). */
     public ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
@@ -45,12 +58,12 @@ public record ManagedSettings(Double maxTargetDistance, Double rangedMinRange, D
 
     /** Nothing managed. */
     public static final ManagedSettings NONE =
-            new ManagedSettings(null, null, null, null, null, null, null, null, null);
+            new ManagedSettings(null, null, null, null, null, null, null, null, null, null, null);
 
     public boolean isEmpty() {
         return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
                 && rangedMaxRange == null && autoEquipWeapon == null
                 && autoTargetEnabled == null && rangedRetreatOnClose == null && meleeRange == null
-                && bowMinDrawTime == null;
+                && bowMinDrawTime == null && autoTotemEnabled == null && totemPriority == null;
     }
 }

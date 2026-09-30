@@ -353,9 +353,26 @@ therefore holds these settings at chosen values:
   "autoEquipWeapon": false,      // PvP BOT: true
   "rangedRetreatOnClose": false, // PvP BOT: true; false = a bot that carries a sword or axe switches to it up close
   "meleeRange": 2.5,             // blocks, 2..6 (PvP BOT: 3.5): the melee weapon comes out within twice this (5 blocks) and strikes within it
-  "bowMinDrawTime": 20           // ticks 5..100; PvP BOT: 40 (an artificial 2 s wait); 20 = vanilla full power
+  "bowMinDrawTime": 20,          // ticks 5..100; PvP BOT: 40 (an artificial 2 s wait); 20 = vanilla full power
+  "autoTotemEnabled": false,     // PvP BOT: true; it forces a totem into the offhand whenever the bot is not blocking (see "The offhand")
+  "totemPriority": false         // PvP BOT: true; false = PvP BOT blocks with the shield that is already in the offhand
 }
 ```
+
+**The offhand.** Every inhabitant follows one rule, applied by the addon every tick after PvP BOT's own tick: the offhand
+holds the **best shield** the bot carries, else a **totem of undying**, else whatever it holds. When the offhand item
+breaks (a shield) or is used up (a totem pops) the best replacement of the same kind takes its place at once (the next
+shield; after the last shield a totem; the next totem; after the last totem nothing). A bot that holds a totem only
+because it had no shield moves the shield into the offhand as soon as it has one (the totem takes the shield's place).
+A shield already in the offhand is never swapped for another, however worn: it is used until it breaks. Any other offhand item
+(a torch, arrows) is left alone. A new inhabitant's loadout already starts this way (a shield in the offhand, every totem in
+the inventory; without a shield the first totem in the offhand). PvP BOT's own auto-totem would push the shield out of the
+offhand every tick, and its totem priority would keep the totem there and block from the main hand, so both are managed off:
+with `totemPriority` false PvP BOT blocks through `player use continuous` with the shield that is already in the offhand
+and does not swap anything when it stops blocking (verified in the decompiled `BotUtils.startBlocking`/`stopBlocking`).
+If you set `autoTotemEnabled` to `true` (or manage nothing) the addon's offhand policy stays idle, with one warning, because
+the two would swap the offhand back and forth. An existing config file with a `pvpbotSettings` block needs the two new keys
+to apply them (an absent key leaves PvP BOT's value alone).
 
 What inhabitants react to is decided by what they see and hear (sight has no block limit in the view cone), and the
 addon itself never engages a target it sees beyond 64 blocks (the one hard-coded distance rule, a constant). So

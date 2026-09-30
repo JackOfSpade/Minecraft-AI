@@ -23,7 +23,9 @@
       "dev.spawnbotswrapper.inhabitants.gametest.InhabitantStateGameTests",
       "dev.spawnbotswrapper.inhabitants.gametest.PopulationGameTests",
       "dev.spawnbotswrapper.inhabitants.gametest.AggroPerceptionGameTests",
-      "dev.spawnbotswrapper.inhabitants.gametest.HumanAimGameTests"
+      "dev.spawnbotswrapper.inhabitants.gametest.HumanAimGameTests",
+      "dev.spawnbotswrapper.inhabitants.gametest.OffhandPolicyGameTests",
+      "dev.spawnbotswrapper.inhabitants.gametest.GearOnBreakGameTests"
     ]
   },
   "depends": {

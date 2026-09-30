@@ -11,6 +11,7 @@ import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.HumanAimDriver;
 import dev.spawnbotswrapper.inhabitants.mc.IssuedItemGuard;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
+import dev.spawnbotswrapper.inhabitants.mc.OffhandPolicy;
 import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
@@ -68,6 +69,8 @@ public final class InhabitantsMod implements ModInitializer {
     private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER, aggro::mayAttackPlayer, humanAim);
     private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER, aggro::mayAttackPlayer, humanAim);
     private final OutOfAmmoGapCloser gapCloser = new OutOfAmmoGapCloser(() -> session, LOGGER);
+    /** The offhand of every inhabitant: the best shield, else a totem (see OffhandRule); PvP BOT auto-totem is managed off. */
+    private final OffhandPolicy offhandPolicy = new OffhandPolicy(() -> session, LOGGER);
     /** Vanilla's rule that food is only eaten below a full food bar, which PvP BOT's own eating skips. */
     private final EatGate eatGate = new EatGate(LOGGER);
 
@@ -266,6 +269,7 @@ public final class InhabitantsMod implements ModInitializer {
             shared.guard().run("aggro hunter", () -> aggro.tick(server));
         }
         gapCloser.tick(server);
+        offhandPolicy.tick(server);
         if (current != null && current.server() == server) {
             // Behind every writer of a look direction (PvP BOT, the hunt's steering, the gap closer): whatever they asked the head
             // to look at, it turns there at human speed. The crossbow trigger below reads where it really looks.
@@ -288,6 +292,7 @@ public final class InhabitantsMod implements ModInitializer {
             humanAim.reset();
             rangedFire.reset();
             gapCloser.reset();
+            offhandPolicy.reset();
             eatGate.reset();
             current.shutdown();
         }

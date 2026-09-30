@@ -22,13 +22,12 @@ import java.util.TreeMap;
  * PvP BOT would otherwise fight the loadout over:
  * <ul>
  *   <li>Only items whose behaviour the global capabilities leave switched on are rolled. A mace with
- *       {@code mace=false}, a bow with {@code ranged=false} or a totem with {@code auto-totem=false} does
- *       nothing, so it is not handed out.</li>
+ *       {@code mace=false} or a bow with {@code ranged=false} does nothing, so it is not handed out.
+ *       (Totems are the exception: the addon manages PvP BOT's auto-totem off and places the offhand itself.)</li>
  *   <li>The best weapon (by PvP BOT's own ranking) goes in hotbar slot 0 and ranged weapons sit in the
- *       hotbar, the only place PvP BOT selects them from. Hotbar slot 1 is where PvP BOT swaps a shield
- *       in when a totem occupies the offhand, and slot 8 is its food/potion scratch slot.</li>
- *   <li>A totem takes the offhand (PvP BOT would move it there next tick anyway, displacing a shield);
- *       a shield only gets the offhand when there is no totem.</li>
+ *       hotbar, the only place PvP BOT selects them from. Slot 8 is its food/potion scratch slot.</li>
+ *   <li>The offhand follows the addon's offhand rule (best shield, else a totem): a shield takes the
+ *       offhand and every totem waits in the inventory; without a shield the first totem takes the offhand.</li>
  *   <li>Armor is worn directly, never carried as a spare, so auto-equip has nothing to swap.</li>
  * </ul>
  * All randomness goes through the {@link Roller} with a stable key per decision; see {@link Roller}.
@@ -77,7 +76,6 @@ final class LoadoutRoller {
     private final List<BotProfile.ItemSpec> melee = new ArrayList<>();
     private final List<BotProfile.ItemSpec> ranged = new ArrayList<>();
     private BotProfile.ItemSpec shield;
-    private boolean shieldInHotbar;
     private int arrows;
     private int totems;
     private Facts.ExplosiveKit explosive = Facts.ExplosiveKit.NONE;
@@ -351,24 +349,23 @@ final class LoadoutRoller {
 
     private void defence() {
         boolean wantsShield = caps.autoShieldEnabled() && r.flag("profile.defence.shield");
-        totems = caps.autoTotemEnabled() ? r.count("profile.defence.totems", 0, 4) : 0;
+        // Totems are rolled whatever PvP BOT's own auto-totem is set to: the addon manages it OFF and places the offhand itself
+        // (OffhandPolicy: the best shield, else a totem, the next of the same kind when one breaks or pops).
+        totems = r.count("profile.defence.totems", 0, 4);
 
-        if (totems >= 1) {
-            out.offhand(BotProfile.ItemSpec.of(ItemIds.TOTEM));
-            for (int i = 1; i < totems; i++) {
-                out.stock(BotProfile.ItemSpec.of(ItemIds.TOTEM), LoadoutBuilder.TOTEM);
-            }
-        }
-        // With totemPriority off, PvP BOT's shield equip overwrites the offhand outright (BotCombat destroys
-        // whatever was there, including a totem) instead of routing through hotbar slot 1: giving this bot
-        // BOTH would mean the shield silently destroys its emergency totem the first time it blocks. Keep
-        // the totem and skip the shield rather than hand out a self-defeating loadout.
-        if (wantsShield && (totems == 0 || caps.totemPriority())) {
+        // The offhand rule, from the first tick: a shield takes the offhand and every totem waits in the inventory; without a
+        // shield the first totem takes the offhand. PvP BOT blocks with the offhand shield (totemPriority is managed off).
+        boolean totemInOffhand = true;
+        if (wantsShield) {
             shield = BotProfile.ItemSpec.of(ItemIds.SHIELD);
-            if (totems >= 1) {
-                shieldInHotbar = true;
+            out.offhand(shield);
+            totemInOffhand = false;
+        }
+        for (int i = 0; i < totems; i++) {
+            if (i == 0 && totemInOffhand) {
+                out.offhand(BotProfile.ItemSpec.of(ItemIds.TOTEM));
             } else {
-                out.offhand(shield);
+                out.stock(BotProfile.ItemSpec.of(ItemIds.TOTEM), LoadoutBuilder.TOTEM);
             }
         }
     }
@@ -487,7 +484,7 @@ final class LoadoutRoller {
 
     /**
      * Best melee weapon first (PvP BOT would move it to slot 0 anyway), then crossbow before bow (PvP BOT
-     * prefers the crossbow), skipping slot 1 when the shield has to live there.
+     * prefers the crossbow).
      */
     private void layout() {
         List<BotProfile.ItemSpec> hotbar = new ArrayList<>(melee);
@@ -496,13 +493,7 @@ final class LoadoutRoller {
         hotbar.addAll(ranged);
         int index = 0;
         for (BotProfile.ItemSpec spec : hotbar) {
-            if (index == 1 && shieldInHotbar) {
-                index++;
-            }
             out.hotbar(index++, spec);
-        }
-        if (shieldInHotbar) {
-            out.hotbar(1, shield);
         }
     }
 

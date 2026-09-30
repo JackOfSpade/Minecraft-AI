@@ -34,7 +34,8 @@ public final class ManagedSettingsGameTests {
                 + Upstream.setting("getMaxTargetDistance") + " ranged=" + Upstream.setting("getRangedMinRange") + "/"
                 + Upstream.setting("getRangedOptimalRange") + "/" + Upstream.setting("getRangedMaxRange") + " retreatOnClose="
                 + Upstream.setting("isRangedRetreatOnClose") + " meleeRange=" + Upstream.setting("getMeleeRange") + " bowMinDrawTime="
-                + Upstream.setting("getBowMinDrawTime");
+                + Upstream.setting("getBowMinDrawTime") + " autoTotem=" + Upstream.setting("isAutoTotemEnabled") + " totemPriority="
+                + Upstream.setting("isTotemPriority");
     }
 
     private static boolean heldAtTheShippedValues() {
@@ -46,7 +47,9 @@ public final class ManagedSettingsGameTests {
                 && Double.valueOf(12.0).equals(Upstream.setting("getRangedOptimalRange"))
                 && Double.valueOf(16.0).equals(Upstream.setting("getRangedMaxRange"))
                 && Boolean.FALSE.equals(Upstream.setting("isRangedRetreatOnClose"))
-                && Double.valueOf(2.5).equals(Upstream.setting("getMeleeRange"));
+                && Double.valueOf(2.5).equals(Upstream.setting("getMeleeRange"))
+                && Boolean.FALSE.equals(Upstream.setting("isAutoTotemEnabled"))
+                && Boolean.FALSE.equals(Upstream.setting("isTotemPriority"));
     }
 
     /** PvP BOT starts with auto-equip on and a 64 block radius in nothing but its own defaults; the wrapper must have fixed that. */
@@ -62,6 +65,8 @@ public final class ManagedSettingsGameTests {
                         "the managed optimal range is not in the file:\n" + file);
                 require(context, file.contains("\"bowMinDrawTime\": 20"),
                         "the managed bow draw time is not in the file:\n" + file);
+                require(context, file.contains("\"autoTotemEnabled\": false") && file.contains("\"totemPriority\": false"),
+                        "the managed offhand keys are not in the file:\n" + file);
             } catch (IOException e) {
                 context.fail(net.minecraft.network.chat.Component.nullToEmpty("cannot read " + settingsFile() + ": " + e));
             }
@@ -87,7 +92,9 @@ public final class ManagedSettingsGameTests {
                         .replaceAll("\"rangedOptimalRange\": [0-9.]+", "\"rangedOptimalRange\": 40.0")
                         .replaceAll("\"rangedMaxRange\": [0-9.]+", "\"rangedMaxRange\": 60.0")
                         .replaceAll("\"rangedRetreatOnClose\": \\w+", "\"rangedRetreatOnClose\": true")
-                        .replaceAll("\"meleeRange\": [0-9.]+", "\"meleeRange\": 3.5");
+                        .replaceAll("\"meleeRange\": [0-9.]+", "\"meleeRange\": 3.5")
+                        .replaceAll("\"autoTotemEnabled\": \\w+", "\"autoTotemEnabled\": true")
+                        .replaceAll("\"totemPriority\": \\w+", "\"totemPriority\": true");
                 Files.writeString(settingsFile(), file, StandardCharsets.UTF_8);
             } catch (IOException e) {
                 context.fail(net.minecraft.network.chat.Component.nullToEmpty("cannot write " + settingsFile() + ": " + e));

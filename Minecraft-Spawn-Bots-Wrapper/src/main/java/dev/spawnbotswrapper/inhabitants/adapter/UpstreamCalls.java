@@ -286,7 +286,8 @@ final class UpstreamCalls {
                 readDouble(settings, "getRangedMinRange"), readDouble(settings, "getRangedOptimalRange"),
                 readDouble(settings, "getRangedMaxRange"), readBoolean(settings, "isAutoEquipWeapon"),
                 readBoolean(settings, "isAutoTargetEnabled"), readBoolean(settings, "isRangedRetreatOnClose"),
-                readDouble(settings, "getMeleeRange"), readBowMinDrawTime(settings));
+                readDouble(settings, "getMeleeRange"), readBowMinDrawTime(settings),
+                readBoolean(settings, "isAutoTotemEnabled"), readBoolean(settings, "isTotemPriority"));
     }
 
     /**

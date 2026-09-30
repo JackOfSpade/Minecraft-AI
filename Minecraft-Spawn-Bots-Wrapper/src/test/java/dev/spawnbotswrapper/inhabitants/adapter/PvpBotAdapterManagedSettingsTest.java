@@ -68,6 +68,20 @@ class PvpBotAdapterManagedSettingsTest {
     }
 
     @Test
+    void theOffhandKeysAreWrittenIntoTheirFieldsSoPvpBotKeepsItsHandsOffTheOffhand() throws Exception {
+        AdapterFixture f = AdapterFixture.probed();
+        assertEquals(Boolean.TRUE, field("autoTotemEnabled"), "PvP BOT forces a totem into the offhand by default");
+        assertEquals(Boolean.TRUE, field("totemPriority"));
+        f.adapter.manageSettings(new ManagedSettings(null, null, null, null, null, null, null, null, null, false, false));
+        assertEquals(Boolean.FALSE, field("autoTotemEnabled"));
+        assertEquals(Boolean.FALSE, field("totemPriority"));
+        assertEquals(1, saves());
+        assertTrue(f.sink.info.stream().anyMatch(l -> l.startsWith("PvP BOT settings:") && l.contains("autoTotemEnabled true -> false")
+                && l.contains("totemPriority true -> false")), f.sink.info.toString());
+        assertTrue(Recorder.FORBIDDEN.isEmpty(), "no setter is ever called: " + Recorder.FORBIDDEN);
+    }
+
+    @Test
     void oneInfoLineNamesExactlyWhatChanged() {
         AdapterFixture f = AdapterFixture.probed();
         f.adapter.manageSettings(SHIPPED);
@@ -144,7 +158,7 @@ class PvpBotAdapterManagedSettingsTest {
     void aSettingsClassWithoutTheManagedFieldsIsReportedAsProblemsNotAnException() {
         UpstreamSettingsWriter.Handles none = UpstreamSettingsWriter.resolve(Object.class);
         assertTrue(none.fields().isEmpty());
-        assertEquals(10, none.problems().size(), none.problems().toString());
+        assertEquals(12, none.problems().size(), none.problems().toString());
         assertFalse(none.canWrite("maxTargetDistance"));
     }
 

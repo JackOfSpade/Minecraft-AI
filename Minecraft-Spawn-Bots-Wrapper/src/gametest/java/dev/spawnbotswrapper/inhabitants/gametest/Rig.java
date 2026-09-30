@@ -428,7 +428,7 @@ final class Rig {
         return level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(key);
     }
 
-    /** The Skirmisher-like loadout of the user's log: sword 0, shield 1, crossbow (quick charge 3, piercing 1) 2, arrows, totem. */
+    /** The Skirmisher-like loadout of the user's log: sword 0, shield in the offhand, crossbow (quick charge 3, piercing 1) 2, arrows, a spare totem. */
     void dressSkirmisher() {
         dressSkirmisher(true);
     }
@@ -447,13 +447,13 @@ final class Rig {
         if (sword) {
             inv.setItem(0, new ItemStack(Items.NETHERITE_SWORD));
         }
-        inv.setItem(1, new ItemStack(Items.SHIELD));
+        inv.setItem(40, new ItemStack(Items.SHIELD)); // the offhand rule: a shield takes the offhand, the totem waits in the inventory
         ItemStack crossbow = new ItemStack(Items.CROSSBOW);
         crossbow.enchant(enchantment(Enchantments.QUICK_CHARGE), 3);
         crossbow.enchant(enchantment(Enchantments.PIERCING), 1);
         inv.setItem(2, crossbow);
         inv.setItem(3, new ItemStack(Items.ARROW, 64));
-        inv.setItem(40, new ItemStack(Items.TOTEM_OF_UNDYING));
+        inv.setItem(4, new ItemStack(Items.TOTEM_OF_UNDYING));
         inv.setSelectedSlot(0);
         finishDressing();
     }

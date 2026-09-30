@@ -20,16 +20,18 @@ import java.util.Map;
 final class UpstreamSettingsWriter {
 
     /** The managed settings by name, with the type the field must have. */
-    static final Map<String, Class<?>> MANAGED = Map.of(
-            "maxTargetDistance", double.class,
-            "rangedMinRange", double.class,
-            "rangedOptimalRange", double.class,
-            "rangedMaxRange", double.class,
-            "autoEquipWeapon", boolean.class,
-            "autoTargetEnabled", boolean.class,
-            "rangedRetreatOnClose", boolean.class,
-            "meleeRange", double.class,
-            "bowMinDrawTime", int.class);
+    static final Map<String, Class<?>> MANAGED = Map.ofEntries(
+            Map.entry("maxTargetDistance", double.class),
+            Map.entry("rangedMinRange", double.class),
+            Map.entry("rangedOptimalRange", double.class),
+            Map.entry("rangedMaxRange", double.class),
+            Map.entry("autoEquipWeapon", boolean.class),
+            Map.entry("autoTargetEnabled", boolean.class),
+            Map.entry("rangedRetreatOnClose", boolean.class),
+            Map.entry("meleeRange", double.class),
+            Map.entry("bowMinDrawTime", int.class),
+            Map.entry("autoTotemEnabled", boolean.class),
+            Map.entry("totemPriority", boolean.class));
 
     /** What a probe found: writable fields by setting name, PvP BOT's save routine, and what is unusable. */
     record Handles(Map<String, Field> fields, Method save, List<String> problems) {

@@ -126,15 +126,17 @@ final class GlobalNotes {
             out.add("Carries a shield but auto-shield is off globally: PvP BOT never raises it.");
         }
         if (inv.has(ItemIds.TOTEM) && !caps.autoTotemEnabled()) {
-            out.add("Carries totems but auto-totem is off globally: PvP BOT will not move one to the offhand "
-                    + "(vanilla only pops a totem that is held in a hand).");
+            out.add("Carries totems: PvP BOT's own auto-totem is off (managed by this addon), so the addon's offhand "
+                    + "policy places them: the best shield goes in the offhand first, a totem when there is none or "
+                    + "when the shield breaks, the next totem when one pops (vanilla only pops a totem held in a hand).");
+        } else if (inv.has(ItemIds.TOTEM)) {
+            out.add("Carries totems and PvP BOT's own auto-totem is on (not managed by this addon): PvP BOT moves a "
+                    + "totem into the offhand, pushing a shield out of it, and the addon's offhand policy stays idle.");
         }
-        if (inv.has(ItemIds.SHIELD) && inv.offhandHolds(ItemIds.TOTEM) && caps.autoShieldEnabled()) {
-            out.add(caps.totemPriority()
-                    ? "The offhand holds a totem, so the shield is used from the main hand (hotbar slot 1)."
-                    : "totem-priority is off globally: raising this shield will overwrite and destroy the "
-                            + "offhand totem instead of using the main hand. This profile should not have been "
-                            + "given both; report it if it was generated after this note was written.");
+        if (inv.has(ItemIds.SHIELD) && inv.offhandHolds(ItemIds.TOTEM) && caps.autoShieldEnabled()
+                && !caps.autoTotemEnabled()) {
+            out.add("The offhand holds a totem although the bot carries a shield: the addon's offhand policy moves the "
+                    + "shield into the offhand (the totem takes its place in the inventory) on the next tick.");
         }
     }
 

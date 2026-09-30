@@ -159,9 +159,9 @@ class ProfileGeneratorTest {
         assertEquals("Smasher | head:0=netherite_helmet+blast_protection4+thorns3~0.77"
                 + " chest:0=netherite_chestplate+blast_protection3+thorns2+unbreaking3~0.46"
                 + " legs:0=netherite_leggings~0.18 feet:0=netherite_boots+blast_protection4~0.67"
-                + " offhand:0=totem_of_undying hotbar:0=mace+breach2+unbreaking2~0.14 hotbar:1=shield"
+                + " offhand:0=shield hotbar:0=mace+breach2+unbreaking2~0.14"
                 + " hotbar:8=cooked_porkchopx42 inventory:-1=totem_of_undying inventory:-1=totem_of_undying"
-                + " inventory:-1=golden_applex2 inventory:-1=potion<healing> inventory:-1=potion<healing>"
+                + " inventory:-1=totem_of_undying inventory:-1=golden_applex2 inventory:-1=potion<healing> inventory:-1=potion<healing>"
                 + " inventory:-1=potion<healing> inventory:-1=water_bucket"
                 + " | hp 0.52 food 12 | STAND true bhop 0.0 0",
                 fingerprint(generator.create(1L, caps, new TransientDeckStore())));

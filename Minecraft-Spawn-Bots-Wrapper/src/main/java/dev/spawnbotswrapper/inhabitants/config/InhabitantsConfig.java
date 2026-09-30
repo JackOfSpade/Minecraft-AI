@@ -168,6 +168,12 @@ public final class InhabitantsConfig {
      *   <li>{@link #bowMinDrawTime} - ticks PvP BOT holds a bow draw before it releases (5..100). Shipped 20 = vanilla
      *       full power; PvP BOT's own default of 40 (2 s) is an artificial wait, so an inhabitant shoots as fast as a
      *       person holding the bow to full draw would. Written straight into the field like the others.</li>
+     *   <li>{@link #autoTotemEnabled} - PvP BOT's "swap a totem into the offhand whenever the bot is not blocking", which
+     *       pushes a shield out of the offhand. Shipped false: the offhand rule is this addon's {@code OffhandPolicy}
+     *       (the best shield, else a totem, the next of the same kind when one breaks or pops; any other offhand item is
+     *       left alone). true gives the offhand back to PvP BOT.</li>
+     *   <li>{@link #totemPriority} - PvP BOT's "keep a totem in the offhand and block with a shield from the main hand".
+     *       Shipped false: a bot blocks with the shield that is already in its offhand.</li>
      * </ul>
      */
     public static final class PvpbotSettings {
@@ -180,6 +186,8 @@ public final class InhabitantsConfig {
         public Boolean rangedRetreatOnClose;
         public Double meleeRange;
         public Integer bowMinDrawTime;
+        public Boolean autoTotemEnabled;
+        public Boolean totemPriority;
 
         public PvpbotSettings() {
         }
@@ -197,6 +205,8 @@ public final class InhabitantsConfig {
             s.rangedRetreatOnClose = false;
             s.meleeRange = 2.5;
             s.bowMinDrawTime = 20;
+            s.autoTotemEnabled = false;
+            s.totemPriority = false;
             return s;
         }
 
@@ -205,7 +215,7 @@ public final class InhabitantsConfig {
             return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
                     && rangedMaxRange == null && autoEquipWeapon == null && autoTargetEnabled == null
                     && rangedRetreatOnClose == null && meleeRange == null
-                    && bowMinDrawTime == null;
+                    && bowMinDrawTime == null && autoTotemEnabled == null && totemPriority == null;
         }
     }
 

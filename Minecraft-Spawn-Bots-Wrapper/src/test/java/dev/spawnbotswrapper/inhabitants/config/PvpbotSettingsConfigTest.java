@@ -34,6 +34,8 @@ class PvpbotSettingsConfigTest {
         assertEquals(Boolean.FALSE, s.autoEquipWeapon);
         assertEquals(Boolean.FALSE, s.autoTargetEnabled, "the aggro controller acquires, PvP BOT does not");
         assertEquals(20, s.bowMinDrawTime, "vanilla full power, not PvP BOT's artificial 40 tick wait");
+        assertEquals(Boolean.FALSE, s.autoTotemEnabled, "the offhand is the addon's offhand policy, not PvP BOT's auto-totem");
+        assertEquals(Boolean.FALSE, s.totemPriority, "a bot blocks with the shield already in its offhand");
         assertEquals(List.of(), ConfigValidator.validate(new InhabitantsConfig()), "the shipped values are valid");
     }
 
