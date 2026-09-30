@@ -25,7 +25,8 @@ final class UpstreamSettingsWriter {
             "rangedMinRange", double.class,
             "rangedOptimalRange", double.class,
             "rangedMaxRange", double.class,
-            "autoEquipWeapon", boolean.class);
+            "autoEquipWeapon", boolean.class,
+            "autoTargetEnabled", boolean.class);
 
     /** What a probe found: writable fields by setting name, PvP BOT's save routine, and what is unusable. */
     record Handles(Map<String, Field> fields, Method save, List<String> problems) {

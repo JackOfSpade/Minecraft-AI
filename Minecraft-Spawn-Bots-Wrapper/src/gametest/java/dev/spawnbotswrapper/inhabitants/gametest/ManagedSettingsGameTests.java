@@ -30,17 +30,18 @@ public final class ManagedSettingsGameTests {
     }
 
     private static String held() {
-        return "autoEquipWeapon=" + Upstream.setting("isAutoEquipWeapon") + " maxTargetDistance="
+        return "autoEquipWeapon=" + Upstream.setting("isAutoEquipWeapon") + " autoTarget=" + Upstream.setting("isAutoTargetEnabled") + " maxTargetDistance="
                 + Upstream.setting("getMaxTargetDistance") + " ranged=" + Upstream.setting("getRangedMinRange") + "/"
                 + Upstream.setting("getRangedOptimalRange") + "/" + Upstream.setting("getRangedMaxRange");
     }
 
     private static boolean heldAtTheShippedValues() {
         return Boolean.FALSE.equals(Upstream.setting("isAutoEquipWeapon"))
-                && Double.valueOf(10.0).equals(Upstream.setting("getMaxTargetDistance"))
-                && Double.valueOf(6.0).equals(Upstream.setting("getRangedMinRange"))
-                && Double.valueOf(8.0).equals(Upstream.setting("getRangedOptimalRange"))
-                && Double.valueOf(10.0).equals(Upstream.setting("getRangedMaxRange"));
+                && Double.valueOf(128.0).equals(Upstream.setting("getMaxTargetDistance"))
+                && Boolean.FALSE.equals(Upstream.setting("isAutoTargetEnabled"))
+                && Double.valueOf(8.0).equals(Upstream.setting("getRangedMinRange"))
+                && Double.valueOf(12.0).equals(Upstream.setting("getRangedOptimalRange"))
+                && Double.valueOf(16.0).equals(Upstream.setting("getRangedMaxRange"));
     }
 
     /** PvP BOT starts with auto-equip on and a 64 block radius in nothing but its own defaults; the wrapper must have fixed that. */
@@ -52,8 +53,8 @@ public final class ManagedSettingsGameTests {
                 String file = Files.readString(settingsFile(), StandardCharsets.UTF_8);
                 require(context, file.contains("\"autoEquipWeapon\": false"),
                         "the settings file was not written with autoEquipWeapon=false:\n" + file);
-                require(context, file.contains("\"rangedOptimalRange\": 8.0"),
-                        "the short optimal range (which PvP BOT's own setter would clamp to 10) is not in the file:\n" + file);
+                require(context, file.contains("\"rangedOptimalRange\": 12.0"),
+                        "the managed optimal range is not in the file:\n" + file);
             } catch (IOException e) {
                 context.fail(net.minecraft.network.chat.Component.nullToEmpty("cannot read " + settingsFile() + ": " + e));
             }
@@ -72,6 +73,7 @@ public final class ManagedSettingsGameTests {
                 // world, and every test after this one runs against it.
                 String file = Files.readString(settingsFile(), StandardCharsets.UTF_8)
                         .replaceAll("\"autoEquipWeapon\": \\w+", "\"autoEquipWeapon\": true")
+                        .replaceAll("\"autoTargetEnabled\": \\w+", "\"autoTargetEnabled\": true")
                         .replaceAll("\"maxTargetDistance\": [0-9.]+", "\"maxTargetDistance\": 40.0")
                         .replaceAll("\"rangedMinRange\": [0-9.]+", "\"rangedMinRange\": 20.0")
                         .replaceAll("\"rangedOptimalRange\": [0-9.]+", "\"rangedOptimalRange\": 40.0")

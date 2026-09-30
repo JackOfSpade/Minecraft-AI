@@ -159,9 +159,9 @@ public final class ConfigValidator {
         }
     }
 
-    /** Smallest and largest {@code pvpbotSettings.maxTargetDistance} (blocks). */
+    /** Smallest and largest {@code pvpbotSettings.maxTargetDistance} (blocks); 128 is PvP BOT's catalog maximum and vanilla's line-of-sight cap. */
     public static final double MIN_TARGET_DISTANCE = 4.0;
-    public static final double MAX_TARGET_DISTANCE = 64.0;
+    public static final double MAX_TARGET_DISTANCE = 128.0;
 
     private static void validatePvpbotSettings(InhabitantsConfig c, List<String> w) {
         if (c.pvpbotSettings == null) {

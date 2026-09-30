@@ -24,13 +24,14 @@ class PvpbotSettingsConfigTest {
     }
 
     @Test
-    void theShippedDefaultsAreTheShortRangesAndNoWeaponAutoEquip() {
+    void theShippedDefaultsAreTheModMaximumCeilingAndTheArcherRanges() {
         InhabitantsConfig.PvpbotSettings s = new InhabitantsConfig().pvpbotSettings;
-        assertEquals(10.0, s.maxTargetDistance);
-        assertEquals(6.0, s.rangedMinRange);
-        assertEquals(8.0, s.rangedOptimalRange);
-        assertEquals(10.0, s.rangedMaxRange);
+        assertEquals(128.0, s.maxTargetDistance, "a ceiling only, the mod maximum: line of sight decides");
+        assertEquals(8.0, s.rangedMinRange);
+        assertEquals(12.0, s.rangedOptimalRange);
+        assertEquals(16.0, s.rangedMaxRange);
         assertEquals(Boolean.FALSE, s.autoEquipWeapon);
+        assertEquals(Boolean.FALSE, s.autoTargetEnabled, "the aggro controller acquires, PvP BOT does not");
         assertEquals(List.of(), ConfigValidator.validate(new InhabitantsConfig()), "the shipped values are valid");
     }
 
@@ -45,7 +46,8 @@ class PvpbotSettingsConfigTest {
     @Test
     void aFileWithoutTheBlockGetsTheShippedValues(@TempDir Path dir) throws IOException {
         InhabitantsConfig c = load(dir, "{ \"enabled\": true }").config();
-        assertEquals(10.0, c.pvpbotSettings.maxTargetDistance);
+        assertEquals(128.0, c.pvpbotSettings.maxTargetDistance);
+        assertEquals(Boolean.FALSE, c.pvpbotSettings.autoTargetEnabled);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoEquipWeapon);
     }
 
@@ -57,6 +59,7 @@ class PvpbotSettingsConfigTest {
         assertNull(c.pvpbotSettings.rangedOptimalRange);
         assertNull(c.pvpbotSettings.rangedMaxRange);
         assertNull(c.pvpbotSettings.autoEquipWeapon, "an absent key inside a present block leaves PvP BOT's value alone");
+        assertNull(c.pvpbotSettings.autoTargetEnabled);
     }
 
     @Test
@@ -72,12 +75,12 @@ class PvpbotSettingsConfigTest {
     }
 
     @Test
-    void theTargetDistanceIsClampedToFourToSixtyFour(@TempDir Path dir) throws IOException {
+    void theTargetDistanceIsClampedToFourToOneHundredTwentyEight(@TempDir Path dir) throws IOException {
         ConfigIO.LoadResult low = load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 1 } }");
         assertEquals(4.0, low.config().pvpbotSettings.maxTargetDistance);
-        assertTrue(low.warnings().stream().anyMatch(w -> w.contains("maxTargetDistance") && w.contains("4.0..64.0")));
+        assertTrue(low.warnings().stream().anyMatch(w -> w.contains("maxTargetDistance") && w.contains("4.0..128.0")));
         ConfigIO.LoadResult high = load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 200 } }");
-        assertEquals(64.0, high.config().pvpbotSettings.maxTargetDistance);
+        assertEquals(128.0, high.config().pvpbotSettings.maxTargetDistance);
     }
 
     @Test
@@ -122,8 +125,8 @@ class PvpbotSettingsConfigTest {
     @Test
     void theWrittenDefaultFileContainsBothBlocksWithTheirKeys() {
         String json = ConfigIO.toJson(new InhabitantsConfig());
-        for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 10.0", "\"rangedMinRange\": 6.0",
-                "\"rangedOptimalRange\": 8.0", "\"rangedMaxRange\": 10.0", "\"autoEquipWeapon\": false",
+        for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 128.0", "\"rangedMinRange\": 8.0",
+                "\"rangedOptimalRange\": 12.0", "\"rangedMaxRange\": 16.0", "\"autoEquipWeapon\": false", "\"autoTargetEnabled\": false",
                 "\"rangedPacing\"", "\"aimSettleTicks\": 4", "\"crossbowMinShotIntervalTicks\": 26")) {
             assertTrue(json.contains(key), key + " missing from:\n" + json);
         }

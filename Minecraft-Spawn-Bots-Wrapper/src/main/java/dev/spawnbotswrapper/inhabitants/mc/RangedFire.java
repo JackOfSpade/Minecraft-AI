@@ -100,9 +100,16 @@ public final class RangedFire {
         shooter.getCooldowns().addCooldown(new ItemStack(Items.CROSSBOW), CrossbowPacer.cooldownAfterShot(settings.pacing()));
     }
 
-    /** True for the projectile kinds a crossbow launches, fired by a shooter that holds a crossbow. */
+    /**
+     * True for the projectile kinds a crossbow launches, fired by a shooter whose crossbow was the item that fired: a bow
+     * shot (the release of a bow being used) with a crossbow in the other hand is not one and must not start the
+     * crossbow cooldown ({@link CrossbowPacer#crossbowFired}).
+     */
     private static boolean crossbowShot(Projectile projectile, ServerPlayer shooter) {
-        if (!shooter.getMainHandItem().is(Items.CROSSBOW) && !shooter.getOffhandItem().is(Items.CROSSBOW)) {
+        boolean inMain = shooter.getMainHandItem().is(Items.CROSSBOW);
+        boolean inOff = shooter.getOffhandItem().is(Items.CROSSBOW);
+        boolean using = shooter.isUsingItem();
+        if (!CrossbowPacer.crossbowFired(inMain || inOff, using, using && shooter.getUseItem().is(Items.CROSSBOW))) {
             return false;
         }
         String type = BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).getPath();
@@ -217,7 +224,7 @@ public final class RangedFire {
         }
     }
 
-    /** PvP BOT's own targeting radius when readable, else the configured one, else PvP BOT's default of 64. */
+    /** PvP BOT's own targeting radius when readable, else the configured one, else the mod maximum of 128. */
     private static double targetRadius(PvpBotOperations adapter, InhabitantsConfig cfg) {
         java.util.OptionalDouble live = adapter.targetRadius();
         if (live.isPresent()) {
@@ -226,7 +233,7 @@ public final class RangedFire {
         if (cfg.pvpbotSettings != null && cfg.pvpbotSettings.maxTargetDistance != null) {
             return cfg.pvpbotSettings.maxTargetDistance;
         }
-        return 64.0;
+        return 128.0;
     }
 
     /** The target is alive, in the same level, within the radius and in line of sight. */

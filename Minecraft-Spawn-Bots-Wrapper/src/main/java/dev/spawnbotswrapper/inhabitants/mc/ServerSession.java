@@ -150,12 +150,13 @@ public final class ServerSession {
     /** Tells the adapter which PvP BOT settings the configuration wants held (none while the addon is disabled). */
     private void manageUpstreamSettings() {
         InhabitantsConfig config = shared.config().get();
+        shared.adapter().aggroRangeEnabled(config.enabled && config.aggro != null && config.aggro.enabled);
         shared.adapter().manageSettings(config.enabled ? managedSettings(config.pvpbotSettings) : ManagedSettings.NONE);
     }
 
     static ManagedSettings managedSettings(InhabitantsConfig.PvpbotSettings s) {
         return s == null ? ManagedSettings.NONE : new ManagedSettings(s.maxTargetDistance, s.rangedMinRange,
-                s.rangedOptimalRange, s.rangedMaxRange, s.autoEquipWeapon);
+                s.rangedOptimalRange, s.rangedMaxRange, s.autoEquipWeapon, s.autoTargetEnabled);
     }
 
     private void probeUpstream() {

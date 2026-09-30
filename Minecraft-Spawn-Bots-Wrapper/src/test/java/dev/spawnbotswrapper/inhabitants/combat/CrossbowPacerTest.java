@@ -148,4 +148,13 @@ class CrossbowPacerTest {
         p.shot("Bot", 100);
         assertEquals(20, p.ticksSinceShot("Bot", 120));
     }
+
+    @Test
+    void aBowShotWithACrossbowInTheOtherHandIsNotACrossbowShot() {
+        assertFalse(CrossbowPacer.crossbowFired(true, true, false), "a bow being released while a crossbow rests in the offhand");
+        assertTrue(CrossbowPacer.crossbowFired(true, false, false), "a loaded crossbow fires from a plain use");
+        assertTrue(CrossbowPacer.crossbowFired(true, true, true), "the crossbow itself is the item in use");
+        assertFalse(CrossbowPacer.crossbowFired(false, false, false), "no crossbow in a hand at all");
+        assertFalse(CrossbowPacer.crossbowFired(false, true, false));
+    }
 }

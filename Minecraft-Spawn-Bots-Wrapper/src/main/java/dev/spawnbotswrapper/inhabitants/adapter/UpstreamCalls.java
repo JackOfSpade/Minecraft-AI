@@ -268,9 +268,10 @@ final class UpstreamCalls {
 
     /** The current values of the managed settings as PvP BOT has them; a component is null when it cannot be read. */
     SettingsPolicy.Current currentManaged(Object settings) throws Throwable {
-        return new SettingsPolicy.Current(readDouble(settings, "getMaxTargetDistance"),
+        return new SettingsPolicy.Current(readDouble(settings, UpstreamContract.MAX_TARGET_DISTANCE_GETTER),
                 readDouble(settings, "getRangedMinRange"), readDouble(settings, "getRangedOptimalRange"),
-                readDouble(settings, "getRangedMaxRange"), readBoolean(settings, "isAutoEquipWeapon"));
+                readDouble(settings, "getRangedMaxRange"), readBoolean(settings, "isAutoEquipWeapon"),
+                readBoolean(settings, "isAutoTargetEnabled"));
     }
 
     /**

@@ -59,13 +59,19 @@ class SettingsHygieneTest {
     }
 
     @Test
-    void autoTargetOffIsANoteBecauseItIsUpstreamsDefault() {
-        List<Finding> f = findings(new SettingsSnapshot(true, true, 20, false), Telemetry.DISABLED);
+    void autoTargetOffIsANoteOnlyWhileTheAggroRangeIsOff() {
+        List<Finding> f = findings(new SettingsSnapshot(true, true, 20, false, null, null, false), Telemetry.DISABLED);
         assertEquals(1, f.size());
         assertEquals(Severity.NOTE, f.get(0).severity());
         assertTrue(f.get(0).text().contains("never open fire on sight"));
-        assertTrue(f.get(0).text().contains("manages only the settings listed under pvpbotSettings"),
-                "the addon does not fix it, it says so and names what it does manage");
+        assertTrue(f.get(0).text().contains("aggro range"), "it names the switch that makes auto-target off fine");
+    }
+
+    @Test
+    void autoTargetOffIsTheIntendedStateWhileTheAggroRangeIsOn() {
+        assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, false, null, null, true), Telemetry.DISABLED),
+                "the aggro range acquires targets, so PvP BOT's own auto-target being off is not a finding");
+        assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, false, 64.0, 8.0, true), Telemetry.DISABLED));
     }
 
     @Test

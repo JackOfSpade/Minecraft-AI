@@ -101,6 +101,13 @@ public interface PvpBotOperations {
     }
 
     /**
+     * Tells the adapter whether the wrapper's aggro range is switched on. While it is, PvP BOT's own auto-target being OFF
+     * is the intended state (the aggro range acquires targets), so the status report no longer warns about it.
+     */
+    default void aggroRangeEnabled(boolean enabled) {
+    }
+
+    /**
      * How far (blocks) PvP BOT looks for targets right now, as its settings hold it; empty when unreadable. Read-only.
      */
     default java.util.OptionalDouble targetRadius() {

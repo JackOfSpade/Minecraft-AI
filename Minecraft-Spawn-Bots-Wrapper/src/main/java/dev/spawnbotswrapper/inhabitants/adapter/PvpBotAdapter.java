@@ -74,6 +74,8 @@ public final class PvpBotAdapter implements PvpBotOperations {
     private volatile Set<String> settingNames;
     /** What the addon wants held in PvP BOT's settings, and which settings object and wish it was last applied for. */
     private volatile ManagedSettings managedWanted = ManagedSettings.NONE;
+    /** Whether the wrapper's aggro range is on (auto-target off is then the intended state, not a finding). */
+    private volatile boolean aggroRangeOn;
     private WeakReference<Object> managedAppliedTo = new WeakReference<>(null);
     private ManagedSettings managedAppliedFor;
 
@@ -253,8 +255,9 @@ public final class PvpBotAdapter implements PvpBotOperations {
                     calls.readBoolean(settings, "isBotLeaveOnDeath"),
                     calls.readInt(settings, "getCheckInterval"),
                     calls.readBoolean(settings, "isAutoTargetEnabled"),
-                    calls.readDouble(settings, "getMaxTargetDistance"),
-                    calls.readDouble(settings, "getRangedMinRange"));
+                    calls.readDouble(settings, UpstreamContract.MAX_TARGET_DISTANCE_GETTER),
+                    calls.readDouble(settings, "getRangedMinRange"),
+                    aggroRangeOn);
         } catch (Throwable t) {
             log.failure("reading PvP BOT's settings", t);
             return SettingsSnapshot.unreadable();
@@ -271,6 +274,11 @@ public final class PvpBotAdapter implements PvpBotOperations {
             log.failure("inspecting the command tree", t);
             return CommandTree.UNKNOWN;
         }
+    }
+
+    @Override
+    public void aggroRangeEnabled(boolean enabled) {
+        aggroRangeOn = enabled;
     }
 
     @Override
@@ -320,7 +328,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
         }
         if (!duringProbe) {
             // The probe's own report carries the same findings; a later re-apply has no report, so say it here.
-            SettingsHygiene.Finding ranged = SettingsHygiene.rangedFinding(calls.readDouble(settings, "getMaxTargetDistance"),
+            SettingsHygiene.Finding ranged = SettingsHygiene.rangedFinding(calls.readDouble(settings, UpstreamContract.MAX_TARGET_DISTANCE_GETTER),
                     calls.readDouble(settings, "getRangedMinRange"));
             if (ranged != null) {
                 log.warnOnce("managed-settings-hygiene|" + ranged.text(), ranged.text());
@@ -335,7 +343,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
             if (p == null || p.calls() == null || !p.verdict().usable() || !p.calls().contract().settingsGet.ok()) {
                 return java.util.OptionalDouble.empty();
             }
-            Double value = p.calls().readDouble(p.calls().settingsInstance(), "getMaxTargetDistance");
+            Double value = p.calls().readDouble(p.calls().settingsInstance(), UpstreamContract.MAX_TARGET_DISTANCE_GETTER);
             return value == null ? java.util.OptionalDouble.empty() : java.util.OptionalDouble.of(value);
         } catch (Throwable t) {
             log.failure("reading the targeting radius", t);

@@ -216,8 +216,12 @@ else in PvP BOT 0.0.15, so:
   (PvP BOT's bucket branch is a bounded ten-tick routine: water at the bot's feet, which removes the web, picked up
   again on tick 5, the bot walking back for it if that failed; PvP BOT never refills, so nothing tops the bucket up
   later; before this the bucket was a coin flip and webbed bots without one printed
-  `[COBWEB] No water bucket or ender pearl found!` to the console on every tick). Only newly rolled profiles get it;
-  a stored profile keeps what it has. Cobwebs are still stocked as before;
+  `[COBWEB] No water bucket or ender pearl found!` to the console on every tick). Only newly rolled profiles get it:
+  a stored profile keeps what it has. Cobwebs are still stocked as before.
+  Checked against the decompiled PvP BOT (`BotUtils.handleCobwebEscape`, `handleAutoEat`, `findBestFood`): the escape
+  swaps the bucket into hotbar slot 8 by exchanging the two stacks, so what was in slot 8 moves to the bucket's old
+  slot and nothing is lost; `findBestFood` scans all 36 main-inventory slots and `handleAutoEat` swaps a food stack
+  found at slot 9 or above into slot 8, so food outside the hotbar is still found and eaten afterwards.
 * every inhabitant the addon manages is **swept for ender pearls**: right after it is restored and then about every
   5 seconds while it is online (so a picked-up pearl goes too). Only inhabitants are touched, never real players or
   other bots; nothing else in the inventory changes. The first removal per bot is logged once at INFO
@@ -248,42 +252,46 @@ strong for a structure guardian, so Piercing is **off by default**. The list is 
 ## Managed PvP BOT settings (`pvpbotSettings`)
 
 PvP BOT keeps its combat settings per world (`config/pvpbot/worlds/<world>/settings.json`), and its defaults suit
-a duel arena, not a structure inhabitant: it looks for targets up to **64 blocks** away, archers park 20 blocks from
-their target, and a housekeeping routine (`autoEquipWeapon`) re-selects the best **melee** weapon every
+a duel arena, not a structure inhabitant: it picks targets by itself (`autoTargetEnabled`), archers park 20 blocks
+from their target, and a housekeeping routine (`autoEquipWeapon`) re-selects the best **melee** weapon every
 `checkInterval` ticks. For a bot that carries a sword AND a bow or crossbow that last one ends every draw before it
 completes (the selected slot leaves the ranged weapon inside the tick), so such a bot never shoots. The addon
 therefore holds these settings at chosen values:
 
 ```jsonc
 "pvpbotSettings": {
-  "maxTargetDistance": 10.0,     // blocks, 4..64 (PvP BOT's own default: 64)
-  "rangedMinRange": 6.0,         // archers back off below this (PvP BOT: 20)
-  "rangedOptimalRange": 8.0,     // PvP BOT: 40
-  "rangedMaxRange": 10.0,        // archers walk toward a target beyond this (PvP BOT: 60)
+  "maxTargetDistance": 128.0,    // blocks, 4..128: the mod's own maximum (PvP BOT's catalog maximum and vanilla's line-of-sight cap)
+  "autoTargetEnabled": false,    // PvP BOT: false; the wrapper's aggro controller acquires targets by line of sight
+  "rangedMinRange": 8.0,         // archers back off below this (PvP BOT: 20)
+  "rangedOptimalRange": 12.0,    // PvP BOT: 40
+  "rangedMaxRange": 16.0,        // archers walk toward a target beyond this (PvP BOT: 60)
   "autoEquipWeapon": false       // PvP BOT: true
 }
 ```
 
+Inhabitants have no block-distance restriction of their own: what they react to is decided by line of sight, up to
+the mod's maximum, so `maxTargetDistance` is a ceiling only and PvP BOT must neither acquire targets itself
+(`autoTargetEnabled` false) nor drop a chased target early.
+
 * A `null` or absent key inside the block leaves PvP BOT's own value alone; a config file without the block at all
   gets the values above. `"pvpbotSettings": null` manages nothing.
-* Validation: `maxTargetDistance` is clamped to 4..64; the three ranges must satisfy
+* Validation: `maxTargetDistance` is clamped to 4..128; the three ranges must satisfy
   `rangedMinRange < rangedOptimalRange <= rangedMaxRange <= maxTargetDistance` (judged with PvP BOT's own value for
   any you leave out), otherwise **all three ranged keys are skipped** with a warning and the other keys still apply.
 * When it is applied: at the first tick (before the PvP BOT probe report, so the report shows the real values) and
   again **every time PvP BOT loads its per-world settings** (`/pvpbot reload`), which the addon notices because PvP
   BOT then replaces its settings object. Nothing is written when the values already match. The values are written
   into PvP BOT's settings object directly, not through its setters (they clamp the optimal range to at least 10 and
-  the maximum to at least 15), and then PvP BOT's own save routine writes the settings file once.
-* One INFO line names what changed: `PvP BOT settings: maxTargetDistance 64 -> 10, autoEquipWeapon true -> false`.
+  the maximum to at least 15; the addon writes the fields, so a managed value may deliberately lie outside those
+  setter clamps), and then PvP BOT's own save routine writes the settings file once.
+* One INFO line names what changed: `PvP BOT settings: maxTargetDistance 64 -> 128, autoEquipWeapon true -> false`.
   A missing PvP BOT field is one warning and never an exception. `/inhabitants adapter` (and the probe report) warn
   when the effective `rangedMinRange` is above `maxTargetDistance`: ranged bots would back away from every target
   inside their own targeting radius.
-* The other settings stay PvP BOT's: `autoTargetEnabled` in particular is NOT managed (with it off, inhabitants
-  fight only what attacked them and never open fire on sight; turn it on with `pvpbot settings auto-target true` or
-  in `settings.json`). Whoever hits an inhabitant from beyond `maxTargetDistance` (an arrow from far away) is NOT
-  pursued: PvP BOT's revenge logic remembers the last attacker for 30 seconds but only targets one that is within
-  `maxTargetDistance`, so the bot stays put until you come inside that radius (within those 30 seconds it then
-  attacks you); melee hits are always inside it.
+* The other settings stay PvP BOT's. `autoTargetEnabled` false is the intended state under this addon: `/inhabitants
+  adapter` no longer warns about it while `aggro.enabled` is on. PvP BOT's revenge logic (`revengeEnabled`, not managed)
+  still handles whoever hit an inhabitant, and it accepts an attacker within `maxTargetDistance`, which at 128 is
+  the mod's maximum.
 
 ## Crossbow trigger and shot pacing (`rangedPacing`)
 
@@ -508,7 +516,7 @@ Runs the full unit test suite (pure logic and Minecraft-registry-backed tests; n
 jars as runtime mods (copied into the run directory like a profile, never compile-time dependencies): a real
 inhabitant is requested from the population engine, dressed, and fights a survival mock player. They cover the
 crossbow trigger and pacing, bows, the managed PvP BOT settings (including their re-application after PvP BOT reloads
-its settings), the combat log lines, the targeting radius, and the ranged-loop cause text.
+its settings), the combat log lines and the ranged-loop cause text.
 
 ```bash
 ./gradlew runGameTest -PupstreamModsDir=<dir with PVP_bot-*.jar and herobot-*.jar>   # default C:\mcw\_tools\deploycheck\mods
@@ -516,8 +524,8 @@ its settings), the combat log lines, the targeting radius, and the ranged-loop c
 
 When the directory or either jar is missing, `runGameTest` is skipped with a message and everything else (build, unit
 tests) is unaffected. `-PharnessFixesOff=true` switches the addon's two ranged-combat fixes off in the run, which
-reproduces the failures they fix. Two workarounds live in the test mod only: a mixin that maps PvP BOT's reflective
-hotbar-index lookup to the runtime field name (the dev runtime uses Mojang names, PvP BOT looks up Yarn and
+reproduces the failures they fix. Two workarounds live in the test mod only: `InventoryHelperDevShimMixin`, a test-only field-name translation that changes no behaviour (it maps PvP BOT's reflective
+hotbar-index lookup to the runtime field name; the dev runtime uses Mojang names, PvP BOT looks up Yarn and
 intermediary ones), and `attackInvincible` in the run's PvP BOT settings because GameTest mock players report
 `isCreative()`.
 

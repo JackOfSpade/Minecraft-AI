@@ -100,6 +100,16 @@ public final class CrossbowPacer {
         loadedSince.remove(bot);
     }
 
+    /**
+     * Whether a projectile a shooter has just launched was a crossbow shot: a crossbow must be in a hand AND must not be
+     * ruled out as the item that fired. A loaded crossbow fires from a plain use (nothing being used); a bow shot is the
+     * release of a bow that is being used. So while the shooter is using an item, the shot is a crossbow's only when the
+     * used item is the crossbow: a bow shot with a crossbow in the other hand is not a crossbow shot.
+     */
+    public static boolean crossbowFired(boolean crossbowInAHand, boolean usingItem, boolean usedItemIsCrossbow) {
+        return crossbowInAHand && (!usingItem || usedItemIsCrossbow);
+    }
+
     /** Ticks until the next shot may be fired, counted from a shot that just happened: the whole interval. */
     public static int cooldownAfterShot(Settings settings) {
         return settings == null || !settings.enabled() ? 0 : Math.max(1, settings.minShotIntervalTicks());

@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * file is saved, the one INFO line, and what a missing upstream name costs.
  */
 class PvpBotAdapterManagedSettingsTest {
-    private static final ManagedSettings SHIPPED = new ManagedSettings(10.0, 6.0, 8.0, 10.0, false);
+    private static final ManagedSettings SHIPPED = new ManagedSettings(10.0, 6.0, 8.0, 10.0, false, false);
 
     private static Object field(String name) throws ReflectiveOperationException {
         Field f = BotSettings.class.getDeclaredField(name);
@@ -68,7 +68,7 @@ class PvpBotAdapterManagedSettingsTest {
         AdapterFixture f = AdapterFixture.probed();
         f.adapter.manageSettings(SHIPPED);
         f.adapter.manageSettings(SHIPPED);
-        f.adapter.manageSettings(new ManagedSettings(10.0, 6.0, 8.0, 10.0, false));
+        f.adapter.manageSettings(new ManagedSettings(10.0, 6.0, 8.0, 10.0, false, false));
         assertEquals(1, saves());
         assertEquals(1, settingsLines(f));
     }
@@ -88,7 +88,7 @@ class PvpBotAdapterManagedSettingsTest {
     void aChangedWishIsAppliedToTheSameObject() throws Exception {
         AdapterFixture f = AdapterFixture.probed();
         f.adapter.manageSettings(SHIPPED);
-        f.adapter.manageSettings(new ManagedSettings(16.0, null, null, null, null));
+        f.adapter.manageSettings(new ManagedSettings(16.0, null, null, null, null, null));
         assertEquals(16.0, field("maxTargetDistance"));
         assertEquals(6.0, field("rangedMinRange"), "what the new wish no longer names keeps the last value");
         assertEquals(2, saves());
@@ -100,7 +100,7 @@ class PvpBotAdapterManagedSettingsTest {
         AdapterFixture f = AdapterFixture.probed();
         BotSettings.put("maxTargetDistance", 10.0);
         BotSettings.put("autoEquipWeapon", false);
-        f.adapter.manageSettings(new ManagedSettings(10.0, null, null, null, false));
+        f.adapter.manageSettings(new ManagedSettings(10.0, null, null, null, false, null));
         assertEquals(0, saves());
         assertFalse(f.sink.anyContains("PvP BOT settings:"));
     }
@@ -119,8 +119,8 @@ class PvpBotAdapterManagedSettingsTest {
     @Test
     void invalidRangesAreRefusedWithOneWarningAndTheRestStillApplies() throws Exception {
         AdapterFixture f = AdapterFixture.probed();
-        f.adapter.manageSettings(new ManagedSettings(10.0, 9.0, 8.0, 10.0, false));
-        f.adapter.manageSettings(new ManagedSettings(10.0, 9.0, 8.0, 10.0, false));
+        f.adapter.manageSettings(new ManagedSettings(10.0, 9.0, 8.0, 10.0, false, null));
+        f.adapter.manageSettings(new ManagedSettings(10.0, 9.0, 8.0, 10.0, false, null));
         assertEquals(20.0, field("rangedMinRange"), "the ranged keys are left alone");
         assertEquals(10.0, field("maxTargetDistance"));
         assertEquals(1, f.sink.warn.stream().filter(w -> w.contains("ranged distances are not applied")).count(),
@@ -131,7 +131,7 @@ class PvpBotAdapterManagedSettingsTest {
     void aSettingsClassWithoutTheManagedFieldsIsReportedAsProblemsNotAnException() {
         UpstreamSettingsWriter.Handles none = UpstreamSettingsWriter.resolve(Object.class);
         assertTrue(none.fields().isEmpty());
-        assertEquals(6, none.problems().size(), none.problems().toString());
+        assertEquals(7, none.problems().size(), none.problems().toString());
         assertFalse(none.canWrite("maxTargetDistance"));
     }
 

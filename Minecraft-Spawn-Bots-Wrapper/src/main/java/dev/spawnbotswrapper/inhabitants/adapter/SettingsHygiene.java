@@ -32,14 +32,21 @@ final class SettingsHygiene {
      * (a wrong warning is worse than none).
      */
     record SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval,
-                            Boolean autoTargetEnabled, Double maxTargetDistance, Double rangedMinRange) {
+                            Boolean autoTargetEnabled, Double maxTargetDistance, Double rangedMinRange,
+                            boolean aggroRangeEnabled) {
         /** The snapshot of the four switches alone (the ranged distances then count as unreadable). */
         SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval, Boolean autoTargetEnabled) {
             this(botsRelogs, botLeaveOnDeath, checkInterval, autoTargetEnabled, null, null);
         }
 
+        /** A snapshot without the aggro range flag (off). */
+        SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval, Boolean autoTargetEnabled,
+                         Double maxTargetDistance, Double rangedMinRange) {
+            this(botsRelogs, botLeaveOnDeath, checkInterval, autoTargetEnabled, maxTargetDistance, rangedMinRange, false);
+        }
+
         static SettingsSnapshot unreadable() {
-            return new SettingsSnapshot(null, null, null, null, null, null);
+            return new SettingsSnapshot(null, null, null, null, null, null, false);
         }
     }
 
@@ -79,12 +86,14 @@ final class SettingsHygiene {
                                 + "): PvP BOT's dead-bot cleanup then never runs and dead inhabitants stay listed. "
                                 + "Use " + MIN_CHECK_INTERVAL + " or more"));
             }
-            if (Boolean.FALSE.equals(s.autoTargetEnabled())) {
+            // With the wrapper's aggro range on, auto-target OFF is the intended state (the aggro range acquires), not a finding.
+            if (Boolean.FALSE.equals(s.autoTargetEnabled()) && !s.aggroRangeEnabled()) {
                 out.add(new Finding(Severity.NOTE,
-                        "PvP BOT setting autoTarget is OFF (its default): inhabitants only fight what attacked them (or "
-                                + "what an order or a faction names) and never open fire on sight. This addon manages only the "
-                                + "settings listed under pvpbotSettings in its config, not this one; enable it in PvP BOT "
-                                + "(pvpbot settings auto-target true) if inhabitants should attack players in range"));
+                        "PvP BOT setting autoTarget is OFF and this addon's aggro range (config aggro.enabled) is off too: "
+                                + "inhabitants only fight what attacked them (or what an order or a faction names) and never open "
+                                + "fire on sight. Turn the aggro range on (it acquires players by line of sight) or "
+                                + "enable PvP BOT's auto-target (pvpbot settings auto-target true, or pvpbotSettings.autoTargetEnabled "
+                                + "in this addon's config)"));
             }
             Finding ranged = rangedFinding(s.maxTargetDistance(), s.rangedMinRange());
             if (ranged != null) {

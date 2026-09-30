@@ -84,10 +84,12 @@ final class SettingData {
                                 + "three target filters; absorption or resistance suppress it only as a perverse "
                                 + "side effect. With defaults inhabitants stay passive until hit."),
                 flag("autoTargetEnabled", "auto-target", false).global(
-                        "No per-bot proxy: the default (off) is why inhabitants are passive until attacked; revenge, "
-                                + "faction enemies and forced orders still apply. Upstream has per-bot substitutes "
-                                + "(forced target, faction hostility by name) but they need addon-side targeting logic "
-                                + "or persistent faction files, so they are deliberately not used."),
+                        "No per-bot proxy: PvP BOT's own acquisition of the nearest entity within maxTargetDistance (no line of "
+                                + "sight needed). Managed by this addon: config pvpbotSettings.autoTargetEnabled (shipped false), "
+                                + "because the addon's aggro controller (config aggro) acquires instead, by line of sight: players it can see "
+                                + "(no block limit), plus a chase after a hit from farther away. Revenge, faction enemies and forced "
+                                + "orders (which the aggro range uses) still apply. The value is written into the field, like the "
+                                + "others; with aggro.enabled false and this managed as false inhabitants stay passive until hit."),
                 flag("targetPlayers", "target-players", true).global(
                         "No per-bot proxy: global filter inside auto-target for real players (names not registered as "
                                 + "bots). Forced, revenge and faction targets bypass it."),
@@ -103,9 +105,10 @@ final class SettingData {
                         "No per-bot proxy: search and acceptance radius (blocks, 3D, no dimension check) for forced, "
                                 + "revenge, faction and auto targets; also sizes the per-tick entity query when "
                                 + "auto-target is on. A forced order beyond it is ignored. This addon manages it: config "
-                                + "pvpbotSettings.maxTargetDistance (shipped 10, allowed 4..64; PvP BOT's own 64 is far "
-                                + "more than a structure inhabitant should react to) is written into the settings whenever "
-                                + "PvP BOT loads them."),
+                                + "pvpbotSettings.maxTargetDistance (shipped 128 = PvP BOT's catalog maximum, allowed 4..128) "
+                                + "is written into the settings whenever PvP BOT loads them. 128 is a ceiling only: line of "
+                                + "sight decides when a chase ends, and the high value keeps PvP "
+                                + "BOT from dropping a chased target early and lets a hit from far away register as revenge."),
                 decimal("meleeRange", "melee-range", 2.0, 6.0, 3.5).perBot(ATTRIBUTE,
                         "vitals.attributes[minecraft:entity_interaction_range]",
                         "Partial, reach only. Varies: entity_interaction_range 2..6 (vanilla 3.0); on the 'attack "
@@ -118,16 +121,18 @@ final class SettingData {
                         "No per-bot proxy: numeric tuning. Archers park at about min to min+2 blocks (20 to 22 by "
                                 + "default), not at rangedOptimalRange; the loadout only decides who is an archer. The "
                                 + "default equals the clamp maximum. Managed by this addon: config "
-                                + "pvpbotSettings.rangedMinRange (shipped 6), written straight into the field because the "
+                                + "pvpbotSettings.rangedMinRange (shipped 8), written straight into the field because the "
                                 + "setter would clamp the ranges below."),
                 decimal("rangedOptimalRange", "ranged-optimal-range", 10.0, 50.0, 40.0).global(
                         "No per-bot proxy: only used while retreating with a bow (no food, health under 50 percent), "
                                 + "not in normal engagement. The loadout only decides who is an archer. Managed by this "
-                                + "addon: config pvpbotSettings.rangedOptimalRange (shipped 8; the setter would raise it to 10)."),
+                                + "addon: config pvpbotSettings.rangedOptimalRange (shipped 12)."),
                 decimal("rangedMaxRange", "ranged-max-range", 15.0, 100.0, 60.0).global(
                         "No per-bot proxy: archers walk toward a target beyond this distance instead of shooting. The "
                                 + "loadout only decides who is an archer. Managed by this addon: config "
-                                + "pvpbotSettings.rangedMaxRange (shipped 10; the setter would raise it to 15)."),
+                                + "pvpbotSettings.rangedMaxRange (shipped 16). The managed values are written straight into the fields, "
+                                + "so they may deliberately lie outside PvP BOT's setter clamps (the shipped 8/12/16 happen to "
+                                + "sit inside them; the catalog bounds only describe what the setters accept)."),
                 decimal("maceRange", NO_KEY, 3.0, 10.0, 6.0).global(
                         "No per-bot proxy: mace mode-selection distance and engagement radius (twice the value). A "
                                 + "mace in the loadout only decides who can use mace mode. No command key: "

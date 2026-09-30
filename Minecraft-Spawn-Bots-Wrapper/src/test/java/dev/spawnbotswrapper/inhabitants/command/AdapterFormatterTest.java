@@ -63,7 +63,7 @@ class AdapterFormatterTest {
     void offSwitchesAreListedAndAutoTargetGetsTheExplanation() {
         List<String> t = text(Fixtures.availableStatus(), GlobalCapabilities.upstreamDefaults());
         assertTrue(contains(t, "switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): autoTarget, spear"), t.toString());
-        assertTrue(contains(t, "autoTarget is off: inhabitants stay passive until something attacks them"), t.toString());
+        assertTrue(contains(t, "autoTarget is off: PvP BOT itself never picks a target on sight"), t.toString());
     }
 
     @Test

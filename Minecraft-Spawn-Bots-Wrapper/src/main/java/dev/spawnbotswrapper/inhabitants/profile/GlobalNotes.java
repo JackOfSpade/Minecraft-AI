@@ -40,9 +40,11 @@ final class GlobalNotes {
             out.add("Combat is disabled globally: this bot never attacks or defends itself, so its weapons, "
                     + "ranged gear, cobwebs and crystal/anchor kits are unused.");
         } else if (!caps.autoTargetEnabled()) {
-            out.add("Auto-target is off: this bot stays passive until it is attacked (revenge), given a forced "
-                    + "target or placed in a hostile faction, and never opens fire on sight. It is a global PvP BOT setting, not a per-bot "
-                    + "choice, and not one this addon manages (pvpbot settings auto-target true turns it on).");
+            out.add("Auto-target is off (PvP BOT's own; the addon's managed setting pvpbotSettings.autoTargetEnabled): this bot "
+                    + "never picks a target on sight by itself. While the addon's aggro range is on (config aggro) that range "
+                    + "acquires players within a short distance in line of sight, and a hit from farther away starts a chase, so "
+                    + "the bot is not passive; with the aggro range off it stays passive until it is attacked (revenge), given a "
+                    + "forced target or placed in a hostile faction. It is a global PvP BOT setting, not a per-bot choice.");
         }
     }
 

@@ -140,16 +140,21 @@ public final class InhabitantsConfig {
      * PvP BOT settings the addon enforces (PvP BOT keeps them per world, in {@code config/pvpbot/worlds/<world>/settings.json}).
      * A null value means "leave PvP BOT's own value alone". They are written straight into PvP BOT's settings object, NOT
      * through its setters, because the setters clamp to ranges (ranged optimal at least 10, ranged max at least 15) that
-     * exclude the short ranges wanted here.
+     * can exclude the ranges wanted here (the shipped 8/12/16 happen to sit inside them, but the mechanism stays field writes).  A
+     * managed value may therefore deliberately lie outside a setter clamp; PvP BOT itself never re-validates a loaded value.
      * <ul>
-     *   <li>{@link #maxTargetDistance} - how far PvP BOT looks for targets (blocks, 4..64). PvP BOT's own default is 64,
-     *       far more than a structure inhabitant should react to.</li>
+     *   <li>{@link #maxTargetDistance} - the CEILING of PvP BOT's target search (blocks, 4..128). Shipped 128 = the mod's own
+     *       maximum (PvP BOT's catalog maximum and vanilla's line-of-sight cap): line of sight, not a block distance,
+     *       decides who is chased; this only keeps PvP BOT from dropping a chased target early and lets far hits register.</li>
      *   <li>{@link #rangedMinRange}, {@link #rangedOptimalRange}, {@link #rangedMaxRange} - archer distances. Must satisfy
      *       min &lt; optimal &lt;= max &lt;= maxTargetDistance, otherwise all three are left alone (with a warning).</li>
      *   <li>{@link #autoEquipWeapon} - PvP BOT's housekeeping that keeps selecting the best MELEE weapon every
      *       {@code checkInterval} ticks. For a bot that carries both a sword and a bow or crossbow it ends every draw
      *       (the selected slot leaves the ranged weapon inside the tick), so such bots never shoot. false stops it;
      *       melee combat picks its own weapon anyway.</li>
+     *   <li>{@link #autoTargetEnabled} - PvP BOT's own acquisition of the nearest entity within maxTargetDistance. Shipped
+     *       false: the wrapper's aggro controller acquires (by line of sight) instead. Set it to true (or set
+     *       {@code aggro.enabled} to false and manage nothing here) to give acquisition back to PvP BOT.</li>
      * </ul>
      */
     public static final class PvpbotSettings {
@@ -158,25 +163,28 @@ public final class InhabitantsConfig {
         public Double rangedOptimalRange;
         public Double rangedMaxRange;
         public Boolean autoEquipWeapon;
+        public Boolean autoTargetEnabled;
 
         public PvpbotSettings() {
         }
 
-        /** The values the addon ships with: the short ranges and no weapon auto-equip. */
+        /** The values the addon ships with: the mod's 128-block maximum as the ceiling (line of sight decides who is chased), PvP BOT's own target
+         * acquisition off (the aggro controller acquires), archers at 8/12/16 and no weapon auto-equip. */
         public static PvpbotSettings shipped() {
             PvpbotSettings s = new PvpbotSettings();
-            s.maxTargetDistance = 10.0;
-            s.rangedMinRange = 6.0;
-            s.rangedOptimalRange = 8.0;
-            s.rangedMaxRange = 10.0;
+            s.maxTargetDistance = 128.0;
+            s.rangedMinRange = 8.0;
+            s.rangedOptimalRange = 12.0;
+            s.rangedMaxRange = 16.0;
             s.autoEquipWeapon = false;
+            s.autoTargetEnabled = false;
             return s;
         }
 
         /** True when nothing is managed. */
         public boolean isEmpty() {
             return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
-                    && rangedMaxRange == null && autoEquipWeapon == null;
+                    && rangedMaxRange == null && autoEquipWeapon == null && autoTargetEnabled == null;
         }
     }
 

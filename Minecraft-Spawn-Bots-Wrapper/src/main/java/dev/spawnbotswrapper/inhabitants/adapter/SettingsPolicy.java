@@ -16,7 +16,7 @@ import java.util.List;
  */
 final class SettingsPolicy {
     static final double MIN_TARGET_DISTANCE = 4.0;
-    static final double MAX_TARGET_DISTANCE = 64.0;
+    static final double MAX_TARGET_DISTANCE = 128.0;
     private static final double EPSILON = 1e-9;
 
     private SettingsPolicy() {
@@ -24,7 +24,7 @@ final class SettingsPolicy {
 
     /** What PvP BOT has right now; a null component could not be read. */
     record Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
-                   Boolean autoEquipWeapon) {
+                   Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
     }
 
     /** One setting to change; {@code from} is null when the current value could not be read. */
@@ -90,6 +90,9 @@ final class SettingsPolicy {
         }
         if (wanted.autoEquipWeapon() != null && !wanted.autoEquipWeapon().equals(current.autoEquipWeapon())) {
             changes.add(new Change("autoEquipWeapon", current.autoEquipWeapon(), wanted.autoEquipWeapon()));
+        }
+        if (wanted.autoTargetEnabled() != null && !wanted.autoTargetEnabled().equals(current.autoTargetEnabled())) {
+            changes.add(new Change("autoTargetEnabled", current.autoTargetEnabled(), wanted.autoTargetEnabled()));
         }
         return new Plan(changes, warnings);
     }
