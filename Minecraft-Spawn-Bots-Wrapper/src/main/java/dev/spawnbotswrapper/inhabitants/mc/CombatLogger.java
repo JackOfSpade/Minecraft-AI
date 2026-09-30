@@ -146,12 +146,13 @@ public final class CombatLogger {
         if (c == null) {
             return;
         }
-        double distance = c.attacker == null ? -1 : victim.distanceTo(source.getEntity());
-        c.ledger.hit(c.now, new CombatLedger.Hit(c.attacker, c.victim, damage, baseDamage, blocked,
-                source.getMsgId(), weapon(source), distance, victim.getHealth()), c.detail);
+        // The damage-taken line first, in its own guard: it is the diagnostic that must survive a ledger failure.
         if (c.victim.kind() == Kind.INHABITANT && victim instanceof ServerPlayer bot) {
             guarded("damage taken", () -> logTaken(bot, source, damage, baseDamage, blocked, c));
         }
+        double distance = c.attacker == null ? -1 : victim.distanceTo(source.getEntity());
+        c.ledger.hit(c.now, new CombatLedger.Hit(c.attacker, c.victim, damage, baseDamage, blocked,
+                source.getMsgId(), weapon(source), distance, victim.getHealth()), c.detail);
     }
 
     /**
