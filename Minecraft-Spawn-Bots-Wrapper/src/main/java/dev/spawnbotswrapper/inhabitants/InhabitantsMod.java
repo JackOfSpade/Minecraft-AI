@@ -8,6 +8,7 @@ import dev.spawnbotswrapper.inhabitants.mc.CombatLogger;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
+import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
 import dev.spawnbotswrapper.inhabitants.mc.MeleeLegality;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
@@ -60,6 +61,7 @@ public final class InhabitantsMod implements ModInitializer {
     /** No cheating: vetoes melee hits by inhabitants that a human client could not make (through walls, beyond reach). */
     private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER);
     private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER);
+    private final OutOfAmmoGapCloser gapCloser = new OutOfAmmoGapCloser(() -> session, LOGGER);
 
     @Override
     public void onInitialize() {
@@ -167,6 +169,7 @@ public final class InhabitantsMod implements ModInitializer {
             shared.guard().run("aggro range", () -> aggro.tick(server));
         }
         rangedFire.tick(server);
+        gapCloser.tick(server);
         if (current != null && current.server() == server) {
             combat.tick(server.getTickCount());
         }
@@ -178,6 +181,7 @@ public final class InhabitantsMod implements ModInitializer {
             combat.flush(server.getTickCount());
             aggro.reset();
             rangedFire.reset();
+            gapCloser.reset();
             current.shutdown();
         }
     }

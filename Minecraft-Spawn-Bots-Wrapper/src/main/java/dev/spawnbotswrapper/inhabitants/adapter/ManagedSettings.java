@@ -1,27 +1,45 @@
 package dev.spawnbotswrapper.inhabitants.adapter;
 
 /**
- * The PvP BOT settings the addon wants held at a value (config {@code pvpbotSettings}). A null component means "leave
- * PvP BOT's own value alone". Plain data: the adapter turns it into field writes ({@link SettingsPolicy} decides what,
- * {@link UpstreamSettingsWriter} does it).
+ * The PvP BOT settings this addon manages. A null component means "leave PvP BOT's value alone". Immutable.
  *
- * @param maxTargetDistance  how far PvP BOT looks for targets, blocks (4..128)
- * @param rangedMinRange     archers back off below this distance
- * @param rangedOptimalRange archer distance while retreating
- * @param rangedMaxRange     archers walk toward a target beyond this distance
+ * @param maxTargetDistance  PvP BOT's targeting radius (blocks, within {@code 4..128})
+ * @param rangedMinRange     archers back away / stop shooting closer than this (blocks)
+ * @param rangedOptimalRange the distance archers try to keep (blocks)
+ * @param rangedMaxRange     archers walk toward a target beyond this instead of shooting (blocks)
  * @param autoEquipWeapon    PvP BOT's housekeeping that keeps selecting the best MELEE weapon (it ends every bow and
  *                           crossbow draw of a bot that also carries a melee weapon)
  * @param autoTargetEnabled   PvP BOT's own target acquisition: false leaves acquisition to the wrapper's aggro range
+ * @param rangedRetreatOnClose PvP BOT's "archers keep shooting and back away when a target is close": false lets a bot that
+ *                           carries a melee weapon switch to it when the target is within twice its melee range
+ * @param meleeRange         PvP BOT's melee range: a bot switches to its melee weapon within twice this (2.5 gives 5 blocks)
+ *                           and attacks within it (within PvP BOT's clamp {@code 2..6})
  */
 public record ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
-                              Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
+                              Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled,
+                              Boolean rangedRetreatOnClose, Double meleeRange) {
+
+    /** The settings without the archer close-range behaviour and the melee range (those are then left alone). */
+    public ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
+                           Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
+        this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon, autoTargetEnabled,
+                null, null);
+    }
+
+    /** The settings without the melee range (that one is then left alone). */
+    public ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
+                           Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled,
+                           Boolean rangedRetreatOnClose) {
+        this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon, autoTargetEnabled,
+                rangedRetreatOnClose, null);
+    }
 
     /** Nothing managed. */
-    public static final ManagedSettings NONE = new ManagedSettings(null, null, null, null, null, null);
+    public static final ManagedSettings NONE = new ManagedSettings(null, null, null, null, null, null, null, null);
 
     public boolean isEmpty() {
         return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
                 && rangedMaxRange == null && autoEquipWeapon == null
-                && autoTargetEnabled == null;
+                && autoTargetEnabled == null && rangedRetreatOnClose == null && meleeRange == null;
     }
 }

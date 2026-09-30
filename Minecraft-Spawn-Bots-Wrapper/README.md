@@ -254,6 +254,15 @@ ids, for example only Piercing, replaces the default: that choice is kept and Me
   but the application filters the loadout, so a re-dressing can never put a disabled enchantment back. Removing an
   id from the list makes stored loadouts whole again on their next re-dressing.
 
+### Arrow counts
+
+A bot that carries a bow or crossbow gets **0 to 32 arrows in total** when it is rolled (uniformly spread by the coverage
+sampler; the stack of spectral or tipped arrows that about half of them carry is counted inside that total). Zero is
+possible on purpose: an archer that starts out of ammunition uses its sword if it has one (see "Sword up close, and out
+of arrows"). The roll consumes the same random draws as before (only the range changed, it used to be 0..256), so a
+seeded loadout differs from an old one only in its arrow stacks. Stored profiles are not migrated: bots that already
+carry more arrows keep them.
+
 ## Managed PvP BOT settings (`pvpbotSettings`)
 
 PvP BOT keeps its combat settings per world (`config/pvpbot/worlds/<world>/settings.json`), and its defaults suit
@@ -270,7 +279,9 @@ therefore holds these settings at chosen values:
   "rangedMinRange": 8.0,         // archers back off below this (PvP BOT: 20)
   "rangedOptimalRange": 12.0,    // PvP BOT: 40
   "rangedMaxRange": 16.0,        // archers walk toward a target beyond this (PvP BOT: 60)
-  "autoEquipWeapon": false       // PvP BOT: true
+  "autoEquipWeapon": false,      // PvP BOT: true
+  "rangedRetreatOnClose": false, // PvP BOT: true; false = a bot that carries a sword or axe switches to it up close
+  "meleeRange": 2.5              // blocks, 2..6 (PvP BOT: 3.5): the melee weapon comes out within twice this (5 blocks) and strikes within it
 }
 ```
 
@@ -280,6 +291,8 @@ the mod's maximum, so `maxTargetDistance` is a ceiling only and PvP BOT must nei
 
 * A `null` or absent key inside the block leaves PvP BOT's own value alone; a config file without the block at all
   gets the values above. `"pvpbotSettings": null` manages nothing.
+* `rangedRetreatOnClose` and `meleeRange` are described under "Sword up close, and out of arrows" below; `meleeRange`
+  outside 2..6 (PvP BOT's own clamp) is not applied, with a warning.
 * Validation: `maxTargetDistance` is clamped to 4..128; the three ranges must satisfy
   `rangedMinRange < rangedOptimalRange <= rangedMaxRange <= maxTargetDistance` (judged with PvP BOT's own value for
   any you leave out), otherwise **all three ranged keys are skipped** with a warning and the other keys still apply.
@@ -297,6 +310,31 @@ the mod's maximum, so `maxTargetDistance` is a ceiling only and PvP BOT must nei
   adapter` no longer warns about it while `aggro.enabled` is on. PvP BOT's revenge logic (`revengeEnabled`, not managed)
   still handles whoever hit an inhabitant, and it accepts an attacker within `maxTargetDistance`, which at 128 is
   the mod's maximum.
+
+### Sword up close, and out of arrows
+
+A bot that carries a sword or axe (or a mace, spear or trident, as PvP BOT scores them) and a bow or crossbow shoots
+while the player is farther than **5 blocks** (twice `meleeRange` 2.5) and takes the melee weapon out once the player is
+within it, like a player swapping to a sword up close. `rangedRetreatOnClose: false` is what lets PvP BOT's own melee
+mode win inside that distance (it also removes PvP BOT's velocity push away from a target inside melee range);
+`meleeRange` sets the distance. PvP BOT's melee mode approaches until the target is within `meleeRange` and attacks
+there: 2.5 blocks between the two bodies' centres, inside vanilla's 3.0 reach.
+
+PvP BOT chooses its ranged mode whenever a bot carries a bow or crossbow anywhere in its inventory, without looking at
+ammunition. A bot with **no arrow left** used to select the empty weapon, notice it cannot shoot, flip to melee mode
+without attacking or moving, and repeat that every tick: it stood there holding the crossbow. Now:
+
+* within 5 blocks PvP BOT's own melee mode runs (the setting above);
+* beyond 5 blocks an out-of-ammo gap closer (after PvP BOT's tick, vanilla inventory calls and PvP BOT's own
+  look-and-move only) selects the melee weapon (moving it into the hotbar if it sits in the main inventory) and walks
+  toward the target until PvP BOT's melee mode takes over. It acts only for a bot PvP BOT has a live target for, that is
+  not retreating or eating, has no arrow of any kind in slots 0-35 and no loaded crossbow it can fire, and carries a
+  melee weapon;
+* a crossbow that is still **loaded** fires its bolt first (the crossbow trigger allows it without an arrow in the
+  inventory), then the sword comes out;
+* a bot with no melee weapon and no ammunition is left exactly as PvP BOT has it;
+* PvP BOT has no "pick arrows up" behaviour, and none is added: a bot only picks up arrows by walking over them, as in
+  vanilla. Once it has an arrow again it shoots again.
 
 ## Crossbow trigger and shot pacing (`rangedPacing`)
 

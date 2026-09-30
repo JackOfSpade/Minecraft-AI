@@ -50,5 +50,6 @@ public class BotCombat {
         public String forcedTargetName = null;
         public Entity lastAttacker = null;
         public boolean lastAttackReset;
+        public boolean isRetreating = false;
     }
 }

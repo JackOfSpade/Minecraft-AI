@@ -157,6 +157,14 @@ public final class InhabitantsConfig {
      *   <li>{@link #autoTargetEnabled} - PvP BOT's own acquisition of the nearest entity within maxTargetDistance. Shipped
      *       false: the wrapper's aggro controller acquires (by line of sight) instead. Set it to true (or set
      *       {@code aggro.enabled} to false and manage nothing here) to give acquisition back to PvP BOT.</li>
+     *   <li>{@link #rangedRetreatOnClose} - PvP BOT's "archers keep shooting and back away when the target is close". Shipped
+     *       false: a bot that carries a melee weapon then switches to it once the target is within twice PvP BOT's melee
+     *       range (like a player swapping to a sword up close) and keeps shooting beyond that; it also removes PvP BOT's
+     *       velocity push away from a target inside melee range. true restores PvP BOT's archer that never puts the
+     *       bow away while it holds an arrow (with no arrow left this addon's out-of-ammo gap closer still applies).</li>
+     *   <li>{@link #meleeRange} - PvP BOT's melee range. Shipped 2.5 (PvP BOT: 3.5): a melee weapon comes out within twice
+     *       this (5 blocks) and attacks land within it (2.5 blocks between the two centres, inside vanilla's 3.0
+     *       reach). PvP BOT clamps it to 2..6; a value outside is not applied.</li>
      * </ul>
      */
     public static final class PvpbotSettings {
@@ -166,6 +174,8 @@ public final class InhabitantsConfig {
         public Double rangedMaxRange;
         public Boolean autoEquipWeapon;
         public Boolean autoTargetEnabled;
+        public Boolean rangedRetreatOnClose;
+        public Double meleeRange;
 
         public PvpbotSettings() {
         }
@@ -180,13 +190,16 @@ public final class InhabitantsConfig {
             s.rangedMaxRange = 16.0;
             s.autoEquipWeapon = false;
             s.autoTargetEnabled = false;
+            s.rangedRetreatOnClose = false;
+            s.meleeRange = 2.5;
             return s;
         }
 
         /** True when nothing is managed. */
         public boolean isEmpty() {
             return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
-                    && rangedMaxRange == null && autoEquipWeapon == null && autoTargetEnabled == null;
+                    && rangedMaxRange == null && autoEquipWeapon == null && autoTargetEnabled == null
+                    && rangedRetreatOnClose == null && meleeRange == null;
         }
     }
 

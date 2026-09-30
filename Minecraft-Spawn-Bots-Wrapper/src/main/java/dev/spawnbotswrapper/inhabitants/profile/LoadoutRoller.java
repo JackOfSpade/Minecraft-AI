@@ -299,7 +299,7 @@ final class LoadoutRoller {
         if (bow) {
             ranged.add(bow());
         }
-        arrows = r.count("profile.ranged.arrows", 0, 256);
+        arrows = r.count("profile.ranged.arrows", 0, 32);
         stockArrows(arrows);
     }
 

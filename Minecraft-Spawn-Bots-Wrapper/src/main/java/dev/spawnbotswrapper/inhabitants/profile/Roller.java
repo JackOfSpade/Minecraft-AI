@@ -23,7 +23,7 @@ final class Roller {
     }
 
     /**
-     * Integer in [lo, hi]. Wide ranges (0..256 arrows, 0..64 food) are drawn as a bucketed double and
+     * Integer in [lo, hi]. Wide ranges (0..64 food) are drawn as a bucketed double and
      * rounded, because the sampler snaps only double edge buckets to the exact endpoints; with plain
      * integer buckets the true minimum and maximum of a 257-value range would be seen once in ~250 draws.
      * Narrow ranges use integer buckets, where every value is dealt once per cycle.

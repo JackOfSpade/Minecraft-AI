@@ -131,7 +131,7 @@ class PvpBotAdapterManagedSettingsTest {
     void aSettingsClassWithoutTheManagedFieldsIsReportedAsProblemsNotAnException() {
         UpstreamSettingsWriter.Handles none = UpstreamSettingsWriter.resolve(Object.class);
         assertTrue(none.fields().isEmpty());
-        assertEquals(7, none.problems().size(), none.problems().toString());
+        assertEquals(9, none.problems().size(), none.problems().toString());
         assertFalse(none.canWrite("maxTargetDistance"));
     }
 
@@ -141,5 +141,40 @@ class PvpBotAdapterManagedSettingsTest {
         f.adapter.probeWith(AdapterFixture.FULL_TREE);
         f.adapter.manageSettings(SHIPPED);
         assertEquals(0, saves());
+    }
+
+    @Test
+    void rangedRetreatOnCloseIsWrittenIntoTheFieldAndNamedInTheLine() throws Exception {
+        AdapterFixture f = AdapterFixture.probed();
+        assertEquals(Boolean.TRUE, field("rangedRetreatOnClose"), "PvP BOT's own default");
+        f.adapter.manageSettings(new ManagedSettings(null, null, null, null, null, null, false));
+        assertEquals(Boolean.FALSE, field("rangedRetreatOnClose"));
+        assertEquals(1, saves());
+        assertEquals(List.of("PvP BOT settings: rangedRetreatOnClose true -> false"),
+                f.sink.info.stream().filter(l -> l.startsWith("PvP BOT settings:")).toList());
+        assertTrue(Recorder.FORBIDDEN.isEmpty(), "no setter is ever called: " + Recorder.FORBIDDEN);
+    }
+
+    @Test
+    void theMeleeRangeAndMoveSpeedAreReadFromPvpBot() {
+        AdapterFixture f = AdapterFixture.probed();
+        assertEquals(new PvpBotOperations.MeleeTuning(3.5, 1.0), f.adapter.meleeTuning().orElseThrow());
+        BotSettings.put("meleeRange", 5.0);
+        BotSettings.put("moveSpeed", 0.5);
+        assertEquals(new PvpBotOperations.MeleeTuning(5.0, 0.5), f.adapter.meleeTuning().orElseThrow());
+    }
+
+    @Test
+    void theMeleeRangeIsWrittenIntoTheFieldAndNamedInTheLine() throws Exception {
+        AdapterFixture f = AdapterFixture.probed();
+        assertEquals(3.5, field("meleeRange"), "PvP BOT's own default");
+        f.adapter.manageSettings(new ManagedSettings(null, null, null, null, null, null, null, 2.5));
+        assertEquals(2.5, field("meleeRange"));
+        assertEquals(1, saves());
+        assertEquals(List.of("PvP BOT settings: meleeRange 3.5 -> 2.5"),
+                f.sink.info.stream().filter(l -> l.startsWith("PvP BOT settings:")).toList());
+        assertTrue(Recorder.FORBIDDEN.isEmpty(), "no setter is ever called: " + Recorder.FORBIDDEN);
+        f.adapter.manageSettings(new ManagedSettings(null, null, null, null, null, null, null, 2.5));
+        assertEquals(1, saves(), "nothing to change, nothing saved");
     }
 }

@@ -144,4 +144,23 @@ class PvpbotSettingsConfigTest {
         assertEquals("10", RangedDistances.text(10.0));
         assertEquals("6.5", RangedDistances.text(6.5));
     }
+
+    @Test
+    void theShippedDefaultTurnsPvpBotsArcherRetreatOffSoABowCarrierUsesItsMeleeWeaponUpClose(@TempDir Path dir) throws IOException {
+        assertEquals(Boolean.FALSE, new InhabitantsConfig().pvpbotSettings.rangedRetreatOnClose);
+        assertNull(load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }").config().pvpbotSettings.rangedRetreatOnClose,
+                "an absent key inside a present block leaves PvP BOT's value alone");
+        assertEquals(Boolean.TRUE, load(dir, "{ \"pvpbotSettings\": { \"rangedRetreatOnClose\": true } }")
+                .config().pvpbotSettings.rangedRetreatOnClose);
+        assertTrue(ConfigIO.toJson(new InhabitantsConfig()).contains("\"rangedRetreatOnClose\": false"));
+    }
+
+    @Test
+    void theShippedMeleeRangeIsTwoAndAHalfSoTheSwordComesOutAtFiveBlocks(@TempDir Path dir) throws IOException {
+        assertEquals(2.5, new InhabitantsConfig().pvpbotSettings.meleeRange);
+        assertNull(load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 16 } }").config().pvpbotSettings.meleeRange,
+                "an absent key inside a present block leaves PvP BOT's value alone");
+        assertEquals(3.0, load(dir, "{ \"pvpbotSettings\": { \"meleeRange\": 3 } }").config().pvpbotSettings.meleeRange);
+        assertTrue(ConfigIO.toJson(new InhabitantsConfig()).contains("\"meleeRange\": 2.5"));
+    }
 }

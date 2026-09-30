@@ -174,6 +174,7 @@ public final class ConfigValidator {
         s.rangedMinRange = finiteOrNull(w, "pvpbotSettings.rangedMinRange", s.rangedMinRange);
         s.rangedOptimalRange = finiteOrNull(w, "pvpbotSettings.rangedOptimalRange", s.rangedOptimalRange);
         s.rangedMaxRange = finiteOrNull(w, "pvpbotSettings.rangedMaxRange", s.rangedMaxRange);
+        s.meleeRange = finiteOrNull(w, "pvpbotSettings.meleeRange", s.meleeRange);
         if (s.maxTargetDistance != null) {
             s.maxTargetDistance = clamp(w, "pvpbotSettings.maxTargetDistance", s.maxTargetDistance,
                     MIN_TARGET_DISTANCE, MAX_TARGET_DISTANCE);

@@ -53,6 +53,8 @@ public class BotSettings {
     private double rangedMinRange = 20.0;
     private double rangedOptimalRange = 40.0;
     private double rangedMaxRange = 60.0;
+    private double meleeRange = 3.5;
+    private double moveSpeed = 1.0;
 
     public static BotSettings get() {
         Recorder.guard("BotSettings.get", "");
@@ -121,6 +123,8 @@ public class BotSettings {
     public double getRangedMinRange() { return rangedMinRange; }
     public double getRangedOptimalRange() { return rangedOptimalRange; }
     public double getRangedMaxRange() { return rangedMaxRange; }
+    public double getMeleeRange() { return meleeRange; }
+    public double getMoveSpeed() { return moveSpeed; }
 
     public void setBotsRelogs(boolean v) { Recorder.FORBIDDEN.add("setBotsRelogs"); }
     public void setBotLeaveOnDeath(boolean v) { Recorder.FORBIDDEN.add("setBotLeaveOnDeath"); }

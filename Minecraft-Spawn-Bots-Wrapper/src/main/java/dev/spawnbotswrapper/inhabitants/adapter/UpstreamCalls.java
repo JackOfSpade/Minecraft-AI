@@ -271,7 +271,8 @@ final class UpstreamCalls {
         return new SettingsPolicy.Current(readDouble(settings, UpstreamContract.MAX_TARGET_DISTANCE_GETTER),
                 readDouble(settings, "getRangedMinRange"), readDouble(settings, "getRangedOptimalRange"),
                 readDouble(settings, "getRangedMaxRange"), readBoolean(settings, "isAutoEquipWeapon"),
-                readBoolean(settings, "isAutoTargetEnabled"));
+                readBoolean(settings, "isAutoTargetEnabled"), readBoolean(settings, "isRangedRetreatOnClose"),
+                readDouble(settings, "getMeleeRange"));
     }
 
     /**
@@ -322,6 +323,16 @@ final class UpstreamCalls {
             }
         }
         return new CombatRead(target, mode, drawing, drawTicks);
+    }
+
+    /** The bot's {@code isRetreating} flag from upstream's combat state, or null when it cannot be read. */
+    Boolean readRetreating(String bot) throws Throwable {
+        java.lang.reflect.Field f = contract.stateFields.get(UpstreamContract.FIELD_RETREATING);
+        if (f == null || !contract.combatGetState.ok()) {
+            return null;
+        }
+        Object state = invoke(contract.combatGetState.method(), null, bot);
+        return state != null && f.get(state) instanceof Boolean b ? b : null;
     }
 
     // ---------------------------------------------------------------- paths

@@ -85,7 +85,7 @@ class ProfileCoverageTest {
     /** Facets every configuration produces (nothing opt-in), checked on both the stock and the full setup. */
     private static void assertCoreNumericFacets(String tag, List<BotProfile> from) {
         assertCovered(tag + " arrows", collect(from, p -> has(p, i -> i.equals(NS + "bow") || i.equals(NS + "crossbow"))
-                ? (double) countOf(p, ProfileTestSupport::isArrowItem) : null), 0, 256, true, true);
+                ? (double) countOf(p, ProfileTestSupport::isArrowItem) : null), 0, 32, true, true);
         assertCovered(tag + " food count", collect(from, p -> (double) countOf(p, ProfileCoverageTest::isFood)),
                 0, 64, true, true);
         assertCovered(tag + " golden apples", collect(from, p -> (double) countOf(p, ItemIds.GOLDEN_APPLE)),

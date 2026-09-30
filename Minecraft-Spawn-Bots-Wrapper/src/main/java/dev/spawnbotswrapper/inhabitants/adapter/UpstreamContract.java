@@ -60,11 +60,12 @@ final class UpstreamContract {
     static final String MAX_TARGET_DISTANCE_GETTER = "getMaxTargetDistance";
     /** Double getters read for the managed ranges (kept apart from {@link #getters}: they are not capability inputs). */
     static final List<String> DOUBLE_GETTERS = List.of(MAX_TARGET_DISTANCE_GETTER, "getRangedMinRange",
-            "getRangedOptimalRange", "getRangedMaxRange");
+            "getRangedOptimalRange", "getRangedMaxRange", "getMeleeRange", "getMoveSpeed");
     /** Public fields of BotCombat.CombatState the addon reads (never written). */
     static final String FIELD_MODE = "currentMode";
     static final String FIELD_DRAWING = "isDrawingBow";
     static final String FIELD_DRAW_TICKS = "bowDrawTicks";
+    static final String FIELD_RETREATING = "isRetreating";
 
     // ---- BotManager
     final Member spawn3;
@@ -290,7 +291,7 @@ final class UpstreamContract {
         if (state == null || !Modifier.isPublic(state.getModifiers())) {
             return out;
         }
-        for (String name : List.of(FIELD_MODE, FIELD_DRAWING, FIELD_DRAW_TICKS)) {
+        for (String name : List.of(FIELD_MODE, FIELD_DRAWING, FIELD_DRAW_TICKS, FIELD_RETREATING)) {
             try {
                 Field f = state.getField(name);
                 if (!Modifier.isStatic(f.getModifiers())) {

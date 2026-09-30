@@ -55,7 +55,9 @@ final class GlobalNotes {
             out.add("Carries a bow/crossbow but ranged combat is off globally (ranged setting): it is never used.");
         } else if (weapon && arrows == 0) {
             out.add("Carries a bow/crossbow but no arrows: PvP BOT needs an arrow in its inventory to use it, "
-                    + "so the weapon is useless.");
+                    + (inv.hasMelee()
+                    ? "so the weapon is useless; with the melee weapon it carries the bot fights in melee instead."
+                    : "so the weapon is useless."));
         }
         if (!weapon && arrows > 0) {
             out.add("Carries arrows but no bow or crossbow: the arrows do nothing.");
@@ -64,8 +66,11 @@ final class GlobalNotes {
             out.add("Carries both a bow and a crossbow: PvP BOT prefers the crossbow.");
         }
         if (weapon && caps.rangedEnabled() && arrows > 0 && inv.hasMelee()) {
-            out.add("With a ranged weapon and arrows PvP BOT normally stays in ranged mode even at close "
-                    + "range, so its melee weapon is rarely used until the arrows run out.");
+            out.add(caps.rangedRetreatOnClose()
+                    ? "With a ranged weapon and arrows PvP BOT normally stays in ranged mode even at close "
+                    + "range, so its melee weapon is rarely used until the arrows run out."
+                    : "With a ranged weapon and arrows it shoots from a distance and switches to its melee weapon "
+                    + "once the target is within twice PvP BOT's melee range.");
         }
     }
 

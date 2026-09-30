@@ -352,6 +352,36 @@ public final class PvpBotAdapter implements PvpBotOperations {
     }
 
     @Override
+    public Optional<MeleeTuning> meleeTuning() {
+        try {
+            UpstreamCalls calls = usableCalls();
+            if (calls == null || !calls.contract().settingsGet.ok()) {
+                return Optional.empty();
+            }
+            Object settings = calls.settingsInstance();
+            Double range = calls.readDouble(settings, "getMeleeRange");
+            Double speed = calls.readDouble(settings, "getMoveSpeed");
+            return range == null || speed == null ? Optional.empty() : Optional.of(new MeleeTuning(range, speed));
+        } catch (Throwable t) {
+            log.failure("reading the melee range", t);
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Boolean retreating(String botName) {
+        try {
+            UpstreamCalls calls = usableCalls();
+            Map<String, String> listed = calls == null || botName == null ? null : listedOrNull(lastServer.get());
+            String exact = listed == null ? null : listed.get(NameRules.key(botName));
+            return exact == null ? null : calls.readRetreating(exact);
+        } catch (Throwable t) {
+            log.failure("reading a bot's retreat flag", t);
+            return null;
+        }
+    }
+
+    @Override
     public Optional<CombatView> combatView(String botName) {
         try {
             Probed p = probed;

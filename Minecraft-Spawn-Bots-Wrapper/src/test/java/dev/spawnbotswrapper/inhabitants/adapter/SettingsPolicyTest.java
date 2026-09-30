@@ -141,4 +141,37 @@ class SettingsPolicyTest {
         assertEquals(List.of(), plan.changes());
         assertTrue(plan.warnings().get(0).contains("positive"), plan.warnings().get(0));
     }
+
+    @Test
+    void rangedRetreatOnCloseIsManagedLikeTheOthersAndOnlyWrittenWhenItDiffers() {
+        ManagedSettings wanted = new ManagedSettings(null, null, null, null, null, null, false);
+        Plan plan = SettingsPolicy.plan(wanted, new Current(64.0, 20.0, 40.0, 60.0, true, true, true));
+        assertEquals(List.of("rangedRetreatOnClose"), names(plan));
+        assertEquals("rangedRetreatOnClose true -> false", plan.summary());
+        assertEquals(List.of(), names(SettingsPolicy.plan(wanted, new Current(64.0, 20.0, 40.0, 60.0, true, true, false))));
+        assertEquals(List.of("rangedRetreatOnClose"), names(SettingsPolicy.plan(wanted, UPSTREAM)),
+                "an unreadable current value is written (the six-argument Current has none)");
+        assertEquals(List.of(), names(SettingsPolicy.plan(new ManagedSettings(null, null, null, null, null, null, null),
+                new Current(64.0, 20.0, 40.0, 60.0, true, true, true))), "null leaves it alone");
+        assertTrue(new ManagedSettings(null, null, null, null, null, null, false).isEmpty() == false);
+        assertTrue(new ManagedSettings(null, null, null, null, null, null, null).isEmpty());
+    }
+
+    @Test
+    void theMeleeRangeIsManagedWithinPvpBotsClampAndOnlyWrittenWhenItDiffers() {
+        ManagedSettings wanted = new ManagedSettings(null, null, null, null, null, null, null, 2.5);
+        Plan plan = SettingsPolicy.plan(wanted, new Current(64.0, 20.0, 40.0, 60.0, true, true, true, 3.5));
+        assertEquals(List.of("meleeRange"), names(plan));
+        assertEquals("meleeRange 3.5 -> 2.5", plan.summary());
+        assertEquals(List.of(), names(SettingsPolicy.plan(wanted, new Current(64.0, 20.0, 40.0, 60.0, true, true, true, 2.5))));
+        assertEquals(List.of("meleeRange"), names(SettingsPolicy.plan(wanted, UPSTREAM)), "an unreadable value is written");
+        for (double bad : new double[] {1.9, 6.1, 0.0, -1.0}) {
+            Plan refused = SettingsPolicy.plan(new ManagedSettings(null, null, null, null, null, null, null, bad), UPSTREAM);
+            assertEquals(List.of(), names(refused));
+            assertTrue(refused.warnings().get(0).contains("meleeRange"), refused.warnings().toString());
+        }
+        assertEquals(List.of("meleeRange"), names(SettingsPolicy.plan(new ManagedSettings(null, null, null, null, null, null, null, 2.0), UPSTREAM)));
+        assertEquals(List.of("meleeRange"), names(SettingsPolicy.plan(new ManagedSettings(null, null, null, null, null, null, null, 6.0), UPSTREAM)));
+        assertTrue(!wanted.isEmpty());
+    }
 }

@@ -116,7 +116,10 @@ final class SettingData {
                                 + "min(attribute, global meleeRange), so it can only clamp down. Does not vary: "
                                 + "approach and attack-attempt distance stay the global meleeRange, and the default "
                                 + "jump-crit path (criticals on) calls the vanilla attack directly with no reach "
-                                + "check. A block in the line of sight is hit first. Verified in HeroBot HEAD only."),
+                                + "check. A block in the line of sight is hit first. Verified in HeroBot HEAD only. Managed by this "
+                                + "addon: config pvpbotSettings.meleeRange (shipped 2.5, PvP BOT's own default is 3.5): a bot "
+                                + "switches to its melee weapon within twice this (5 blocks) and attacks within it (2.5 blocks "
+                                + "between the two centres, inside vanilla's 3.0 reach)."),
                 decimal("rangedMinRange", "ranged-min-range", 3.0, 20.0, 20.0).global(
                         "No per-bot proxy: numeric tuning. Archers park at about min to min+2 blocks (20 to 22 by "
                                 + "default), not at rangedOptimalRange; the loadout only decides who is an archer. The "
@@ -393,10 +396,12 @@ final class SettingData {
                         "No per-bot proxy: sideways strafing while shooting. It writes an input field HeroBot may "
                                 + "overwrite, so it is possibly inert (unverified for the shipped HeroBot)."),
                 flag("rangedRetreatOnClose", "ranged-retreat", true).global(
-                        "No per-bot proxy: decides whether a bow carrier keeps shooting at point blank (on, default) "
-                                + "or switches to melee if it carries a melee weapon. Loadout composition does not "
-                                + "substitute: at the default every bow-plus-arrows bot is an archer, so hybrids "
-                                + "collapse to archers."),
+                        "No per-bot proxy: decides whether a bow carrier keeps shooting at point blank (on, PvP BOT's default) "
+                                + "or switches to melee if it carries a melee weapon (off: the melee weapon is used within twice "
+                                + "meleeRange, and the velocity push away from a target inside meleeRange is gone). Managed by this "
+                                + "addon: config pvpbotSettings.rangedRetreatOnClose (shipped false), written into the settings "
+                                + "whenever PvP BOT loads them. Loadout composition does not substitute the setting itself; at "
+                                + "PvP BOT's default every bow-plus-arrows bot is an archer, so hybrids collapse to archers."),
                 flag("profileLagFix", "profile-lagg-fix", true).admin(
                         "Spawn-path optimisation: pre-fills the profile cache before each playerspawn issued by PvP "
                                 + "BOT's own spawn method. Never touched. The command key really is spelled with a "

@@ -11,6 +11,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -211,7 +212,9 @@ public final class RangedFire {
             }
             Optional<PvpBotOperations.CombatView> view = adapter.combatView(name);
             if (view.isPresent()) {
-                ranged = view.get().mode() == null ? null : view.get().mode().equals("RANGED");
+                // PvP BOT flips to melee mode when the bot has no arrow left, but a bolt already in the crossbow can still
+                // be fired: without an arrow in the inventory the loaded crossbow counts as ranged whatever the mode says.
+                ranged = view.get().mode() == null ? null : view.get().mode().equals("RANGED") || !hasArrow(bot);
                 reachable = reachable(bot, view.get().target(), radius[0]);
             }
         }
@@ -222,6 +225,16 @@ public final class RangedFire {
             bot.gameMode.useItem(bot, bot.level(), main, InteractionHand.MAIN_HAND);
             shotsFired++;
         }
+    }
+
+    /** An arrow of any kind anywhere in slots 0-35 (PvP BOT's own ammo test). */
+    private static boolean hasArrow(ServerPlayer bot) {
+        for (int i = 0; i < 36; i++) {
+            if (bot.getInventory().getItem(i).getItem() instanceof ArrowItem) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** PvP BOT's own targeting radius when readable, else the configured one, else the mod maximum of 128. */

@@ -133,6 +133,31 @@ public interface PvpBotOperations {
     record CombatView(Entity target, String mode, Boolean drawingBow, Integer bowDrawTicks) {
     }
 
+    /**
+     * PvP BOT's melee range and move speed (its own settings: blocks, and the speed factor its combat passes to its
+     * move-toward). Empty when unreadable. Read-only.
+     */
+    default Optional<MeleeTuning> meleeTuning() {
+        return Optional.empty();
+    }
+
+    /**
+     * PvP BOT's melee reach and walking speed factor.
+     *
+     * @param meleeRange PvP BOT's melee range, blocks
+     * @param moveSpeed  the speed factor its combat moves with
+     */
+    record MeleeTuning(double meleeRange, double moveSpeed) {
+    }
+
+    /**
+     * Whether PvP BOT flags this bot as retreating (low health with food to eat: it walks away from its target), or
+     * null when that cannot be read. Read-only.
+     */
+    default Boolean retreating(String botName) {
+        return null;
+    }
+
     // ---------------------------------------------------------------- spawning
 
     /**

@@ -12,11 +12,15 @@ import java.util.List;
  * Rules: {@code maxTargetDistance} must be within {@value #MIN_TARGET_DISTANCE}..{@value #MAX_TARGET_DISTANCE}; the
  * ranged distances (judged with the values PvP BOT has for the ones that are not managed) must satisfy
  * {@link RangedDistances#problem}, otherwise none of the ranged keys is applied and a warning says why (the other
- * settings are unaffected).
+ * settings are unaffected); {@code meleeRange} must be within {@value #MIN_MELEE_RANGE}..{@value #MAX_MELEE_RANGE}
+ * (PvP BOT's own clamp).
  */
 final class SettingsPolicy {
     static final double MIN_TARGET_DISTANCE = 4.0;
     static final double MAX_TARGET_DISTANCE = 128.0;
+    /** PvP BOT's own setter clamp for the melee range. */
+    static final double MIN_MELEE_RANGE = 2.0;
+    static final double MAX_MELEE_RANGE = 6.0;
     private static final double EPSILON = 1e-9;
 
     private SettingsPolicy() {
@@ -24,7 +28,19 @@ final class SettingsPolicy {
 
     /** What PvP BOT has right now; a null component could not be read. */
     record Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
-                   Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
+                   Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose,
+                   Double meleeRange) {
+        Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
+                Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
+            this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
+                    autoTargetEnabled, null, null);
+        }
+
+        Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
+                Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose) {
+            this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
+                    autoTargetEnabled, rangedRetreatOnClose, null);
+        }
     }
 
     /** One setting to change; {@code from} is null when the current value could not be read. */
@@ -94,6 +110,16 @@ final class SettingsPolicy {
         if (wanted.autoTargetEnabled() != null && !wanted.autoTargetEnabled().equals(current.autoTargetEnabled())) {
             changes.add(new Change("autoTargetEnabled", current.autoTargetEnabled(), wanted.autoTargetEnabled()));
         }
+        if (wanted.rangedRetreatOnClose() != null && !wanted.rangedRetreatOnClose().equals(current.rangedRetreatOnClose())) {
+            changes.add(new Change("rangedRetreatOnClose", current.rangedRetreatOnClose(), wanted.rangedRetreatOnClose()));
+        }
+        Double melee = wanted.meleeRange();
+        if (melee != null && !(melee >= MIN_MELEE_RANGE && melee <= MAX_MELEE_RANGE)) {
+            warnings.add("meleeRange " + RangedDistances.text(melee) + " is outside " + RangedDistances.text(MIN_MELEE_RANGE)
+                    + ".." + RangedDistances.text(MAX_MELEE_RANGE) + "; it is not applied");
+            melee = null;
+        }
+        addDouble(changes, "meleeRange", current.meleeRange(), melee);
         return new Plan(changes, warnings);
     }
 

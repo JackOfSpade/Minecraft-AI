@@ -330,7 +330,7 @@ class ProfileInvariantsTest {
             if (!g.facts().hasRanged()) {
                 assertEquals(0, arrows, "arrows without a bow are dead weight");
             }
-            assertTrue(arrows <= 256);
+            assertTrue(arrows <= 32);
         }
     }
 
