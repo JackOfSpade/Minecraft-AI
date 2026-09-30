@@ -7,6 +7,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 public final class InteractAction {
+    /** The refusal reason of a legal strike whose target is not (yet) under the bot's crosshair. */
+    public static final String NOT_UNDER_CROSSHAIR = "not_under_crosshair";
+
     private InteractAction() {
     }
 
@@ -15,7 +18,12 @@ public final class InteractAction {
      * the packet handler, which this direct call skips), so the survival-legal preconditions are
      * enforced here for every caller: never the owner or another bot, the target's box inside the
      * vanilla entity interaction range, and no colliding block in the way. A refused strike does
-     * not swing, does not reset the cooldown and does not turn the bot.
+     * not swing and does not reset the cooldown.
+     *
+     * <p>Human aim ({@link HumanAim}): a legal strike first turns the bot toward the target at human speed (at most the
+     * per-tick turn budget, shared with the caller's own look), and only lands when the target is then the entity under the
+     * bot's crosshair (vanilla's pick along its real look vector within its vanilla attack range). While the bot is still
+     * turning the strike fails with {@code not_under_crosshair}; a caller that strikes every tick simply tries again.
      */
     public static ActionResult attackEntity(AIPlayerEntity player, Entity target) {
         String refusal = StrikeLegality.strikeRefusal(player, target);
@@ -25,7 +33,10 @@ public final class InteractAction {
             return ActionResult.failed(refusal);
         }
         Vec3 targetCenter = target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D);
-        LookAction.lookAt(player, targetCenter);
+        HumanAim.lookToward(player, targetCenter);
+        if (!HumanAim.isUnderCrosshair(player, target)) {
+            return ActionResult.failed(NOT_UNDER_CROSSHAIR);
+        }
         player.attack(target);
         player.swing(InteractionHand.MAIN_HAND);
         player.resetOnlyAttackStrengthTicker();

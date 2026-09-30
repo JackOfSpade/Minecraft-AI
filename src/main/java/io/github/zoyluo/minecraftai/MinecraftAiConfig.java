@@ -682,9 +682,15 @@ public record MinecraftAiConfig(
      * same defaults. Every section is null-tolerant: a missing section, key or Boolean is the default, a number that is missing,
      * zero, negative or NaN is the default. See docs/OPERATING_PROFILES.md ("Behaviour switches").
      */
-    public record Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden) {
+    public record Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden, CombatBehaviour combat) {
+        /** Source-compatible constructor for callers that predate the combat section: it carries the combat defaults. */
+        public Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden) {
+            this(pace, targeting, gear, follow, warden, CombatBehaviour.defaults());
+        }
+
         public static Behaviour defaults() {
-            return new Behaviour(Pace.defaults(), Targeting.defaults(), Gear.defaults(), Follow.defaults(), Warden.defaults());
+            return new Behaviour(Pace.defaults(), Targeting.defaults(), Gear.defaults(), Follow.defaults(), Warden.defaults(),
+                    CombatBehaviour.defaults());
         }
 
         Behaviour withDefaults(Behaviour defaults) {
@@ -693,7 +699,8 @@ public record MinecraftAiConfig(
                     targeting == null ? defaults.targetingOrDefaults() : targeting.withDefaults(defaults.targetingOrDefaults()),
                     gear == null ? defaults.gearOrDefaults() : gear.withDefaults(defaults.gearOrDefaults()),
                     follow == null ? defaults.followOrDefaults() : follow.withDefaults(defaults.followOrDefaults()),
-                    warden == null ? defaults.wardenOrDefaults() : warden.withDefaults(defaults.wardenOrDefaults()));
+                    warden == null ? defaults.wardenOrDefaults() : warden.withDefaults(defaults.wardenOrDefaults()),
+                    combat == null ? defaults.combatOrDefaults() : combat.withDefaults(defaults.combatOrDefaults()));
         }
 
         /** The pace section; never null. */
@@ -719,6 +726,44 @@ public record MinecraftAiConfig(
         /** The warden section; never null. */
         public Warden wardenOrDefaults() {
             return warden == null ? Warden.defaults() : warden;
+        }
+
+        /** The combat section; never null. */
+        public CombatBehaviour combatOrDefaults() {
+            return combat == null ? CombatBehaviour.defaults() : combat;
+        }
+    }
+
+    /** How a companion fights (the {@code "behaviour.combat"} section). */
+    public record CombatBehaviour(Aim aim) {
+        public static CombatBehaviour defaults() {
+            return new CombatBehaviour(Aim.defaults());
+        }
+
+        CombatBehaviour withDefaults(CombatBehaviour defaults) {
+            return new CombatBehaviour(aim == null ? defaults.aimOrDefaults() : aim.withDefaults(defaults.aimOrDefaults()));
+        }
+
+        /** The aim section; never null. */
+        public Aim aimOrDefaults() {
+            return aim == null ? Aim.defaults() : aim;
+        }
+    }
+
+    /**
+     * Human aim of a fighting companion. {@code maxTurnDegPerSec}: the fastest its head turns while it aims a weapon or strikes
+     * (a human's flick speed: there is no instant spin-and-shoot); a missing, zero, negative or NaN value is the default.
+     */
+    public record Aim(double maxTurnDegPerSec) {
+        /** The default flick speed of a human aim, in degrees per second. */
+        public static final double DEFAULT_MAX_TURN_DEG_PER_SEC = 540.0D;
+
+        public static Aim defaults() {
+            return new Aim(DEFAULT_MAX_TURN_DEG_PER_SEC);
+        }
+
+        Aim withDefaults(Aim defaults) {
+            return new Aim(positiveFiniteOrDefault(maxTurnDegPerSec, defaults.maxTurnDegPerSec));
         }
     }
 

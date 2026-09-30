@@ -136,6 +136,11 @@ public final class FollowTask extends AbstractTask {
         return escort.strikes();
     }
 
+    /** Package-visible for GameTests: the game tick of the last ready swing that was still turning toward its target. */
+    long escortLastAimTick() {
+        return escort.lastAimTick();
+    }
+
     /** Package-visible for GameTests: the gait this task last asked for. */
     Gait paceGait() {
         return paceGait;

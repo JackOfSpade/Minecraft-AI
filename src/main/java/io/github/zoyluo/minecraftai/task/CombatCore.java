@@ -2,8 +2,10 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.EquipAction;
+import io.github.zoyluo.minecraftai.action.HumanAim;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.RangedWeapon;
 import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
@@ -18,7 +20,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -49,7 +50,7 @@ public final class CombatCore {
     public static final float ATTACK_RANGE = 3.0F;
     /**
      * Shared "am I already in a melee exchange" boundary. Kept independent from
-     * {@code CombatTask.BOW_MELEE_SWITCH_DISTANCE} (same value) so target-priority decisions made
+     * {@code CombatTask.RANGED_MELEE_SWITCH_DISTANCE} (same value) so target-priority decisions made
      * outside CombatTask (e.g. DangerWatcher's top-threat ranking) do not require a dependency on
      * CombatTask's private phase machinery.
      */
@@ -363,30 +364,36 @@ public final class CombatCore {
         return hasLineOfSight(bot, target) || SharedVision.ownerSees(bot, target);
     }
 
+    /**
+     * Turns toward {@code target}'s centre at human speed ({@link HumanAim}: the head turns at most the configured degrees per
+     * second, so a target behind the bot is faced over several ticks, never in one).
+     */
     public static void lookAt(AIPlayerEntity bot, LivingEntity target) {
         Vec3 targetCenter = target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D);
-        LookAction.lookAt(bot, targetCenter);
+        HumanAim.lookToward(bot, targetCenter);
     }
 
     /**
-     * Aims for a bow shot at {@code target}'s center: same yaw as {@link #lookAt}, but the pitch is
-     * solved via {@link ProjectileBallistics} so a fully-drawn arrow actually lands there instead of
-     * dropping short with increasing range. {@link #lookAt} points straight at the target, which is
-     * correct for melee (and negligibly different from this at melee range) but is the aim of a
-     * human archer who never compensates for arrow drop -- fine at a few blocks, an increasingly
-     * clear miss-low at the far end of ranged engagement.
+     * Aims the ranged weapon in the main hand (bow or crossbow) at {@code target}'s center, at human speed ({@link HumanAim}):
+     * same yaw as {@link #lookAt}, but the pitch is solved via {@link ProjectileBallistics} for the weapon's own arrow speed so
+     * the arrow actually lands there instead of dropping short with increasing range. {@link #lookAt} points straight at the
+     * target, which is correct for melee (and negligibly different from this at melee range) but is the aim of a human archer
+     * who never compensates for arrow drop -- fine at a few blocks, an increasingly clear miss-low at the far end of ranged
+     * engagement. Returns true when the tracked aim is on the shot direction (within {@link HumanAim#SHOT_TOLERANCE_DEG}),
+     * the only moment a shot may leave.
      */
-    public static void lookAtForBowShot(AIPlayerEntity bot, LivingEntity target) {
+    public static boolean aimForShot(AIPlayerEntity bot, LivingEntity target) {
         Vec3 eye = bot.getEyePosition();
         Vec3 targetCenter = target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D);
         double dx = targetCenter.x - eye.x;
         double dz = targetCenter.z - eye.z;
         double dy = targetCenter.y - eye.y;
         double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
-        float yaw = Mth.wrapDegrees((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D));
-        double pitch = ProjectileBallistics.pitchForShot(
-                horizontalDistance, dy, ProjectileBallistics.FULL_DRAW_ARROW_SPEED);
-        LookAction.setYawPitch(bot, yaw, (float) pitch);
+        float yaw = HumanAim.yawTo(eye, targetCenter);
+        float pitch = (float) ProjectileBallistics.pitchForShot(
+                horizontalDistance, dy, RangedWeapon.projectileSpeed(bot.getMainHandItem()));
+        HumanAim.turnToward(bot, yaw, pitch);
+        return HumanAim.isOnTarget(bot, yaw, pitch);
     }
 
     public static void startApproach(AIPlayerEntity bot, LivingEntity target) {

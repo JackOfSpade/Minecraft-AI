@@ -14,11 +14,11 @@ final class CombatSmartBowSourceContractTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
-    void combatUsesBowOnlyBeyondOneAndAHalfMeleeRangesAndReturnsToBestMelee() throws IOException {
+    void combatUsesRangedOnlyBeyondOneAndAHalfMeleeRangesAndReturnsToBestMelee() throws IOException {
         String combat = read("task/CombatTask.java");
 
-        assertTrue(combat.contains("BOW_MELEE_SWITCH_DISTANCE = CombatCore.ATTACK_RANGE * 1.5D"));
-        assertTrue(combat.contains("bot.distanceTo(target) > BOW_MELEE_SWITCH_DISTANCE"));
+        assertTrue(combat.contains("RANGED_MELEE_SWITCH_DISTANCE = CombatCore.ATTACK_RANGE * 1.5D"));
+        assertTrue(combat.contains("bot.distanceTo(target) > RANGED_MELEE_SWITCH_DISTANCE"));
         assertTrue(combat.contains("EquipAction.bestRangedSlot(bot, target).isPresent()"));
         assertTrue(combat.contains("finishRangedLoadout(bot);\n        CombatCore.ensureMeleeWeapon(bot, target);"),
                 "crossing back inside the range boundary must restore the offhand and equip melee");

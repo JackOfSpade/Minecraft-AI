@@ -41,6 +41,8 @@ final class FollowEscort {
 
     private long nextWeaponSwapTick = Long.MIN_VALUE;
     private long lastStrikeTick = Long.MIN_VALUE;
+    /** The last tick a ready swing found its target not yet under the crosshair (the aim is still turning, at human speed). */
+    private long lastAimTick = Long.MIN_VALUE;
     private long nextLogTick = Long.MIN_VALUE;
     private boolean engaged;
     private int strikes;
@@ -75,7 +77,13 @@ final class FollowEscort {
 
     /** True while the follower should not turn toward the player because it has just swung at something. */
     boolean holdsFacing(long now) {
-        return lastStrikeTick != Long.MIN_VALUE && now - lastStrikeTick < NO_FACE_TICKS;
+        return lastStrikeTick != Long.MIN_VALUE && now - lastStrikeTick < NO_FACE_TICKS
+                || lastAimTick != Long.MIN_VALUE && now - lastAimTick <= 1L;
+    }
+
+    /** The game tick of the last ready swing that was still turning toward its target, or {@link Long#MIN_VALUE}. */
+    long lastAimTick() {
+        return lastAimTick;
     }
 
     /**
@@ -131,6 +139,9 @@ final class FollowEscort {
             return null;
         }
         if (!CombatCore.strikeIfReady(bot, target)) {
+            // The swing is ready and legal but the aim is still on its way (human turn speed): the follower keeps its facing
+            // on the target until the crosshair is on it, so the walker does not turn it back every tick.
+            lastAimTick = now;
             return null;
         }
         lastStrikeTick = now;

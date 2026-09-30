@@ -487,31 +487,64 @@ public final class EquipAction {
     }
 
     /**
-     * Selects a bow only when a physical vanilla-compatible arrow exists.  In particular, this
-     * deliberately does not let an Infinity bow invent ammunition: vanilla consumes tipped and
-     * spectral arrows, so a real stack must still be available before a ranged action is begun.
+     * Selects a ranged weapon (a bow or a crossbow) that can fire right now, worst-first (the cheapest one by
+     * {@link GearValue}, enchantments counted; on an exact tie a crossbow that is already loaded goes first). A bow needs a
+     * physical vanilla-compatible arrow; a crossbow needs one too, or must already be loaded (a pre-loaded crossbow needs no
+     * ammunition for that shot). In particular, this deliberately does not let an Infinity bow invent ammunition: vanilla
+     * consumes tipped and spectral arrows, so a real stack must still be available before a ranged action is begun.
+     *
+     * <p>Adequacy is the same for both weapons: a full-power arrow reaches and damages the target from any distance the combat
+     * planner shoots from (arrow speed 3.0 for the bow, 3.15 for the crossbow), so the worst-first order alone decides between
+     * them, except that a weapon about to break goes last and a crossbow that holds a rocket is not used.
      */
     public static OptionalInt bestRangedSlot(AIPlayerEntity bot, LivingEntity target) {
-        if (bestArrowChoice(bot, target).isEmpty()) {
-            return OptionalInt.empty();
-        }
+        boolean hasArrow = bestArrowChoice(bot, target).isPresent();
         Inventory inventory = bot.getInventory();
         boolean worstFirst = GearValue.worstFirstEnabled();
         int chosen = -1;
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
             ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (!stack.is(Items.BOW)) {
+            if (!canFireNow(stack, hasArrow)) {
                 continue;
             }
             if (!worstFirst) {
                 return OptionalInt.of(slot);
             }
-            // Worst-first: the cheapest bow that is not about to break (an enchanted one is kept for last).
-            if (chosen < 0 || cheaperBefore(stack, inventory.getNonEquipmentItems().get(chosen))) {
+            // Worst-first: the cheapest weapon that is not about to break (an enchanted one is kept for last).
+            if (chosen < 0 || cheaperRangedBefore(stack, inventory.getNonEquipmentItems().get(chosen))) {
                 chosen = slot;
             }
         }
         return chosen < 0 ? OptionalInt.empty() : OptionalInt.of(chosen);
+    }
+
+    /** True when {@code stack} is a bow or crossbow that could shoot now: with an arrow at hand, or (a crossbow) already loaded. */
+    private static boolean canFireNow(ItemStack stack, boolean hasArrow) {
+        if (!RangedWeapon.isRanged(stack) || !RangedWeapon.canShoot(stack)) {
+            return false;
+        }
+        return hasArrow || RangedWeapon.isLoaded(stack);
+    }
+
+    /**
+     * {@link #cheaperBefore} for two ranged weapons: not nearly broken first, then the lower value; among weapons of an equal value a
+     * loaded crossbow (its shot needs no draw) goes first, then the more worn.
+     */
+    private static boolean cheaperRangedBefore(ItemStack a, ItemStack b) {
+        boolean aBroken = a.isDamageableItem() && GearValue.remaining(a) <= 1;
+        boolean bBroken = b.isDamageableItem() && GearValue.remaining(b) <= 1;
+        if (aBroken != bBroken) {
+            return !aBroken;
+        }
+        double valueA = GearValue.toolValue(a);
+        double valueB = GearValue.toolValue(b);
+        if (Math.abs(valueA - valueB) > SCORE_EPSILON) {
+            return valueA < valueB;
+        }
+        if (RangedWeapon.isLoaded(a) != RangedWeapon.isLoaded(b)) {
+            return RangedWeapon.isLoaded(a);
+        }
+        return GearValue.remaining(a) < GearValue.remaining(b);
     }
 
     /** True when the bow or shield {@code a} goes before {@code b} worst-first: not nearly broken first, then the lower value, then the more worn. */
@@ -530,22 +563,24 @@ public final class EquipAction {
     }
 
     /**
-     * Equips a bow and places the deterministic best arrow in offhand.  ProjectileWeaponItem resolves
-     * a held projectile before inventory ammunition, so this makes the score observable by the
+     * Equips the best ranged weapon (bow or crossbow) and places the deterministic best arrow in offhand.
+     * ProjectileWeaponItem resolves a held projectile before inventory ammunition, so this makes the score observable by the
      * actual shot instead of relying on inventory iteration order.  The previous offhand stack is
      * atomically swapped into the arrow's source slot and can later be restored by the returned
-     * lease without dropping or overwriting either stack.
+     * lease without dropping or overwriting either stack. A loaded crossbow with no arrow at hand needs no swap for its shot.
      */
     public static Optional<RangedLoadout> equipBestRangedLoadout(AIPlayerEntity bot,
                                                                    LivingEntity target) {
-        OptionalInt bowSlot = bestRangedSlot(bot, target);
-        if (bowSlot.isEmpty() || InventoryAction.equipFromSlot(bot, bowSlot.getAsInt()) < 0) {
+        OptionalInt weaponSlot = bestRangedSlot(bot, target);
+        if (weaponSlot.isEmpty() || InventoryAction.equipFromSlot(bot, weaponSlot.getAsInt()) < 0) {
             return Optional.empty();
         }
 
         ArrowChoice choice = bestArrowChoice(bot, target).orElse(null);
         if (choice == null) {
-            return Optional.empty();
+            return RangedWeapon.isLoaded(bot.getMainHandItem())
+                    ? Optional.of(RangedLoadout.alreadyHeld(ItemStack.EMPTY))
+                    : Optional.empty();
         }
         if (choice.isOffhand()) {
             return Optional.of(RangedLoadout.alreadyHeld(bot.getOffhandItem()));

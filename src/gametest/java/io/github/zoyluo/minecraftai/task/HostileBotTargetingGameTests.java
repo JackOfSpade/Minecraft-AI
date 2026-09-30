@@ -94,6 +94,7 @@ public final class HostileBotTargetingGameTests {
         f.require(StrikeLegality.strikeRefusal(bot, foreign) == null,
                 "the strike on a visible marked aggressor is refused: " + StrikeLegality.strikeRefusal(bot, foreign));
         float before = foreign.getHealth();
+        f.face(bot, foreign); // the strike needs the crosshair on its target (human aim); the fixture faces it first
         ActionResult hit = InteractAction.attackEntity(bot, foreign);
         f.require(hit.isSuccess() && foreign.getHealth() < before, "the strike did not hurt the aggressor: " + hit.reason());
         f.finish();

@@ -306,6 +306,8 @@ public final class CombatHardeningGameTests {
         // 2. A meadow between them (non-colliding plants) must NOT block the strike.
         buildWall(context, wall, Blocks.AIR);
         world.setBlock(wall, Blocks.SHORT_GRASS.defaultBlockState(), Block.UPDATE_ALL);
+        // Human aim: a strike lands only under the crosshair, so the fixture faces the husk (the small pitch left is turned at once).
+        io.github.zoyluo.minecraftai.action.LookAction.lookAt(bot, husk.getBoundingBox().getCenter());
         ActionResult grass = InteractAction.attackEntity(bot, husk);
         require(context, grass.isSuccess() && husk.getHealth() < before,
                 "grass occluded a strike: " + grass.status() + ":" + grass.reason());
@@ -873,7 +875,7 @@ public final class CombatHardeningGameTests {
                         && combat.describe().contains("phase=RANGED")) {
                     sawFullDraw[0] = true;
                 }
-                if (combat.isBowSuppressed()) {
+                if (combat.isRangedSuppressed()) {
                     giveUpTick[0] = (int) context.getTick();
                     require(context, sawFullDraw[0],
                             "the bow was given up without ever being fully drawn: the give-up was not the "
@@ -932,7 +934,7 @@ public final class CombatHardeningGameTests {
                     peekTicks[0]++;
                     placeOnLineOfFire(owner, bot, first.distanceTo(bot) <= second.distanceTo(bot) ? first : second);
                 }
-                if (combat.isBowSuppressed()) {
+                if (combat.isRangedSuppressed()) {
                     giveUpTick[0] = (int) context.getTick();
                     require(context, peekTicks[0] > 0, "the bow was given up before any peek: " + combat.describe());
                     require(context, !bot.isUsingItem() && !combat.describe().contains("phase=COVER"),

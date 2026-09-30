@@ -109,6 +109,10 @@ public final class GearValue {
                 case "mending", "infinity" -> 0.4D;
                 case "fortune", "fire_aspect" -> 0.2D * level;
                 case "flame" -> 0.2D;
+                // Crossbow enchantments: a faster reload and a piercing shot each count per level, Multishot (three arrows) more.
+                case "quick_charge" -> 0.15D * level;
+                case "multishot" -> 0.4D;
+                case "piercing" -> 0.1D * level;
                 case "sharpness", "knockback", "power", "punch", "feather_falling", "thorns" -> 0.1D * level;
                 case "smite", "bane_of_arthropods", "looting" -> 0.05D * level;
                 case "binding_curse", "vanishing_curse" -> 0.0D;
@@ -167,6 +171,17 @@ public final class GearValue {
 
     public static boolean hasSilkTouch(ItemStack stack) {
         return hasEnchantment(stack, "silk_touch");
+    }
+
+    /** The level of the enchantment with this registry path (e.g. "multishot") on the stack, 0 when it carries none. */
+    public static int enchantmentLevel(ItemStack stack, String path) {
+        ItemEnchantments enchantments = stack.getOrDefault(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
+        for (Holder<Enchantment> holder : enchantments.keySet()) {
+            if (path.equals(enchantPath(holder))) {
+                return enchantments.getLevel(holder);
+            }
+        }
+        return 0;
     }
 
     public static boolean hasBindingCurse(ItemStack stack) {

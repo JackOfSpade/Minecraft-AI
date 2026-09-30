@@ -112,8 +112,10 @@ final class CombatHardeningSourceContractTest {
                 "an out-of-leash shootable hostile must not be held off");
         String combat = read("task/CombatTask.java");
         assertTrue(combat.contains("&& !canShootFromWhereItStands(bot, target)"));
-        assertTrue(combat.contains("StrikeLegality.friendlyOnLineOfFire(bot, target)"),
-                "a bow must never be released into the owner or another bot");
+        assertTrue(combat.contains("StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf("),
+                "a ranged weapon must never be shot into the owner or another bot (or without a clear line)");
+        assertTrue(read("action/StrikeLegality.java").contains("\"friendly_on_line_of_fire\""),
+                "the shot refusal must name a friend on the line of fire");
         assertTrue(combat.contains("CombatCore.safeStrafeInput("),
                 "the REPOSITION strafe needs a footing check");
         assertTrue(combat.contains("\"shooter_draw\""));
@@ -144,8 +146,8 @@ final class CombatHardeningSourceContractTest {
         assertFalse(core.substring(stepBody, stepEnd).contains("teleport")
                         || core.substring(stepBody, stepEnd).contains("setDeltaMovement"),
                 "a walked step must not move or re-velocity the bot itself");
-        assertTrue(combat.contains("bowSuppressedUntil"),
-                "a friend on the line of fire must latch the bow out of the plan, not loop into RANGED");
+        assertTrue(combat.contains("rangedSuppressedUntil"),
+                "a friend on the line of fire must latch ranged out of the plan, not loop into RANGED");
         assertTrue(core.contains("enderman.getTarget() == bot")
                         && !core.contains("mob.getTarget() == bot ||"),
                 "Mob.getTarget() stays only the legacy Enderman rule");
@@ -166,11 +168,12 @@ final class CombatHardeningSourceContractTest {
 
 
     @Test
-    void everyBowExitCancelsTheDrawAndOnlyTheCheckedShotsRelease() throws IOException {
+    void everyRangedExitCancelsTheDrawAndOnlyTheCheckedShotsFire() throws IOException {
         String combat = read("task/CombatTask.java");
-        // releaseUsingItem() FIRES a charged bow; only the two line-of-fire-checked shots and the shield/reactive-shield
-        // releases may use it, every give-up and abort path cancels with stopUsingItem().
-        for (String method : new String[]{"private void giveUpBowForFriendlyLine(", "private void coverHide(",
+        // releasing a charged bow FIRES it (and a loaded crossbow is fired by a use); only RangedWeapon.shoot, called after the
+        // two line-of-fire-checked shots (ranged and the peek), may do it, and the shield/reactive-shield releases are the only
+        // releaseUsingItem calls of the task: every give-up and abort path cancels with stopUsingItem().
+        for (String method : new String[]{"private void giveUpRangedForBlockedShot(", "private void coverHide(",
                 "private boolean settleDeadPrimary("}) {
             int start = combat.indexOf(method);
             assertTrue(start > 0, method);
@@ -180,10 +183,20 @@ final class CombatHardeningSourceContractTest {
         }
         int peek = combat.indexOf("private void coverPeek(");
         String peekBody = combat.substring(peek, combat.indexOf("private boolean shouldBlock("));
-        assertTrue(peekBody.split("releaseUsingItem", -1).length - 1 == 1,
-                "the peek may release exactly once: the shot that passed the friendly line-of-fire check");
-        assertTrue(peekBody.indexOf("releaseUsingItem") > peekBody.indexOf("} else {\n                friendlyBlockedPeeks = 0;"),
-                "that release sits in the friend-free branch");
+        assertFalse(peekBody.contains("releaseUsingItem"), "the peek fires only through RangedWeapon.shoot");
+        assertTrue(peekBody.split(java.util.regex.Pattern.quote("RangedWeapon.shoot(bot)"), -1).length - 1 == 1,
+                "the peek may shoot exactly once: the shot that passed the line-of-fire check");
+        assertTrue(peekBody.indexOf("RangedWeapon.shoot(bot)") > peekBody.indexOf("} else if (refusal == null) {"),
+                "that shot sits in the refusal-free branch");
+        int ranged = combat.indexOf("private void ranged(");
+        String rangedBody = combat.substring(ranged, combat.indexOf("private void giveUpRangedForBlockedShot("));
+        assertTrue(rangedBody.indexOf("RangedWeapon.shoot(bot)") > rangedBody.indexOf("StrikeLegality.shotRefusal("),
+                "ranged() shoots only after the line-of-fire check");
+        String weapon = read("action/RangedWeapon.java");
+        assertTrue(weapon.contains("public static boolean shoot(") && weapon.contains("if (!isReadyToShoot(bot))"),
+                "shoot never fires a bow before its full draw nor a crossbow that is not loaded");
+        assertTrue(weapon.contains("public static void cancel(") && weapon.contains("bot.stopUsingItem();"),
+                "cancel is stopUsingItem, never a release");
         assertTrue(read("action/ActionPack.java").contains("player.stopUsingItem();")
                         && !read("action/ActionPack.java").contains("player.releaseUsingItem();"),
                 "stopAll is an interruption: it must cancel a drawn bow, not fire it");
@@ -192,17 +205,17 @@ final class CombatHardeningSourceContractTest {
     void coverPhasesCountFriendlyBlockedPeeksAndLeaveThroughTheRangedGiveUpPath() throws IOException {
         String combat = read("task/CombatTask.java");
         assertTrue(combat.contains("FRIENDLY_PEEK_LIMIT") && combat.contains("friendlyBlockedPeeks"));
-        int give = combat.indexOf("private void giveUpBowForFriendlyLine(");
-        assertTrue(give > 0 && combat.substring(give).contains("bowSuppressedUntil = elapsed + BOW_SUPPRESS_TICKS"));
+        int give = combat.indexOf("private void giveUpRangedForBlockedShot(");
+        assertTrue(give > 0 && combat.substring(give).contains("rangedSuppressedUntil = elapsed + RANGED_SUPPRESS_TICKS"));
         int ranged = combat.indexOf("private void ranged(");
-        assertTrue(combat.substring(ranged, combat.indexOf("private void giveUpBowForFriendlyLine(")).contains("giveUpBowForFriendlyLine(bot)"),
-                "ranged() gives the bow up through the shared path");
+        assertTrue(combat.substring(ranged, combat.indexOf("private void giveUpRangedForBlockedShot(")).contains("giveUpRangedForBlockedShot(bot, refusal)"),
+                "ranged() gives the weapon up through the shared path");
         int peek = combat.indexOf("private void coverPeek(");
-        assertTrue(combat.substring(peek, combat.indexOf("private boolean shouldBlock(")).contains("giveUpBowForFriendlyLine(bot)"),
-                "a peek that a friend keeps blocking gives the bow up through the same path");
+        assertTrue(combat.substring(peek, combat.indexOf("private boolean shouldBlock(")).contains("giveUpRangedForBlockedShot(bot, refusal)"),
+                "a peek that a friend keeps blocking gives the weapon up through the same path");
         int hide = combat.indexOf("private void coverHide(");
-        assertTrue(combat.substring(hide, combat.indexOf("private void coverPeek(")).contains("!shouldUseBow(bot)"),
-                "cover-hide re-checks that the bow is still in the plan");
+        assertTrue(combat.substring(hide, combat.indexOf("private void coverPeek(")).contains("!shouldUseRanged(bot)"),
+                "cover-hide re-checks that ranged is still in the plan");
     }
 
     /**

@@ -84,7 +84,11 @@ public final class FollowEscortGameTests {
                 strikesSeen[0] = follow.escortStrikes();
                 excludeUntil[0] = now + 2; // the swing turns the bot toward its target on that tick, the walker re-steers the next
             }
-            if (now > 8 && moving && now > excludeUntil[0]) {
+            // Human aim: a swing that is ready but still turning toward its target (a few ticks at 540 degrees per second) also
+            // holds the follower's facing on the mob; that is the swing itself, not the walker steering toward the mob.
+            long lastAim = follow.escortLastAimTick();
+            boolean aiming = lastAim != Long.MIN_VALUE && bot.level().getGameTime() - lastAim <= 2L;
+            if (now > 8 && moving && now > excludeUntil[0] && !aiming) {
                 checked[0]++;
                 float offPath = Math.abs(Mth.wrapDegrees(bot.getYRot() + 90.0F)); // the path runs along +x: yaw -90
                 f.require(offPath <= 45.0F, "on tick " + now + " (no swing) the follower faced " + offPath + " degrees off its path");

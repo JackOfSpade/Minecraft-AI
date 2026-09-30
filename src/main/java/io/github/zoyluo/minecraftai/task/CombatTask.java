@@ -7,7 +7,8 @@ import io.github.zoyluo.minecraftai.action.EatAction;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
-import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.HumanAim;
+import io.github.zoyluo.minecraftai.action.RangedWeapon;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -48,8 +49,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private static final int SEARCH_RANGE = 20;
-    private static final double BOW_MELEE_SWITCH_DISTANCE = CombatCore.ATTACK_RANGE * 1.5D;
-    private static final int BOW_CHARGE_TICKS = 20;
+    private static final double RANGED_MELEE_SWITCH_DISTANCE = CombatCore.ATTACK_RANGE * 1.5D;
     private static final int BLOCK_TICKS = 12;
     private static final int HEAL_WAIT_TICKS = 200;
     private static final double HEAL_SAFE_DISTANCE = CombatCore.ATTACK_RANGE + 2.0D;
@@ -76,11 +76,11 @@ public final class CombatTask extends AbstractTask {
     private static final int SHOOTER_SHIELD_COOLDOWN_TICKS = 40;
     /** The shield only helps between swings once it can be up for its five warm-up ticks. */
     private static final float MIN_BLOCK_COOLDOWN_TICKS = 6.0F;
-    /** A friend on the line of fire holds the drawn bow this long before falling back to melee. */
-    private static final int FRIENDLY_LINE_HOLD_LIMIT = 60;
-    /** After a friend blocked the line of fire this long, the bow stays out of the plan this many ticks. */
-    private static final int BOW_SUPPRESS_TICKS = 200;
-    /** Peek cycles in a row whose shot a friend on the line of fire held back, before the bow is given up. */
+    /** A shot the line of fire forbids (a friend on it, no clear sight) holds the drawn or loaded weapon this long before falling back to melee. */
+    private static final int BLOCKED_SHOT_HOLD_LIMIT = 60;
+    /** After a shot stayed blocked this long, the ranged weapon stays out of the plan this many ticks. */
+    private static final int RANGED_SUPPRESS_TICKS = 200;
+    /** Peek cycles in a row whose shot a friend on the line of fire held back, before the ranged weapon is given up. */
     private static final int FRIENDLY_PEEK_LIMIT = 3;
     /** A warden's flight must clear its sonic boom range, not the generic six-block retreat step. */
     private static final int WARDEN_RETREAT_STEP_DISTANCE = CombatCore.WARDEN_ESCAPE_DISTANCE;
@@ -95,6 +95,8 @@ public final class CombatTask extends AbstractTask {
      */
     private static final int PEEKABOO_EXPOSE_TICKS = 3;
     private static final int PEEKABOO_RETRY_COOLDOWN_TICKS = 100;
+    /** A peek stays exposed at most this many ticks waiting for the human-speed aim to settle on the target. */
+    private static final int PEEKABOO_EXPOSE_LIMIT_TICKS = 40;
 
     private final EntityType<?> targetType;
     private final int targetKills;
@@ -118,7 +120,7 @@ public final class CombatTask extends AbstractTask {
     private boolean reactiveShieldRaised;
     private int shooterShieldTicks;
     private int shooterShieldCooldownUntil;
-    private int friendlyLineTicks;
+    private int blockedShotTicks;
     /** Consecutive peeks that ended with a friend on the line of fire (the drawn bow was kept, not shot). */
     private int friendlyBlockedPeeks;
     private BlockPos peekHideSpot;
@@ -141,7 +143,7 @@ public final class CombatTask extends AbstractTask {
     /** Ranged shooters counted in sight while last exposed (the cover column hides them the rest of the time). */
     private int peekThreatsAtLastPeek;
     /** The bow stays out of the plan until this elapsed tick (a friend kept blocking the line of fire). */
-    private int bowSuppressedUntil;
+    private int rangedSuppressedUntil;
 
     public CombatTask(EntityType<?> targetType, int targetKills, float retreatHpThreshold) {
         this(targetType, targetKills, retreatHpThreshold, null, null);
@@ -174,8 +176,8 @@ public final class CombatTask extends AbstractTask {
     }
 
     /** True while the bow is latched out of the plan because a friend kept blocking the line of fire. */
-    boolean isBowSuppressed() {
-        return bowSuppressedUntil > 0 && elapsed < bowSuppressedUntil;
+    boolean isRangedSuppressed() {
+        return rangedSuppressedUntil > 0 && elapsed < rangedSuppressedUntil;
     }
 
     @Override
@@ -203,9 +205,9 @@ public final class CombatTask extends AbstractTask {
         peekStage = PeekStage.OUT;
         peekExposedTicks = 0;
         peekStep = null;
-        bowSuppressedUntil = 0;
+        rangedSuppressedUntil = 0;
         peekThreatsAtLastPeek = 0;
-        friendlyLineTicks = 0;
+        blockedShotTicks = 0;
         friendlyBlockedPeeks = 0;
     }
 
@@ -359,7 +361,7 @@ public final class CombatTask extends AbstractTask {
         Vec3 faceTowards = incoming != null
                 ? incoming.projectile().position()
                 : fusingCreeper != null ? fusingCreeper.position() : drawingShooter.getEyePosition();
-        LookAction.lookAt(bot, faceTowards);
+        HumanAim.lookToward(bot, faceTowards);
         if (!bot.isUsingItem() || bot.getUsedItemHand() != InteractionHand.OFF_HAND) {
             InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
         }
@@ -463,7 +465,7 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         CombatCore.lookAt(bot, target);
-        boolean useBow = shouldUseBow(bot);
+        boolean useBow = shouldUseRanged(bot);
         if (useBow) {
             beginRanged(bot);
             return;
@@ -490,7 +492,7 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire(bot);
             return;
         }
-        if (!shouldUseBow(bot)) {
+        if (!shouldUseRanged(bot)) {
             finishRangedLoadout(bot);
             CombatCore.ensureMeleeWeapon(bot, target);
             phase = Phase.APPROACH;
@@ -501,51 +503,62 @@ public final class CombatTask extends AbstractTask {
             beginRanged(bot);
             return;
         }
-        CombatCore.lookAtForBowShot(bot, target);
-        if (!bot.isUsingItem()) {
-            ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
-            if (result.isFailed()) {
-                finishRangedLoadout(bot);
-                CombatCore.ensureMeleeWeapon(bot, target);
-                phase = Phase.APPROACH;
-                startApproach(bot);
-                return;
-            }
+        if (!RangedWeapon.isRanged(bot.getMainHandItem())) {
+            // Something else took the hand (a building block, a melee swap): take the ranged weapon back.
+            beginRanged(bot);
+            return;
         }
-        // getTicksUsingItem() is Minecraft's own count of ticks since the CURRENT draw began -- it
-        // self-resets if something upstream (e.g. ActionPack#stopAll from another task) interrupted
-        // and restarted the use. A hand-rolled tick counter here would desync from that and could
-        // release a shot well before it's actually at full pull.
-        if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS) {
-            if (StrikeLegality.friendlyOnLineOfFire(bot, target)) {
-                // Never release into the owner or another bot: hold the draw until the line clears,
-                // then give up on the bow if it does not. approach() would re-enter RANGED at once
-                // through shouldUseBow(), so the give-up latches the bow out of the plan for a while
-                // and the fight really continues in melee.
-                if (++friendlyLineTicks > FRIENDLY_LINE_HOLD_LIMIT) {
-                    giveUpBowForFriendlyLine(bot);
-                }
-                return;
-            }
-            friendlyLineTicks = 0;
-            bot.releaseUsingItem();
+        // The aim turns at human speed and a shot only leaves once it is on target (never an instant spin-and-shoot).
+        boolean aimed = CombatCore.aimForShot(bot, target);
+        // One vanilla item-use cycle for both weapons: draw (getTicksUsingItem() is Minecraft's own count of ticks since the
+        // CURRENT draw began, so it cannot fire early even if another task interrupted and restarted the use), a crossbow
+        // is released the moment it is charged (loaded), and a fully drawn bow or a loaded crossbow is ready to shoot.
+        RangedWeapon.Readiness readiness = RangedWeapon.prepare(bot);
+        if (readiness == RangedWeapon.Readiness.FAILED) {
+            finishRangedLoadout(bot);
+            CombatCore.ensureMeleeWeapon(bot, target);
             phase = Phase.APPROACH;
+            startApproach(bot);
+            return;
+        }
+        if (readiness != RangedWeapon.Readiness.READY) {
+            return;
+        }
+        String refusal = StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf(bot.getMainHandItem()));
+        if (refusal != null) {
+            // Never shoot into the owner or another bot, nor without a clear line: hold the drawn (or loaded) weapon until
+            // the line clears, then give up on ranged if it does not. approach() would re-enter RANGED at once
+            // through shouldUseRanged(), so the give-up latches ranged out of the plan for a while
+            // and the fight really continues in melee.
+            if (++blockedShotTicks > BLOCKED_SHOT_HOLD_LIMIT) {
+                giveUpRangedForBlockedShot(bot, refusal);
+            }
+            return;
+        }
+        blockedShotTicks = 0;
+        if (aimed && RangedWeapon.shoot(bot)) {
+            BotLog.action(bot, "ranged_shot", "target_type", target.getType(),
+                    "dist", String.format(java.util.Locale.ROOT, "%.1f", bot.distanceTo(target)));
+            // The next shot starts from the top (weapon and ammunition re-derived, ranged still in the plan, cover
+            // eligibility re-checked), in the same tick: the cycle is the weapon's own, with no idle tick between shots.
+            beginRanged(bot);
         }
     }
 
     /**
-     * The one give-up path for a bow that a friend keeps blocking (the ranged hold and the cover peeks both
-     * end here): latches the bow out of the plan for a while, so the fight really continues in melee.
+     * The one give-up path for a ranged weapon whose shot stays blocked (a friend keeps standing on the line of fire, or no
+     * clear line to the target; the ranged hold and the cover peeks both end here): latches ranged out of the plan for a
+     * while, so the fight really continues in melee.
      */
-    private void giveUpBowForFriendlyLine(AIPlayerEntity bot) {
-        friendlyLineTicks = 0;
+    private void giveUpRangedForBlockedShot(AIPlayerEntity bot, String reason) {
+        blockedShotTicks = 0;
         friendlyBlockedPeeks = 0;
-        bowSuppressedUntil = elapsed + BOW_SUPPRESS_TICKS;
-        BotLog.action(bot, "bow_suppressed", "reason", "friendly_on_line_of_fire",
-                "until", bowSuppressedUntil);
+        rangedSuppressedUntil = elapsed + RANGED_SUPPRESS_TICKS;
+        BotLog.action(bot, "ranged_suppressed", "reason", reason,
+                "until", rangedSuppressedUntil);
         cancelPeekStep(bot);
         // CANCEL the draw, never release it: releasing a charged bow fires it, and the reason for
-        // giving up is a friend standing on the line of fire.
+        // giving up is a shot the line of fire forbids.
         bot.stopUsingItem();
         finishRangedLoadout(bot);
         CombatCore.ensureMeleeWeapon(bot, target);
@@ -926,7 +939,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private void chooseEngagement(AIPlayerEntity bot) {
-        if (shouldUseBow(bot)) {
+        if (shouldUseRanged(bot)) {
             beginRanged(bot);
             return;
         }
@@ -937,29 +950,36 @@ public final class CombatTask extends AbstractTask {
     }
 
     /**
-     * True when {@code target} is beyond the melee boundary but within bow range, observed with a
-     * clear line of sight, and the bot holds a bow with real arrows, and no friend stands on the
-     * line of fire: a shot from where the bot already stands, with no approach needed. Never for a
-     * never-melee threat (a creeper or enderman is evaded, not provoked).
+     * True when {@code target} is beyond the melee boundary but within arrow range, observed with a
+     * clear line of sight, and the bot holds a bow or a crossbow that can fire (real arrows, or a loaded
+     * crossbow), and no friend stands on the line of fire (of that weapon's shot): a shot from where the
+     * bot already stands, with no approach needed. Never for a never-melee threat (a creeper or enderman
+     * is evaded, not provoked).
      */
     static boolean canShootFromWhereItStands(AIPlayerEntity bot, LivingEntity target) {
         if (target == null || !target.isAlive() || CombatCore.isMeleeForbiddenThreat(target)) {
             return false;
         }
         double distance = bot.distanceTo(target);
-        return distance > BOW_MELEE_SWITCH_DISTANCE
-                && distance <= SEARCH_RANGE
-                && ObservableWorldQuery.canObserveEntity(bot, target)
-                && CombatCore.hasLineOfSight(bot, target)
-                && EquipAction.bestRangedSlot(bot, target).isPresent()
-                && !StrikeLegality.friendlyOnLineOfFire(bot, target);
+        if (distance <= RANGED_MELEE_SWITCH_DISTANCE
+                || distance > SEARCH_RANGE
+                || !ObservableWorldQuery.canObserveEntity(bot, target)
+                || !CombatCore.hasLineOfSight(bot, target)) {
+            return false;
+        }
+        OptionalInt weaponSlot = EquipAction.bestRangedSlot(bot, target);
+        if (weaponSlot.isEmpty()) {
+            return false;
+        }
+        RangedWeapon.Shape shape = RangedWeapon.shapeOf(bot.getInventory().getNonEquipmentItems().get(weaponSlot.getAsInt()));
+        return !StrikeLegality.friendlyOnLineOfFire(bot, target, shape.spreadDeg(), shape.piercing());
     }
 
-    private boolean shouldUseBow(AIPlayerEntity bot) {
-        return elapsed >= bowSuppressedUntil
+    private boolean shouldUseRanged(AIPlayerEntity bot) {
+        return elapsed >= rangedSuppressedUntil
                 && target != null
                 && target.isAlive()
-                && bot.distanceTo(target) > BOW_MELEE_SWITCH_DISTANCE
+                && bot.distanceTo(target) > RANGED_MELEE_SWITCH_DISTANCE
                 && EquipAction.bestRangedSlot(bot, target).isPresent();
     }
 
@@ -1106,8 +1126,8 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire(bot);
             return;
         }
-        if (!shouldUseBow(bot)) {
-            // The bow left the plan (a friend kept blocking the line, or the target closed in): leave cover.
+        if (!shouldUseRanged(bot)) {
+            // Ranged left the plan (a friend kept blocking the line, or the target closed in): leave cover.
             cancelPeekStep(bot);
             // Cancel the draw (never release it: releasing a drawn bow fires it without the line-of-fire check).
             bot.stopUsingItem();
@@ -1143,11 +1163,11 @@ public final class CombatTask extends AbstractTask {
                 startApproach(bot);
                 return;
             }
-        } else if (!bot.getMainHandItem().is(Items.BOW)) {
-            // Placing the cover column put a building block in the main hand: take the bow back
+        } else if (!RangedWeapon.isRanged(bot.getMainHandItem())) {
+            // Placing the cover column put a building block in the main hand: take the ranged weapon back
             // (the arrow stays in the offhand; equipping an already selected slot is a no-op).
-            OptionalInt bowSlot = EquipAction.bestRangedSlot(bot, target);
-            if (bowSlot.isEmpty() || InventoryAction.equipFromSlot(bot, bowSlot.getAsInt()) < 0) {
+            OptionalInt weaponSlot = EquipAction.bestRangedSlot(bot, target);
+            if (weaponSlot.isEmpty() || InventoryAction.equipFromSlot(bot, weaponSlot.getAsInt()) < 0) {
                 finishRangedLoadout(bot);
                 CombatCore.ensureMeleeWeapon(bot, target);
                 phase = Phase.APPROACH;
@@ -1155,20 +1175,20 @@ public final class CombatTask extends AbstractTask {
                 return;
             }
         }
-        if (!bot.isUsingItem()) {
-            ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
-            if (result.isFailed()) {
-                finishRangedLoadout(bot);
-                CombatCore.ensureMeleeWeapon(bot, target);
-                phase = Phase.APPROACH;
-                startApproach(bot);
-                return;
-            }
+        if (peekStep == null) {
+            // Behind the column the aim already settles on the target, so the peek starts on it.
+            CombatCore.aimForShot(bot, target);
         }
-        // See the identical check in ranged(): getTicksUsingItem() tracks the CURRENT draw, so it
-        // can't fire early even if this draw was interrupted and restarted mid-charge.
-        // The peek only starts from the hiding cell itself (a bow drawn while still walking back in waits).
-        if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS
+        // The same vanilla draw cycle as in ranged(): a crossbow is loaded here, behind cover, and a bow is drawn.
+        if (RangedWeapon.prepare(bot) == RangedWeapon.Readiness.FAILED) {
+            finishRangedLoadout(bot);
+            CombatCore.ensureMeleeWeapon(bot, target);
+            phase = Phase.APPROACH;
+            startApproach(bot);
+            return;
+        }
+        // The peek only starts from the hiding cell itself (a bow drawn, or a crossbow loaded, while still walking back in waits).
+        if (RangedWeapon.isReadyToShoot(bot)
                 && bot.blockPosition().equals(peekHideSpot)
                 && peekStep == null) {
             phase = Phase.COVER_PEEK;
@@ -1195,8 +1215,8 @@ public final class CombatTask extends AbstractTask {
         }
         peekCycleTicks++;
         if (peekStage == PeekStage.OUT) {
-            // Aim first: the strafe below is computed in the current yaw frame, so the bow stays on target.
-            CombatCore.lookAtForBowShot(bot, target);
+            // Aim first: the strafe below is computed in the current yaw frame, so the weapon stays on target.
+            CombatCore.aimForShot(bot, target);
             if (peekStep == null) {
                 peekStep = CombatCore.beginStepByInput(peekExposeSpot, true, false);
             }
@@ -1216,24 +1236,27 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         if (peekStage == PeekStage.EXPOSED) {
-            CombatCore.lookAtForBowShot(bot, target);
+            boolean aimed = CombatCore.aimForShot(bot, target);
             if (++peekExposedTicks <= PEEKABOO_EXPOSE_TICKS) {
                 return;
+            }
+            if (!aimed && peekExposedTicks <= PEEKABOO_EXPOSE_LIMIT_TICKS) {
+                return; // the aim is still settling (human turn speed): stay exposed for it, bounded
             }
             // The only moment the shooters are in sight: remember how many there are, because the
             // bot's own column hides them again as soon as it ducks back.
             peekThreatsAtLastPeek = CombatCore.rangedThreatsAround(bot, PEEKABOO_SCAN_RANGE).size();
-            if (StrikeLegality.friendlyOnLineOfFire(bot, target)) {
-                // With a friend on the line of fire the drawn bow is kept, never released into them; past a
-                // few such peeks the bow is given up, through the same path ranged() uses.
+            String refusal = StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf(bot.getMainHandItem()));
+            if ("friendly_on_line_of_fire".equals(refusal)) {
+                // With a friend on the line of fire the drawn (or loaded) weapon is kept, never shot into them; past a
+                // few such peeks it is given up, through the same path ranged() uses.
                 if (++friendlyBlockedPeeks > FRIENDLY_PEEK_LIMIT) {
-                    giveUpBowForFriendlyLine(bot);
+                    giveUpRangedForBlockedShot(bot, refusal);
                     return;
                 }
-            } else {
+            } else if (refusal == null) {
                 friendlyBlockedPeeks = 0;
-                if (bot.isUsingItem()) {
-                    bot.releaseUsingItem();
+                if (aimed && RangedWeapon.shoot(bot)) {
                     BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
                 }
             }
@@ -1242,7 +1265,7 @@ public final class CombatTask extends AbstractTask {
         if (peekStep == null) {
             peekStep = CombatCore.beginStepByInput(peekHideSpot, true, false);
         }
-        CombatCore.lookAtForBowShot(bot, target);
+        CombatCore.aimForShot(bot, target);
         CombatCore.StepStatus back = CombatCore.stepByInput(bot, peekStep);
         if (back == CombatCore.StepStatus.FAILED) {
             String why = peekStep.failure();
@@ -1255,7 +1278,7 @@ public final class CombatTask extends AbstractTask {
         }
         peekStep = null;
         peekStage = PeekStage.OUT;
-        if (!shouldUseBow(bot)) {
+        if (!shouldUseRanged(bot)) {
             finishRangedLoadout(bot);
             CombatCore.ensureMeleeWeapon(bot, target);
             phase = Phase.APPROACH;

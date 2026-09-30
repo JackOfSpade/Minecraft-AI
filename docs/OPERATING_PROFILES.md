@@ -103,6 +103,7 @@ The `behaviour` section of `minecraftai.json` holds the companion behaviour swit
 | `behaviour.follow.walkGap` | `6.0` | The follower walks when the gap to the followed player is at or below this (blocks). |
 | `behaviour.follow.sprintGap` | `10.0` | The follower sprints from this gap on. |
 | `behaviour.warden.sneakAway` | `true` | Wardens are never fought. A bot sneaks away from a calm one and sprints away from one that hunts it. |
+| `behaviour.combat.aim.maxTurnDegPerSec` | `540.0` | Human aim: the fastest a companion's head turns (degrees per second) while it aims a weapon or strikes; no instant spin-and-shoot. A shot leaves only when the aim is within 1.5 degrees of the shot direction (with a settle jitter that fades: sigma = 0.3 deg + 2.5 deg * exp(-t/0.25 s) after a fast turn), and a melee strike lands only on the entity under the crosshair (vanilla's pick along the real look vector within the weapon's vanilla attack range). Walking, mining and placing keep their own facing. |
 
 These switches only exist as configuration from this version on; the behaviours they name are switched on by the jobs that implement them, and until then a switch has no effect.
 

@@ -41,6 +41,7 @@ final class MinecraftAiConfigBehaviourTest {
         assertEquals(6.0D, follow.walkGap());
         assertEquals(10.0D, follow.sprintGap());
         assertTrue(behaviour.warden().sneakAwayEnabled());
+        assertEquals(540.0D, behaviour.combatOrDefaults().aimOrDefaults().maxTurnDegPerSec());
     }
 
     @Test
@@ -189,6 +190,17 @@ final class MinecraftAiConfigBehaviourTest {
         assertTrue(new MinecraftAiConfig.Follow(null, 0.0D, 0.0D).escortOnlyEnabled());
         assertTrue(new MinecraftAiConfig.Warden(null).sneakAwayEnabled());
         assertFalse(new MinecraftAiConfig.Gear(false).worstFirstEnabled());
+    }
+
+    @Test
+    void theAimSectionKeepsAGoodRateAndDefaultsABadOne() {
+        assertEquals(720.0D, parse("{\"behaviour\":{\"combat\":{\"aim\":{\"maxTurnDegPerSec\":720.0}}}}")
+                .behaviour().combatOrDefaults().aimOrDefaults().maxTurnDegPerSec());
+        for (String bad : new String[]{"0", "-90"}) {
+            assertEquals(540.0D, parse("{\"behaviour\":{\"combat\":{\"aim\":{\"maxTurnDegPerSec\":" + bad + "}}}}")
+                    .behaviour().combatOrDefaults().aimOrDefaults().maxTurnDegPerSec(), "a bad rate is the default: " + bad);
+        }
+        assertEquals(540.0D, parse("{\"behaviour\":{\"combat\":{}}}").behaviour().combatOrDefaults().aimOrDefaults().maxTurnDegPerSec());
     }
 
     @Test
