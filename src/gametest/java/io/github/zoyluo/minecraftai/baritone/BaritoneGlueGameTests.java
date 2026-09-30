@@ -136,6 +136,11 @@ public final class BaritoneGlueGameTests {
         context.succeed();
     }
 
+    /**
+     * The pool is a pool of threads, so the test waits for its tasks in wall-clock time, on the server thread. The GameTest server runs
+     * its ticks back to back without waiting, so a tick count is no clock for them: sharing a batch with 49 other tests, 200 ticks
+     * lasted long enough for four rounds of 40 ms tasks; running alone, the test used up its 200 ticks before they had finished.
+     */
     @GameTest(maxTicks = 200)
     public void workerPoolIsBoundedNamedAndDaemon(GameTestHelper context) {
         BaritoneHost.configure(context.getLevel().getServer());
@@ -143,7 +148,7 @@ public final class BaritoneGlueGameTests {
         int tasks = workers * 4;
         AtomicInteger running = new AtomicInteger();
         AtomicInteger peak = new AtomicInteger();
-        AtomicInteger finished = new AtomicInteger();
+        CountDownLatch finished = new CountDownLatch(tasks);
         List<String> threadNames = java.util.Collections.synchronizedList(new ArrayList<>());
         List<Boolean> daemon = java.util.Collections.synchronizedList(new ArrayList<>());
         for (int i = 0; i < tasks; i++) {
@@ -157,21 +162,24 @@ public final class BaritoneGlueGameTests {
                     Thread.currentThread().interrupt();
                 }
                 running.decrementAndGet();
-                finished.incrementAndGet();
+                finished.countDown();
             });
         }
-        context.onEachTick(() -> {
-            if (finished.get() < tasks) {
-                return;
-            }
-            System.out.println("BARITONE_POOL workers=" + workers + " tasks=" + tasks + " peak_concurrency=" + peak.get()
-                    + " max_queue_wait_ms=" + BaritoneExecutor.maxQueueWaitMillis());
-            require(context, peak.get() <= workers, "peak concurrency " + peak.get() + " exceeds the " + workers + " workers");
-            require(context, peak.get() >= 2, "the pool never ran two tasks at once (peak " + peak.get() + ")");
-            require(context, threadNames.stream().allMatch(n -> n.startsWith("minecraftai-baritone-")), "unexpected worker threads " + threadNames);
-            require(context, daemon.stream().allMatch(Boolean::booleanValue), "a worker thread is not a daemon");
-            context.succeed();
-        });
+        boolean allFinished;
+        try {
+            allFinished = finished.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            allFinished = false;
+        }
+        require(context, allFinished, "the pool did not run " + tasks + " tasks of 40 ms within 30 s: " + finished.getCount() + " left");
+        System.out.println("BARITONE_POOL workers=" + workers + " tasks=" + tasks + " peak_concurrency=" + peak.get()
+                + " max_queue_wait_ms=" + BaritoneExecutor.maxQueueWaitMillis());
+        require(context, peak.get() <= workers, "peak concurrency " + peak.get() + " exceeds the " + workers + " workers");
+        require(context, peak.get() >= 2, "the pool never ran two tasks at once (peak " + peak.get() + ")");
+        require(context, threadNames.stream().allMatch(n -> n.startsWith("minecraftai-baritone-")), "unexpected worker threads " + threadNames);
+        require(context, daemon.stream().allMatch(Boolean::booleanValue), "a worker thread is not a daemon");
+        context.succeed();
     }
 
     @GameTest(maxTicks = 200)

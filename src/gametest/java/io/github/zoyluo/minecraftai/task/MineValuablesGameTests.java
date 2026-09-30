@@ -51,10 +51,13 @@ public final class MineValuablesGameTests {
         AIPlayerEntity bot = fixture.bot();
         BlockPos visibleOre = fixture.start().east(2);
         // One layer directly beneath the ordinary floor -- fully concealed by that floor block
-        // from every angle the bot can stand at, since it sits in the exact same column the bot's
-        // own eye-to-face raycasts pass through to reach anything below the floor.
-        BlockPos concealingFloor = fixture.start().east(2).below(1);
-        BlockPos hiddenOre = fixture.start().east(2).below(2);
+        // from every angle the bot can stand at: the floor slab is solid all around it, so every
+        // eye-to-face ray toward it passes through the floor block above it. It is NOT under the
+        // visible ore: revealing it opens a hole in the floor, and a hole under the visible ore
+        // swallowed that ore's drop whenever the drop fell straight down (the bot does not climb
+        // into a pit for a drop), which failed the mission for a reason this test is not about.
+        BlockPos concealingFloor = fixture.start().west(1).south(1).below(1);
+        BlockPos hiddenOre = fixture.start().west(1).south(1).below(2);
         bot.level().setBlock(visibleOre, Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
         bot.level().setBlock(hiddenOre, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         // A stone pickaxe can harvest both coal and iron ore. If the scope-freeze guarantee this

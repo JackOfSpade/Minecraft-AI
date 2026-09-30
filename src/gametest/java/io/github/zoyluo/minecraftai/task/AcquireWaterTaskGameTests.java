@@ -1402,7 +1402,9 @@ public final class AcquireWaterTaskGameTests {
         task.start(bot);
         context.failIfEver(() -> {
             task.tick(bot);
-            if (InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 3) {
+            // The payment is checked in the tick the third pick appears: later, the ascent mines stone with it and picks up the
+            // cobblestone like any player, while the two exhausted picks may still be in the inventory.
+            if (!crafted.get() && InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 3) {
                 crafted.set(true);
                 require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 0
                                 && InventoryAction.countItem(bot, Items.STICK) == 0,

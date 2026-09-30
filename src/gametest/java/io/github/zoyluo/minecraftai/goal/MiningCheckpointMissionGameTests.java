@@ -3241,8 +3241,11 @@ public final class MiningCheckpointMissionGameTests {
                         && !checkpoint.containsKey("task.pending_pickup_pos")
                         && !checkpoint.containsKey("task.active_break_pos");
                 if (!ordinaryCoal) {
+                    // The bootstrap (craft six wooden pickaxes, place and reclaim the table) measured 94 ticks when the bot
+                    // is already centred after the reclaim and 110 when it needs the walked recentre step (the drop of the reclaimed
+                    // table decides): a 100-tick limit sat inside that spread, so it only measured which of the two happened.
                     if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
-                            || context.getTick() > 100) {
+                            || context.getTick() > 130) {
                         context.fail(Component.nullToEmpty(
                                 "diamond64 bootstrap never reached a debt-free coal OreDig: "
                                         + checkpointSummary(checkpoint)));

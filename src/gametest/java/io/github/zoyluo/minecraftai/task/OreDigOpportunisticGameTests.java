@@ -232,12 +232,14 @@ public final class OreDigOpportunisticGameTests {
         // dy=1 + a solid roof strip (not dy=0): see test 1's pose comment -- every member needs
         // approachGoalFor's below-stand, never poseFor's same-level cardinal one.
         for (int i = 0; i < veinLength; i++) {
-            // Kept close to spawn (dx starts at 1, not farther out) so the near end of the vein is
-            // reliably within ordinary perception radius of a bot still working hub()'s coal near dx=0,
-            // regardless of which way OreDigTask's own strip tunnel happens to head first.
-            BlockPos pos = room.at(1 + i, 1, 0);
+            // Kept close to spawn so the near end of the vein is reliably within ordinary perception radius of a bot still
+            // working hub()'s coal near dx=0, regardless of which way OreDigTask's own strip tunnel happens to head first. It
+            // starts at dx=3, clear of the hub: starting at dx=1 put its first members between the hub's coal at (1,1,+-1) and
+            // (2,1,+-2), where the mission's own work took them as bonus ores (two in one run, four in another, depending on
+            // where the coal drops landed), and after four the rest of the vein was excluded and never detoured to.
+            BlockPos pos = room.at(3 + i, 1, 0);
             room.world.setBlock(pos, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
-            room.world.setBlock(room.at(1 + i, 2, 0), STONE, Block.UPDATE_ALL);
+            room.world.setBlock(room.at(3 + i, 2, 0), STONE, Block.UPDATE_ALL);
             vein.add(pos);
         }
 
@@ -569,7 +571,13 @@ public final class OreDigOpportunisticGameTests {
                     "the bot took damage: it must never have touched the revealed lava");
             MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
             boolean activeNow = state != null && state.detourOwner() == task;
-            if (activeNow && !revealed[0]) {
+            // Revealed only while the bot is outside DangerWatcher's own lava box (two blocks around it, one up and down): lava
+            // that close is DangerWatcher's to evade, not a sighting mid-detour. The bot mines the hub's coal before the detour
+            // starts and can stand next to the door by then (it did, one run in four).
+            BlockPos feetNow = bot.blockPosition();
+            boolean clearOfLavaBox = Math.abs(feetNow.getX() - lava.getX()) > 2 || Math.abs(feetNow.getZ() - lava.getZ()) > 2
+                    || Math.abs(feetNow.getY() - lava.getY()) > 1;
+            if (activeNow && !revealed[0] && clearOfLavaBox) {
                 room.world.setBlock(door, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 revealed[0] = true;
                 return;
