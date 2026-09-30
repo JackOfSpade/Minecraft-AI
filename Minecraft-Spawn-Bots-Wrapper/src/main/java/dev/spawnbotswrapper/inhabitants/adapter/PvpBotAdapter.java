@@ -74,7 +74,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
     private volatile Set<String> settingNames;
     /** What the addon wants held in PvP BOT's settings, and which settings object and wish it was last applied for. */
     private volatile ManagedSettings managedWanted = ManagedSettings.NONE;
-    /** Whether the wrapper's aggro range is on (auto-target off is then the intended state, not a finding). */
+    /** Whether the wrapper's aggro hunter is on (auto-target off is then the intended state, not a finding). */
     private volatile boolean aggroRangeOn;
     private WeakReference<Object> managedAppliedTo = new WeakReference<>(null);
     private ManagedSettings managedAppliedFor;

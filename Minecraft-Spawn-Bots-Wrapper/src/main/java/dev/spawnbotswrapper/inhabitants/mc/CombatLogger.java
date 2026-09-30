@@ -82,7 +82,7 @@ public final class CombatLogger {
     /** Only inhabitants within this many blocks of a real player are watched for the ranged loop. */
     static final double RANGED_WATCH_RADIUS = 32.0;
 
-    /** The aggro range's state for one bot (name) as text, appended to the damage-taken line. */
+    /** The aggro hunter's state for one bot (name) as text, appended to the damage-taken line. */
     private volatile Function<String, String> aggroState = bot -> null;
     /** One bot's vetoed melee hits (name to text, null for none), appended to the damage-taken line. */
     private volatile Function<String, String> meleeVetoState = bot -> null;
@@ -92,7 +92,7 @@ public final class CombatLogger {
         this.log = log;
     }
 
-    /** Lets the damage-taken diagnostic show whether the aggro range holds a forced target on the victim. */
+    /** Lets the damage-taken diagnostic show what the aggro hunter is doing about the victim. */
     public void aggroState(Function<String, String> aggroState) {
         this.aggroState = aggroState;
     }

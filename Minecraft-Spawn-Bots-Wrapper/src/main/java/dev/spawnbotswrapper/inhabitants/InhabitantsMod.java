@@ -56,7 +56,7 @@ public final class InhabitantsMod implements ModInitializer {
     private volatile ServerSession session;
     private final McTpsGateway tps = new McTpsGateway();
     private final CombatLogger combat = new CombatLogger(() -> session, LOGGER);
-    /** The aggro range (inhabitants notice players within a short range, chase far); see AggroController. */
+    /** The line-of-sight hunter (inhabitants notice, chase, search for and walk back from players); see AggroController. */
     private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER);
     /** No cheating: vetoes melee hits by inhabitants that a human client could not make (through walls, beyond reach). */
     private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER);
@@ -177,14 +177,14 @@ public final class InhabitantsMod implements ModInitializer {
     }
 
     /**
-     * Everything that runs behind PvP BOT's own end-of-tick work: the aggro range (its walk back is the last input
+     * Everything that runs behind PvP BOT's own end-of-tick work: the aggro hunter (its steering is the last input
      * written), the crossbow trigger (PvP BOT's target, its mode) and the combat diagnostics (the selected slot and
      * item use it left).
      */
     private void onLateServerTick(MinecraftServer server) {
         ServerSession current = session;
         if (current != null && current.server() == server) {
-            shared.guard().run("aggro range", () -> aggro.tick(server));
+            shared.guard().run("aggro hunter", () -> aggro.tick(server));
         }
         rangedFire.tick(server);
         gapCloser.tick(server);

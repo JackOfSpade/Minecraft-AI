@@ -39,7 +39,7 @@ final class SettingsHygiene {
             this(botsRelogs, botLeaveOnDeath, checkInterval, autoTargetEnabled, null, null);
         }
 
-        /** A snapshot without the aggro range flag (off). */
+        /** A snapshot without the aggro hunter flag (off). */
         SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval, Boolean autoTargetEnabled,
                          Double maxTargetDistance, Double rangedMinRange) {
             this(botsRelogs, botLeaveOnDeath, checkInterval, autoTargetEnabled, maxTargetDistance, rangedMinRange, false);
@@ -86,7 +86,7 @@ final class SettingsHygiene {
                                 + "): PvP BOT's dead-bot cleanup then never runs and dead inhabitants stay listed. "
                                 + "Use " + MIN_CHECK_INTERVAL + " or more"));
             }
-            // With the wrapper's aggro range on, auto-target OFF is the intended state (the aggro range acquires), not a finding.
+            // With the wrapper's aggro hunter on, auto-target OFF is the intended state (the aggro hunter acquires), not a finding.
             if (Boolean.FALSE.equals(s.autoTargetEnabled()) && !s.aggroRangeEnabled()) {
                 out.add(new Finding(Severity.NOTE,
                         "PvP BOT setting autoTarget is OFF and this addon's aggro hunter (config aggro.enabled) is off too: "

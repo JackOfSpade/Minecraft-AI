@@ -195,7 +195,7 @@ final class UpstreamCalls {
         return invoke(m.method(), settings) instanceof Integer i ? i : null;
     }
 
-    /** A boolean getter that only the aggro range reads, or null when it is missing or returns something else. */
+    /** A boolean getter that only the aggro hunter reads, or null when it is missing or returns something else. */
     Boolean readCombatBoolean(Object settings, String getter) throws Throwable {
         UpstreamContract.Member m = contract.combatGetters.get(getter);
         if (settings == null || m == null || !m.ok()) {
@@ -227,7 +227,7 @@ final class UpstreamCalls {
         return readDouble(settings, UpstreamContract.MAX_TARGET_DISTANCE_GETTER);
     }
 
-    // ---------------------------------------------------------------- combat targets (aggro range)
+    // ---------------------------------------------------------------- combat targets (aggro hunter)
 
     /**
      * The name forced on {@code bot} through {@code BotCombat.setTarget}, or null. Reads the public

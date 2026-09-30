@@ -108,7 +108,7 @@ final class UpstreamContract {
     /** Optional: clears the per-bot navigation anchor upstream never clears itself. */
     final Member removeState;
 
-    // ---- BotCombat / BotFaction (aggro range). All optional: none of them affects availability.
+    // ---- BotCombat / BotFaction (aggro hunter). All optional: none of them affects availability.
     final Member combatSetTarget;
     final Member combatGetTarget;
     final Member combatClearTarget;
@@ -125,7 +125,7 @@ final class UpstreamContract {
     /** {@code BotNavigation.lookAtPosition(ServerPlayer, Vec3)} and {@code moveTowardPosition(ServerPlayer, Vec3, double)}: the walk back. */
     final Member navLookAt;
     final Member navMoveToward;
-    /** Getter name to member for the settings only the aggro range reads (target filters, factions, chase limit). */
+    /** Getter name to member for the settings only the aggro hunter reads (target filters, factions, chase limit). */
     final Map<String, Member> combatGetters;
     /** {@code BotFaction.areAllies(String, String)}; only invoked while PvP BOT's factions setting is on. */
     final Member factionAreAllies;
@@ -212,7 +212,7 @@ final class UpstreamContract {
         modIdNote = checkModId(main);
     }
 
-    /** BotSettings getters read only by the aggro range (isCombatEnabled / isAutoTargetEnabled are capability getters). */
+    /** BotSettings getters read only by the aggro hunter (isCombatEnabled / isAutoTargetEnabled are capability getters). */
     static final List<String> COMBAT_BOOLEAN_GETTERS = List.of("isTargetPlayers", "isTargetOtherBots",
             "isAttackInvincible", "isFactionsEnabled", "isFriendlyFireEnabled");
     private static final String FORCED_TARGET_FIELD = "forcedTargetName";
@@ -261,7 +261,7 @@ final class UpstreamContract {
     }
 
     /**
-     * Why the aggro range cannot control targets, or null when it can: it needs the three target calls, the
+     * Why the aggro hunter cannot control targets, or null when it can: it needs the three target calls, the
      * forced-name field and readable settings. The individual setting getters are handled one by one at read time.
      */
     String combatControlProblem() {

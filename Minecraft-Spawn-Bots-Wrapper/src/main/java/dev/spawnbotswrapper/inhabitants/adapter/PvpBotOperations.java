@@ -101,8 +101,8 @@ public interface PvpBotOperations {
     }
 
     /**
-     * Tells the adapter whether the wrapper's aggro range is switched on. While it is, PvP BOT's own auto-target being OFF
-     * is the intended state (the aggro range acquires targets), so the status report no longer warns about it.
+     * Tells the adapter whether the wrapper's aggro hunter is switched on. While it is, PvP BOT's own auto-target being OFF
+     * is the intended state (the aggro hunter acquires targets), so the status report no longer warns about it.
      */
     default void aggroRangeEnabled(boolean enabled) {
     }
@@ -204,10 +204,10 @@ public interface PvpBotOperations {
     /** True when the bot currently follows a path created by this addon. */
     boolean isPatrolling(String botName);
 
-    // ---------------------------------------------------------------- targeting (aggro range)
+    // ---------------------------------------------------------------- targeting (aggro hunter)
 
     /**
-     * PvP BOT's target control for the aggro range: read its targeting settings, read a bot's current and forced
+     * PvP BOT's target control for the aggro hunter: read its targeting settings, read a bot's current and forced
      * target, force or release a target. Never null; {@link TargetControl#available()} is false when PvP BOT is
      * missing or lacks a member it needs.
      */

@@ -12,7 +12,7 @@ package dev.spawnbotswrapper.inhabitants.adapter;
  * The one deliberate exception is PvP BOT's faction registry ({@link #CLASS_BOT_FACTION}): its static
  * initialiser also binds to world state, so it is only ever loaded without initialisation by the probe and
  * only invoked (which initialises it, as PvP BOT's own combat code does) while PvP BOT's factions setting is
- * on, for the aggro range's "is this player an ally" question. No other file may name it.
+ * on, for the aggro hunter's "is this player an ally" question. No other file may name it.
  */
 final class UpstreamNames {
 

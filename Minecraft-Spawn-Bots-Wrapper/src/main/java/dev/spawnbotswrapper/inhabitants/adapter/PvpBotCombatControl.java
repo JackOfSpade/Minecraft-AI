@@ -10,7 +10,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
- * {@link TargetControl} over PvP BOT's combat routine, for the aggro range. Resolves the current probe result on
+ * {@link TargetControl} over PvP BOT's combat routine, for the aggro hunter. Resolves the current probe result on
  * every call ({@code calls} may be replaced by a re-probe), reads settings through getters only and writes only through
  * PvP BOT's own {@code setTarget} / {@code clearTarget} and its look / move-toward navigation calls.
  * <p>
@@ -96,7 +96,7 @@ final class PvpBotCombatControl implements TargetControl {
             if (combat == null || auto == null || max == null) {
                 log.warnOnce("aggro-settings|" + (combat == null) + "|" + (auto == null) + "|" + (max == null),
                         "PvP BOT integration: the settings isCombatEnabled / isAutoTargetEnabled / "
-                                + "getMaxTargetDistance cannot all be read; the aggro range stays idle");
+                                + "getMaxTargetDistance cannot all be read; the aggro hunter stays idle");
                 return null;
             }
             return new Settings(combat, auto,
@@ -116,7 +116,7 @@ final class PvpBotCombatControl implements TargetControl {
             return v;
         }
         log.warnOnce("aggro-getter|" + getter, "PvP BOT integration: the setting getter " + getter
-                + " is missing or unusable; the aggro range assumes PvP BOT's default (" + fallback + ")");
+                + " is missing or unusable; the aggro hunter assumes PvP BOT's default (" + fallback + ")");
         return fallback;
     }
 

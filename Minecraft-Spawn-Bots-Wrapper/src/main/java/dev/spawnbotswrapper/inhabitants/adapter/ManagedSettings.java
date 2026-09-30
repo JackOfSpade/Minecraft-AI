@@ -9,7 +9,7 @@ package dev.spawnbotswrapper.inhabitants.adapter;
  * @param rangedMaxRange     archers walk toward a target beyond this instead of shooting (blocks)
  * @param autoEquipWeapon    PvP BOT's housekeeping that keeps selecting the best MELEE weapon (it ends every bow and
  *                           crossbow draw of a bot that also carries a melee weapon)
- * @param autoTargetEnabled   PvP BOT's own target acquisition: false leaves acquisition to the wrapper's aggro range
+ * @param autoTargetEnabled   PvP BOT's own target acquisition: false leaves acquisition to the wrapper's aggro hunter
  * @param rangedRetreatOnClose PvP BOT's "archers keep shooting and back away when a target is close": false lets a bot that
  *                           carries a melee weapon switch to it when the target is within twice its melee range
  * @param meleeRange         PvP BOT's melee range: a bot switches to its melee weapon within twice this (2.5 gives 5 blocks)
