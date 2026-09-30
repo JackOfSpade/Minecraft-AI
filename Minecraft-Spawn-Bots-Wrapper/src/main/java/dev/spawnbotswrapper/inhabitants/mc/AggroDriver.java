@@ -121,6 +121,11 @@ public final class AggroDriver {
         return c == null ? AggroController.Phase.IDLE : c.phaseOf(botName);
     }
 
+    /** Route planner statistics {plans made, plans that reached their goal, helper mobs alive}; a seam for the GameTests. */
+    public long[] plannerStats() {
+        return new long[]{planner.plans(), planner.reached(), planner.helperCount()};
+    }
+
     /** The home anchor of {@code botName} as {x, y, z}, or null. */
     public double[] homeOf(String botName) {
         AggroController c = controller;

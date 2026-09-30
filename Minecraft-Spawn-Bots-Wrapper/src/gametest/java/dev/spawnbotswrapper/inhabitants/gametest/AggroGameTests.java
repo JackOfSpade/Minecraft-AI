@@ -31,6 +31,27 @@ public final class AggroGameTests {
         rig.fill(dx, 0, dz, dx, 1, dz, Blocks.AIR);
     }
 
+    /**
+     * The route planner ran (the bot walked AROUND the wall, which a straight walk cannot do) and its detached helper mob
+     * never reached the world: no zombie exists in the level, and there is at most one helper per level.
+     */
+    private static void requireCleanPlanner(Rig rig) {
+        long[] stats = InhabitantsMod.aggroPlannerStats();
+        int zombies = rig.level.getEntities(net.minecraft.world.level.entity.EntityTypeTest.forClass(
+                net.minecraft.world.entity.monster.zombie.Zombie.class), z -> true).size();
+        Rig.LOG.info("[planner] {} plans, {} reached their goal, {} helper mob(s) held, {} zombie(s) in the level", stats[0],
+                stats[1], stats[2], zombies);
+        if (stats[0] < 1) {
+            rig.fail("no route was planned: the walk around the wall cannot have been planned");
+        }
+        if (zombies != 0) {
+            rig.fail("the planner's helper mob is in the world (" + zombies + " zombie(s) found)");
+        }
+        if (stats[2] > 3) {
+            rig.fail("the planner keeps " + stats[2] + " helper mobs (one per level is expected)");
+        }
+    }
+
     // ------------------------------------------------------------------ (a) reaction time
 
     /**
@@ -427,6 +448,7 @@ public final class AggroGameTests {
             if (searches < (resight ? 2 : 1)) {
                 rig.fail("the bot searched " + searches + " time(s)");
             }
+            requireCleanPlanner(rig);
             if (toHome > 1.55) {
                 rig.fail("the bot stopped " + fmt(toHome) + " blocks from its first start point (needs 1.5)");
             }
@@ -457,6 +479,7 @@ public final class AggroGameTests {
         long[] hitAt = {-1};
         double[] shooter = new double[2];
         double[] closest = {Double.MAX_VALUE};
+        double[] detour = {0.0};
         String[] phaseBefore = {""};
         context.onEachTick(() -> {
             if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.MELEE_ONLY, "cover")) {
@@ -502,8 +525,15 @@ public final class AggroGameTests {
                 rig.fail("the bot is in phase " + phase + " " + n + " ticks after a hit from cover; it must pursue the shooter's position");
             }
             closest[0] = Math.min(closest[0], rig.horizontalTo(shooter[0], shooter[1]));
+            detour[0] = Math.max(detour[0], Math.abs(rig.bot.getZ() - rig.homeZ()));
             if (closest[0] <= 2.5) {
-                Rig.LOG.info("[cover] reached within {} blocks of the shooter's position {} ticks after the hit", fmt(closest[0]), n);
+                Rig.LOG.info("[cover] reached within {} blocks of the shooter's position {} ticks after the hit; the detour reached {} "
+                        + "blocks to the side (the wall ends at 4.5)", fmt(closest[0]), n, fmt(detour[0]));
+                if (detour[0] < 4.0) {
+                    rig.fail("the bot got to the shooter without walking around the wall (largest sideways distance "
+                            + fmt(detour[0]) + "): it did not walk a planned route");
+                }
+                requireCleanPlanner(rig);
                 rig.succeed();
             } else if (n > 500) {
                 rig.fail("the bot got no closer than " + fmt(closest[0]) + " blocks to the shooter's position; phase " + phase);

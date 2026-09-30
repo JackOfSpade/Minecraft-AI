@@ -116,6 +116,15 @@ public final class InhabitantsMod implements ModInitializer {
         return mod == null ? "IDLE" : mod.aggro.phaseOf(botName).name();
     }
 
+    /**
+     * The aggro route planner's statistics {plans made, plans that reached their goal, detached helper mobs alive}. A seam
+     * for the real-server GameTests; nothing in the addon itself calls it.
+     */
+    public static long[] aggroPlannerStats() {
+        InhabitantsMod mod = instance;
+        return mod == null ? new long[3] : mod.aggro.plannerStats();
+    }
+
     /** The aggro home anchor of an inhabitant as {x, y, z}, or null. A seam for the real-server GameTests. */
     public static double[] aggroHomeOf(String botName) {
         InhabitantsMod mod = instance;
