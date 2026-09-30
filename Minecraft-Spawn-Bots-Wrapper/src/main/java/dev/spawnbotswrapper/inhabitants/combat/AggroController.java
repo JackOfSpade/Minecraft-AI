@@ -663,14 +663,20 @@ public final class AggroController {
         if (near.isEmpty()) {
             return false;
         }
-        List<Body> ordered = new ArrayList<>(near);
-        ordered.sort(Comparator.<Body>comparingDouble(bot::distanceTo)
-                .thenComparing(b -> b.name().toLowerCase(Locale.ROOT)));
+        // Cheap validity first (most of a crowded server's players are other inhabitants, which are no targets), then the
+        // few that are left nearest first.
+        List<Body> ordered = new ArrayList<>(Math.min(near.size(), 8));
+        for (Body candidate : near) {
+            if (validTarget(bot, candidate, s)) {
+                ordered.add(candidate);
+            }
+        }
+        if (ordered.size() > 1) {
+            ordered.sort(Comparator.<Body>comparingDouble(bot::distanceTo)
+                    .thenComparing(b -> b.name().toLowerCase(Locale.ROOT)));
+        }
         boolean anyExposure = false;
         for (Body candidate : ordered) {
-            if (!validTarget(bot, candidate, s)) {
-                continue;
-            }
             Perception.Reading reading = read(bot, candidate, cfg);
             String key = ExposureTracker.key(name, candidate.name());
             if (reading.exposed()) {
