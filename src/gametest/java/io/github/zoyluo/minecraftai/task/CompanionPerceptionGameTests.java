@@ -9,8 +9,10 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.gametest.MockPlayers;
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import io.github.zoyluo.minecraftai.perception.CreaturePerception;
 import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
@@ -30,6 +32,7 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.zombie.Husk;
 import net.minecraft.world.entity.monster.zombie.Zombie;
@@ -43,7 +46,7 @@ import net.minecraft.world.phys.Vec3;
 /**
  * Live proofs of the companions' realistic perception (docs/PERCEPTION.md): a bot notices a creature only when it sees it (its view
  * cone, a clear line) for the reaction time, or hears it (vanilla vibrations, radius 16) with a clear line, or is struck by it. The
- * harness runs every other suite with perception OFF (omnidirectional, as before); these tests switch it on for their own batch.
+ * whole suite runs with perception ON now; these tests prove the model itself, the scan cost and the fail-safe.
  *
  * <p>The arena is a stone strip; the bot stands at the origin looking south (+Z), "behind" is north (-Z). Every test has its own
  * environment (its own batch: the perception switch is global).
@@ -314,28 +317,213 @@ public final class CompanionPerceptionGameTests {
 
     // ------------------------------------------------------------------ the LLM attack tool
 
-    @GameTest(environment = ENV + "llm_attack_tool_hits_a_mob_behind_the_bot_that_faces_away", maxTicks = 100)
-    public void llmAttackToolHitsAMobBehindTheBotThatFacesAway(GameTestHelper context) {
+    /**
+     * A cow is no threat and no scan subject: animals keep omnidirectional observation, so the one-shot tool still works with the bot
+     * facing away (a hostile that is noticed is the safety layer's business: see the busy test).
+     */
+    @GameTest(environment = ENV + "llm_attack_tool_hits_a_cow_behind_the_bot_that_faces_away", maxTicks = 140)
+    public void llmAttackToolHitsACowBehindTheBotThatFacesAway(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity bot = f.bot("PerceptionToolGT", 0, 0);
+        Cow husk = f.cow(0, -3);
+        PerceptionFixtures.faceAway(bot, husk);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(husk), () -> {
+            f.require(CreatureSenses.INSTANCE.noticed(bot, husk) && PerceptionFixtures.angleTo(bot, husk) > 100.0D,
+                    "fixture: the cow must be behind the bot and known to it");
+            float before = husk.getHealth();
+            JsonObject args = new JsonObject();
+            args.addProperty("entity_type", "minecraft:cow");
+            ToolDefinition tool = new ToolRegistry().get("attack_entity").orElseThrow();
+            ToolDefinition.ToolResult result = tool.handler().invoke(bot, args);
+            f.require(result != null && result.ok(), "the attack tool refused: " + (result == null ? "null" : result.message()));
+            f.require(husk.getHealth() >= before || result.message().contains("hit"),
+                    "the tool claimed a hit that did not land: " + result.message());
+            int from = (int) context.getTick();
+            PerceptionFixtures.everyTick(context, () -> {
+                if (husk.getHealth() < before) {
+                    f.finish();
+                } else if (context.getTick() - from >= 60) {
+                    f.require(false, "the tool's attack never landed although the bot only had to turn round: " + result.message()
+                            + " task=" + TaskManager.INSTANCE.getActive(bot).map(Task::describe).orElse("none"));
+                }
+            });
+        });
+    }
+
+    @GameTest(environment = ENV + "llm_attack_tool_does_not_reveal_a_mob_the_bot_has_not_noticed", maxTicks = 60)
+    public void llmAttackToolDoesNotRevealAMobTheBotHasNotNoticed(GameTestHelper context) {
+        Fixture f = new Fixture(context);
+        AIPlayerEntity bot = f.bot("PerceptionToolBlindGT", 0, 0);
+        f.hold(bot);
         Husk husk = f.zombieLike(0, -2);
-        float before = husk.getHealth();
-        f.require(!CreatureSenses.INSTANCE.noticed(bot, husk), "fixture: the mob behind the bot is unnoticed");
-        JsonObject args = new JsonObject();
-        args.addProperty("entity_type", "minecraft:husk");
-        ToolDefinition tool = new ToolRegistry().get("attack_entity").orElseThrow();
-        ToolDefinition.ToolResult result = tool.handler().invoke(bot, args);
-        f.require(result != null && result.ok(), "the attack tool refused: " + (result == null ? "null" : result.message()));
-        f.require(husk.getHealth() >= before || result.message().contains("hit"),
-                "the tool claimed a hit that did not land: " + result.message());
         context.onEachTick(() -> {
-            if (husk.getHealth() < before) {
+            f.require(!CreatureSenses.INSTANCE.noticed(bot, husk), "fixture: the silent mob behind the bot was noticed");
+            if (context.getTick() < 20) {
+                return;
+            }
+            f.require(ObservableWorldQuery.canObserveEntity(bot, husk), "control: the mob is right there, in plain omnidirectional sight");
+            JsonObject args = new JsonObject();
+            args.addProperty("entity_type", "minecraft:husk");
+            ToolDefinition.ToolResult result = new ToolRegistry().get("attack_entity").orElseThrow().handler().invoke(bot, args);
+            f.require(result != null && !result.ok() && result.message().startsWith("no_nearby_entity"),
+                    "the reply revealed or attacked a mob the bot has not noticed: " + (result == null ? "null" : result.message()));
+            f.require(husk.getHealth() >= husk.getMaxHealth(), "an unnoticed mob was struck");
+            f.require(TaskManager.INSTANCE.getActive(bot).filter(t -> t instanceof AttackEntityTask).isEmpty(),
+                    "an attack was started on a mob the bot has not noticed");
+            f.finish();
+        });
+    }
+
+    @GameTest(environment = ENV + "llm_attack_tool_is_busy_instead_of_replacing_a_running_task", maxTicks = 140)
+    public void llmAttackToolIsBusyInsteadOfReplacingARunningTask(GameTestHelper context) {
+        Fixture f = new Fixture(context);
+        AIPlayerEntity bot = f.bot("PerceptionToolBusyGT", 0, 0);
+        HoldingTask mission = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, mission, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_attack_busy"));
+        net.minecraft.world.entity.animal.cow.Cow husk = f.cow(0, -3);
+        PerceptionFixtures.faceAway(bot, husk);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(husk), () -> {
+            JsonObject args = new JsonObject();
+            args.addProperty("entity_type", "minecraft:cow");
+            ToolDefinition tool = new ToolRegistry().get("attack_entity").orElseThrow();
+            ToolDefinition.ToolResult result = tool.handler().invoke(bot, args);
+            f.require(result != null && !result.ok() && result.message().startsWith("busy: ")
+                            && result.message().contains("holding_work"),
+                    "a running mission must be reported as busy, not replaced: " + (result == null ? "null" : result.message()));
+            f.require(TaskManager.INSTANCE.getActive(bot).orElse(null) == mission, "the tool replaced the running mission");
+            // A safety task is never interrupted either, and the refusal says so without keeping the request.
+            HoldingTask safety = new HoldingTask();
+            TaskManager.INSTANCE.assign(bot, safety, TaskOrigin.safety("gametest_attack_busy_safety"));
+            result = tool.handler().invoke(bot, args);
+            f.require(result != null && !result.ok() && result.message().startsWith("busy: ")
+                            && result.message().contains("safety task"),
+                    "a safety task must be reported as busy: " + (result == null ? "null" : result.message()));
+            f.require(TaskManager.INSTANCE.getActive(bot).orElse(null) == safety, "the tool interrupted a safety task");
+            f.finish();
+        });
+    }
+
+    // ------------------------------------------------------------------ the fail-safe
+
+    @GameTest(environment = ENV + "a_failing_scan_falls_back_to_omnidirectional_sight_never_blindness", maxTicks = 80)
+    public void aFailingScanFallsBackToOmnidirectionalSightNeverBlindness(GameTestHelper context) {
+        Fixture f = new Fixture(context);
+        AIPlayerEntity bot = f.bot("PerceptionFailSafeGT", 0, 0);
+        f.hold(bot);
+        Husk husk = f.zombieLike(0, -4);
+        int[] step = {0};
+        int[] faultFrom = {0};
+        context.onEachTick(() -> {
+            int tick = (int) context.getTick();
+            if (step[0] == 0 && tick >= 10) {
+                f.require(!CreatureSenses.INSTANCE.noticed(bot, husk), "fixture: the silent mob behind the bot was noticed");
+                CreatureSenses.setScanFaultForTests(() -> {
+                    throw new IllegalStateException("gametest injected scan failure");
+                });
+                faultFrom[0] = tick;
+                step[0] = 1;
+                return;
+            }
+            if (step[0] == 1 && tick >= faultFrom[0] + 3) {
+                // The scan has thrown on every tick since: the bot is on the legacy test, it can see what a plain line of sight sees.
+                f.require(CreatureSenses.INSTANCE.noticed(bot, husk) && ObservableWorldQuery.canNoticeCreature(bot, husk),
+                        "a failing scan left the bot blind to a creature in plain line of sight");
+                CreatureSenses.setScanFaultForTests(null);
+                faultFrom[0] = tick;
+                step[0] = 2;
+                return;
+            }
+            if (step[0] == 2 && tick >= faultFrom[0] + 4) {
+                f.require(!CreatureSenses.INSTANCE.noticed(bot, husk),
+                        "the bot stayed on the legacy test after the scan recovered: the mob behind it is unnoticed again");
                 f.finish();
-            } else if (context.getTick() >= 60) {
-                f.require(false, "the tool's attack never landed although the bot only had to turn round: " + result.message()
-                        + " task=" + TaskManager.INSTANCE.getActive(bot).map(Task::describe).orElse("none"));
             }
         });
+    }
+
+    // ------------------------------------------------------------------ the cost of the scan
+
+    /**
+     * Five bots in a crowd (dozens of mobs: passive animals, villagers, zombies in front, zombies behind), the same scene measured
+     * with the scan's cost limits off and on. The numbers go to the console ("PERCEPTION_COST"); the assertions are on what is
+     * deterministic: the throttled scan casts fewer rays and every zombie in front is still noticed.
+     */
+    @GameTest(environment = ENV + "the_scan_cost_with_five_bots_in_a_crowd_is_throttled", maxTicks = 400)
+    public void theScanCostWithFiveBotsInACrowdIsThrottled(GameTestHelper context) {
+        Fixture f = new Fixture(context);
+        List<AIPlayerEntity> bots = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            AIPlayerEntity bot = f.bot("PerceptionCrowdGT" + i, -4 + 2 * i, 0);
+            f.hold(bot);
+            bots.add(bot);
+        }
+        // Calm zombified piglins: creatures the scan reads (a NeutralMob is no "passive animal") but that the watchers leave alone, so
+        // the bots stand still and the scene is the same in both measurements.
+        List<LivingEntity> crowdInFront = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            crowdInFront.add(f.calmPiglin(-5 + (i % 10), 5 + (i / 10) * 3));
+        }
+        for (int i = 0; i < 10; i++) {
+            f.calmPiglin(-5 + i, -8);
+        }
+        for (int i = 0; i < 24; i++) {
+            net.minecraft.world.entity.animal.cow.Cow cow = EntityType.COW.create(f.level, EntitySpawnReason.COMMAND);
+            cow.setNoAi(true);
+            cow.setPersistenceRequired();
+            f.add(cow, -5 + (i % 12), 12 + (i / 12) * 2);
+        }
+        for (int i = 0; i < 12; i++) {
+            net.minecraft.world.entity.npc.villager.Villager villager = EntityType.VILLAGER.create(f.level, EntitySpawnReason.COMMAND);
+            villager.setNoAi(true);
+            villager.setPersistenceRequired();
+            f.add(villager, -5 + i, -12);
+        }
+        double[] unthrottledMs = {0.0D};
+        long[] unthrottledRays = {0L};
+        long[] rays0 = {0L};
+        context.onEachTick(() -> {
+            int tick = (int) context.getTick();
+            if (tick == 60) {
+                // Everyone in front has been noticed by now: the scene is steady. Phase 1 runs with no cost limits at all.
+                CreatureSenses.setThrottleForTests(false);
+                bots.forEach(b -> BotProfiler.INSTANCE.clear(b.getUUID()));
+                rays0[0] = CreatureSenses.raysCast();
+            } else if (tick == 160) {
+                unthrottledMs[0] = perTickMs(bots);
+                unthrottledRays[0] = CreatureSenses.raysCast() - rays0[0];
+                CreatureSenses.setThrottleForTests(true);
+                bots.forEach(b -> BotProfiler.INSTANCE.clear(b.getUUID()));
+                rays0[0] = CreatureSenses.raysCast();
+            } else if (tick == 260) {
+                double throttledMs = perTickMs(bots);
+                long throttledRays = CreatureSenses.raysCast() - rays0[0];
+                System.out.println("PERCEPTION_COST 5 bots, " + f.entityCount() + " mobs: unthrottled "
+                        + String.format("%.3f", unthrottledMs[0]) + " ms/tick (" + unthrottledRays[0] / 100.0D
+                        + " rays/tick), throttled " + String.format("%.3f", throttledMs) + " ms/tick (" + throttledRays / 100.0D
+                        + " rays/tick)");
+                for (AIPlayerEntity bot : bots) {
+                    for (LivingEntity zombie : crowdInFront) {
+                        f.require(CreatureSenses.INSTANCE.noticed(bot, zombie), "a calm piglin in the view was not noticed with the throttle on: bot "
+                                + bot.getGameProfile().name() + " at " + bot.blockPosition().toShortString() + " task "
+                                + TaskManager.INSTANCE.getActive(bot).map(Task::describe).orElse("none") + ", zombie at "
+                                + zombie.blockPosition().toShortString() + " angle " + Math.round(PerceptionFixtures.angleTo(bot, zombie))
+                                + " distance " + Math.round(bot.distanceTo(zombie)) + " clear=" + bot.hasLineOfSight(zombie));
+                    }
+                }
+                f.require(throttledRays <= unthrottledRays[0], "the throttled scan cast more rays (" + throttledRays
+                        + ") than the unthrottled (" + unthrottledRays[0] + ")");
+                f.finish();
+            }
+        });
+    }
+
+    private static double perTickMs(List<AIPlayerEntity> bots) {
+        double total = 0.0D;
+        for (AIPlayerEntity bot : bots) {
+            BotProfiler.Stat stat = BotProfiler.INSTANCE.snapshot(bot.getUUID()).get("perception_scan");
+            total += stat == null ? 0.0D : stat.avgMs();
+        }
+        return total;
     }
 
     // ------------------------------------------------------------------ listeners
@@ -482,6 +670,22 @@ public final class CompanionPerceptionGameTests {
             return add(husk, dx, dz);
         }
 
+        Cow cow(int dx, int dz) {
+            Cow cow = EntityType.COW.create(level, EntitySpawnReason.COMMAND);
+            cow.setPersistenceRequired();
+            cow.setNoAi(true);
+            return add(cow, dx, dz);
+        }
+
+        /** A calm zombified piglin without AI: a creature the scan reads, and no threat. */
+        net.minecraft.world.entity.monster.zombie.ZombifiedPiglin calmPiglin(int dx, int dz) {
+            net.minecraft.world.entity.monster.zombie.ZombifiedPiglin piglin =
+                    EntityType.ZOMBIFIED_PIGLIN.create(level, EntitySpawnReason.COMMAND);
+            piglin.setPersistenceRequired();
+            piglin.setNoAi(true);
+            return add(piglin, dx, dz);
+        }
+
         /** A husk with its own AI: it walks to the nearest player. */
         Husk walkingHusk(int dx, int dz) {
             Husk husk = EntityType.HUSK.create(level, EntitySpawnReason.COMMAND);
@@ -542,6 +746,10 @@ public final class CompanionPerceptionGameTests {
             }
         }
 
+        int entityCount() {
+            return entities.size();
+        }
+
         void finish() {
             if (!finished) {
                 finished = true;
@@ -551,6 +759,8 @@ public final class CompanionPerceptionGameTests {
 
         private void cleanUp() {
             CreatureSenses.forceEnabledForTests(false);
+            CreatureSenses.setThrottleForTests(true);
+            CreatureSenses.setScanFaultForTests(null);
             for (Entity entity : entities) {
                 entity.discard();
             }
