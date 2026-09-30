@@ -4,7 +4,6 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
-import java.lang.reflect.Field;
 import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -19,7 +18,7 @@ import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * R5 acceptance: a long mixed session with not one correction teleport, in every profile and on both navigation engines.
+ * R5 acceptance: a long mixed session with not one correction teleport, in strict survival and on both navigation engines.
  *
  * <p>The owner is a survival mock (not ticked, so the test moves it by placing it, the way a scripted client would) that, over 1200
  * ticks, walks, sneaks over a slab edge, sprints up a one-block step, drops two blocks into a basin, swims a pond, sprints on,
@@ -28,33 +27,26 @@ import net.minecraft.world.phys.Vec3;
  * emergency), no drowning or suffocation damage, no damage at all before the zombie, and the follow task alive; at the end the bot is
  * within four blocks of the owner and has been past the pond.</p>
  *
- * <p>The strict-survival tests are the ones that matter most (there the emergency teleport is denied, so a bot that got stuck cannot
- * be rescued by one); the operator variants prove that having the emergency teleport available does not make the bot use it (or any
- * correction) on a course with no emergency.</p>
+ * <p>Only the strict-survival profile is run here, where the emergency teleport is denied (so a bot that got stuck cannot be rescued by
+ * one). The operator profile is one JVM-wide config value: swapping it for a minute while the other scenarios run concurrently would
+ * change what they see. That profile is covered by the source lock ({@code NoCorrectionTeleportSourceTest}: the only relocations left in
+ * production are the four capability-gated emergency rescues) and by {@code ActionPackSuppressedSnapGameTests}, which runs the operator
+ * profile for a single tick.</p>
  */
 public final class NaturalMovementAcceptanceGameTests {
     private static final String ENV = "minecraftai-gametest:natural_movement_acceptance_game_tests_";
     private static final int SESSION_TICKS = 1200;
     private static final double YAW_EAST = -90.0D;
+    private static final int ARENA_LAYER = 20;
 
     @GameTest(environment = ENV + "strict_session_has_zero_correction_teleports_legacy", maxTicks = 1300)
     public void strictSessionHasZeroCorrectionTeleportsLegacy(GameTestHelper context) {
-        session(context, false, false, "AccL");
+        session(context, false, "AccL");
     }
 
     @GameTest(environment = ENV + "strict_session_has_zero_correction_teleports_baritone", maxTicks = 1300)
     public void strictSessionHasZeroCorrectionTeleportsBaritone(GameTestHelper context) {
-        session(context, true, false, "AccB");
-    }
-
-    @GameTest(environment = ENV + "operator_session_has_zero_correction_teleports_legacy", maxTicks = 1300)
-    public void operatorSessionHasZeroCorrectionTeleportsLegacy(GameTestHelper context) {
-        session(context, false, true, "AccOL");
-    }
-
-    @GameTest(environment = ENV + "operator_session_has_zero_correction_teleports_baritone", maxTicks = 1300)
-    public void operatorSessionHasZeroCorrectionTeleportsBaritone(GameTestHelper context) {
-        session(context, true, true, "AccOB");
+        session(context, true, "AccB");
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -110,15 +102,10 @@ public final class NaturalMovementAcceptanceGameTests {
         }
     }
 
-    private static void session(GameTestHelper context, boolean baritone, boolean operator, String prefix) {
-        FollowFieldFixture f = new FollowFieldFixture(context, 40, 8);
-        if (operator) {
-            MinecraftAiConfig original = MinecraftAiConfig.get();
-            setConfig(withProfile(original, OperatingProfile.OPERATOR));
-            f.onFinish(() -> setConfig(original));
-        } else {
-            f.require(MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL, "fixture: the default profile is not strict survival");
-        }
+    private static void session(GameTestHelper context, boolean baritone, String prefix) {
+        // Its own world layer: the scene is wide and lives for a minute, and the other follow scenes share layer 0.
+        FollowFieldFixture f = new FollowFieldFixture(context, 40, 8, ARENA_LAYER);
+        f.require(MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL, "fixture: the default profile is not strict survival");
         buildCourse(f);
         AIPlayerEntity bot = f.bot(prefix + "Bot", -34, 0, baritone);
         ServerPlayer owner = f.owner(bot, -30, 0);
@@ -212,32 +199,4 @@ public final class NaturalMovementAcceptanceGameTests {
         owner.setDeltaMovement(Vec3.ZERO);
     }
 
-    private static MinecraftAiConfig withProfile(MinecraftAiConfig config, OperatingProfile profile) {
-        return new MinecraftAiConfig(
-                profile,
-                config.operatorCapabilities(),
-                config.llm(),
-                config.perception(),
-                config.brain(),
-                config.watchdog(),
-                config.logging(),
-                config.survival(),
-                config.combat(),
-                config.night(),
-                config.mining(),
-                config.goal(),
-                config.nav(),
-                config.pickup(),
-                config.conversation());
-    }
-
-    private static void setConfig(MinecraftAiConfig config) {
-        try {
-            Field instance = MinecraftAiConfig.class.getDeclaredField("instance");
-            instance.setAccessible(true);
-            instance.set(null, config);
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("failed to install GameTest config", exception);
-        }
-    }
 }

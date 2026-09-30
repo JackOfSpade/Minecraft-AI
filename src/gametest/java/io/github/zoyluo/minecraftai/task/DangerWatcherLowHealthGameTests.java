@@ -2032,8 +2032,11 @@ public final class DangerWatcherLowHealthGameTests {
                 return;
             }
 
-            require(context, trail.contains(bot.blockPosition()),
-                    "lava return left the factual trail: " + bot.blockPosition().toShortString());
+            // The return is walked (R5): a step up onto the next waypoint is a jump, so mid-step the bot is in the cell above the
+            // waypoint it leaves or in the waypoint it climbs to; it must never leave the trail column line (the lava is two cells north).
+            BlockPos here = bot.blockPosition();
+            require(context, (trail.contains(here) || trail.contains(here.below())) && here.getZ() == start.getZ(),
+                    "lava return left the factual trail: " + here.toShortString());
             require(context, world.getBlockState(lava).is(Blocks.LAVA),
                     "DigDown mutated the factual lava source");
             require(context, bot.getHealth() == healthBefore

@@ -43,9 +43,14 @@ final class FollowFieldFixture {
     private boolean finished;
 
     FollowFieldFixture(GameTestHelper context, int halfX, int halfZ) {
+        this(context, halfX, halfZ, 0);
+    }
+
+    /** As above on its own world layer (a long or wide scene keeps clear of the layer-0 scenes that run at the same time). */
+    FollowFieldFixture(GameTestHelper context, int halfX, int halfZ, int layer) {
         this.context = context;
         this.level = context.getLevel();
-        this.arena = BaritoneEngineArena.build(context, 0, halfX, halfZ);
+        this.arena = BaritoneEngineArena.build(context, layer, halfX, halfZ);
         level.setDayTime(1000L);
         GameTestCleanup.whenFinished(context, this::cleanUp);
     }
