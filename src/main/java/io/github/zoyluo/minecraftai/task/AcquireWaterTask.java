@@ -146,6 +146,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private int lastPathAttemptBudget = -PATH_RETRY_INTERVAL;
     private BlockPos ascentTarget;
     private EdgePlacement edge;
+    private WalkedStep ascentSettle;
     private BlockPos ascentCommittedFrom;
     private boolean ascentPathStarted;
     private int ascentPathStartedBudget;
@@ -316,6 +317,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         ascentTarget = null;
         ascentPathStarted = false;
         edge = null;
+        ascentSettle = null;
         ascentRelocationTarget = null;
         ascentRelocationOrigin = null;
         ascentRelocationPathStarted = false;
@@ -350,6 +352,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         ascentTarget = null;
         ascentPathStarted = false;
         edge = null;
+        ascentSettle = null;
 
         if (ascentRelocationTarget == null) {
             return;
@@ -387,6 +390,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         ascentTarget = null;
         ascentPathStarted = false;
         edge = null;
+        ascentSettle = null;
         ascentRelocationTarget = null;
         ascentRelocationOrigin = null;
         ascentRelocationPathStarted = false;
@@ -644,6 +648,9 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             tickAscentToolCraft(bot);
             return true;
         }
+        if (settleOnStandableCell(bot, world, current)) {
+            return true;
+        }
         if (tickAscentRelocation(bot, current)) {
             return true;
         }
@@ -788,6 +795,37 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             ascentTarget = null;
             ascentPathStarted = false;
         }
+        return true;
+    }
+
+    /**
+     * A bot whose body overhangs the edge of its floor (a restart or a cancelled hop left it half over the next cell) stands in a cell
+     * that is not standable although it is supported by a neighbour. Every stair candidate and every route search treats the bot's
+     * cell as its start, so nothing chosen from there is sound; a route search from such a start only plans the walk onto the
+     * neighbouring cell and, when the search then fails, the plan is dropped and the same target is chosen again for the whole budget.
+     * The bot first walks (a walked step, inputs only) onto the standable cell it is leaning on. Returns true while that step runs.
+     */
+    private boolean settleOnStandableCell(AIPlayerEntity bot, ServerLevel world, BlockPos current) {
+        if (ascentSettle != null) {
+            if (!ascentSettle.ended()) {
+                return true;
+            }
+            ascentSettle = null;
+            return false;
+        }
+        if (Standability.isStandableFresh(world, current) || !WalkedStep.supported(bot)) {
+            return false;
+        }
+        WalkedStep step = bot.getActionPack().adjacentStandableStep("acquire_water_ascent_settle");
+        if (step == null) {
+            return false;
+        }
+        returnMiner.cancel(bot);
+        bot.getActionPack().stopAll();
+        bot.getActionPack().runStep(step);
+        ascentSettle = step;
+        ascentPathStarted = false;
+        ascentTarget = null;
         return true;
     }
 
