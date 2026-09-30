@@ -309,6 +309,28 @@ public final class McBotGatewayMcCases {
         assertFalse(rig.gateway.applyProfile("Inh_Bot", standing()).loadoutApplied());
     }
 
+    // ------------------------------------------------------------------------------ ender pearl sanitize
+
+    public static void stripEnderPearlsGoesThroughTheApplierForTheBotEntityAndReturnsItsCount() {
+        Rig rig = new Rig();
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.strippedCount = 7;
+        assertEquals(7, rig.gateway.stripEnderPearls("Inh_Bot"));
+        assertEquals(1, rig.applier.stripped.size());
+        assertSame(rig.bot, rig.applier.stripped.get(0));
+    }
+
+    public static void stripEnderPearlsDoesNothingForAnOfflineNameAndContainsAdapterFailures() {
+        Rig rig = new Rig();
+        rig.applier.strippedCount = 7;
+        assertEquals(0, rig.gateway.stripEnderPearls("Nobody"), "no bot entity: nothing to strip");
+        assertTrue(rig.applier.stripped.isEmpty());
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.adapter.findFailure = new IllegalStateException("boom");
+        assertEquals(0, rig.gateway.stripEnderPearls("Inh_Bot"));
+        assertTrue(rig.applier.stripped.isEmpty());
+    }
+
     // ------------------------------------------------------------------------------ restore
 
     public static void restoreDoesNothingForABotThatIsNotOnlineAndListed() {

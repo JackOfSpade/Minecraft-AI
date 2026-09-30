@@ -63,6 +63,60 @@ public final class ProfileApplierMcCases {
         }
     }
 
+    /** Every pearl goes from every kind of slot; everything else, including other throwables, stays exactly as it was. */
+    public static void removeEnderPearlsTakesOnlyPearlsFromEverySlotAndCountsThem() {
+        Inventory inventory = newInventory();
+        ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), true, new ArrayList<>());
+        inventory.setItem(2, new ItemStack(Items.ENDER_PEARL, 16));          // hotbar
+        inventory.setItem(20, new ItemStack(Items.ENDER_PEARL, 3));          // main inventory
+        inventory.setItem(21, new ItemStack(Items.ENDER_EYE, 4));            // look-alike, must stay
+        inventory.setItem(22, new ItemStack(Items.SNOWBALL, 16));            // other throwable, must stay
+        inventory.setItem(SlotPlanner.OFFHAND, new ItemStack(Items.ENDER_PEARL, 1)); // offhand replaces the shield
+        List<ItemStack> before = new ArrayList<>();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            before.add(inventory.getItem(slot).copy());
+        }
+
+        assertEquals(20, ProfileApplier.removeEnderPearls(inventory));
+
+        assertTrue(inventory.getItem(2).isEmpty());
+        assertTrue(inventory.getItem(20).isEmpty());
+        assertTrue(inventory.getItem(SlotPlanner.OFFHAND).isEmpty());
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (before.get(slot).is(Items.ENDER_PEARL)) {
+                continue;
+            }
+            assertTrue(ItemStack.matches(before.get(slot), inventory.getItem(slot)), "slot " + slot + " must be untouched");
+        }
+        assertTrue(inventory.getItem(21).is(Items.ENDER_EYE));
+        assertEquals(4, inventory.getItem(21).getCount());
+        assertTrue(inventory.getItem(22).is(Items.SNOWBALL));
+        assertEquals(0, ProfileApplier.removeEnderPearls(inventory), "idempotent: a second pass finds nothing");
+    }
+
+    public static void aBotWithoutPearlsIsLeftAlone() {
+        Inventory inventory = newInventory();
+        ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), true, new ArrayList<>());
+        assertEquals(0, ProfileApplier.removeEnderPearls(inventory));
+        assertTrue(inventory.getItem(0).is(Items.DIAMOND_SWORD));
+        assertTrue(inventory.getItem(SlotPlanner.OFFHAND).is(Items.SHIELD));
+    }
+
+    /** Old stored profiles (and unwiped inventories) carry pearls; a dressing never leaves any and says so. */
+    public static void dressingNeverLeavesPearlsFromAStoredProfileOrTheOldInventory() {
+        BotProfile.Loadout old = new BotProfile.Loadout(List.of(
+                new PlacedItem(Slot.HOTBAR, 0, ItemSpec.of("minecraft:diamond_sword")),
+                new PlacedItem(Slot.INVENTORY, -1, ItemSpec.of("minecraft:ender_pearl", 6))));
+        Inventory inventory = newInventory();
+        inventory.setItem(30, new ItemStack(Items.ENDER_PEARL, 2)); // not a planned slot, survives a non-clearing fill
+        List<String> warnings = new ArrayList<>();
+        ProfileApplier.fill(inventory, McBootstrap.registries(), old, false, warnings);
+        assertEquals(0, ProfileApplier.removeEnderPearls(inventory), "nothing left to remove");
+        assertTrue(inventory.getItem(0).is(Items.DIAMOND_SWORD));
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.get(0).contains("8 ender pearls"), warnings.get(0));
+    }
+
     public static void aLoadoutLandsInTheRightVanillaSlots() {
         Inventory inventory = newInventory();
         List<String> warnings = new ArrayList<>();

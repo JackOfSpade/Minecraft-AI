@@ -69,6 +69,14 @@ public interface BotGateway {
      */
     boolean restore(String botName, BotProfile profile);
 
+    /**
+     * Removes every ender pearl from an online inhabitant's inventory and returns how many were removed (0 when
+     * none, when it is not online or not a bot). Cheap and idempotent; the engine calls it after a restore and then
+     * every few seconds so a pearl picked up later goes too. PvP BOT's cobweb escape loop re-selects the pearl
+     * slot every tick while the bot stands in a web, which cancels crossbow charges and attacks.
+     */
+    int stripEnderPearls(String botName);
+
     // ------------------------------------------------------------------ value types
 
     record SpawnRequest(String dimensionId, String name, double x, double y, double z, float yaw) {

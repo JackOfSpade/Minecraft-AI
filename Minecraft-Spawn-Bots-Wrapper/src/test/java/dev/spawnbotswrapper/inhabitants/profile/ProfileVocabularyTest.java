@@ -35,7 +35,7 @@ class ProfileVocabularyTest {
                 "spectral_arrow", "tipped_arrow", "shield", "totem_of_undying", "golden_apple",
                 "enchanted_golden_apple", "golden_carrot", "cooked_beef", "cooked_porkchop", "cooked_mutton",
                 "cooked_salmon", "cooked_cod", "cooked_chicken", "bread", "baked_potato", "apple", "carrot",
-                "splash_potion", "potion", "experience_bottle", "cobweb", "water_bucket", "ender_pearl",
+                "splash_potion", "potion", "experience_bottle", "cobweb", "water_bucket",
                 "wind_charge", "end_crystal", "obsidian", "respawn_anchor", "glowstone", "firework_rocket")) {
             ids.add(NS + name);
         }
@@ -53,7 +53,7 @@ class ProfileVocabularyTest {
     @Test
     void itemsAreExactlyTheIndependentlyTranscribedRegistryIds() {
         assertEquals(expectedItems(), ProfileVocabulary.items());
-        assertEquals(78, ProfileVocabulary.items().size());
+        assertEquals(77, ProfileVocabulary.items().size());
     }
 
     @Test

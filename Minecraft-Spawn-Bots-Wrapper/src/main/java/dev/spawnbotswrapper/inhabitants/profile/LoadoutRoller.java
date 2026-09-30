@@ -389,12 +389,21 @@ final class LoadoutRoller {
             out.stockSplit(BotProfile.ItemSpec.of(ItemIds.COBWEB),
                     r.count("profile.sustain.cobwebs", 0, 16), LoadoutBuilder.UTILITY);
         }
-        // The cobweb escape routine is not tied to any setting, so its tools are always fair game.
+        // PvP BOT's cobweb escape routine is not tied to any setting. Its water-bucket branch is a bounded ten-tick
+        // routine, so a bucket is always fair game. Ender pearls are deliberately NEVER stocked: with a pearl and
+        // no bucket the bot selects the pearl slot, throws it horizontally and clears its in-web flag every single
+        // tick while it stands in a cobweb. In cramped places (mineshafts, tunnels) the pearl lands back in or
+        // next to the web and the pearl cooldown turns most retries into no-ops, but every retry still switches
+        // the selected hotbar slot, which cancels a crossbow charge, a bow draw and every attack until the pearls
+        // run out. Without pearls (and without a bucket) it simply fights from the web. Nothing else in PvP BOT
+        // uses pearls, so leaving them out costs no behaviour. Inhabitants that already carry some have them
+        // removed by the inventory sanitize step (ProfileApplier.removeEnderPearls).
         if (r.flag("profile.sustain.waterBucket")) {
             out.stock(BotProfile.ItemSpec.of(ItemIds.WATER_BUCKET), LoadoutBuilder.UTILITY);
         }
-        out.stockSplit(BotProfile.ItemSpec.of(ItemIds.ENDER_PEARL),
-                r.count("profile.sustain.enderPearls", 0, 8), LoadoutBuilder.UTILITY);
+        // The draw that used to pick the pearl count is still consumed, so every later roll (vitals, behaviour,
+        // the next bots of a deterministic world) is unchanged and only the pearls themselves disappear.
+        r.count("profile.sustain.enderPearls", 0, 8);
     }
 
     /**

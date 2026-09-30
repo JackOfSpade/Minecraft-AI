@@ -101,7 +101,7 @@ class ProfileCoverageTest {
         assertCovered(tag + " fire resistance potions", collect(from,
                 p -> (double) potionCount(p, pot -> pot.contains("fire_resistance"))), 0, 8, true, false);
         assertCovered(tag + " cobwebs", collect(from, p -> (double) countOf(p, ItemIds.COBWEB)), 0, 16, true, false);
-        assertCovered(tag + " ender pearls", collect(from, p -> (double) countOf(p, ItemIds.ENDER_PEARL)), 0, 8, true, false);
+        assertEquals(0, from.stream().mapToInt(p -> countOf(p, ItemIds.ENDER_PEARL)).sum(), tag + ": ender pearls are never stocked");
         assertCovered(tag + " totems", collect(from, p -> (double) countOf(p, ItemIds.TOTEM)), 0, 4, true, false);
         assertCovered(tag + " wind charges", collect(from, p -> has(p, i -> i.equals(NS + "mace"))
                 ? (double) countOf(p, ItemIds.WIND_CHARGE) : null), 0, 32, true, true);

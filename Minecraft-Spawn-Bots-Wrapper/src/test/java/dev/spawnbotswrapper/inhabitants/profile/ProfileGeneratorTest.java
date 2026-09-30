@@ -162,7 +162,7 @@ class ProfileGeneratorTest {
                 + " offhand:0=totem_of_undying hotbar:0=mace+breach2+unbreaking2~0.14 hotbar:1=shield"
                 + " hotbar:8=cooked_porkchopx42 inventory:-1=totem_of_undying inventory:-1=totem_of_undying"
                 + " inventory:-1=golden_applex2 inventory:-1=potion<healing> inventory:-1=potion<healing>"
-                + " inventory:-1=potion<healing> inventory:-1=ender_pearlx6"
+                + " inventory:-1=potion<healing>"
                 + " | hp 0.52 food 12 attack_speedm-0.29 entity_interaction_rangev1.3 knockback_resistancev0.05"
                 + " max_healthv17.0 | STAND true bhop 0.0 0",
                 fingerprint(generator.create(1L, caps, new TransientDeckStore())));
@@ -173,7 +173,7 @@ class ProfileGeneratorTest {
                 + " inventory:-1=potion<strong_healing> inventory:-1=potion<strong_healing>"
                 + " inventory:-1=potion<strong_healing> inventory:-1=splash_potion<swiftness>"
                 + " inventory:-1=splash_potion<swiftness> inventory:-1=splash_potion<swiftness>"
-                + " inventory:-1=splash_potion<swiftness> inventory:-1=cobwebx5 inventory:-1=ender_pearlx3"
+                + " inventory:-1=splash_potion<swiftness> inventory:-1=cobwebx5"
                 + " | hp 0.85 food 7 attack_speedm-0.13 entity_interaction_rangev2.4 knockback_resistancev0.8"
                 + " max_healthv12.0 | PATROL_PINGPONG true bhop 33.7 3",
                 fingerprint(generator.create(987654321L, caps, new TransientDeckStore())));

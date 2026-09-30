@@ -278,7 +278,8 @@ final class SettingData {
                         "Truthful. A cobweb in slots 0-35 lets the bot place webs on its target (in retreat within 8 "
                                 + "blocks, or in melee at 2-6 blocks against a moving target); without one it never "
                                 + "does. Varies: web placer or not. Does not vary: the bot's own escape from webs "
-                                + "(water_bucket or ender_pearl), a separate ungated mechanism. Leak: a decorative "
+                                + "(water_bucket only: ender pearls are never stocked because the pearl escape "
+                                + "loop cancels attacks), a separate ungated mechanism. Leak: a decorative "
                                 + "cobweb is used as a weapon. No command key."),
                 flag("retreatEnabled", "retreat", true).perBot(LOADOUT,
                         "loadout: any food item; vitals.healthFraction: starting below retreatHealthPercent retreats "

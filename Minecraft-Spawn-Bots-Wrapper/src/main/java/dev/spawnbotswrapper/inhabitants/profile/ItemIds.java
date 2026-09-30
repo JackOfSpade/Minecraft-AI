@@ -110,6 +110,7 @@ final class ItemIds {
     static final String EXPERIENCE_BOTTLE = NS + "experience_bottle";
     static final String COBWEB = NS + "cobweb";
     static final String WATER_BUCKET = NS + "water_bucket";
+    /** Never stocked (see LoadoutRoller); kept only so stored profiles from before that still get the right stack size and category. */
     static final String ENDER_PEARL = NS + "ender_pearl";
     static final String WIND_CHARGE = NS + "wind_charge";
     static final String END_CRYSTAL = NS + "end_crystal";
@@ -215,7 +216,7 @@ final class ItemIds {
         all.addAll(MELEE_ITEMS);
         all.addAll(List.of(BOW, CROSSBOW, ARROW, SPECTRAL_ARROW, TIPPED_ARROW, SHIELD, TOTEM, GOLDEN_APPLE,
                 ENCHANTED_GOLDEN_APPLE, SPLASH_POTION, POTION, EXPERIENCE_BOTTLE, COBWEB, WATER_BUCKET,
-                ENDER_PEARL, WIND_CHARGE, END_CRYSTAL, OBSIDIAN, RESPAWN_ANCHOR, GLOWSTONE, FIREWORK_ROCKET));
+                WIND_CHARGE, END_CRYSTAL, OBSIDIAN, RESPAWN_ANCHOR, GLOWSTONE, FIREWORK_ROCKET));
         all.addAll(FOODS);
         return List.copyOf(all);
     }

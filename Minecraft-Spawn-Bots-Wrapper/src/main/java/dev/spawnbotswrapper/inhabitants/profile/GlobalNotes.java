@@ -144,7 +144,7 @@ final class GlobalNotes {
         }
         if (inv.has(ItemIds.COBWEB) && !caps.cobwebEnabled()) {
             out.add("Carries cobwebs but the cobweb setting is off globally: it never places them on its target "
-                    + "(a water bucket or ender pearl only helps it escape a web it stands in).");
+                    + "(a water bucket only helps it escape a web it stands in).");
         }
     }
 

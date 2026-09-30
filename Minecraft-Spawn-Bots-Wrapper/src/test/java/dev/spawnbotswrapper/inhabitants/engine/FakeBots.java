@@ -55,6 +55,9 @@ final class FakeBots implements BotGateway {
     final List<String> forgets = new ArrayList<>();
     final List<String> removes = new ArrayList<>();
     final List<Applied> restores = new ArrayList<>();
+    final List<String> pearlStripCalls = new ArrayList<>();
+    /** Pearls "found" per strip call, by lower-case name; the fake keeps answering the same number. */
+    final Map<String, Integer> pearlsToStrip = new HashMap<>();
     int availableCalls;
     int restoreCalls;
     /** When non-null, available() throws this (any Throwable, including Errors). */
@@ -70,6 +73,7 @@ final class FakeBots implements BotGateway {
     boolean throwForget;
     boolean throwRemove;
     boolean throwRestore;
+    boolean throwStrip;
     boolean throwCapabilities;
     boolean nullHandle;
 
@@ -246,6 +250,15 @@ final class FakeBots implements BotGateway {
         }
         restores.add(new Applied(botName, profile));
         return true;
+    }
+
+    @Override
+    public int stripEnderPearls(String botName) {
+        pearlStripCalls.add(botName);
+        if (throwStrip) {
+            throw new IllegalStateException("injected stripEnderPearls failure");
+        }
+        return pearlsToStrip.getOrDefault(key(botName), 0);
     }
 
     @SuppressWarnings("unchecked")

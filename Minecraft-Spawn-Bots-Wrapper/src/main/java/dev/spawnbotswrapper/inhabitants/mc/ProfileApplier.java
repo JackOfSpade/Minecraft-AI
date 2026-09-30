@@ -13,6 +13,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.Team;
@@ -133,7 +134,41 @@ public final class ProfileApplier implements ProfileApplication {
             Optional<ItemStack> stack = factory.build(placement.spec(), warnings);
             stack.ifPresent(s -> inventory.setItem(placement.slot(), s));
         }
+        // Stored profiles from before pearls were dropped from loadouts (and pearls already on a bot that is not
+        // wiped) never survive a dressing; see removeEnderPearls for why.
+        int pearls = removeEnderPearls(inventory);
+        if (pearls > 0) {
+            warnings.add("removed " + pearls + " ender pearl" + (pearls == 1 ? "" : "s")
+                    + " (they make PvP BOT's cobweb escape loop cancel attacks)");
+        }
         inventory.setSelectedSlot(0);
+    }
+
+    /**
+     * Removes every ender pearl from every slot of the inventory (hotbar, main, armor, offhand) and returns how
+     * many pearls were removed (items, not stacks). Nothing else is touched. PvP BOT's cobweb escape uses a
+     * pearl when it stands in a cobweb without a water bucket and re-selects the pearl slot on every tick it stays
+     * webbed, which cancels a crossbow charge, a bow draw and attacks; see {@code LoadoutRoller}.
+     */
+    static int removeEnderPearls(Inventory inventory) {
+        int removed = 0;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && stack.is(Items.ENDER_PEARL)) {
+                removed += stack.getCount();
+                inventory.setItem(slot, ItemStack.EMPTY);
+            }
+        }
+        return removed;
+    }
+
+    @Override
+    public int stripEnderPearls(ServerPlayer bot) {
+        try {
+            return isBot.test(bot) ? removeEnderPearls(bot.getInventory()) : 0;
+        } catch (RuntimeException e) {
+            return 0;
+        }
     }
 
     private static boolean applyVitals(ServerPlayer bot, BotProfile.Vitals vitals, List<String> warnings) {

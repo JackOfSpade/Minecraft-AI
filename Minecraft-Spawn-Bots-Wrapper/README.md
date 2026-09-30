@@ -194,6 +194,23 @@ patrols were **pacifists**: they never targeted, attacked or retaliated. That ha
 * stale upstream paths (PvP BOT stores paths in its own file, with `attack=false` for old pacifists) are
   replaced: restoring a bot deletes and rebuilds its `inh_` path with `attack=true` before it starts following.
 
+## No ender pearls: the cobweb escape loop
+
+PvP BOT's cobweb escape (a bot standing inside a cobweb) uses a water bucket if it has one (a bounded ten-tick
+routine), else an ender pearl: it selects the pearl slot, throws horizontally and clears its in-web flag, and repeats
+on every tick it is still webbed. In cramped places (mineshafts, tunnels, next to walls) the pearl lands back in or
+next to the web and the pearl cooldown turns most retries into no-ops, but every retry still switches the selected
+hotbar slot, which cancels a crossbow charge, a bow draw and every attack. The visible symptom is a hostile bot right
+next to you that "reloads its crossbow half-way, stops, reloads again" and never fires. Pearls are used by nothing
+else in PvP BOT 0.0.15, so:
+
+* new loadouts **never contain ender pearls** (water buckets and cobwebs are still stocked as before);
+* every inhabitant the addon manages is **swept for ender pearls**: right after it is restored and then about every
+  5 seconds while it is online (so a picked-up pearl goes too). Only inhabitants are touched, never real players or
+  other bots; nothing else in the inventory changes. The first removal per bot is logged once at INFO
+  (`Removed N ender pearl(s) from inhabitant ...`), later ones only in debug mode. Profiles stored before this change
+  keep their pearls in `populations.json`, but a re-dressing (`profiles.reapplyOnRestore`) drops them too.
+
 ## Managed PvP BOT setting: critical-hit fall phase
 
 PvP BOT's melee routine only swings after a jump-crit with `crit-fall-ticks` ticks of descent (its default is

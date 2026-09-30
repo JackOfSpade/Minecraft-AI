@@ -25,6 +25,12 @@ public interface ProfileApplication {
     void mark(ServerPlayer bot);
 
     /**
+     * Removes every ender pearl from a bot's inventory (never for a non-bot) and returns how many pearls were
+     * removed; 0 when none, when the entity is not a bot, or on any failure. Nothing else is changed.
+     */
+    int stripEnderPearls(ServerPlayer bot);
+
+    /**
      * @param loadoutApplied the inventory section ran to completion (individual items may still have been
      *                       skipped, see the warnings)
      * @param vitalsApplied  the attribute / health / hunger section ran to completion

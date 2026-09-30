@@ -500,7 +500,7 @@ class ProfileInvariantsTest {
         assertTrue(items.stream().anyMatch(i -> i.endsWith("_chestplate")), "armor needs no capability");
         assertTrue(items.stream().anyMatch(i -> i.endsWith("_sword")), "plain melee weapons need no capability");
         assertTrue(items.contains(NS + "water_bucket"), "the cobweb escape kit is ungated");
-        assertTrue(items.contains(NS + "ender_pearl"));
+        assertFalse(items.contains(NS + "ender_pearl"), "ender pearls are never stocked (they make the cobweb escape loop cancel attacks)");
         for (String forbidden : List.of("bow", "crossbow", "arrow", "mace", "wind_charge", "shield", "totem_of_undying",
                 "splash_potion", "potion", "experience_bottle", "cobweb", "end_crystal", "respawn_anchor",
                 "golden_apple", "cooked_beef")) {
@@ -587,6 +587,18 @@ class ProfileInvariantsTest {
             }
         }
         assertTrue(checked > 100);
+    }
+
+    @Test
+    void newLoadoutsNeverContainEnderPearls() {
+        // PvP BOT's cobweb escape throws pearls in a per-tick loop that cancels crossbow charges and attacks.
+        for (GlobalCapabilities caps : List.of(allOn(), allOff(), GlobalCapabilities.upstreamDefaults())) {
+            for (BotProfile p : profiles(generate(SAMPLES, caps, everythingOptions(), 31))) {
+                for (BotProfile.PlacedItem item : p.loadout().items()) {
+                    assertNotEquals(NS + "ender_pearl", item.spec().item(), p.archetype());
+                }
+            }
+        }
     }
 
     @Test

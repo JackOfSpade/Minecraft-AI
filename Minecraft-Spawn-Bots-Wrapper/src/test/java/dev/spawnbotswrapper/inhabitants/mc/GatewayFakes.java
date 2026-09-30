@@ -166,6 +166,8 @@ final class GatewayFakes {
         final List<Boolean> clearFlags = new ArrayList<>();
         final List<BotProfile> profiles = new ArrayList<>();
         final Map<ServerPlayer, Boolean> marked = new IdentityHashMap<>();
+        final List<ServerPlayer> stripped = new ArrayList<>();
+        int strippedCount;
 
         @Override
         public Result apply(ServerPlayer bot, BotProfile profile, boolean clearInventoryFirst) {
@@ -182,6 +184,12 @@ final class GatewayFakes {
         @Override
         public void mark(ServerPlayer bot) {
             marked.put(bot, Boolean.TRUE);
+        }
+
+        @Override
+        public int stripEnderPearls(ServerPlayer bot) {
+            stripped.add(bot);
+            return strippedCount;
         }
     }
 

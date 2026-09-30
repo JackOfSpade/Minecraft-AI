@@ -229,6 +229,11 @@ public final class McBotGateway implements BotGateway {
         return changed;
     }
 
+    @Override
+    public int stripEnderPearls(String botName) {
+        return findBot(botName).map(applier::stripEnderPearls).orElse(0);
+    }
+
     /** Gives a bot back its path if it no longer follows one. True only when a path was actually assigned. */
     private boolean reassignPath(String botName, BotProfile.Behavior behavior) {
         try {

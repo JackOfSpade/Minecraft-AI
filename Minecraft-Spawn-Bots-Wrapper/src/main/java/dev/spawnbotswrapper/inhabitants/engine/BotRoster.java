@@ -33,6 +33,9 @@ final class BotRoster {
     /** A complete pass over the roster takes this many ticks. */
     static final int SCAN_PERIOD_TICKS = 20;
 
+    /** Each online inhabitant is swept for ender pearls at most this often (5 s). */
+    static final int PEARL_SWEEP_TICKS = 100;
+
     private static final class Tracked {
         final StructureKey structure;
         final BotRecord bot;
@@ -41,6 +44,9 @@ final class BotRoster {
         long offlineSince = -1;
         boolean restored;
         boolean forgotten;
+        /** Tick from which the next ender-pearl sweep is due. */
+        long nextPearlSweep;
+        boolean pearlsLogged;
 
         Tracked(StructureKey structure, BotRecord bot) {
             this.structure = structure;
@@ -200,6 +206,7 @@ final class BotRoster {
             Tracked t = entries.get(cursor++);
             observe(t, now);
             maybeRestore(t, cfg);
+            sweepPearls(t, now, cfg);
         }
     }
 
@@ -231,6 +238,7 @@ final class BotRoster {
             }
             setOnline(t, true);
             maybeRestore(t, cfg);
+            sweepPearls(t, ctx.now(), cfg);
         }
     }
 
@@ -276,6 +284,37 @@ final class BotRoster {
             throw e;
         } catch (Throwable e) {
             ctx.log.error("restore", t.bot.name, e);
+        }
+    }
+
+    /**
+     * Removes ender pearls from an online inhabitant, at most once per {@link #PEARL_SWEEP_TICKS} per bot (so a
+     * freshly restored bot is cleaned on its first visit and a pearl picked up later goes within seconds). PvP
+     * BOT's cobweb escape throws pearls in a loop that keeps switching the held slot, which cancels the bot's own
+     * crossbow charge and attacks; see {@code LoadoutRoller}. Logged at INFO once per bot (the count removed), then
+     * only in debug mode. Never throws.
+     */
+    private void sweepPearls(Tracked t, long now, InhabitantsConfig cfg) {
+        if (!t.online || now < t.nextPearlSweep) {
+            return;
+        }
+        t.nextPearlSweep = now + PEARL_SWEEP_TICKS;
+        try {
+            int removed = ctx.bots.stripEnderPearls(t.bot.name);
+            if (removed <= 0) {
+                return;
+            }
+            if (!t.pearlsLogged) {
+                t.pearlsLogged = true;
+                ctx.info("Removed {} ender pearl(s) from inhabitant {} (they make PvP BOT's cobweb escape loop cancel its attacks)",
+                        removed, t.bot.name);
+            } else {
+                ctx.debug(cfg, "Removed {} more ender pearl(s) from inhabitant {}", removed, t.bot.name);
+            }
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable e) {
+            ctx.log.error("stripEnderPearls", t.bot.name, e);
         }
     }
 
