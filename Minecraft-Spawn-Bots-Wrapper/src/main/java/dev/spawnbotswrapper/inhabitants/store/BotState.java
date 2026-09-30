@@ -9,10 +9,11 @@ package dev.spawnbotswrapper.inhabitants.store;
  *      +---------- timeout / refusal (attempt++) -----+--> FAILED (attempts exhausted)               v  |
  *                                                                               far from every player, a while --> DORMANT
  * </pre>
- * DORMANT is the one non-terminal exception to "death is permanent": unlike FAILED, it is expected to flip
- * back to SPAWNED (same name, position and profile) once its structure is near a real player again -- see
- * {@code DormancyGovernor} and {@code PopulationDriver#restoreDormant}. A bot removed for server load instead
- * (see {@code TpsGovernor}) is left SPAWNED and simply never comes back online, exactly like a real death.
+ * DORMANT is the one non-terminal exception: a bot a player has SEEN and that had to leave the world (its structure
+ * left the allocation, or the lag governor shed it) sleeps with its whole state and is expected to flip back to SPAWNED
+ * (same name, position and identity) once its structure is allocated again -- see {@code AllocationGovernor} and
+ * {@code Retirer}. A bot nobody saw is deleted instead (no record at all: its slot is vacant). DEAD is a real death and
+ * is permanent: the slot is never refilled.
  */
 public enum BotState {
     /** Name and seed chosen; no position yet, or a previous attempt failed and it is waiting to retry. */

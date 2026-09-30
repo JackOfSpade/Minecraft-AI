@@ -47,7 +47,7 @@ final class ProfileReport {
         out.add(label("  structure: ") + id(key.structureId()) + label(" at chunk "
                 + Fmt.chunk(key.chunkX(), key.chunkZ()) + " in " + Markup.esc(key.dimension())));
         out.add(label("  state: ") + state(bot.state) + label("  |  index " + bot.index + "  |  spawn attempts "
-                + bot.spawnAttempts));
+                + bot.spawnAttempts + (bot.seen ? "  |  seen by a player (kept for good)" : "")));
         out.add(label("  uuid: ") + (bot.uuid == null || bot.uuid.isBlank() ? label("not seen yet") : plain(bot.uuid)));
         if (bot.state == BotState.REQUESTED || bot.state == BotState.SPAWNED || bot.state == BotState.DORMANT) {
             out.add(label("  position: ") + plain(Fmt.xyz(bot.x, bot.y, bot.z)) + label(", yaw "
@@ -57,6 +57,10 @@ final class ProfileReport {
         }
         if (bot.failure != null && !bot.failure.isBlank()) {
             out.add(label("  last failure: ") + bad(bot.failure));
+        }
+        if (bot.state == BotState.DEAD) {
+            out.add(bad("  Dead: this inhabitant was killed; its slot is never refilled, nothing else is kept."));
+            return out;
         }
         if (bot.profile == null) {
             out.add(warn("  No profile yet: it is generated when the bot spawns (state " + bot.state + ")."));

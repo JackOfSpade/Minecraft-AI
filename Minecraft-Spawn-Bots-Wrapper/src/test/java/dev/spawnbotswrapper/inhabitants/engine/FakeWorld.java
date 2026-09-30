@@ -31,6 +31,8 @@ final class FakeWorld implements WorldGateway {
     boolean throwOnProbe;
     boolean throwOnSeed;
     int probeCalls;
+    /** What standing(...) answers: UNKNOWN keeps the saved position (a world with no block data), UNSAFE forces a new place. */
+    dev.spawnbotswrapper.inhabitants.spawn.SpawnSafety.Verdict standingVerdict = dev.spawnbotswrapper.inhabitants.spawn.SpawnSafety.Verdict.UNKNOWN;
 
     @Override
     public long worldSeed() {
@@ -38,6 +40,11 @@ final class FakeWorld implements WorldGateway {
             throw new IllegalStateException("injected worldSeed failure");
         }
         return seed;
+    }
+
+    @Override
+    public dev.spawnbotswrapper.inhabitants.spawn.SpawnSafety.Verdict standing(String dimensionId, double x, double y, double z) {
+        return standingVerdict;
     }
 
     @Override

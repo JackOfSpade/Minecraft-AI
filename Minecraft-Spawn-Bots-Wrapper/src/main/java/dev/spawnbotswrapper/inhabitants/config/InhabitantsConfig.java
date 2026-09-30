@@ -348,12 +348,12 @@ public final class InhabitantsConfig {
      * smoothed tick time with a level derived from the server's OWN measured baseline (so a pack that idles at
      * 55 ms per tick is not treated as overloaded), requires the excess to be sustained, uses separate enter and
      * exit levels (hysteresis) and a minimum dwell, and logs every transition with the numbers. Shedding happens
-     * only while genuinely degraded. A despawn here
-     * is permanent, exactly like a death: nothing here ever brings a bot back on its own. Unblocking new spawns
-     * once the server is healthy again cannot by itself respawn anything either -- only a newly discovered
-     * structure, or {@link Dormancy} restoring one it put to sleep, ever creates a new bot. See {@link Dormancy}
-     * for the separate, always-on, fully reversible mechanism that keeps the population naturally close to the
-     * player during ordinary play.
+     * only while genuinely degraded. A shed bot is taken out
+     * of the world without dying and without dropping anything: one a player has seen sleeps with its whole state,
+     * one nobody saw is deleted and its slot is vacant. Unblocking new spawns once the server is healthy again does
+     * not by itself create anything -- only the nearest-first {@link Allocation} does (it wakes sleepers and rolls
+     * fresh bots for vacant slots of structures near a player). See {@link Allocation} for the mechanism that keeps
+     * the population close to the players during ordinary play.
      */
     public static final class TpsThrottle {
         /** Master switch. */
@@ -529,11 +529,15 @@ public final class InhabitantsConfig {
      * Without this, a spawned inhabitant is a real player-like entity (see the addon README) that keeps
      * ticking forever no matter how far the player travels -- PvP BOT gives it none of vanilla's distance-based
      * entity unloading. Left alone, the live population would only ever grow as the player explores. This
-     * periodically despawns inhabitants that have stayed far from every real player for a while, and remembers
-     * them exactly (name, position, profile) so they are restored unchanged -- not re-rolled -- the next time
-     * their structure is near a real player again. This is what lets the population settle to an equilibrium
-     * around wherever the player actually is, instead of accumulating across the whole explored world. See
-     * {@link TpsThrottle} for the separate, reactive, one-way mechanism that responds to server load instead.
+     * periodically removes inhabitants that have stayed far from every real player for a while (a bot a player has
+     * seen sleeps with its whole state and wakes unchanged, one nobody saw is deleted and its slot is vacant), which
+     * lets the population settle to an equilibrium around wherever the player actually is.
+     * <p>
+     * SUPERSEDED by {@link Allocation} while that runs (it is enabled and a real player is online): its relevance
+     * area does the same job structure by structure, so this distance rule is then not run at all, {@code
+     * distanceBlocks} only caps the relevance area, and {@code enabled=false} stops the allocation from removing bots
+     * that left it. {@code delayTicks} and {@code scanIntervalTicks} only apply to the fallback (allocation off, or no
+     * player known). See {@link TpsThrottle} for the separate, reactive mechanism that responds to server load.
      */
     public static final class Dormancy {
         /** Master switch. */

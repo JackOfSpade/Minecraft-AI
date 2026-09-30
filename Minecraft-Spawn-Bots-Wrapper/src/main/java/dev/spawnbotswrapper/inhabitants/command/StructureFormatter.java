@@ -94,8 +94,15 @@ final class StructureFormatter {
         if (r.status == StructureStatus.ABANDONED || r.bots == null || r.bots.isEmpty()) {
             return;
         }
+        int dead = r.deadCount();
+        int seen = 0;
+        for (BotRecord b : r.bots) {
+            if (b.seen && b.state != BotState.DEAD) {
+                seen++;
+            }
+        }
         out.add(label(indent + "bots: ") + plain(spawned(r) + "/" + Math.max(r.plannedBots, r.bots.size())
-                + " spawned"));
+                + " spawned" + (seen > 0 ? ", " + seen + " seen" : "") + (dead > 0 ? ", " + dead + " dead (never refilled)" : "")));
         List<String> names = new ArrayList<>();
         for (BotRecord b : r.bots) {
             names.add(indent + "  " + id(String.valueOf(b.name)) + " " + botState(b.state));

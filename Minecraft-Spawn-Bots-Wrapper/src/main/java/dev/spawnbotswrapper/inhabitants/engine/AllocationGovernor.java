@@ -133,7 +133,19 @@ final class AllocationGovernor implements AllocationView {
 
     // ------------------------------------------------------------------ the pass
 
+    /** Server-thread nanoseconds spent in {@link #tick} so far (diagnostics and the cost test). */
+    long nanos;
+
     void tick(long now, InhabitantsConfig cfg) {
+        long started = System.nanoTime();
+        try {
+            pass(now, cfg);
+        } finally {
+            nanos += System.nanoTime() - started;
+        }
+    }
+
+    private void pass(long now, InhabitantsConfig cfg) {
         InhabitantsConfig.Allocation a = EngineContext.allocation(cfg);
         if (!a.enabled) {
             deactivate();
@@ -362,15 +374,17 @@ final class AllocationGovernor implements AllocationView {
         }
         victims.sort(Comparator.comparingDouble(Victim::distance).reversed().thenComparing(v -> v.bot().name));
         int batch = Math.max(1, EngineContext.tpsThrottle(cfg).despawnBatchSize);
-        for (Victim v : victims) {
-            if (batch <= 0) {
-                break;
-            }
-            Retirer.Result r = retirer.retire(v.key(), v.bot(), Retirer.Reason.ALLOCATION, cfg);
-            if (r == Retirer.Result.KEPT) {
-                retryAfter.put(EngineContext.lower(v.bot().name), now + RETRY_BACKOFF_TICKS); // do not hammer a broken disk
+        List<Victim> chosen = victims.subList(0, Math.min(batch, victims.size()));
+        List<Retirer.Item> items = new ArrayList<>(chosen.size());
+        for (Victim v : chosen) {
+            items.add(new Retirer.Item(v.key(), v.bot()));
+        }
+        // One batch: the sleeps among them share ONE write of the store (see Retirer#retireAll).
+        List<Retirer.Result> results = retirer.retireAll(items, Retirer.Reason.ALLOCATION, cfg);
+        for (int i = 0; i < results.size(); i++) {
+            if (results.get(i) == Retirer.Result.KEPT) {
+                retryAfter.put(EngineContext.lower(chosen.get(i).bot().name), now + RETRY_BACKOFF_TICKS); // do not hammer a broken disk
             } else {
-                batch--;
                 dirty = true;
             }
         }

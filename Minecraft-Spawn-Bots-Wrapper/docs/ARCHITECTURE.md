@@ -98,8 +98,34 @@ other source file mentions PvP BOT or HeroBot.
 7. **Profile.** When the entity exists, a randomized profile is generated, its patrol waypoints are planned
    from the real home position, and the profile is applied (loadout, vitals, path). The stored profile is
    authoritative and never regenerated.
-8. **Done.** When every planned bot has spawned or definitively failed, the structure becomes `POPULATED`
-   (or `GAVE_UP` if none could be placed). Both are terminal.
+8. **Done.** When every planned bot has spawned, died or definitively failed, the structure becomes `POPULATED`
+   (or `GAVE_UP` if none could be placed). Both are terminal as far as the ROLL goes: N is never re-rolled.
+9. **Allocation.** Which bots exist now is decided by `AllocationGovernor` (see 3b), not by the order structures were
+   found in.
+
+### 3b. Population by allocation (engine package)
+
+* `StructureIndex` keeps the occupied structures by 16x16-chunk cell; only those reaching into a real player's relevance
+  area (simulation distance + margin, at most `dormancy.distanceBlocks`) are looked at.
+* `Allocation` (pure) sorts them by 3D distance from the nearest real player to the bounding box and walks the list,
+  giving each its fill target (`N - dead - failed`) until `processing.maxLiveBots` is used up; protected bots (engaged with
+  a player, or SEEN inside the relevance area) count first. Hysteresis keeps an allocated structure against a rival that is
+  not nearer by `allocation.hysteresisBlocks`.
+* `AllocationGovernor` recomputes only when a player moved, changed level, or something relevant happened, at most once
+  per interval, and diffs the desired counts against the live ones: surplus bots are handed to `Retirer` (paced by the lag
+  governor's batch size, after the grace and dwell times), structures that came in get their sleepers woken first
+  (`DormancyRestorer`) and fresh bots rolled for their vacant slots, which the `PopulationDriver` places nearest first
+  under its own pacing and the lag governor's spawn block. There is no separate queue: each pass is a diff.
+* `SeenTracker` asks the gateway whether a real player sees a live bot (view cone, range, invisibility, then the
+  occlusion rays, last); the answer is stored for good in the bot's record.
+* `Retirer` is the only place that ends a live inhabitant. A removal is NOT a death: `BotGateway.remove` empties the bot
+  (`adapter.BotRemoval`) and lets it leave like a logging-out player before PvP BOT forgets it, so nothing drops and
+  nothing dies. A seen bot sleeps (snapshot, position and a `removing` mark are written to disk BEFORE the bot is emptied),
+  an unseen bot is deleted with no record; `died` turns a real death into a `DEAD` record for good.
+* Removal paths, and what they do: allocation surplus, lag shedding and the legacy distance rule go through `Retirer`
+  (sleep or delete); an admin `reset ... removeBots` and a failed spawn go through the same non-death `remove` and drop
+  the record; a real death arrives from the server's death event (or, as a fallback, a bot gone for `goneConfirmTicks`);
+  a server stop keeps every record and saves the live states.
 
 ### Why nothing is populated twice
 
@@ -109,7 +135,9 @@ other source file mentions PvP BOT or HeroBot.
 * Abandoned decisions survive even a hard crash (the key log is appended immediately).
 * If persisted data cannot be read, the store reports itself **unusable** and the addon refuses to roll
   anything: a wrongly empty store would otherwise re-roll the world and duplicate populations.
-* Killed inhabitants are never replaced; a structure never returns to "unprocessed". There is no respawn logic.
+* Killed inhabitants are never replaced: a death is a `DEAD` record, the slot is spent for good and a structure yields
+  at most N bots' worth of kills over the world's lifetime. Only vacant slots (from deleted, never-seen bots) are ever
+  rolled again, and only a structure that is allocated. A structure never returns to "unprocessed".
 * If PvP BOT is missing or incompatible, nothing is rolled or recorded, so structures are not marked
   processed while unable to be populated.
 
@@ -194,8 +222,10 @@ the profile logic.
 
 * Work is bounded per tick (structures rolled, bots requested) and paced (`spawnIntervalTicks`).
 * Bots are full players and, like real players, keep their surroundings loaded and ticking; hundreds of
-  inhabitants spread over many structures keep many chunk areas loaded. `processing.maxLiveBots` caps this;
-  structures beyond the cap simply stay pending (never re-rolled) until a bot dies.
+  inhabitants spread over many structures keep many chunk areas loaded. `processing.maxLiveBots` caps this and the
+  nearest-first allocation decides who gets the slots; structures beyond the budget stay pending (never re-rolled)
+  until they are nearer to a player than what holds the slots. The allocator costs under 0.1 ms per server tick with
+  500 known structures and 64 live bots (`AllocatorCostTest`).
 * The abandoned-structure log is append-only and indexed by chunk, so a heavily explored world does not slow
   saving down; only the small set of occupied structures is rewritten.
 * Block inspection never loads or generates a chunk.

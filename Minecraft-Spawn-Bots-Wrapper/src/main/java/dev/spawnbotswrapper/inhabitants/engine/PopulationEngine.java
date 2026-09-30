@@ -558,6 +558,19 @@ public final class PopulationEngine implements EngineControl {
         return ctx.log.errorCount();
     }
 
+    /** Nanoseconds the allocation and the seen check have used on the server thread so far, and how many passes ran. */
+    long allocationNanos() {
+        return allocation.nanos + seenTracker.nanos;
+    }
+
+    long allocationPasses() {
+        return allocation.passes;
+    }
+
+    long allocationComputations() {
+        return allocation.computations;
+    }
+
     int rollQueueSize() {
         return rollQueue.size();
     }

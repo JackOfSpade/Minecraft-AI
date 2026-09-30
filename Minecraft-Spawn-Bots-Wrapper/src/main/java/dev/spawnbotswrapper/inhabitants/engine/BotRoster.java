@@ -18,8 +18,8 @@ import java.util.Map;
  * cheaply: how many inhabitants are alive right now (the {@code maxLiveBots} cap), re-establishing state that
  * upstream does not persist (path following) after a restart, and noticing bots that are gone for good.
  * <p>
- * Death is permanent, so "gone" only ever releases upstream leftovers ({@code forget}); it never touches the
- * structure's status and never leads to a respawn.
+ * A bot that is gone for good without this addon having removed it died (every removal of the addon untracks the bot
+ * first): its record becomes DEAD ({@link Retirer#died}), its upstream leftovers are released, and it is never replaced.
  * <p>
  * Cost model: asking the server whether a name is online is a linear player-list scan, so the roster is
  * examined in a round-robin slice (one full pass per {@link #SCAN_PERIOD_TICKS}) rather than every bot every

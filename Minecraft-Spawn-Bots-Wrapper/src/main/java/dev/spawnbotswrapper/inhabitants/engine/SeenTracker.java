@@ -34,7 +34,19 @@ final class SeenTracker {
         this.governor = governor;
     }
 
+    /** Server-thread nanoseconds spent here so far (diagnostics and the cost test). */
+    long nanos;
+
     void tick(long now, InhabitantsConfig cfg) {
+        long started = System.nanoTime();
+        try {
+            look(now, cfg);
+        } finally {
+            nanos += System.nanoTime() - started;
+        }
+    }
+
+    private void look(long now, InhabitantsConfig cfg) {
         if (nextTick != PendingStructure.NEVER && now < nextTick) {
             return;
         }

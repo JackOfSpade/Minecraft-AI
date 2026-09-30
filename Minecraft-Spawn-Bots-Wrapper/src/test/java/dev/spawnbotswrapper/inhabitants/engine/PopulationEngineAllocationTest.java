@@ -535,6 +535,187 @@ class PopulationEngineAllocationTest {
         assertEquals(BotState.DORMANT, bot.state, "retried once the store works again");
     }
 
+
+    // ------------------------------------------------------------------ persistence, wake order, wake place
+
+    /** Makes the first bot of the structure seen and puts it to sleep by taking the player far away; returns its record. */
+    private static BotRecord sleeper(Rig rig, StructureSnapshot s) {
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(s);
+        rig.run(100);
+        BotRecord bot = rig.record(s.key()).bots.get(0);
+        BotSnapshot state = new BotSnapshot();
+        state.health = 6.0f;
+        state.stacks.add(new BotSnapshot.Entry(0, "{\"id\":\"minecraft:bow\",\"count\":1}"));
+        rig.bots.liveState.put(FakeBots.key(bot.name), state);
+        rig.bots.positions.put(FakeBots.key(bot.name), new BotGateway.PlayerPos(WORLD, 20.5, 64, 21.5, 45f));
+        rig.bots.visibleToHuman.add(FakeBots.key(bot.name));
+        rig.run(30);
+        assertTrue(bot.seen);
+        playerAt(rig, 900, 70, 0);
+        rig.run(100);
+        assertEquals(BotState.DORMANT, bot.state);
+        return bot;
+    }
+
+    @Test
+    void theSeenFlagAndTheSleepSurviveARestartAndTheSameBotWakesWhenThePlayerIsBack() {
+        Rig rig = rig(3);
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        BotRecord bot = sleeper(rig, s);
+        String name = bot.name;
+        BotSnapshot saved = bot.snapshot;
+
+        rig.restart(true); // a clean restart: what was saved is all the new session has
+        rig.bots.online.clear();
+        BotRecord after = rig.record(s.key()).bots.stream().filter(b -> b.name.equals(name)).findFirst().orElseThrow();
+        assertTrue(after.seen, "the SEEN flag is persistent");
+        assertEquals(BotState.DORMANT, after.state);
+        assertEquals(saved, after.snapshot);
+        assertEquals(20.5, after.x);
+
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(s); // its chunk loads again
+        rig.run(200);
+        assertEquals(BotState.SPAWNED, after.state, "the same bot is back");
+        assertEquals(1, rig.bots.wakes.stream().filter(w -> w.name().equals(name)).count());
+        assertEquals(3, live(rig, s));
+    }
+
+    @Test
+    void aSleepingSeenBotIsWokenBeforeAnyFreshRollAndCountsAgainstTheBudget() {
+        Rig rig = rig(1); // room for ONE bot only
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        BotRecord bot = sleeper(rig, s);
+        String name = bot.name;
+        int requestsBefore = rig.bots.requests.size();
+
+        playerAt(rig, -10, 70, 0);
+        rig.run(200);
+        assertEquals(BotState.SPAWNED, bot.state, "the seen resident gets the one slot");
+        assertEquals(1, rig.bots.requests.size() - requestsBefore, "and nothing else was rolled: the budget is one bot");
+        assertEquals(1, rig.engine.stats().liveBots());
+        assertEquals(name, rig.bots.requests.get(rig.bots.requests.size() - 1).request().name());
+        assertEquals(20.5, rig.bots.requests.get(rig.bots.requests.size() - 1).request().x(), "at the place it went to sleep at");
+        assertEquals(21.5, rig.bots.requests.get(rig.bots.requests.size() - 1).request().z());
+    }
+
+    @Test
+    void aSleeperWakesAtAFreshSpotOfItsStructureWhenItCanNotStandWhereItWentToSleep() {
+        Rig rig = rig(3);
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        BotRecord bot = sleeper(rig, s);
+        rig.world.standingVerdict = dev.spawnbotswrapper.inhabitants.spawn.SpawnSafety.Verdict.UNSAFE;
+        int before = rig.bots.requests.size();
+
+        playerAt(rig, -10, 70, 0);
+        rig.run(200);
+        assertEquals(BotState.SPAWNED, bot.state);
+        BotGateway.SpawnRequest wake = rig.bots.requests.subList(before, rig.bots.requests.size()).stream()
+                .map(FakeBots.Request::request).filter(r -> r.name().equals(bot.name)).findFirst().orElseThrow();
+        assertTrue(wake.x() != 20.5 || wake.z() != 21.5, "not at the unsafe saved place");
+        assertTrue(wake.x() >= 0 && wake.x() <= 47 && wake.z() >= 0 && wake.z() <= 47, "but inside its structure");
+        assertEquals(bot.name, bot.name);
+    }
+
+    @Test
+    void noBotWakesOrIsRolledWhileTheServerIsDegraded() {
+        Rig rig = rig(3);
+        rig.cfg.tpsThrottle.checkIntervalTicks = 5;
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        BotRecord bot = sleeper(rig, s);
+        int before = rig.bots.requests.size();
+        rig.tps.millis = 150.0;
+        playerAt(rig, -10, 70, 0);
+        rig.run(200);
+        assertEquals(BotState.DORMANT, bot.state, "spawning is blocked while the server is degraded");
+        assertEquals(before, rig.bots.requests.size());
+        rig.tps.millis = 30.0;
+        rig.run(300);
+        assertEquals(BotState.SPAWNED, bot.state, "and resumes when it recovers");
+    }
+
+    // ------------------------------------------------------------------ who is looked at, and how often
+
+    @Test
+    void theSeenCheckAsksAboutEveryLiveBotAndAlreadySeenBotsOnlyRarely() {
+        Rig rig = rig(3);
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(s);
+        rig.run(100);
+        BotRecord first = rig.record(s.key()).bots.get(0);
+        rig.bots.visibleToHuman.add(FakeBots.key(first.name));
+        rig.run(20);
+        assertTrue(first.seen);
+        long firstSeenAt = first.firstSeenMillis;
+        assertTrue(firstSeenAt > 0);
+        assertEquals(firstSeenAt, first.lastSeenMillis);
+        rig.run(SeenTracker.RESEEN_TICKS + 40);
+        assertTrue(first.lastSeenMillis > firstSeenAt, "still in view: the last-seen time moves on");
+        assertEquals(firstSeenAt, first.firstSeenMillis, "the first sighting stays");
+        long other = rig.record(s.key()).bots.stream().filter(b -> b.seen).count();
+        assertEquals(1, other, "the others were never in view");
+    }
+
+    @Test
+    void aBotNoOneEverSawStaysUnseenAndASeenFlagIsNeverCleared() {
+        Rig rig = rig(3);
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(s);
+        rig.run(100);
+        BotRecord bot = rig.record(s.key()).bots.get(0);
+        rig.bots.visibleToHuman.add(FakeBots.key(bot.name));
+        rig.run(20);
+        assertTrue(bot.seen);
+        rig.bots.visibleToHuman.clear();
+        rig.run(2000);
+        assertTrue(bot.seen, "never cleared while the bot lives");
+    }
+
+    @Test
+    void aBatchOfSleepsSharesOneWriteOfTheStoreAndEveryRecordIsDurableBeforeItsBotIsRemoved() {
+        Rig rig = rig(3);
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(s);
+        rig.run(100);
+        for (BotRecord b : rig.record(s.key()).bots) {
+            rig.bots.visibleToHuman.add(FakeBots.key(b.name));
+        }
+        rig.run(30);
+        assertEquals(3, rig.record(s.key()).seenAliveCount());
+
+        List<String> order = rig.bots.events;
+        rig.store.onWrite = () -> order.add("write");
+        order.clear();
+        playerAt(rig, 900, 70, 0);
+        rig.run(100);
+
+        assertEquals(3, rig.record(s.key()).bots.stream().filter(b -> b.state == BotState.DORMANT).count());
+        int firstRemove = -1;
+        int lastRemove = -1;
+        int writesBeforeFirstRemove = 0;
+        int writesBetween = 0;
+        for (int i = 0; i < order.size(); i++) {
+            if (order.get(i).startsWith("remove:")) {
+                if (firstRemove < 0) {
+                    firstRemove = i;
+                }
+                lastRemove = i;
+            } else if (order.get(i).equals("write")) {
+                if (firstRemove < 0) {
+                    writesBeforeFirstRemove++;
+                } else {
+                    writesBetween++;
+                }
+            }
+        }
+        assertTrue(firstRemove >= 0 && lastRemove > firstRemove);
+        assertTrue(writesBeforeFirstRemove >= 1, "the records are on disk before the first bot is emptied: " + order);
+        assertEquals(0, writesBetween, "one write for the whole batch, not one per bot: " + order);
+    }
     // ------------------------------------------------------------------ a new structure at the live ceiling
 
     @Test

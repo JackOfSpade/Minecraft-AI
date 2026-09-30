@@ -7,7 +7,9 @@ import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -63,27 +65,91 @@ final class Retirer {
 
     // ------------------------------------------------------------------ removal (never a death)
 
+    /** One bot to take out: its structure and its record. */
+    record Item(StructureKey key, BotRecord bot) {
+    }
+
     /** Puts a live bot to sleep when a player has seen it, deletes it otherwise. */
     Result retire(StructureKey key, BotRecord bot, Reason reason, InhabitantsConfig cfg) {
-        String lower = bot.name.toLowerCase(Locale.ROOT);
-        removing.add(lower);
+        return retireAll(List.of(new Item(key, bot)), reason, cfg).get(0);
+    }
+
+    /**
+     * Takes several bots out, in order. The records of all the SEEN ones among them (state, position, the {@code removing}
+     * mark) are made durable with ONE write of the store before any of them is emptied, so a batch of sleeps costs one save
+     * instead of one per bot and the crash ordering still holds for every bot: a bot is only ever emptied after its own
+     * record is on disk. If that write fails nothing is emptied and every seen bot of the batch is left exactly as it was.
+     */
+    List<Result> retireAll(List<Item> items, Reason reason, InhabitantsConfig cfg) {
+        List<Result> results = new ArrayList<>(items.size());
+        List<Sleeper> sleepers = new ArrayList<>();
+        for (Item item : items) {
+            removing.add(item.bot().name.toLowerCase(Locale.ROOT));
+            sleepers.add(item.bot().seen ? prepareSleep(item.key(), item.bot()) : null);
+        }
         try {
-            return bot.seen ? sleep(key, bot, reason, cfg) : delete(key, bot, reason, cfg);
+            boolean anySleeper = sleepers.stream().anyMatch(s -> s != null);
+            boolean durable = !anySleeper || ctx.saveNow();
+            for (int i = 0; i < items.size(); i++) {
+                Item item = items.get(i);
+                Sleeper sleeper = sleepers.get(i);
+                if (sleeper == null) {
+                    results.add(delete(item.key(), item.bot(), reason, cfg));
+                } else if (!durable) {
+                    sleeper.undo();
+                    results.add(Result.KEPT); // nothing was emptied: the bot is exactly as it was
+                } else {
+                    results.add(finishSleep(sleeper, reason, cfg));
+                }
+            }
         } finally {
-            removing.remove(lower);
+            for (Item item : items) {
+                removing.remove(item.bot().name.toLowerCase(Locale.ROOT));
+            }
+        }
+        return results;
+    }
+
+    /** What a bot was before its sleep was recorded, so a failed sleep puts it back exactly. */
+    private final class Sleeper {
+        final StructureKey key;
+        final BotRecord bot;
+        final BotState state;
+        final BotSnapshot snapshot;
+        final double x;
+        final double y;
+        final double z;
+        final float yaw;
+        final String dimension;
+
+        Sleeper(StructureKey key, BotRecord bot) {
+            this.key = key;
+            this.bot = bot;
+            this.state = bot.state;
+            this.snapshot = bot.snapshot;
+            this.x = bot.x;
+            this.y = bot.y;
+            this.z = bot.z;
+            this.yaw = bot.yaw;
+            this.dimension = bot.dimension;
+        }
+
+        void undo() {
+            bot.state = state;
+            bot.removing = false;
+            bot.snapshot = snapshot;
+            bot.x = x;
+            bot.y = y;
+            bot.z = z;
+            bot.yaw = yaw;
+            bot.dimension = dimension;
+            ctx.store.markDirty();
         }
     }
 
-    private Result sleep(StructureKey key, BotRecord bot, Reason reason, InhabitantsConfig cfg) {
-        BotState before = bot.state;
-        BotSnapshot beforeSnapshot = bot.snapshot;
-        double bx = bot.x;
-        double by = bot.y;
-        double bz = bot.z;
-        float byaw = bot.yaw;
-        String bdim = bot.dimension;
-
-        // 1. The live state and the place go into the record FIRST, marked "removing", and the record is made durable.
+    /** Step 1 of a sleep: the live state and the place go into the record, marked "removing" (made durable by the caller). */
+    private Sleeper prepareSleep(StructureKey key, BotRecord bot) {
+        Sleeper before = new Sleeper(key, bot);
         if (roster.isRestored(bot)) {
             BotSnapshot snapshot = ctx.snapshot(bot.name);
             if (snapshot != null) {
@@ -104,29 +170,19 @@ final class Retirer {
         bot.state = BotState.DORMANT;
         bot.removing = true;
         ctx.store.markDirty();
-        if (!ctx.saveNow()) {
-            bot.state = before;
-            bot.removing = false;
-            bot.snapshot = beforeSnapshot;
-            bot.x = bx;
-            bot.y = by;
-            bot.z = bz;
-            bot.yaw = byaw;
-            bot.dimension = bdim;
-            return Result.KEPT; // nothing was emptied: the bot is exactly as it was
-        }
-        // 2. Only now it is emptied and removed (BotGateway.remove: no drops, no death).
+        return before;
+    }
+
+    /** Steps 2 and 3: the bot is emptied and removed (no drops, no death), then the mark is cleared. */
+    private Result finishSleep(Sleeper s, Reason reason, InhabitantsConfig cfg) {
+        BotRecord bot = s.bot;
         ctx.discard(bot.name);
         Boolean stillThere = ctx.online(bot.name);
         if (stillThere == null || stillThere) {
             // It could not be removed. The record must not keep saying "asleep with a saved copy" while the bot lives on.
-            bot.state = before;
-            bot.removing = false;
-            bot.snapshot = beforeSnapshot;
-            ctx.store.markDirty();
+            s.undo();
             return Result.KEPT;
         }
-        // 3. Done.
         bot.removing = false;
         ctx.store.markDirty();
         roster.untrackOne(bot);

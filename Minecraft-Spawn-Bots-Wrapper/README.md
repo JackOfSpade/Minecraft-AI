@@ -75,6 +75,12 @@ runs on defaults until you fix it.
     "maxBotsPerTick": 1
   },
 
+  // nearest-first population (see "Population by allocation" below); every value has a sane bound
+  "allocation": { "enabled": true, "intervalTicks": 20, "moveThresholdBlocks": 4.0, "hysteresisBlocks": 8.0,
+                  "dwellTicks": 400, "dwellOverrideBlocks": 32.0, "graceTicks": 200, "relevanceExtraChunks": 2,
+                  "seenCheckTicks": 10, "seenHalfAngleDeg": 70.0 },
+  "dormancy": { "enabled": true, "distanceBlocks": 160.0 },
+
   "spawning": {
     "backend": "AUTO",
     "namePrefix": "",
@@ -137,14 +143,69 @@ structure id + start position`, so a fresh copy of the same world (and the same 
 inhabitants from scratch. Once a structure has actually been processed, the saved result is authoritative —
 deterministic mode does not retroactively re-roll anything.
 
-### One spawn per structure, ever
+### Population by allocation: who is near you gets the bots, and there is no loot farm
 
-Every structure is rolled and populated **exactly once**, permanently: `PopulationDriver` never re-rolls,
-renames a live bot, or requests one twice, and once a structure settles into `POPULATED` or `GAVE_UP` no
-code path ever revisits it. If a structure's inhabitants are later killed — by the player, by hostile mobs
-already living there, by anything — that structure stays settled; it is **not** repopulated. This mirrors
-the addon's own restart guarantee (a bot that goes permanently offline is never respawned either, see
-`processing.goneConfirmTicks`): a POI's population is a one-time event, not something that regenerates.
+Every structure is rolled **exactly once**, permanently, and its number of bots **N** is rolled once and never
+re-rolled: N is the size logic (`processing.blocksPerBot`, the structure's volume, `minBots`/`maxBots`) times the
+occupied roll. Which of those bots exist *right now* depends on where the players are.
+
+**Nearest first.** The structures within a player's relevance area (the server's simulation distance plus
+`allocation.relevanceExtraChunks`, at most `dormancy.distanceBlocks`) are sorted by their **3D** distance from the
+nearest real player (not PvP BOT or Minecraft-AI fake players) to the structure's bounding box: a trial chamber 90
+blocks below you is farther than a village 60 blocks away on the surface. The nearest structure gets its full fill
+target first, then the rest of `processing.maxLiveBots` goes to the next closest, and so on. That is why an
+underground structure under your route can no longer eat the whole budget while the surface structures you ride past
+get nothing. The order is recomputed when a player has moved at least `allocation.moveThresholdBlocks`, changed level,
+or a structure appeared or went, at most once per `allocation.intervalTicks`. Only structures near a player are
+looked at (a spatial index by 16x16-chunk cell), never the whole store; the cost measured with 500 known structures and
+64 live bots is under 0.1 ms per server tick.
+
+**Anti-churn.** A structure must be `hysteresisBlocks` (8) nearer than an allocated one to displace it; a bot is not
+removed within `dwellTicks` (20 s) of coming up unless its slot is needed for a structure `dwellOverrideBlocks` (32)
+nearer; a structure that drops out keeps its bots `graceTicks` (10 s) before they go. A bot that is engaged with a player
+is never removed. Spawns and removals stay paced (`maxBotsPerTick`, the lag governor's batch size, no spawning while
+the server is degraded).
+
+**Seen bots persist, unseen bots are ephemeral.** A bot becomes *seen* when a real player actually sees it: its eye or
+body is inside the player's view cone (`allocation.seenHalfAngleDeg`, 70 degrees each side, generous for wide FOV
+settings), the same eye-to-eye and eye-to-body rays as the aggro perception are clear, and it is within vanilla's
+128 block sight range; invisible bots are never seen. The flag is stored in the bot's record, survives restarts and is
+never cleared while the bot lives. A seen bot is never removed for good by anything but its own death: when its
+structure leaves the allocation (or the lag governor sheds it) it **sleeps** with its whole state (inventory, armor,
+health, food, effects, experience) and its position, and wakes first when its structure is allocated again, at its saved
+position when a bot can stand there (otherwise at a fresh spot of its structure), with the same name and identity. A
+bot nobody saw is **deleted** when it has to go: no record, no snapshot, no profile is kept, and its slot is *vacant*.
+When the structure is allocated again a fresh bot is rolled for each vacant slot (a different name and loadout: the
+player never saw the old ones). Only seen bots are stored, which also keeps the store small.
+
+**No loot or XP farm.** Vacant slots are `N - dead - failed - (bots that already occupy one)`; right after unseen bots
+were deleted that is `N - dead - seenAlive`.
+
+* **A structure yields at most N bots' worth of kills over the world's lifetime.** Every real death, from any cause
+  (a player, a mob, a fall, the void), makes that bot's record `DEAD` for good; the slot is never refilled, not by the
+  allocation and not by a return. A bot that stays offline for `processing.goneConfirmTicks` without this addon having
+  removed it is counted as dead too.
+* **Removal is not death.** Deleting an unseen bot, putting a seen one to sleep and the lag governor's shedding never
+  drop anything and never count as a death. PvP BOT's own removal runs `clear` and then `player <name> kill`, a real
+  vanilla death (its items and XP orbs drop, a death message goes out). The addon empties the bot first (inventory,
+  armor, offhand, cursor, ender chest, experience), makes it leave like a player who logs out and only then lets PvP
+  BOT forget it: no item entity, no XP orb, no death message, no statistic or advancement.
+* **No re-roll fishing.** A fresh roll only fills a vacant slot; the player cannot learn a bot's loadout without seeing
+  it, and seeing it locks it in. A seen bot is never re-rolled, and nothing is re-rolled on restart or reload.
+* **No duplication.** A sleep is ordered snapshot, store, clear, remove: the record (state, position, `removing` mark)
+  is written to disk *before* the bot is emptied, so a crash leaves either the unchanged live bot or a record marked
+  `removing` (finished on the next start), never a live inventory together with a restorable copy of it. A wake writes
+  the snapshot onto a fresh, empty fake player.
+
+**Without the allocation** (`allocation.enabled: false`, or no real player online) population is first come, first
+served under `processing.maxLiveBots`, and the old distance rule (`dormancy`: a bot beyond `distanceBlocks` for
+`delayTicks` goes away through the same sleep-or-delete rule) is the fallback. With the allocation running the
+relevance area replaces that rule (it is not run twice); `dormancy.enabled: false` also stops the allocation from
+removing bots that left it.
+
+**Upgrading.** Stores from before this version have their dormant, never-seen bots released on load (one INFO line:
+"N unseen stored bots released"); their slots are vacant, deaths already recorded stay recorded. Bots that are live and
+unseen stay until their structure leaves the allocation; a bot becomes seen the moment a player sees it after the update.
 
 ### Names and presence
 
@@ -383,7 +444,8 @@ runs PvP BOT's own command `pvpbot settings crit-fall-ticks <criticalFallTicks>`
 
 ## Lag governor (`tpsThrottle`)
 
-The governor sheds inhabitants (farthest from the nearest real player first, permanently, like a death) and
+The governor sheds inhabitants (farthest from the nearest real player first; a seen bot sleeps with its state, an unseen
+one is deleted, nothing drops and it is not a death) and
 blocks new spawns only while the server is **genuinely** degraded. The measured metric is the rolling average
 wall-clock ms between ticks, which never reads below ~50 and sits at 53-59 ms on a busy modded server; the old
 fixed 55.6 ms threshold therefore fired during ordinary load. The trigger is now a small state machine
@@ -622,7 +684,7 @@ food, potions, blocks and tool durability, and nothing refills it.
   effects, experience, fire and air) is written into its record in `populations.json`: once right after its first
   dressing, then about every 5 seconds while it is online (only when it changed), again when it goes dormant and once
   more when the server stops.
-* **Dormancy keeps it.** A bot that goes dormant is removed by PvP BOT (which empties its inventory). It used to wake
+* **Sleep keeps it.** A seen bot that goes to sleep is emptied and removed without dying (see "Population by allocation"). It used to wake
   dressed again from its stored profile, with a full quiver, fresh food, potions and totems, pristine gear and full
   health. It now wakes with exactly the saved state, slot by slot, and is never dressed a second time. A record from
   before this change has no saved state: it is dressed from its profile once (one INFO line per bot) and saved from
@@ -721,12 +783,12 @@ PvP BOT and HeroBot installed:
 4. **Compare several bots' profiles** with `/inhabitants profile <name>`: confirm visibly different
    loadouts, vitals and behaviour, and that numeric values are NOT all clustered near the middle of their
    range across many bots.
-5. **Unload and reload the chunks** of a populated structure (fly away and back, or restart the client).
-   Confirm no additional bots were spawned.
+5. **Fly away and back** to a populated structure. A bot you looked at is the same bot (same name, same items, where
+   you left it); the ones you never saw are replaced by fresh bots, never more than the structure's planned number.
 6. **Restart the server.** Confirm the same bots come back (or are correctly left dead if killed — see
    next step) and no duplicates appear.
-7. **Kill an inhabitant.** Confirm its structure is never repopulated, even after further restarts or
-   chunk reloads.
+7. **Kill an inhabitant.** Confirm it drops its loot and XP like a player, and that its slot is never refilled,
+   even after further restarts or leaving and coming back.
 8. **Install a datapack or mod that registers its own structure** (or reuse `/inhabitants structure here`
    on any non-vanilla structure available to you) and confirm it is detected and populated with no
    addon changes.

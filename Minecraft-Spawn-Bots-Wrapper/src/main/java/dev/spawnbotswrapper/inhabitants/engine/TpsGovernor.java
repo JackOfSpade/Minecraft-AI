@@ -14,8 +14,9 @@ import java.util.Map;
  * measured tick time on a fixed interval, feeds it to {@link TickHealth} (which decides, with a baseline learned
  * from the server itself, sustained-excess timing and hysteresis, whether the server is GENUINELY degraded) and,
  * only while it is, sheds a batch of inhabitants farthest from the nearest real player first, then waits a full
- * interval before checking again so each round's effect is actually measured. A despawn here is permanent,
- * exactly like a death -- see {@link DormancyGovernor} for the separate, reversible mechanism. Ordinary busy
+ * interval before checking again so each round's effect is actually measured. A shed bot leaves through
+ * {@link Retirer}: one a player has seen sleeps with its whole state, one nobody saw is deleted (its slot is vacant), and
+ * neither drops anything or counts as a death -- see {@link AllocationGovernor} for the nearest-first mechanism. Ordinary busy
  * operation (this pack idles at 53-59 ms per tick) never sheds anything.
  * <p>
  * While degraded, {@link #blocksNewSpawns()} hard-blocks every new spawn (both freshly-discovered structures
@@ -130,15 +131,19 @@ final class TpsGovernor {
         StringBuilder names = new StringBuilder();
         InhabitantsConfig cfg = ctx.config();
         int shed = 0;
-        for (int i = 0; i < ranked.size() && shed < toRemove; i++) {
-            Ranked r = ranked.get(i);
-            // Shedding is not a death and takes nothing from the world: a bot a player has seen sleeps with its whole state
-            // (it wakes when its structure is allocated again), one nobody saw is deleted and its slot is free for a fresh roll.
-            Retirer.Result result = retirer.retire(r.key, r.bot, Retirer.Reason.TPS, cfg);
-            if (result == Retirer.Result.KEPT) {
+        // Shedding is not a death and takes nothing from the world: a bot a player has seen sleeps with its whole state
+        // (it wakes when its structure is allocated again), one nobody saw is deleted and its slot is free for a fresh roll.
+        // The whole round is one batch, so its sleeps share one write of the store.
+        List<Retirer.Item> items = new ArrayList<>(toRemove);
+        for (int i = 0; i < toRemove; i++) {
+            items.add(new Retirer.Item(ranked.get(i).key, ranked.get(i).bot));
+        }
+        List<Retirer.Result> results = retirer.retireAll(items, Retirer.Reason.TPS, cfg);
+        for (int i = 0; i < results.size(); i++) {
+            if (results.get(i) == Retirer.Result.KEPT) {
                 continue;
             }
-            names.append(shed == 0 ? "" : ", ").append(r.bot.name).append(result == Retirer.Result.SLEPT ? " (asleep)" : "");
+            names.append(shed == 0 ? "" : ", ").append(items.get(i).bot().name).append(results.get(i) == Retirer.Result.SLEPT ? " (asleep)" : "");
             shed++;
         }
         ctx.info("TPS governor: shed {} of {} inhabitant(s) [{}] -- degraded, smoothed tick time {} ms is above the enter "
