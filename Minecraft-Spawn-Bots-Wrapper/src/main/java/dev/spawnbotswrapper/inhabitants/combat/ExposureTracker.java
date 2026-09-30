@@ -60,6 +60,20 @@ public final class ExposureTracker {
         runs.remove(key);
     }
 
+    /**
+     * Keeps only the runs of {@code observer} whose subject is in {@code subjects} (the ones still present and valid this
+     * scan) and drops the others at once: a subject that disconnected, changed level or became no valid target has no run.
+     */
+    public void retainSubjects(String observer, java.util.Set<String> subjects) {
+        String prefix = observer + '\u0000';
+        for (Iterator<String> it = runs.keySet().iterator(); it.hasNext(); ) {
+            String key = it.next();
+            if (key.startsWith(prefix) && !subjects.contains(key.substring(prefix.length()))) {
+                it.remove();
+            }
+        }
+    }
+
     /** Forgets every pair of one observer (it died, left or started an engagement). */
     public void forgetObserver(String observer) {
         String prefix = observer + '\u0000';

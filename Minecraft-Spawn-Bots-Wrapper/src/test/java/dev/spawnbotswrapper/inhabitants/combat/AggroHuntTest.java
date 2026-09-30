@@ -196,6 +196,42 @@ class AggroHuntTest {
         assertEquals(List.of("resume-patrol Warden7"), s.up.callsOf("resume-patrol"));
     }
 
+    @Test
+    void aPausedPatrolIsResumedWhenPvpBotBecomesUnavailableMidHunt() {
+        noticeThenLoseSteve();
+        assertEquals(List.of("pause-patrol Warden7"), s.up.callsOf("pause-patrol"));
+        s.up.available = false;
+        s.run(2);
+        assertEquals(AggroController.Mode.UPSTREAM_UNAVAILABLE, s.controller.mode());
+        assertEquals(List.of("resume-patrol Warden7"), s.up.callsOf("resume-patrol"), "the patrol must not stay paused for good");
+        assertEquals(Phase.IDLE, s.phase());
+    }
+
+    @Test
+    void aPausedPatrolIsResumedWhenTheControllerSwitchesItselfOffAfterRepeatedFailures() {
+        noticeThenLoseSteve();
+        s.up.failEverything = true;
+        s.run(60);
+        assertEquals(AggroController.Mode.FAILED, s.controller.mode());
+        assertEquals(List.of("resume-patrol Warden7"), s.up.callsOf("resume-patrol"));
+    }
+
+    @Test
+    void aCandidateThatBecameInvalidOrLeftLosesItsExposureRun() {
+        steve.x = 8;
+        s.run(4);
+        assertEquals(1, s.controller.exposureRuns(), "Steve is being sighted");
+        steve.creative = true;
+        s.run(1);
+        assertEquals(0, s.controller.exposureRuns(), "no valid target any more: no run");
+        steve.creative = false;
+        s.run(4);
+        assertEquals(1, s.controller.exposureRuns());
+        s.world.online.remove("steve");
+        s.run(1);
+        assertEquals(0, s.controller.exposureRuns(), "disconnected: no run");
+    }
+
     // ---------------------------------------------------------------- seen again
 
     @Test

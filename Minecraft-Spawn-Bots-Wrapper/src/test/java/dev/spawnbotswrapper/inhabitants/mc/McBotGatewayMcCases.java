@@ -432,6 +432,32 @@ public final class McBotGatewayMcCases {
         assertSame(profile, rig.applier.profiles.get(0));
     }
 
+    public static void aSnapshotThatCannotBeReadFallsBackToDressingTheBotFromItsProfile() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.managed = true;
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.restoreFails = true;
+        BotProfile profile = standing();
+        assertTrue(rig.gateway.restore("Inh_Bot", profile, savedState()));
+        assertEquals(List.of(true), rig.applier.restoredInventoryFlags, "the restore was tried first");
+        assertEquals(List.of(true), rig.applier.clearFlags, "and, unreadable, replaced by a dressing");
+        assertSame(profile, rig.applier.profiles.get(0));
+        assertTrue(rig.applier.isMarked(rig.bot), "the dressing marks it: marker and contents are in step");
+    }
+
+    public static void wakingWithAnUnreadableSnapshotDressesTheBotFromItsProfileAndSaysSo() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.restoreFails = true;
+        BotProfile profile = patrolling();
+        BotGateway.ApplyResult result = rig.gateway.wake("Inh_Bot", profile, savedState());
+        assertTrue(result.allApplied(), result.warnings().toString());
+        assertEquals(List.of(true), rig.applier.clearFlags);
+        assertTrue(result.warnings().stream().anyMatch(w -> w.contains("decoded")), result.warnings().toString());
+    }
+
     public static void aFailedSnapshotRestoreDoesNotMarkTheBot() {
         Rig rig = new Rig();
         rig.online("Inh_Bot");

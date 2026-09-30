@@ -39,7 +39,7 @@ public final class AggroSmokeGameTests {
             this.rig = new Rig(ctx);
         }
 
-        /** Platform and a survival player parked out of every noticing range (beyond the 10 block sight range). */
+        /** Platform and a survival player parked away from the bot until the scene is placed (a still player is only noticed after a reaction time, so one tick there changes nothing). */
         void build(int radius) {
             rig.buildPlatform(radius);
             rig.createTarget(11.5);

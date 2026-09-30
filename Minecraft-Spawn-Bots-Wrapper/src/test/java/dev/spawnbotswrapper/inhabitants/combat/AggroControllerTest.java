@@ -395,6 +395,37 @@ class AggroControllerTest {
     }
 
     @Test
+    void aHitByAnAttackerThatIsNoValidTargetIsIgnoredLikeAnyOtherCandidate() {
+        // the hit feed alone (PvP BOT's revenge is off), so only this controller decides
+        steve.x = 6;
+        s.up.settings = new Settings(true, false, false, false, false, false, false, 128.0);
+        bot.hitQueue.add(steve);
+        s.run(12);
+        assertEquals(Phase.IDLE, s.phase(), "targetPlayers is off: a player hit does not widen who is hunted");
+        assertEquals(List.of(), s.up.callsOf("set"));
+        s.up.settings = new Settings(true, false, true, false, false, false, false, 128.0);
+        s.up.listed.add("Steve");
+        bot.hitQueue.add(steve);
+        s.run(12);
+        assertEquals(Phase.IDLE, s.phase(), "another PvP BOT bot without targetOtherBots");
+        s.up.settings = new Settings(true, false, true, true, false, false, false, 128.0);
+        bot.hitQueue.add(steve);
+        s.run(12);
+        assertEquals(Phase.CHASE, s.phase(), "with targetOtherBots it is hunted");
+    }
+
+    @Test
+    void aHitByAFactionAllyIsIgnoredUnlessFriendlyFire() {
+        s.up.settings = new Settings(true, false, true, false, false, true, false, 128.0);
+        s.up.allies.add("Warden7,Steve");
+        steve.x = 6;
+        bot.hitQueue.add(steve);
+        s.run(12);
+        assertEquals(Phase.IDLE, s.phase());
+        assertEquals(List.of(), s.up.callsOf("set"));
+    }
+
+    @Test
     void aHitIsNoticedThroughTheHitFeedEvenWithoutPvpBotsRevenge() {
         steve.x = 6;
         bot.hitQueue.add(steve); // PvP BOT's revenge did not fire (its own switch is off); the damage feed still reports
@@ -492,7 +523,7 @@ class AggroControllerTest {
     void aForcedNameThatAppearsDuringOurChaseIsExternalUnlessItIsTheAttacker() {
         steve.x = 8;
         assertTrue(ticksUntilChase(40) > 0);
-        // PvP BOT writes the attacker's name itself (wind burst): still our chase, still leash-able
+        // PvP BOT writes the attacker's name itself (wind burst): still our chase, still hunted by us
         s.up.forced.put("Warden7", "Steve");
         s.run(3);
         assertEquals(Phase.CHASE, s.phase());

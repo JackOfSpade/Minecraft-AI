@@ -33,7 +33,7 @@ final class SettingsHygiene {
      */
     record SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval,
                             Boolean autoTargetEnabled, Double maxTargetDistance, Double rangedMinRange,
-                            boolean aggroRangeEnabled) {
+                            boolean aggroHunterEnabled) {
         /** The snapshot of the four switches alone (the ranged distances then count as unreadable). */
         SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval, Boolean autoTargetEnabled) {
             this(botsRelogs, botLeaveOnDeath, checkInterval, autoTargetEnabled, null, null);
@@ -87,7 +87,7 @@ final class SettingsHygiene {
                                 + "Use " + MIN_CHECK_INTERVAL + " or more"));
             }
             // With the wrapper's aggro hunter on, auto-target OFF is the intended state (the aggro hunter acquires), not a finding.
-            if (Boolean.FALSE.equals(s.autoTargetEnabled()) && !s.aggroRangeEnabled()) {
+            if (Boolean.FALSE.equals(s.autoTargetEnabled()) && !s.aggroHunterEnabled()) {
                 out.add(new Finding(Severity.NOTE,
                         "PvP BOT setting autoTarget is OFF and this addon's aggro hunter (config aggro.enabled) is off too: "
                                 + "inhabitants only fight what attacked them (or what an order or a faction names) and never open "

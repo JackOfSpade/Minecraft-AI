@@ -187,6 +187,8 @@ final class GatewayFakes {
         final List<ServerPlayer> captureCalls = new ArrayList<>();
         final List<BotSnapshot> restoredSnapshots = new ArrayList<>();
         final List<Boolean> restoredInventoryFlags = new ArrayList<>();
+        /** The saved state cannot be read: restore reports nothing restored (apply is unaffected). */
+        boolean restoreFails;
         BotGateway.StateFixes fixes = BotGateway.StateFixes.NONE;
         final List<ServerPlayer> enforced = new ArrayList<>();
 
@@ -200,6 +202,9 @@ final class GatewayFakes {
         public Result restore(ServerPlayer bot, BotSnapshot snapshot, boolean inventory) {
             restoredSnapshots.add(snapshot);
             restoredInventoryFlags.add(inventory);
+            if (restoreFails) {
+                return new Result(false, false, List.of("none of the saved stacks could be decoded"));
+            }
             return new Result(loadoutApplied, vitalsApplied, warnings, pearlsRemoved, enchantmentsRemoved);
         }
 

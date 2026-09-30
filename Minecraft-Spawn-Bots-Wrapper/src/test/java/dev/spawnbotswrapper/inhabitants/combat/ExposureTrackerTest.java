@@ -77,6 +77,19 @@ class ExposureTrackerTest {
     }
 
     @Test
+    void runsOfSubjectsThatAreNoLongerPresentAreDroppedAtOnce() {
+        ExposureTracker t = new ExposureTracker();
+        t.sighted(ExposureTracker.key("Warden7", "Steve"), 100);
+        t.sighted(ExposureTracker.key("Warden7", "Alex"), 100);
+        t.sighted(ExposureTracker.key("Ranger", "Gone"), 100);
+        t.retainSubjects("Warden7", java.util.Set.of("Steve"));
+        assertEquals(2, t.size(), "Alex left, the other observer is untouched");
+        assertTrue(t.inProgress(ExposureTracker.key("Warden7", "Steve"), 101));
+        t.retainSubjects("Warden7", java.util.Set.of());
+        assertEquals(1, t.size());
+    }
+
+    @Test
     void aClockGoingBackwardsStartsOver() {
         ExposureTracker t = new ExposureTracker();
         t.sighted(K, 5000);

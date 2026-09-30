@@ -288,7 +288,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
     }
 
     @Override
-    public void aggroRangeEnabled(boolean enabled) {
+    public void aggroHunterEnabled(boolean enabled) {
         aggroRangeOn = enabled;
     }
 

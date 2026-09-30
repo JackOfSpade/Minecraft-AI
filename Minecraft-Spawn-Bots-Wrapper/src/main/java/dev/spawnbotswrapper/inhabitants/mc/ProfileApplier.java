@@ -315,7 +315,14 @@ public final class ProfileApplier implements ProfileApplication {
             int pearls = 0;
             List<String> enchantments = List.of();
             if (inventory) {
-                BotSnapshots.restoreInventory(bot.getInventory(), bot.registryAccess(), snapshot, warnings);
+                int written = BotSnapshots.restoreInventory(bot.getInventory(), bot.registryAccess(), snapshot, warnings);
+                if (written == 0 && !snapshot.stacks.isEmpty()) {
+                    // Not a success: nothing of the saved inventory could be read (it was left as it was), so the caller
+                    // falls back to dressing the bot from its profile.
+                    warnings.add("none of the " + snapshot.stacks.size() + " saved stacks of " + bot.getGameProfile().name()
+                            + " could be decoded; the saved state is not restored");
+                    return new Result(false, false, warnings);
+                }
                 pearls = removeEnderPearls(bot.getInventory());
                 enchantments = removeDisabledEnchantments(bot.getInventory(), disabledEnchantments.get());
             }

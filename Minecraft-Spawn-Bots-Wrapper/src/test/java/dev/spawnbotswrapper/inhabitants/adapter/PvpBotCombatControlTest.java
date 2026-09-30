@@ -88,7 +88,7 @@ class PvpBotCombatControlTest {
     }
 
     @Test
-    void theStatusDetailsMentionTheAggroRangeAndTheWalkBack() {
+    void theStatusDetailsMentionTheAggroHunterStates() {
         AdapterFixture f = AdapterFixture.probed();
         assertTrue(AdapterFixture.anyContains(f.adapter.status().details(), "walking via BotNavigation"),
                 f.adapter.status().details().toString());

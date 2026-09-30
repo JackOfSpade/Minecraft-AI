@@ -104,7 +104,7 @@ public interface PvpBotOperations {
      * Tells the adapter whether the wrapper's aggro hunter is switched on. While it is, PvP BOT's own auto-target being OFF
      * is the intended state (the aggro hunter acquires targets), so the status report no longer warns about it.
      */
-    default void aggroRangeEnabled(boolean enabled) {
+    default void aggroHunterEnabled(boolean enabled) {
     }
 
     /**

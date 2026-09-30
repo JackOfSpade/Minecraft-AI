@@ -179,7 +179,7 @@ public final class McBotGateway implements BotGateway {
         ServerPlayer bot = entity.get();
         List<String> warnings = new ArrayList<>();
         // Nothing is dressed from the profile: the bot gets back exactly what it had, slot by slot, and how it was doing.
-        ProfileApplication.Result restored = applier.restore(bot, snapshot, true);
+        ProfileApplication.Result restored = restoreOrDress(botName, bot, profile, snapshot);
         stash(botName, restored);
         warnings.addAll(restored.warnings());
         if (restored.loadoutApplied() && restored.vitalsApplied()) {
@@ -188,6 +188,26 @@ public final class McBotGateway implements BotGateway {
         stashFixes(botName, applier.enforceVanilla(bot));
         boolean behavior = applyBehavior(botName, profile.behavior(), warnings);
         return new ApplyResult(restored.loadoutApplied(), restored.vitalsApplied(), behavior, warnings);
+    }
+
+    /**
+     * Puts the saved state back; when none of it can be read (the result says nothing was restored) the bot is dressed from
+     * its profile instead, and the reason is logged, so a bot is never left in whatever state the spawn gave it and never
+     * reported as restored when it was not.
+     */
+    private ProfileApplication.Result restoreOrDress(String botName, ServerPlayer bot, BotProfile profile,
+                                                     BotSnapshot snapshot) {
+        ProfileApplication.Result restored = applier.restore(bot, snapshot, true);
+        if (restored.loadoutApplied()) {
+            return restored;
+        }
+        LOG.warn("The saved state of inhabitant {} could not be restored ({}); dressing it from its profile instead", botName,
+                restored.warnings());
+        ProfileApplication.Result dressed = applier.apply(bot, profile, true);
+        List<String> warnings = new ArrayList<>(restored.warnings());
+        warnings.addAll(dressed.warnings());
+        return new ProfileApplication.Result(dressed.loadoutApplied(), dressed.vitalsApplied(), warnings,
+                dressed.pearlsRemoved(), dressed.enchantmentsRemoved());
     }
 
     @Override
@@ -304,7 +324,7 @@ public final class McBotGateway implements BotGateway {
             }
         } else if (config.get().profiles.reapplyOnRestore) {
             ProfileApplication.Result applied = snapshot != null
-                    ? applier.restore(bot, snapshot, true)
+                    ? restoreOrDress(botName, bot, profile, snapshot)
                     : applier.apply(bot, profile, true);
             stash(botName, applied);
             if (applied.loadoutApplied() && applied.vitalsApplied()) {

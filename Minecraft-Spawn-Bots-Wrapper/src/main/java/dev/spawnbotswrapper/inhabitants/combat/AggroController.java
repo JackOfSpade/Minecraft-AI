@@ -323,7 +323,7 @@ public final class AggroController {
         }
         if (!up.available()) {
             setMode(Mode.UPSTREAM_UNAVAILABLE, up.unavailableReason());
-            states.clear();
+            clearStatesResumingPatrols();
             return;
         }
         if (lastSettingsRead == Long.MIN_VALUE || now - lastSettingsRead >= cfg.scanIntervalTicks()) {
@@ -362,6 +362,11 @@ public final class AggroController {
             }
             watching.keySet().removeIf(n -> !seen.contains(n));
         }
+    }
+
+    /** How many (observer, candidate) exposure runs are being tracked (for tests and diagnostics). */
+    int exposureRuns() {
+        return exposure.size();
     }
 
     /** Forget everything: the server stopped or restarted. Does not touch PvP BOT. */
@@ -506,11 +511,14 @@ public final class AggroController {
         exposure.forgetObserver(bot.name());
     }
 
-    /** True when {@code b} may be treated as an attacker to hunt: alive, a player, in this level, and not exempt. */
+    /**
+     * True when {@code b} may be treated as an attacker to hunt: the same filters as any other candidate ({@link #validTarget}:
+     * alive, a player, in this level, not exempt unless {@code attackInvincible}, no faction ally, other bots only with
+     * {@code targetOtherBots}, other players only with {@code targetPlayers}). A hit does not widen who may be hunted.
+     */
     private boolean validAttacker(Watcher bot, Body b) {
         Settings s = settings;
-        return s != null && b.alive() && b.isPlayer() && Objects.equals(bot.dimension(), b.dimension())
-                && !b.name().equalsIgnoreCase(bot.name()) && (s.attackInvincible() || attackable(b));
+        return s != null && validTarget(bot, b, s);
     }
 
     private boolean attackableNow(Body b) {
@@ -661,6 +669,7 @@ public final class AggroController {
         }
         List<? extends Body> near = world.playersWithin(bot, modMax);
         if (near.isEmpty()) {
+            exposure.forgetObserver(name);
             return false;
         }
         // Cheap validity first (most of a crowded server's players are other inhabitants, which are no targets), then the
@@ -675,6 +684,13 @@ public final class AggroController {
             ordered.sort(Comparator.<Body>comparingDouble(bot::distanceTo)
                     .thenComparing(b -> b.name().toLowerCase(Locale.ROOT)));
         }
+        // A player that disconnected, changed level, went out of range or is no valid target any more has no exposure run:
+        // only the candidates that are valid this scan keep one.
+        Set<String> present = new HashSet<>();
+        for (Body candidate : ordered) {
+            present.add(candidate.name());
+        }
+        exposure.retainSubjects(name, present);
         boolean anyExposure = false;
         for (Body candidate : ordered) {
             Perception.Reading reading = read(bot, candidate, cfg);
@@ -1253,6 +1269,25 @@ public final class AggroController {
         log.debug("aggro: " + name + " dropped its hunt (" + st.phase.name().toLowerCase(Locale.ROOT) + "): " + reason);
     }
 
+    /**
+     * Forgets every hunt without a per-bot reason (PvP BOT is unavailable, or this controller switched itself off after
+     * repeated failures), and lets every PvP BOT patrol this controller paused walk again. Best effort: the calls may
+     * fail for the very reason the hunts are dropped, and that must never throw out of the tick.
+     */
+    private void clearStatesResumingPatrols() {
+        for (Map.Entry<String, BotState> e : states.entrySet()) {
+            if (e.getValue().patrolPaused) {
+                try {
+                    up.resumePatrol(e.getKey());
+                } catch (RuntimeException ex) {
+                    warnOnce("resume|" + e.getKey(), "aggro: could not resume the patrol of " + e.getKey() + ": " + ex.getMessage());
+                }
+            }
+        }
+        states.clear();
+        watching.clear();
+    }
+
     private void dropAll(String reason) {
         for (String name : new ArrayList<>(states.keySet())) {
             dropBot(name, reason);
@@ -1346,7 +1381,7 @@ public final class AggroController {
         warnOnce(what + "|" + e.getMessage(), "aggro: " + what + " failed: " + e.getMessage());
         if (failures >= MAX_CONSECUTIVE_FAILURES && !failed) {
             failed = true;
-            states.clear();
+            clearStatesResumingPatrols();
             setMode(Mode.FAILED, null);
         }
     }
