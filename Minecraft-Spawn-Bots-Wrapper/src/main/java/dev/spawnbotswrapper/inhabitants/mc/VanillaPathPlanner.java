@@ -57,6 +57,8 @@ public final class VanillaPathPlanner implements PathPlanner {
             AttributeInstance follow = helper.getAttribute(Attributes.FOLLOW_RANGE);
             if (follow != null) {
                 follow.setBaseValue(range);
+                // vanilla sizes the search (follow range x 16 nodes) once, when the navigation is built: do it for this range
+                helper.getNavigation().updatePathfinderMaxVisitedNodes();
             }
             helper.setPos(player.getX(), player.getY(), player.getZ());
             helper.setOnGround(true);
