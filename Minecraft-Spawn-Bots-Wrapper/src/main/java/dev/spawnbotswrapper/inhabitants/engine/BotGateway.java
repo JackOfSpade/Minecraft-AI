@@ -85,6 +85,26 @@ public interface BotGateway {
         return false;
     }
 
+    /**
+     * True when the bot is inside the area a real player keeps loaded: its chunk is sent to a player (view distance) or
+     * lies within the simulation distance of one. A seen bot in such a place is never put to sleep (its chunk is loaded
+     * and ticking), whatever the allocation says. The default estimates it from positions.
+     */
+    default boolean loadedByHuman(String botName) {
+        PlayerPos where = position(botName);
+        if (where == null) {
+            return true;
+        }
+        double radius = relevanceRadiusBlocks();
+        for (PlayerPos p : realPlayers()) {
+            if (p.dimension().equals(where.dimension())
+                    && Math.max(Math.abs(p.x() - where.x()), Math.abs(p.z() - where.z())) <= radius) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Where a live bot stands (dimension, position, facing), or null when it is not online. */
     default PlayerPos position(String botName) {
         return null;

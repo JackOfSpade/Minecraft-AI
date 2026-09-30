@@ -114,7 +114,9 @@ final class BotRoster {
         List<Map.Entry<StructureKey, StructureRecord>> all = ctx.store.nonAbandoned();
         for (Map.Entry<StructureKey, StructureRecord> e : all) {
             for (BotRecord b : e.getValue().bots) {
-                if (b.state == BotState.SPAWNED && b.name != null) {
+                if (b.state == BotState.SPAWNED && b.name != null && !b.removing) {
+                    // A record still marked "removing" is an interrupted removal (a crash): {@link Retirer#finishInterrupted}
+                    // deals with it, it is never tracked as a live bot (and so can never be concluded dead).
                     add(e.getKey(), b, false);
                 }
             }

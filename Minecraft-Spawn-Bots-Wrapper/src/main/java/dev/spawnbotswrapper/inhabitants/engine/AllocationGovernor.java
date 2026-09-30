@@ -29,7 +29,7 @@ import java.util.Set;
  *       removed); otherwise the last answer stands,</li>
  *   <li>reconciles: the surplus bots of structures that dropped out are removed (a bot a player has seen sleeps, an unseen
  *       one is deleted -- see {@link Retirer}), paced by the TPS governor's batch size and never a bot that is engaged
- *       with a player or SEEN inside the relevance area; and structures that came in get their sleepers woken first,
+ *       with a player or SEEN while their chunk is loaded by a player; and structures that came in get their sleepers woken first,
  *       then fresh bots for their vacant slots ({@code N - dead - failed}), handed to the {@link PopulationDriver}
  *       nearest first.</li>
  * </ol>
@@ -66,8 +66,6 @@ final class AllocationGovernor implements AllocationView {
     private List<StructureKey> allowedOrder = List.of();
     /** 3D distance of each candidate structure of the last computation; used to order removals and to judge new structures. */
     private Map<StructureKey, Double> distances = Map.of();
-    /** Structures inside a player's relevance area at the last computation. */
-    private Set<StructureKey> relevant = Set.of();
     /** Since when a structure has had more live bots than it was allocated (for the grace period). */
     private final Map<StructureKey, Long> surplusSince = new HashMap<>();
     /** Lower-case bot name -> tick before which it is not tried again (its removal just failed: the store could not be written). */
@@ -181,7 +179,6 @@ final class AllocationGovernor implements AllocationView {
             result = new Allocation.Result(Map.of(), List.of());
             allowedOrder = List.of();
             distances = Map.of();
-            relevant = Set.of();
             surplusSince.clear();
             dirty = true;
         }
@@ -227,14 +224,19 @@ final class AllocationGovernor implements AllocationView {
     private record Near(StructureKey key, StructureRecord rec, IntBox box) {
     }
 
-    /** The relevance radius in blocks: the players' simulation distance plus the extra chunks, at most the legacy dormancy distance. */
+    /**
+     * The relevance radius in blocks: the players' simulation distance plus the extra chunks, capped by the legacy dormancy
+     * distance -- but never below the simulation distance itself: a structure inside it is loaded and ticking, so it can host
+     * bots, and a bot in it is not out of range whatever the legacy cap says.
+     */
     double relevanceRadius(InhabitantsConfig cfg, InhabitantsConfig.Allocation a) {
-        double r = ctx.relevanceRadiusBlocks() + 16.0 * Math.max(0, a.relevanceExtraChunks);
+        double simulation = ctx.relevanceRadiusBlocks();
+        double r = simulation + 16.0 * Math.max(0, a.relevanceExtraChunks);
         InhabitantsConfig.Dormancy d = EngineContext.dormancy(cfg);
         if (d.enabled && d.distanceBlocks > 0) {
             r = Math.min(r, d.distanceBlocks);
         }
-        return r;
+        return Math.max(r, simulation);
     }
 
     private void compute(List<BotGateway.PlayerPos> humans, InhabitantsConfig cfg, InhabitantsConfig.Allocation a) {
@@ -257,15 +259,11 @@ final class AllocationGovernor implements AllocationView {
                 near.add(new Near(e.key, rec, e.box));
             });
         }
-        Set<StructureKey> nearKeys = new HashSet<>();
-        for (Near n : near) {
-            nearKeys.add(n.key());
-        }
-        // 2. which live bots may not be removed: engaged with a player anywhere, or seen inside the relevance area
+        // 2. which live bots may not be removed: engaged with a player anywhere, or SEEN while their chunk is loaded by a player
         Map<StructureKey, Integer> protectedPerStructure = new HashMap<>();
         int protectedTotal = 0;
         for (Map.Entry<StructureKey, BotRecord> e : roster.onlineEntries()) {
-            if (ctx.engaged(e.getValue().name) || (e.getValue().seen && nearKeys.contains(e.getKey()))) {
+            if (isProtected(e.getValue())) {
                 protectedPerStructure.merge(e.getKey(), 1, Integer::sum);
                 protectedTotal++;
             }
@@ -300,13 +298,17 @@ final class AllocationGovernor implements AllocationView {
         }
         allowedOrder = allowedKeys;
         distances = dist;
-        relevant = nearKeys;
     }
 
     // ------------------------------------------------------------------ reconcile
 
-    private boolean isProtected(StructureKey key, BotRecord bot) {
-        return ctx.engaged(bot.name) || (bot.seen && relevant.contains(key));
+    /**
+     * A bot that may not be removed now: engaged with a player, or SEEN by one while its chunk is loaded (amendment 3, P3). The
+     * loaded state is the real one (the bot stands where a player keeps chunks loaded), not the relevance area, which is only
+     * about where structures can host bots.
+     */
+    private boolean isProtected(BotRecord bot) {
+        return ctx.engaged(bot.name) || (bot.seen && ctx.loadedByHuman(bot.name));
     }
 
     private record Victim(StructureKey key, BotRecord bot, double distance) {
@@ -354,7 +356,7 @@ final class AllocationGovernor implements AllocationView {
                 if (surplus <= 0) {
                     break;
                 }
-                if (isProtected(key, b)) {
+                if (isProtected(b)) {
                     continue;
                 }
                 Long later = retryAfter.get(EngineContext.lower(b.name));

@@ -535,7 +535,7 @@ public final class InhabitantsConfig {
      * <p>
      * SUPERSEDED by {@link Allocation} while that runs (it is enabled and a real player is online): its relevance
      * area does the same job structure by structure, so this distance rule is then not run at all, {@code
-     * distanceBlocks} only caps the relevance area, and {@code enabled=false} stops the allocation from removing bots
+     * distanceBlocks} only caps the relevance area (never below the simulation distance), and {@code enabled=false} stops the allocation from removing bots
      * that left it. {@code delayTicks} and {@code scanIntervalTicks} only apply to the fallback (allocation off, or no
      * player known). See {@link TpsThrottle} for the separate, reactive mechanism that responds to server load.
      */
@@ -560,7 +560,8 @@ public final class InhabitantsConfig {
      * bots of structures that came in are woken or rolled. Deaths are never refilled.
      * <p>
      * Only structures within the players' relevance area (the server simulation distance plus {@code relevanceExtraChunks}
-     * chunks, at most {@code dormancy.distanceBlocks} while dormancy is enabled) can host bots. Every value here has a sane
+     * chunks, capped by {@code dormancy.distanceBlocks} while dormancy is enabled but never smaller than the simulation distance
+     * itself) can host bots. Every value here has a sane
      * bound (see {@code ConfigValidator}). When {@code enabled} is false, or no real player is online, population is first
      * come, first served and {@link Dormancy} sleeps far bots, as before.
      */

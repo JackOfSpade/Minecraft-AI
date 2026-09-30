@@ -210,7 +210,7 @@ class PopulationEngineAllocationTest {
     }
 
     @Test
-    void aSeenBotIsProtectedWhileItsStructureIsInsideTheRelevanceArea() {
+    void aSeenBotIsProtectedWhileItsChunkIsLoadedByAPlayer() {
         Rig rig = rig(3);
         StructureSnapshot a = Rig.structure("minecraft:pillager_outpost", 0, 0);   // x 0..47
         StructureSnapshot b = Rig.structure("minecraft:pillager_outpost", 10, 0);  // x 160..207
@@ -225,12 +225,46 @@ class PopulationEngineAllocationTest {
             rig.bots.visibleToHuman.add(FakeBots.key(bot.name));
         }
         rig.run(30);
-        // the player now stands next to b: b is nearer, but a's seen bots stay (b only gets what the budget leaves)
-        playerAt(rig, 215, 70, 0);
+        // the player now stands next to b (every bot of a is still inside the 192 blocks the player keeps loaded): b is nearer,
+        // but a's seen bots stay (b only gets what the budget leaves)
+        playerAt(rig, 190, 70, 0);
         rig.run(300);
-        assertEquals(3, live(rig, a), "seen bots are never taken out while their structure is in range");
+        assertEquals(3, live(rig, a), "seen bots are never taken out while their chunk is loaded");
         assertEquals(0, live(rig, b), "so the budget of 3 is already used up by protected bots");
         assertEquals(0, rig.bots.removes.size());
+    }
+
+    /**
+     * Review fix (a): the protection of a seen bot lasts while its chunk is LOADED, not only inside the relevance area, which
+     * the legacy dormancy distance (160) caps below the loaded range. Here the structure is 163 blocks from the player (beyond
+     * that cap) but its bots stand 165 blocks away, inside the 192 blocks the player keeps loaded: they stay.
+     */
+    @Test
+    void aSeenBotStaysWhileItsChunkIsLoadedEvenBeyondTheLegacyDormancyDistance() {
+        Rig rig = rig(3);
+        rig.cfg.dormancy.distanceBlocks = 160.0; // the shipped default
+        StructureSnapshot a = Rig.structure("minecraft:pillager_outpost", 0, 0);   // x 0..47
+        StructureSnapshot b = Rig.structure("minecraft:pillager_outpost", 13, 0);  // x 208..255, right next to the player
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(a);
+        rig.run(100);
+        rig.engine.submit(b);
+        rig.run(50);
+        assertEquals(3, live(rig, a));
+        for (BotRecord bot : rig.record(a.key()).bots) {
+            rig.bots.visibleToHuman.add(FakeBots.key(bot.name));
+            rig.bots.positions.put(FakeBots.key(bot.name), new BotGateway.PlayerPos(WORLD, 45, 70, 0));
+        }
+        rig.run(30);
+        playerAt(rig, 210, 70, 0); // 163 blocks from the box of a, 165 from its bots
+        rig.run(300);
+        assertEquals(3, live(rig, a), "loaded and seen: never put to sleep, although the structure is beyond the legacy distance");
+        assertEquals(0, rig.bots.removes.size());
+        // out of the loaded range (a chunk that is not loaded any more) they sleep, with their whole state
+        playerAt(rig, 260, 70, 0);
+        rig.run(300);
+        assertEquals(0, live(rig, a), "not loaded any more: asleep");
+        assertEquals(3, rig.record(a.key()).bots.stream().filter(x -> x.state == BotState.DORMANT).count());
     }
 
     @Test
@@ -696,18 +730,21 @@ class PopulationEngineAllocationTest {
         assertEquals(3, rig.record(s.key()).bots.stream().filter(b -> b.state == BotState.DORMANT).count());
         int firstRemove = -1;
         int lastRemove = -1;
-        int writesBeforeFirstRemove = 0;
-        int writesBetween = 0;
         for (int i = 0; i < order.size(); i++) {
             if (order.get(i).startsWith("remove:")) {
                 if (firstRemove < 0) {
                     firstRemove = i;
                 }
                 lastRemove = i;
-            } else if (order.get(i).equals("write")) {
-                if (firstRemove < 0) {
+            }
+        }
+        int writesBeforeFirstRemove = 0;
+        int writesBetween = 0;
+        for (int i = 0; i < order.size(); i++) {
+            if (order.get(i).equals("write")) {
+                if (i < firstRemove) {
                     writesBeforeFirstRemove++;
-                } else {
+                } else if (i < lastRemove) {
                     writesBetween++;
                 }
             }
@@ -715,6 +752,8 @@ class PopulationEngineAllocationTest {
         assertTrue(firstRemove >= 0 && lastRemove > firstRemove);
         assertTrue(writesBeforeFirstRemove >= 1, "the records are on disk before the first bot is emptied: " + order);
         assertEquals(0, writesBetween, "one write for the whole batch, not one per bot: " + order);
+        // ... and that one write is a journal append (a few records), not a rewrite of the whole store
+        assertEquals(1, rig.store.journals, "one journal append for the whole batch: " + order);
     }
     // ------------------------------------------------------------------ a new structure at the live ceiling
 

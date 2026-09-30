@@ -9,10 +9,13 @@ import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * The ONE place that ends a live inhabitant, so that "no loot or XP farm" is a property of one class:
@@ -24,10 +27,14 @@ import java.util.Set;
  *       bot is deleted</b> (no record, no snapshot, no profile: its slot is vacant and re-rollable).</li>
  *   <li><b>A death is permanent.</b> {@link #died} turns the record into DEAD; only ever more dead, never a free slot.</li>
  * </ul>
- * Ordering for a sleep, so a crash can never leave both a live inventory and a restorable copy of it: (1) the snapshot and
- * the position go into the record, marked {@code removing}, and the store is written; (2) only then is the bot emptied and
- * removed; (3) the mark is cleared. A crash after (1) leaves a record that says "removing" -- on the next start a live bot
- * with that mark is removed again ({@link #finishInterrupted}) -- and a crash before (1) leaves the unchanged live bot.
+ * Ordering of every removal, so a crash can never leave both a live inventory and a restorable copy of it, and can never
+ * turn a removal into a death: (1) the record is marked {@code removing} (a seen bot also gets its snapshot and position and
+ * the state DORMANT) and made durable through the store's write-ahead journal -- one small append, never a full save in the
+ * middle of a lag spike; (2) only then is the bot emptied and removed; (3) the mark is cleared (seen) or the record dropped
+ * (unseen). A crash after (1) leaves a record that says "removing": on the next start a live bot with that mark is removed
+ * again ({@link #finishInterrupted}), an absent one is a vacant slot and never a death, and a bot of such a record that
+ * rejoins late is removed too ({@link #tickLate}; the snapshot wins, there is never a second copy). A crash before (1)
+ * leaves the unchanged live bot.
  * <p>
  * Server thread only.
  */
@@ -43,9 +50,15 @@ final class Retirer {
 
     enum Result {
         SLEPT, DELETED,
-        /** Could not be done now (the store could not be written, or the bot could not be removed); nothing was lost. */
+        /**
+         * Could not be done now (the store could not be written, or the bot could not be removed). The bot is left as it was:
+         * when the removal itself failed after it had been emptied, the adapter puts everything it carried back.
+         */
         KEPT
     }
+
+    /** How often (ticks) bots of interrupted removals are checked for a late rejoin. */
+    static final int LATE_CHECK_TICKS = 20;
 
     private final EngineContext ctx;
     private final BotRoster roster;
@@ -53,10 +66,19 @@ final class Retirer {
     private final Set<String> removing = new HashSet<>();
     /** Lower-case names of bots already reported as put to sleep without a readable state (once per bot is enough). */
     private final Set<String> noStateReported = new HashSet<>();
+    /** Bots of records that were "removing" at the last start: watched for a late rejoin (see {@link #tickLate}). */
+    private final Map<String, Late> late = new LinkedHashMap<>();
+    private Predicate<String> inFlight = name -> false;
+    private long nextLateCheck;
 
     Retirer(EngineContext ctx, BotRoster roster) {
         this.ctx = ctx;
         this.roster = roster;
+    }
+
+    /** Whether a spawn or a wake of this bot name is in flight (set once by the engine): such a bot is not a stray. */
+    void setInFlight(Predicate<String> inFlight) {
+        this.inFlight = inFlight == null ? name -> false : inFlight;
     }
 
     boolean isRemoving(String name) {
@@ -75,32 +97,44 @@ final class Retirer {
     }
 
     /**
-     * Takes several bots out, in order. The records of all the SEEN ones among them (state, position, the {@code removing}
-     * mark) are made durable with ONE write of the store before any of them is emptied, so a batch of sleeps costs one save
-     * instead of one per bot and the crash ordering still holds for every bot: a bot is only ever emptied after its own
-     * record is on disk. If that write fails nothing is emptied and every seen bot of the batch is left exactly as it was.
+     * Takes several bots out, in order. The records of ALL of them (a seen one: state, position, the {@code removing} mark; an
+     * unseen one: the mark) are made durable with ONE journal append before any of them is emptied, so a batch costs one
+     * small write instead of one per bot and the crash ordering still holds for every bot: a bot is only ever emptied
+     * after its own record is on disk. If that write fails nothing is emptied and every bot of the batch is left exactly as
+     * it was.
      */
     List<Result> retireAll(List<Item> items, Reason reason, InhabitantsConfig cfg) {
         List<Result> results = new ArrayList<>(items.size());
-        List<Sleeper> sleepers = new ArrayList<>();
+        List<Marked> marked = new ArrayList<>(items.size());
+        Set<StructureKey> keys = new LinkedHashSet<>();
         for (Item item : items) {
             removing.add(item.bot().name.toLowerCase(Locale.ROOT));
-            sleepers.add(item.bot().seen ? prepareSleep(item.key(), item.bot()) : null);
+            marked.add(item.bot().seen ? prepareSleep(item.key(), item.bot()) : prepareDelete(item.key(), item.bot()));
+            keys.add(item.key());
         }
+        List<Marked> undone = new ArrayList<>();
         try {
-            boolean anySleeper = sleepers.stream().anyMatch(s -> s != null);
-            boolean durable = !anySleeper || ctx.saveNow();
-            for (int i = 0; i < items.size(); i++) {
-                Item item = items.get(i);
-                Sleeper sleeper = sleepers.get(i);
-                if (sleeper == null) {
-                    results.add(delete(item.key(), item.bot(), reason, cfg));
-                } else if (!durable) {
-                    sleeper.undo();
+            boolean durable = !items.isEmpty() && ctx.journalNow(keys);
+            for (Marked m : marked) {
+                if (!durable) {
+                    m.undo();
                     results.add(Result.KEPT); // nothing was emptied: the bot is exactly as it was
                 } else {
-                    results.add(finishSleep(sleeper, reason, cfg));
+                    Result r = m.seen ? finishSleep(m, reason, cfg) : finishDelete(m, reason, cfg);
+                    if (r == Result.KEPT) {
+                        undone.add(m);
+                    }
+                    results.add(r);
                 }
+            }
+            if (!undone.isEmpty()) {
+                // The bots that could not be removed live on with the state they had: make that durable as well (best effort),
+                // so a crash does not roll them back to the state the journal recorded for the removal.
+                Set<StructureKey> again = new LinkedHashSet<>();
+                for (Marked m : undone) {
+                    again.add(m.key);
+                }
+                ctx.journalNow(again);
             }
         } finally {
             for (Item item : items) {
@@ -110,11 +144,13 @@ final class Retirer {
         return results;
     }
 
-    /** What a bot was before its sleep was recorded, so a failed sleep puts it back exactly. */
-    private final class Sleeper {
+    /** What a bot was before its removal was recorded, so a failed removal puts it back exactly. */
+    private final class Marked {
         final StructureKey key;
         final BotRecord bot;
+        final boolean seen;
         final BotState state;
+        final boolean removingBefore;
         final BotSnapshot snapshot;
         final double x;
         final double y;
@@ -122,10 +158,12 @@ final class Retirer {
         final float yaw;
         final String dimension;
 
-        Sleeper(StructureKey key, BotRecord bot) {
+        Marked(StructureKey key, BotRecord bot) {
             this.key = key;
             this.bot = bot;
+            this.seen = bot.seen;
             this.state = bot.state;
+            this.removingBefore = bot.removing;
             this.snapshot = bot.snapshot;
             this.x = bot.x;
             this.y = bot.y;
@@ -136,7 +174,7 @@ final class Retirer {
 
         void undo() {
             bot.state = state;
-            bot.removing = false;
+            bot.removing = removingBefore;
             bot.snapshot = snapshot;
             bot.x = x;
             bot.y = y;
@@ -148,8 +186,8 @@ final class Retirer {
     }
 
     /** Step 1 of a sleep: the live state and the place go into the record, marked "removing" (made durable by the caller). */
-    private Sleeper prepareSleep(StructureKey key, BotRecord bot) {
-        Sleeper before = new Sleeper(key, bot);
+    private Marked prepareSleep(StructureKey key, BotRecord bot) {
+        Marked before = new Marked(key, bot);
         if (roster.isRestored(bot)) {
             BotSnapshot snapshot = ctx.snapshot(bot.name);
             if (snapshot != null) {
@@ -173,13 +211,22 @@ final class Retirer {
         return before;
     }
 
-    /** Steps 2 and 3: the bot is emptied and removed (no drops, no death), then the mark is cleared. */
-    private Result finishSleep(Sleeper s, Reason reason, InhabitantsConfig cfg) {
+    /** Step 1 of a deletion: only the mark, so a crash before the record is gone can never read as a death. */
+    private Marked prepareDelete(StructureKey key, BotRecord bot) {
+        Marked before = new Marked(key, bot);
+        bot.removing = true;
+        ctx.store.markDirty();
+        return before;
+    }
+
+    /** Steps 2 and 3 of a sleep: the bot is emptied and removed (no drops, no death), then the mark is cleared. */
+    private Result finishSleep(Marked s, Reason reason, InhabitantsConfig cfg) {
         BotRecord bot = s.bot;
         ctx.discard(bot.name);
         Boolean stillThere = ctx.online(bot.name);
         if (stillThere == null || stillThere) {
-            // It could not be removed. The record must not keep saying "asleep with a saved copy" while the bot lives on.
+            // It could not be removed (the adapter put back what it had emptied). The record must not keep saying "asleep with
+            // a saved copy" while the bot lives on.
             s.undo();
             return Result.KEPT;
         }
@@ -190,14 +237,24 @@ final class Retirer {
         return Result.SLEPT;
     }
 
-    private Result delete(StructureKey key, BotRecord bot, Reason reason, InhabitantsConfig cfg) {
-        // Unseen: nothing about it is kept. It is emptied and removed first; the record goes only once it is really gone.
+    /** Steps 2 and 3 of a deletion: emptied and removed first; the record goes only once the bot is really gone. */
+    private Result finishDelete(Marked m, Reason reason, InhabitantsConfig cfg) {
+        BotRecord bot = m.bot;
         ctx.discard(bot.name);
         Boolean stillThere = ctx.online(bot.name);
         if (stillThere == null || stillThere) {
+            m.undo();
             return Result.KEPT;
         }
         roster.untrackOne(bot);
+        dropRecord(m.key, bot);
+        ctx.debug(cfg, "Inhabitant {} deleted ({}): no player ever saw it, nothing is kept and its slot is free again",
+                bot.name, reason);
+        return Result.DELETED;
+    }
+
+    /** Takes an unseen bot out of its structure's record: its slot is vacant (its index is never reused). */
+    private void dropRecord(StructureKey key, BotRecord bot) {
         StructureRecord rec = ctx.store.find(key).orElse(null);
         if (rec != null) {
             rec.nextBotIndex = Math.max(rec.nextBotIndex, bot.index + 1);
@@ -205,9 +262,6 @@ final class Retirer {
             ctx.store.reindex(key);
             ctx.store.markDirty();
         }
-        ctx.debug(cfg, "Inhabitant {} deleted ({}): no player ever saw it, nothing is kept and its slot is free again",
-                bot.name, reason);
-        return Result.DELETED;
     }
 
     // ------------------------------------------------------------------ death (permanent)
@@ -227,6 +281,7 @@ final class Retirer {
         bot.failure = null;
         ctx.store.markDirty();
         roster.untrackOne(bot);
+        late.remove(EngineContext.lower(bot.name));
         ctx.guard("forget-dead", () -> ctx.bots.forget(bot.name));
         StructureRecord rec = ctx.store.find(key).orElse(null);
         InhabitantsConfig cfg = ctx.config();
@@ -238,36 +293,121 @@ final class Retirer {
 
     // ------------------------------------------------------------------ after a crash
 
+    /** A bot of a record that was "removing" when the server went down; see {@link #finishInterrupted}. */
+    private record Late(StructureKey key, BotRecord bot, long until) {
+    }
+
     /**
-     * A sleep that was recorded but not finished (a crash between its steps): a bot that is still online and whose record
-     * says DORMANT and "removing" is emptied and removed now, and the mark cleared; an offline one only loses the mark.
+     * Finishes the removals that a crash or a stop interrupted, once the restore settle period is over (PvP BOT has brought
+     * its bots back by then): a record still marked {@code removing} whose bot is online has the bot emptied and removed
+     * now (the record already holds the state that counts, so there is never a second copy); one whose bot is offline just
+     * loses the mark (seen) or stays a vacant slot until the gone period ends (unseen; then the record goes). Either way it is
+     * never a death. The bots of such records are then watched for {@code goneConfirmTicks}: one that rejoins late is handled
+     * the same way ({@link #tickLate}).
+     *
+     * @return true when every marked record was dealt with (false: the gateway could not tell for some; call again later)
      */
-    void finishInterrupted(InhabitantsConfig cfg) {
+    boolean finishInterrupted(InhabitantsConfig cfg) {
+        long now = ctx.now();
+        long until = now + Math.max(1, EngineContext.processing(cfg).goneConfirmTicks);
         int finished = 0;
+        boolean all = true;
+        List<StructureKey> keys = new ArrayList<>();
+        List<BotRecord> bots = new ArrayList<>();
         for (Map.Entry<StructureKey, StructureRecord> e : ctx.store.nonAbandoned()) {
             for (BotRecord bot : e.getValue().bots) {
-                if (!bot.removing || bot.name == null) {
-                    continue;
+                if (bot.removing && bot.name != null) {
+                    keys.add(e.getKey());
+                    bots.add(bot);
                 }
-                Boolean online = ctx.online(bot.name);
-                if (online == null) {
-                    continue; // cannot tell: try again next time
-                }
-                if (online && bot.state == BotState.DORMANT) {
-                    removing.add(bot.name.toLowerCase(Locale.ROOT));
-                    try {
-                        ctx.discard(bot.name);
-                    } finally {
-                        removing.remove(bot.name.toLowerCase(Locale.ROOT));
-                    }
-                }
-                bot.removing = false;
-                ctx.store.markDirty();
-                finished++;
             }
         }
-        if (finished > 0) {
-            ctx.info("Finished {} sleep(s) that a restart had interrupted (the bot was emptied and removed once more)", finished);
+        for (int i = 0; i < bots.size(); i++) {
+            StructureKey key = keys.get(i);
+            BotRecord bot = bots.get(i);
+            Boolean online = ctx.online(bot.name);
+            if (online == null) {
+                all = false; // cannot tell: try again next time
+                continue;
+            }
+            if (online && !discardStray(bot)) {
+                all = false; // could not be removed now: try again next time
+                continue;
+            }
+            if (bot.seen) {
+                bot.removing = false; // the snapshot in the record is what counts; the bot may wake now
+                ctx.store.markDirty();
+                late.put(EngineContext.lower(bot.name), new Late(key, bot, until));
+            } else if (online) {
+                dropRecord(key, bot);
+            } else {
+                late.put(EngineContext.lower(bot.name), new Late(key, bot, until)); // a vacant slot until the period ends
+            }
+            finished++;
         }
+        if (finished > 0) {
+            ctx.info("Finished {} removal(s) that a restart had interrupted (nothing is a death; the bot was emptied and removed once more)", finished);
+        }
+        return all;
+    }
+
+    /**
+     * Bots of interrupted removals that came back after {@link #finishInterrupted} ran (PvP BOT restores its bots one by one,
+     * possibly late): a seen one that is online while its record says DORMANT is a second copy of what the snapshot holds,
+     * so it is emptied and removed (the snapshot wins); an unseen one is removed and its record dropped. After the gone
+     * period a still-absent unseen bot's record is dropped (a vacant slot, never a death).
+     */
+    void tickLate(long now) {
+        if (late.isEmpty() || now < nextLateCheck) {
+            return;
+        }
+        nextLateCheck = now + LATE_CHECK_TICKS;
+        for (Late l : new ArrayList<>(late.values())) {
+            String lower = EngineContext.lower(l.bot().name);
+            BotRecord bot = l.bot();
+            if (bot.state == BotState.DEAD || (bot.state == BotState.SPAWNED && bot.seen)) {
+                late.remove(lower); // it died, or its wake completed: nothing to watch any more
+                continue;
+            }
+            Boolean online = ctx.online(bot.name);
+            if (online == null) {
+                continue;
+            }
+            if (online && !inFlight.test(bot.name)) {
+                if (discardStray(bot)) {
+                    ctx.info("Inhabitant {} rejoined after an interrupted removal; it was emptied and removed again (its saved state "
+                            + "or its deleted record stands, there is no second copy)", bot.name);
+                    if (!bot.seen) {
+                        dropRecord(l.key(), bot);
+                        late.remove(lower);
+                    }
+                }
+                continue;
+            }
+            if (now >= l.until()) {
+                late.remove(lower);
+                if (!online && !bot.seen && bot.removing) {
+                    dropRecord(l.key(), bot); // gone for the whole period: a vacant slot
+                }
+            }
+        }
+    }
+
+    /** How many bots of interrupted removals are being watched for a late rejoin (diagnostics and tests). */
+    int lateWatched() {
+        return late.size();
+    }
+
+    /** Empties and removes an online bot the record says is not to exist as a live one; true when it is gone. */
+    private boolean discardStray(BotRecord bot) {
+        String lower = EngineContext.lower(bot.name);
+        removing.add(lower);
+        try {
+            ctx.discard(bot.name);
+        } finally {
+            removing.remove(lower);
+        }
+        Boolean still = ctx.online(bot.name);
+        return still != null && !still;
     }
 }

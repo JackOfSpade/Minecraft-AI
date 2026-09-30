@@ -49,6 +49,11 @@ final class DormancyRestorer {
         return dormantInFlight.size();
     }
 
+    /** A wake of the bot with this name is in flight. */
+    boolean isInFlight(String name) {
+        return dormantInFlight.containsKey(EngineContext.lower(name));
+    }
+
     /** Wakes in flight for one structure. */
     int inFlightFor(StructureKey key) {
         int n = 0;

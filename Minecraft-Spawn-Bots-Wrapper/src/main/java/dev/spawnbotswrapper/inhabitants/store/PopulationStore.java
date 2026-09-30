@@ -24,8 +24,10 @@ import java.util.function.Consumer;
  * Persistence of every processed structure, in a directory inside the world save.
  *
  * <pre>
- *   populations.json       { dataVersion, structures: {key: record}, decks: {name: deck} }
+ *   populations.json       { dataVersion, structures: {key: record}, decks: {name: deck}, journalSeq }
  *                          ONLY non-abandoned records; rewritten atomically on save
+ *   populations.journal    write-ahead journal: the records of a few structures, appended and fsynced (see RecordJournal);
+ *                          replayed on load, dropped by the next full save
  *   populations.json.bak   the previous good populations.json
  *   abandoned.keys         append-only, one structure key per line: every abandoned structure
  * </pre>
@@ -53,8 +55,9 @@ import java.util.function.Consumer;
  * mid-append) is ignored and cut off, never trusted.
  *
  * <h2>What is durable when</h2>
- * Only an abandoned decision is durable on its own (one forced append per {@code put}, so a burst of
- * rolls costs one fsync each). A new occupied record, and every later in-place change, is durable only
+ * An abandoned decision is durable on its own (one forced append per {@code put}, so a burst of
+ * rolls costs one fsync each), and so are the records handed to {@link #journal} (one forced append of a few kilobytes: what
+ * must be durable before a bot is emptied and removed, see {@code Retirer}, without a full save on the server thread). A new occupied record, and every later in-place change, is durable only
  * after {@link #saveIfDirty()}/{@link #flush()}: the engine should save after rolling an occupied structure
  * and before it asks PvP BOT to spawn its bots, otherwise a crash in between leaves live bots that the
  * restarted addon has no record of. A save rewrites the whole populations.json (roughly 60 microseconds
@@ -106,6 +109,7 @@ public final class PopulationStore implements PopulationStorage {
     private final Path corruptFile;
     private final Path abandonedFile;
     private final Path abandonedTempFile;
+    private final Path journalFile;
 
     /** Records that are not ABANDONED, in the order they were first stored. */
     private final Map<StructureKey, StructureRecord> active = new LinkedHashMap<>();
@@ -130,6 +134,10 @@ public final class PopulationStore implements PopulationStorage {
     private LoadSource loadSource = LoadSource.FRESH;
     private String lastError;
     private boolean refusalLogged;
+    /** The highest write-ahead journal line number handed out (or found); the next full save records it and drops the journal. */
+    private long journalSeq;
+    /** The journal cannot be appended to safely (its torn tail could not be cut); only a full save can make records durable. */
+    private boolean journalNeedsFullSave;
 
     /** @param directory e.g. {@code <world>/pvpbot_inhabitants}; created if missing */
     public PopulationStore(Path directory) {
@@ -140,6 +148,7 @@ public final class PopulationStore implements PopulationStorage {
         this.corruptFile = directory.resolve(CORRUPT_FILE);
         this.abandonedFile = directory.resolve(ABANDONED_FILE);
         this.abandonedTempFile = directory.resolve(ABANDONED_TEMP_FILE);
+        this.journalFile = directory.resolve(RecordJournal.FILE);
     }
 
     public Path directory() {
@@ -203,6 +212,8 @@ public final class PopulationStore implements PopulationStorage {
         loadSource = LoadSource.FRESH;
         lastError = null;
         refusalLogged = false;
+        journalSeq = 0;
+        journalNeedsFullSave = false;
     }
 
     private LoadReport doLoad() {
@@ -216,7 +227,7 @@ public final class PopulationStore implements PopulationStorage {
 
         // wrapperB-6: reading populations.json (with its temp-file/backup fallbacks) and abandoned.keys is a
         // self-contained cluster with no store state of its own; see PopulationStoreLoader's class doc.
-        PopulationStoreLoader.Result r = PopulationStoreLoader.load(directory, mainFile, backupFile, tempFile, abandonedFile);
+        PopulationStoreLoader.Result r = PopulationStoreLoader.load(directory, mainFile, backupFile, tempFile, abandonedFile, journalFile);
         List<String> messages = new ArrayList<>(r.messages());
         if (!r.usable()) {
             return unusable(messages, r.unusableWhy());
@@ -232,6 +243,8 @@ public final class PopulationStore implements PopulationStorage {
         decks.importSnapshots(r.decks());
         abandonedRewriteNeeded = r.abandonedRewriteNeeded();
         dirty = r.dirtyOnLoad();
+        journalSeq = r.journalSeq();
+        journalNeedsFullSave = r.journalNeedsFullSave();
 
         names.rebuild(active);
         if (names.clashes() > 0) {
@@ -507,6 +520,41 @@ public final class PopulationStore implements PopulationStorage {
         return persist(mainDue);
     }
 
+    /**
+     * Makes the CURRENT records of these structures durable through the write-ahead journal: one small append and one fsync
+     * of a few kilobytes, instead of rewriting the whole store. See {@link RecordJournal}. Falls back to a full save when the
+     * journal cannot be trusted. Returns false when nothing could be made durable.
+     */
+    @Override
+    public synchronized boolean journal(java.util.Collection<StructureKey> keys) {
+        ensureLoaded();
+        if (!usable) {
+            refuse("journal");
+            return false;
+        }
+        if (journalNeedsFullSave) {
+            return persist(true);
+        }
+        Map<StructureKey, StructureRecord> records = new LinkedHashMap<>();
+        for (StructureKey key : keys) {
+            StructureRecord record = active.get(key);
+            if (record != null) {
+                records.put(key, record);
+            }
+        }
+        if (records.isEmpty()) {
+            return true;
+        }
+        try {
+            RecordJournal.append(journalFile, journalSeq + 1, records);
+            journalSeq += records.size();
+            return true;
+        } catch (IOException | RuntimeException e) {
+            fail("could not append to " + RecordJournal.FILE, e);
+            return false;
+        }
+    }
+
     /** Unconditional write (server stop). Never throws; a failure is logged and kept in {@link #lastError()}. */
     @Override
     public synchronized void flush() {
@@ -539,7 +587,7 @@ public final class PopulationStore implements PopulationStorage {
                 // Always keep the pair together, so a missing key file next to a population file is a real anomaly.
                 AbandonedLog.rewrite(abandonedFile, abandonedTempFile, this::forEachAbandonedKey);
             }
-            PopulationFile.write(tempFile, DATA_VERSION, active, decks.exportSnapshots());
+            PopulationFile.write(tempFile, DATA_VERSION, active, decks.exportSnapshots(), journalSeq);
         } catch (IOException | RuntimeException e) {
             DurableFiles.deleteQuietly(tempFile);
             fail("could not write " + POPULATIONS_FILE, e);
@@ -569,6 +617,9 @@ public final class PopulationStore implements PopulationStorage {
         mainGood = true;
         dirty = false;
         decks.clearDirty();
+        // Everything the journal held is in the file now (its header records the sequence number): the journal can go.
+        RecordJournal.delete(journalFile);
+        journalNeedsFullSave = false;
         return true;
     }
 

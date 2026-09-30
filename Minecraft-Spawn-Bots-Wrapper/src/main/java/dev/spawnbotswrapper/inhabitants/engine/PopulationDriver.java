@@ -95,6 +95,12 @@ final class PopulationDriver {
         return n;
     }
 
+    /** True while a spawn or a wake of the bot with this name is in flight (it may be online before its record says so). */
+    boolean isInFlight(String name) {
+        String lower = EngineContext.lower(name);
+        return inFlight.containsKey(lower) || dormancyRestorer.isInFlight(name);
+    }
+
     boolean isQueued(StructureKey key) {
         return pending.containsKey(key);
     }

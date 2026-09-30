@@ -230,6 +230,35 @@ final class InMemoryStorage implements PopulationStorage {
         return true;
     }
 
+    /** Journal appends (a write-ahead record of a few structures; the full store is not written). */
+    int journals;
+    /** The keys of every journal call, in order. */
+    final List<java.util.Collection<StructureKey>> journaled = new ArrayList<>();
+
+    @Override
+    public boolean journal(java.util.Collection<StructureKey> keys) {
+        journals++;
+        journaled.add(List.copyOf(keys));
+        if (throwOnSave) {
+            throw new IllegalStateException("injected save failure");
+        }
+        if (failSaves) {
+            return false;
+        }
+        if (trackDisk) {
+            Map<StructureKey, StructureRecord> next = new LinkedHashMap<>(disk);
+            for (StructureKey key : keys) {
+                StructureRecord r = live.get(key);
+                if (r != null) {
+                    next.put(key, copy(r));
+                }
+            }
+            disk = next;
+            onWrite.run();
+        }
+        return true;
+    }
+
     @Override
     public void flush() {
         flushCalls++;

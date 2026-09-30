@@ -42,7 +42,7 @@ final class PopulationStoreLoader {
     record Result(String unusableWhy, List<String> messages, PopulationStore.LoadSource source,
                   Map<StructureKey, StructureRecord> active, Set<StructureKey> abandonedKeys,
                   Map<String, PersistentDeckStore.Snapshot> decks, boolean abandonedRewriteNeeded,
-                  boolean dirtyOnLoad) {
+                  boolean dirtyOnLoad, long journalSeq, boolean journalNeedsFullSave) {
 
         boolean usable() {
             return unusableWhy == null;
@@ -51,10 +51,10 @@ final class PopulationStoreLoader {
 
     private static Result unusable(List<String> messages, String why) {
         return new Result(why, List.copyOf(messages), PopulationStore.LoadSource.FRESH,
-                Map.of(), Set.of(), Map.of(), false, false);
+                Map.of(), Set.of(), Map.of(), false, false, 0L, false);
     }
 
-    static Result load(Path directory, Path mainFile, Path backupFile, Path tempFile, Path abandonedFile) {
+    static Result load(Path directory, Path mainFile, Path backupFile, Path tempFile, Path abandonedFile, Path journalFile) {
         List<String> messages = new ArrayList<>();
         PopulationStore.LoadSource source = PopulationStore.LoadSource.FRESH;
         PopulationFile.Parsed parsed = null;
@@ -148,6 +148,42 @@ final class PopulationStoreLoader {
             messages.add("no " + PopulationStore.POPULATIONS_FILE + " found in " + directory + "; starting a new store");
         }
 
+        // The write-ahead journal: records made durable since the last full save, replayed over what was loaded.
+        long fileSeq = parsed == null ? 0L : parsed.journalSeq();
+        long journalSeq = fileSeq;
+        boolean journalReplayed = false;
+        boolean journalNeedsFullSave = false;
+        try {
+            RecordJournal.Loaded journal = RecordJournal.read(journalFile, fileSeq);
+            journalSeq = Math.max(journalSeq, journal.maxSeq());
+            for (RecordJournal.Entry entry : journal.entries()) {
+                if (entry.record().status == StructureStatus.ABANDONED) {
+                    continue;
+                }
+                active.put(entry.key(), entry.record());
+                abandonedKeys.remove(entry.key());
+                journalReplayed = true;
+            }
+            if (!journal.entries().isEmpty()) {
+                messages.add("replayed " + journal.entries().size() + " record(s) from " + RecordJournal.FILE
+                        + " (durable changes that the last full save did not include yet)");
+            }
+            if (journal.malformed() > 0) {
+                messages.add(RecordJournal.FILE + ": skipped " + journal.malformed() + " malformed line(s)");
+            }
+            if (journal.truncatedTail() > 0) {
+                if (AbandonedLog.truncate(journalFile, journal.validLength())) {
+                    messages.add(RecordJournal.FILE + ": removed an unterminated final line (" + journal.truncatedTail()
+                            + " byte(s)) left by a crash mid-append; it was not used");
+                } else {
+                    journalNeedsFullSave = true;
+                    messages.add(RecordJournal.FILE + ": ignored an unterminated final line left by a crash mid-append");
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            return unusable(messages, RecordJournal.FILE + " in " + directory + " cannot be read (" + e + ")");
+        }
+
         boolean abandonedRewriteNeeded = false;
         int[] conflicts = new int[1];
         try {
@@ -194,10 +230,10 @@ final class PopulationStoreLoader {
         }
 
         boolean migratedFormat = parsed != null && parsed.dataVersion() < StructureRecord.CURRENT_DATA_VERSION;
-        boolean dirtyOnLoad = handEditedAbandoned || migratedFormat || source == PopulationStore.LoadSource.BACKUP
+        boolean dirtyOnLoad = handEditedAbandoned || journalReplayed || migratedFormat || source == PopulationStore.LoadSource.BACKUP
                 || source == PopulationStore.LoadSource.INTERRUPTED_SAVE;
         return new Result(null, List.copyOf(messages), source, active, abandonedKeys, decks,
-                abandonedRewriteNeeded, dirtyOnLoad);
+                abandonedRewriteNeeded, dirtyOnLoad, journalSeq, journalNeedsFullSave);
     }
 
     private static String newerVersion(String file, String detail) {

@@ -109,7 +109,7 @@ other source file mentions PvP BOT or HeroBot.
   area (simulation distance + margin, at most `dormancy.distanceBlocks`) are looked at.
 * `Allocation` (pure) sorts them by 3D distance from the nearest real player to the bounding box and walks the list,
   giving each its fill target (`N - dead - failed`) until `processing.maxLiveBots` is used up; protected bots (engaged with
-  a player, or SEEN inside the relevance area) count first. Hysteresis keeps an allocated structure against a rival that is
+  a player, or SEEN while their chunk is loaded by a player) count first. Hysteresis keeps an allocated structure against a rival that is
   not nearer by `allocation.hysteresisBlocks`.
 * `AllocationGovernor` recomputes only when a player moved, changed level, or something relevant happened, at most once
   per interval, and diffs the desired counts against the live ones: surplus bots are handed to `Retirer` (paced by the lag
@@ -120,8 +120,11 @@ other source file mentions PvP BOT or HeroBot.
   occlusion rays, last); the answer is stored for good in the bot's record.
 * `Retirer` is the only place that ends a live inhabitant. A removal is NOT a death: `BotGateway.remove` empties the bot
   (`adapter.BotRemoval`) and lets it leave like a logging-out player before PvP BOT forgets it, so nothing drops and
-  nothing dies. A seen bot sleeps (snapshot, position and a `removing` mark are written to disk BEFORE the bot is emptied),
-  an unseen bot is deleted with no record; `died` turns a real death into a `DEAD` record for good.
+  nothing dies. `BotRemoval.empty` also clears the 2x2 crafting grid and result slot and returns what it took, so a removal
+  that fails after the emptying puts everything back. A seen bot sleeps (snapshot, position and a `removing` mark are made
+  durable BEFORE the bot is emptied, by one append to the store's write-ahead journal `populations.journal`, see
+  `store.RecordJournal`), an unseen bot is deleted with no record (its `removing` mark is journaled first, so a crash can
+  never turn the missing bot into a death; after a restart `Retirer.finishInterrupted` and `tickLate` finish or undo it); `died` turns a real death into a `DEAD` record for good.
 * Removal paths, and what they do: allocation surplus, lag shedding and the legacy distance rule go through `Retirer`
   (sleep or delete); an admin `reset ... removeBots` and a failed spawn go through the same non-death `remove` and drop
   the record; a real death arrives from the server's death event (or, as a fallback, a bot gone for `goneConfirmTicks`);

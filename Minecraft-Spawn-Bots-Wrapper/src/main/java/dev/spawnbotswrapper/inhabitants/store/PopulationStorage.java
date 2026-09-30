@@ -42,6 +42,15 @@ public interface PopulationStorage extends PopulationView {
     /** World-wide coverage decks, persisted with the records. */
     PersistentDeckStore decks();
 
+    /**
+     * Makes the current records of these structures durable NOW, cheaply (the real store appends them to a small write-ahead
+     * journal instead of rewriting everything). Used before a bot is taken out of the world, on the server thread, possibly in
+     * the middle of lag. The default is a full save. Returns false when nothing could be made durable.
+     */
+    default boolean journal(java.util.Collection<StructureKey> keys) {
+        return saveIfDirty();
+    }
+
     /** Writes to disk if anything changed since the last write. Returns false only on I/O failure. */
     boolean saveIfDirty();
 

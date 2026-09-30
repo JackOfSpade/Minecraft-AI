@@ -368,6 +368,36 @@ public final class McBotGateway implements BotGateway {
     }
 
     @Override
+    public boolean loadedByHuman(String botName) {
+        try {
+            Optional<ServerPlayer> found = findBot(botName);
+            if (found.isEmpty()) {
+                return false;
+            }
+            ServerPlayer bot = found.get();
+            net.minecraft.world.level.ChunkPos at = bot.chunkPosition();
+            int simulation = access.server().getPlayerList().getSimulationDistance();
+            for (ServerPlayer p : access.server().getPlayerList().getPlayers()) {
+                if (!isHuman(p) || p.isRemoved() || p.level() != bot.level()) {
+                    continue;
+                }
+                // its chunk is sent to the player (view distance) ...
+                if (((net.minecraft.server.level.ServerLevel) bot.level()).getChunkSource().chunkMap.isChunkTracked(p, at.x, at.z)) {
+                    return true;
+                }
+                // ... or lies inside the area that ticks around the player (simulation distance)
+                net.minecraft.world.level.ChunkPos there = p.chunkPosition();
+                if (Math.max(Math.abs(there.x - at.x), Math.abs(there.z - at.z)) <= simulation) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (RuntimeException e) {
+            return true; // cannot tell: the safe answer is "keep it"
+        }
+    }
+
+    @Override
     public PlayerPos position(String botName) {
         try {
             Optional<ServerPlayer> found = findBot(botName);

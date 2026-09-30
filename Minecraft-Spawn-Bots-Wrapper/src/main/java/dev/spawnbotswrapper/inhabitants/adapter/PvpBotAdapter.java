@@ -677,17 +677,26 @@ public final class PvpBotAdapter implements PvpBotOperations {
      * Removal is not a death. The bot is emptied (inventory, armor, offhand, ender chest, experience) and leaves the way a
      * player leaves ({@link BotRemoval}), so nothing drops and nothing dies; only then PvP BOT's own removal runs, to
      * forget the bot: its {@code clear} and {@code kill} sub-commands find no player any more. If the bot cannot be made to
-     * leave, that removal kills it as before -- but it is already empty then, so it still drops nothing.
+     * leave, that removal kills it as before -- but it is already empty then, so it still drops nothing. If it is STILL in
+     * the world after all of that (the disconnect and the kill both failed), what was taken from it is put back and the call
+     * returns false: a removal that fails never leaves a live bot that has lost its items.
      */
     private boolean removeWithoutDeath(MinecraftServer server, Probed p, ServerPlayer entity, String exact, String name) {
+        BotRemoval.Carried carried;
         try {
-            BotRemoval.empty(entity);
+            carried = BotRemoval.empty(entity);
+        } catch (Throwable t) {
+            // Not emptied (BotRemoval put back whatever it had already taken): a removal that could drop things is not started.
+            log.failure("emptying a bot before its removal; it stays", t);
+            return false;
+        }
+        try {
             if (!BotRemoval.disconnect(server, entity)) {
                 log.failure("removing a bot", new IllegalStateException(
                         "'" + name + "' is still online after it was disconnected; PvP BOT's removal will be used"));
             }
         } catch (Throwable t) {
-            log.failure("emptying and disconnecting a bot", t);
+            log.failure("disconnecting a bot", t);
         }
         try {
             CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
@@ -713,12 +722,39 @@ public final class PvpBotAdapter implements PvpBotOperations {
             patrols.clear(patrolCalls(), name);
             if (!attempt.issued()) {
                 log.failure("removing a bot", new IllegalStateException(String.join("; ", attempt.failures())));
+                putBackIfStillHere(server, entity, carried, name);
+                return false;
+            }
+            if (putBackIfStillHere(server, entity, carried, name)) {
                 return false;
             }
             return true;
         } catch (Throwable t) {
             log.failure("removing a bot", t);
+            putBackIfStillHere(server, entity, carried, name);
             return false;
+        }
+    }
+
+    /**
+     * After a removal: when the bot is still in the world and alive, gives it back everything {@link BotRemoval#empty} took (its
+     * items and experience), so a removal that failed never leaves an emptied bot behind.
+     *
+     * @return whether the bot is still there (the removal did not happen)
+     */
+    private boolean putBackIfStillHere(MinecraftServer server, ServerPlayer entity, BotRemoval.Carried carried, String name) {
+        try {
+            if (carried == null || entity.isRemoved() || !entity.isAlive()
+                    || server.getPlayerList().getPlayer(entity.getUUID()) == null) {
+                return false;
+            }
+            BotRemoval.restore(entity, carried);
+            log.failure("removing a bot", new IllegalStateException("'" + name + "' is still online after every removal attempt; "
+                    + "its items and experience were put back"));
+            return true;
+        } catch (Throwable t) {
+            log.failure("putting back the items of a bot whose removal failed", t);
+            return true;
         }
     }
 

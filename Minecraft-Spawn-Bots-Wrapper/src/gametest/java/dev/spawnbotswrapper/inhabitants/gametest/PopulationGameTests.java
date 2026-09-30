@@ -49,6 +49,9 @@ public final class PopulationGameTests {
                     return;
                 }
                 carried[0] = scene.dress();
+                // The 2x2 crafting grid is emptied too (a leaving player has it handed back by the menu, which would drop it)
+                scene.bot.inventoryMenu.getCraftSlots().setItem(0, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STICK, 3));
+                scene.bot.inventoryMenu.getCraftSlots().setItem(3, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.COBBLESTONE, 2));
                 botId[0] = scene.bot.getUUID();
                 where[0] = scene.bot.position();
                 entity[0] = scene.bot;

@@ -30,7 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Codec for {@code populations.json}: {@code { dataVersion, structures: {key: record}, decks: {name: deck} }}.
+ * Codec for {@code populations.json}: {@code { dataVersion, structures: {key: record}, decks: {name: deck}, journalSeq }}.
  * <p>
  * Reading is STRICT on purpose. A file that is truncated, contains a record of the wrong shape, an
  * unparseable key, a duplicate key or an unknown status is reported {@link Outcome#INVALID} as a whole
@@ -50,9 +50,10 @@ final class PopulationFile {
      * @param structures records exactly as stored, keyed by structure; an ABANDONED-status record is
      *                   possible here only if someone wrote one by hand, and the store moves it to the key log
      * @param warnings   anomalies that were tolerated (kept in the report so they are not silent)
+     * @param journalSeq the highest {@link RecordJournal} line already folded into this document (0 when none)
      */
     record Parsed(int dataVersion, Map<StructureKey, StructureRecord> structures,
-                  Map<String, PersistentDeckStore.Snapshot> decks, List<String> warnings) {
+                  Map<String, PersistentDeckStore.Snapshot> decks, List<String> warnings, long journalSeq) {
     }
 
     /**
@@ -166,6 +167,7 @@ final class PopulationFile {
         List<String> warnings = new ArrayList<>();
         Integer version = null;
         Map<StructureKey, StructureRecord> structures = null;
+        long journalSeq = 0;
         Map<String, PersistentDeckStore.Snapshot> decks = null;
         try {
             in.beginObject();
@@ -186,6 +188,7 @@ final class PopulationFile {
                         requireAbsent(structures, name);
                         structures = readStructures(in, warnings, version == null ? StructureRecord.CURRENT_DATA_VERSION : version);
                     }
+                    case "journalSeq" -> journalSeq = in.nextLong();
                     case "decks" -> {
                         requireAbsent(decks, name);
                         decks = readDecks(in, warnings);
@@ -214,7 +217,7 @@ final class PopulationFile {
         }
         return new ReadResult(Outcome.OK, new Parsed(
                 version == null ? StructureRecord.CURRENT_DATA_VERSION : version,
-                structures, decks == null ? Map.of() : decks, warnings), "ok");
+                structures, decks == null ? Map.of() : decks, warnings, journalSeq), "ok");
     }
 
     private static void requireAbsent(Object seen, String name) throws MalformedJsonException {
@@ -277,8 +280,8 @@ final class PopulationFile {
                     + " inhabitant profile(s) that were pacifists are now fighters (every inhabitant fights)");
         }
         if (migration[1] > 0) {
-            warnings.add("data migration to version " + StructureRecord.CURRENT_DATA_VERSION + ": " + migration[1]
-                    + " unseen stored bots released (a bot no player ever saw is not kept while asleep; its slot is free again)");
+            // One INFO line for the whole migration (the slots are free again; deaths already recorded stay recorded).
+            warnings.add(migration[1] + " unseen stored bots released");
         }
         return out;
     }
@@ -346,9 +349,14 @@ final class PopulationFile {
         }
     }
 
-    /** Streams the document to {@code file} and fsyncs it. The caller moves it into place. */
     static void write(Path file, int dataVersion, Map<StructureKey, StructureRecord> structures,
                       Map<String, PersistentDeckStore.Snapshot> decks) throws IOException {
+        write(file, dataVersion, structures, decks, 0L);
+    }
+
+    /** Streams the document to {@code file} and fsyncs it. The caller moves it into place. */
+    static void write(Path file, int dataVersion, Map<StructureKey, StructureRecord> structures,
+                      Map<String, PersistentDeckStore.Snapshot> decks, long journalSeq) throws IOException {
         DurableFiles.writeSynced(file, out -> {
             Writer writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
             JsonWriter json = new JsonWriter(writer);
@@ -367,10 +375,34 @@ final class PopulationFile {
                 DECK.write(json, e.getValue());
             }
             json.endObject();
+            json.name("journalSeq").value(journalSeq);
             json.endObject();
             json.flush();
             writer.flush();
         });
+    }
+
+    /** One record as a single line of JSON (no line breaks), for {@link RecordJournal}. */
+    static String encodeRecord(StructureRecord record) throws IOException {
+        java.io.StringWriter text = new java.io.StringWriter();
+        JsonWriter json = new JsonWriter(text);
+        json.setSerializeNulls(false);
+        RECORD.write(json, record);
+        json.flush();
+        return text.toString();
+    }
+
+    /** The inverse of {@link #encodeRecord}, strict and normalised like a record read from the document; throws when unusable. */
+    @SuppressWarnings("deprecation")
+    static StructureRecord decodeRecord(StructureKey key, String text) throws IOException {
+        JsonReader in = new JsonReader(new StringReader(text));
+        in.setLenient(false);
+        StructureRecord record = RECORD.read(in);
+        if (in.peek() != JsonToken.END_DOCUMENT) {
+            throw new MalformedJsonException("unexpected data after the record");
+        }
+        normalise(key, record, new ArrayList<>(), StructureRecord.CURRENT_DATA_VERSION, new int[2]);
+        return record;
     }
 
     private static String describe(Exception e) {

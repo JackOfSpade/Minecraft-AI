@@ -75,6 +75,7 @@ public final class PopulationEngine implements EngineControl {
     private final Map<StructureKey, StructureSnapshot> rollQueue = new LinkedHashMap<>();
     private boolean settledSeen;
     private boolean interruptedSleepsFinished;
+    private long nextFinishAttempt;
     private boolean shutDown;
 
     public PopulationEngine(Supplier<InhabitantsConfig> config, PopulationStorage store, BotGateway bots,
@@ -108,6 +109,7 @@ public final class PopulationEngine implements EngineControl {
         this.roster.setRetirer(retirer);
         this.tpsGovernor = new TpsGovernor(ctx, roster, retirer, Objects.requireNonNull(tps, "tps"));
         this.driver = new PopulationDriver(ctx, roster, tpsGovernor);
+        this.retirer.setInFlight(driver::isInFlight);
         this.allocation = new AllocationGovernor(ctx, roster, driver, retirer, tpsGovernor, known);
         this.driver.setAllocation(allocation);
         this.dormancyGovernor = new DormancyGovernor(ctx, roster, retirer);
@@ -240,10 +242,11 @@ public final class PopulationEngine implements EngineControl {
                     settledSeen = true;
                     ctx.guard("roster", () -> roster.refreshAll(now));
                 }
-                if (!interruptedSleepsFinished) {
-                    interruptedSleepsFinished = true;
-                    ctx.guard("finish-sleeps", () -> retirer.finishInterrupted(cfg));
+                if (!interruptedSleepsFinished && now >= nextFinishAttempt) {
+                    nextFinishAttempt = now + 100; // only matters when a bot could not be removed or the gateway could not tell
+                    ctx.guard("finish-removals", () -> interruptedSleepsFinished = retirer.finishInterrupted(cfg));
                 }
+                ctx.guard("late-rejoins", () -> retirer.tickLate(now));
                 ctx.guard("drive", () -> driver.drive(now, cfg));
                 ctx.guard("reconcile", () -> roster.tick(now, cfg));
                 ctx.guard("tps-governor", () -> tpsGovernor.tick(now, cfg));

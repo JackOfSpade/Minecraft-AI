@@ -33,7 +33,7 @@ final class Allocation {
      *
      * @param distance      3D distance from the nearest real player of its dimension to its bounding box
      * @param target        its fill target: what the size logic says this structure should have (N - dead - failed)
-     * @param protectedLive live bots of it that may not be removed now (engaged, or seen and inside the relevance area)
+     * @param protectedLive live bots of it that may not be removed now (engaged, or seen while its chunk is loaded by a player)
      * @param incumbent     it had bots allocated in the previous result: it keeps its place against a rival that is
      *                      not nearer by the hysteresis margin
      */

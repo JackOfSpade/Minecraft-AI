@@ -150,7 +150,8 @@ re-rolled: N is the size logic (`processing.blocksPerBot`, the structure's volum
 occupied roll. Which of those bots exist *right now* depends on where the players are.
 
 **Nearest first.** The structures within a player's relevance area (the server's simulation distance plus
-`allocation.relevanceExtraChunks`, at most `dormancy.distanceBlocks`) are sorted by their **3D** distance from the
+`allocation.relevanceExtraChunks`, capped by `dormancy.distanceBlocks` but never smaller than the simulation distance
+itself) are sorted by their **3D** distance from the
 nearest real player (not PvP BOT or Minecraft-AI fake players) to the structure's bounding box: a trial chamber 90
 blocks below you is farther than a village 60 blocks away on the surface. The nearest structure gets its full fill
 target first, then the rest of `processing.maxLiveBots` goes to the next closest, and so on. That is why an
@@ -163,7 +164,9 @@ looked at (a spatial index by 16x16-chunk cell), never the whole store; the cost
 **Anti-churn.** A structure must be `hysteresisBlocks` (8) nearer than an allocated one to displace it; a bot is not
 removed within `dwellTicks` (20 s) of coming up unless its slot is needed for a structure `dwellOverrideBlocks` (32)
 nearer; a structure that drops out keeps its bots `graceTicks` (10 s) before they go. A bot that is engaged with a player
-is never removed. Spawns and removals stay paced (`maxBotsPerTick`, the lag governor's batch size, no spawning while
+(chasing, reacting, pursuing or searching; walking home does not count) is never removed, and neither is a *seen* bot
+while its chunk is loaded by a player (it stands within the view distance of one, or within the simulation distance);
+only when that chunk is no longer loaded does it sleep. Spawns and removals stay paced (`maxBotsPerTick`, the lag governor's batch size, no spawning while
 the server is degraded).
 
 **Seen bots persist, unseen bots are ephemeral.** A bot becomes *seen* when a real player actually sees it: its eye or
@@ -192,10 +195,15 @@ were deleted that is `N - dead - seenAlive`.
   BOT forget it: no item entity, no XP orb, no death message, no statistic or advancement.
 * **No re-roll fishing.** A fresh roll only fills a vacant slot; the player cannot learn a bot's loadout without seeing
   it, and seeing it locks it in. A seen bot is never re-rolled, and nothing is re-rolled on restart or reload.
-* **No duplication.** A sleep is ordered snapshot, store, clear, remove: the record (state, position, `removing` mark)
-  is written to disk *before* the bot is emptied, so a crash leaves either the unchanged live bot or a record marked
-  `removing` (finished on the next start), never a live inventory together with a restorable copy of it. A wake writes
-  the snapshot onto a fresh, empty fake player.
+* **No duplication, and a crash never turns a removal into a death.** Every removal is ordered record, clear, remove:
+  the record (a sleeper's state, snapshot and position; an unseen bot's `removing` mark) is made durable *before* the bot
+  is emptied, through a small write-ahead journal (`populations.journal`: one append of a few KB per batch, never a
+  rewrite of the whole store in the middle of a lag spike; a full save folds it in and drops it). A crash leaves either
+  the unchanged live bot or a record marked `removing`. On the next start such a bot that is online is emptied and
+  removed once more, one that is offline is a sleeper (seen: its snapshot stands) or a vacant slot (unseen), *never*
+  a death, and a bot of such a record that rejoins late is emptied and removed again (the snapshot wins). A wake writes
+  the snapshot onto a fresh, empty fake player. If a removal fails after the bot was emptied (the disconnect and the
+  kill both failed), the items and experience are put back: a failed removal never leaves an emptied live bot.
 
 **Without the allocation** (`allocation.enabled: false`, or no real player online) population is first come, first
 served under `processing.maxLiveBots`, and the old distance rule (`dormancy`: a bot beyond `distanceBlocks` for

@@ -134,6 +134,27 @@ final class EngineContext {
         }
     }
 
+    /**
+     * Makes the current records of these structures durable now through the store's write-ahead journal (cheap: one small
+     * append, not a rewrite of the whole store). What must be durable before a bot is emptied and removed, see {@link Retirer}.
+     *
+     * @return false when it could not be done; the caller must then not proceed
+     */
+    boolean journalNow(java.util.Collection<dev.spawnbotswrapper.inhabitants.structure.StructureKey> keys) {
+        try {
+            boolean ok = store.journal(keys);
+            if (!ok) {
+                log.warn("journal", "Could not write the inhabitants data; will retry (no inhabitant is removed until it can be saved)");
+            }
+            return ok;
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("journal", String.valueOf(t), t);
+            return false;
+        }
+    }
+
     void saveIfDue(long now, InhabitantsConfig cfg) {
         long interval = Math.max(1, processing(cfg).saveIntervalTicks);
         if (now - lastSaveTick >= interval) {
@@ -286,6 +307,18 @@ final class EngineContext {
         } catch (Throwable t) {
             log.error("seenByHuman", String.valueOf(name), t);
             return false;
+        }
+    }
+
+    /** Whether the bot is inside the area a real player keeps loaded (its chunk is loaded because of a player); true when that cannot be told. */
+    boolean loadedByHuman(String name) {
+        try {
+            return bots.loadedByHuman(name);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("loadedByHuman", String.valueOf(name), t);
+            return true;
         }
     }
 
