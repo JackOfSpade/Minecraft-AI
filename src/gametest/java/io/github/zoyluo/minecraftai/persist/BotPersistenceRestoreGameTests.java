@@ -239,6 +239,69 @@ public final class BotPersistenceRestoreGameTests {
     }
 
     /**
+     * The mod record is the single source of truth for a restored bot. Whatever the bot already holds when the record is
+     * applied (the state a vanilla playerdata file could bring back, or anything else that touched the fresh player) must not
+     * survive next to it: an armor piece that was moved into a chest after the record was written (so the record has no
+     * helmet) must not be on the bot as well, nor the ender item, the status effect, the XP or the loose item the record no
+     * longer holds. Applied through {@link BotPersistence#applyStoredPlayerState}, exactly what respawnFromRecord does.
+     */
+    @GameTest(environment = ENV + "armor_moved_to_a_chest_is_not_duplicated_by_stale_player_state", maxTicks = 100)
+    public void armorMovedToAChestIsNotDuplicatedByStalePlayerState(GameTestHelper context) {
+        String name = "RestartDupGT";
+        var world = context.getLevel();
+        BlockPos chestPos = context.absolutePos(new BlockPos(6, 2, 3));
+        world.setBlock(chestPos, Blocks.CHEST.defaultBlockState(), Block.UPDATE_ALL);
+        net.minecraft.world.level.block.entity.ChestBlockEntity chest =
+                (net.minecraft.world.level.block.entity.ChestBlockEntity) world.getBlockEntity(chestPos);
+        require(context, chest != null && chest.isEmpty(), "fixture: no empty chest");
+        ItemStack helmet = new ItemStack(Items.DIAMOND_HELMET);
+        helmet.setDamageValue(9);
+        ItemStack gem = new ItemStack(Items.DIAMOND, 5);
+
+        AIPlayerEntity bot = spawn(context, name);
+        try {
+            // The helmet is moved into the chest, and the record is saved after that.
+            chest.setItem(0, helmet.copy());
+            BotRecord record = roundTrip(capture(bot, context));
+            require(context, record.playerStateNbt() != null && !record.playerStateNbt().isBlank(),
+                    "fixture: the record carries no player state");
+
+            // The bot then holds the stale state of an older save: the helmet again, an ender item, an effect, XP, a loose item.
+            bot.setItemSlot(EquipmentSlot.HEAD, helmet.copy());
+            bot.getEnderChestInventory().setItem(0, gem.copy());
+            bot.addEffect(new MobEffectInstance(MobEffects.SPEED, 6000, 0));
+            bot.setExperienceLevels(9);
+            bot.totalExperience = 200;
+            bot.getInventory().setItem(3, new ItemStack(Items.BREAD, 7));
+
+            BotPersistence.applyStoredPlayerState(bot, record);
+
+            int helmets = chest.getItem(0).is(Items.DIAMOND_HELMET) ? 1 : 0;
+            for (Map.Entry<String, Integer> entry : census(bot).entrySet()) {
+                if (entry.getKey().endsWith("diamond_helmet")) {
+                    helmets += entry.getValue();
+                }
+            }
+            require(context, bot.getItemBySlot(EquipmentSlot.HEAD).isEmpty(),
+                    "the helmet the record no longer holds is still on the bot: " + bot.getItemBySlot(EquipmentSlot.HEAD));
+            require(context, helmets == 1, "the helmet exists " + helmets + " times (chest + bot)");
+            require(context, bot.getEnderChestInventory().isEmpty(),
+                    "an ender chest item the record no longer holds survived");
+            require(context, bot.getActiveEffects().isEmpty(),
+                    "a status effect the record no longer holds survived: " + bot.getActiveEffects());
+            require(context, bot.getInventory().getItem(3).isEmpty(), "a loose item the record no longer holds survived");
+            require(context, bot.experienceLevel == 0 && bot.totalExperience == 0, "xp survived: " + bot.experienceLevel);
+
+            // A second application is idempotent.
+            BotPersistence.applyStoredPlayerState(bot, record);
+            require(context, census(bot).isEmpty(), "a second restore invented items: " + census(bot));
+        } finally {
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+        }
+        context.succeed();
+    }
+
+    /**
      * The conversation memory survives a restart: chat lines that overflow the recent-chat window are folded
      * into a summary by the (stubbed) model call, the summary and a tail of recent chat are captured with the
      * bot (the exact save path), pushed through the runtime.json codec, and restored on respawn. The remembered

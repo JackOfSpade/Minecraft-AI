@@ -68,12 +68,18 @@ class BotPlayerStateCompatTest {
         assertTrue(persistence.contains("BotPlayerState.encode(bot)"), "capture must save the player state");
         String manager = Files.readString(
                 Path.of("src/main/java/io/github/zoyluo/minecraftai/manager/AIPlayerManager.java"));
-        int restore = manager.indexOf("BotPersistence.applyPlayerState(bot, record.playerStateNbt())");
-        int inventory = manager.indexOf("BotPersistence.applyInventory(bot, record.inventoryNbt())");
+        int restore = manager.indexOf("BotPersistence.applyStoredPlayerState(bot, record)");
         int health = manager.indexOf("bot.setHealth(Math.max(1.0F");
-        assertTrue(inventory >= 0 && restore > inventory, "state restores after the main inventory");
-        assertTrue(health > restore, "health is clamped after effects/absorption changed the max");
-        assertEquals(restore, manager.lastIndexOf("BotPersistence.applyPlayerState("),
+        assertTrue(restore >= 0 && health > restore, "health is clamped after effects/absorption changed the max");
+        assertEquals(restore, manager.lastIndexOf("BotPersistence.applyStoredPlayerState("),
                 "the player state must be restored exactly once per respawn");
+        int apply = persistence.indexOf("public static void applyStoredPlayerState(");
+        assertTrue(apply > 0);
+        String body = persistence.substring(apply, persistence.indexOf("public static void discardLoadedPlayerData(", apply));
+        int discard = body.indexOf("discardLoadedPlayerData(player)");
+        int inventory = body.indexOf("applyInventory(player, record.inventoryNbt())");
+        int state = body.indexOf("applyPlayerState(player, record.playerStateNbt())");
+        assertTrue(discard >= 0 && inventory > discard, "the record replaces what the bot held: discard first, then the main inventory");
+        assertTrue(state > inventory, "state restores after the main inventory");
     }
 }

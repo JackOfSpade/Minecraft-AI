@@ -93,7 +93,7 @@ public final class AIPlayerManager {
         }
         bot.setHealth(20.0F);
         bot.deathTime = 0;
-        bot.getFoodData().setFoodLevel(20);
+        applyVanillaRespawnState(bot);
         bot.teleportTo(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
                 Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         bot.clearFire();
@@ -101,6 +101,28 @@ public final class AIPlayerManager {
                 "pos", LogFields.pos(bot.blockPosition()),
                 "strategy", respawnStrategy);
         return true;
+    }
+
+    /**
+     * What a vanilla respawn hands the player: a new ServerPlayer with nothing of the old one but its inventory (which
+     * die() already dropped as items and XP orbs). No status effects, no XP level, progress or total (the orbs it dropped are
+     * all of it), food 20 with saturation 5 and no exhaustion debt carried over, no fire, full air, no fall damage brewing,
+     * no absorption or frostbite. The bot is revived in place because it has no client to send the respawn packet, so the
+     * state a new player would not have is reset here. Package-visible for the GameTest.
+     */
+    static void applyVanillaRespawnState(AIPlayerEntity bot) {
+        bot.removeAllEffects();
+        bot.setExperienceLevels(0);
+        bot.setExperiencePoints(0);
+        bot.experienceProgress = 0.0F;
+        bot.totalExperience = 0;
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
+        bot.clearFire();
+        bot.setAirSupply(bot.getMaxAirSupply());
+        bot.setAbsorptionAmount(0.0F);
+        bot.setTicksFrozen(0);
+        bot.fallDistance = 0.0D;
     }
 
     public Optional<AIPlayerEntity> spawn(MinecraftServer server,
@@ -192,8 +214,7 @@ public final class AIPlayerManager {
                 parseUuid(record.ownerUuid()),
                 record.skinIndex());
         spawned.ifPresent(bot -> {
-            BotPersistence.applyInventory(bot, record.inventoryNbt());
-            BotPersistence.applyPlayerState(bot, record.playerStateNbt());
+            BotPersistence.applyStoredPlayerState(bot, record);
             io.github.zoyluo.minecraftai.brain.ChatMemory.restore(bot.getUUID(), record.conversationMemoryJson(), System.currentTimeMillis());
             BotMemoryStore.INSTANCE.loadString(bot.getUUID(), record.memoryNbt());
             bot.setHealth(Math.max(1.0F, Math.min(record.health(), bot.getMaxHealth())));

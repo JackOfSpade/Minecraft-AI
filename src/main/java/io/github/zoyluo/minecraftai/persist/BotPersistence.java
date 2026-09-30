@@ -236,6 +236,40 @@ public final class BotPersistence {
         return view.buildResult().toString();
     }
 
+    /**
+     * Applies the item and player state of {@code record} to a freshly spawned bot with the record as the single source of
+     * truth: when the record carries the full player state, whatever the bot already holds is discarded first
+     * ({@link #discardLoadedPlayerData}), so nothing that was moved out of the bot since is left next to its moved copy.
+     * (In 1.21.11 {@code placeNewPlayer} itself does not read the vanilla playerdata file: that happens in the login flow a
+     * fake player never goes through. The discard is what keeps the guarantee independent of that detail.)
+     */
+    public static void applyStoredPlayerState(ServerPlayer player, BotRecord record) {
+        if (record.playerStateNbt() != null && !record.playerStateNbt().isBlank()) {
+            discardLoadedPlayerData(player);
+        }
+        applyInventory(player, record.inventoryNbt());
+        applyPlayerState(player, record.playerStateNbt());
+    }
+
+    /**
+     * Empties everything a bot could already hold (loaded from a vanilla playerdata file, or left by anything else that
+     * touched the player before the record is applied) before a record that carries the full player state goes on top: main inventory,
+     * armor, offhand, ender chest, status effects, XP, fire and absorption. {@code Inventory.load} only clears the 36 main slots
+     * and the equipment section only writes the slots that are filled in the record, so without this an item the record no longer
+     * holds could survive next to its moved copy.
+     */
+    public static void discardLoadedPlayerData(ServerPlayer player) {
+        player.getInventory().clearContent();
+        player.getEnderChestInventory().clearContent();
+        player.removeAllEffects();
+        player.clearFire();
+        player.setAbsorptionAmount(0.0F);
+        player.setExperienceLevels(0);
+        player.experienceProgress = 0.0F;
+        player.totalExperience = 0;
+        player.getInventory().setChanged();
+    }
+
     public static void applyInventory(ServerPlayer player, String snbt) {
         if (snbt == null || snbt.isBlank()) {
             return;
