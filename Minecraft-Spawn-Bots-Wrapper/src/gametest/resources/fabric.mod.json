@@ -21,7 +21,8 @@
       "dev.spawnbotswrapper.inhabitants.gametest.MeleeLegalityGameTests",
       "dev.spawnbotswrapper.inhabitants.gametest.AggroGameTests",
       "dev.spawnbotswrapper.inhabitants.gametest.InhabitantStateGameTests",
-      "dev.spawnbotswrapper.inhabitants.gametest.PopulationGameTests"
+      "dev.spawnbotswrapper.inhabitants.gametest.PopulationGameTests",
+      "dev.spawnbotswrapper.inhabitants.gametest.AggroPerceptionGameTests"
     ]
   },
   "depends": {

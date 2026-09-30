@@ -146,6 +146,9 @@ public final class AggroSmokeGameTests {
             if (since < 100) {
                 s.faceEast();
                 s.rig.target.setShiftKeyDown(true);
+                if (since % 5 == 0) {
+                    s.rig.emitStep(); // vanilla drops the step vibrations of a sneaking player: silent
+                }
                 if (since % 20 == 0) {
                     Rig.LOG.info("[sneak] {}", s.status());
                 }
@@ -184,9 +187,12 @@ public final class AggroSmokeGameTests {
         Vec3 at = s.home.add(dx, 0, z[0]);
         s.rig.target.setOldPosAndRot();
         s.rig.target.setPos(at.x, at.y, at.z);
+        if (s.ctx.getTick() % 5 == 0) {
+            s.rig.emitStep(); // the step vibration vanilla emits for a walking player (a mock player does not walk by itself)
+        }
     }
 
-    /** A player walking (not sneaking) 3 blocks behind is heard. */
+    /** A player walking (not sneaking) 3 blocks behind is heard: vanilla step vibrations reach the bot, it turns to the sound, and after the reaction time it is targeted. */
     @GameTest(environment = ENV + "aggro_walk_behind", maxTicks = 700)
     public void walkingPlayerThreeBlocksBehindIsHeard(GameTestHelper context) {
         Scene s = new Scene(context);

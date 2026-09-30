@@ -28,6 +28,7 @@ import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -250,6 +251,20 @@ final class Rig {
         target.setLastClientInput(new net.minecraft.world.entity.player.Input(false, false, false, false, false, sneaking, false));
     }
 
+    /**
+     * The player takes a step: vanilla's STEP game event at its position with itself as the source entity, exactly what a
+     * walking player emits every few ticks. Everything after this is vanilla (the dispatcher, the sneaking and wool rules,
+     * the listener radius, the travel delay) and the wrapper's listener; a mock player does not walk by itself.
+     */
+    void emitStep() {
+        level.gameEvent(target, GameEvent.STEP, target.position());
+    }
+
+    /** The horizontal component of the inhabitant's look direction along x (1 = east, -1 = west). */
+    double lookX() {
+        return bot.getViewVector(1.0F).x;
+    }
+
     /** Turns the inhabitant to face a horizontal direction (dx, dz), level with the eyes. */
     void faceDirection(double dx, double dz) {
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
@@ -261,7 +276,7 @@ final class Rig {
         bot.xRotO = 0.0F;
     }
 
-    /** Where the inhabitant is in the aggro hunt (IDLE, REACT, CHASE, PURSUE, SEARCH, RETURN). */
+    /** Where the inhabitant is in the aggro hunt (IDLE, CHASE, PURSUE, SEARCH, RETURN). */
     String phase() {
         return InhabitantsMod.aggroPhaseOf(botName);
     }

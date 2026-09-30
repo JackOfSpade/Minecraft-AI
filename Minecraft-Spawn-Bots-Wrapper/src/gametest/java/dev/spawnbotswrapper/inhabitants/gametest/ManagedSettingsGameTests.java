@@ -39,7 +39,7 @@ public final class ManagedSettingsGameTests {
 
     private static boolean heldAtTheShippedValues() {
         return Boolean.FALSE.equals(Upstream.setting("isAutoEquipWeapon"))
-                && Double.valueOf(128.0).equals(Upstream.setting("getMaxTargetDistance"))
+                && Double.valueOf(64.0).equals(Upstream.setting("getMaxTargetDistance"))
                 && Boolean.FALSE.equals(Upstream.setting("isAutoTargetEnabled"))
                 && Integer.valueOf(20).equals(Upstream.setting("getBowMinDrawTime"))
                 && Double.valueOf(8.0).equals(Upstream.setting("getRangedMinRange"))

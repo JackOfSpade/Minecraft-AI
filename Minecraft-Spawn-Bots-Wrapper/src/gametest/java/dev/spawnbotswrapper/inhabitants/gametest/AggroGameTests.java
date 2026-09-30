@@ -14,8 +14,9 @@ import java.util.Locale;
 /**
  * Real-server tests of the line-of-sight hunter (see {@code AggroController}): a real PvP BOT inhabitant on a real
  * HeroBot fake player, the wrapper loaded, a survival mock player as the "human". The scenes are stone platforms; every
- * time and distance below is a number of the rules: reaction time (5 ticks + a soft distance term), the view cone,
- * hearing, no distance limit, lost -> pursue -> search 10 s -> walk home, noticing again on the way home, a hit from cover.
+ * time and distance below is a number of the rules: the continuous reaction time (0.5 s up close, 2 s at 64 blocks), the view cone,
+ * hearing (vanilla vibrations), sight without a block limit and the 64 block engage limit, lost -> pursue -> search 10 s -> walk
+ * home, noticing again on the way home, an arrow from an unseen shooter (only its direction is known).
  * The bot faces east (+x) unless a test turns it.
  */
 public final class AggroGameTests {
@@ -60,16 +61,16 @@ public final class AggroGameTests {
     // ------------------------------------------------------------------ (a) reaction time
 
     /**
-     * (a) A player appears in front of the bot (a wall between them is removed): the bot must not have targeted the player
-     * before 5 ticks (0.25 s of reaction time), and has by about 7 to 10 (5 + a soft distance term of 1.25 ticks at 8 blocks
-     * + the scan interval).
+     * (a) A player appears in front of the bot at close range (a wall between them is removed): the reaction time is one
+     * continuous formula, 0.5 s up close plus 1.5 s per 64 blocks (3 blocks: 0.57 s, 12 ticks). The bot must not have targeted
+     * the player before 10 ticks, and has by about 12 to 16 (the exposure starts on the first scan, at most 3 ticks later).
      */
     @GameTest(environment = ENV + "aggro_reaction", maxTicks = 500)
-    public void aggroAPlayerAppearingInFrontIsTargetedNotBeforeFiveTicksAndByAboutSeven(GameTestHelper context) {
+    public void aggroAPlayerAppearingInFrontIsTargetedNotBeforeTenTicksAndByAboutTwelve(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
-        rig.fill(4, 0, -6, 4, 4, 6, Blocks.STONE); // a wall, one thick
-        rig.createTarget(8.0);
+        rig.fill(1, 0, -6, 1, 4, 6, Blocks.STONE); // a wall, one thick
+        rig.createTarget(3.0);
         boolean[] dressed = {false};
         long[] dressedAt = {0};
         long[] removedAt = {-1};
@@ -83,7 +84,7 @@ public final class AggroGameTests {
                     rig.fail("the bot noticed a player behind a wall: phase " + rig.phase() + " " + rig.trace());
                 }
                 if (since >= 20) {
-                    rig.fill(4, 0, -6, 4, 4, 6, Blocks.AIR); // the player steps into view
+                    rig.fill(1, 0, -6, 1, 4, 6, Blocks.AIR); // the player steps into view
                     removedAt[0] = context.getTick();
                     Rig.LOG.info("[reaction] wall removed at test tick {}", removedAt[0]);
                 }
@@ -92,15 +93,15 @@ public final class AggroGameTests {
             long n = context.getTick() - removedAt[0];
             if (rig.hasTarget()) {
                 Rig.LOG.info("[reaction] targeted {} ticks after the player came into view (phase {})", n, rig.phase());
-                if (n < 5) {
+                if (n < 10) {
                     rig.fail("the bot targeted the player only " + n + " ticks after it came into view: no reaction time");
                 }
-                if (n > 12) {
-                    rig.fail("the bot needed " + n + " ticks to target a player in plain view (expected about 7)");
+                if (n > 18) {
+                    rig.fail("the bot needed " + n + " ticks to target a player in plain view (expected about 12)");
                 }
                 rig.succeed();
             } else if (n > 30) {
-                rig.fail("the bot never targeted a player in plain view; phase " + rig.phase() + " " + rig.trace());
+                rig.fail("the bot never targeted a player in plain view; phase " + rig.phase() + " look.x=" + fmt(rig.lookX()) + " " + rig.trace());
             }
         });
     }
@@ -136,7 +137,10 @@ public final class AggroGameTests {
         });
     }
 
-    /** (b2) A player WALKING 3 blocks behind the bot is heard (footsteps carry 4 blocks): noticed, from behind. */
+    /**
+     * (b2) A player WALKING 3 blocks behind the bot is heard (vanilla step vibrations, the sculk sensor's own hearing):
+     * noticed, from behind.
+     */
     @GameTest(environment = ENV + "aggro_behind_walk", maxTicks = 400)
     public void aggroAPlayerWalkingThreeBlocksBehindIsHeard(GameTestHelper context) {
         Rig rig = new Rig(context);
@@ -162,6 +166,9 @@ public final class AggroGameTests {
             // pacing between 2.6 and 3.4 blocks behind at 0.1 blocks per tick: a walk, in the bot's back
             double offset = 3.0 + 0.4 * Math.sin(since * 0.25);
             rig.walkTargetTo(rig.homeX() - offset, rig.bot.getY(), rig.homeZ());
+            if (since % 5 == 0) {
+                rig.emitStep(); // a mock player does not walk by itself: the step vibration vanilla emits for a walker
+            }
             if (since > 120) {
                 rig.fail("a player walking 3 blocks behind the bot was never heard; phase " + rig.phase() + " " + rig.trace());
             }
@@ -195,6 +202,9 @@ public final class AggroGameTests {
             if (hitAt[0] < 0) {
                 double offset = 1.5 + 0.2 * Math.sin(since * 0.3);
                 rig.walkTargetTo(rig.homeX() - offset, rig.bot.getY(), rig.homeZ());
+                if (since % 5 == 0) {
+                    rig.emitStep(); // vanilla drops the step vibrations of a sneaking (stepping carefully) player: silent
+                }
                 if (rig.hasTarget() || !rig.phase().equals("IDLE")) {
                     rig.fail("the bot noticed a player sneaking behind it after " + since + " ticks: phase " + rig.phase() + " " + rig.aggroSubjectTrace());
                 }
@@ -221,8 +231,8 @@ public final class AggroGameTests {
     // ------------------------------------------------------------------ (c) long sight
 
     /**
-     * (c) A player 40 blocks away in front with a clear line of sight is noticed (about 12 ticks: 5 + 6.25) and chased: there
-     * is no distance limit.
+     * (c) A player 40 blocks away in front with a clear line of sight is noticed (0.5 + 1.5 * 40 / 64 = 1.44 s, 29 ticks) and
+     * chased: sight has no block limit, the engage limit is 64.
      */
     @GameTest(environment = ENV + "aggro_long_sight", maxTicks = 600)
     public void aggroAPlayerFortyBlocksAwayWithClearSightIsNoticedAndChased(GameTestHelper context) {
@@ -246,10 +256,10 @@ public final class AggroGameTests {
                 if (rig.hasTarget()) {
                     noticedAt[0] = since;
                     Rig.LOG.info("[long-sight] noticed the player {} blocks away after {} ticks", fmt(startDist[0]), since);
-                    if (since < 9) {
-                        rig.fail("noticed a player 40 blocks away after only " + since + " ticks: no reaction time");
+                    if (since < 26) {
+                        rig.fail("noticed a player 40 blocks away after only " + since + " ticks: the reaction time is 29 ticks");
                     }
-                } else if (since > 80) {
+                } else if (since > 100) {
                     rig.fail("a player 40 blocks away in plain sight was never noticed; phase " + rig.phase() + " " + rig.trace());
                 }
                 return;
@@ -489,22 +499,24 @@ public final class AggroGameTests {
     // ------------------------------------------------------------------ (f) hit from cover
 
     /**
-     * (f) An arrow from a player the bot cannot see (a wall between them): the bot is aware of the shooter, does not chase it
-     * through the wall, walks a planned route round the wall to where the shot came from, and gets within melee range (3.6
-     * blocks) of it, or is already fighting the shooter it found there.
+     * (f) An arrow from a shooter the bot cannot see. NO MAGIC: the bot learns only the DIRECTION the arrow came from (the
+     * reverse of its velocity at impact), never the shooter's position. It turns to look along that line, does not target the
+     * shooter, and PURSUES the point found by tracing back along the line to the first blocking block: the face of the wall
+     * between them (2.6 blocks east of the cell), not the shooter 9 blocks away behind it.
      */
     @GameTest(environment = ENV + "aggro_hit_from_cover", maxTicks = 900)
-    public void aggroAnArrowFromAPlayerOutOfSightSendsTheBotToTheShootersPosition(GameTestHelper context) {
+    public void aggroAnArrowFromAnUnseenShooterSendsTheBotToWhereTheLineOfTheShotEnds(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
-        rig.fill(3, 0, -4, 3, 4, 4, Blocks.STONE); // a wall 9 wide
-        rig.createTarget(7.0);
+        rig.fill(3, 0, -6, 3, 4, 6, Blocks.STONE); // a wall 13 wide, one thick, 3 blocks east of the bot's cell
+        rig.createTarget(9.0);                     // the shooter, behind the wall
         boolean[] dressed = {false};
         long[] dressedAt = {0};
         long[] hitAt = {-1};
-        double[] shooter = new double[2];
+        double[] wallFaceX = {0};
         double[] closest = {Double.MAX_VALUE};
-        double[] detour = {0.0};
+        boolean[] turned = {false};
+        boolean[] pursued = {false};
         String[] phaseBefore = {""};
         context.onEachTick(() -> {
             if (!rig.awaitDressed(dressed, dressedAt, Rig.Loadout.MELEE_ONLY, "cover")) {
@@ -513,6 +525,7 @@ public final class AggroGameTests {
             long since = context.getTick() - dressedAt[0];
             rig.keepTargetAlive();
             if (hitAt[0] < 0) {
+                rig.faceDirection(-1.0, 0.0); // looking away from the shot
                 if (rig.hasTarget() || !rig.phase().equals("IDLE")) {
                     rig.fail("the bot noticed a player behind a wall: phase " + rig.phase() + " " + rig.trace());
                 }
@@ -520,16 +533,16 @@ public final class AggroGameTests {
                     Arrow arrow = EntityType.ARROW.create(rig.level, EntitySpawnReason.COMMAND);
                     arrow.setOwner(rig.target);
                     arrow.setPos(rig.target.getX(), rig.target.getEyeY(), rig.target.getZ());
+                    arrow.setDeltaMovement(-1.5, 0.0, 0.0); // flying west: it came from the east
                     DamageSource source = rig.level.damageSources().arrow(arrow, rig.target);
                     if (!rig.bot.connection.hasClientLoaded()) {
                         rig.bot.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket());
                     }
                     if (rig.bot.hurtServer(rig.level, source, 3.0F)) {
                         hitAt[0] = context.getTick();
-                        shooter[0] = rig.target.getX();
-                        shooter[1] = rig.target.getZ();
-                        Rig.LOG.info("[cover] the bot was shot at test tick {} from ({}, {}) relative to its cell", hitAt[0],
-                                fmt(shooter[0] - rig.homeX()), fmt(shooter[1] - rig.homeZ()));
+                        wallFaceX[0] = rig.botFeet.getX() + 3.0;
+                        Rig.LOG.info("[cover] the bot was shot at test tick {} by an arrow flying west; the wall face is at x={} "
+                                + "(the bot stands at x={})", hitAt[0], fmt(wallFaceX[0]), fmt(rig.bot.getX()));
                     } else if (since > 200) {
                         rig.fail("the arrow hit was refused for 200 ticks");
                     }
@@ -539,31 +552,35 @@ public final class AggroGameTests {
             long n = context.getTick() - hitAt[0];
             String phase = rig.phase();
             if (!phase.equals(phaseBefore[0])) {
-                Rig.LOG.info("[cover] {} ticks after the hit: phase {} at ({}, {})", n, phase, fmt(rig.bot.getX() - rig.homeX()),
-                        fmt(rig.bot.getZ() - rig.homeZ()));
+                Rig.LOG.info("[cover] {} ticks after the hit: phase {} at ({}, {}) look.x={}", n, phase,
+                        fmt(rig.bot.getX() - rig.homeX()), fmt(rig.bot.getZ() - rig.homeZ()), fmt(rig.lookX()));
                 phaseBefore[0] = phase;
+            }
+            if (phase.equals("PURSUE")) {
+                pursued[0] = true;
             }
             if (n >= 1 && n <= 8 && rig.hasTarget()) {
                 rig.fail("the bot targeted a shooter it cannot see, " + n + " ticks after the hit (PvP BOT's revenge must be held back)");
             }
             if (n >= 3 && n <= 8 && !phase.equals("PURSUE")) {
-                rig.fail("the bot is in phase " + phase + " " + n + " ticks after a hit from cover; it must pursue the shooter's position");
+                rig.fail("the bot is in phase " + phase + " " + n + " ticks after a hit from cover; it must pursue where the shot's line ends");
             }
-            closest[0] = Math.min(closest[0], rig.horizontalTo(shooter[0], shooter[1]));
-            detour[0] = Math.max(detour[0], Math.abs(rig.bot.getZ() - rig.homeZ()));
-            // Arrived: within melee range of where the shot came from (PvP BOT's melee range is 3.5 and it stops there to fight),
-            // or already fighting the shooter after walking round the wall to find it.
-            if (closest[0] <= 3.6 || (phase.equals("CHASE") && detour[0] >= 4.0)) {
-                Rig.LOG.info("[cover] reached within {} blocks of the shooter's position {} ticks after the hit (phase {}); the detour "
-                        + "reached {} blocks to the side (the wall ends at 4.5)", fmt(closest[0]), n, phase, fmt(detour[0]));
-                if (detour[0] < 4.0) {
-                    rig.fail("the bot got to the shooter without walking around the wall (largest sideways distance "
-                            + fmt(detour[0]) + "): it did not walk a planned route");
-                }
-                requireCleanPlanner(rig);
+            if (n >= 1 && n <= 12 && rig.lookX() > 0.5) {
+                turned[0] = true;
+            }
+            // The traced point: the free space in front of the wall face, 0.4 blocks from it.
+            double pointX = wallFaceX[0] - 0.4;
+            double toPoint = Math.hypot(rig.bot.getX() - pointX, rig.bot.getZ() - rig.homeZ());
+            closest[0] = Math.min(closest[0], toPoint);
+            if (n >= 13 && !turned[0]) {
+                rig.fail("the bot never turned to look along the incoming direction (east); look.x=" + fmt(rig.lookX()));
+            }
+            if (closest[0] <= 1.6 && turned[0] && pursued[0]) {
+                Rig.LOG.info("[cover] reached within {} blocks of the traced point {} ticks after the hit (phase {}); the "
+                        + "shooter stood 9 blocks east behind the wall", fmt(closest[0]), n, phase);
                 rig.succeed();
             } else if (n > 400) {
-                rig.fail("the bot got no closer than " + fmt(closest[0]) + " blocks to the shooter's position; phase " + phase);
+                rig.fail("the bot got no closer than " + fmt(closest[0]) + " blocks to the end of the shot's line; phase " + phase);
             }
         });
     }
