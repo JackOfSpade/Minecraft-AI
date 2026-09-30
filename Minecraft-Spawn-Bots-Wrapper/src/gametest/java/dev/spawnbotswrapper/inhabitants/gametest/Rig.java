@@ -297,9 +297,20 @@ final class Rig {
         target.teleportTo(level, spot.x, spot.y, spot.z, Set.of(), 90.0F, 0.0F, true);
     }
 
-    private StructureKey key() {
+    StructureKey key() {
         return new StructureKey(level.dimension().identifier().toString(), structureId,
                 botFeet.getX() >> 4, botFeet.getZ() >> 4);
+    }
+
+    /** The unique id of this scene's structure (what the population store remembers it by). */
+    String structureId() {
+        return structureId;
+    }
+
+    /** The structure as the engine sees it: the same snapshot the scene's inhabitant is requested with. */
+    StructureSnapshot arena() {
+        IntBox cell = new IntBox(botFeet.getX(), botFeet.getY(), botFeet.getZ(), botFeet.getX(), botFeet.getY(), botFeet.getZ());
+        return new StructureSnapshot(key(), Set.of(), cell, List.of(), true);
     }
 
     /** Asks the population engine for one inhabitant standing exactly in the bot's cell; false while the session is not up. */
@@ -323,6 +334,11 @@ final class Rig {
 
     /** True once the requested inhabitant is online and recorded SPAWNED; sets {@link #bot}. */
     boolean inhabitantReady() {
+        return inhabitantReady(true);
+    }
+
+    /** As above; with {@code forceSurvival} false the bot is left exactly as the wrapper made it, so a test can judge its game mode. */
+    boolean inhabitantReady(boolean forceSurvival) {
         CommandServices services = InhabitantsMod.servicesOf(server);
         if (services == null) {
             return false;
@@ -345,11 +361,32 @@ final class Rig {
         bot = entity;
         // PvP BOT switches a new bot to survival with a delayed command of its own, and the GameTest server defaults to
         // creative: a bot that is looked at before that command ran refuses all damage. A survival server has no such window.
-        if (bot.gameMode.getGameModeForPlayer() != GameType.SURVIVAL) {
+        if (forceSurvival && bot.gameMode.getGameModeForPlayer() != GameType.SURVIVAL) {
             bot.setGameMode(GameType.SURVIVAL);
         }
         botName = planned.name;
         return true;
+    }
+
+    /**
+     * A bow and a full quiver, an iron chestplate and boots that are already worn down, and nothing to eat: what an archer
+     * looks like that has been in fights. Hurt on purpose (health 13, food 14: below the level at which vanilla heals), so
+     * nothing but the wrapper's own restore can put the numbers back.
+     */
+    void dressWornArcher() {
+        Inventory inv = bot.getInventory();
+        inv.clearContent();
+        inv.setItem(0, new ItemStack(Items.BOW));
+        inv.setItem(1, new ItemStack(Items.ARROW, 64));
+        ItemStack chest = new ItemStack(Items.IRON_CHESTPLATE);
+        chest.setDamageValue(37);
+        inv.setItem(38, chest);
+        ItemStack boots = new ItemStack(Items.IRON_BOOTS);
+        boots.setDamageValue(12);
+        inv.setItem(36, boots);
+        inv.setSelectedSlot(0);
+        bot.setHealth(13.0F);
+        bot.getFoodData().setFoodLevel(14);
     }
 
     // ------------------------------------------------------------------ loadouts

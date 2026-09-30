@@ -48,6 +48,26 @@ class ConfigIOTest {
         assertEquals(8, r.config().profiles.coverageBuckets);
     }
 
+    /**
+     * profiles.attributeVariation and profiles.scaleVariation are gone (an inhabitant has vanilla stats only), but a config
+     * written by an earlier version still names them: it must load without an error and keep every other setting.
+     */
+    @Test
+    void aConfigThatStillNamesTheRetiredAttributeOptionsLoadsCleanly(@TempDir Path dir) throws IOException {
+        Path f = dir.resolve("cfg.json");
+        Files.writeString(f, """
+                {
+                  "profiles": { "randomize": true, "coverageBuckets": 12, "attributeVariation": true, "scaleVariation": true,
+                                "behaviorVariation": false }
+                }
+                """, StandardCharsets.UTF_8);
+        ConfigIO.LoadResult r = ConfigIO.load(f);
+        assertNull(r.fatalError());
+        assertEquals(12, r.config().profiles.coverageBuckets);
+        assertFalse(r.config().profiles.behaviorVariation);
+        assertTrue(r.config().profiles.randomize);
+    }
+
     @Test
     void commentsAndTrailingCommasAreTolerated(@TempDir Path dir) throws IOException {
         Path f = dir.resolve("cfg.json");

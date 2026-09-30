@@ -5,6 +5,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EntityEquipment;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.food.FoodData;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -172,5 +173,29 @@ public final class BotSnapshotsMcCases {
         assertNotNull(text);
         assertTrue(text.contains("minecraft:arrow"), text);
         assertTrue(text.contains("37"), text);
+    }
+
+    /** Exhaustion is private in vanilla's FoodData; it is read through the food data's own save routine. */
+    public static void theExhaustionAccumulatorIsReadThroughTheSaveRoutineAndCanBePutBack() {
+        FoodData food = new FoodData();
+        assertEquals(0.0f, BotSnapshots.exhaustionOf(food), 1e-6);
+        food.addExhaustion(2.5f);
+        assertEquals(2.5f, BotSnapshots.exhaustionOf(food), 1e-6);
+
+        // What restoreVitals does: add the difference to the recorded value (a fresh fake player starts at zero).
+        FoodData fresh = new FoodData();
+        fresh.addExhaustion(3.25f - BotSnapshots.exhaustionOf(fresh));
+        assertEquals(3.25f, BotSnapshots.exhaustionOf(fresh), 1e-6);
+        fresh.addExhaustion(1.0f - BotSnapshots.exhaustionOf(fresh));
+        assertEquals(1.0f, BotSnapshots.exhaustionOf(fresh), 1e-6, "also downwards");
+    }
+
+    public static void foodLevelAndSaturationSetThroughTheVanillaSetters() {
+        FoodData food = new FoodData();
+        food.setFoodLevel(14);
+        food.setSaturation(2.5f);
+        assertEquals(14, food.getFoodLevel());
+        assertEquals(2.5f, food.getSaturationLevel(), 1e-6);
+        assertTrue(food.needsFood(), "14 is below a full food bar");
     }
 }
