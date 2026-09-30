@@ -185,6 +185,22 @@ public interface BotGateway {
      */
     List<String> stripDisabledEnchantments(String botName);
 
+    /**
+     * The one-time sanitize pass for an inhabitant dressed before the wrapper marked the items it issues: removes every ender
+     * pearl and disabled enchantment from ALL its stacks, exactly what the periodic sweep used to do. After it (the engine
+     * records the bot as migrated) {@link #stripEnderPearls} and {@link #stripDisabledEnchantments} judge only stacks the wrapper
+     * issued, so what a bot picks up in the world is never touched. Returns null when the bot could not be swept now (it is not
+     * online, or the pass failed) and the engine must try again; never throws.
+     */
+    default ItemSweep migrateLegacyItems(String botName) {
+        return ItemSweep.NONE;
+    }
+
+    /** What a sanitize pass removed: ender pearls (items) and one description per disabled enchantment. */
+    record ItemSweep(int pearls, List<String> enchantments) {
+        public static final ItemSweep NONE = new ItemSweep(0, List.of());
+    }
+
     // ------------------------------------------------------------------ value types
 
     /** A position in a dimension ({@code namespace:path}, the form {@code StructureKey} uses) and where it faces. */

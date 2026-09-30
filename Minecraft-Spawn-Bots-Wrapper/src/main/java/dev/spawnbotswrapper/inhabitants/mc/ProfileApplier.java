@@ -159,10 +159,14 @@ public final class ProfileApplier implements ProfileApplication {
         }
         for (SlotPlanner.Placement placement : plan.placements()) {
             Optional<ItemStack> stack = factory.build(placement.spec(), warnings);
-            stack.ifPresent(s -> inventory.setItem(placement.slot(), s));
+            stack.ifPresent(s -> {
+                // Everything the wrapper hands out is marked; the rules below (and the periodic sweeps) touch marked stacks only.
+                IssuedItems.mark(s);
+                inventory.setItem(placement.slot(), s);
+            });
         }
-        // Stored profiles from before pearls were dropped from loadouts (and pearls already on a bot that is not
-        // wiped) never survive a dressing; see removeEnderPearls for why.
+        // Stored profiles from before pearls were dropped from loadouts never survive a dressing; see removeEnderPearls
+        // for why. Only what this dressing issued is judged: what a bot that is not wiped picked up stays as it is.
         int pearls = removeEnderPearls(inventory);
         if (pearls > 0) {
             warnings.add("removed " + pearls + " ender pearl" + (pearls == 1 ? "" : "s")
@@ -179,16 +183,22 @@ public final class ProfileApplier implements ProfileApplication {
     }
 
     /**
-     * Removes every ender pearl from every slot of the inventory (hotbar, main, armor, offhand) and returns how
-     * many pearls were removed (items, not stacks). Nothing else is touched. PvP BOT's cobweb escape uses a
+     * Removes every ISSUED (see {@link IssuedItems}) ender pearl from every slot of the inventory (hotbar, main, armor,
+     * offhand) and returns how many pearls were removed (items, not stacks). Nothing else is touched, in particular not a
+     * pearl the bot picked up in the world (a player's, dropped when the player died nearby). PvP BOT's cobweb escape uses a
      * pearl when it stands in a cobweb without a water bucket and re-selects the pearl slot on every tick it stays
      * webbed, which cancels a crossbow charge, a bow draw and attacks; see {@code LoadoutRoller}.
      */
     static int removeEnderPearls(Inventory inventory) {
+        return removeEnderPearls(inventory, false);
+    }
+
+    /** As above; with {@code everything} every pearl goes, issued or not (the one-time migration of a bot from before the marker). */
+    static int removeEnderPearls(Inventory inventory, boolean everything) {
         int removed = 0;
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && stack.is(Items.ENDER_PEARL)) {
+            if (!stack.isEmpty() && stack.is(Items.ENDER_PEARL) && (everything || IssuedItems.isIssued(stack))) {
                 removed += stack.getCount();
                 inventory.setItem(slot, ItemStack.EMPTY);
             }
@@ -206,19 +216,25 @@ public final class ProfileApplier implements ProfileApplication {
     }
 
     /**
-     * Removes the enchantments in {@code disabled} (canonical ids; see {@link DisabledEnchantments}) from every stack
-     * in every slot of the inventory (hotbar, main, armor, offhand), on the enchantments component and on the
-     * stored-enchantments component of enchanted books. The item, its count and all its other enchantments stay. One
-     * description per removal, {@code <id> (<item>)}, so a caller can log what went from where.
+     * Removes the enchantments in {@code disabled} (canonical ids; see {@link DisabledEnchantments}) from every ISSUED stack
+     * (see {@link IssuedItems}) in every slot of the inventory (hotbar, main, armor, offhand), on the enchantments component
+     * and on the stored-enchantments component of enchanted books. The item, its count and all its other enchantments stay.
+     * A stack the bot picked up in the world is never touched: a player keeps Piercing and Mending. One description per
+     * removal, {@code <id> (<item>)}, so a caller can log what went from where.
      */
     static List<String> removeDisabledEnchantments(Inventory inventory, Set<String> disabled) {
+        return removeDisabledEnchantments(inventory, disabled, false);
+    }
+
+    /** As above; with {@code everything} every stack is judged, issued or not (the one-time migration of a bot from before the marker). */
+    static List<String> removeDisabledEnchantments(Inventory inventory, Set<String> disabled, boolean everything) {
         List<String> removed = new ArrayList<>();
         if (disabled == null || disabled.isEmpty()) {
             return removed;
         }
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (stack.isEmpty()) {
+            if (stack.isEmpty() || !(everything || IssuedItems.isIssued(stack))) {
                 continue;
             }
             String item = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
@@ -262,6 +278,20 @@ public final class ProfileApplier implements ProfileApplication {
             return isBot.test(bot) ? removeDisabledEnchantments(bot.getInventory(), disabledEnchantments.get()) : List.of();
         } catch (RuntimeException e) {
             return List.of();
+        }
+    }
+
+    @Override
+    public BotGateway.ItemSweep migrateLegacyItems(ServerPlayer bot) {
+        try {
+            if (!isBot.test(bot)) {
+                return BotGateway.ItemSweep.NONE;
+            }
+            int pearls = removeEnderPearls(bot.getInventory(), true);
+            List<String> enchantments = removeDisabledEnchantments(bot.getInventory(), disabledEnchantments.get(), true);
+            return new BotGateway.ItemSweep(pearls, enchantments);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

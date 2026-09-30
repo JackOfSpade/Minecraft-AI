@@ -84,4 +84,93 @@ class PopulationEnginePearlSweepTest {
         assertEquals(List.of(), rig.bots.forgets, "sweeping never changes who is considered alive");
         assertEquals(0, rig.bots.restores.size());
     }
+
+    // ------------------------------------------------------------------ the one-time migration of bots from before issued items were marked
+
+    private static long migrations(Rig rig, String name) {
+        return rig.bots.migrateCalls.stream().filter(n -> n.equals(name)).count();
+    }
+
+    @Test
+    void everyInhabitantGetsExactlyOneMigrationPassAndItsRecordSaysSo() {
+        Rig rig = new Rig();
+        StructureRecord r = populate(rig, Rig.village(0, 0));
+        rig.run(BotRoster.SCAN_PERIOD_TICKS + 2);
+        for (BotRecord b : r.bots) {
+            assertEquals(1, migrations(rig, b.name), b.name + " is migrated on its first sweep");
+            assertTrue(b.itemsMigrated, b.name + " is recorded as migrated");
+        }
+        rig.run(BotRoster.PEARL_SWEEP_TICKS * 6);
+        for (BotRecord b : r.bots) {
+            assertEquals(1, migrations(rig, b.name), b.name + ": never migrated a second time");
+            assertTrue(calls(rig, b.name) >= 5, b.name + " keeps being swept for what the wrapper issued");
+        }
+    }
+
+    @Test
+    void aMigratedRecordIsNotMigratedAgainAfterARestartButAnOldRecordIs() {
+        Rig rig = new Rig();
+        StructureRecord r = populate(rig, Rig.village(0, 0));
+        rig.run(BotRoster.SCAN_PERIOD_TICKS + 2);
+        BotRecord old = r.bots.get(0);
+        old.itemsMigrated = false; // a record written before the marker existed
+        rig.bots.migrateCalls.clear();
+        rig.cfg.processing.restoreSettleTicks = 1200;
+        rig.restart(true);
+        rig.run(BotRoster.SCAN_PERIOD_TICKS * 2 + 2);
+        StructureRecord after = rig.record(Rig.village(0, 0).key());
+        for (BotRecord b : after.bots) {
+            assertEquals(b.name.equals(old.name) ? 1 : 0, migrations(rig, b.name), b.name);
+            assertTrue(b.itemsMigrated, b.name);
+        }
+    }
+
+    @Test
+    void whatTheMigrationRemovesIsLoggedOncePerBotAndAPassThatCouldNotRunIsRetried() {
+        try (EngineLogCapture log = new EngineLogCapture(org.apache.logging.log4j.Level.INFO)) {
+            Rig rig = new Rig();
+            StructureRecord r = populate(rig, Rig.village(0, 0));
+            String late = r.bots.get(0).name;
+            for (BotRecord b : r.bots) {
+                b.itemsMigrated = false;
+                rig.bots.migrationResults.put(FakeBots.key(b.name),
+                        new BotGateway.ItemSweep(4, List.of("minecraft:mending (netherite_chestplate)")));
+            }
+            rig.bots.migrateDeferredFor.add(FakeBots.key(late));
+            rig.bots.migrateCalls.clear();
+            rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+            assertFalse(late.isEmpty());
+            assertTrue(migrations(rig, late) >= 2, "a pass that could not run is retried at every sweep");
+            assertFalse(r.bots.get(0).itemsMigrated, "and is not recorded as done");
+            assertEquals(1, log.count(org.apache.logging.log4j.Level.INFO, "Removed 4 ender pearl(s) from inhabitant " + r.bots.get(1).name + " "));
+            assertEquals(1, log.count(org.apache.logging.log4j.Level.INFO,
+                    "Removed disabled enchantment(s) from inhabitant " + r.bots.get(1).name + ":"));
+            rig.bots.migrateDeferredFor.clear();
+            rig.run(BotRoster.PEARL_SWEEP_TICKS * 2);
+            assertTrue(r.bots.get(0).itemsMigrated, "it is migrated as soon as it can be");
+            long done = migrations(rig, late);
+            rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+            assertEquals(done, migrations(rig, late), "and then never again");
+        }
+    }
+
+    @Test
+    void aFailingMigrationNeverEscapesAndIsRetried() {
+        Rig rig = new Rig();
+        StructureRecord r = populate(rig, Rig.village(0, 0));
+        for (BotRecord b : r.bots) {
+            b.itemsMigrated = false;
+        }
+        rig.bots.throwMigrate = true;
+        rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+        for (BotRecord b : r.bots) {
+            assertFalse(b.itemsMigrated, b.name + " is not recorded as migrated after a failure");
+        }
+        assertEquals(List.of(), rig.bots.forgets, "the failure never changes who is considered alive");
+        rig.bots.throwMigrate = false;
+        rig.run(BotRoster.PEARL_SWEEP_TICKS * 2);
+        for (BotRecord b : r.bots) {
+            assertTrue(b.itemsMigrated, b.name);
+        }
+    }
 }

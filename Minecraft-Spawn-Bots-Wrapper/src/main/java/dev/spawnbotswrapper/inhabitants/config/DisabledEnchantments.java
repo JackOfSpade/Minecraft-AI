@@ -8,7 +8,9 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * The {@code profiles.disabledEnchantments} denylist: enchantments no inhabitant may be given or keep.
+ * The {@code profiles.disabledEnchantments} denylist: enchantments the wrapper never gives an inhabitant (and strips again from
+ * what it issued, see {@code IssuedItems}). It shapes only what the wrapper hands out: an item a bot picks up in the world, a
+ * player's Mending armor for one, is never modified, and players keep these enchantments.
  * <p>
  * Ids are accepted with or without the {@code minecraft:} namespace and in any letter case; everything downstream
  * (the loadout roller, the profile applier, the sweeps) works with the canonical lower-case

@@ -74,11 +74,11 @@ public final class ProfileApplierMcCases {
     public static void removeEnderPearlsTakesOnlyPearlsFromEverySlotAndCountsThem() {
         Inventory inventory = newInventory();
         ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), true, new ArrayList<>());
-        inventory.setItem(2, new ItemStack(Items.ENDER_PEARL, 16));          // hotbar
-        inventory.setItem(20, new ItemStack(Items.ENDER_PEARL, 3));          // main inventory
+        inventory.setItem(2, issued(new ItemStack(Items.ENDER_PEARL, 16)));          // hotbar
+        inventory.setItem(20, issued(new ItemStack(Items.ENDER_PEARL, 3)));          // main inventory
         inventory.setItem(21, new ItemStack(Items.ENDER_EYE, 4));            // look-alike, must stay
         inventory.setItem(22, new ItemStack(Items.SNOWBALL, 16));            // other throwable, must stay
-        inventory.setItem(SlotPlanner.OFFHAND, new ItemStack(Items.ENDER_PEARL, 1)); // offhand replaces the shield
+        inventory.setItem(SlotPlanner.OFFHAND, issued(new ItemStack(Items.ENDER_PEARL, 1))); // offhand replaces the shield
         List<ItemStack> before = new ArrayList<>();
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             before.add(inventory.getItem(slot).copy());
@@ -101,6 +101,102 @@ public final class ProfileApplierMcCases {
         assertEquals(0, ProfileApplier.removeEnderPearls(inventory), "idempotent: a second pass finds nothing");
     }
 
+    private static ItemStack issued(ItemStack stack) {
+        IssuedItems.mark(stack);
+        return stack;
+    }
+
+    /** The marker is what the wrapper's rules key on; it is plain custom data and comes off cleanly. */
+    public static void theMarkerIsSetTestedAndRemovedThroughVanillaCustomData() {
+        ItemStack stack = new ItemStack(Items.ARROW, 5);
+        assertFalse(IssuedItems.isIssued(stack));
+        IssuedItems.mark(stack);
+        assertTrue(IssuedItems.isIssued(stack));
+        assertTrue(stack.has(DataComponents.CUSTOM_DATA));
+        assertFalse(ItemStack.isSameItemSameComponents(stack, new ItemStack(Items.ARROW)), "marked and plain stacks do not merge");
+        assertTrue(IssuedItems.unmark(stack));
+        assertFalse(IssuedItems.isIssued(stack));
+        assertFalse(stack.has(DataComponents.CUSTOM_DATA), "nothing else in it: the component goes, so the stack merges again");
+        assertTrue(ItemStack.isSameItemSameComponents(stack, new ItemStack(Items.ARROW)));
+        assertFalse(IssuedItems.unmark(stack), "unmarking twice is a no-op");
+        // Other custom data of the stack is kept.
+        net.minecraft.nbt.CompoundTag other = new net.minecraft.nbt.CompoundTag();
+        other.putString("x", "y");
+        stack.set(DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(other));
+        IssuedItems.mark(stack);
+        assertTrue(IssuedItems.unmark(stack));
+        assertTrue(stack.has(DataComponents.CUSTOM_DATA), "foreign custom data survives the marker");
+        assertEquals("y", stack.get(DataComponents.CUSTOM_DATA).copyTag().getStringOr("x", ""));
+    }
+
+    /** Everything a dressing places is marked; nothing else is. */
+    public static void aDressingMarksEveryStackItPlacesAndOnlyThose() {
+        Inventory inventory = newInventory();
+        inventory.setItem(30, new ItemStack(Items.DIRT, 5)); // not planned: survives a non-clearing fill, stays unmarked
+        ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), false, new ArrayList<>());
+        for (int slot : new int[]{0, 1, 9, SlotPlanner.HEAD, SlotPlanner.CHEST, SlotPlanner.LEGS, SlotPlanner.FEET, SlotPlanner.OFFHAND}) {
+            assertTrue(IssuedItems.isIssued(inventory.getItem(slot)), "slot " + slot + " is issued");
+        }
+        assertFalse(IssuedItems.isIssued(inventory.getItem(30)));
+        assertEquals(8, countIssued(inventory));
+        assertEquals(8, IssuedItems.unmarkAll(inventory));
+        assertEquals(0, countIssued(inventory));
+    }
+
+    private static int countIssued(Inventory inventory) {
+        int n = 0;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (IssuedItems.isIssued(inventory.getItem(slot))) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Only wrapper-issued stacks are ever modified or deleted: pearls and Mending/Piercing the bot picked up in the world (a player's
+     * dropped gear) stay exactly as they were, through the sweeps, a dressing and a restore-time sanitize.
+     */
+    public static void pickedUpItemsAreNeverTouchedByTheSanitizersButIssuedOnesAre() {
+        Inventory inventory = newInventory();
+        inventory.setItem(3, new ItemStack(Items.ENDER_PEARL, 16));                       // a player's, dropped near the bot
+        inventory.setItem(SlotPlanner.CHEST, enchantedUnmarked("minecraft:netherite_chestplate",
+                Map.of("minecraft:mending", 1, "minecraft:protection", 4)));           // a player's armor
+        inventory.setItem(4, enchantedUnmarked("minecraft:crossbow", Map.of("minecraft:piercing", 3)));
+        inventory.setItem(5, issued(new ItemStack(Items.ENDER_PEARL, 2)));                // issued
+        inventory.setItem(SlotPlanner.HEAD, enchanted("minecraft:diamond_helmet", 1, Map.of("minecraft:mending", 1))); // issued
+        Set<String> defaults = Set.of("minecraft:piercing", "minecraft:mending");
+
+        assertEquals(2, ProfileApplier.removeEnderPearls(inventory));
+        List<String> removed = ProfileApplier.removeDisabledEnchantments(inventory, defaults);
+        assertEquals(List.of("minecraft:mending (diamond_helmet)"), removed);
+
+        assertEquals(16, inventory.getItem(3).getCount(), "the picked-up pearls stay");
+        assertTrue(inventory.getItem(5).isEmpty(), "the issued pearls go");
+        assertEquals(1, level(inventory.getItem(SlotPlanner.CHEST), "minecraft:mending"), "a player's Mending stays");
+        assertEquals(4, level(inventory.getItem(SlotPlanner.CHEST), "minecraft:protection"));
+        assertEquals(3, level(inventory.getItem(4), "minecraft:piercing"), "a player's Piercing stays");
+        assertEquals(0, level(inventory.getItem(SlotPlanner.HEAD), "minecraft:mending"));
+        // Nothing marked, nothing to do, however often it runs.
+        assertEquals(0, ProfileApplier.removeEnderPearls(inventory));
+        assertEquals(List.of(), ProfileApplier.removeDisabledEnchantments(inventory, defaults));
+    }
+
+    /** The one-time migration of a bot from before the marker existed judges every stack, marked or not. */
+    public static void theMigrationPassJudgesEveryStack() {
+        Inventory inventory = newInventory();
+        inventory.setItem(3, new ItemStack(Items.ENDER_PEARL, 16));
+        inventory.setItem(SlotPlanner.CHEST, enchantedUnmarked("minecraft:netherite_chestplate", Map.of("minecraft:mending", 1)));
+        inventory.setItem(5, issued(new ItemStack(Items.ENDER_PEARL, 2)));
+        Set<String> defaults = Set.of("minecraft:piercing", "minecraft:mending");
+
+        assertEquals(18, ProfileApplier.removeEnderPearls(inventory, true));
+        assertEquals(List.of("minecraft:mending (netherite_chestplate)"),
+                ProfileApplier.removeDisabledEnchantments(inventory, defaults, true));
+        assertTrue(inventory.getItem(3).isEmpty());
+        assertEquals(0, level(inventory.getItem(SlotPlanner.CHEST), "minecraft:mending"));
+    }
+
     public static void aBotWithoutPearlsIsLeftAlone() {
         Inventory inventory = newInventory();
         ProfileApplier.fill(inventory, McBootstrap.registries(), kit(), true, new ArrayList<>());
@@ -115,10 +211,12 @@ public final class ProfileApplierMcCases {
                 new PlacedItem(Slot.HOTBAR, 0, ItemSpec.of("minecraft:diamond_sword")),
                 new PlacedItem(Slot.INVENTORY, -1, ItemSpec.of("minecraft:ender_pearl", 6))));
         Inventory inventory = newInventory();
-        inventory.setItem(30, new ItemStack(Items.ENDER_PEARL, 2)); // not a planned slot, survives a non-clearing fill
+        inventory.setItem(30, issued(new ItemStack(Items.ENDER_PEARL, 2))); // issued earlier, not a planned slot, survives a non-clearing fill
+        inventory.setItem(31, new ItemStack(Items.ENDER_PEARL, 3)); // picked up in the world: never touched
         List<String> warnings = new ArrayList<>();
         ProfileApplier.fill(inventory, McBootstrap.registries(), old, false, warnings);
-        assertEquals(0, ProfileApplier.removeEnderPearls(inventory), "nothing left to remove");
+        assertEquals(0, ProfileApplier.removeEnderPearls(inventory), "nothing issued left to remove");
+        assertEquals(3, inventory.getItem(31).getCount(), "a picked-up pearl stays");
         assertTrue(inventory.getItem(0).is(Items.DIAMOND_SWORD));
         assertEquals(1, warnings.size(), warnings.toString());
         assertTrue(warnings.get(0).contains("8 ender pearls"), warnings.get(0));
@@ -155,7 +253,17 @@ public final class ProfileApplierMcCases {
                 .orElseThrow(() -> new AssertionError("enchantment " + id + " is missing from the registry"));
     }
 
+    /** An enchanted stack the wrapper issued (marked). */
     private static ItemStack enchanted(String item, int count, Map<String, Integer> enchantments) {
+        return issued(enchantedUnmarked(item, enchantments, count));
+    }
+
+    /** An enchanted stack a bot picked up in the world (not marked). */
+    private static ItemStack enchantedUnmarked(String item, Map<String, Integer> enchantments) {
+        return enchantedUnmarked(item, enchantments, 1);
+    }
+
+    private static ItemStack enchantedUnmarked(String item, Map<String, Integer> enchantments, int count) {
         List<String> warnings = new ArrayList<>();
         ItemStack stack = new ItemStackFactory(McBootstrap.registries())
                 .build(new ItemSpec(item, count, enchantments, 0.0, null), warnings).orElseThrow();
@@ -246,13 +354,15 @@ public final class ProfileApplierMcCases {
                 new PlacedItem(Slot.HOTBAR, 1, new ItemSpec("minecraft:crossbow", 1,
                         Map.of("minecraft:piercing", 4, "minecraft:quick_charge", 3), 0.0, null))));
         Inventory inventory = newInventory();
-        inventory.setItem(30, enchanted("minecraft:crossbow", 1, Map.of("minecraft:piercing", 1))); // old, unplanned slot
+        inventory.setItem(30, enchanted("minecraft:crossbow", 1, Map.of("minecraft:piercing", 1))); // issued earlier, unplanned slot
+        inventory.setItem(31, enchantedUnmarked("minecraft:crossbow", Map.of("minecraft:piercing", 2))); // picked up: never touched
         List<String> warnings = new ArrayList<>();
 
         ProfileApplier.Sanitized sanitized = ProfileApplier.fill(inventory, McBootstrap.registries(), stored, false,
                 warnings, NO_PIERCING);
 
         assertEquals(2, sanitized.enchantments().size(), sanitized.toString());
+        assertEquals(2, level(inventory.getItem(31), "minecraft:piercing"), "a picked-up crossbow keeps its Piercing");
         assertEquals(0, sanitized.pearls());
         ItemStack crossbow = inventory.getItem(1);
         assertTrue(crossbow.is(Items.CROSSBOW));

@@ -136,6 +136,7 @@ final class InMemoryStorage implements PopulationStorage {
             n.lastSeenMillis = b.lastSeenMillis;
             n.dimension = b.dimension;
             n.removing = b.removing;
+            n.itemsMigrated = b.itemsMigrated;
             c.bots.add(n);
         }
         return c;

@@ -41,6 +41,15 @@ public interface ProfileApplication {
     List<String> stripDisabledEnchantments(ServerPlayer bot);
 
     /**
+     * The one-time sanitize pass of a bot dressed before issued items were marked: strips the pearls and disabled
+     * enchantments from EVERY stack it carries (what the old sweep did every few seconds). Afterwards only marked stacks are
+     * judged. Returns what was removed ({@link BotGateway.ItemSweep#NONE} for a non-bot), or null on failure so the caller tries again.
+     */
+    default BotGateway.ItemSweep migrateLegacyItems(ServerPlayer bot) {
+        return BotGateway.ItemSweep.NONE;
+    }
+
+    /**
      * Captures the live state of a bot (never a non-bot): null when the entity is not a bot, dead, or on any failure.
      * Warnings about slots that could not be saved are appended to {@code warnings}.
      */

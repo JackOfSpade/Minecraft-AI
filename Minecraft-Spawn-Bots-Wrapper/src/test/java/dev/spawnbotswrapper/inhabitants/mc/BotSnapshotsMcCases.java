@@ -84,6 +84,24 @@ public final class BotSnapshotsMcCases {
         assertEquals("Rusty", after.getItem(11).get(DataComponents.CUSTOM_NAME).getString());
     }
 
+    /** The marker of an issued stack is plain item data: it survives a snapshot (dormancy, a restart) and unmarked stacks stay unmarked. */
+    public static void theIssuedMarkerSurvivesTheSnapshotAndUnmarkedStacksStayUnmarked() {
+        Inventory before = newInventory();
+        ItemStack issued = new ItemStack(Items.ARROW, 20);
+        IssuedItems.mark(issued);
+        before.setItem(2, issued);
+        before.setItem(3, new ItemStack(Items.ARROW, 7)); // picked up in the world
+        BotSnapshot snapshot = new BotSnapshot();
+        List<String> warnings = new ArrayList<>();
+        BotSnapshots.captureInventory(before, McBootstrap.registries(), snapshot, warnings);
+        Inventory after = newInventory();
+        assertEquals(2, BotSnapshots.restoreInventory(after, McBootstrap.registries(), snapshot, warnings));
+        assertTrue(warnings.isEmpty(), warnings.toString());
+        assertTrue(IssuedItems.isIssued(after.getItem(2)), "the issued stack is still issued after the round trip");
+        assertFalse(IssuedItems.isIssued(after.getItem(3)), "the picked-up stack was not issued and is not now");
+        assertSame(before, after);
+    }
+
     /** What dormancy used to do: dress the bot from its profile again. A restore must leave nothing of what is on the bot. */
     public static void restoringNeverRefillsAndEmptiesSlotsThatWereEmptyInTheSnapshot() {
         Inventory used = newInventory();

@@ -4,6 +4,7 @@ import dev.spawnbotswrapper.inhabitants.InhabitantsMod;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.engine.PopulationEngine;
+import dev.spawnbotswrapper.inhabitants.mc.IssuedItems;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
@@ -265,6 +266,163 @@ public final class InhabitantStateGameTests {
                     rig.succeed();
                 }
                 default -> rig.fail("unknown stage " + stage[0]);
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ issued items
+
+    private static ItemStack mendingItem(Rig rig, net.minecraft.world.item.Item item, boolean issued) {
+        ItemStack stack = new ItemStack(item);
+        stack.enchant(rig.level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+                .getOrThrow(net.minecraft.world.item.enchantment.Enchantments.MENDING), 1);
+        if (issued) {
+            IssuedItems.mark(stack);
+        }
+        return stack;
+    }
+
+    private static boolean hasMending(ItemStack stack, Rig rig) {
+        return stack.getOrDefault(net.minecraft.core.component.DataComponents.ENCHANTMENTS,
+                net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY).getLevel(
+                rig.level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+                        .getOrThrow(net.minecraft.world.item.enchantment.Enchantments.MENDING)) > 0;
+    }
+
+    /** -1 when the bot carries no such item, else 1 when it has Mending and 0 when it has not. */
+    private static int mendingOf(Rig rig, net.minecraft.world.item.Item item) {
+        int slot = slotOf(rig.bot, item);
+        return slot < 0 ? -1 : hasMending(rig.bot.getInventory().getItem(slot), rig) ? 1 : 0;
+    }
+
+    private static int slotOf(ServerPlayer bot, net.minecraft.world.item.Item item) {
+        Inventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (inventory.getItem(slot).is(item)) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    private static int countOf(ServerPlayer bot, net.minecraft.world.item.Item item) {
+        int n = 0;
+        Inventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (inventory.getItem(slot).is(item)) {
+                n += inventory.getItem(slot).getCount();
+            }
+        }
+        return n;
+    }
+
+    /**
+     * The disabled-enchantment list and the pearl removal shape what the wrapper ISSUES, never what a player owns. A player's
+     * Mending chestplate and ender pearls, dropped at a bot's feet, are picked up and are still exactly that 200 ticks later (several
+     * sweeps on); an issued Mending helmet (marked, forced into the inventory) still loses its Mending; and an issued stack the bot
+     * drops reaches the world without the marker.
+     */
+    @GameTest(environment = ENV + "issued_items", maxTicks = 1200)
+    public void issuedItemsAreSanitizedButAPlayersItemsPickedUpByAnInhabitantAreLeftAlone(GameTestHelper context) {
+        Rig rig = new Rig(context);
+        rig.buildPlatform();
+        int[] phase = {0};
+        long[] mark = {0};
+        boolean[] dropChecked = {false};
+        context.onEachTick(() -> {
+            if (!rig.requestInhabitant()) {
+                return;
+            }
+            long tick = context.getTick();
+            switch (phase[0]) {
+                case 0 -> {
+                    if (!rig.inhabitantReady()) {
+                        if (tick > 300) {
+                            rig.fail("the inhabitant never appeared");
+                        }
+                        return;
+                    }
+                    // The one-time migration of a bot from before the marker judges every stack: let it run before the scene starts.
+                    if (record(rig).map(b -> !b.itemsMigrated).orElse(true)) {
+                        if (tick > 500) {
+                            rig.fail("the inhabitant was never migrated (the first sweep did not run)");
+                        }
+                        return;
+                    }
+                    rig.bot.getInventory().clearContent();
+                    net.minecraft.world.phys.Vec3 at = rig.bot.position();
+                    for (ItemStack dropped : new ItemStack[]{
+                            mendingItem(rig, Items.NETHERITE_CHESTPLATE, false), new ItemStack(Items.ENDER_PEARL, 8)}) {
+                        net.minecraft.world.entity.item.ItemEntity entity =
+                                new net.minecraft.world.entity.item.ItemEntity(rig.level, at.x, at.y, at.z, dropped);
+                        entity.setDeltaMovement(0, 0, 0);
+                        entity.setNoPickUpDelay();
+                        rig.level.addFreshEntity(entity);
+                    }
+                    mark[0] = tick;
+                    phase[0] = 1;
+                }
+                case 1 -> {
+                    int chest = slotOf(rig.bot, Items.NETHERITE_CHESTPLATE);
+                    if (chest < 0 || countOf(rig.bot, Items.ENDER_PEARL) < 8) {
+                        if (tick - mark[0] > 100) {
+                            rig.fail("the inhabitant did not pick up what the player dropped at its feet: chestplate slot " + chest
+                                    + ", pearls " + countOf(rig.bot, Items.ENDER_PEARL));
+                        }
+                        return;
+                    }
+                    if (IssuedItems.isIssued(rig.bot.getInventory().getItem(chest))) {
+                        rig.fail("an item picked up in the world carries the issued marker");
+                    }
+                    // Force-issue a Mending helmet and Mending boots the way a dressing would.
+                    rig.bot.getInventory().setItem(30, mendingItem(rig, Items.DIAMOND_HELMET, true));
+                    rig.bot.getInventory().setItem(31, mendingItem(rig, Items.DIAMOND_BOOTS, false));
+                    mark[0] = tick;
+                    phase[0] = 2;
+                }
+                case 2 -> {
+                    if (!dropChecked[0]) {
+                        dropChecked[0] = true;
+                        // An issued stack the bot drops arrives in the world unmarked.
+                        ItemStack issued = new ItemStack(Items.IRON_SWORD);
+                        IssuedItems.mark(issued);
+                        net.minecraft.world.entity.item.ItemEntity dropped = rig.bot.drop(issued, false, true);
+                        if (dropped == null) {
+                            rig.fail("the inhabitant could not drop an item");
+                        }
+                        if (IssuedItems.isIssued(dropped.getItem())) {
+                            rig.fail("a dropped issued item is still marked in the world");
+                        }
+                        dropped.discard();
+                    }
+                    long waited = tick - mark[0];
+                    // The bot may wear what it carries (armor auto-equip moves a stack between slots), so items are found by kind.
+                    int helmet = mendingOf(rig, Items.DIAMOND_HELMET);
+                    if (waited < 220) {
+                        if (waited > 160 && helmet == 1) {
+                            rig.fail("the issued Mending helmet still has Mending after " + waited + " ticks");
+                        }
+                        return;
+                    }
+                    int chest = mendingOf(rig, Items.NETHERITE_CHESTPLATE);
+                    int boots = mendingOf(rig, Items.DIAMOND_BOOTS);
+                    Rig.LOG.info("[issued] after {} ticks (-1 = gone, 0 = no Mending, 1 = Mending): the player's chestplate {}, pearls {}, "
+                            + "issued helmet {}, the player's boots {}", waited, chest, countOf(rig.bot, Items.ENDER_PEARL), helmet, boots);
+                    if (chest != 1) {
+                        rig.fail("the player's Mending chestplate lost its Mending or was deleted after " + waited + " ticks: " + chest);
+                    }
+                    if (countOf(rig.bot, Items.ENDER_PEARL) != 8) {
+                        rig.fail("the player's ender pearls were touched: " + countOf(rig.bot, Items.ENDER_PEARL) + " of 8 left");
+                    }
+                    if (helmet != 0) {
+                        rig.fail("an issued Mending helmet was not stripped of Mending (it must exist without it): " + helmet);
+                    }
+                    if (boots != 1) {
+                        rig.fail("Mending boots that were not issued lost their Mending or were deleted: " + boots);
+                    }
+                    rig.succeed();
+                }
+                default -> rig.fail("unknown phase " + phase[0]);
             }
         });
     }

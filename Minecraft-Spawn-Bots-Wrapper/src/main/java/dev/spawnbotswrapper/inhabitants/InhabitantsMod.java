@@ -8,6 +8,7 @@ import dev.spawnbotswrapper.inhabitants.mc.CombatLogger;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
 import dev.spawnbotswrapper.inhabitants.mc.EatGate;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
+import dev.spawnbotswrapper.inhabitants.mc.IssuedItemGuard;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
 import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
@@ -87,6 +88,7 @@ public final class InhabitantsMod implements ModInitializer {
             return current == null ? null : current.services();
         });
         combat.register();
+        IssuedItemGuard.register(LOGGER);
         combat.aggroState(aggro::describe);
         combat.meleeVetoState(meleeLegality::describe);
         meleeLegality.register();

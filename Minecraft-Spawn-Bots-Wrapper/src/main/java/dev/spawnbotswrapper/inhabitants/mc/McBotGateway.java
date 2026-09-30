@@ -499,6 +499,12 @@ public final class McBotGateway implements BotGateway {
         return removed;
     }
 
+    @Override
+    public ItemSweep migrateLegacyItems(String botName) {
+        Optional<ServerPlayer> bot = findBot(botName);
+        return bot.isEmpty() ? null : applier.migrateLegacyItems(bot.get());
+    }
+
     private void stash(String botName, ProfileApplication.Result applied) {
         if (applied.pearlsRemoved() > 0) {
             pendingPearls.merge(key(botName), applied.pearlsRemoved(), Integer::sum);

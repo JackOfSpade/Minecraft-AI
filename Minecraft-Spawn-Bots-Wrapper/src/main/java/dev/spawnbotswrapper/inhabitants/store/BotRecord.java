@@ -68,6 +68,13 @@ public final class BotRecord {
      * store never holds both a live bot and a restorable copy of what it carries.
      */
     public boolean removing;
+    /**
+     * True once the one-time sanitize pass of a bot from before issued items were marked has run (every pearl and disabled
+     * enchantment stripped from all its stacks). Afterwards the sweeps judge only stacks the wrapper issued (marked), so what
+     * the bot picked up in the world is never touched. False for a record written by an older version, and for a new bot
+     * until its first sweep (the pass then finds nothing: everything it carries is issued and already judged).
+     */
+    public boolean itemsMigrated;
 
     public BotRecord() {
     }

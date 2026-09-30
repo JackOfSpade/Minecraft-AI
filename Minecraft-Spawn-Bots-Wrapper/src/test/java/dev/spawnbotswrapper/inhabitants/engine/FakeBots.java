@@ -93,6 +93,13 @@ final class FakeBots implements BotGateway {
     final Map<String, List<String>> enchantmentsToStrip = new HashMap<>();
     /** Lower-case names for whom both strip calls throw (one bad bot must not stop the sweep of the others). */
     final Set<String> throwStripFor = new HashSet<>();
+    /** Every one-time legacy-items pass (see BotGateway#migrateLegacyItems), by name. */
+    final List<String> migrateCalls = new ArrayList<>();
+    /** What the pass "finds" per bot, by lower-case name (nothing by default). */
+    final Map<String, BotGateway.ItemSweep> migrationResults = new HashMap<>();
+    /** Lower-case names for whom the pass answers null ("could not be swept now, try again"). */
+    final Set<String> migrateDeferredFor = new HashSet<>();
+    boolean throwMigrate;
     int availableCalls;
     int restoreCalls;
     /** When non-null, available() throws this (any Throwable, including Errors). */
@@ -366,6 +373,18 @@ final class FakeBots implements BotGateway {
             throw new IllegalStateException("injected stripDisabledEnchantments failure");
         }
         return enchantmentsToStrip.getOrDefault(key(botName), List.of());
+    }
+
+    @Override
+    public ItemSweep migrateLegacyItems(String botName) {
+        migrateCalls.add(botName);
+        if (throwMigrate) {
+            throw new IllegalStateException("injected migrateLegacyItems failure");
+        }
+        if (migrateDeferredFor.contains(key(botName))) {
+            return null;
+        }
+        return migrationResults.getOrDefault(key(botName), ItemSweep.NONE);
     }
 
     @SuppressWarnings("unchecked")
