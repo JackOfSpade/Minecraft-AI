@@ -12,7 +12,10 @@ import net.minecraft.world.entity.player.Player;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -177,25 +180,37 @@ public final class AggroDriver {
             this.services = services;
         }
 
-        private boolean isInhabitant(ServerPlayer p) {
-            return services.population().findBot(p.getName().getString()).isPresent();
+        /** The inhabitants online, found in ONE pass over the player list per tick (this view lives for one tick). */
+        private List<PlayerBody> inhabitants;
+        private Map<String, PlayerBody> byName;
+
+        private void scan() {
+            if (inhabitants != null) {
+                return;
+            }
+            List<ServerPlayer> online = server.getPlayerList().getPlayers();
+            inhabitants = new ArrayList<>(Math.min(online.size(), 16));
+            byName = new HashMap<>();
+            for (ServerPlayer p : online) {
+                String name = p.getName().getString();
+                if (services.population().findBot(name).isPresent()) {
+                    PlayerBody body = new PlayerBody(p);
+                    inhabitants.add(body);
+                    byName.put(name.toLowerCase(Locale.ROOT), body);
+                }
+            }
         }
 
         @Override
         public List<? extends Watcher> inhabitants() {
-            List<PlayerBody> out = new ArrayList<>();
-            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-                if (isInhabitant(p)) {
-                    out.add(new PlayerBody(p));
-                }
-            }
-            return out;
+            scan();
+            return inhabitants;
         }
 
         @Override
         public Watcher inhabitant(String name) {
-            ServerPlayer p = server.getPlayerList().getPlayerByName(name);
-            return p != null && isInhabitant(p) ? new PlayerBody(p) : null;
+            scan();
+            return byName.get(name.toLowerCase(Locale.ROOT));
         }
 
         @Override

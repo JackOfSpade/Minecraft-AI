@@ -30,16 +30,24 @@ import java.util.function.Supplier;
  * <b>Being hit.</b> Any target PvP BOT holds that this class did not hand over (its revenge memory after a hit
  * from any distance, or a mob fight) starts an engagement too, so a hit from far away is chased as well.
  * <p>
+ * <b>Home and origins.</b> The first engagement of a bot that has no home sets its HOME anchor (its position and
+ * level right then) and uses it as the engagement's leash origin. Home is kept until the bot is back within
+ * {@code returnArriveDistance} of it, the walk back is abandoned, or the bot dies or leaves; only then is it cleared.
+ * An engagement that starts while the bot is walking back home (a hit, or a regular noticing) gets a TEMPORARY
+ * origin, the bot's position at that moment: its leash and sight rule are measured from there. A hit during a
+ * running engagement changes nothing.
+ * <p>
  * <b>Giving up.</b> Every engagement ends when the inhabitant is more than {@code leashRange} blocks (default 32)
- * from where the engagement began, or has not seen its target for {@code loseSightTicks} ticks (default 200, 10 s),
- * or the target is gone. PvP BOT's target state is then cleared (which also wipes its revenge memory) and, when
- * {@code returnToOrigin} is on, the inhabitant WALKS back to where the engagement began (PvP BOT's own look and
- * move-toward inputs, applied after PvP BOT's own tick; never a teleport). The return ends on arrival, or is
- * abandoned when it makes no progress or takes too long. While the return is pending no new target is noticed,
- * and a new hit continues the ORIGINAL engagement origin, so repeated hits cannot drag a bot ever farther from home.
+ * from its origin, or has not seen its target for {@code loseSightTicks} ticks (default 200, 10 s), or the target is
+ * gone. PvP BOT's target state is then cleared (which also wipes its revenge memory) and, when
+ * {@code returnToOrigin} is on, the inhabitant WALKS back to its HOME anchor, never to a temporary origin (PvP BOT's
+ * own look and move-toward inputs, applied after PvP BOT's own tick; never a teleport). The stuck and maximum-time
+ * guards count per walking leg: a new leg after a temporary engagement starts them afresh.
  * <p>
  * <b>External targets.</b> A forced target somebody else set (a {@code /pvpbot} command, another mod) is tracked for
- * the status text only; it is never leashed, cleared or returned from.
+ * the status text only; it is never leashed, cleared or returned from (it has no home). A forced name that PvP BOT
+ * wrote itself for an engagement that began as a hit (its wind-burst / elytra flow) names the attacker or the
+ * current revenge target and is not external: the leash and the sight rule still apply.
  * <p>
  * Pure decision logic over {@link AggroWorld} and {@link TargetControl}; no Minecraft or PvP BOT classes. Server
  * thread only. {@link #tick} must run AFTER PvP BOT's own tick of the same server tick.
@@ -132,8 +140,13 @@ public final class AggroController {
     private static final class Engagement {
         Object entity;
         String name;
+        /** The target the engagement began with; a forced name equal to it is never "somebody else's". */
+        final String firstName;
         final Cause cause;
+        /** The leash origin: the home anchor for the first engagement, the bot's position for a temporary one. */
         final Origin origin;
+        /** True when {@link #origin} is a temporary origin (the engagement began while walking back home). */
+        final boolean temporary;
         final long startTick;
         /** Somebody else's forced target: tracked, never leashed or cleared. */
         boolean external;
@@ -141,19 +154,24 @@ public final class AggroController {
         final String forcedByUs;
         int unseen;
         double leashDistance;
+        /** Distance to the home anchor as of the last tick (shown for a temporary origin). */
+        double homeDistance;
 
-        Engagement(Object entity, String name, Cause cause, Origin origin, long startTick, boolean external,
-                   String forcedByUs) {
+        Engagement(Object entity, String name, Cause cause, Origin origin, boolean temporary, long startTick,
+                   boolean external, String forcedByUs) {
             this.entity = entity;
             this.name = name;
+            this.firstName = name;
             this.cause = cause;
             this.origin = origin;
+            this.temporary = temporary;
             this.startTick = startTick;
             this.external = external;
             this.forcedByUs = forcedByUs;
         }
     }
 
+    /** One walk back home. A new leg (after a temporary engagement) is a new instance: fresh guard counters. */
     private static final class Return {
         final Origin origin;
         final long startTick;
@@ -171,6 +189,8 @@ public final class AggroController {
     }
 
     private static final class BotState {
+        /** Where the bot's first engagement began; set while an engagement or a walk back exists, else null. */
+        Origin home;
         Engagement engagement;
         Return ret;
     }
@@ -286,8 +306,9 @@ public final class AggroController {
             }
             return;
         }
+        boolean gaveUp = false;
         if (st != null && st.engagement != null) {
-            maintain(now, world, bot, st, cfg);
+            gaveUp = maintain(now, world, bot, st, cfg);
         }
         boolean engaged = st != null && st.engagement != null;
         if (!engaged && mayStart) {
@@ -297,14 +318,22 @@ public final class AggroController {
                 engaged = true;
             }
         }
-        if (st != null && st.ret != null) {
-            stepReturn(now, bot, st, cfg);
-        }
-        if (mayAcquire && !engaged && (st == null || st.ret == null)) {
+        // Noticing is allowed while walking back home (regular rules); not on the very tick a chase was given up,
+        // so the walk back always gets at least one tick of steering.
+        if (mayAcquire && !engaged && !gaveUp) {
             acquire(now, world, bot, cfg);
+            st = states.get(name);
+            engaged = st != null && st.engagement != null;
         }
-        if (st != null && st.engagement == null && st.ret == null) {
-            states.remove(name);
+        if (st != null && st.engagement == null) {
+            if (st.ret != null) {
+                stepReturn(now, bot, st, cfg);
+            }
+            if (st.ret == null) {
+                // No engagement and no walk back: nothing left to be home to.
+                st.home = null;
+                states.remove(name);
+            }
         }
     }
 
@@ -314,45 +343,85 @@ public final class AggroController {
 
     // ---------------------------------------------------------------- start
 
+    /**
+     * The leash origin of a chase that starts now, with the bookkeeping that goes with it: the first engagement of
+     * a bot without a home makes the bot's position its home and its origin; one that starts while the bot walks
+     * back home gets the bot's position as a TEMPORARY origin and ends that walk (a new leg starts after it).
+     *
+     * @param temporary set to true in {@code temporary[0]} when the origin is a temporary one
+     */
+    private Origin beginOrigin(Watcher bot, BotState st, boolean[] temporary) {
+        Origin here = new Origin(bot.position(), bot.dimension());
+        if (st.ret != null && st.home != null) {
+            temporary[0] = true;
+        } else {
+            st.home = here;
+        }
+        st.ret = null;
+        return here;
+    }
+
     /** PvP BOT holds a target this controller did not hand over: revenge, a mob fight, or somebody else's force. */
     private BotState startFromTarget(long now, Watcher bot, BotState existing, Target t) {
         String name = bot.name();
         BotState st = existing != null ? existing : state(name);
         String forced = up.forcedTarget(name);
+        // A forced name that appears while there is no engagement is somebody else's (a command, another mod).
         boolean external = forced != null;
         Cause cause = external ? Cause.OTHER : t.revenge() ? Cause.HIT : Cause.OTHER;
-        // A return still pending keeps its origin: repeated hits must not drag the bot farther from home each time.
-        boolean continued = st.ret != null;
-        Origin origin = continued ? st.ret.origin : new Origin(bot.position(), bot.dimension());
-        st.ret = null;
-        st.engagement = new Engagement(t.entity(), t.name(), cause, origin, now, external, null);
+        Origin origin;
+        boolean[] temporary = {false};
+        if (external) {
+            // Never leashed and never returned from: it has no home either.
+            st.home = null;
+            st.ret = null;
+            origin = new Origin(bot.position(), bot.dimension());
+        } else {
+            origin = beginOrigin(bot, st, temporary);
+        }
+        Engagement e = new Engagement(t.entity(), t.name(), cause, origin, temporary[0], now, external, null);
+        st.engagement = e;
+        if (temporary[0]) {
+            e.homeDistance = homeDistance(bot, st);
+        }
         if (external) {
             log.debug("aggro: " + name + " fights " + t.name() + " on a forced target set by someone else; tracked only");
         } else {
             hitEngagements++;
             logInfo(now, name, "aggro: " + name + " engaged " + t.name() + " (" + cause.name().toLowerCase(Locale.ROOT)
-                    + ")" + (continued ? ", original origin kept" : ""));
+                    + ")" + (temporary[0] ? ", temporary origin, home " + fmt(e.homeDistance) + " away" : ""));
         }
         return st;
     }
 
+    private static double homeDistance(Watcher bot, BotState st) {
+        return st.home == null || !Objects.equals(bot.dimension(), st.home.dimension()) ? 0.0
+                : bot.position().horizontalTo(st.home.pos());
+    }
+
     // ---------------------------------------------------------------- maintain
 
-    private void maintain(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
+    /**
+     * Judges the running engagement of one bot.
+     *
+     * @return true when it was given up on this tick
+     */
+    private boolean maintain(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
         Engagement e = st.engagement;
         String name = bot.name();
         String forced = up.forcedTarget(name);
-        if (!e.external && forced != null && !forced.equalsIgnoreCase(e.forcedByUs)) {
+        Target t = up.currentTarget(name);
+        if (!e.external && forced != null && isSomebodyElses(forced, e, t)) {
             e.external = true;
+            st.home = null;
             log.debug("aggro: " + name + " now has a forced target set by someone else (" + forced + "); tracked only");
         }
-        Target t = up.currentTarget(name);
         if (e.external) {
             if (forced == null) {
                 // Not forced any more: it is an ordinary fight again and is judged as one from the next step.
                 st.engagement = null;
                 log.debug("aggro: " + name + " no longer has an external forced target");
-                return;
+                return false;
             }
             if (t != null) {
                 e.entity = t.entity();
@@ -361,12 +430,27 @@ public final class AggroController {
                 e.unseen = target != null && !bot.canSee(target) ? e.unseen + 1 : 0;
             }
             e.leashDistance = bot.position().horizontalTo(e.origin.pos());
-            return;
+            return false;
         }
         String reason = giveUpReason(world, bot, e, t, cfg);
+        if (e.temporary) {
+            e.homeDistance = homeDistance(bot, st);
+        }
         if (reason != null) {
             giveUp(now, bot, st, reason, cfg);
+            return true;
         }
+        return false;
+    }
+
+    /**
+     * Whether a forced name is somebody else's. It is ours when this controller set it, when it names the target the
+     * engagement began with (PvP BOT writes the attacker's name itself in its wind-burst and elytra flow), or when it
+     * names the bot's current revenge target (its last attacker).
+     */
+    private static boolean isSomebodyElses(String forced, Engagement e, Target t) {
+        return !forced.equalsIgnoreCase(e.forcedByUs) && !forced.equalsIgnoreCase(e.firstName)
+                && !(t != null && t.revenge() && forced.equalsIgnoreCase(t.name()));
     }
 
     /** Why the engagement must end now, or null. Also updates the counters the status text shows. */
@@ -406,8 +490,9 @@ public final class AggroController {
     }
 
     /**
-     * Ends the engagement: clears PvP BOT's target state (also its revenge memory) and starts the walk back. If the
-     * clear throws, the engagement stays and the next tick tries again.
+     * Ends the engagement: clears PvP BOT's target state (also its revenge memory) and starts the walk back to the
+     * HOME anchor (never to a temporary origin). Without a walk back the home is cleared and the bot stays where it
+     * is. If the clear throws, the engagement stays and the next tick tries again.
      */
     private void giveUp(long now, Watcher bot, BotState st, String reason, Config cfg) {
         Engagement e = st.engagement;
@@ -415,13 +500,16 @@ public final class AggroController {
         up.clearTarget(name);
         st.engagement = null;
         giveUps.merge(reason, 1L, Long::sum);
-        boolean back = cfg.returnToOrigin() && canReturn(bot, e.origin);
+        Origin home = st.home;
+        boolean back = cfg.returnToOrigin() && home != null && canReturn(bot, home);
         if (back) {
-            st.ret = new Return(e.origin, now, bot.position().horizontalTo(e.origin.pos()));
+            st.ret = new Return(home, now, bot.position().horizontalTo(home.pos()));
+        } else {
+            st.home = null;
         }
         logInfo(now, name, "aggro: " + name + " gives up on " + e.name + " after " + (now - e.startTick) + " ticks ("
-                + reason + ", " + fmt(e.leashDistance) + " from origin, unseen " + e.unseen + "t)"
-                + (back ? ", walking back" : ""));
+                + reason + ", " + fmt(e.leashDistance) + " from " + (e.temporary ? "temporary origin" : "origin")
+                + ", unseen " + e.unseen + "t)" + (back ? ", walking home" : ""));
     }
 
     private boolean canReturn(Watcher bot, Origin origin) {
@@ -429,7 +517,7 @@ public final class AggroController {
             return false;
         }
         if (!up.steeringAvailable()) {
-            warnOnce("steering", "aggro: inhabitants cannot walk back to where a fight began: " + up.steeringProblem());
+            warnOnce("steering", "aggro: inhabitants cannot walk back to its home anchor: " + up.steeringProblem());
             return false;
         }
         return true;
@@ -448,9 +536,10 @@ public final class AggroController {
         r.distance = d;
         if (d <= cfg.returnArriveDistance()) {
             st.ret = null;
+            st.home = null;
             returned++;
-            log.debug("aggro: " + name + " is back where the fight began (" + fmt(d) + " blocks away, "
-                    + (now - r.startTick) + " ticks)");
+            log.debug("aggro: " + name + " is back home (" + fmt(d) + " blocks away, " + (now - r.startTick)
+                    + " ticks)");
             return;
         }
         if (now - r.startTick >= cfg.returnMaxTicks()) {
@@ -467,8 +556,10 @@ public final class AggroController {
         up.steer(bot.handle(), r.origin.pos(), RETURN_SPEED);
     }
 
+    /** The walk back is given up: the bot stays where it is and the home anchor is cleared. */
     private void abandon(String name, BotState st, String reason) {
         st.ret = null;
+        st.home = null;
         abandoned.merge(reason.contains(",") ? reason.substring(0, reason.indexOf(',')) : reason, 1L, Long::sum);
         log.debug("aggro: " + name + " stops walking back: " + reason);
     }
@@ -531,12 +622,20 @@ public final class AggroController {
                 continue;
             }
             up.setTarget(bot.name(), candidate.name());
-            Origin origin = new Origin(bot.position(), bot.dimension());
-            state(bot.name()).engagement = new Engagement(candidate.handle(), candidate.name(), Cause.ACQUIRED,
-                    origin, now, false, candidate.name());
+            BotState st = state(bot.name());
+            boolean[] temporary = {false};
+            Origin origin = beginOrigin(bot, st, temporary);
+            Engagement e = new Engagement(candidate.handle(), candidate.name(), Cause.ACQUIRED, origin, temporary[0],
+                    now, false, candidate.name());
+            st.engagement = e;
+            if (temporary[0]) {
+                e.homeDistance = homeDistance(bot, st);
+            }
             acquisitions++;
             logInfo(now, bot.name(), "aggro: " + bot.name() + " noticed " + candidate.name() + " at "
-                    + fmt(bot.distanceTo(candidate)) + " blocks");
+                    + fmt(bot.distanceTo(candidate)) + " blocks"
+                    + (temporary[0] ? " while walking home (temporary origin, home " + fmt(e.homeDistance)
+                    + " away)" : ""));
             return;
         }
     }
@@ -611,8 +710,8 @@ public final class AggroController {
                 Config cfg = config.get();
                 log.info(previous == Mode.UNKNOWN
                         ? "aggro: active, inhabitants notice players within " + fmt(cfg.acquireRange())
-                        + " blocks in line of sight and give up " + fmt(cfg.leashRange()) + " blocks from where the "
-                        + "fight began or after " + cfg.loseSightTicks() + " ticks unseen"
+                        + " blocks in line of sight and give up " + fmt(cfg.leashRange()) + " blocks from where the chase "
+                        + "began (its origin) or after " + cfg.loseSightTicks() + " ticks unseen"
                         + (cfg.returnToOrigin() ? ", then walk back" : "")
                         : text);
             }
@@ -708,15 +807,27 @@ public final class AggroController {
         return s == null || s.engagement == null ? null : s.engagement.cause;
     }
 
-    /** True while {@code botName} is walking back to where a fight began. */
+    /** True while {@code botName} is walking back to its home anchor. */
     public boolean isReturning(String botName) {
         BotState s = states.get(botName);
         return s != null && s.ret != null;
     }
 
+    /** True while {@code botName} has a home anchor (an engagement or a walk back is pending). */
+    public boolean hasHome(String botName) {
+        BotState s = states.get(botName);
+        return s != null && s.home != null;
+    }
+
+    /** True while the engagement running on {@code botName} is measured from a temporary origin. */
+    public boolean hasTemporaryOrigin(String botName) {
+        BotState s = states.get(botName);
+        return s != null && s.engagement != null && s.engagement.temporary;
+    }
+
     /**
      * One short text about one bot for the status output, e.g.
-     * {@code engaged Steve (acquired) 12.3 from origin, unseen 40t}, {@code returning, 18.0 to origin} or
+     * {@code engaged Steve (acquired) 12.3 from origin, unseen 40t}, {@code engaged Steve (hit) 5.2 from temp origin, home 20.1 away, unseen 0t}, {@code returning home, 18.0 to go} or
      * {@code idle}. Distances are as of the last tick.
      */
     public String describe(String botName) {
@@ -724,11 +835,12 @@ public final class AggroController {
         if (s != null && s.engagement != null) {
             Engagement e = s.engagement;
             return "engaged " + e.name + " (" + e.cause.name().toLowerCase(Locale.ROOT)
-                    + (e.external ? ", external" : "") + ") " + fmt(e.leashDistance) + " from origin, unseen "
-                    + e.unseen + "t";
+                    + (e.external ? ", external" : "") + ") " + fmt(e.leashDistance)
+                    + (e.temporary ? " from temp origin, home " + fmt(e.homeDistance) + " away" : " from origin")
+                    + ", unseen " + e.unseen + "t";
         }
         if (s != null && s.ret != null) {
-            return "returning, " + fmt(s.ret.distance) + " to origin";
+            return "returning home, " + fmt(s.ret.distance) + " to go";
         }
         return switch (mode) {
             case ACTIVE -> "idle";

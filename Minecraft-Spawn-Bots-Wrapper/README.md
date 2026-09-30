@@ -305,23 +305,35 @@ policy turns PvP BOT's `autoTarget` off) with the rules below, applied to every 
   creative/spectator unless `attackInvincible`, not a faction ally, other bots only with `targetOtherBots`). The
   player is handed to PvP BOT as a forced target.
 * **Being hit.** Anyone who hits an inhabitant from any distance (up to PvP BOT's `maxTargetDistance`) is chased too
-  (PvP BOT's revenge memory), and so is a mob it decides to fight.
+  (PvP BOT's revenge memory), and so is a mob it decides to fight. This includes a wind-burst / elytra flow in which
+  PvP BOT writes the forced target itself: that chase is leashed like any other. **Limit:** PvP BOT itself never keeps
+  a target farther than its `maxTargetDistance` ceiling (64), so a hit from beyond it is not chased. That is a PvP BOT
+  limitation and is left as is.
+* **Home and origins.** The first engagement of a bot that has no home records the bot's position and level as its
+  **home anchor**, and that position is the origin its leash and sight rule are measured from. Home is kept until the
+  bot is back within `returnArriveDistance` of it, the walk back is abandoned, or the bot dies or leaves, and only
+  then cleared. An engagement that starts while the bot is walking back home (a hit, or a regular noticing) gets a
+  **temporary origin**: the bot's position at that moment, from which its 32-block leash and 10 s sight rule are
+  measured. A hit while a chase is already running changes nothing.
 * **Giving up.** Every chase ends when the inhabitant is more than `leashRange` (32) blocks (horizontally) from
-  where the engagement began, or has not seen its target for `loseSightTicks` (200 = 10 s) in a row, or the
+  its origin, or has not seen its target for `loseSightTicks` (200 = 10 s) in a row, or the
   target is gone (dead, logged out, another dimension, creative/spectator), or the bot changed dimension. PvP BOT's
   target state is then cleared (`BotCombat.clearTarget`, which also wipes its revenge memory).
-* **Walking back.** With `returnToOrigin` the inhabitant then walks back to where the engagement began, using PvP BOT's
-  own look and move-toward calls every tick (never a teleport), and counts as arrived within `returnArriveDistance`
-  (1.5) blocks. The walk is abandoned (one debug line, the bot stays put) when the distance shrinks by less than a
-  block over `returnStuckTicks` (200) or it lasts `returnMaxTicks` (1200). While returning nothing new is noticed;
-  a new hit continues the ORIGINAL origin, so repeated hits cannot drag a bot ever farther from home.
+* **Walking home.** With `returnToOrigin` the inhabitant then walks back to its HOME anchor (never to a temporary
+  origin), using PvP BOT's own look and move-toward calls every tick (never a teleport), and counts as arrived within
+  `returnArriveDistance` (1.5) blocks; the home anchor is then cleared. The walk is abandoned (one debug line, the bot
+  stays put, home cleared) when the distance shrinks by less than a block over `returnStuckTicks` (200) or it lasts
+  `returnMaxTicks` (1200). Both guards count per walking leg: after a temporary chase gives up, the new leg starts them
+  afresh. While walking home the bot still notices players by the regular rules (within `acquireRange`, in line of
+  sight), which starts a chase with a temporary origin; a bot is never noticed-and-chased on the very tick a chase was
+  given up, so the walk always gets its steering tick.
 * **Somebody else's forced target** (a `/pvpbot` command) is only tracked: never leashed, cleared or walked back from.
 * **Inert mode.** While PvP BOT's `autoTarget` is on, PvP BOT notices by itself: nothing is noticed here (logged once
   at INFO), but the leash and the walk back still apply. A `WARN` is logged when `leashRange + acquireRange` exceeds
   PvP BOT's `maxTargetDistance`, since PvP BOT may then drop a target before the leash decides.
 * The walk back runs in a Fabric tick phase ordered after the default phase, so it is the last input written each tick,
   after PvP BOT's own bot tick (idle wander, patrol movement). The state of a bot (`aggro[engaged Steve (acquired)
-  12.3 from origin, unseen 40t]`, `aggro[returning, 18.0 to origin]`) is appended to the "Combat taken" line; starts,
+  12.3 from origin, unseen 40t]`, `aggro[engaged Steve (hit) 5.2 from temp origin, home 20.1 away, unseen 0t]`, `aggro[returning home, 18.0 to go]`) is appended to the "Combat taken" line; starts,
   give-ups and returns are logged at debug (one INFO per bot per 10 s at most).
 
 ### Diagnostic lines: hits an inhabitant TAKES, and bow/crossbow loops

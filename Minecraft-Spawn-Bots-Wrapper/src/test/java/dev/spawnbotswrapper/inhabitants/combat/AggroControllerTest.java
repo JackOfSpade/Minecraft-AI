@@ -888,9 +888,10 @@ class AggroControllerTest {
         scan();
         up.walkSpeed = 0.5;
         bot.x = 33;
+        steve.x = 300; // out of range: nothing new is noticed on the way home
         run(1);
         assertTrue(controller.isReturning("Warden7"));
-        assertTrue(controller.describe("Warden7").startsWith("returning, "), controller.describe("Warden7"));
+        assertTrue(controller.describe("Warden7").startsWith("returning home, "), controller.describe("Warden7"));
         int steps = 0;
         while (controller.isReturning("Warden7") && steps < 200) {
             run(1);
@@ -934,18 +935,95 @@ class AggroControllerTest {
         assertFalse(controller.isReturning("Warden7"));
     }
 
-    @Test
-    void noNewPlayerIsNoticedWhileReturning() {
+    /** Steve is noticed at 0, the bot follows to 33 (past the leash) and gives up: it now walks home from x=33. */
+    private void engageThenGiveUpAt33() {
         steve.x = 5;
         scan();
         bot.x = 33;
-        steve.x = 34;
         run(2);
         assertTrue(controller.isReturning("Warden7"));
-        world.add("Alex", 30);
+        assertTrue(controller.hasHome("Warden7"));
+        steve.x = 300; // out of everybody's range: nothing new is noticed on the way home
+    }
+
+    @Test
+    void aPlayerNoticedWhileReturningIsAcquiredWithATemporaryOrigin() {
+        engageThenGiveUpAt33();
+        world.add("Alex", 41);
+        run(config.scanIntervalTicks());
+        assertEquals(List.of("set Warden7->Steve", "set Warden7->Alex"), up.callsOf("set"));
+        assertEquals("Alex", controller.engagedWith("Warden7"));
+        assertEquals(Cause.ACQUIRED, controller.causeOf("Warden7"));
+        assertTrue(controller.hasTemporaryOrigin("Warden7"));
+        assertFalse(controller.isReturning("Warden7"), "the walk ends while the new chase runs");
+        assertTrue(controller.hasHome("Warden7"), "the home anchor is kept");
+        assertTrue(controller.describe("Warden7").contains("from temp origin, home 33.0 away"),
+                controller.describe("Warden7"));
+    }
+
+    @Test
+    void noticingWhileReturningKeepsTheRegularRules() {
+        engageThenGiveUpAt33();
+        Person alex = world.add("Alex", 43.5);
         run(20);
-        assertEquals(1, up.callsOf("set").size(), "nothing new was forced while walking back");
+        assertEquals(1, up.callsOf("set").size(), "10.5 blocks is outside the range");
+        alex.x = 41;
+        bot.blind.add("Alex");
+        run(20);
+        assertEquals(1, up.callsOf("set").size(), "no line of sight, no noticing");
         assertTrue(controller.isReturning("Warden7"));
+        alex.creative = true;
+        bot.blind.clear();
+        run(20);
+        assertEquals(1, up.callsOf("set").size(), "an invalid target is not noticed");
+        alex.creative = false;
+        run(config.scanIntervalTicks());
+        assertEquals(2, up.callsOf("set").size());
+    }
+
+    @Test
+    void aTemporaryAcquisitionIsLeashedFromItsOwnOriginAndThenWalksHome() {
+        engageThenGiveUpAt33();
+        world.add("Alex", 41);
+        run(config.scanIntervalTicks());
+        assertTrue(controller.hasTemporaryOrigin("Warden7"));
+        // 31.9 blocks from the temporary origin (33, 0) but 45 from home: still inside its own leash.
+        bot.z = 31.9;
+        run(3);
+        assertEquals("Alex", controller.engagedWith("Warden7"));
+        bot.z = 32.1;
+        run(1);
+        assertNull(controller.engagedWith("Warden7"));
+        assertTrue(controller.isReturning("Warden7"));
+        assertEquals(new Pos(0, 64, 0), up.steered.get(up.steered.size() - 1), "home, never the temporary origin");
+    }
+
+    @Test
+    void anAcquisitionIsNotStartedOnTheTickAChaseWasGivenUpSoTheWalkGetsItsSteeringTick() {
+        config = new Config(true, 10.0, true, 1, 32.0, 200, true, 1.5, 200, 1200);
+        steve.x = 5;
+        run(1);
+        assertEquals("Steve", controller.engagedWith("Warden7"));
+        bot.x = 33;
+        steve.x = 34;
+        int steersBefore = up.steered.size();
+        run(1);
+        assertTrue(controller.isReturning("Warden7"));
+        assertEquals(steersBefore + 1, up.steered.size(), "the give-up tick already steers home");
+        run(1);
+        assertEquals("Steve", controller.engagedWith("Warden7"), "next tick the regular noticing applies again");
+        assertTrue(controller.hasTemporaryOrigin("Warden7"));
+    }
+
+    @Test
+    void theWalkHomeIsSteeredOnEveryTickIncludingScanTicks() {
+        engageThenGiveUpAt33();
+        up.walkSpeed = 0.5;
+        int before = up.steered.size();
+        for (int i = 1; i <= 40; i++) {
+            run(1);
+            assertEquals(before + i, up.steered.size(), "one steer per tick, tick " + i);
+        }
     }
 
     @Test
@@ -963,24 +1041,206 @@ class AggroControllerTest {
     }
 
     @Test
-    void aHitWhileReturningContinuesTheOriginalOriginNotTheNewPosition() {
-        steve.x = 5;
-        scan();
-        bot.x = 33;
-        run(2);
-        assertTrue(controller.isReturning("Warden7"));
-        bot.x = 20;
+    void aHitWhileReturningStartsATemporaryOriginAndTheLeashIsMeasuredFromIt() {
+        engageThenGiveUpAt33();
+        // Walking home, the bot is at x=25 when Steve (far outside the noticing range) hits it.
+        bot.x = 25;
+        steve.x = 55;
         hit(steve);
         run(1);
-        assertFalse(controller.isReturning("Warden7"));
         assertEquals(Cause.HIT, controller.causeOf("Warden7"));
-        assertTrue(log.any("original origin kept"));
-        // Farther than the leash from the ORIGINAL origin (0), though only 12.5 blocks from where it was hit.
-        bot.x = 32.5;
+        assertTrue(controller.hasTemporaryOrigin("Warden7"));
+        assertFalse(controller.isReturning("Warden7"));
+        assertTrue(controller.hasHome("Warden7"));
+        assertTrue(controller.describe("Warden7").contains("(hit) 0.0 from temp origin, home 25.0 away"),
+                controller.describe("Warden7"));
+        // 31.9 blocks from the temporary origin (25) while only 6.9 from home: inside its leash.
+        bot.x = 25 - 31.9;
+        run(3);
+        assertEquals("Steve", controller.engagedWith("Warden7"));
+        // 32.1 blocks from the temporary origin though only 7.1 from home: over its leash.
+        bot.x = 25 - 32.1;
         run(1);
+        assertNull(controller.engagedWith("Warden7"));
+        assertEquals(2, up.callsOf("clear").size());
+        assertTrue(controller.isReturning("Warden7"));
+        assertEquals(new Pos(0, 64, 0), up.steered.get(up.steered.size() - 1), "home, not the temporary origin");
+    }
+
+    @Test
+    void aHitDuringARunningEngagementChangesNothing() {
+        steve.x = 5;
+        scan();
+        Person alex = world.add("Alex", 8);
+        bot.x = 20;
+        run(1);
+        hit(alex);
+        run(3);
+        assertFalse(controller.hasTemporaryOrigin("Warden7"));
+        assertEquals(Cause.ACQUIRED, controller.causeOf("Warden7"));
+        // Still measured from the original origin (0): 20 is inside, 32.1 is out.
+        bot.x = 32.1;
+        run(1);
+        assertNull(controller.engagedWith("Warden7"));
+        assertEquals(new Pos(0, 64, 0), up.steered.get(up.steered.size() - 1));
+    }
+
+    @Test
+    void aTemporaryEngagementThatGivesUpAlwaysWalksHomeNeverToItsOwnOrigin() {
+        engageThenGiveUpAt33();
+        bot.x = 25;
+        steve.x = 55;
+        hit(steve);
+        run(1);
+        bot.blind.add("Steve");
+        run(config.loseSightTicks());
         assertNull(controller.engagedWith("Warden7"));
         assertTrue(controller.isReturning("Warden7"));
         assertEquals(new Pos(0, 64, 0), up.steered.get(up.steered.size() - 1));
+        assertTrue(controller.describe("Warden7").startsWith("returning home, 25.0 to go"),
+                controller.describe("Warden7"));
+    }
+
+    @Test
+    void theHomeIsClearedOnArrival() {
+        engageThenGiveUpAt33();
+        bot.x = 1.4;
+        run(1);
+        assertFalse(controller.isReturning("Warden7"));
+        assertFalse(controller.hasHome("Warden7"));
+    }
+
+    @Test
+    void theHomeIsClearedWhenTheWalkIsAbandoned() {
+        engageThenGiveUpAt33();
+        run(config.returnStuckTicks() + 1);
+        assertFalse(controller.isReturning("Warden7"));
+        assertFalse(controller.hasHome("Warden7"));
+        assertEquals(1, up.callsOf("set").size(), "nothing new was noticed");
+    }
+
+    @Test
+    void theHomeIsClearedWhenTheBotDiesOrLeaves() {
+        engageThenGiveUpAt33();
+        bot.alive = false;
+        run(1);
+        assertFalse(controller.hasHome("Warden7"));
+        bot.alive = true;
+        // Another life: a fresh engagement sets a fresh home right where the bot stands now.
+        bot.x = 50;
+        steve.x = 55;
+        hit(steve);
+        run(1);
+        assertTrue(controller.hasHome("Warden7"));
+        assertFalse(controller.hasTemporaryOrigin("Warden7"));
+        world.online.remove("warden7");
+        run(1);
+        assertFalse(controller.hasHome("Warden7"));
+    }
+
+    @Test
+    void aNewEngagementAfterArrivalSetsAFreshHomeAndOrigin() {
+        engageThenGiveUpAt33();
+        bot.x = 1.4;
+        run(1);
+        assertFalse(controller.hasHome("Warden7"));
+        bot.x = 20;
+        steve.x = 45;
+        hit(steve);
+        run(1);
+        assertEquals(Cause.HIT, controller.causeOf("Warden7"));
+        assertFalse(controller.hasTemporaryOrigin("Warden7"), "not walking home: this is a first engagement again");
+        assertTrue(controller.hasHome("Warden7"));
+        bot.x = 20 + 32.5;
+        run(1);
+        assertEquals(new Pos(20, 64, 0), up.steered.get(up.steered.size() - 1), "the new home is where it stood");
+    }
+
+    @Test
+    void theStuckGuardCountsPerLegAndRestartsWithANewLeg() {
+        engageThenGiveUpAt33();
+        // 150 ticks of a stuck first leg...
+        run(150);
+        assertTrue(controller.isReturning("Warden7"));
+        // ...then a hit starts a temporary chase that ends unseen; the new leg starts its counters from zero.
+        steve.x = 60;
+        hit(steve);
+        run(1);
+        assertFalse(controller.isReturning("Warden7"));
+        bot.blind.add("Steve");
+        run(config.loseSightTicks());
+        assertTrue(controller.isReturning("Warden7"));
+        run(config.returnStuckTicks() - 3);
+        assertTrue(controller.isReturning("Warden7"), "199 ticks into the new leg is not yet stuck");
+        run(4);
+        assertFalse(controller.isReturning("Warden7"));
+        assertTrue(log.any("stops walking back: stuck"));
+    }
+
+    @Test
+    void theMaximumTimeGuardCountsPerLegToo() {
+        config = new Config(true, 10.0, true, 5, 32.0, 200, true, 1.5, 100000, 1200);
+        engageThenGiveUpAt33();
+        up.walkSpeed = 0.01;
+        run(1000);
+        steve.x = 60;
+        hit(steve);
+        run(1);
+        bot.blind.add("Steve");
+        run(config.loseSightTicks());
+        assertTrue(controller.isReturning("Warden7"));
+        run(1100);
+        assertTrue(controller.isReturning("Warden7"), "1100 ticks into the new leg: the old 1200 tick budget is gone");
+        run(200);
+        assertFalse(controller.isReturning("Warden7"));
+        assertTrue(log.any("stops walking back: took too long"));
+    }
+
+    // ---------------------------------------------------------------- forced names PvP BOT writes itself
+
+    @Test
+    void aForcedNamePvpBotWritesForTheAttackerDoesNotEscapeTheLeash() {
+        steve.x = 10;
+        hit(steve);
+        run(1);
+        assertEquals(Cause.HIT, controller.causeOf("Warden7"));
+        // PvP BOT's wind-burst / elytra flow forces the attacker's name itself.
+        up.forced.put("Warden7", "Steve");
+        run(3);
+        assertEquals("Steve", controller.engagedWith("Warden7"));
+        assertFalse(controller.describe("Warden7").contains("external"), controller.describe("Warden7"));
+        bot.x = 32.1;
+        run(1);
+        assertNull(controller.engagedWith("Warden7"), "still leashed");
+        assertEquals(List.of("clear Warden7"), up.callsOf("clear"));
+        assertTrue(controller.isReturning("Warden7"));
+    }
+
+    @Test
+    void aForcedNamePvpBotWritesForTheAttackerDoesNotEscapeTheSightRule() {
+        steve.x = 10;
+        hit(steve);
+        run(1);
+        up.forced.put("Warden7", "Steve");
+        bot.blind.add("Steve");
+        run(config.loseSightTicks());
+        assertNull(controller.engagedWith("Warden7"));
+        assertEquals(List.of("clear Warden7"), up.callsOf("clear"));
+    }
+
+    @Test
+    void aForcedNameForSomeoneElseThanTheAttackerStillCountsAsExternal() {
+        steve.x = 10;
+        hit(steve);
+        run(1);
+        world.add("Alex", 6);
+        up.forced.put("Warden7", "Alex");
+        run(1);
+        assertTrue(controller.describe("Warden7").contains("external"), controller.describe("Warden7"));
+        assertFalse(controller.hasHome("Warden7"), "an external force has no home to walk back to");
+        bot.x = 100;
+        run(50);
+        assertEquals(List.of(), up.callsOf("clear"));
     }
 
     @Test
@@ -1193,7 +1453,7 @@ class AggroControllerTest {
         assertTrue(controller.describe("Warden7").contains("18.0 from origin"), controller.describe("Warden7"));
         bot.x = 33;
         run(1);
-        assertEquals("returning, 33.0 to origin", controller.describe("Warden7"));
+        assertEquals("returning home, 33.0 to go", controller.describe("Warden7"));
     }
 
     @Test

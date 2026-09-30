@@ -352,9 +352,10 @@ public final class InhabitantsConfig {
      * <p>
      * An inhabitant NOTICES a player only within {@link #acquireRange} blocks and in line of sight. Someone who
      * hits it from any distance (up to PvP BOT's {@code maxTargetDistance}) is chased too. Every chase ends when the
-     * inhabitant is {@link #leashRange} blocks from where it began, or has not seen its target for
-     * {@link #loseSightTicks} ticks; it then drops the fight and, with {@link #returnToOrigin}, WALKS back to where
-     * it began (never a teleport).
+     * inhabitant is {@link #leashRange} blocks from its origin, or has not seen its target for
+     * {@link #loseSightTicks} ticks; it then drops the fight and, with {@link #returnToOrigin}, WALKS back to its HOME
+     * anchor (never a teleport). Home is where its first engagement began and is kept until it is back there; an
+     * engagement that starts while it walks home (hit or noticing) is measured from a temporary origin instead.
      * <p>
      * Works together with PvP BOT's auto-target being OFF (then the addon does the noticing); while it is ON PvP BOT
      * notices by itself and only the leash and the walk back apply. The addon says so once in the log.
@@ -368,17 +369,18 @@ public final class InhabitantsConfig {
         public boolean requireLineOfSight = true;
         /** Ticks between looks for a target for idle inhabitants (1..40). */
         public int scanIntervalTicks = 5;
-        /** Blocks from where the fight began at which the chase is given up. Range acquireRange..128. */
+        /** Blocks from the chase's origin (home anchor, or a temporary one while walking home) at which it is given
+         *  up. Range acquireRange..128. */
         public double leashRange = 32.0;
         /** Consecutive ticks without a line of sight to the target after which the chase is given up (200 = 10 s). */
         public int loseSightTicks = 200;
-        /** After giving up, walk back to where the fight began. */
+        /** After giving up, walk back to the home anchor (where the first engagement began). */
         public boolean returnToOrigin = true;
-        /** Blocks (horizontal) from the origin at which the walk back counts as arrived. */
+        /** Blocks (horizontal) from home at which the walk back counts as arrived. */
         public double returnArriveDistance = 1.5;
-        /** The walk back is abandoned when it gets less than a block closer over this many ticks. */
+        /** The walk back is abandoned when it gets less than a block closer over this many ticks (per leg). */
         public int returnStuckTicks = 200;
-        /** The walk back is abandoned after this many ticks in any case. */
+        /** The walk back is abandoned after this many ticks in any case (per leg). */
         public int returnMaxTicks = 1200;
     }
 
