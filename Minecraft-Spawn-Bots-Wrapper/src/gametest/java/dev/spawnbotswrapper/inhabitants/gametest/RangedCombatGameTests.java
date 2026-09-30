@@ -88,8 +88,8 @@ public final class RangedCombatGameTests {
                 java.util.Collections.sort(sorted);
                 long min = sorted.get(0);
                 long median = sorted.get(sorted.size() / 2);
-                Rig.LOG.info("[qc3] {} shots, gaps {} (min {}, median {}), first shot {} ticks after dressing", ticks.size(),
-                        gaps, min, median, ticks.get(0) - (dressedAt[0]));
+                Rig.LOG.info("[qc3] {} shots, gaps {} (min {}, median {}), first shot at game tick {}", ticks.size(),
+                        gaps, min, median, ticks.get(0));
                 if (min < 10) {
                     rig.fail("two shots only " + min + " ticks apart: faster than a Quick Charge III crossbow can charge; gaps " + gaps);
                 }
