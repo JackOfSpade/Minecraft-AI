@@ -4,11 +4,14 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
+import java.util.List;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 public final class WalkToController {
@@ -165,7 +168,7 @@ public final class WalkToController {
         boolean headClear = isClear(world, front.above()) && isClear(world, playerPos.above());
 
         if (hasCollision(frontState, world, front)) {
-            double rise = front.getY() + collisionTop(frontState, world, front) - current.y;
+            double rise = front.getY() + collisionTop(frontState, world, front, move) - current.y;
             if (rise <= STEP_HEIGHT) {
                 return new JumpDecision(false, false, false);
             }
@@ -181,15 +184,27 @@ public final class WalkToController {
         return new JumpDecision(false, false, false);
     }
 
+    /**
+     * A gap is a cell ahead with nothing to stand on and ground again beyond it: the bot jumps across. One exception: a one-deep water
+     * cell (an irrigation channel or the water hole of a farm) with farmland beyond it. The jump would land on the farmland from above
+     * half a block and vanilla would trample it most of the time, while wading through the shallow water and stepping out on the far
+     * side is safe and tramples nothing.
+     */
     private static boolean isGapAhead(Vec3 current, Vec3 move, ServerLevel world) {
         BlockPos near = footPos(current, move, 1.35D);
         if (!isClear(world, near) || !isClear(world, near.above()) || !isClear(world, near.below())) {
             return false;
         }
         BlockPos landing = footPos(current, move, 2.1D);
-        return isClear(world, landing)
+        boolean gap = isClear(world, landing)
                 && isClear(world, landing.above())
                 && hasCollision(world.getBlockState(landing.below()), world, landing.below());
+        return gap && !(isShallowWater(world, near.below()) && world.getBlockState(landing.below()).is(Blocks.FARMLAND));
+    }
+
+    /** A water cell with solid ground right under it: wading through it is a step down and a step out, never a swim. */
+    private static boolean isShallowWater(ServerLevel world, BlockPos pos) {
+        return world.getFluidState(pos).is(FluidTags.WATER) && hasCollision(world.getBlockState(pos.below()), world, pos.below());
     }
 
     private static boolean sprintGeometryClear(JumpDecision jump, Vec3 current, Vec3 move, ServerLevel world) {
@@ -216,11 +231,35 @@ public final class WalkToController {
         return !state.getCollisionShape(world, pos).isEmpty();
     }
 
-    private static double collisionTop(BlockState state, ServerLevel world, BlockPos pos) {
+    private static double collisionTop(BlockState state, ServerLevel world, BlockPos pos, Vec3 move) {
         if (!hasCollision(state, world, pos)) {
             return 0.0D;
         }
-        return state.getCollisionShape(world, pos).max(Direction.Axis.Y);
+        return entryTop(state.getCollisionShape(world, pos).toAabbs(), move.x, move.z);
+    }
+
+    /**
+     * The top of a block's collision boxes (block-local, 0..1) in the half of the block the bot walks into first, along the dominant
+     * axis of {@code (moveX, moveZ)}; the whole block's top when that half is empty. A stair seen from its low side is a half-block
+     * step there (it walks or jumps onto the low step, then steps up to the high one), not the full block its highest box makes it:
+     * from a bottom slab a stair one level up rises 1.0, a jump, where the highest box would make it 1.5 and block the walk.
+     */
+    static double entryTop(List<AABB> boxes, double moveX, double moveZ) {
+        boolean alongX = Math.abs(moveX) >= Math.abs(moveZ);
+        boolean positive = (alongX ? moveX : moveZ) >= 0.0D;
+        double top = 0.0D;
+        double highest = 0.0D;
+        boolean entered = false;
+        for (AABB box : boxes) {
+            highest = Math.max(highest, box.maxY);
+            double low = alongX ? box.minX : box.minZ;
+            double high = alongX ? box.maxX : box.maxZ;
+            if (positive ? low < 0.5D : high > 0.5D) {
+                top = Math.max(top, box.maxY);
+                entered = true;
+            }
+        }
+        return entered ? top : highest;
     }
 
     /**

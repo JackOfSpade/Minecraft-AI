@@ -761,6 +761,58 @@ public final class FarmSurvivalGameTests {
         });
     }
 
+    /**
+     * A field with a one-deep irrigation channel across the walk: a 1-wide gap in the ground with farmland beyond it. Jumping it would
+     * land on the farmland from above half a block and trample it most of the time; the bot wades through the shallow water and steps
+     * out instead. The walk crosses the field and the channel, and every farmland cell is still farmland with its wheat.
+     */
+    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_walking_across_afield_channel_never_tramples_it", maxTicks = 300)
+    public void walkingAcrossAFieldChannelNeverTramplesIt(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(14, 4, 254));
+        forceChunks(context, feet, 12);
+        prepareGround(world, feet, 12);
+        BlockPos fieldOrigin = feet.offset(2, 0, -1);
+        field(world, fieldOrigin, 7, 3, MATURE_WHEAT);
+        int channelX = 3;
+        for (int z = 0; z < 3; z++) {
+            BlockPos cell = fieldOrigin.offset(channelX, 0, z);
+            world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.below(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        AIPlayerEntity bot = spawnBot(context, "FarmChannelWalkGT", feet);
+        requireStrict(context, bot);
+        BlockPos goal = feet.offset(11, 0, 0);
+        boolean[] walking = {false};
+        context.failIfEver(() -> {
+            if (context.getTick() < 5) {
+                return;
+            }
+            if (!walking[0]) {
+                require(context, !bot.getActionPack().startWalkTo(Vec3.atBottomCenterOf(goal), 0.5D).isFailed(),
+                        "fixture: the walk across the field did not start");
+                walking[0] = true;
+                return;
+            }
+            for (int x = 0; x < 7; x++) {
+                for (int z = 0; z < 3; z++) {
+                    if (x == channelX) {
+                        continue;
+                    }
+                    BlockPos cell = fieldOrigin.offset(x, 0, z);
+                    require(context, world.getBlockState(cell.below()).is(Blocks.FARMLAND) && world.getBlockState(cell).is(Blocks.WHEAT),
+                            "the walk trampled the field at " + cell.toShortString() + ": " + world.getBlockState(cell.below()));
+                }
+            }
+            if (bot.getActionPack().isWalkToIdle()) {
+                require(context, bot.position().distanceTo(Vec3.atBottomCenterOf(goal)) <= 1.0D,
+                        "the walk across the field's channel stopped short at " + bot.blockPosition().toShortString());
+                AIPlayerManager.INSTANCE.despawn(world.getServer(), "FarmChannelWalkGT");
+                context.succeed();
+            }
+        });
+    }
+
     /** Item entities only tick in entity-ticking chunks: force every chunk the fixture (and its drops) can reach. */
     private static void forceChunks(GameTestHelper context, BlockPos feet, int radius) {
         GameTestChunkForcing.forceForTest(context,
