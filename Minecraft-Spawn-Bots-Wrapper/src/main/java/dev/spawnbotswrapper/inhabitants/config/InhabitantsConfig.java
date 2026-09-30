@@ -293,10 +293,11 @@ public final class InhabitantsConfig {
          * Enchantments no inhabitant is given or keeps (ids with or without the {@code minecraft:} namespace; an
          * empty list disables the feature). Default: Piercing (a piercing bolt ignores a raised shield in
          * vanilla Java, so a hostile inhabitant's crossbow could not be blocked) and Mending (gear is a one-time
-         * reward that cannot be repaired with experience). A list written in the config replaces the default. New loadouts never contain them
-         * (the rolls are otherwise unchanged), inhabitants that already carry one are stripped of just that
-         * enchantment (dressing, after a restore and about every 5 s), and stored profiles are filtered when
-         * re-applied.
+         * reward that cannot be repaired with experience). A list written in the config replaces the default. New
+         * loadouts never contain them (the rolls are otherwise unchanged), inhabitants that already carry one are
+         * stripped of just that enchantment (dressing, after a restore and about every 5 s), and stored profiles are
+         * filtered when re-applied. A changed list applies to gear dressed from then on (and to the periodic sweep of
+         * wrapper-issued gear); a stack the one-time migration left unmarked, or one a bot picked up, is never re-judged.
          */
         public List<String> disabledEnchantments = new ArrayList<>(DisabledEnchantments.DEFAULT);
     }

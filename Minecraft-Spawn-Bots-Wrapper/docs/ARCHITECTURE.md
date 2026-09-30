@@ -2,7 +2,9 @@
 
 PvP BOT Inhabitants is a standalone Fabric addon for **Minecraft 1.21.11**. It populates registered
 structures, vanilla and modded, with bots that the upstream **PvP BOT** mod spawns and drives. It never
-copies, bundles, patches or mixes into PvP BOT.
+copies, bundles, patches or mixes into PvP BOT. The published jar contains no mixin at all. The single exception in the
+repository is a harness-only shim in the GameTest source set (`InventoryHelperDevShimMixin`, a field-name translation for
+the Mojang-named dev server that changes no behaviour and is never packaged); `NoUpstreamMixinTest` guards both facts.
 
 This document explains what the addon does, why it is built the way it is, and exactly how it touches PvP BOT.
 

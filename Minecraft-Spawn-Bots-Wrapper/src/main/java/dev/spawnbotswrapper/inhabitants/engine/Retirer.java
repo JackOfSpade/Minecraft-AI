@@ -375,6 +375,9 @@ final class Retirer {
      * possibly late): a seen one that is online while its record says DORMANT is a second copy of what the snapshot holds,
      * so it is emptied and removed (the snapshot wins); an unseen one is removed and its record dropped. After the gone
      * period a still-absent unseen bot's record is dropped (a vacant slot, never a death).
+     * <p>
+     * Limit: the watch lasts {@code goneConfirmTicks}. A seen bot that rejoins AFTER that window while its record is DORMANT
+     * is a second live copy nothing here removes (the roster does not track a sleeper); the window is the documented bound.
      */
     void tickLate(long now) {
         if (late.isEmpty() || now < nextLateCheck) {

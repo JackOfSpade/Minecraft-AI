@@ -32,7 +32,8 @@ import java.util.function.Supplier;
  * </ol>
  * The cycle is charge time plus about two ticks: about 12 ticks with Quick Charge III, about 27 without. The only gates
  * are vanilla mechanics (charge time, item use) and "has a live target in line of sight" (no shooting at nothing);
- * there is no cooldown or interval of this addon's own here (the aim rule below is the hand and the eye). No projectile is created here and no damage, accuracy or speed is
+ * there is no cooldown or interval of this addon's own here: the aim gate below (the hand and the eye settling on the
+ * target) is the only wait beyond vanilla mechanics. No projectile is created here and no damage, accuracy or speed is
  * touched. A loaded crossbow fires with no arrow left in the inventory too (the out-of-ammo bolt already in it), because
  * PvP BOT's mode plays no part in the gate. Bows need no trigger: PvP BOT releases them itself, at
  * {@code pvpbotSettings.bowMinDrawTime} (20 = full power).

@@ -16,7 +16,9 @@ import java.util.TreeMap;
  * doing X?". The second half matters because a profile is generated once and stored, while the PvP BOT
  * settings can change afterwards: a bot may carry a mace long after {@code mace} was switched off, or a
  * bow no one gave arrows for. The notes at the end are therefore computed from the stored loadout against
- * the capabilities as they are NOW, not as they were at generation.
+ * the capabilities as they are NOW, not as they were at generation. Likewise the rendered loadout is the stored one:
+ * it may list an enchantment (Piercing, Mending) that {@code profiles.disabledEnchantments} strips when the profile is
+ * applied, so a bot of an older profile can carry less than this shows.
  * <p>
  * Lines are plain text (the command layer may colour them). The formatter never throws: every field of an
  * odd or hand-edited profile is rendered defensively.

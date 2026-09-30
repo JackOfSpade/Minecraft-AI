@@ -172,6 +172,12 @@ public final class OutOfAmmoGapCloser {
         return charged && bot.hasLineOfSight(target);
     }
 
+    /**
+     * Whether the bot is eating or drinking RIGHT NOW, by vanilla's own item-use state. PvP BOT keeps an eating flag of its own
+     * that can stay set between two item uses; it is deliberately not read (an upstream internal, reached by reflection): the
+     * swap here only happens while the bot holds no food or drink in use, PvP BOT does the same swaps itself, and a bot
+     * between two bites has nothing in use to displace. Accepted risk, as the review noted.
+     */
     private static boolean eating(ServerPlayer bot) {
         if (!bot.isUsingItem()) {
             return false;

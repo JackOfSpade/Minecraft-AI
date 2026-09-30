@@ -203,7 +203,9 @@ were deleted that is `N - dead - seenAlive`.
   rewrite of the whole store in the middle of a lag spike; a full save folds it in and drops it). A crash leaves either
   the unchanged live bot or a record marked `removing`. On the next start such a bot that is online is emptied and
   removed once more, one that is offline is a sleeper (seen: its snapshot stands) or a vacant slot (unseen), *never*
-  a death, and a bot of such a record that rejoins late is emptied and removed again (the snapshot wins). A wake writes
+  a death, and a bot of such a record that rejoins late is emptied and removed again (the snapshot wins; this watch
+  lasts `processing.goneConfirmTicks`, so a bot that PvP BOT brings back only after that window while its record is
+  asleep is not recognised as a second copy: a known limit of a crash-interrupted removal). A wake writes
   the snapshot onto a fresh, empty fake player. If a removal fails after the bot was emptied (the disconnect and the
   kill both failed), the items and experience are put back: a failed removal never leaves an emptied live bot.
 
@@ -323,7 +325,12 @@ ids, for example only Piercing, replaces the default: that choice is kept and Me
   (`Removed disabled enchantment(s) from inhabitant ...`), later ones only in debug mode;
 * stored profiles (`populations.json`) are **not migrated**: the file keeps what was rolled and old saves load unchanged,
   but the application filters the loadout, so a re-dressing can never put a disabled enchantment back. Removing an
-  id from the list makes stored loadouts whole again on their next re-dressing.
+  id from the list makes stored loadouts whole again on their next re-dressing. A stored loadout (and any profile display
+  made from it) may therefore list an enchantment, for example Piercing, that the denylist strips when it is applied;
+* a **changed** `profiles.disabledEnchantments` applies to gear dressed from then on and to the periodic sweep of the
+  stacks the wrapper issued. Stacks of a bot from before issued items were marked (they went through the one-time
+  migration and stay unmarked) are not re-judged by a later change, and neither is anything a bot picked up from a
+  player or the world: such items are never touched.
 
 ### Arrow counts
 
@@ -783,7 +790,9 @@ ranged loop: DuskRaven aborted 3 bow/crossbow draws in 10 s | draws: crossbow st
   `charged`/`unloaded`), off hand, the item in use with use ticks so far/total, arrows and firework rockets carried,
   which of bow/crossbow/melee weapon it carries, the attacker (else the nearest real player) with distance and an
   eye-to-eye line of sight, on ground / in water / in a cobweb, and PvP BOT's GLOBAL switches (combat, auto-target,
-  ranged), followed by what PvP BOT intends for THIS bot, read through the adapter: `target=Steve` (its current
+  ranged; when the adapter cannot read PvP BOT's settings (the settings accessor is missing or the read throws) these
+  are PvP BOT's shipped DEFAULTS, not a measurement, so they are only as good as the startup contract check says),
+  followed by what PvP BOT intends for THIS bot, read through the adapter: `target=Steve` (its current
   target, `none`, or `unreadable` when PvP BOT does not list the bot or a name is missing upstream), `mode=RANGED`
   (its weapon mode) and `draw=1/7` (it believes it is drawing, for 7 ticks; `draw=0` when not).
 * **`ranged loop:`** (WARN) for inhabitants within 32 blocks of a real player, every bow or crossbow draw is tracked;
@@ -839,8 +848,9 @@ food, potions, blocks and tool durability, and nothing refills it.
   those, so `profiles.attributeVariation` and `profiles.scaleVariation` are gone (an old config that still names them
   is fine: unknown options are ignored). Modifiers of this addon that an earlier version put on an existing bot are
   removed (one INFO line per bot) and its health is clamped to the new maximum. Armor, toughness, netherite knockback
-  resistance and enchantments come from gear and stay. Seeded (deterministic) worlds keep every other roll: the old
-  attribute rolls are still drawn and dropped.
+  resistance and enchantments come from gear and stay. Seeded (deterministic) worlds of the DEFAULT configuration keep every
+  other roll: the old attribute rolls are still drawn and dropped. A world that ran with `attributeVariation` off (it drew
+  none of them) or with the scale variation on (its removed draw already shifted the stream) gets different rolls.
 * **No eating at a full food bar.** PvP BOT starts eating with `startUsingItem`, which skips vanilla's rule that food
   can only be eaten below 20 food unless it is always edible. An inhabitant that is eating food which a player could
   not eat right now is stopped in the same tick (golden apples, chorus fruit and the like are always edible and are
@@ -904,9 +914,13 @@ reaction, a melee hit gets no counter-hit inside the reaction delay).
 When the directory or either jar is missing, `runGameTest` is skipped with a message and everything else (build, unit
 tests) is unaffected. `-PharnessFixesOff=true` switches the addon's managed PvP BOT settings off in the run, which
 reproduces the failures they fix. `gradlew build` and `check` do NOT run the GameTests (only an explicit `runGameTest`, or
-the machine-wide runner script, does). Two workarounds live in the test mod only: `InventoryHelperDevShimMixin`, a test-only field-name translation that changes no behaviour (it maps PvP BOT's reflective
-hotbar-index lookup to the runtime field name; the dev runtime uses Mojang names, PvP BOT looks up Yarn and
-intermediary ones), and `attackInvincible` in the run's PvP BOT settings because GameTest mock players report
+the machine-wide runner script, does). Two workarounds live in the test mod only (`src/gametest`, never in the published jar): `InventoryHelperDevShimMixin`, a
+harness-only mixin into PvP BOT's `InventoryHelper`. It is the ONE known exception to "no mixins into PvP BOT's classes":
+it only translates PvP BOT's reflective hotbar-index lookup (`selectedSlot`, `field_7545`) to the runtime field name
+(`selected`), because the dev runtime uses Mojang names while PvP BOT looks up Yarn and intermediary ones, so without it PvP
+BOT's tick dies in `InventoryHelper.<clinit>`. It changes no behaviour, the addon itself contains no mixin, and
+`NoUpstreamMixinTest` fails the build if a mixin ever appears in `src/main`, in the built jar, or anywhere in the
+GameTest source set other than this shim. The other workaround is `attackInvincible` in the run's PvP BOT settings because GameTest mock players report
 `isCreative()`.
 
 ## Test procedure

@@ -79,7 +79,10 @@ public final class ProfileGenerator implements ProfileFactory {
      * rolled permanent modifiers for max health, reach, attack speed and knockback resistance, stats with no item or
      * effect behind them that no player can have, so nothing of the kind is generated or applied any more. Those four
      * rolls are still DRAWN (and dropped), exactly as before, so every other roll of a seeded world stays where it was and
-     * an existing deterministic world keeps its loadouts and behaviours.
+     * an existing deterministic world keeps its loadouts and behaviours. That holds for worlds of the DEFAULT configuration
+     * only: the four attribute rolls are now always drawn, so a world that ran with attribute variation off (which drew none
+     * of them), and one that ran with the scale variation on (whose removed scale draw already shifted its stream), get
+     * different rolls than before. The golden seed test pins the default configuration only.
      * <p>
      * Movement speed was never varied: PvP BOT applies its own moveSpeed as a velocity scalar, so the vanilla attribute
      * would change nothing it reads.

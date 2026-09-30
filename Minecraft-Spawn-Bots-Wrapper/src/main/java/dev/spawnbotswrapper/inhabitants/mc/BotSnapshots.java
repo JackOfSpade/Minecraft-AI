@@ -32,6 +32,11 @@ import java.util.Optional;
  *       is put back. {@code full=true} is a bot that was removed and comes back from nothing (dormancy): everything.</li>
  * </ul>
  * Nothing here throws for a bad entry; a slot or effect that cannot be read is skipped with a warning.
+ * <p>
+ * Skew after a crash: the snapshot of an online bot is refreshed at most every 5 seconds (and only when it changed), while
+ * its inventory, experience and effects are saved by the server's own player save. After a crash (no snapshot on
+ * SERVER_STOPPING) a restored bot therefore has health, hunger and saturation from a snapshot up to 5 seconds old next to an
+ * inventory from the player save; the two can disagree slightly. Accepted: nothing is refilled, and the gap is bounded.
  */
 final class BotSnapshots {
     private static final String EXHAUSTION_KEY = "foodExhaustionLevel";
