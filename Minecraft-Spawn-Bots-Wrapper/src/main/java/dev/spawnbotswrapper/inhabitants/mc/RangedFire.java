@@ -47,6 +47,8 @@ public final class RangedFire {
     private boolean broken;
     private long shotsFired;
     private long lastPrune;
+    /** Failure messages already logged (bounded), so a repeating failure is one line, not twenty a second. */
+    private final Set<String> warned = new HashSet<>();
 
     public RangedFire(Supplier<ServerSession> session, Logger log) {
         this.session = session;
@@ -78,6 +80,7 @@ public final class RangedFire {
         pacer.reset();
         broken = false;
         lastPrune = 0;
+        warned.clear();
     }
 
     // ------------------------------------------------------------------ the cooldown hook
@@ -151,37 +154,17 @@ public final class RangedFire {
         }
         CommandServices services = settings.services();
         PvpBotOperations adapter = services.adapter();
-        double radius = Double.NaN;
+        double[] radius = {Double.NaN};
         for (ServerPlayer bot : server.getPlayerList().getPlayers()) {
-            ItemStack main = bot.getMainHandItem();
-            String name = bot.getName().getString();
-            boolean crossbow = main.is(Items.CROSSBOW);
-            if (!crossbow && !pacer.isTracked(name)) {
-                continue;
-            }
-            if (!isInhabitant(services, bot)) {
-                continue;
-            }
-            boolean loaded = crossbow && CrossbowItem.isCharged(main);
-            boolean using = bot.isUsingItem();
-            boolean reachable = false;
-            Boolean ranged = null;
-            if (loaded && !using && adapter != null) {
-                if (Double.isNaN(radius)) {
-                    radius = targetRadius(adapter, settings.config());
+            try {
+                handle(bot, settings, services, adapter, radius);
+            } catch (OutOfMemoryError e) {
+                throw e;
+            } catch (RuntimeException e) {
+                // One bot's failure must not stop the others; the same message is logged once.
+                if (warned.size() < 16 && warned.add(e.toString())) {
+                    log.warn("crossbow trigger failed for {}: {}", bot.getName().getString(), e.toString());
                 }
-                Optional<PvpBotOperations.CombatView> view = adapter.combatView(name);
-                if (view.isPresent()) {
-                    ranged = view.get().mode() == null ? null : view.get().mode().equals("RANGED");
-                    reachable = reachable(bot, view.get().target(), radius);
-                }
-            }
-            long now = bot.level().getGameTime();
-            CrossbowPacer.Verdict verdict = pacer.evaluate(name, now, settings.pacing(), new CrossbowPacer.Look(crossbow,
-                    loaded, using, crossbow && bot.getCooldowns().isOnCooldown(main), reachable, ranged));
-            if (verdict == CrossbowPacer.Verdict.FIRE) {
-                bot.gameMode.useItem(bot, bot.level(), main, InteractionHand.MAIN_HAND);
-                shotsFired++;
             }
         }
         long serverTick = server.getTickCount();
@@ -196,6 +179,41 @@ public final class RangedFire {
                     pacer.forget(name);
                 }
             }
+        }
+    }
+
+    /** One player: nothing unless it is an inhabitant holding (or just having held) a crossbow; fires when the pacer says so. */
+    private void handle(ServerPlayer bot, Settings settings, CommandServices services, PvpBotOperations adapter,
+                        double[] radius) {
+        ItemStack main = bot.getMainHandItem();
+        String name = bot.getName().getString();
+        boolean crossbow = main.is(Items.CROSSBOW);
+        if (!crossbow && !pacer.isTracked(name)) {
+            return;
+        }
+        if (!isInhabitant(services, bot)) {
+            return;
+        }
+        boolean loaded = crossbow && CrossbowItem.isCharged(main);
+        boolean using = bot.isUsingItem();
+        boolean reachable = false;
+        Boolean ranged = null;
+        if (loaded && !using && adapter != null) {
+            if (Double.isNaN(radius[0])) {
+                radius[0] = targetRadius(adapter, settings.config());
+            }
+            Optional<PvpBotOperations.CombatView> view = adapter.combatView(name);
+            if (view.isPresent()) {
+                ranged = view.get().mode() == null ? null : view.get().mode().equals("RANGED");
+                reachable = reachable(bot, view.get().target(), radius[0]);
+            }
+        }
+        long now = bot.level().getGameTime();
+        CrossbowPacer.Verdict verdict = pacer.evaluate(name, now, settings.pacing(), new CrossbowPacer.Look(crossbow,
+                loaded, using, crossbow && bot.getCooldowns().isOnCooldown(main), reachable, ranged));
+        if (verdict == CrossbowPacer.Verdict.FIRE) {
+            bot.gameMode.useItem(bot, bot.level(), main, InteractionHand.MAIN_HAND);
+            shotsFired++;
         }
     }
 

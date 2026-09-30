@@ -172,7 +172,7 @@ final class UpstreamCalls {
 
     // ---------------------------------------------------------------- settings (read-only)
 
-    /** Upstream's settings singleton. Only ever READ: no setter and no load/save is resolved or called. */
+    /** Upstream's settings singleton. READ here; the few managed settings are written by UpstreamSettingsWriter only. */
     Object settingsInstance() throws Throwable {
         return invoke(contract.settingsGet.method(), null);
     }

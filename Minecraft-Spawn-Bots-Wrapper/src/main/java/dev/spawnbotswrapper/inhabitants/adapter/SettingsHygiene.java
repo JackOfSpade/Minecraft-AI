@@ -6,9 +6,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Turns PvP BOT's GLOBAL settings (read-only) into findings about conditions that will surprise an
- * operator. The addon never changes these settings: they are one global singleton, and flipping one
- * to vary a single bot would change every bot on the server.
+ * Turns PvP BOT's GLOBAL settings (read here, written only for the few the addon manages, see
+ * {@link ManagedSettings}) into findings about conditions that will surprise an operator. The settings are one
+ * global singleton, so flipping one to vary a single bot would change every bot on the server.
  */
 final class SettingsHygiene {
 

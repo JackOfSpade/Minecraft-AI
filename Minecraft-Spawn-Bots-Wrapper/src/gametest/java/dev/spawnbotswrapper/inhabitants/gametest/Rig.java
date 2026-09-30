@@ -119,8 +119,13 @@ final class Rig {
 
     /** A 25x25 stone floor with a high air ceiling around the bot's cell. */
     void buildPlatform() {
-        for (int dx = -12; dx <= 12; dx++) {
-            for (int dz = -12; dz <= 12; dz++) {
+        buildPlatform(12);
+    }
+
+    /** A stone floor {@code radius} blocks to every side of the bot's cell with a high air ceiling. */
+    void buildPlatform(int radius) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
                 level.setBlock(botFeet.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 6; dy++) {
                     level.setBlock(botFeet.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
@@ -217,6 +222,15 @@ final class Rig {
         finishDressing();
     }
 
+    /** An iron sword and nothing else: a pure melee bot. */
+    void dressMeleeOnly() {
+        Inventory inv = bot.getInventory();
+        inv.clearContent();
+        inv.setItem(0, new ItemStack(Items.IRON_SWORD));
+        inv.setSelectedSlot(0);
+        finishDressing();
+    }
+
     /** A bow, arrows and nothing else. */
     void dressBowOnly() {
         Inventory inv = bot.getInventory();
@@ -247,6 +261,7 @@ final class Rig {
     enum Loadout {
         SKIRMISHER,
         BOW_ONLY,
+        MELEE_ONLY,
         BOW_AND_SWORD
     }
 
@@ -270,6 +285,7 @@ final class Rig {
         switch (loadout) {
             case SKIRMISHER -> dressSkirmisher();
             case BOW_ONLY -> dressBowOnly();
+            case MELEE_ONLY -> dressMeleeOnly();
             case BOW_AND_SWORD -> dressBowAndSword();
         }
         dressed[0] = true;

@@ -83,6 +83,12 @@ runs on defaults until you fix it.
     "allowSubmerged": false
   },
 
+  // PvP BOT settings the addon holds at these values (see "Managed PvP BOT settings" below); null/absent key = leave alone
+  "pvpbotSettings": { "maxTargetDistance": 10.0, "rangedMinRange": 6.0, "rangedOptimalRange": 8.0,
+                      "rangedMaxRange": 10.0, "autoEquipWeapon": false },
+  // fires a loaded crossbow and spaces shots (see "Crossbow trigger and shot pacing" below)
+  "rangedPacing": { "enabled": true, "aimSettleTicks": 4, "crossbowMinShotIntervalTicks": 26 },
+
   "debugCommands": true,
   "commandPermissionLevel": 2
 }
@@ -169,8 +175,9 @@ world:
 
 ## What gets randomized, and what does not
 
-PvP BOT keeps every combat setting in **one process-wide singleton**; this addon never touches it, so it
-never silently changes the behaviour of bots that already exist. Per-bot variety therefore comes only from
+PvP BOT keeps every combat setting in **one process-wide singleton**; this addon changes only the few settings
+listed under `pvpbotSettings` (see "Managed PvP BOT settings" below), server-wide and never per bot, so it never
+silently changes ONE existing bot's behaviour. Per-bot variety therefore comes only from
 what a bot **carries** (PvP BOT chooses its weapon mode, shield/totem/potion/food/mending behaviour from
 its inventory), from the few vanilla **attributes** PvP BOT actually reads, and from PvP BOT's own **patrol
 path** system (stance and walk type; every path has its attack flag on, see "Every inhabitant fights" below).
@@ -494,6 +501,25 @@ itself).
 ```
 
 Runs the full unit test suite (pure logic and Minecraft-registry-backed tests; no server required).
+
+### Real-server GameTests (PvP BOT and HeroBot loaded)
+
+`src/gametest` holds Fabric GameTests that run a real dedicated GameTest server with the PvP BOT and HeroBot release
+jars as runtime mods (copied into the run directory like a profile, never compile-time dependencies): a real
+inhabitant is requested from the population engine, dressed, and fights a survival mock player. They cover the
+crossbow trigger and pacing, bows, the managed PvP BOT settings (including their re-application after PvP BOT reloads
+its settings), the combat log lines, the targeting radius, and the ranged-loop cause text.
+
+```bash
+./gradlew runGameTest -PupstreamModsDir=<dir with PVP_bot-*.jar and herobot-*.jar>   # default C:\mcw\_tools\deploycheck\mods
+```
+
+When the directory or either jar is missing, `runGameTest` is skipped with a message and everything else (build, unit
+tests) is unaffected. `-PharnessFixesOff=true` switches the addon's two ranged-combat fixes off in the run, which
+reproduces the failures they fix. Two workarounds live in the test mod only: a mixin that maps PvP BOT's reflective
+hotbar-index lookup to the runtime field name (the dev runtime uses Mojang names, PvP BOT looks up Yarn and
+intermediary ones), and `attackInvincible` in the run's PvP BOT settings because GameTest mock players report
+`isCreative()`.
 
 ## Test procedure
 

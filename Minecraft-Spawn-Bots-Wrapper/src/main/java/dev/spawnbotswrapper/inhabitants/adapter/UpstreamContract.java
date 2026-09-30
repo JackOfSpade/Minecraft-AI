@@ -77,7 +77,7 @@ final class UpstreamContract {
     final Member saveBots;
     final Member updateBotData;
 
-    // ---- BotSettings (read-only use)
+    // ---- BotSettings (read; the few managed fields are written only through UpstreamSettingsWriter)
     final Member settingsGet;
     /** The settings class, or null when it cannot be loaded. Metadata only: never initialised by the probe. */
     final Class<?> settingsClass;

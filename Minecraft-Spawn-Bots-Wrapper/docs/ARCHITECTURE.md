@@ -14,7 +14,7 @@ assumptions:
 | Fact | Consequence |
 |---|---|
 | PvP BOT has **no public API**. An API existed in 0.0.13/0.0.14 and was deleted ("will be rewritten"). | Every upstream symbol is treated as private. One adapter class talks to it by reflection and fails soft. |
-| All 68 settings live in **one process-wide singleton** (`BotSettings`). Nothing is per bot. | The addon never writes a setting. Per-bot variety comes only from levers that are genuinely per bot (below). |
+| All 68 settings live in **one process-wide singleton** (`BotSettings`). Nothing is per bot. | The addon writes only the few settings under `pvpbotSettings` (server-wide, only when they differ). Per-bot variety comes only from levers that are genuinely per bot (below). |
 | Bot identity is the **name string only**; everything upstream is keyed by name. | Names are addon-generated, reserved-prefix, unique, and recorded. |
 | `BotManager.spawnBot(...)` returning `true` does **not** mean a bot exists; the entity may appear several ticks later, and PvP BOT drops an entry whose entity is absent for ~50 ticks. | Spawning is asynchronous: request, then poll for the entity and for PvP BOT listing it; repair orphans; time out. |
 | Spawning is done through HeroBot's `playerspawn` command; bots are full player entities and hold chunk tickets. | A live-bot cap, paced spawning, and honest documentation of the chunk-loading cost. |
