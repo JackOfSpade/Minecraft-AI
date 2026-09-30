@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import com.google.gson.JsonObject;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.EquipAction;
@@ -161,7 +162,7 @@ public final class CombatHardeningGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "guard_task_never_melees_creeper_or_calm_enderman", maxTicks = 160)
+    @GameTest(environment = ENV + "guard_task_never_melees_creeper_or_calm_enderman", maxTicks = 160 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void guardTaskNeverMeleesCreeperOrCalmEnderman(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GuardCreeperGT", 26);
         BlockPos origin = bot.blockPosition().immutable();
@@ -180,9 +181,19 @@ public final class CombatHardeningGameTests {
         BlockPos endermanFeet = origin.west(2);
         enderman.snapTo(endermanFeet.getX() + 0.5D, endermanFeet.getY(), endermanFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(enderman);
-        Husk husk = spawnHusk(context, origin.north(3));
         float creeperHealth = creeper.getHealth();
         float endermanHealth = enderman.getHealth();
+
+        // Perception is on: the bot notices the three one after the other, each by turning to it and waiting the reaction time of the
+        // shared formula (a noticed creeper or zombie makes the watcher react at once, so each step starts from a clean slate; the
+        // calm enderman is no threat). They are all known to it, and all in view, when the guard starts.
+        PerceptionFixtures.faceToward(bot, enderman);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(enderman), since1 -> {
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(creeper), since2 -> {
+        Husk husk = spawnHusk(context, origin.north(3));
+        PerceptionFixtures.faceToward(bot, husk);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(husk, creeper, enderman), since -> {
 
         // The pure target policy: the husk, and only the husk, is a legal guard target.
         require(context, CombatCore.nearestHostileAround(bot, origin, 10.0D).orElse(null) == husk,
@@ -195,7 +206,7 @@ public final class CombatHardeningGameTests {
         GuardTask guard = GuardTask.point(origin);
         guard.start(bot);
         AtomicBoolean engagedHusk = new AtomicBoolean();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             if (guard.state() == TaskState.RUNNING) {
                 guard.tick(bot);
             }
@@ -208,7 +219,7 @@ public final class CombatHardeningGameTests {
             if (!guard.describe().contains("phase=WATCH") && !guard.describe().contains("phase=RETURN")) {
                 engagedHusk.set(true);
             }
-            if (context.getTick() >= 60) {
+            if (since.getAsLong() >= 60) {
                 // Positive control: the guard did pick the legal husk as its target.
                 require(context, engagedHusk.get(), "the guard never engaged the legal husk target");
                 guard.abort(bot);
@@ -218,9 +229,12 @@ public final class CombatHardeningGameTests {
                 despawnAndComplete(context, bot);
             }
         });
+        });
+        });
+        });
     }
 
-    @GameTest(environment = ENV + "no_melee_against_warden", maxTicks = 80)
+    @GameTest(environment = ENV + "no_melee_against_warden", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void noMeleeAgainstWarden(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "CombatWardenGT", 38, -64, 12);
         BlockPos origin = bot.blockPosition().immutable();
@@ -229,6 +243,8 @@ public final class CombatHardeningGameTests {
         Warden warden = spawnDisabledWarden(context, origin.east(2));
         float initialHealth = warden.getHealth();
 
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
         // The pure policy first: a warden is never a melee target, defensive or commanded.
         require(context, CombatCore.isMeleeForbiddenThreat(warden),
                 "a warden was not in the never-melee table");
@@ -255,9 +271,10 @@ public final class CombatHardeningGameTests {
         combat.abort(bot);
         warden.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
-    @GameTest(environment = ENV + "warden_threat_routes_to_evade_beyond_sonic_boom_range", maxTicks = 80)
+    @GameTest(environment = ENV + "warden_threat_routes_to_evade_beyond_sonic_boom_range", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void wardenThreatRoutesToEvadeBeyondSonicBoomRange(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "EvadeWardenGT", 50, -64, 12);
         BlockPos origin = bot.blockPosition().immutable();
@@ -269,6 +286,8 @@ public final class CombatHardeningGameTests {
         Warden warden = spawnDisabledWarden(context, origin.east(6));
         float initialHealth = warden.getHealth();
 
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(warden), () -> {
         require(context, DangerWatcher.isActiveHostileThreat(bot, warden)
                         && CombatCore.isWithinHostilePressureEnvelope(bot, warden),
                 "a warden in view was not a factual active threat");
@@ -285,6 +304,7 @@ public final class CombatHardeningGameTests {
         require(context, warden.getHealth() == initialHealth, "warden routing dealt combat damage");
         warden.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     @GameTest(environment = ENV + "strike_through_wall_or_beyond_vanilla_reach_is_refused", maxTicks = 130)
@@ -427,7 +447,7 @@ public final class CombatHardeningGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = ENV + "late_fuse_creeper_with_no_wall_material_gets_the_shield", maxTicks = 120)
+    @GameTest(environment = ENV + "late_fuse_creeper_with_no_wall_material_gets_the_shield", maxTicks = 120 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void lateFuseCreeperWithNoWallMaterialGetsTheShield(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "CreeperShieldGT", 98);
         var world = context.getLevel();
@@ -452,6 +472,9 @@ public final class CombatHardeningGameTests {
                 "the fixture bot still carried wall material");
 
         var creeper = spawnDisabledCreeper(context, origin.east(2));
+        // The bot notices the (silent, unlit) creeper first; the fuse is lit afterwards.
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(creeper), () -> {
         creeper.ignite();
         creeper.setSwellDir(1);
         for (int tick = 0; tick < 15; tick++) {
@@ -465,7 +488,7 @@ public final class CombatHardeningGameTests {
         AtomicBoolean sawShieldPhase = new AtomicBoolean();
         AtomicBoolean sawBlocking = new AtomicBoolean();
         AtomicInteger goneTicks = new AtomicInteger();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             if (task.describe().contains("phase=SHIELD")) {
                 sawShieldPhase.set(true);
             }
@@ -484,9 +507,10 @@ public final class CombatHardeningGameTests {
                 }
             }
         });
+        });
     }
 
-    @GameTest(environment = ENV + "observed_drowned_outside_the_leash_is_shot_not_looped", maxTicks = 300)
+    @GameTest(environment = ENV + "observed_drowned_outside_the_leash_is_shot_not_looped", maxTicks = 300 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void observedDrownedOutsideTheLeashIsShotNotLooped(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "RangedDrownedGT", 110, -6, 20);
         var world = context.getLevel();
@@ -517,6 +541,8 @@ public final class CombatHardeningGameTests {
         BlockPos drownedFeet = origin.offset(13, -1, 0);
         drowned.snapTo(drownedFeet.getX() + 0.5D, drownedFeet.getY(), drownedFeet.getZ() + 0.5D, 90.0F, 0.0F);
         world.addFreshEntity(drowned);
+        PerceptionFixtures.faceToward(bot, drowned);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(drowned), since -> {
         int arrowsBefore = arrows(bot);
         require(context, !CombatTask.isWithinDefensiveLeash(origin, drowned.blockPosition())
                         && CombatTask.canShootFromWhereItStands(bot, drowned),
@@ -528,17 +554,18 @@ public final class CombatHardeningGameTests {
         require(context, first instanceof CombatTask,
                 "an observed shootable hostile was not assigned defensive combat: "
                         + (first == null ? "idle" : first.name()));
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "bot died against the disabled drowned");
             if (arrows(bot) < arrowsBefore) {
                 drowned.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_ranged_done");
                 despawnAndComplete(context, bot);
-            } else if (context.getTick() >= 250) {
+            } else if (since.getAsLong() >= 250) {
                 Task now = TaskManager.INSTANCE.getActive(bot).orElse(null);
                 context.fail(Component.nullToEmpty("the bot never shot the drowned; active="
                         + (now == null ? "idle" : now.describe())));
             }
+        });
         });
     }
 
@@ -547,7 +574,7 @@ public final class CombatHardeningGameTests {
      * back. Both moves must be real walks by movement inputs: no tick may carry the bot a block, and
      * getting out from behind the column must take several ticks (a teleport step took one).
      */
-    @GameTest(environment = ENV + "peekaboo_walks_out_and_back_without_teleport", maxTicks = 420)
+    @GameTest(environment = ENV + "peekaboo_walks_out_and_back_without_teleport", maxTicks = 420 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void peekabooWalksOutAndBackWithoutTeleport(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "PeekabooGT", 122, -4, 16);
         var world = context.getLevel();
@@ -567,6 +594,14 @@ public final class CombatHardeningGameTests {
         // Two live, armed skeletons (a helmet keeps the daylight off them) at the far end.
         var first = spawnArmedSkeleton(context, origin.east(11).north());
         var second = spawnArmedSkeleton(context, origin.east(11).south());
+        // The skeletons stand still until the bot has noticed them (a live skeleton would shoot before the bot knew of it); then the
+        // fight is the one the fixture always had.
+        first.setNoAi(true);
+        second.setNoAi(true);
+        PerceptionFixtures.faceToward(bot, first);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(first, second), since -> {
+        first.setNoAi(false);
+        second.setNoAi(false);
         require(context, CombatCore.rangedThreatsAround(bot, 24.0D).size() >= 2,
                 "the skeleton fixtures were not two observable ranged threats");
 
@@ -579,7 +614,7 @@ public final class CombatHardeningGameTests {
         int[] leftCoverTick = {-1};
         boolean[] cycleDone = {false};
         double[] maxStep = {0.0D};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             Vec3 now = bot.position();
             double step = Math.hypot(now.x - previous[0].x, now.z - previous[0].z);
             previous[0] = now;
@@ -591,12 +626,12 @@ public final class CombatHardeningGameTests {
                         "a peek step moved the bot " + step + " blocks in one tick (a teleport, not a walk)");
             }
             if (peeking && peekStartTick[0] < 0) {
-                peekStartTick[0] = (int) context.getTick();
+                peekStartTick[0] = (int) since.getAsLong();
                 hide[0] = now;
             }
             if (peeking && leftCoverTick[0] < 0 && hide[0] != null
                     && Math.hypot(now.x - hide[0].x, now.z - hide[0].z) >= 0.6D) {
-                leftCoverTick[0] = (int) context.getTick();
+                leftCoverTick[0] = (int) since.getAsLong();
                 require(context, leftCoverTick[0] - peekStartTick[0] >= 3,
                         "the bot reached the exposed cell within " + (leftCoverTick[0] - peekStartTick[0])
                                 + " ticks: that is a teleport, not a walk");
@@ -611,11 +646,12 @@ public final class CombatHardeningGameTests {
                 second.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_peekaboo_done");
                 despawnAndComplete(context, bot);
-            } else if (context.getTick() >= 380) {
+            } else if (since.getAsLong() >= 380) {
                 context.fail(Component.nullToEmpty("no complete peek out and back: peekStart="
                         + peekStartTick[0] + " leftCover=" + leftCoverTick[0] + " maxStep=" + maxStep[0]
                         + " state=" + combat.state() + " " + combat.describe() + " hp=" + bot.getHealth()));
             }
+        });
         });
     }
 
@@ -698,7 +734,7 @@ public final class CombatHardeningGameTests {
      * never fires: the shield can only be a reaction to the drawn bow). A skeleton drawing with its
      * head turned away must not.
      */
-    @GameTest(environment = ENV + "drawing_skeleton_raises_the_shield_before_the_arrow", maxTicks = 260)
+    @GameTest(environment = ENV + "drawing_skeleton_raises_the_shield_before_the_arrow", maxTicks = 260 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void drawingSkeletonRaisesTheShieldBeforeTheArrow(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "PreShieldGT", 146);
         BlockPos origin = bot.blockPosition().immutable();
@@ -714,19 +750,23 @@ public final class CombatHardeningGameTests {
         skeleton.setNoAi(true);
         skeleton.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
         skeleton.setItemSlot(net.minecraft.world.entity.EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
-        BlockPos skeletonFeet = origin.west(6);
-        // Facing west, away from the bot: yaw 90 points the head along -x.
-        skeleton.snapTo(skeletonFeet.getX() + 0.5D, skeletonFeet.getY(), skeletonFeet.getZ() + 0.5D, 90.0F, 0.0F);
-        skeleton.setYHeadRot(90.0F);
+        // Behind the husk in the bot's view (the bot turns to its fight, east): a skeleton behind the bot would not be noticed at all.
+        BlockPos skeletonFeet = origin.east(6);
+        // Facing east, away from the bot: yaw -90 points the head along +x.
+        skeleton.snapTo(skeletonFeet.getX() + 0.5D, skeletonFeet.getY(), skeletonFeet.getZ() + 0.5D, -90.0F, 0.0F);
+        skeleton.setYHeadRot(-90.0F);
         context.getLevel().addFreshEntity(skeleton);
         skeleton.startUsingItem(InteractionHand.MAIN_HAND);
 
+        // The bot faces its enemy and notices both before the scenario starts (the shield rule needs a NOTICED shooter).
+        PerceptionFixtures.faceToward(bot, husk);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(husk, skeleton), since -> {
         CombatTask combat = CombatTask.defensive(husk, 6.0F, origin);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_pre_shield"));
         int[] turnedAt = {-1};
         int[] drawRestarts = {0};
         boolean[] raised = {false};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             if (!skeleton.isUsingItem() || !skeleton.getUseItem().is(Items.BOW)) {
                 // The fixture keeps its (AI-less) skeleton drawing; a dropped draw simply starts over.
@@ -738,14 +778,14 @@ public final class CombatHardeningGameTests {
             if (turnedAt[0] < 0) {
                 require(context, !shieldUp,
                         "the shield went up for a skeleton drawing with its head turned away (tick "
-                                + context.getTick() + ", draw ticks " + skeleton.getTicksUsingItem() + ")");
-                if (context.getTick() >= 30 && skeleton.getTicksUsingItem() >= 14) {
-                    turnedAt[0] = (int) context.getTick();
-                    // Turn to face the bot: yaw -90 points the head along +x.
-                    skeleton.setYRot(-90.0F);
-                    skeleton.setYHeadRot(-90.0F);
-                    skeleton.setYBodyRot(-90.0F);
-                } else if (context.getTick() >= 120) {
+                                + since.getAsLong() + ", draw ticks " + skeleton.getTicksUsingItem() + ")");
+                if (since.getAsLong() >= 30 && skeleton.getTicksUsingItem() >= 14) {
+                    turnedAt[0] = (int) since.getAsLong();
+                    // Turn to face the bot: yaw 90 points the head along -x.
+                    skeleton.setYRot(90.0F);
+                    skeleton.setYHeadRot(90.0F);
+                    skeleton.setYBodyRot(90.0F);
+                } else if (since.getAsLong() >= 120) {
                     context.fail(Component.nullToEmpty("the fixture skeleton never held a draw: restarts="
                             + drawRestarts[0] + " draw_ticks=" + skeleton.getTicksUsingItem()));
                 }
@@ -759,11 +799,12 @@ public final class CombatHardeningGameTests {
                 husk.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_pre_shield_done");
                 despawnAndComplete(context, bot);
-            } else if (context.getTick() >= turnedAt[0] + 30) {
+            } else if (since.getAsLong() >= turnedAt[0] + 30) {
                 context.fail(Component.nullToEmpty("the shield never came up for a skeleton drawing at the bot: "
                         + combat.describe() + " drawing=" + (CombatTask.nearbyDrawingShooter(bot) == skeleton)
                         + " draw_ticks=" + skeleton.getTicksUsingItem() + " restarts=" + drawRestarts[0]));
             }
+        });
         });
     }
 
@@ -839,7 +880,7 @@ public final class CombatHardeningGameTests {
      * exactly what the guard exists to prevent, so no Arrow entity may ever exist and no arrow leaves the
      * inventory, while the fight goes on without the bow.
      */
-    @GameTest(environment = ENV + "friendly_owner_on_the_line_of_fire_gives_the_bow_up_without_a_shot", maxTicks = 320)
+    @GameTest(environment = ENV + "friendly_owner_on_the_line_of_fire_gives_the_bow_up_without_a_shot", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void friendlyOwnerOnTheLineOfFireGivesTheBowUpWithoutAShot(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendLineGT", 170, -4, 16, owner.getUUID());
@@ -854,6 +895,8 @@ public final class CombatHardeningGameTests {
         Husk husk = spawnHusk(context, origin.east(12));
         owner.teleportTo(world, origin.getX() + 6.5D, origin.getY(), origin.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        PerceptionFixtures.faceToward(bot, husk);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(husk), since -> {
         require(context, StrikeLegality.friendlyOnLineOfFire(bot, husk),
                 "the fixture owner was not on the line of fire");
         int arrowsBefore = arrows(bot);
@@ -862,7 +905,7 @@ public final class CombatHardeningGameTests {
 
         boolean[] sawFullDraw = {false};
         int[] giveUpTick = {-1};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             require(context, botArrows(context, bot) == 0,
                     "an arrow was spawned with the owner on the line of fire: " + combat.describe());
@@ -877,7 +920,7 @@ public final class CombatHardeningGameTests {
                     sawFullDraw[0] = true;
                 }
                 if (combat.isRangedSuppressed()) {
-                    giveUpTick[0] = (int) context.getTick();
+                    giveUpTick[0] = (int) since.getAsLong();
                     require(context, sawFullDraw[0],
                             "the bow was given up without ever being fully drawn: the give-up was not the "
                                     + "dangerous one (bow drawn at full pull)");
@@ -886,16 +929,17 @@ public final class CombatHardeningGameTests {
                     require(context, !combat.describe().contains("phase=RANGED"),
                             "the bot did not fall back from the ranged phase: " + combat.describe());
                 }
-            } else if (context.getTick() >= giveUpTick[0] + 25) {
+            } else if (since.getAsLong() >= giveUpTick[0] + 25) {
                 husk.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_line_done");
                 despawnAndComplete(context, bot);
             }
-            if (giveUpTick[0] < 0 && context.getTick() >= 290) {
+            if (giveUpTick[0] < 0 && since.getAsLong() >= 290) {
                 context.fail(Component.nullToEmpty("the bow was never given up: sawFullDraw=" + sawFullDraw[0]
                         + " " + combat.describe() + " using=" + bot.isUsingItem()
                         + " ticks=" + bot.getTicksUsingItem()));
             }
+        });
         });
     }
 
@@ -903,7 +947,7 @@ public final class CombatHardeningGameTests {
      * The same guard on the cover-peek path: with the owner standing on the line of fire at the end of each
      * peek the drawn bow must never be released; after a few blocked peeks it is given up by cancelling.
      */
-    @GameTest(environment = ENV + "friendly_owner_on_the_peek_line_gives_the_bow_up_without_a_shot", maxTicks = 900)
+    @GameTest(environment = ENV + "friendly_owner_on_the_peek_line_gives_the_bow_up_without_a_shot", maxTicks = 900 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void friendlyOwnerOnThePeekLineGivesTheBowUpWithoutAShot(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendPeekGT", 182, -4, 16, owner.getUUID());
@@ -912,10 +956,14 @@ public final class CombatHardeningGameTests {
         givePeekabooKit(bot);
         owner.teleportTo(world, origin.getX() - 2.5D, origin.getY(), origin.getZ() + 2.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        var first = spawnArmedSkeleton(context, origin.east(11).north());
-        var second = spawnArmedSkeleton(context, origin.east(11).south());
+        // One behind the other on the same line: under perception the bot may shoot at whichever skeleton it has noticed, and the friend
+        // on that line is on the line of fire of both (the fixture no longer relies on the bot picking the nearer of two lines).
+        var first = spawnArmedSkeleton(context, origin.east(11));
+        var second = spawnArmedSkeleton(context, origin.east(13));
         first.setNoAi(true);
         second.setNoAi(true);
+        PerceptionFixtures.faceToward(bot, first);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(first, second), since -> {
         require(context, CombatCore.rangedThreatsAround(bot, 24.0D).size() >= 2,
                 "the skeleton fixtures were not two observable ranged threats");
         int arrowsBefore = arrows(bot);
@@ -924,7 +972,7 @@ public final class CombatHardeningGameTests {
 
         int[] peekTicks = {0};
         int[] giveUpTick = {-1};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             require(context, botArrows(context, bot) == 0,
                     "an arrow was spawned with the owner on the peek line: " + combat.describe());
@@ -936,21 +984,22 @@ public final class CombatHardeningGameTests {
                     placeOnLineOfFire(owner, bot, first.distanceTo(bot) <= second.distanceTo(bot) ? first : second);
                 }
                 if (combat.isRangedSuppressed()) {
-                    giveUpTick[0] = (int) context.getTick();
+                    giveUpTick[0] = (int) since.getAsLong();
                     require(context, peekTicks[0] > 0, "the bow was given up before any peek: " + combat.describe());
                     require(context, !bot.isUsingItem() && !combat.describe().contains("phase=COVER"),
                             "the bot is still in cover with the bow drawn after the give-up: " + combat.describe());
                 }
-            } else if (context.getTick() >= giveUpTick[0] + 25) {
+            } else if (since.getAsLong() >= giveUpTick[0] + 25) {
                 first.discard();
                 second.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_peek_done");
                 despawnAndComplete(context, bot);
             }
-            if (giveUpTick[0] < 0 && context.getTick() >= 840) {
+            if (giveUpTick[0] < 0 && since.getAsLong() >= 840) {
                 context.fail(Component.nullToEmpty("the peek bow was never given up: peekTicks=" + peekTicks[0]
                         + " " + combat.describe() + " " + combat.state()));
             }
+        });
         });
     }
 
@@ -959,7 +1008,7 @@ public final class CombatHardeningGameTests {
      * to melee range): the cover-hide exit must cancel the draw. Releasing it would loose an arrow that
      * skipped the line-of-fire check.
      */
-    @GameTest(environment = ENV + "cover_hide_exit_with_the_bow_drawn_fires_no_arrow", maxTicks = 420)
+    @GameTest(environment = ENV + "cover_hide_exit_with_the_bow_drawn_fires_no_arrow", maxTicks = 420 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void coverHideExitWithTheBowDrawnFiresNoArrow(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "CoverExitGT", 194, -4, 16);
         BlockPos origin = bot.blockPosition().immutable();
@@ -968,6 +1017,8 @@ public final class CombatHardeningGameTests {
         var second = spawnArmedSkeleton(context, origin.east(11).south());
         first.setNoAi(true);
         second.setNoAi(true);
+        PerceptionFixtures.faceToward(bot, first);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(first, second), since -> {
         require(context, CombatCore.rangedThreatsAround(bot, 24.0D).size() >= 2,
                 "the skeleton fixtures were not two observable ranged threats");
         int arrowsBefore = arrows(bot);
@@ -975,7 +1026,7 @@ public final class CombatHardeningGameTests {
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_cover_exit"));
 
         int[] exitTick = {-1};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             require(context, botArrows(context, bot) == 0,
                     "an arrow was loosed by the cover-hide exit: " + combat.describe());
@@ -986,9 +1037,9 @@ public final class CombatHardeningGameTests {
                     // The threats close in: the bow leaves the plan (shouldUseBow turns false) with the bow drawing.
                     first.snapTo(origin.getX() + 3.5D, origin.getY(), origin.getZ() + 0.5D, 90.0F, 0.0F);
                     second.snapTo(origin.getX() + 3.5D, origin.getY(), origin.getZ() + 1.5D, 90.0F, 0.0F);
-                    exitTick[0] = (int) context.getTick();
+                    exitTick[0] = (int) since.getAsLong();
                 }
-            } else if (context.getTick() >= exitTick[0] + 12) {
+            } else if (since.getAsLong() >= exitTick[0] + 12) {
                 require(context, !combat.describe().contains("phase=COVER"),
                         "the bot stayed in cover after the bow left the plan: " + combat.describe());
                 first.discard();
@@ -996,10 +1047,11 @@ public final class CombatHardeningGameTests {
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_cover_exit_done");
                 despawnAndComplete(context, bot);
             }
-            if (exitTick[0] < 0 && context.getTick() >= 380) {
+            if (exitTick[0] < 0 && since.getAsLong() >= 380) {
                 context.fail(Component.nullToEmpty("never reached a drawn bow in cover: " + combat.describe()
                         + " " + combat.state()));
             }
+        });
         });
     }
 

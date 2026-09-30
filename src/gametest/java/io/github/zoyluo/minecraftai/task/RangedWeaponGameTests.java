@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.EquipAction;
@@ -58,12 +60,12 @@ public final class RangedWeaponGameTests {
 
     // ------------------------------------------------------------------ crossbow, natural rates
 
-    @GameTest(environment = ENV + "crossbow_kills_a_zombie_at_eight_blocks_and_consumes_one_arrow_per_shot", maxTicks = 700)
+    @GameTest(environment = ENV + "crossbow_kills_a_zombie_at_eight_blocks_and_consumes_one_arrow_per_shot", maxTicks = 700 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void crossbowKillsAZombieAtEightBlocksAndConsumesOneArrowPerShot(GameTestHelper context) {
         killsAZombieAtEightBlocks(context, "XbowKillGT", 212, new ItemStack(Items.CROSSBOW), 24);
     }
 
-    @GameTest(environment = ENV + "bow_kills_a_zombie_at_eight_blocks_and_consumes_one_arrow_per_shot", maxTicks = 900)
+    @GameTest(environment = ENV + "bow_kills_a_zombie_at_eight_blocks_and_consumes_one_arrow_per_shot", maxTicks = 900 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void bowKillsAZombieAtEightBlocksAndConsumesOneArrowPerShot(GameTestHelper context) {
         killsAZombieAtEightBlocks(context, "BowKillGT", 218, new ItemStack(Items.BOW), 24);
     }
@@ -81,13 +83,15 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, weapon);
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, arrowCount));
         Zombie zombie = spawnZombie(context, origin.east(8), false);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         int arrowsBefore = arrows(bot);
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 1, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_ranged_kill"));
 
         Set<Integer> flown = new HashSet<>();
         boolean crossbow = weapon.is(Items.CROSSBOW);
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             noteNewArrows(context, bot, flown);
             if (!zombie.isAlive()) {
@@ -101,13 +105,14 @@ public final class RangedWeaponGameTests {
                 despawnAndComplete(context, bot);
             }
         });
+        });
     }
 
     /**
      * A Quick Charge III crossbow shoots at the natural vanilla rate: the charge is 10 ticks instead of 25, plus the tick that
      * fires (about 12 ticks per shot), with no invented cap. A plain crossbow of the same kit is far slower (about 27).
      */
-    @GameTest(environment = ENV + "quick_charge_iii_crossbow_fires_at_the_natural_rate", maxTicks = 260)
+    @GameTest(environment = ENV + "quick_charge_iii_crossbow_fires_at_the_natural_rate", maxTicks = 260 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void quickChargeIiiCrossbowFiresAtTheNaturalRate(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "QuickChargeGT", 224, -4, 14, null);
         BlockPos origin = bot.blockPosition().immutable();
@@ -115,6 +120,8 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, enchanted(context, Items.CROSSBOW, Enchantments.QUICK_CHARGE, 3));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 64));
         Zombie zombie = spawnZombie(context, origin.east(10), true);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 5, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_quick_charge"));
         require(context, RangedWeapon.drawTicks(bot, findWeapon(bot)) == 10,
@@ -123,12 +130,12 @@ public final class RangedWeaponGameTests {
 
         Set<Integer> flown = new HashSet<>();
         List<Long> shotTicks = new java.util.ArrayList<>();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             int before = flown.size();
             noteNewArrows(context, bot, flown);
             if (flown.size() > before) {
-                shotTicks.add(context.getTick());
+                shotTicks.add(since.getAsLong());
             }
             if (shotTicks.size() >= 7) {
                 for (int i = 1; i < shotTicks.size(); i++) {
@@ -139,10 +146,11 @@ public final class RangedWeaponGameTests {
                 zombie.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_quick_charge_done");
                 despawnAndComplete(context, bot);
-            } else if (context.getTick() >= 240) {
+            } else if (since.getAsLong() >= 240) {
                 context.fail(Component.nullToEmpty("only " + shotTicks.size() + " shots in 240 ticks: " + shotTicks
                         + " " + combat.describe()));
             }
+        });
         });
     }
 
@@ -203,7 +211,7 @@ public final class RangedWeaponGameTests {
     }
 
     /** A Multishot crossbow uses one arrow and launches three (vanilla), all through the same item-use path. */
-    @GameTest(environment = ENV + "multishot_crossbow_uses_one_arrow_and_launches_three", maxTicks = 200)
+    @GameTest(environment = ENV + "multishot_crossbow_uses_one_arrow_and_launches_three", maxTicks = 200 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void multishotCrossbowUsesOneArrowAndLaunchesThree(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "MultishotGT", 236, -4, 14, null);
         BlockPos origin = bot.blockPosition().immutable();
@@ -211,15 +219,17 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, enchanted(context, Items.CROSSBOW, Enchantments.MULTISHOT, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 5));
         Zombie zombie = spawnZombie(context, origin.east(8), true);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 5, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_multishot"));
 
         Set<Integer> flown = new HashSet<>();
         int[] volleyTick = {-1};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             noteNewArrows(context, bot, flown);
-            int tick = (int) context.getTick();
+            int tick = (int) since.getAsLong();
             if (volleyTick[0] < 0 && !flown.isEmpty()) {
                 volleyTick[0] = tick;
                 require(context, flown.size() == 3, "the Multishot volley launched " + flown.size() + " arrows, not 3");
@@ -233,10 +243,11 @@ public final class RangedWeaponGameTests {
                 context.fail(Component.nullToEmpty("no Multishot volley in 150 ticks: " + combat.describe()));
             }
         });
+        });
     }
 
     /** Infinity on a bow keeps the plain arrows, exactly as vanilla does: the shots are real, the stack does not shrink. */
-    @GameTest(environment = ENV + "infinity_bow_keeps_its_plain_arrows_as_vanilla_does", maxTicks = 300)
+    @GameTest(environment = ENV + "infinity_bow_keeps_its_plain_arrows_as_vanilla_does", maxTicks = 300 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void infinityBowKeepsItsPlainArrowsAsVanillaDoes(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "InfinityGT", 242, -4, 14, null);
         BlockPos origin = bot.blockPosition().immutable();
@@ -244,10 +255,12 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, enchanted(context, Items.BOW, Enchantments.INFINITY, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 4));
         Zombie zombie = spawnZombie(context, origin.east(8), true);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 5, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_infinity"));
         Set<Integer> flown = new HashSet<>();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             noteNewArrows(context, bot, flown);
             require(context, arrows(bot) == 4, "an Infinity bow used up plain arrows: " + arrows(bot));
@@ -255,9 +268,10 @@ public final class RangedWeaponGameTests {
                 zombie.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_infinity_done");
                 despawnAndComplete(context, bot);
-            } else if (context.getTick() >= 270) {
+            } else if (since.getAsLong() >= 270) {
                 context.fail(Component.nullToEmpty("only " + flown.size() + " Infinity shots: " + combat.describe()));
             }
+        });
         });
     }
 
@@ -268,7 +282,7 @@ public final class RangedWeaponGameTests {
      * ranged hold. No arrow entity may ever exist. (The same guard is proven for the bow by
      * {@code combat_hardening_game_tests_friendly_owner_on_the_line_of_fire_gives_the_bow_up_without_a_shot}.)
      */
-    @GameTest(environment = ENV + "no_crossbow_shot_while_the_owner_stands_in_the_line_of_fire", maxTicks = 320)
+    @GameTest(environment = ENV + "no_crossbow_shot_while_the_owner_stands_in_the_line_of_fire", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void noCrossbowShotWhileTheOwnerStandsInTheLineOfFire(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendXbowGT", 248, -4, 16, owner.getUUID());
@@ -280,13 +294,15 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 16));
         Zombie zombie = spawnZombie(context, origin.east(12), true);
         placeOwner(owner, world, origin.getX() + 6.5D, origin);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         require(context, StrikeLegality.friendlyOnLineOfFire(bot, zombie), "fixture: the owner is not on the line of fire");
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 1, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_xbow"));
 
         boolean[] sawLoaded = {false};
         int[] giveUpTick = {-1};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             require(context, botArrows(context, bot) == 0,
                     "an arrow was fired with the owner on the line of fire: " + combat.describe());
@@ -296,20 +312,21 @@ public final class RangedWeaponGameTests {
                     sawLoaded[0] = true;
                 }
                 if (combat.isRangedSuppressed()) {
-                    giveUpTick[0] = (int) context.getTick();
+                    giveUpTick[0] = (int) since.getAsLong();
                     require(context, sawLoaded[0], "the crossbow was given up without ever being loaded");
                     require(context, !combat.describe().contains("phase=RANGED"),
                             "the bot did not fall back from the ranged phase: " + combat.describe());
                 }
-                if (context.getTick() >= 290) {
+                if (since.getAsLong() >= 290) {
                     context.fail(Component.nullToEmpty("the crossbow was never given up: sawLoaded=" + sawLoaded[0]
                             + " " + combat.describe()));
                 }
-            } else if (context.getTick() >= giveUpTick[0] + 25) {
+            } else if (since.getAsLong() >= giveUpTick[0] + 25) {
                 zombie.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_xbow_done");
                 despawnAndComplete(context, bot);
             }
+        });
         });
     }
 
@@ -317,7 +334,7 @@ public final class RangedWeaponGameTests {
      * A Multishot volley also flies ten degrees to either side, so the owner standing on a SIDE arrow's line blocks the shot even
      * though the middle arrow would miss them (the guard is widened per weapon). Fixture proof plus a live hold.
      */
-    @GameTest(environment = ENV + "multishot_volley_is_not_fired_with_the_owner_on_a_side_arrow_line", maxTicks = 200)
+    @GameTest(environment = ENV + "multishot_volley_is_not_fired_with_the_owner_on_a_side_arrow_line", maxTicks = 200 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void multishotVolleyIsNotFiredWithTheOwnerOnASideArrowLine(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendMultishotGT", 254, -4, 16, owner.getUUID());
@@ -327,6 +344,8 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, enchanted(context, Items.CROSSBOW, Enchantments.MULTISHOT, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 16));
         Zombie zombie = spawnZombie(context, origin.east(12), true);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         // 8 blocks along the east line, 10 degrees off it: the middle arrow passes to the side, a side arrow does not.
         double along = 8.0D;
         double side = along * Math.tan(Math.toRadians(RangedWeapon.MULTISHOT_SPREAD_DEG));
@@ -339,18 +358,19 @@ public final class RangedWeaponGameTests {
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 1, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_multishot"));
         boolean[] sawLoaded = {false};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             require(context, botArrows(context, bot) == 0, "a volley was fired with the owner on a side arrow's line");
             owner.teleportTo(world, origin.getX() + 0.5D + along, origin.getY(), origin.getZ() + 0.5D + side,
                     Set.of(), 0.0F, 0.0F, true);
             sawLoaded[0] |= RangedWeapon.isLoaded(bot.getMainHandItem());
-            if (context.getTick() >= 120) {
+            if (since.getAsLong() >= 120) {
                 require(context, sawLoaded[0], "fixture: the crossbow never loaded, so the guard was not exercised");
                 zombie.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_multishot_done");
                 despawnAndComplete(context, bot);
             }
+        });
         });
     }
 
@@ -421,7 +441,7 @@ public final class RangedWeaponGameTests {
      * A bot runs out of arrows in the middle of a fight and falls back to its sword: the crossbow fires its two arrows, then the
      * bot walks up and finishes the zombie in melee.
      */
-    @GameTest(environment = ENV + "a_bot_out_of_arrows_falls_back_to_melee", maxTicks = 700)
+    @GameTest(environment = ENV + "a_bot_out_of_arrows_falls_back_to_melee", maxTicks = 700 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void aBotOutOfArrowsFallsBackToMelee(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "OutOfArrowsGT", 266, -4, 14, null);
         BlockPos origin = bot.blockPosition().immutable();
@@ -430,12 +450,14 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.CROSSBOW));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 2));
         Zombie zombie = spawnZombie(context, origin.east(9), false);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 1, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_out_of_arrows"));
 
         Set<Integer> flown = new HashSet<>();
         boolean[] meleeAfterArrows = {false};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
             noteNewArrows(context, bot, flown);
             if (arrows(bot) == 0 && !RangedWeapon.isLoaded(findWeapon(bot)) && bot.getMainHandItem().is(Items.STONE_SWORD)) {
@@ -448,6 +470,7 @@ public final class RangedWeaponGameTests {
                 despawnAndComplete(context, bot);
             }
         });
+        });
     }
 
     // ------------------------------------------------------------------ human aim
@@ -456,16 +479,18 @@ public final class RangedWeaponGameTests {
      * The aim never turns faster than the configured rate (180 degrees per second here, 9 per tick): the zombie is moved to the
      * opposite side of the bot again and again, and no tick of the fight turns the view more than the cap, while shots still fly.
      */
-    @GameTest(environment = ENV + "turn_rate_never_exceeds_the_configured_degrees_per_second", maxTicks = 330)
+    @GameTest(environment = ENV + "turn_rate_never_exceeds_the_configured_degrees_per_second", maxTicks = 330 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void turnRateNeverExceedsTheConfiguredDegreesPerSecond(GameTestHelper context) {
         MinecraftAiConfig previous = setAim(180.0D);
-        try {
+        GameTestCleanup.whenFinished(context, () -> restoreAim(previous));
             AIPlayerEntity bot = spawnCorridor(context, "TurnRateGT", 272, -14, 14, null);
             BlockPos origin = bot.blockPosition().immutable();
             bot.getInventory().clearContent();
             InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
             InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 32));
             Zombie zombie = spawnZombie(context, origin.east(8), true);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
             CombatTask combat = new CombatTask(EntityType.ZOMBIE, 9, 6.0F);
             TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_turn_rate"));
             double cap = 180.0D / 20.0D;
@@ -473,18 +498,18 @@ public final class RangedWeaponGameTests {
             double[] total = {0.0D};
             int[] side = {1};
             Set<Integer> flown = new HashSet<>();
-            context.failIfEver(() -> {
+            PerceptionFixtures.everyTick(context, () -> {
                 try {
                     require(context, bot.isAlive(), "the bot died: " + combat.describe());
                     double moved = HumanAim.Core.angleBetween(last[0], last[1], bot.getYRot(), bot.getXRot());
                     require(context, moved <= cap + 0.01D,
                             "the view turned " + moved + " degrees in one tick, above the configured " + cap
-                                    + " (tick " + context.getTick() + ", " + combat.describe() + ")");
+                                    + " (tick " + since.getAsLong() + ", " + combat.describe() + ")");
                     total[0] += moved;
                     last[0] = bot.getYRot();
                     last[1] = bot.getXRot();
                     noteNewArrows(context, bot, flown);
-                    int tick = (int) context.getTick();
+                    int tick = (int) since.getAsLong();
                     if (tick > 0 && tick % 60 == 0) {
                         // A 180 degree flick: the zombie is on the other side of the bot now.
                         side[0] = -side[0];
@@ -503,10 +528,7 @@ public final class RangedWeaponGameTests {
                     throw failure;
                 }
             });
-        } catch (RuntimeException failure) {
-            restoreAim(previous);
-            throw failure;
-        }
+        });
     }
 
     /**
@@ -514,29 +536,32 @@ public final class RangedWeaponGameTests {
      * second (4.5 per tick) the half turn takes 40 ticks. Not one arrow may fly before it is done, and the first arrow leaves
      * along the zombie's direction.
      */
-    @GameTest(environment = ENV + "no_shot_before_the_aim_settles_on_the_target", maxTicks = 160)
+    @GameTest(environment = ENV + "no_shot_before_the_aim_settles_on_the_target", maxTicks = 160 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void noShotBeforeTheAimSettlesOnTheTarget(GameTestHelper context) {
         MinecraftAiConfig previous = setAim(90.0D);
-        try {
+        GameTestCleanup.whenFinished(context, () -> restoreAim(previous));
             AIPlayerEntity bot = spawnCorridor(context, "AimSettleGT", 278, -14, 14, null);
             BlockPos origin = bot.blockPosition().immutable();
             bot.getInventory().clearContent();
             ItemStack crossbow = new ItemStack(Items.CROSSBOW);
             crossbow.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(new ItemStack(Items.ARROW)));
             InventoryAction.giveItem(bot, crossbow);
-            // The bot faces west (yaw 90); the zombie stands east, 180 degrees behind it.
-            LookAction.setYawPitch(bot, 90.0F, 0.0F);
+            // The zombie stands east; the bot first faces it and notices it, then turns to face west (yaw 90): the zombie is then 180
+            // degrees behind it, known to it (awareness is tracked by plain occlusion), and the aim still has to turn the half circle.
             Zombie zombie = spawnZombie(context, origin.east(8), true);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
+            LookAction.setYawPitch(bot, 90.0F, 0.0F);
             CombatTask combat = new CombatTask(EntityType.ZOMBIE, 1, 6.0F);
             TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_aim_settle"));
             Set<Integer> flown = new HashSet<>();
             float[] yawAtShot = {Float.NaN};
-            context.failIfEver(() -> {
+            PerceptionFixtures.everyTick(context, () -> {
                 try {
                     require(context, bot.isAlive(), "the bot died: " + combat.describe());
                     int before = flown.size();
                     noteNewArrows(context, bot, flown);
-                    int tick = (int) context.getTick();
+                    int tick = (int) since.getAsLong();
                     if (flown.size() > before) {
                         yawAtShot[0] = bot.getYRot();
                         require(context, tick >= 38, "an arrow flew at tick " + tick
@@ -557,10 +582,7 @@ public final class RangedWeaponGameTests {
                     throw failure;
                 }
             });
-        } catch (RuntimeException failure) {
-            restoreAim(previous);
-            throw failure;
-        }
+        });
     }
 
     /**

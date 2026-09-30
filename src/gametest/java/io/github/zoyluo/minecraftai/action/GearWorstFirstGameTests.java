@@ -448,10 +448,10 @@ public final class GearWorstFirstGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SWORD));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD));
-        var world = context.getLevel();
-        bot.hurtServer(world, world.damageSources().mobAttack(first), 2.0F);
-        bot.invulnerableTime = 0;
-        bot.hurtServer(world, world.damageSources().mobAttack(second), 2.0F);
+        // Both zombies really strike the bot (perception: a blow makes its striker known, the bot needs no look round first).
+        require(context, io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.struckBy(context, bot, first, 2.0F)
+                        && io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.struckBy(context, bot, second, 2.0F),
+                "the zombies' blows on the bot were not real");
         bot.setHealth(3.0F);
         AggroSense.Snapshot snapshot = AggroSense.snapshot(bot);
         require(context, snapshot.pressure() && snapshot.aggressorCount() >= 1,

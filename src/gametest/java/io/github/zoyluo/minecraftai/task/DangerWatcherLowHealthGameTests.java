@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
@@ -639,7 +640,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_pickaxe_only_inventory_cannot_authorize_combat", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_pickaxe_only_inventory_cannot_authorize_combat", maxTicks = 40 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void pickaxeOnlyInventoryCannotAuthorizeCombat(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PickaxeOnlyNoCombatGT", 2);
         BlockPos origin = bot.blockPosition().immutable();
@@ -662,6 +663,8 @@ public final class DangerWatcherLowHealthGameTests {
         zombie.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(zombie);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         require(context, CombatCore.hasLineOfSight(bot, zombie),
                 "pickaxe-only hostile fixture lacked factual line of sight");
 
@@ -675,6 +678,7 @@ public final class DangerWatcherLowHealthGameTests {
                 "pickaxe-only Evade did not preserve interrupted work");
         zombie.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     /**
@@ -682,7 +686,7 @@ public final class DangerWatcherLowHealthGameTests {
      * evaded, which is wear setting a weapon aside). The bot is armed, so the watcher enters defensive combat; the combat owner
      * selects the physical successor at the boundary where the last use is spent (see the backup-weapon test).
      */
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_final_use_sword_is_used_until_it_breaks_and_authorizes_combat", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_final_use_sword_is_used_until_it_breaks_and_authorizes_combat", maxTicks = 40 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void finalUseSwordIsUsedUntilItBreaksAndAuthorizesCombat(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseSwordCombatGT", 2);
         BlockPos origin = bot.blockPosition().immutable();
@@ -707,6 +711,8 @@ public final class DangerWatcherLowHealthGameTests {
         zombie.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(zombie);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         require(context, CombatCore.hasLineOfSight(bot, zombie),
                 "final-use sword hostile fixture lacked factual line of sight");
 
@@ -720,6 +726,7 @@ public final class DangerWatcherLowHealthGameTests {
                 "raw-1 sword combat did not preserve interrupted work");
         zombie.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_final_use_axe_is_still_a_qualified_melee_weapon", maxTicks = 20)
@@ -734,7 +741,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_ranged_line_of_sight_blocks_combat_heal_beyond_melee_boundary", maxTicks = 30)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_ranged_line_of_sight_blocks_combat_heal_beyond_melee_boundary", maxTicks = 30 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void rangedLineOfSightBlocksCombatHealBeyondMeleeBoundary(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatRangedHealGT", 2);
         int deathBaseline = deathCount(bot);
@@ -762,6 +769,8 @@ public final class DangerWatcherLowHealthGameTests {
                 skeletonFeet.getX() + 0.5D, skeletonFeet.getY(),
                 skeletonFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(skeleton);
+        PerceptionFixtures.faceToward(bot, skeleton);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(skeleton), since -> {
         double skeletonDistance = bot.position().distanceTo(skeleton.position());
         require(context, skeletonDistance > 6.8D && skeletonDistance < 7.2D
                         && CombatCore.hasLineOfSight(bot, skeleton),
@@ -796,9 +805,10 @@ public final class DangerWatcherLowHealthGameTests {
                         + combat.describe());
         skeleton.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_night_creeper_with_shelter_materials_chooses_dedicated_defense", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_night_creeper_with_shelter_materials_chooses_dedicated_defense", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void nightCreeperWithShelterMaterialsChoosesDedicatedDefense(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "NightCreeperDefenseGT", 36);
         context.getLevel().setDayTime(18000L);
@@ -812,6 +822,8 @@ public final class DangerWatcherLowHealthGameTests {
         Creeper creeper = spawnDisabledCreeper(
                 context, bot.blockPosition().east(8), "night Creeper routing fixture");
 
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(creeper), since -> {
         require(context, ObservableWorldQuery.canObserveEntity(bot, creeper)
                         && CombatCore.hasLineOfSight(bot, creeper),
                 "night Creeper was not factually observable");
@@ -830,9 +842,10 @@ public final class DangerWatcherLowHealthGameTests {
                 "night Creeper routing consumed shelter material");
         creeper.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_low_health_creeper_cannot_enter_emergency_entomb", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_low_health_creeper_cannot_enter_emergency_entomb", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void lowHealthCreeperCannotEnterEmergencyEntomb(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "LowCreeperDefenseGT", 52);
         context.getLevel().setDayTime(18000L);
@@ -847,6 +860,8 @@ public final class DangerWatcherLowHealthGameTests {
         Creeper creeper = spawnDisabledCreeper(
                 context, bot.blockPosition().east(6), "low-health Creeper routing fixture");
 
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(creeper), since -> {
         require(context, ObservableWorldQuery.canObserveEntity(bot, creeper)
                         && CombatCore.hasLineOfSight(bot, creeper),
                 "low-health Creeper was not factually observable");
@@ -864,9 +879,10 @@ public final class DangerWatcherLowHealthGameTests {
                 "low-health Creeper routing consumed shelter material");
         creeper.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_observable_creeper_at_fifteen_blocks_triggers_dedicated_defense", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_observable_creeper_at_fifteen_blocks_triggers_dedicated_defense", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void observableCreeperAtFifteenBlocksTriggersDedicatedDefense(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(
@@ -877,6 +893,8 @@ public final class DangerWatcherLowHealthGameTests {
         Creeper creeper = spawnDisabledCreeper(
                 context, bot.blockPosition().east(15), "fifteen-block Creeper fixture");
 
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(creeper), since -> {
         require(context, ObservableWorldQuery.canObserveEntity(bot, creeper)
                         && CombatCore.hasLineOfSight(bot, creeper),
                 "fifteen-block Creeper was not factually observable");
@@ -893,9 +911,10 @@ public final class DangerWatcherLowHealthGameTests {
                 "fifteen-block Creeper did not admit a real escape path");
         creeper.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_completed_creeper_defense_reacquires_without_mission_stack_gap", maxTicks = 160)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_completed_creeper_defense_reacquires_without_mission_stack_gap", maxTicks = 160 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void completedCreeperDefenseReacquiresWithoutMissionStackGap(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "CreeperReacquireGT", 108);
@@ -904,6 +923,8 @@ public final class DangerWatcherLowHealthGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_creeper_reacquire_work"));
         Creeper first = spawnDisabledCreeper(
                 context, bot.blockPosition().east(8), "initial Creeper cooldown fixture");
+        PerceptionFixtures.faceToward(bot, first);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(first), since -> {
         DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task firstSafety = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, firstSafety instanceof CreeperDefenseTask,
@@ -936,6 +957,8 @@ public final class DangerWatcherLowHealthGameTests {
 
         Creeper reappeared = spawnDisabledCreeper(
                 context, bot.blockPosition().east(15), "reappearing Creeper cooldown fixture");
+        PerceptionFixtures.faceToward(bot, reappeared);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(reappeared), since2 -> {
         require(context, ObservableWorldQuery.canObserveEntity(bot, reappeared),
                 "reappearing fifteen-block Creeper was not observable");
         DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
@@ -947,9 +970,11 @@ public final class DangerWatcherLowHealthGameTests {
                 "Creeper reacquisition resumed or duplicated the mission frame");
         reappeared.discard();
         despawnAndComplete(context, bot);
+        });
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_closer_zombie_cannot_mask_observable_creeper", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_closer_zombie_cannot_mask_observable_creeper", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void closerZombieCannotMaskObservableCreeper(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "MixedCreeperDefenseGT", 76);
         context.getLevel().setDayTime(18000L);
@@ -957,22 +982,27 @@ public final class DangerWatcherLowHealthGameTests {
         HoldingTask work = new HoldingTask();
         TaskManager.INSTANCE.assign(bot, work,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_mixed_creeper_work"));
-        Husk husk = EntityType.HUSK.create(context.getLevel(), EntitySpawnReason.COMMAND);
-        if (husk == null) {
-            despawnAndComplete(context, bot);
-            context.fail(Component.nullToEmpty("failed to create mixed-pressure Husk fixture"));
-            return;
-        }
-        husk.setPersistenceRequired();
-        husk.setNoAi(true);
-        BlockPos huskFeet = bot.blockPosition().east(3);
-        husk.snapTo(
-                huskFeet.getX() + 0.5D, huskFeet.getY(), huskFeet.getZ() + 0.5D,
-                90.0F, 0.0F);
-        context.getLevel().addFreshEntity(husk);
         Creeper creeper = spawnDisabledCreeper(
                 context, bot.blockPosition().east(15), "mixed-pressure Creeper fixture");
 
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(creeper), since -> {
+        // The creeper is noticed first (the bot reacts to it; the scenario starts from a clean slate). THEN a closer zombie appears and
+        // strikes the bot (a real blow: the striker is known at once): the bot now knows both, the zombie closer, and the zombie must
+        // not mask the creeper.
+        Husk husk = EntityType.HUSK.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        husk.setPersistenceRequired();
+        husk.setNoAi(true);
+        BlockPos huskFeet = bot.blockPosition().east(3);
+        husk.snapTo(huskFeet.getX() + 0.5D, huskFeet.getY(), huskFeet.getZ() + 0.5D, 90.0F, 0.0F);
+        context.getLevel().addFreshEntity(husk);
+        if (!bot.connection.hasClientLoaded()) {
+            bot.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket()); // ends the join invulnerability
+        }
+        require(context, bot.hurtServer(context.getLevel(), context.getLevel().damageSources().mobAttack(husk), 1.0F),
+                "the zombie's blow on the bot was not real");
+        bot.setHealth(bot.getMaxHealth());
+        bot.hurtTime = 0;
         DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active instanceof CreeperDefenseTask,
@@ -986,6 +1016,7 @@ public final class DangerWatcherLowHealthGameTests {
         husk.discard();
         creeper.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_evade_examines_fifth_direction_within_bounded_admission", maxTicks = 80)
@@ -1059,7 +1090,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_point_blank_live_charged_creeper_during_stalled_evade_survives_and_resumes_mission", maxTicks = 340)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_point_blank_live_charged_creeper_during_stalled_evade_survives_and_resumes_mission", maxTicks = 340 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void pointBlankLiveChargedCreeperDuringStalledEvadeSurvivesAndResumesMission(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnOnReactiveEscapeArena(
@@ -1078,16 +1109,23 @@ public final class DangerWatcherLowHealthGameTests {
         Vec3 approachAnchor = Vec3.atBottomCenterOf(origin.east(8));
         Creeper[] creeperRef = {null};
         AtomicBoolean pointBlankPressure = new AtomicBoolean();
+        // Set once the bot has noticed the creeper and taken up its safety response: before that the mission rightly runs on.
+        AtomicBoolean safetyStarted = new AtomicBoolean();
         AtomicBoolean explosionObserved = new AtomicBoolean();
         int[] armedTicks = {0};
         int[] maxPausedDepth = {0};
 
+        PerceptionFixtures.prepare(context); // the notice wait below starts inside a runAtTickTime step
         // Commit and physically stall the same initial westbound SAFETY path on both revisions
         // before applying point-blank pressure. Damage waits until join invulnerability expires.
         context.runAtTickTime(70, () -> {
             Creeper creeper = spawnLiveTargetingCreeper(
                     context, origin.east(8), bot, "live Creeper fuse fixture");
             creeperRef[0] = creeper;
+            // The bot turns to the creeper and notices it (reaction time of the shared formula) before safety routing; ten ticks after
+            // that comes the point-blank pressure (it was tick 80 when the bot knew of the creeper at once).
+            PerceptionFixtures.faceToward(bot, creeper);
+            PerceptionFixtures.afterNoticed(context, bot, List.of(creeper), since -> {
             require(context, ObservableWorldQuery.canObserveEntity(bot, creeper)
                             && CombatCore.hasLineOfSight(bot, creeper),
                     "live Creeper was not factually observable before safety routing");
@@ -1106,10 +1144,12 @@ public final class DangerWatcherLowHealthGameTests {
             require(context, committedGoal != null
                             && committedGoal.getX() < origin.getX() - 4,
                     "live Creeper safety did not commit its initial westbound path");
-        });
+            safetyStarted.set(true);
+            PerceptionFixtures.everyTick(context, () -> {
+            if (since.getAsLong() != 10) {
+                return;
+            }
 
-        context.runAtTickTime(80, () -> {
-            Creeper creeper = creeperRef[0];
             require(context, creeper != null && creeper.isAlive(),
                     "live Creeper disappeared before point-blank pressure");
             // Stronger-than-evidence regression: keep vanilla fuse/explosion behavior, but use
@@ -1129,6 +1169,8 @@ public final class DangerWatcherLowHealthGameTests {
                             && CombatCore.hasLineOfSight(bot, creeper),
                     "point-blank charged Creeper was not a live targeting pressure source");
             pointBlankPressure.set(true);
+            });
+            });
         });
 
         context.failIfEver(() -> {
@@ -1186,7 +1228,7 @@ public final class DangerWatcherLowHealthGameTests {
                 // mission to resume after its SAFETY owner repays the pressure.
             }
 
-            if (active == mission) {
+            if (active == mission && safetyStarted.get()) {
                 require(context, explosionObserved.get() && armedTicks[0] >= 20,
                         "mission resumed without observing a real Creeper fuse and explosion");
                 require(context, mission.state() == TaskState.RUNNING
@@ -1198,7 +1240,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_creeper_is_never_hit_from_strike_or_secondary_retreat", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_creeper_is_never_hit_from_strike_or_secondary_retreat", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void creeperIsNeverHitFromStrikeOrSecondaryRetreat(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatCreeperRetreatGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1221,6 +1263,8 @@ public final class DangerWatcherLowHealthGameTests {
         context.getLevel().addFreshEntity(creeper);
         float creeperHealth = creeper.getHealth();
 
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(creeper), since -> {
         // Exercise the normal STRIKE entry independently of DangerWatcher routing.
         CombatTask strikeProbe = CombatTask.defensive(creeper, 6.0F, origin);
         strikeProbe.start(bot);
@@ -1274,7 +1318,7 @@ public final class DangerWatcherLowHealthGameTests {
         TaskManager.INSTANCE.assign(bot, combat,
                 TaskOrigin.safety("gametest_secondary_creeper_no_counterattack"));
         AtomicBoolean dedicatedOwnerObserved = new AtomicBoolean();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, creeper.isAlive() && creeper.getHealth() == creeperHealth,
                     "combat or dedicated defense attacked the secondary Creeper");
             require(context, primary.isAlive() && primary.getHealth() == primaryHealth,
@@ -1299,7 +1343,7 @@ public final class DangerWatcherLowHealthGameTests {
                         "secondary Creeper transferred to unexpected owner "
                                 + (active == null ? "idle" : active.name()));
             }
-            if (context.getTick() >= 40) {
+            if (since.getAsLong() >= 40) {
                 require(context, dedicatedOwnerObserved.get(),
                         "secondary Creeper never established dedicated defense");
                 primary.discard();
@@ -1311,6 +1355,7 @@ public final class DangerWatcherLowHealthGameTests {
                 context.fail(Component.nullToEmpty("secondary-Creeper combat ended as "
                         + combat.state() + ":" + combat.failureReason()));
             }
+        });
         });
     }
 
@@ -1363,7 +1408,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_nearest_secondary_pressure_blocks_food_without_taking_primary_credit", maxTicks = 100)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_nearest_secondary_pressure_blocks_food_without_taking_primary_credit", maxTicks = 100 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void nearestSecondaryPressureBlocksFoodWithoutTakingPrimaryCredit(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatSecondaryPressureGT", 2);
@@ -1415,10 +1460,12 @@ public final class DangerWatcherLowHealthGameTests {
         float primaryHealth = primary.getHealth();
         float secondaryHealth = secondary.getHealth();
 
+        PerceptionFixtures.faceToward(bot, secondary);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(primary, secondary), since -> {
         CombatTask combat = CombatTask.defensive(primary, 10.0F, origin);
         TaskManager.INSTANCE.assign(bot, combat,
                 TaskOrigin.safety("gametest_secondary_pressure"));
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive() && deathCount(bot) == deathBaseline,
                     "secondary-pressure combat violated the zero-death boundary");
             if (secondary.isAlive() && bot.distanceTo(secondary) < 5.0D) {
@@ -1439,9 +1486,10 @@ public final class DangerWatcherLowHealthGameTests {
                         + combat.state() + ":" + combat.failureReason()));
             }
         });
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_ranged_secondary_at_fourteen_blocks_blocks_primary_settlement_until_los_breaks", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_ranged_secondary_at_fourteen_blocks_blocks_primary_settlement_until_los_breaks", maxTicks = 40 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void rangedSecondaryAtFourteenBlocksBlocksPrimarySettlementUntilLosBreaks(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatRangedSecondaryGT", 2);
@@ -1493,6 +1541,8 @@ public final class DangerWatcherLowHealthGameTests {
                 secondaryFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(primary);
         context.getLevel().addFreshEntity(secondary);
+        PerceptionFixtures.faceToward(bot, secondary);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(primary, secondary), since -> {
         require(context, CombatCore.hasLineOfSight(bot, secondary)
                         && bot.distanceTo(secondary) > 13.8D
                         && bot.distanceTo(secondary) < 14.2D,
@@ -1525,6 +1575,7 @@ public final class DangerWatcherLowHealthGameTests {
 
         secondary.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_combat_reequips_backup_in_the_same_attack_boundary", maxTicks = 100)
@@ -1606,7 +1657,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_contact_hostile_blocks_healing_and_forces_counterattack", maxTicks = 100)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_contact_hostile_blocks_healing_and_forces_counterattack", maxTicks = 100 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void contactHostileBlocksHealingAndForcesCounterattack(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatContactHealGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1641,6 +1692,8 @@ public final class DangerWatcherLowHealthGameTests {
         zombie.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(zombie);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         float initialHealth = zombie.getHealth();
         AtomicBoolean counterattacked = new AtomicBoolean();
 
@@ -1657,7 +1710,7 @@ public final class DangerWatcherLowHealthGameTests {
                         > origin.distSqr(hostileFeet),
                 "low-health acquire did not admit a goal away from the contact hostile: "
                         + (retreatGoal == null ? "no goal" : retreatGoal.toShortString()));
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             if (zombie.isAlive()) {
                 require(context, !bot.isUsingItem(),
                         "combat began eating while a live hostile remained in contact range");
@@ -1670,7 +1723,7 @@ public final class DangerWatcherLowHealthGameTests {
             require(context, bot.isAlive(), "bot died against the disabled contact hostile");
             require(context, deathCount(bot) == deathBaseline,
                     "contact-heal combat changed the bot death counter");
-            if (!zombie.isAlive() || context.getTick() >= 60) {
+            if (!zombie.isAlive() || since.getAsLong() >= 60) {
                 require(context, counterattacked.get(),
                         "blocked retreat never counterattacked the contact hostile");
                 zombie.discard();
@@ -1681,9 +1734,10 @@ public final class DangerWatcherLowHealthGameTests {
                         + combat.state() + ":" + combat.failureReason()));
             }
         });
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_leash_exit_cannot_complete_while_a_hostile_remains_in_contact", maxTicks = 30)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_leash_exit_cannot_complete_while_a_hostile_remains_in_contact", maxTicks = 30 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void leashExitCannotCompleteWhileAHostileRemainsInContact(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatLeashContactGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1704,6 +1758,8 @@ public final class DangerWatcherLowHealthGameTests {
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(zombie);
 
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         // The task's work-site anchor is deliberately outside its defensive leash while the live
         // hostile is still touching the bot. A leash check may end pursuit only after safety; it
         // must not complete here and expose the paused mining task to a free zombie hit.
@@ -1722,6 +1778,7 @@ public final class DangerWatcherLowHealthGameTests {
                 "leash-contact retreat changed the bot death counter");
         zombie.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     @GameTest(maxTicks = 160)
@@ -1753,7 +1810,7 @@ public final class DangerWatcherLowHealthGameTests {
     // This fixture opens a fourteen-block hostile corridor, wider than GameTest's default
     // structure spacing. Keep it in an isolated batch so neighbouring mobs/walls cannot change
     // the admission fact between the two synchronous scans.
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_observed_hostile_inside_threat_cooldown_blocks_new_naked_healing_eat", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_observed_hostile_inside_threat_cooldown_blocks_new_naked_healing_eat", maxTicks = 40 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void observedHostileInsideThreatCooldownBlocksNewNakedHealingEat(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "NakedEatAdmissionGT", 2);
@@ -1788,6 +1845,8 @@ public final class DangerWatcherLowHealthGameTests {
         skeleton.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(skeleton);
+        PerceptionFixtures.faceToward(bot, skeleton);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(skeleton), since -> {
         require(context, CombatCore.hasLineOfSight(bot, skeleton),
                 "remote naked-eat skeleton was not initially reachable");
 
@@ -1824,11 +1883,12 @@ public final class DangerWatcherLowHealthGameTests {
                 "blocked naked EatTask consumed food");
         skeleton.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     // The terminal-episode decision counts every observable hostile. An isolated batch proves
     // the intended close zombie without inheriting ranged mobs from adjacent empty structures.
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_terminal_shelter_episode_uses_close_defensive_combat_until_relocation", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_terminal_shelter_episode_uses_close_defensive_combat_until_relocation", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void terminalShelterEpisodeUsesCloseDefensiveCombatUntilRelocation(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "ShelterEpisodeFallbackGT", 2);
@@ -1860,6 +1920,8 @@ public final class DangerWatcherLowHealthGameTests {
         zombie.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(zombie);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         require(context, CombatCore.hasLineOfSight(bot, zombie),
                 "shelter-episode fixture hostile was not reachable");
 
@@ -1899,6 +1961,7 @@ public final class DangerWatcherLowHealthGameTests {
 
         zombie.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     @GameTest(maxTicks = 40)
@@ -2289,7 +2352,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_provoked_enderman_routes_to_evade", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_provoked_enderman_routes_to_evade", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void provokedEndermanRoutesToEvade(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "ProvokedEndermanGT", 132);
         HoldingTask work = new HoldingTask();
@@ -2302,6 +2365,8 @@ public final class DangerWatcherLowHealthGameTests {
         enderman.setTarget(bot);
         float initialHealth = enderman.getHealth();
 
+        PerceptionFixtures.faceToward(bot, enderman);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(enderman), since -> {
         require(context, DangerWatcher.isActiveHostileThreat(bot, enderman)
                         && ObservableWorldQuery.canObserveEntity(bot, enderman)
                         && CombatCore.hasLineOfSight(bot, enderman),
@@ -2322,9 +2387,10 @@ public final class DangerWatcherLowHealthGameTests {
                 "provoked Enderman routing dealt combat damage");
         enderman.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_direct_combat_never_attacks_enderman", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_direct_combat_never_attacks_enderman", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void directCombatNeverAttacksEnderman(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "CombatEndermanGuardGT", 164);
         BlockPos origin = bot.blockPosition().immutable();
@@ -2336,6 +2402,8 @@ public final class DangerWatcherLowHealthGameTests {
         enderman.setTarget(bot);
         float initialHealth = enderman.getHealth();
 
+        PerceptionFixtures.faceToward(bot, enderman);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(enderman), since -> {
         // Exercise CombatTask directly so the assertion survives even if a caller bypasses the
         // normal DangerWatcher -> Evade routing boundary.
         CombatTask combat = CombatTask.defensive(enderman, 6.0F, origin);
@@ -2352,9 +2420,10 @@ public final class DangerWatcherLowHealthGameTests {
                 "direct Enderman CombatTask did not retain escape movement");
         enderman.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_combat_retreat_admits_lateral_surface_path", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_combat_retreat_admits_lateral_surface_path", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void combatRetreatAdmitsLateralSurfacePath(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatLateralRetreatGT", 148);
         var world = context.getLevel();
@@ -2396,6 +2465,8 @@ public final class DangerWatcherLowHealthGameTests {
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         world.addFreshEntity(husk);
 
+        PerceptionFixtures.faceToward(bot, husk);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(husk), since -> {
         CombatTask combat = CombatTask.defensive(husk, 10.0F, origin);
         TaskManager.INSTANCE.assign(bot, combat,
                 TaskOrigin.safety("gametest_lateral_combat_retreat"));
@@ -2416,6 +2487,7 @@ public final class DangerWatcherLowHealthGameTests {
                 "Combat retreat bypassed surface-path admission");
         husk.discard();
         despawnAndComplete(context, bot);
+        });
     }
 
     private static Map<String, String> createActiveBreakCheckpoint(BlockPos origin,
