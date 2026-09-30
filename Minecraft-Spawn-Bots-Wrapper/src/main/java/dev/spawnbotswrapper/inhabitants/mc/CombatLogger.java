@@ -1,19 +1,33 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.combat.CombatLedger;
+import dev.spawnbotswrapper.inhabitants.combat.DamageTakenLog;
+import dev.spawnbotswrapper.inhabitants.combat.RangedCycleDetector;
+import dev.spawnbotswrapper.inhabitants.combat.StateSnapshot;
 import dev.spawnbotswrapper.inhabitants.combat.CombatLedger.Actor;
 import dev.spawnbotswrapper.inhabitants.combat.CombatLedger.Kind;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
@@ -30,12 +44,28 @@ import java.util.function.Supplier;
  * only through internal state that the adapter does not read, and reading it per bot per tick is not free.
  * The first hit line of a fight shows who engaged whom instead.
  * <p>
+ * Also writes two diagnostics (see the README, "Diagnostic lines"): one "Combat taken:" line per hit an inhabitant
+ * takes, with a {@link StateSnapshot}, and a "ranged loop:" WARN when a bot repeatedly starts and abandons a bow or
+ * crossbow draw ({@link RangedCycleDetector}). Both only read state; no bot behaviour changes.
+ * <p>
  * Every handler swallows its own failures: a logging bug must never reach the damage code path.
  */
 public final class CombatLogger {
     private final Supplier<ServerSession> session;
     private final Logger log;
     private CombatLedger ledger;
+    /** Diagnostics: hits inhabitants TAKE (with a state snapshot) and the bow/crossbow abort loop. Server thread only. */
+    private final DamageTakenLog taken = new DamageTakenLog();
+    private final RangedCycleDetector rangedLoop = new RangedCycleDetector();
+    /** Server tick at which a projectile owned by this player last spawned. */
+    private final Map<UUID, Long> lastShot = new HashMap<>();
+    private long upstreamTick = Long.MIN_VALUE;
+    private String upstreamText;
+    /** Set after the ranged-loop watcher threw once (logged once): a broken diagnostic must not spam every tick. */
+    private boolean rangedWatchBroken;
+
+    /** Only inhabitants within this many blocks of a real player are watched for the ranged loop. */
+    static final double RANGED_WATCH_RADIUS = 32.0;
 
     public CombatLogger(Supplier<ServerSession> session, Logger log) {
         this.session = session;
@@ -48,6 +78,17 @@ public final class CombatLogger {
                 guarded("damage", () -> onDamage(entity, source, baseDamage, damage, blocked)));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) ->
                 guarded("death", () -> onDeath(entity, source)));
+        // Remembers when a player-like shooter last spawned a projectile: a bow/crossbow draw that ends with a
+        // fresh projectile was a shot, one that does not was aborted (see RangedCycleDetector).
+        ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
+            if (entity instanceof Projectile projectile) {
+                guarded("projectile", () -> {
+                    if (projectile.getOwner() instanceof ServerPlayer shooter) {
+                        lastShot.put(shooter.getUUID(), (long) level.getServer().getTickCount());
+                    }
+                });
+            }
+        });
     }
 
     /** Once per server tick (from the entrypoint's END_SERVER_TICK): emits summaries whose window has elapsed. */
@@ -55,6 +96,16 @@ public final class CombatLogger {
         CombatLedger current = ledger;
         if (current != null) {
             guarded("tick", () -> current.tick(serverTicks));
+        }
+        if (!rangedWatchBroken) {
+            try {
+                watchRangedLoops(serverTicks);
+            } catch (OutOfMemoryError e) {
+                throw e;
+            } catch (Throwable t) {
+                rangedWatchBroken = true;
+                log.warn("ranged loop diagnostic failed and is switched off until restart: {}", t.toString());
+            }
         }
     }
 
@@ -66,6 +117,10 @@ public final class CombatLogger {
     public void flush(long serverTicks) {
         CombatLedger current = ledger;
         ledger = null;
+        taken.reset();
+        rangedLoop.reset();
+        lastShot.clear();
+        upstreamTick = Long.MIN_VALUE;
         if (current != null) {
             guarded("flush", () -> {
                 current.flushAll(serverTicks);
@@ -94,6 +149,141 @@ public final class CombatLogger {
         double distance = c.attacker == null ? -1 : victim.distanceTo(source.getEntity());
         c.ledger.hit(c.now, new CombatLedger.Hit(c.attacker, c.victim, damage, baseDamage, blocked,
                 source.getMsgId(), weapon(source), distance, victim.getHealth()), c.detail);
+        if (c.victim.kind() == Kind.INHABITANT && victim instanceof ServerPlayer bot) {
+            guarded("damage taken", () -> logTaken(bot, source, damage, baseDamage, blocked, c));
+        }
+    }
+
+    /**
+     * One INFO line for every hit an inhabitant takes (throttled per attacker, first hit always), with the bot's
+     * state snapshot. Unlike the coalesced ledger this shows a PLAYER hitting an inhabitant immediately.
+     */
+    private void logTaken(ServerPlayer bot, DamageSource source, float damage, float baseDamage, boolean blocked,
+                          Context c) {
+        String attackerKey = c.attacker == null ? "environment:" + source.getMsgId()
+                : c.attacker.kind() + ":" + c.attacker.name().toLowerCase(Locale.ROOT);
+        int folded = taken.admit(c.now, c.victim.name().toLowerCase(Locale.ROOT), attackerKey);
+        if (folded < 0) {
+            return;
+        }
+        ServerSession current = session.get();
+        CommandServices services = current == null ? null : current.services();
+        Entity attackerEntity = source.getEntity();
+        Entity direct = source.getDirectEntity();
+        String directCause = direct == null || direct == attackerEntity ? null
+                : BuiltInRegistries.ENTITY_TYPE.getKey(direct.getType()).getPath();
+        String population = null;
+        if (services != null && services.population() != null) {
+            population = services.population().findBot(c.victim.name())
+                    .map(loc -> loc.structure().asString()).orElse(null);
+        }
+        Entity other = attackerEntity != null ? attackerEntity : nearestRealPlayer(bot, services, Double.MAX_VALUE);
+        String snapshot = BotStateProbe.snapshot(bot, other, upstream(services, c.now)).format();
+        log.info(DamageTakenLog.line(new DamageTakenLog.Taken(c.victim.name(), population,
+                c.attacker == null ? null : c.attacker.name(),
+                c.attacker == null ? null : c.attacker.kind().name().toLowerCase(Locale.ROOT), directCause,
+                source.getMsgId(), weapon(source), damage, baseDamage, blocked, bot.getHealth(),
+                bot.getX(), bot.getY(), bot.getZ(), bot.level().dimension().identifier().toString(), snapshot),
+                folded));
+    }
+
+    /** PvP BOT's global combat switches as text, cached for a few seconds; null when the adapter cannot read them. */
+    private String upstream(CommandServices services, long now) {
+        if (services == null || services.adapter() == null) {
+            return null;
+        }
+        if (upstreamTick == Long.MIN_VALUE || now < upstreamTick || now - upstreamTick >= 100) {
+            upstreamTick = now;
+            try {
+                upstreamText = BotStateProbe.upstreamText(services.adapter().readCapabilities());
+            } catch (RuntimeException e) {
+                upstreamText = null;
+            }
+        }
+        return upstreamText;
+    }
+
+    /** The closest real (non-inhabitant) player in the same level within {@code maxDistance}, or null. */
+    private static ServerPlayer nearestRealPlayer(ServerPlayer bot, CommandServices services, double maxDistance) {
+        MinecraftServer server = bot.level().getServer();
+        if (server == null) {
+            return null;
+        }
+        ServerPlayer best = null;
+        double bestSq = maxDistance == Double.MAX_VALUE ? Double.MAX_VALUE : maxDistance * maxDistance;
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            if (p == bot || p.level() != bot.level() || isInhabitant(p, services)) {
+                continue;
+            }
+            double d = bot.distanceToSqr(p);
+            if (d <= bestSq) {
+                bestSq = d;
+                best = p;
+            }
+        }
+        return best;
+    }
+
+    private static boolean isInhabitant(ServerPlayer p, CommandServices services) {
+        return services != null && services.population() != null
+                && services.population().findBot(p.getName().getString()).isPresent();
+    }
+
+    // ------------------------------------------------------------------ ranged loop
+
+    /**
+     * Every server tick: for inhabitants within {@value #RANGED_WATCH_RADIUS} blocks of a real player that are
+     * using (or were just using) a bow or crossbow, feed the detector; log one WARN when it reports a loop. Idle
+     * bots cost one boolean check.
+     */
+    private void watchRangedLoops(long now) {
+        ServerSession current = session.get();
+        CommandServices services = current == null ? null : current.services();
+        if (services == null || services.population() == null) {
+            return;
+        }
+        InhabitantsConfig cfg = services.config().get();
+        if (cfg == null || cfg.combatLog == null || !cfg.combatLog.enabled) {
+            return;
+        }
+        List<ServerPlayer> players = current.server().getPlayerList().getPlayers();
+        if (players.size() < 2) {
+            if (rangedLoop.trackedBots() > 0) {
+                rangedLoop.reset();
+            }
+            return;
+        }
+        Set<String> seen = rangedLoop.trackedBots() == 0 ? null : new HashSet<>();
+        for (ServerPlayer p : players) {
+            String name = p.getName().getString();
+            String using = BotStateProbe.usedRanged(p);
+            if (using == null && !rangedLoop.tracking(name)) {
+                continue;
+            }
+            if (!isInhabitant(p, services)) {
+                continue;
+            }
+            ServerPlayer near = nearestRealPlayer(p, services, RANGED_WATCH_RADIUS);
+            if (near == null) {
+                rangedLoop.forget(name);
+                continue;
+            }
+            if (seen != null) {
+                seen.add(name);
+            }
+            RangedCycleDetector.Alert alert = rangedLoop.observe(name, new RangedCycleDetector.Sample(now,
+                    using != null, using == null ? "none" : using, using == null ? 0 : p.getTicksUsingItem(),
+                    BotStateProbe.anyCrossbowCharged(p), p.getInventory().getSelectedSlot(),
+                    BotStateProbe.itemName(p.getMainHandItem()), lastShot.getOrDefault(p.getUUID(), -1L),
+                    p.distanceTo(near), p.hasLineOfSight(near)));
+            if (alert != null) {
+                log.warn(RangedCycleDetector.line(alert,
+                        BotStateProbe.snapshot(p, near, upstream(services, now)).format()));
+            }
+        }
+        if (seen != null) {
+            rangedLoop.retainOnly(seen);
+        }
     }
 
     private void onDeath(LivingEntity victim, DamageSource source) {
