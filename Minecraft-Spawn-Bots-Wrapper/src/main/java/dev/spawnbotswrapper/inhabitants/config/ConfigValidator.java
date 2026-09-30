@@ -111,7 +111,6 @@ public final class ConfigValidator {
         validateCombat(c);
         validateAggro(c, w);
         validatePvpbotSettings(c, w);
-        validateRangedPacing(c, w);
 
         if (c.spawning == null) {
             c.spawning = new InhabitantsConfig.Spawning();
@@ -175,6 +174,9 @@ public final class ConfigValidator {
         s.rangedOptimalRange = finiteOrNull(w, "pvpbotSettings.rangedOptimalRange", s.rangedOptimalRange);
         s.rangedMaxRange = finiteOrNull(w, "pvpbotSettings.rangedMaxRange", s.rangedMaxRange);
         s.meleeRange = finiteOrNull(w, "pvpbotSettings.meleeRange", s.meleeRange);
+        if (s.bowMinDrawTime != null) {
+            s.bowMinDrawTime = clamp(w, "pvpbotSettings.bowMinDrawTime", s.bowMinDrawTime, 5, 100);
+        }
         if (s.maxTargetDistance != null) {
             s.maxTargetDistance = clamp(w, "pvpbotSettings.maxTargetDistance", s.maxTargetDistance,
                     MIN_TARGET_DISTANCE, MAX_TARGET_DISTANCE);
@@ -196,16 +198,6 @@ public final class ConfigValidator {
             return null;
         }
         return v;
-    }
-
-    private static void validateRangedPacing(InhabitantsConfig c, List<String> w) {
-        if (c.rangedPacing == null) {
-            c.rangedPacing = new InhabitantsConfig.RangedPacing();
-            w.add("'rangedPacing' is null; using the defaults");
-        }
-        c.rangedPacing.aimSettleTicks = clamp(w, "rangedPacing.aimSettleTicks", c.rangedPacing.aimSettleTicks, 0, 40);
-        c.rangedPacing.crossbowMinShotIntervalTicks = clamp(w, "rangedPacing.crossbowMinShotIntervalTicks",
-                c.rangedPacing.crossbowMinShotIntervalTicks, 1, 200);
     }
 
     private static void validateCombatLog(InhabitantsConfig c, List<String> w) {
@@ -230,13 +222,14 @@ public final class ConfigValidator {
             c.aggro = new InhabitantsConfig.Aggro();
         }
         InhabitantsConfig.Aggro a = c.aggro;
-        a.acquireRange = clamp(w, "aggro.acquireRange", a.acquireRange, 2.0, 64.0);
-        a.scanIntervalTicks = clamp(w, "aggro.scanIntervalTicks", a.scanIntervalTicks, 1, 40);
-        a.leashRange = clamp(w, "aggro.leashRange", a.leashRange, a.acquireRange, 128.0);
-        a.loseSightTicks = clamp(w, "aggro.loseSightTicks", a.loseSightTicks, 1, 72000);
+        a.reactionTicks = clamp(w, "aggro.reactionTicks", a.reactionTicks, 0, 100);
+        a.distanceReactionTicksPer32 = clamp(w, "aggro.distanceReactionTicksPer32", a.distanceReactionTicksPer32, 0.0, 100.0);
+        a.loseGraceTicks = clamp(w, "aggro.loseGraceTicks", a.loseGraceTicks, 1, 72000);
+        a.searchTicks = clamp(w, "aggro.searchTicks", a.searchTicks, 20, 72000);
         a.returnArriveDistance = clamp(w, "aggro.returnArriveDistance", a.returnArriveDistance, 0.5, 16.0);
-        a.returnStuckTicks = clamp(w, "aggro.returnStuckTicks", a.returnStuckTicks, 1, 72000);
-        a.returnMaxTicks = clamp(w, "aggro.returnMaxTicks", a.returnMaxTicks, 1, 72000);
+        a.stuckTicks = clamp(w, "aggro.stuckTicks", a.stuckTicks, 10, 1200);
+        a.returnMaxTicks = clamp(w, "aggro.returnMaxTicks", a.returnMaxTicks, 20, 72000);
+        a.scanIntervalTicks = clamp(w, "aggro.scanIntervalTicks", a.scanIntervalTicks, 1, 40);
         if (a.perception == null) {
             a.perception = new InhabitantsConfig.AggroPerception();
         }
@@ -244,11 +237,11 @@ public final class ConfigValidator {
         p.frontHalfAngleDeg = clamp(w, "aggro.perception.frontHalfAngleDeg", p.frontHalfAngleDeg, 0.0, 180.0);
         p.peripheralHalfAngleDeg = clamp(w, "aggro.perception.peripheralHalfAngleDeg", p.peripheralHalfAngleDeg,
                 p.frontHalfAngleDeg, 180.0);
-        p.peripheralFactor = clamp(w, "aggro.perception.peripheralFactor", p.peripheralFactor, 0.0, 1.0);
-        p.sneakFactor = clamp(w, "aggro.perception.sneakFactor", p.sneakFactor, 0.0, 1.0);
-        p.hearWalk = clamp(w, "aggro.perception.hearWalk", p.hearWalk, 0.0, 64.0);
-        p.hearSprint = clamp(w, "aggro.perception.hearSprint", p.hearSprint, 0.0, 64.0);
-        p.hearCombat = clamp(w, "aggro.perception.hearCombat", p.hearCombat, 0.0, 64.0);
+        p.peripheralMultiplier = clamp(w, "aggro.perception.peripheralMultiplier", p.peripheralMultiplier, 1.0, 20.0);
+        p.sneakMultiplier = clamp(w, "aggro.perception.sneakMultiplier", p.sneakMultiplier, 1.0, 20.0);
+        p.hearWalk = clamp(w, "aggro.perception.hearWalk", p.hearWalk, 0.0, 128.0);
+        p.hearSprint = clamp(w, "aggro.perception.hearSprint", p.hearSprint, 0.0, 128.0);
+        p.hearCombat = clamp(w, "aggro.perception.hearCombat", p.hearCombat, 0.0, 128.0);
         p.combatNoiseTicks = clamp(w, "aggro.perception.combatNoiseTicks", p.combatNoiseTicks, 0, 200);
     }
 

@@ -3,31 +3,40 @@ package dev.spawnbotswrapper.inhabitants.combat;
 import java.util.function.BooleanSupplier;
 
 /**
- * Realistic noticing: the ONE pure decision {@code notice(observer, subject) -> SIGHT | HEARING | NONE}, shared (as
- * the same function, checked by the same golden vectors in {@code docs/perception/vectors.json}) with the
- * Minecraft-AI mod. See {@code docs/PERCEPTION.md}.
+ * Realistic noticing: the ONE pure decision "does observer O notice subject S, and how long must it be exposed first",
+ * shared (as the same function, checked by the same golden vectors in {@code docs/perception/vectors.json}) with the
+ * Minecraft-AI mod. See {@code docs/PERCEPTION.md}. There is NO distance restriction beyond the mod maximum: a subject
+ * is sighted whenever it is in view; seeing takes TIME (a person needs a moment to register somebody), and the moment is
+ * longer for what is harder to see.
  * <ul>
- *   <li><b>Cone.</b> Within {@code frontHalfAngleDeg} of the look direction the subject is seen at the full range;
- *       out to {@code peripheralHalfAngleDeg} at {@code peripheralFactor} of it; beyond that (behind) it is not seen.</li>
- *   <li><b>Subject.</b> Sneaking multiplies the sight range by {@code sneakFactor}; invisibility and worn mob heads by
- *       the {@code visibility} factor (the vanilla one, with its own sneak factor divided out so sneaking is not
- *       counted twice).</li>
- *   <li><b>Hearing.</b> A close, noisy subject is noticed even from behind: within its noise radius (walking 4,
- *       sprinting 8, combat noise 12, mobs by kind; sneaking or standing still is silent), capped at the base sight
- *       range. Hearing never works through walls.</li>
+ *   <li><b>Sighted</b> this tick: within the mod maximum, in the view cone (front {@code frontHalfAngleDeg}, or the
+ *       peripheral field out to {@code peripheralHalfAngleDeg}; behind is never sighted), the view unobstructed, and
+ *       not fully invisible.</li>
+ *   <li><b>Reaction time.</b> The subject must stay sighted for {@code reactionTicks * cone * sneak / visibility +
+ *       distanceTicksPer32 * distance / 32} ticks (cone: 1 in front, {@code peripheralMultiplier} in the periphery;
+ *       sneak: {@code sneakMultiplier} while the subject sneaks; visibility: vanilla invisibility and worn mob heads with
+ *       the sneak factor divided out). The distance term is a soft scaling (far figures take longer), not a limit.</li>
+ *   <li><b>Hearing.</b> A close, noisy subject (walking 4, sprinting 8, combat noise 12; a sneaking or standing subject is
+ *       silent) with a clear line counts as sighted in the FRONT cone: the observer turns to the sound. Heard but
+ *       occluded is only an {@link Sense#INVESTIGATE} hint (a place to go and look), never a notice. Hearing only ADDS
+ *       awareness from behind; it restricts nothing.</li>
  *   <li><b>Occlusion</b> is asked LAST (a callback), only when range and angle already say yes: the caller casts its
  *       expensive rays lazily, at most once.</li>
  * </ul>
- * Awareness memory (an engaged combatant keeps following for {@code awarenessTicks}) lives in the caller: for the
- * aggro controller it is the engagement itself. No Minecraft classes here.
+ * Exposure (how long the subject has been sighted) is bookkeeping of the caller, see {@link ExposureTracker}; awareness
+ * memory (an engaged combatant follows by plain occlusion) is the caller's engagement. {@code enabled=false} is exactly
+ * vanilla {@code hasLineOfSight}: in range and unobstructed is a notice at once, no cone, no sneaking, no time. No
+ * Minecraft classes here.
  */
 public final class Perception {
     private Perception() {
     }
 
-    /** How a subject was noticed. */
-    public enum Notice {
-        NONE, SIGHT, HEARING
+    /** What an observer made of a subject this tick. */
+    public enum Sense {
+        NONE, SIGHT, HEARING,
+        /** Heard, but the line is blocked: a place to go and look, never a notice. */
+        INVESTIGATE
     }
 
     /** What kind of creature makes noise the way mobs do; {@link #NONE} for a player or a bot (they use the stance). */
@@ -45,25 +54,29 @@ public final class Perception {
         ANIMAL
     }
 
-    /** The tunables (the {@code perception} config block of either mod). */
+    /** The tunables (the {@code aggro} and {@code aggro.perception} config blocks of the wrapper). */
     public record Params(boolean enabled, double frontHalfAngleDeg, double peripheralHalfAngleDeg,
-                         double peripheralFactor, double sneakFactor, double hearWalk, double hearSprint,
-                         double hearCombat, double hearNoisyMob, double hearPrimedCreeper, double hearWarden,
-                         double hearAnimal, int combatNoiseTicks, int awarenessTicks) {
+                         double peripheralMultiplier, double sneakMultiplier, double reactionTicks,
+                         double distanceTicksPer32, double hearWalk, double hearSprint, double hearCombat,
+                         double hearNoisyMob, double hearPrimedCreeper, double hearWarden, double hearAnimal,
+                         int combatNoiseTicks) {
         public static Params defaults() {
-            return new Params(true, 60.0, 100.0, 0.5, 0.5, 4.0, 8.0, 12.0, 8.0, 16.0, 24.0, 4.0, 10, 200);
+            return new Params(true, 60.0, 100.0, 2.0, 2.0, 5.0, 5.0, 4.0, 8.0, 12.0, 8.0, 16.0, 24.0, 4.0, 10);
         }
 
-        /** The same tunables with perception switched off: plain omnidirectional line of sight, as before. */
+        /** The same tunables with perception switched off: exactly vanilla hasLineOfSight (see the class comment). */
         public Params disabled() {
-            return new Params(false, frontHalfAngleDeg, peripheralHalfAngleDeg, peripheralFactor, sneakFactor,
-                    hearWalk, hearSprint, hearCombat, hearNoisyMob, hearPrimedCreeper, hearWarden, hearAnimal,
-                    combatNoiseTicks, awarenessTicks);
+            return new Params(false, frontHalfAngleDeg, peripheralHalfAngleDeg, peripheralMultiplier, sneakMultiplier,
+                    reactionTicks, distanceTicksPer32, hearWalk, hearSprint, hearCombat, hearNoisyMob,
+                    hearPrimedCreeper, hearWarden, hearAnimal, combatNoiseTicks);
         }
     }
 
     /** No noise event has happened for so long that it never counts. */
     public static final int NO_NOISE = Integer.MAX_VALUE;
+
+    /** "Never": the required exposure of something that cannot be sighted at all (behind, fully invisible). */
+    public static final double NEVER = Double.POSITIVE_INFINITY;
 
     /**
      * What the subject is doing this tick, as far as noticing goes.
@@ -82,6 +95,22 @@ public final class Perception {
         /** A player or bot in the given stance, no combat noise, fully visible. */
         public static Subject player(boolean sneaking, boolean moving, boolean sprinting) {
             return new Subject(sneaking, moving, sprinting, NO_NOISE, MobKind.NONE, 1.0);
+        }
+    }
+
+    /**
+     * What the observer made of the subject this tick.
+     *
+     * @param sense         how it was sensed (or not)
+     * @param requiredTicks for {@link Sense#SIGHT} / {@link Sense#HEARING}: the continuous exposure (ticks) after which it
+     *                      is noticed; {@link #NEVER} otherwise
+     */
+    public record Reading(Sense sense, double requiredTicks) {
+        static final Reading NOTHING = new Reading(Sense.NONE, NEVER);
+
+        /** True when the subject is sensed by sight or hearing (exposure builds up). */
+        public boolean exposed() {
+            return sense == Sense.SIGHT || sense == Sense.HEARING;
         }
     }
 
@@ -108,19 +137,40 @@ public final class Perception {
         return r;
     }
 
-    /** The share of the sight range that applies at this angle off the look direction: 1, the peripheral factor, or 0. */
-    public static double coneFactor(Params p, double thetaDeg) {
+    /**
+     * How many times longer the reaction takes at this angle off the look direction: 1 in the front cone, the
+     * peripheral multiplier in the peripheral field, {@link #NEVER} behind (not sighted at all).
+     */
+    public static double coneMultiplier(Params p, double thetaDeg) {
         double t = Math.abs(thetaDeg);
         if (t <= p.frontHalfAngleDeg()) {
             return 1.0;
         }
-        return t <= p.peripheralHalfAngleDeg() ? p.peripheralFactor() : 0.0;
+        return t <= p.peripheralHalfAngleDeg() ? p.peripheralMultiplier() : NEVER;
     }
 
-    /** The distance out to which the subject is SEEN at this angle: base x cone x sneak x visibility. */
-    public static double sightRange(Params p, double baseRange, double thetaDeg, Subject s) {
-        return baseRange * coneFactor(p, thetaDeg) * (s.sneaking() ? p.sneakFactor() : 1.0)
-                * Math.max(0.0, s.visibility());
+    /** The soft distance term of the reaction time: {@code distanceTicksPer32} extra ticks per 32 blocks. */
+    public static double distanceTicks(Params p, double distance) {
+        return p.distanceTicksPer32() * Math.max(0.0, distance) / 32.0;
+    }
+
+    /**
+     * The continuous exposure (ticks) after which a subject SIGHTED at this angle and distance is noticed:
+     * {@code reactionTicks * cone * sneak / visibility + distance term}; {@link #NEVER} when it is behind the observer or
+     * fully invisible.
+     */
+    public static double sightTicks(Params p, double thetaDeg, double distance, Subject s) {
+        double cone = coneMultiplier(p, thetaDeg);
+        if (cone == NEVER || s.visibility() <= 0.0) {
+            return NEVER;
+        }
+        double sneak = s.sneaking() ? p.sneakMultiplier() : 1.0;
+        return p.reactionTicks() * cone * sneak / s.visibility() + distanceTicks(p, distance);
+    }
+
+    /** The exposure after which a HEARD subject is noticed: the front-cone reaction time (the observer turns to the sound). */
+    public static double hearingTicks(Params p, double distance) {
+        return p.reactionTicks() + distanceTicks(p, distance);
     }
 
     /** The 3D angle in degrees between the look direction and the direction to the subject (0 = straight ahead). */
@@ -135,27 +185,41 @@ public final class Perception {
     }
 
     /**
-     * Whether the observer notices the subject.
+     * What the observer makes of the subject THIS tick.
      *
-     * @param baseRange      the observer's base sight range (the aggro acquire range)
+     * @param modMax         the mod maximum in blocks (128: vanilla hasLineOfSight's cap and PvP BOT's largest targeting
+     *                       distance); the only distance limit there is
      * @param thetaDeg       the angle between the observer's look direction and the direction to the subject
      * @param distance       the distance between them
-     * @param occlusionClear asked last, at most once, only when range and angle already allow noticing; true when the
+     * @param occlusionClear asked last, at most once, only when range and angle already allow sensing; true when the
      *                       line of sight is clear (eye ray, then a body-centre ray)
      */
-    public static Notice notice(Params p, double baseRange, double thetaDeg, double distance, Subject s,
-                                BooleanSupplier occlusionClear) {
-        if (!p.enabled()) {
-            return distance <= baseRange && occlusionClear.getAsBoolean() ? Notice.SIGHT : Notice.NONE;
+    public static Reading read(Params p, double modMax, double thetaDeg, double distance, Subject s,
+                               BooleanSupplier occlusionClear) {
+        if (distance > modMax) {
+            return Reading.NOTHING;
         }
-        boolean sees = distance <= sightRange(p, baseRange, thetaDeg, s);
-        boolean hears = distance <= Math.min(noiseRadius(p, s), baseRange);
-        if (!sees && !hears) {
-            return Notice.NONE;
+        if (!p.enabled()) {
+            return occlusionClear.getAsBoolean() ? new Reading(Sense.SIGHT, 0.0) : Reading.NOTHING;
+        }
+        double seeTicks = sightTicks(p, thetaDeg, distance, s);
+        boolean sightPossible = seeTicks != NEVER;
+        boolean heard = distance <= noiseRadius(p, s);
+        if (!sightPossible && !heard) {
+            return Reading.NOTHING;
         }
         if (!occlusionClear.getAsBoolean()) {
-            return Notice.NONE;
+            return heard ? new Reading(Sense.INVESTIGATE, NEVER) : Reading.NOTHING;
         }
-        return sees ? Notice.SIGHT : Notice.HEARING;
+        double hearTicks = heard ? hearingTicks(p, distance) : NEVER;
+        if (sightPossible && seeTicks <= hearTicks) {
+            return new Reading(Sense.SIGHT, seeTicks);
+        }
+        return new Reading(Sense.HEARING, hearTicks);
+    }
+
+    /** True when {@code exposureTicks} of continuous exposure is enough for {@code requiredTicks}. */
+    public static boolean noticed(double exposureTicks, double requiredTicks) {
+        return requiredTicks != NEVER && exposureTicks >= requiredTicks;
     }
 }

@@ -87,8 +87,8 @@ final class SettingData {
                         "No per-bot proxy: PvP BOT's own acquisition of the nearest entity within maxTargetDistance (no line of "
                                 + "sight needed). Managed by this addon: config pvpbotSettings.autoTargetEnabled (shipped false), "
                                 + "because the addon's aggro controller (config aggro) acquires instead, by line of sight: players it can see "
-                                + "(no block limit), plus a chase after a hit from farther away. Revenge, faction enemies and forced "
-                                + "orders (which the aggro range uses) still apply. The value is written into the field, like the "
+                                + "(no block limit, after a reaction time), plus a chase after a hit from any distance. Revenge, "
+                                + "faction enemies and forced orders (which the hunter uses) still apply. The value is written into the field, like the "
                                 + "others; with aggro.enabled false and this managed as false inhabitants stay passive until hit."),
                 flag("targetPlayers", "target-players", true).global(
                         "No per-bot proxy: global filter inside auto-target for real players (names not registered as "
@@ -167,9 +167,12 @@ final class SettingData {
                                 + "'pvpbot settings crit-fall-ticks 3' (config key criticalFallTicks, 0 = unmanaged) "
                                 + "instead of keeping upstream's 6."),
                 whole("bowMinDrawTime", "bow-draw-ticks", 5, 100, 40).global(
-                        "No per-bot proxy: ticks a bow is drawn before release (crossbows use a fixed 25). Quick "
-                                + "Charge and Power enchantments are never consulted, so enchanting the bow does not "
-                                + "substitute."),
+                        "No per-bot proxy: ticks a bow is drawn before release (crossbows use a fixed 25, which this "
+                                + "addon shortens to the enchantment-adjusted charge time by releasing a loaded draw). "
+                                + "Quick Charge and Power enchantments are never consulted, so enchanting the bow does "
+                                + "not substitute. Managed by this addon: config pvpbotSettings.bowMinDrawTime (shipped "
+                                + "20 = vanilla full power; the default 40 is an artificial two second wait), written "
+                                + "into the field like the others."),
 
                 // ---- weapon modes and gear behaviours
                 flag("rangedEnabled", "ranged", true).perBot(LOADOUT,

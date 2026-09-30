@@ -10,11 +10,12 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The {@code pvpbotSettings} and {@code rangedPacing} blocks: shipped values, partial blocks, validation. */
+/** The {@code pvpbotSettings} block (and the retired {@code rangedPacing} keys): shipped values, partial blocks, validation. */
 class PvpbotSettingsConfigTest {
 
     private static ConfigIO.LoadResult load(Path dir, String json) throws IOException {
@@ -32,15 +33,17 @@ class PvpbotSettingsConfigTest {
         assertEquals(16.0, s.rangedMaxRange);
         assertEquals(Boolean.FALSE, s.autoEquipWeapon);
         assertEquals(Boolean.FALSE, s.autoTargetEnabled, "the aggro controller acquires, PvP BOT does not");
+        assertEquals(20, s.bowMinDrawTime, "vanilla full power, not PvP BOT's artificial 40 tick wait");
         assertEquals(List.of(), ConfigValidator.validate(new InhabitantsConfig()), "the shipped values are valid");
     }
 
     @Test
-    void theShippedPacingIsFourTicksOfAimSettleAndTwentySixBetweenShots() {
-        InhabitantsConfig.RangedPacing p = new InhabitantsConfig().rangedPacing;
-        assertTrue(p.enabled);
-        assertEquals(4, p.aimSettleTicks);
-        assertEquals(26, p.crossbowMinShotIntervalTicks);
+    void theBowDrawTimeIsClampedToFiveToOneHundred(@TempDir Path dir) throws IOException {
+        assertEquals(5, load(dir, "{ \"pvpbotSettings\": { \"bowMinDrawTime\": 1 } }").config().pvpbotSettings.bowMinDrawTime);
+        assertEquals(100, load(dir, "{ \"pvpbotSettings\": { \"bowMinDrawTime\": 900 } }").config().pvpbotSettings.bowMinDrawTime);
+        assertEquals(21, load(dir, "{ \"pvpbotSettings\": { \"bowMinDrawTime\": 21 } }").config().pvpbotSettings.bowMinDrawTime);
+        assertNull(load(dir, "{ \"pvpbotSettings\": { \"maxTargetDistance\": 20 } }").config().pvpbotSettings.bowMinDrawTime,
+                "an absent key inside a present block leaves PvP BOT's value alone");
     }
 
     @Test
@@ -112,24 +115,27 @@ class PvpbotSettingsConfigTest {
     }
 
     @Test
-    void pacingValuesAreClampedAndABrokenBlockFallsBackToTheDefaults(@TempDir Path dir) throws IOException {
-        InhabitantsConfig.RangedPacing p = load(dir,
-                "{ \"rangedPacing\": { \"aimSettleTicks\": 500, \"crossbowMinShotIntervalTicks\": 0 } }").config().rangedPacing;
-        assertEquals(40, p.aimSettleTicks);
-        assertEquals(1, p.crossbowMinShotIntervalTicks);
-        ConfigIO.LoadResult nulled = load(dir, "{ \"rangedPacing\": null }");
-        assertEquals(26, nulled.config().rangedPacing.crossbowMinShotIntervalTicks);
-        assertTrue(nulled.warnings().stream().anyMatch(w -> w.contains("rangedPacing")));
+    void theRetiredPacingKeysAreIgnoredWithOneInfoNoteAndNeverFailTheLoad(@TempDir Path dir) throws IOException {
+        ConfigIO.LoadResult r = load(dir,
+                "{ \"rangedPacing\": { \"enabled\": true, \"aimSettleTicks\": 4, \"crossbowMinShotIntervalTicks\": 26 } }");
+        assertNull(r.fatalError());
+        assertEquals(List.of(), r.warnings(), "not a problem, just information");
+        assertEquals(1, r.notes().size(), r.notes().toString());
+        assertTrue(r.notes().get(0).contains("rangedPacing.aimSettleTicks")
+                && r.notes().get(0).contains("rangedPacing.crossbowMinShotIntervalTicks"), r.notes().toString());
+        assertFalse(ConfigIO.toJson(r.config()).contains("rangedPacing"), "and they are not written back");
+        assertEquals(List.of(), load(dir, "{ \"enabled\": true }").notes(), "nothing to say without them");
     }
 
     @Test
-    void theWrittenDefaultFileContainsBothBlocksWithTheirKeys() {
+    void theWrittenDefaultFileContainsTheBlockWithItsKeys() {
         String json = ConfigIO.toJson(new InhabitantsConfig());
         for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 128.0", "\"rangedMinRange\": 8.0",
                 "\"rangedOptimalRange\": 12.0", "\"rangedMaxRange\": 16.0", "\"autoEquipWeapon\": false", "\"autoTargetEnabled\": false",
-                "\"rangedPacing\"", "\"aimSettleTicks\": 4", "\"crossbowMinShotIntervalTicks\": 26")) {
+                "\"bowMinDrawTime\": 20")) {
             assertTrue(json.contains(key), key + " missing from:\n" + json);
         }
+        assertFalse(json.contains("rangedPacing"), json);
     }
 
     @Test

@@ -110,8 +110,6 @@ public final class InhabitantsConfig {
     @SerializedName("pvpbotSettings")
     public PvpbotSettings pvpbotSettings = PvpbotSettings.shipped();
 
-    /** Pacing of crossbow shots and the trigger for a loaded crossbow (see {@link RangedPacing}). */
-    public RangedPacing rangedPacing = new RangedPacing();
 
     public static final int DEFAULT_CRITICAL_FALL_TICKS = 3;
 
@@ -165,6 +163,9 @@ public final class InhabitantsConfig {
      *   <li>{@link #meleeRange} - PvP BOT's melee range. Shipped 2.5 (PvP BOT: 3.5): a melee weapon comes out within twice
      *       this (5 blocks) and attacks land within it (2.5 blocks between the two centres, inside vanilla's 3.0
      *       reach). PvP BOT clamps it to 2..6; a value outside is not applied.</li>
+     *   <li>{@link #bowMinDrawTime} - ticks PvP BOT holds a bow draw before it releases (5..100). Shipped 20 = vanilla
+     *       full power; PvP BOT's own default of 40 (2 s) is an artificial wait, so an inhabitant shoots as fast as a
+     *       person holding the bow to full draw would. Written straight into the field like the others.</li>
      * </ul>
      */
     public static final class PvpbotSettings {
@@ -176,6 +177,7 @@ public final class InhabitantsConfig {
         public Boolean autoTargetEnabled;
         public Boolean rangedRetreatOnClose;
         public Double meleeRange;
+        public Integer bowMinDrawTime;
 
         public PvpbotSettings() {
         }
@@ -192,6 +194,7 @@ public final class InhabitantsConfig {
             s.autoTargetEnabled = false;
             s.rangedRetreatOnClose = false;
             s.meleeRange = 2.5;
+            s.bowMinDrawTime = 20;
             return s;
         }
 
@@ -199,26 +202,11 @@ public final class InhabitantsConfig {
         public boolean isEmpty() {
             return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
                     && rangedMaxRange == null && autoEquipWeapon == null && autoTargetEnabled == null
-                    && rangedRetreatOnClose == null && meleeRange == null;
+                    && rangedRetreatOnClose == null && meleeRange == null
+                    && bowMinDrawTime == null;
         }
     }
 
-    /**
-     * Crossbow trigger and pacing. PvP BOT can never fire a LOADED crossbow on this Minecraft version (it calls the
-     * release of an item that is not being used, which does nothing), so a crossbow inhabitant would hold its loaded
-     * weapon forever. Once per tick, after PvP BOT's own tick, this addon fires a loaded crossbow through the vanilla
-     * right-click path when PvP BOT's target is alive, in range and in sight and PvP BOT is in ranged mode. Every shot
-     * an inhabitant fires (this addon's or anything else's, e.g. a held "use" action) puts the crossbow on the vanilla
-     * item cooldown so shots are never closer together than {@link #crossbowMinShotIntervalTicks}.
-     */
-    public static final class RangedPacing {
-        /** Master switch: false leaves crossbows entirely to PvP BOT (loaded crossbows are then never fired by it). */
-        public boolean enabled = true;
-        /** Ticks a crossbow must have been loaded before it is fired, so the bot has settled its aim (0..40). */
-        public int aimSettleTicks = 4;
-        /** Minimum ticks between two shots of one inhabitant (PvP BOT's own cycle is a 25-tick draw plus one) (1..200). */
-        public int crossbowMinShotIntervalTicks = 26;
-    }
 
     /** A partial rule; null fields inherit. */
     public static final class RuleOverride {
@@ -463,72 +451,77 @@ public final class InhabitantsConfig {
     }
 
     /**
-     * The aggro range and leash of the hostile inhabitants (see {@code AggroController}).
-     * <p>
-     * An inhabitant NOTICES a player only within {@link #acquireRange} blocks and in line of sight. Someone who
-     * hits it from any distance (up to PvP BOT's {@code maxTargetDistance}) is chased too. Every chase ends when the
-     * inhabitant is {@link #leashRange} blocks from its origin, or has not seen its target for
-     * {@link #loseSightTicks} ticks; it then drops the fight and, with {@link #returnToOrigin}, WALKS back to its HOME
-     * anchor (never a teleport). Home is where its first engagement began and is kept until it is back there; an
-     * engagement that starts while it walks home (hit or noticing) is measured from a temporary origin instead.
-     * <p>
+     * How the hostile inhabitants hunt players and their companions (see {@code AggroController}); everything is decided
+     * by LINE OF SIGHT, there is no block-distance rule of any kind (the only limit is the mod maximum, 128 blocks).
+     * <ul>
+     *   <li><b>Noticing.</b> A player is noticed after staying in view for a reaction time: {@link #reactionTicks} (5 =
+     *       0.25 s), longer for what is harder to see (far: {@link #distanceReactionTicksPer32} extra ticks per 32
+     *       blocks, 0 disables; at an angle; sneaking; invisible). From behind nothing is seen, but close footsteps
+     *       and fight noise are heard (see {@link AggroPerception}).</li>
+     *   <li><b>Chase.</b> While the target is in sight (occlusion only) the inhabitant chases; not in sight for
+     *       {@link #loseGraceTicks} (10 = 0.5 s, so a tree trunk does not break the chase) it has LOST the target.</li>
+     *   <li><b>Pursue, search, return.</b> A lost target: walk to the last place it was seen, search around there for
+     *       {@link #searchTicks} (200 = 10 s), then WALK back to where the first hunt began (the home anchor, kept until it
+     *       is back within {@link #returnArriveDistance}); seeing the player again starts a new chase, home unchanged.
+     *       {@link #stuckTicks} without progress replans the walk; {@link #returnMaxTicks} is the longest walk home.
+     *       Never a teleport; no blocks are ever broken or placed for it.</li>
+     * </ul>
      * Works together with PvP BOT's auto-target being OFF (then the addon does the noticing); while it is ON PvP BOT
-     * notices by itself and only the leash and the walk back apply. The addon says so once in the log.
+     * notices by itself and only the lost-target search and the walk home apply. The addon says so once in the log.
      */
     public static final class Aggro {
         /** Master switch. */
         public boolean enabled = true;
-        /** Blocks within which an idle inhabitant notices a player. Range 2..64. */
-        public double acquireRange = 10.0;
         /** A player is only noticed when the inhabitant has a line of sight to them (like a vanilla mob). */
         public boolean requireLineOfSight = true;
-        /** Ticks between looks for a target for idle inhabitants (1..40). */
-        public int scanIntervalTicks = 5;
-        /** Blocks from the chase's origin (home anchor, or a temporary one while walking home) at which it is given
-         *  up. Range acquireRange..128. */
-        public double leashRange = 32.0;
-        /** Consecutive ticks without a line of sight to the target after which the chase is given up (200 = 10 s). */
-        public int loseSightTicks = 200;
-        /** After giving up, walk back to the home anchor (where the first engagement began). */
-        public boolean returnToOrigin = true;
-        /** Blocks (horizontal) from home at which the walk back counts as arrived. */
+        /** Ticks a player must stay in view before an inhabitant reacts (5 = 0.25 s, a human's reaction). Range 0..100. */
+        public int reactionTicks = 5;
+        /** Extra ticks of reaction time per 32 blocks of distance (a soft scaling, not a limit; 0 disables). Range 0..100. */
+        public double distanceReactionTicksPer32 = 5.0;
+        /** Ticks without a line of sight to the target after which it counts as lost (10 = 0.5 s). Range 1..72000. */
+        public int loseGraceTicks = 10;
+        /** Ticks the search lasts after arriving where the target was last seen (200 = 10 s). Range 20..72000. */
+        public int searchTicks = 200;
+        /** Blocks (horizontal) from home at which the walk back counts as arrived. Range 0.5..16. */
         public double returnArriveDistance = 1.5;
-        /** The walk back is abandoned when it gets less than a block closer over this many ticks (per leg). */
-        public int returnStuckTicks = 200;
-        /** The walk back is abandoned after this many ticks in any case (per leg). */
+        /** A walk is replanned when it gets no closer to its next waypoint over this many ticks. Range 10..1200. */
+        public int stuckTicks = 40;
+        /** The walk home gives up after this many ticks; the inhabitant then stays where it is. Range 20..72000. */
         public int returnMaxTicks = 1200;
+        /** Ticks between looks for a player, for an idle inhabitant (staggered across inhabitants; 1..40). */
+        public int scanIntervalTicks = 3;
         /** How an inhabitant perceives a player: view cone, sneaking, hearing. See {@link AggroPerception}. */
         public AggroPerception perception = new AggroPerception();
     }
 
     /**
-     * Realistic noticing for the aggro range (the {@code aggro.perception} block; see {@code Perception} and
-     * {@code docs/PERCEPTION.md}, the same model Minecraft-AI's bots use). {@link Aggro#acquireRange} is the base
-     * sight range; {@link Aggro#requireLineOfSight} stays the switch for occlusion; the awareness of an engaged
-     * inhabitant is {@link Aggro#loseSightTicks}.
+     * Realistic noticing for the aggro controller (the {@code aggro.perception} block; see {@code Perception} and
+     * {@code docs/PERCEPTION.md}, the same model Minecraft-AI's bots use).
      * <p>
-     * An inhabitant SEES a player in front of it (a {@link #frontHalfAngleDeg} half-angle cone) out to the base range,
-     * out to {@link #peripheralHalfAngleDeg} at {@link #peripheralFactor} of it, and not at all behind it; a sneaking
-     * player only from {@link #sneakFactor} of that distance. It HEARS a player that is close and noisy, even from
-     * behind (walking {@link #hearWalk}, sprinting {@link #hearSprint}, fighting {@link #hearCombat} blocks; sneaking
-     * or standing still is silent), never through a wall. {@code enabled=false} is the old omnidirectional sight.
+     * An inhabitant SEES a player in front of it (a {@link #frontHalfAngleDeg} half-angle cone) after the reaction time,
+     * in the peripheral field out to {@link #peripheralHalfAngleDeg} after {@link #peripheralMultiplier} times as long, and
+     * not at all behind it; a sneaking player takes {@link #sneakMultiplier} times as long to be spotted. It HEARS a player
+     * that is close and noisy, even from behind (walking {@link #hearWalk}, sprinting {@link #hearSprint}, fighting
+     * {@link #hearCombat} blocks; sneaking or standing still is silent), never through a wall. These radii only ADD
+     * awareness from behind: they never limit how far an inhabitant can see. {@code enabled=false} is plain vanilla line of
+     * sight: in range and unobstructed is noticed at once, no cone, no sneaking, no reaction time.
      */
     public static final class AggroPerception {
-        /** Master switch; off = plain omnidirectional line of sight within the acquire range, as before. */
+        /** Master switch; off = plain vanilla line of sight (no cone, no sneaking, no reaction time). */
         public boolean enabled = true;
-        /** Half-angle (degrees) of the front cone in which the full sight range applies. Range 0..180. */
+        /** Half-angle (degrees) of the front cone in which the normal reaction time applies. Range 0..180. */
         public double frontHalfAngleDeg = 60.0;
         /** Half-angle (degrees) out to which the peripheral field reaches; behind it nothing is seen. Range front..180. */
         public double peripheralHalfAngleDeg = 100.0;
-        /** Share of the sight range that applies in the peripheral field. Range 0..1. */
-        public double peripheralFactor = 0.5;
-        /** Share of the sight range that applies to a sneaking player. Range 0..1. */
-        public double sneakFactor = 0.5;
-        /** Blocks at which a walking player is heard. Range 0..64. */
+        /** How many times longer the reaction takes in the peripheral field. Range 1..20. */
+        public double peripheralMultiplier = 2.0;
+        /** How many times longer the reaction takes for a sneaking player. Range 1..20. */
+        public double sneakMultiplier = 2.0;
+        /** Blocks at which a walking player is heard. Range 0..128. */
         public double hearWalk = 4.0;
-        /** Blocks at which a sprinting player is heard. Range 0..64. */
+        /** Blocks at which a sprinting player is heard. Range 0..128. */
         public double hearSprint = 8.0;
-        /** Blocks at which a player who just fought, shot, ate, drank, broke or placed a block is heard. Range 0..64. */
+        /** Blocks at which a player who just fought, shot, ate, drank, broke or placed a block is heard. Range 0..128. */
         public double hearCombat = 12.0;
         /** Ticks a swing, hit, bow draw, meal or block change keeps a player noisy. Range 0..200. */
         public int combatNoiseTicks = 10;

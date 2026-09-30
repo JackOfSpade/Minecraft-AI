@@ -22,7 +22,7 @@ public interface TargetControl {
     }
 
     /**
-     * The PvP BOT settings that decide who a bot may attack and how far it chases.
+     * The PvP BOT settings that decide who a bot may attack and how far it can chase.
      *
      * @param combatEnabled     PvP BOT's combat routine is on at all (off: its per-bot target is not even refreshed)
      * @param autoTarget        PvP BOT already picks targets by itself (nearest entity within maxTargetDistance)
@@ -31,7 +31,8 @@ public interface TargetControl {
      * @param attackInvincible  spectator / creative / invulnerable players are valid targets
      * @param factionsEnabled   faction rules are on (allies are skipped unless friendlyFire)
      * @param friendlyFire      faction allies may be attacked
-     * @param maxTargetDistance the chase limit: a forced target or revenge attacker farther away is ignored
+     * @param maxTargetDistance the mod maximum: a forced target or revenge attacker farther away is ignored (the wrapper
+     *                          manages it at 128, the vanilla line-of-sight cap)
      */
     record Settings(boolean combatEnabled, boolean autoTarget, boolean targetPlayers, boolean targetOtherBots,
                     boolean attackInvincible, boolean factionsEnabled, boolean friendlyFire,
@@ -79,7 +80,7 @@ public interface TargetControl {
      */
     void clearTarget(String bot);
 
-    /** False when the walk back cannot be done (PvP BOT's look/move-toward calls are missing). */
+    /** False when walking cannot be done (PvP BOT's look/move-toward calls are missing). */
     boolean steeringAvailable();
 
     /** Why {@link #steeringAvailable()} is false, for the one log line; null when it is true. */
@@ -92,6 +93,12 @@ public interface TargetControl {
      * @param bot the inhabitant, opaque ({@link AggroWorld.Watcher#handle()})
      */
     void steer(Object bot, AggroWorld.Pos to, double speed);
+
+    /** One tick of turning {@code bot} to look at {@code at} (PvP BOT's own look call), without walking. */
+    void look(Object bot, AggroWorld.Pos at);
+
+    /** Stops the walking input of {@code bot} (forward and sideways movement and sprint), so it stands still. */
+    void halt(Object bot);
 
     /** A control that is never available; what callers get when there is no PvP BOT. */
     TargetControl NONE = new TargetControl() {
@@ -152,6 +159,16 @@ public interface TargetControl {
 
         @Override
         public void steer(Object bot, AggroWorld.Pos to, double speed) {
+            throw new UpstreamFailure("PvP BOT is not available");
+        }
+
+        @Override
+        public void look(Object bot, AggroWorld.Pos at) {
+            throw new UpstreamFailure("PvP BOT is not available");
+        }
+
+        @Override
+        public void halt(Object bot) {
             throw new UpstreamFailure("PvP BOT is not available");
         }
     };

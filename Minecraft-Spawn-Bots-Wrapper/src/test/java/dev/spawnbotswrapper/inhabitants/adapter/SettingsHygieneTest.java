@@ -64,7 +64,7 @@ class SettingsHygieneTest {
         assertEquals(1, f.size());
         assertEquals(Severity.NOTE, f.get(0).severity());
         assertTrue(f.get(0).text().contains("never open fire on sight"));
-        assertTrue(f.get(0).text().contains("aggro range"), "it names the switch that makes auto-target off fine");
+        assertTrue(f.get(0).text().contains("aggro hunter"), "it names the switch that makes auto-target off fine");
     }
 
     @Test

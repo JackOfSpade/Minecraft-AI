@@ -187,6 +187,31 @@ final class PvpBotCombatControl implements TargetControl {
         }
     }
 
+    @Override
+    public void look(Object bot, AggroWorld.Pos at) {
+        UpstreamCalls c = calls.get();
+        if (c == null || c.contract().steeringProblem() != null || !(bot instanceof ServerPlayer player)) {
+            throw new UpstreamFailure("PvP BOT's look call is not available");
+        }
+        try {
+            c.look(player, new Vec3(at.x(), at.y(), at.z()));
+        } catch (Throwable t) {
+            throw fail("turning a bot toward a point", t);
+        }
+    }
+
+    @Override
+    public void halt(Object bot) {
+        if (!(bot instanceof ServerPlayer player)) {
+            throw new UpstreamFailure("not a player");
+        }
+        // Vanilla's own movement input of the entity (what PvP BOT's move-toward call sets every tick): no forward or
+        // sideways push and no sprint, so the bot stands still instead of walking on in its last direction.
+        player.zza = 0.0F;
+        player.xxa = 0.0F;
+        player.setSprinting(false);
+    }
+
     private UpstreamFailure fail(String what, Throwable t) {
         log.failure(what, t);
         return new UpstreamFailure(what + " failed (" + Diagnostics.describe(t) + ")", t);

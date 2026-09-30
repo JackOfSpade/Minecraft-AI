@@ -89,9 +89,9 @@ final class SettingsHygiene {
             // With the wrapper's aggro range on, auto-target OFF is the intended state (the aggro range acquires), not a finding.
             if (Boolean.FALSE.equals(s.autoTargetEnabled()) && !s.aggroRangeEnabled()) {
                 out.add(new Finding(Severity.NOTE,
-                        "PvP BOT setting autoTarget is OFF and this addon's aggro range (config aggro.enabled) is off too: "
+                        "PvP BOT setting autoTarget is OFF and this addon's aggro hunter (config aggro.enabled) is off too: "
                                 + "inhabitants only fight what attacked them (or what an order or a faction names) and never open "
-                                + "fire on sight. Turn the aggro range on (it acquires players by line of sight) or "
+                                + "fire on sight. Turn the aggro hunter on (it notices players by line of sight) or "
                                 + "enable PvP BOT's auto-target (pvpbot settings auto-target true, or pvpbotSettings.autoTargetEnabled "
                                 + "in this addon's config)"));
             }

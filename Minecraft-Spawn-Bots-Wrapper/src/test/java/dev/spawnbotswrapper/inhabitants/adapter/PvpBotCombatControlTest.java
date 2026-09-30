@@ -80,9 +80,17 @@ class PvpBotCombatControlTest {
     }
 
     @Test
+    void lookAndHaltRefuseAnythingButAServerPlayer() {
+        AdapterFixture f = AdapterFixture.probed();
+        assertThrows(TargetControl.UpstreamFailure.class,
+                () -> f.adapter.targetControl().look("not a player", new dev.spawnbotswrapper.inhabitants.combat.AggroWorld.Pos(0, 0, 0)));
+        assertThrows(TargetControl.UpstreamFailure.class, () -> f.adapter.targetControl().halt("not a player"));
+    }
+
+    @Test
     void theStatusDetailsMentionTheAggroRangeAndTheWalkBack() {
         AdapterFixture f = AdapterFixture.probed();
-        assertTrue(AdapterFixture.anyContains(f.adapter.status().details(), "walk back via BotNavigation"),
+        assertTrue(AdapterFixture.anyContains(f.adapter.status().details(), "walking via BotNavigation"),
                 f.adapter.status().details().toString());
     }
 }

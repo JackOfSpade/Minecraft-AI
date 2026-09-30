@@ -145,6 +145,91 @@ final class Rig {
         placeTarget(dx);
     }
 
+    // ------------------------------------------------------------------ aggro scenes
+
+    /** The absolute cell {@code dx, dy, dz} from the bot's feet cell. */
+    BlockPos rel(int dx, int dy, int dz) {
+        return botFeet.offset(dx, dy, dz);
+    }
+
+    /** Fills a box (inclusive, relative to the bot's feet cell) with a block; no neighbour updates, so it is cheap. */
+    void fill(int x0, int y0, int z0, int x1, int y1, int z1, Block block) {
+        for (int x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) {
+            for (int y = Math.min(y0, y1); y <= Math.max(y0, y1); y++) {
+                for (int z = Math.min(z0, z1); z <= Math.max(z0, z1); z++) {
+                    level.setBlock(rel(x, y, z), block.defaultBlockState(), Block.UPDATE_CLIENTS);
+                }
+            }
+        }
+    }
+
+    /** A floor strip 7 wide, from 3 blocks west of the bot to {@code length + 3} blocks east, with a high air ceiling. */
+    void buildStrip(int length) {
+        fill(-3, -1, -3, length + 3, -1, 3, Blocks.STONE);
+        fill(-3, 0, -3, length + 3, 6, 3, Blocks.AIR);
+    }
+
+    /** Puts the target at an absolute position, standing still there (its old position is the new one). */
+    void placeTargetAt(double x, double y, double z) {
+        target.teleportTo(level, x, y, z, Set.of(), target.getYRot(), 0.0F, true);
+        target.setOldPosAndRot();
+    }
+
+    /** Moves the target to an absolute position as a step of a walk: the old position is where it was, so it counts as moving. */
+    void walkTargetTo(double x, double y, double z) {
+        target.setOldPosAndRot();
+        target.setPos(x, y, z);
+    }
+
+    /** The target crouches (or stands up), the way a client's shift key does. */
+    void setSneaking(boolean sneaking) {
+        target.setShiftKeyDown(sneaking);
+        target.setLastClientInput(new net.minecraft.world.entity.player.Input(false, false, false, false, false, sneaking, false));
+    }
+
+    /** Turns the inhabitant to face a horizontal direction (dx, dz), level with the eyes. */
+    void faceDirection(double dx, double dz) {
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        bot.setYRot(yaw);
+        bot.yRotO = yaw;
+        bot.setYHeadRot(yaw);
+        bot.yHeadRotO = yaw;
+        bot.setXRot(0.0F);
+        bot.xRotO = 0.0F;
+    }
+
+    /** Where the inhabitant is in the aggro hunt (IDLE, REACT, CHASE, PURSUE, SEARCH, RETURN). */
+    String phase() {
+        return InhabitantsMod.aggroPhaseOf(botName);
+    }
+
+    /** True when PvP BOT currently has a target for the inhabitant. */
+    boolean hasTarget() {
+        return !Upstream.target(botName).equals("none");
+    }
+
+    /** Horizontal distance from the inhabitant to a point. */
+    double horizontalTo(double x, double z) {
+        return Math.hypot(bot.getX() - x, bot.getZ() - z);
+    }
+
+    /** The centre of the bot's feet cell (its start point), x. */
+    double homeX() {
+        return botFeet.getX() + 0.5;
+    }
+
+    /** The centre of the bot's feet cell (its start point), z. */
+    double homeZ() {
+        return botFeet.getZ() + 0.5;
+    }
+
+    /** Keeps the target player alive (a test that needs many shots must not end because the player died). */
+    void keepTargetAlive() {
+        if (target != null && target.getHealth() < target.getMaxHealth()) {
+            target.setHealth(target.getMaxHealth());
+        }
+    }
+
     void placeTarget(double dx) {
         Vec3 spot = Vec3.atBottomCenterOf(botFeet).add(dx, 0, 0);
         target.teleportTo(level, spot.x, spot.y, spot.z, Set.of(), 90.0F, 0.0F, true);

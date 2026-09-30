@@ -29,17 +29,23 @@ final class SettingsPolicy {
     /** What PvP BOT has right now; a null component could not be read. */
     record Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
                    Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose,
-                   Double meleeRange) {
+                   Double meleeRange, Integer bowMinDrawTime) {
         Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
                 Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
             this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
-                    autoTargetEnabled, null, null);
+                    autoTargetEnabled, null, null, null);
         }
 
         Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
                 Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose) {
             this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
-                    autoTargetEnabled, rangedRetreatOnClose, null);
+                    autoTargetEnabled, rangedRetreatOnClose, null, null);
+        }
+
+        Current(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange, Double rangedMaxRange,
+                Boolean autoEquipWeapon, Boolean autoTargetEnabled, Boolean rangedRetreatOnClose, Double meleeRange) {
+            this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon,
+                    autoTargetEnabled, rangedRetreatOnClose, meleeRange, null);
         }
     }
 
@@ -120,6 +126,9 @@ final class SettingsPolicy {
             melee = null;
         }
         addDouble(changes, "meleeRange", current.meleeRange(), melee);
+        if (wanted.bowMinDrawTime() != null && !wanted.bowMinDrawTime().equals(current.bowMinDrawTime())) {
+            changes.add(new Change("bowMinDrawTime", current.bowMinDrawTime(), wanted.bowMinDrawTime()));
+        }
         return new Plan(changes, warnings);
     }
 

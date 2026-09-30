@@ -14,32 +14,43 @@ package dev.spawnbotswrapper.inhabitants.adapter;
  *                           carries a melee weapon switch to it when the target is within twice its melee range
  * @param meleeRange         PvP BOT's melee range: a bot switches to its melee weapon within twice this (2.5 gives 5 blocks)
  *                           and attacks within it (within PvP BOT's clamp {@code 2..6})
+ * @param bowMinDrawTime     ticks PvP BOT holds a bow draw before it releases (5..100; 20 = vanilla full power)
  */
 public record ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
                               Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled,
-                              Boolean rangedRetreatOnClose, Double meleeRange) {
+                              Boolean rangedRetreatOnClose, Double meleeRange, Integer bowMinDrawTime) {
 
-    /** The settings without the archer close-range behaviour and the melee range (those are then left alone). */
+    /** The settings without the archer close-range behaviour, the melee range and the draw time (those are left alone). */
     public ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
                            Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled) {
         this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon, autoTargetEnabled,
-                null, null);
+                null, null, null);
     }
 
-    /** The settings without the melee range (that one is then left alone). */
+    /** The settings without the melee range and the draw time (those are then left alone). */
     public ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
                            Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled,
                            Boolean rangedRetreatOnClose) {
         this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon, autoTargetEnabled,
-                rangedRetreatOnClose, null);
+                rangedRetreatOnClose, null, null);
+    }
+
+    /** The settings without the bow draw time (that one is then left alone). */
+    public ManagedSettings(Double maxTargetDistance, Double rangedMinRange, Double rangedOptimalRange,
+                           Double rangedMaxRange, Boolean autoEquipWeapon, Boolean autoTargetEnabled,
+                           Boolean rangedRetreatOnClose, Double meleeRange) {
+        this(maxTargetDistance, rangedMinRange, rangedOptimalRange, rangedMaxRange, autoEquipWeapon, autoTargetEnabled,
+                rangedRetreatOnClose, meleeRange, null);
     }
 
     /** Nothing managed. */
-    public static final ManagedSettings NONE = new ManagedSettings(null, null, null, null, null, null, null, null);
+    public static final ManagedSettings NONE =
+            new ManagedSettings(null, null, null, null, null, null, null, null, null);
 
     public boolean isEmpty() {
         return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
                 && rangedMaxRange == null && autoEquipWeapon == null
-                && autoTargetEnabled == null && rangedRetreatOnClose == null && meleeRange == null;
+                && autoTargetEnabled == null && rangedRetreatOnClose == null && meleeRange == null
+                && bowMinDrawTime == null;
     }
 }

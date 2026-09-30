@@ -85,7 +85,6 @@ public final class InhabitantsMod implements ModInitializer {
         combat.register();
         combat.aggroState(aggro::describe);
         combat.meleeVetoState(meleeLegality::describe);
-        rangedFire.register();
         meleeLegality.register();
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
@@ -108,12 +107,30 @@ public final class InhabitantsMod implements ModInitializer {
         return current != null && current.server() == server ? current.services() : null;
     }
 
+    /**
+     * Where an inhabitant is in the aggro hunt (IDLE, REACT, CHASE, PURSUE, SEARCH, RETURN), or IDLE when nothing runs. A seam
+     * for the real-server GameTests; nothing in the addon itself calls it.
+     */
+    public static String aggroPhaseOf(String botName) {
+        InhabitantsMod mod = instance;
+        return mod == null ? "IDLE" : mod.aggro.phaseOf(botName).name();
+    }
+
+    /** The aggro home anchor of an inhabitant as {x, y, z}, or null. A seam for the real-server GameTests. */
+    public static double[] aggroHomeOf(String botName) {
+        InhabitantsMod mod = instance;
+        return mod == null ? null : mod.aggro.homeOf(botName);
+    }
+
     private static void logConfigLoad(ConfigHolder holder, ConfigIO.LoadResult result) {
         if (result.created()) {
             LOGGER.info("Wrote a default configuration to {}", holder.file());
         }
         for (String warning : result.warnings()) {
             LOGGER.warn("config: {}", warning);
+        }
+        for (String note : result.notes()) {
+            LOGGER.info(note);
         }
         if (result.fatalError() != null) {
             LOGGER.error("PvP BOT Inhabitants could not read its configuration {}: {}", holder.file(), result.fatalError());

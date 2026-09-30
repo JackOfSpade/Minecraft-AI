@@ -107,12 +107,12 @@ def prepareGameTestRun = tasks.register('prepareGameTestRun') {
   "factionsEnabled": true
 }
 ''', 'UTF-8')
-        // -PharnessFixesOff=true: the addon's two ranged-combat fixes (pvpbotSettings, rangedPacing) switched off, i.e. what a
+        // -PharnessFixesOff=true: the addon's managed PvP BOT settings (pvpbotSettings) switched off, i.e. what a
         // profile ran with before them. The same tests then show the failures the fixes are for.
         def fixesOff = providers.gradleProperty('harnessFixesOff').orNull == 'true'
-        def fixesConfig = fixesOff ? ',\n  "pvpbotSettings": null,\n  "rangedPacing": { "enabled": false }' : ''
+        def fixesConfig = fixesOff ? ',\n  "pvpbotSettings": null' : ''
         if (fixesOff) {
-            logger.lifecycle('harnessFixesOff: pvpbotSettings and rangedPacing are switched off in this run')
+            logger.lifecycle('harnessFixesOff: pvpbotSettings is switched off in this run')
         }
         // The addon's own config: natural structure population is off (nothing matches "include"), so the only
         // inhabitants are the ones a test asks the engine for; no waiting periods, no throttles, no random loadouts.
@@ -133,6 +133,19 @@ tasks.named('runGameTest') {
             logger.lifecycle("runGameTest skipped: no PvP BOT / HeroBot jars in ${upstreamModsDir} (pass -PupstreamModsDir=<dir>)")
         }
         upstreamAvailable
+    }
+}
+
+// The GameTests start a real server, which must only ever run through the machine-wide lock (C:\mcw\_tools\gt_wrapper.sh)
+// or an explicit `gradlew runGameTest`: neither `build` nor `check` may depend on it (Fabric API's test configuration wires
+// runGameTest into check by default).
+afterEvaluate {
+    tasks.named('check') { checkTask ->
+        def others = checkTask.dependsOn.findAll { dep ->
+            !((dep instanceof TaskProvider && dep.name == 'runGameTest') || (dep instanceof Task && dep.name == 'runGameTest')
+                    || dep == 'runGameTest')
+        }
+        checkTask.setDependsOn(others)
     }
 }
 

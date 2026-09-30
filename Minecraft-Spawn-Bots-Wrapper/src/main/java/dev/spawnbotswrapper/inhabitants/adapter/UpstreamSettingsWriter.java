@@ -28,7 +28,8 @@ final class UpstreamSettingsWriter {
             "autoEquipWeapon", boolean.class,
             "autoTargetEnabled", boolean.class,
             "rangedRetreatOnClose", boolean.class,
-            "meleeRange", double.class);
+            "meleeRange", double.class,
+            "bowMinDrawTime", int.class);
 
     /** What a probe found: writable fields by setting name, PvP BOT's save routine, and what is unusable. */
     record Handles(Map<String, Field> fields, Method save, List<String> problems) {
@@ -95,6 +96,8 @@ final class UpstreamSettingsWriter {
         f.setAccessible(true);
         if (f.getType() == double.class) {
             f.setDouble(settings, ((Number) value).doubleValue());
+        } else if (f.getType() == int.class) {
+            f.setInt(settings, ((Number) value).intValue());
         } else {
             f.setBoolean(settings, (Boolean) value);
         }

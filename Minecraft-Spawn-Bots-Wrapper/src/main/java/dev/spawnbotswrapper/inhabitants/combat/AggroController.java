@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.combat;
 
 import dev.spawnbotswrapper.inhabitants.combat.AggroWorld.Body;
 import dev.spawnbotswrapper.inhabitants.combat.AggroWorld.Pos;
+import dev.spawnbotswrapper.inhabitants.combat.AggroWorld.SearchSpot;
 import dev.spawnbotswrapper.inhabitants.combat.AggroWorld.Watcher;
 import dev.spawnbotswrapper.inhabitants.combat.TargetControl.Settings;
 import dev.spawnbotswrapper.inhabitants.combat.TargetControl.Target;
@@ -21,72 +22,76 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
- * The aggro range and the leash of the hostile inhabitants.
+ * The "line of sight hunter" of the hostile inhabitants: what they do about players (and their companions), decided by
+ * what they can SEE and HEAR, with no block-distance rule of any kind (the only limit is the mod maximum, 128 blocks:
+ * vanilla's line-of-sight cap and PvP BOT's largest targeting distance).
+ * <pre>
+ *   IDLE --(noticed)--&gt; CHASE --(lost)--&gt; PURSUE --(arrived or blocked)--&gt; SEARCH --(10 s)--&gt; RETURN --(home)--&gt; IDLE
+ *   PURSUE / SEARCH / RETURN --(noticed again)--&gt; CHASE          IDLE / PURSUE / SEARCH / RETURN --(hit)--&gt; REACT or PURSUE
+ * </pre>
+ * <b>Noticing</b> is {@link Perception}: a player that stays in view (front cone, or the periphery; never from behind) for
+ * the reaction time (0.25 s and more, longer for what is far, at an angle, sneaking or hard to see), or is heard close by
+ * (walking 4, sprinting 8, combat noise 12; a sneaking player is silent; never through a wall). Hearing only adds
+ * awareness from behind: it restricts nothing. A player standing behind a bot or sneaking up on it is not noticed until it
+ * strikes.
  * <p>
- * <b>Noticing.</b> An idle inhabitant notices a player like a person would, by {@link Perception}: by SIGHT only what
- * is in front (a 120 degree cone out to {@code acquireRange} blocks, default 10; a 200 degree field at half of it;
- * nothing behind), a sneaking player from half as far, and by HEARING what is close and noisy even from behind
- * (walking 4, sprinting 8, combat 12; a sneaking player is silent), never through a wall. So a player sneaking up
- * from behind is not noticed until they strike (being hit engages at once, see below). Then it hands that player
- * to PvP BOT as a forced target. {@code perception.enabled=false} restores plain omnidirectional line of sight.
- * PvP BOT's own auto-target (a 64 block box without line of sight) must be off for this; while it is on, PvP BOT
- * acquires by itself and this class only supervises (inert mode).
+ * <b>CHASE.</b> The noticed player is handed to PvP BOT as its forced target; PvP BOT fights and moves. While the target is
+ * visible (occlusion only, no cone: an engaged bot faces its target) the last known position and velocity are kept. Not
+ * visible for {@code loseGraceTicks} (a tree trunk does not break a chase), or beyond the mod maximum, and the target is
+ * LOST. A target that is dead, gone, in another level or no longer attackable ends the hunt and sends the bot home.
  * <p>
- * <b>Being hit.</b> Any target PvP BOT holds that this class did not hand over (its revenge memory after a hit
- * from any distance, or a mob fight) starts an engagement too, so a hit from far away is chased as well.
+ * <b>PURSUE.</b> PvP BOT's target is cleared (so it does not track through walls) and the bot walks to the last known
+ * position along a planned route ({@link PathPlanner}); if the player was moving it continues a few blocks along the last
+ * heading. No route, or no progress: search from where it stands.
  * <p>
- * <b>Home and origins.</b> The first engagement of a bot that has no home sets its HOME anchor (its position and
- * level right then) and uses it as the engagement's leash origin. Home is kept until the bot is back within
- * {@code returnArriveDistance} of it, the walk back is abandoned, or the bot dies or leaves; only then is it cleared.
- * An engagement that starts while the bot is walking back home (a hit, or a regular noticing) gets a TEMPORARY
- * origin, the bot's position at that moment: its leash and sight rule are measured from there. A hit during a
- * running engagement changes nothing.
+ * <b>SEARCH</b> lasts {@code searchTicks} (10 s): look all the way round, walk to the most promising nearby spots (along the
+ * last heading, corners, doorways and branches from which hidden space opens up, not yet visited: {@link SearchPlanner}),
+ * look round again, repeat; a sound heard from behind cover moves the search there. Seeing the player again (reaction time
+ * applies) is a new CHASE.
  * <p>
- * <b>Giving up.</b> Every engagement ends when the inhabitant is more than {@code leashRange} blocks (default 32)
- * from its origin, or has not seen its target for {@code loseSightTicks} ticks (default 200, 10 s), or the target is
- * gone. PvP BOT's target state is then cleared (which also wipes its revenge memory) and, when
- * {@code returnToOrigin} is on, the inhabitant WALKS back to its HOME anchor, never to a temporary origin (PvP BOT's
- * own look and move-toward inputs, applied after PvP BOT's own tick; never a teleport). The stuck and maximum-time
- * guards count per walking leg: a new leg after a temporary engagement starts them afresh.
+ * <b>RETURN.</b> Walks back to the HOME anchor: where the bot stood when it FIRST started aggro'ing. Home is kept through
+ * every cycle until the bot is back within {@code returnArriveDistance}; then it is cleared. The bot ALWAYS returns
+ * to it, never to a temporary point. If it cannot get there within {@code returnMaxTicks} it gives up where it stands.
+ * Never a teleport; the bot never breaks or places blocks for any of this.
  * <p>
- * <b>External targets.</b> A forced target somebody else set (a {@code /pvpbot} command, another mod) is tracked for
- * the status text only; it is never leashed, cleared or returned from (it has no home). A forced name that PvP BOT
- * wrote itself for an engagement that began as a hit (its wind-burst / elytra flow) names the attacker or the
- * current revenge target and is not external: the leash and the sight rule still apply.
+ * <b>Being hit</b> by a valid player makes the bot aware of the attacker at once (the last known position is where the
+ * attacker stood). Visible: it turns to the pain and reacts after the reaction time (PvP BOT's instant revenge is
+ * suppressed meanwhile), then CHASE. Not visible (an arrow from cover): PURSUE to that position.
  * <p>
- * Pure decision logic over {@link AggroWorld} and {@link TargetControl}; no Minecraft or PvP BOT classes. Server
- * thread only. {@link #tick} must run AFTER PvP BOT's own tick of the same server tick.
+ * <b>Mobs.</b> PvP BOT's native revenge still fights mobs (a forced target cannot name a specific mob): the fight is tracked,
+ * lost sight for {@code loseGraceTicks} ends it, and the bot walks home; no pursuit and no search for mobs.
+ * <b>External</b> forced targets (a {@code /pvpbot} command, another mod) are tracked for the status only and are never
+ * cleared, pursued or returned from.
+ * <p>
+ * Pure decision logic over {@link AggroWorld}, {@link TargetControl} and {@link PathPlanner}; no Minecraft or PvP BOT
+ * classes. Server thread only. {@link #tick} must run AFTER PvP BOT's own tick of the same server tick.
  */
 public final class AggroController {
 
-    /** Tunables; see {@code InhabitantsConfig.Aggro}. */
-    public record Config(boolean enabled, double acquireRange, boolean requireLineOfSight, int scanIntervalTicks,
-                         double leashRange, int loseSightTicks, boolean returnToOrigin, double returnArriveDistance,
-                         int returnStuckTicks, int returnMaxTicks, Perception.Params perception) {
-        public static Config defaults() {
-            return new Config(true, 10.0, true, 5, 32.0, 200, true, 1.5, 200, 1200);
-        }
+    /** The mod maximum: vanilla {@code hasLineOfSight}'s cap and PvP BOT's largest {@code maxTargetDistance}. */
+    public static final double MOD_MAX = 128.0;
 
-        /** With the default perception rules. */
-        public Config(boolean enabled, double acquireRange, boolean requireLineOfSight, int scanIntervalTicks,
-                      double leashRange, int loseSightTicks, boolean returnToOrigin, double returnArriveDistance,
-                      int returnStuckTicks, int returnMaxTicks) {
-            this(enabled, acquireRange, requireLineOfSight, scanIntervalTicks, leashRange, loseSightTicks,
-                    returnToOrigin, returnArriveDistance, returnStuckTicks, returnMaxTicks, Perception.Params.defaults());
+    /** Tunables; see {@code InhabitantsConfig.Aggro}. */
+    public record Config(boolean enabled, boolean requireLineOfSight, int loseGraceTicks, int searchTicks,
+                         double returnArriveDistance, int stuckTicks, int returnMaxTicks, int scanIntervalTicks,
+                         Perception.Params perception) {
+        public static Config defaults() {
+            return new Config(true, true, 10, 200, 1.5, 40, 1200, 3, Perception.Params.defaults());
         }
 
         public Config {
-            scanIntervalTicks = Math.max(1, scanIntervalTicks);
-            loseSightTicks = Math.max(1, loseSightTicks);
-            returnStuckTicks = Math.max(1, returnStuckTicks);
+            loseGraceTicks = Math.max(1, loseGraceTicks);
+            searchTicks = Math.max(1, searchTicks);
+            stuckTicks = Math.max(1, stuckTicks);
             returnMaxTicks = Math.max(1, returnMaxTicks);
+            scanIntervalTicks = Math.max(1, scanIntervalTicks);
             perception = perception == null ? Perception.Params.defaults() : perception;
         }
 
         /** The same configuration with other perception rules. */
         public Config withPerception(Perception.Params p) {
-            return new Config(enabled, acquireRange, requireLineOfSight, scanIntervalTicks, leashRange, loseSightTicks,
-                    returnToOrigin, returnArriveDistance, returnStuckTicks, returnMaxTicks, p);
+            return new Config(enabled, requireLineOfSight, loseGraceTicks, searchTicks, returnArriveDistance,
+                    stuckTicks, returnMaxTicks, scanIntervalTicks, p);
         }
     }
 
@@ -107,7 +112,7 @@ public final class AggroController {
         ACTIVE("active"),
         /** Switched off by the configuration. */
         OFF("off (configuration)"),
-        /** PvP BOT's auto-target is on: PvP BOT acquires by itself; only the leash and the return apply. */
+        /** PvP BOT's auto-target is on: PvP BOT acquires by itself; only the supervision (lost, search, return) applies. */
         INERT_AUTO_TARGET("inert, PvP BOT auto-target is on"),
         /** PvP BOT's combat routine is off. */
         INERT_COMBAT_OFF("inert, PvP BOT combat is off"),
@@ -129,100 +134,154 @@ public final class AggroController {
         }
     }
 
+    /** Where one inhabitant is in the hunt. */
+    public enum Phase {
+        IDLE,
+        /** Hit by a visible attacker: turning to it, reacting; PvP BOT's instant revenge is held back. */
+        REACT,
+        CHASE,
+        PURSUE,
+        SEARCH,
+        RETURN
+    }
+
     /** How an engagement began. */
     public enum Cause {
-        /** This controller noticed a player and forced them on the bot. */
+        /** This controller noticed a player (sight or hearing) and forced them on the bot. */
         ACQUIRED,
-        /** The target is the bot's last attacker (PvP BOT's revenge memory). */
+        /** The bot was hit by the target. */
         HIT,
         /** Anything else PvP BOT holds (a mob it decided to fight, a faction enemy, somebody else's force). */
         OTHER
     }
 
+    /** What is being tracked. */
+    private enum Kind {
+        /** A player this controller handed to PvP BOT (or one PvP BOT holds that is treated the same). */
+        PLAYER,
+        /** A mob PvP BOT fights on its own (revenge): tracked, never pursued or searched for. */
+        MOB,
+        /** Somebody else's forced target: tracked for the status only. */
+        EXTERNAL
+    }
+
     /** Snapshot for diagnostics. */
-    public record Stats(Mode mode, int engaged, int returning, long acquisitions, long hits, long returned,
-                        Map<String, Long> giveUps, Map<String, Long> abandoned) {
+    public record Stats(Mode mode, int chasing, int pursuing, int searching, int returning, long acquisitions,
+                        long hits, long returned, Map<String, Long> giveUps, Map<String, Long> abandoned) {
     }
 
     /** Consecutive upstream failures after which the controller switches itself off. */
     static final int MAX_CONSECUTIVE_FAILURES = 20;
     /** At most one INFO line per bot per this many ticks for starts and give-ups; the rest go to debug. */
     static final long INFO_GAP_TICKS = 200;
-    /** How far (blocks) the distance to the origin must shrink to count as progress. */
-    static final double RETURN_PROGRESS = 1.0;
     /** Speed handed to PvP BOT's move-toward call (1.0 is what its own patrols use). */
-    static final double RETURN_SPEED = 1.0;
+    static final double WALK_SPEED = 1.0;
+    /** Horizontal distance (blocks) from the last known position at which a pursuit has arrived. */
+    static final double ARRIVE_LKP = 1.5;
+    /** Horizontal distance (blocks) from a search spot at which the bot has arrived and looks round. */
+    static final double ARRIVE_SPOT = 1.2;
+    /** Blocks around the search focus that candidate search spots are taken from. */
+    static final double SPOT_RADIUS = 12.0;
+    /** Ticks a bot walks to one search spot at most before it looks round wherever it is. */
+    static final int MAX_SPOT_TICKS = 100;
+    /** Look round: quarter turns, and ticks spent looking along each. */
+    static final int SWEEP_STEPS = 4;
+    static final int SWEEP_STEP_TICKS = 6;
+    /** Ticks a planned route stays unreplanned after a plan (bounds the planning cost), and after a failed one. */
+    static final int PLAN_INTERVAL_TICKS = 20;
+    static final int PLAN_RETRY_TICKS = 60;
+    /** Route plans per server tick, all bots together (the cost bound); the rest wait a tick. */
+    static final int MAX_PLANS_PER_TICK = 2;
+    /** A player moving faster than this (blocks per tick, 1.2 blocks per second) has a heading worth following. */
+    static final double SIGNIFICANT_SPEED = 0.06;
+    /** Ticks a bot keeps scanning every tick after something was in view (the exposure runs are watched closely). */
+    static final int WATCH_TICKS = 3;
+    /** Times a stuck route is replanned before the walk gives up (pursuit and search). */
+    static final int MAX_STUCK_REPLANS = 2;
+    /** Vertical distance (blocks) within which the bot counts as being at home. */
+    static final double HOME_HEIGHT = 4.0;
 
-    /** Where an engagement began. */
+    /** Where a hunt began: a position and the level it is in. */
     record Origin(Pos pos, Object dimension) {
     }
 
-    private static final class Engagement {
-        Object entity;
-        String name;
-        /** The target the engagement began with; a forced name equal to it is never "somebody else's". */
-        final String firstName;
-        final Cause cause;
-        /** The leash origin: the home anchor for the first engagement, the bot's position for a temporary one. */
-        final Origin origin;
-        /** True when {@link #origin} is a temporary origin (the engagement began while walking back home). */
-        final boolean temporary;
-        final long startTick;
-        /** How the target was noticed (sight or hearing); null for a hit or an engagement PvP BOT began itself. */
-        final Perception.Notice noticed;
-        /** Somebody else's forced target: tracked, never leashed or cleared. */
-        boolean external;
-        /** The forced name this controller set, or null. */
-        final String forcedByUs;
-        int unseen;
-        double leashDistance;
-        /** Distance to the home anchor as of the last tick (shown for a temporary origin). */
-        double homeDistance;
-
-        Engagement(Object entity, String name, Cause cause, Origin origin, boolean temporary, long startTick,
-                   boolean external, String forcedByUs, Perception.Notice noticed) {
-            this.noticed = noticed;
-            this.entity = entity;
-            this.name = name;
-            this.firstName = name;
-            this.cause = cause;
-            this.origin = origin;
-            this.temporary = temporary;
-            this.startTick = startTick;
-            this.external = external;
-            this.forcedByUs = forcedByUs;
-        }
-    }
-
-    /** One walk back home. A new leg (after a temporary engagement) is a new instance: fresh guard counters. */
-    private static final class Return {
-        final Origin origin;
-        final long startTick;
-        double best;
-        long bestTick;
-        double distance;
-
-        Return(Origin origin, long startTick, double distance) {
-            this.origin = origin;
-            this.startTick = startTick;
-            this.best = distance;
-            this.bestTick = startTick;
-            this.distance = distance;
-        }
-    }
-
     private static final class BotState {
-        /** Where the bot's first engagement began; set while an engagement or a walk back exists, else null. */
+        Phase phase = Phase.IDLE;
+        /** Where the bot FIRST started aggro'ing; kept until it is back there. */
         Origin home;
-        Engagement engagement;
-        Return ret;
+
+        // ---- the target
+        Kind kind = Kind.PLAYER;
+        Cause cause = Cause.OTHER;
+        String target;
+        Object entity;
+        /** The target the hunt began with; a forced name equal to it is never "somebody else's". */
+        String firstName;
+        /** The forced name this controller set, or null. */
+        String forcedByUs;
+        /** How the target was noticed: sight or hearing; null for a hit or a hunt PvP BOT began itself. */
+        Perception.Sense noticed;
+        /** Ticks of exposure (or of reaction delay) before the hunt began. */
+        long reaction;
+        long startTick;
+        int unseen;
+        Pos lkp;
+        double lastX;
+        double lastZ;
+        boolean haveLast;
+        /** Smoothed horizontal velocity of the target while it was visible (blocks per tick). */
+        double velX;
+        double velZ;
+        long lastSeenTick;
+        /** Where the bot was as of the last tick (for the status text). */
+        Pos pos;
+
+        // ---- REACT
+        long reactUntil;
+
+        // ---- walking
+        long phaseStart;
+        PathFollower route;
+        Pos routeGoal;
+        boolean routePartial;
+        long nextPlanTick;
+        int stuckReplans;
+        double straightBest = Double.MAX_VALUE;
+        long straightBestTick;
+
+        // ---- PURSUE
+        Pos pursueGoal;
+        boolean predicted;
+
+        // ---- SEARCH
+        long searchStart;
+        Pos focus;
+        final List<Pos> visited = new ArrayList<>();
+        int points;
+        Pos spot;
+        long spotStart;
+        boolean sweeping;
+        int sweepStep;
+        long sweepStepStart;
+        double sweepBase;
+        Pos hint;
+        long hintTick = Long.MIN_VALUE;
+        long hintUsed = Long.MIN_VALUE;
+    }
+
+    private enum Walk {
+        WALKING, ARRIVED, BLOCKED
     }
 
     private final Supplier<Config> config;
     private final TargetControl up;
+    private final PathPlanner planner;
     private final Log log;
 
     private final Map<String, BotState> states = new LinkedHashMap<>();
+    /** Bots that have something in view: scanned every tick until this tick. */
+    private final Map<String, Long> watching = new HashMap<>();
+    private final ExposureTracker exposure = new ExposureTracker();
     private final Map<String, Long> lastInfo = new HashMap<>();
     private final Map<String, Long> giveUps = new TreeMap<>();
     private final Map<String, Long> abandoned = new TreeMap<>();
@@ -231,16 +290,18 @@ public final class AggroController {
     private long hitEngagements;
     private long returned;
     private long lastTick = Long.MIN_VALUE;
-    private long lastScan = Long.MIN_VALUE;
+    private long lastSettingsRead = Long.MIN_VALUE;
     private Settings settings;
     private Mode mode = Mode.UNKNOWN;
+    private double modMax = MOD_MAX;
     private int failures;
     private boolean failed;
-    private String warnedLeash = "";
+    private int plansThisTick;
 
-    public AggroController(Supplier<Config> config, TargetControl up, Log log) {
+    public AggroController(Supplier<Config> config, TargetControl up, PathPlanner planner, Log log) {
         this.config = config;
         this.up = up;
+        this.planner = planner == null ? PathPlanner.NONE : planner;
         this.log = log;
     }
 
@@ -253,6 +314,7 @@ public final class AggroController {
             reset();
         }
         lastTick = now;
+        plansThisTick = 0;
         Config cfg = config.get();
         if (failed) {
             return;
@@ -262,25 +324,18 @@ public final class AggroController {
             states.clear();
             return;
         }
-        boolean scan = lastScan == Long.MIN_VALUE || now - lastScan >= cfg.scanIntervalTicks();
-        if (scan) {
-            lastScan = now;
+        if (lastSettingsRead == Long.MIN_VALUE || now - lastSettingsRead >= cfg.scanIntervalTicks()) {
+            lastSettingsRead = now;
             settings = readSettings();
+            modMax = settings == null ? MOD_MAX : Math.max(4.0, Math.min(MOD_MAX, settings.maxTargetDistance()));
         }
         if (!cfg.enabled()) {
             setMode(Mode.OFF, null);
             dropAll("aggro disabled");
             return;
         }
-        Mode wanted = modeFor(settings);
-        if (scan) {
-            setMode(wanted, null);
-            checkLeash(cfg);
-        }
-        boolean mayStart = settings == null || settings.combatEnabled();
-        boolean mayAcquire = scan && wanted == Mode.ACTIVE;
-
-        boolean prune = !states.isEmpty();
+        setMode(modeFor(settings), null);
+        boolean prune = !states.isEmpty() || !watching.isEmpty();
         Set<String> seen = prune ? new HashSet<>() : null;
         for (Watcher bot : world.inhabitants()) {
             if (failed) {
@@ -291,7 +346,7 @@ public final class AggroController {
                 seen.add(name);
             }
             try {
-                step(now, world, bot, cfg, mayStart, mayAcquire);
+                step(now, world, bot, cfg);
                 failures = 0;
             } catch (RuntimeException e) {
                 noteFailure("handling " + name, e);
@@ -303,16 +358,20 @@ public final class AggroController {
                     dropBot(name, "bot left");
                 }
             }
+            watching.keySet().removeIf(n -> !seen.contains(n));
         }
     }
 
     /** Forget everything: the server stopped or restarted. Does not touch PvP BOT. */
     public void reset() {
         states.clear();
+        watching.clear();
+        exposure.clear();
         lastInfo.clear();
         lastTick = Long.MIN_VALUE;
-        lastScan = Long.MIN_VALUE;
+        lastSettingsRead = Long.MIN_VALUE;
         settings = null;
+        modMax = MOD_MAX;
         mode = Mode.UNKNOWN;
         failures = 0;
         failed = false;
@@ -320,42 +379,67 @@ public final class AggroController {
 
     // ================================================================ per bot
 
-    private void step(long now, AggroWorld world, Watcher bot, Config cfg, boolean mayStart, boolean mayAcquire) {
+    private boolean active() {
+        return mode == Mode.ACTIVE;
+    }
+
+    private boolean mayStart() {
+        return settings == null || settings.combatEnabled();
+    }
+
+    private void step(long now, AggroWorld world, Watcher bot, Config cfg) {
         String name = bot.name();
         BotState st = states.get(name);
         if (!bot.alive()) {
             if (st != null) {
                 dropBot(name, "bot died");
             }
+            watching.remove(name);
             return;
         }
-        boolean gaveUp = false;
-        if (st != null && st.engagement != null) {
-            gaveUp = maintain(now, world, bot, st, cfg);
+        // Drained every tick, so each hit is reported once and the poller's baseline stays current.
+        Body hitter = bot.newHitAttacker();
+        if (st != null) {
+            st.pos = bot.position();
         }
-        boolean engaged = st != null && st.engagement != null;
-        if (!engaged && mayStart) {
-            Target t = up.currentTarget(name);
-            if (t != null) {
-                st = startFromTarget(now, bot, st, t);
-                engaged = true;
+        if (st != null) {
+            switch (st.phase) {
+                case CHASE -> {
+                    chase(now, world, bot, st, cfg);
+                    return;
+                }
+                case REACT -> {
+                    react(now, world, bot, st, cfg, hitter);
+                    return;
+                }
+                default -> {
+                }
             }
         }
-        // Noticing is allowed while walking back home (regular rules); not on the very tick a chase was given up,
-        // so the walk back always gets at least one tick of steering.
-        if (mayAcquire && !engaged && !gaveUp) {
-            acquire(now, world, bot, cfg);
-            st = states.get(name);
-            engaged = st != null && st.engagement != null;
-        }
-        if (st != null && st.engagement == null) {
-            if (st.ret != null) {
-                stepReturn(now, bot, st, cfg);
+        // IDLE, PURSUE, SEARCH or RETURN. PvP BOT's own target (revenge after a hit, a mob fight, somebody's force) first.
+        if (mayStart()) {
+            Target held = up.currentTarget(name);
+            if (held != null) {
+                st = startFromHeld(now, world, bot, st, held, cfg);
+                if (st.phase == Phase.CHASE || st.phase == Phase.REACT || st.phase == Phase.PURSUE) {
+                    return;
+                }
+            } else if (hitter != null && active() && validAttacker(bot, hitter)) {
+                st = onHit(now, world, bot, st, hitter, cfg);
+                return;
             }
-            if (st.ret == null) {
-                // No engagement and no walk back: nothing left to be home to.
-                st.home = null;
-                states.remove(name);
+        }
+        if (st == null) {
+            if (active()) {
+                scanForChase(now, world, bot, null, cfg);
+            }
+            return;
+        }
+        switch (st.phase) {
+            case PURSUE -> pursue(now, world, bot, st, cfg);
+            case SEARCH -> search(now, world, bot, st, cfg);
+            case RETURN -> ret(now, world, bot, st, cfg);
+            default -> {
             }
         }
     }
@@ -364,341 +448,294 @@ public final class AggroController {
         return states.computeIfAbsent(name, k -> new BotState());
     }
 
-    // ---------------------------------------------------------------- start
-
-    /**
-     * The leash origin of a chase that starts now, with the bookkeeping that goes with it: the first engagement of
-     * a bot without a home makes the bot's position its home and its origin; one that starts while the bot walks
-     * back home gets the bot's position as a TEMPORARY origin and ends that walk (a new leg starts after it).
-     *
-     * @param temporary set to true in {@code temporary[0]} when the origin is a temporary one
-     */
-    private Origin beginOrigin(Watcher bot, BotState st, boolean[] temporary) {
-        Origin here = new Origin(bot.position(), bot.dimension());
-        if (st.ret != null && st.home != null) {
-            temporary[0] = true;
-        } else {
-            st.home = here;
-        }
-        st.ret = null;
-        return here;
+    private Origin here(Watcher bot) {
+        return new Origin(bot.position(), bot.dimension());
     }
 
+    // ---------------------------------------------------------------- starting a hunt
+
     /** PvP BOT holds a target this controller did not hand over: revenge, a mob fight, or somebody else's force. */
-    private BotState startFromTarget(long now, Watcher bot, BotState existing, Target t) {
+    private BotState startFromHeld(long now, AggroWorld world, Watcher bot, BotState existing, Target t,
+                                   Config cfg) {
+        String name = bot.name();
+        String forced = up.forcedTarget(name);
+        Body body = world.bodyOf(t.entity());
+        boolean player = body != null && body.isPlayer();
+        BotState st = existing != null ? existing : state(name);
+        if (forced != null) {
+            // A forced name that appears while nothing of ours is chasing is somebody else's (a command, another mod).
+            beginHeld(now, bot, st, t, Kind.EXTERNAL, Cause.OTHER);
+            log.debug("aggro: " + name + " fights " + t.name() + " on a forced target set by someone else; tracked only");
+            return st;
+        }
+        if (player && active()) {
+            // A hit: the bot is aware of the attacker now; PvP BOT's instant revenge is held back.
+            if (body.alive() && attackableNow(body)) {
+                return onHit(now, world, bot, st, body, cfg);
+            }
+        }
+        beginHeld(now, bot, st, t, player ? Kind.PLAYER : Kind.MOB, t.revenge() ? Cause.HIT : Cause.OTHER);
+        hitEngagements++;
+        logInfo(now, name, "aggro: " + name + " fights " + t.name() + " (" + st.cause.name().toLowerCase(Locale.ROOT)
+                + (st.kind == Kind.MOB ? ", a mob" : "") + ")");
+        return st;
+    }
+
+    /** Begins tracking a fight PvP BOT started itself (or somebody forced). */
+    private void beginHeld(long now, Watcher bot, BotState st, Target t, Kind kind, Cause cause) {
+        st.kind = kind;
+        st.cause = cause;
+        st.target = t.name();
+        st.firstName = t.name();
+        st.entity = t.entity();
+        st.forcedByUs = null;
+        st.noticed = null;
+        st.reaction = 0;
+        st.startTick = now;
+        st.unseen = 0;
+        st.haveLast = false;
+        st.velX = 0.0;
+        st.velZ = 0.0;
+        st.route = null;
+        if (kind != Kind.EXTERNAL && st.home == null) {
+            st.home = here(bot);
+        }
+        st.phase = Phase.CHASE;
+        exposure.forgetObserver(bot.name());
+    }
+
+    /** True when {@code b} may be treated as an attacker to hunt: alive, a player, in this level, and not exempt. */
+    private boolean validAttacker(Watcher bot, Body b) {
+        Settings s = settings;
+        return s != null && b.alive() && b.isPlayer() && Objects.equals(bot.dimension(), b.dimension())
+                && !b.name().equalsIgnoreCase(bot.name()) && (s.attackInvincible() || attackable(b));
+    }
+
+    private boolean attackableNow(Body b) {
+        Settings s = settings;
+        return s != null && (s.attackInvincible() || attackable(b));
+    }
+
+    /**
+     * A hit by a player. The bot is aware of the attacker at once and knows where it was. Visible: turn to it and react
+     * after the reaction time (PvP BOT's instant revenge is cleared now and the target is set when the delay ends).
+     * Not visible (an arrow from cover): PURSUE to where the attacker stood.
+     */
+    private BotState onHit(long now, AggroWorld world, Watcher bot, BotState existing, Body attacker, Config cfg) {
         String name = bot.name();
         BotState st = existing != null ? existing : state(name);
-        String forced = up.forcedTarget(name);
-        // A forced name that appears while there is no engagement is somebody else's (a command, another mod).
-        boolean external = forced != null;
-        Cause cause = external ? Cause.OTHER : t.revenge() ? Cause.HIT : Cause.OTHER;
-        Origin origin;
-        boolean[] temporary = {false};
-        if (external) {
-            // Never leashed and never returned from: it has no home either.
-            st.home = null;
-            st.ret = null;
-            origin = new Origin(bot.position(), bot.dimension());
-        } else {
-            origin = beginOrigin(bot, st, temporary);
+        if (st.home == null) {
+            st.home = here(bot);
         }
-        Engagement e = new Engagement(t.entity(), t.name(), cause, origin, temporary[0], now, external, null, null);
-        st.engagement = e;
-        if (temporary[0]) {
-            e.homeDistance = homeDistance(bot, st);
-        }
-        if (external) {
-            log.debug("aggro: " + name + " fights " + t.name() + " on a forced target set by someone else; tracked only");
+        st.kind = Kind.PLAYER;
+        st.cause = Cause.HIT;
+        st.target = attacker.name();
+        st.firstName = attacker.name();
+        st.entity = attacker.handle();
+        st.forcedByUs = null;
+        st.noticed = null;
+        st.reaction = reactionTicks(cfg);
+        st.startTick = now;
+        st.unseen = 0;
+        st.lkp = attacker.position();
+        st.haveLast = false;
+        st.velX = 0.0;
+        st.velZ = 0.0;
+        st.lastSeenTick = now;
+        st.route = null;
+        exposure.forgetObserver(name);
+        hitEngagements++;
+        boolean visible = sees(bot, attacker, cfg);
+        if (visible) {
+            // PvP BOT's instant revenge is held back: its target is cleared now and set when the reaction is over.
+            up.clearTarget(name);
+            st.phase = Phase.REACT;
+            st.reactUntil = now + reactionTicks(cfg);
+            logInfo(now, name, "aggro: " + name + " was hit by " + attacker.name() + " and turns to it (reacts in "
+                    + reactionTicks(cfg) + " ticks)");
         } else {
-            hitEngagements++;
-            logInfo(now, name, "aggro: " + name + " engaged " + t.name() + " (" + cause.name().toLowerCase(Locale.ROOT)
-                    + ")" + (temporary[0] ? ", temporary origin, home " + fmt(e.homeDistance) + " away" : ""));
+            logInfo(now, name, "aggro: " + name + " was hit by " + attacker.name() + " from cover and goes to where "
+                    + "it came from");
+            beginPursue(now, bot, st, "hit from cover");
         }
         return st;
     }
 
-    private static double homeDistance(Watcher bot, BotState st) {
-        return st.home == null || !Objects.equals(bot.dimension(), st.home.dimension()) ? 0.0
-                : bot.position().horizontalTo(st.home.pos());
+    private static int reactionTicks(Config cfg) {
+        return (int) Math.max(0, Math.ceil(cfg.perception().reactionTicks()));
     }
 
-    // ---------------------------------------------------------------- maintain
+    /** Tracks the reaction delay after a visible hit; when it is over the attacker is handed to PvP BOT. */
+    private void react(long now, AggroWorld world, Watcher bot, BotState st, Config cfg, Body hitter) {
+        String name = bot.name();
+        Body attacker = world.bodyOf(st.entity);
+        if (attacker == null || !attacker.alive() || !Objects.equals(bot.dimension(), attacker.dimension())) {
+            beginReturn(now, bot, st, "attacker gone");
+            return;
+        }
+        if (hitter != null && hitter.alive()) {
+            st.lkp = hitter.position();
+        }
+        // PvP BOT re-arms its revenge on every hit; hold it back until the delay is over.
+        if (up.currentTarget(name) != null) {
+            up.clearTarget(name);
+        }
+        if (now < st.reactUntil) {
+            up.look(bot.handle(), attacker.position());
+            return;
+        }
+        if (!attackableNow(attacker)) {
+            beginReturn(now, bot, st, "attacker no longer attackable");
+            return;
+        }
+        if (!sees(bot, attacker, cfg)) {
+            beginPursue(now, bot, st, "attacker out of sight after the reaction");
+            return;
+        }
+        startChase(now, bot, st, attacker, null, st.reaction, Cause.HIT);
+    }
 
     /**
-     * Judges the running engagement of one bot.
+     * Hands {@code target} to PvP BOT as the forced target and starts CHASE. The first hunt of a bot without a home makes
+     * the bot's position its home.
+     */
+    private void startChase(long now, Watcher bot, BotState existing, Body target, Perception.Sense how, long reaction,
+                            Cause cause) {
+        String name = bot.name();
+        up.setTarget(name, target.name());
+        BotState st = existing != null ? existing : state(name);
+        if (st.home == null) {
+            st.home = here(bot);
+        }
+        st.phase = Phase.CHASE;
+        st.kind = Kind.PLAYER;
+        st.cause = cause;
+        st.target = target.name();
+        st.firstName = target.name();
+        st.forcedByUs = target.name();
+        st.entity = target.handle();
+        st.noticed = how;
+        st.reaction = reaction;
+        st.startTick = now;
+        st.unseen = 0;
+        st.lkp = target.position();
+        st.lastSeenTick = now;
+        st.haveLast = false;
+        st.velX = 0.0;
+        st.velZ = 0.0;
+        st.route = null;
+        exposure.forgetObserver(name);
+        if (cause == Cause.ACQUIRED) {
+            acquisitions++;
+        }
+        logInfo(now, name, "aggro: " + name + (cause == Cause.HIT ? " reacted to the hit and chases "
+                : " noticed " + target.name() + " by " + senseText(how) + " after " + reaction + " ticks and chases ")
+                + target.name() + " (" + fmt(bot.distanceTo(target)) + " blocks away)");
+    }
+
+    // ---------------------------------------------------------------- noticing
+
+    /**
+     * Looks for a player this bot notices now (IDLE, PURSUE, SEARCH, RETURN): every scan interval (staggered per bot), and
+     * every tick while something is in view. Starts a CHASE when the exposure has lasted long enough. An occluded sound
+     * is only a hint for the search.
      *
-     * @return true when it was given up on this tick
+     * @return true when a chase started
      */
-    private boolean maintain(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
-        Engagement e = st.engagement;
+    private boolean scanForChase(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
         String name = bot.name();
-        String forced = up.forcedTarget(name);
-        Target t = up.currentTarget(name);
-        if (!e.external && forced != null && isSomebodyElses(forced, e, t)) {
-            e.external = true;
-            st.home = null;
-            log.debug("aggro: " + name + " now has a forced target set by someone else (" + forced + "); tracked only");
-        }
-        if (e.external) {
-            if (forced == null) {
-                // Not forced any more: it is an ordinary fight again and is judged as one from the next step.
-                st.engagement = null;
-                log.debug("aggro: " + name + " no longer has an external forced target");
-                return false;
-            }
-            if (t != null) {
-                e.entity = t.entity();
-                e.name = t.name();
-                Body target = world.bodyOf(t.entity());
-                e.unseen = target != null && !bot.canSee(target) ? e.unseen + 1 : 0;
-            }
-            e.leashDistance = bot.position().horizontalTo(e.origin.pos());
-            return false;
-        }
-        String reason = giveUpReason(world, bot, e, t, cfg);
-        if (e.temporary) {
-            e.homeDistance = homeDistance(bot, st);
-        }
-        if (reason != null) {
-            giveUp(now, bot, st, reason, cfg);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Whether a forced name is somebody else's. It is ours when this controller set it, when it names the target the
-     * engagement began with (PvP BOT writes the attacker's name itself in its wind-burst and elytra flow), or when it
-     * names the bot's current revenge target (its last attacker).
-     */
-    private static boolean isSomebodyElses(String forced, Engagement e, Target t) {
-        return !forced.equalsIgnoreCase(e.forcedByUs) && !forced.equalsIgnoreCase(e.firstName)
-                && !(t != null && t.revenge() && forced.equalsIgnoreCase(t.name()));
-    }
-
-    /** Why the engagement must end now, or null. Also updates the counters the status text shows. */
-    private String giveUpReason(AggroWorld world, Watcher bot, Engagement e, Target t, Config cfg) {
-        if (t == null) {
-            return "target lost";
-        }
-        e.entity = t.entity();
-        e.name = t.name();
-        Body target = world.bodyOf(t.entity());
-        if (target == null || !target.alive()) {
-            return "target gone";
-        }
-        if (!Objects.equals(bot.dimension(), e.origin.dimension())) {
-            return "bot changed level";
-        }
-        if (!Objects.equals(bot.dimension(), target.dimension())) {
-            return "target in another level";
-        }
         Settings s = settings;
-        if (s != null && !s.attackInvincible() && !attackable(target)) {
-            return "target no longer attackable";
-        }
-        e.leashDistance = bot.position().horizontalTo(e.origin.pos());
-        if (e.leashDistance > cfg.leashRange()) {
-            return "leash";
-        }
-        if (bot.canSee(target)) {
-            e.unseen = 0;
-        } else {
-            e.unseen++;
-            if (e.unseen >= cfg.loseSightTicks()) {
-                return "out of sight";
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Ends the engagement: clears PvP BOT's target state (also its revenge memory) and starts the walk back to the
-     * HOME anchor (never to a temporary origin). Without a walk back the home is cleared and the bot stays where it
-     * is. If the clear throws, the engagement stays and the next tick tries again.
-     */
-    private void giveUp(long now, Watcher bot, BotState st, String reason, Config cfg) {
-        Engagement e = st.engagement;
-        String name = bot.name();
-        up.clearTarget(name);
-        st.engagement = null;
-        giveUps.merge(reason, 1L, Long::sum);
-        Origin home = st.home;
-        boolean back = cfg.returnToOrigin() && home != null && canReturn(bot, home);
-        if (back) {
-            st.ret = new Return(home, now, bot.position().horizontalTo(home.pos()));
-        } else {
-            st.home = null;
-        }
-        logInfo(now, name, "aggro: " + name + " gives up on " + e.name + " after " + (now - e.startTick) + " ticks ("
-                + reason + ", " + fmt(e.leashDistance) + " from " + (e.temporary ? "temporary origin" : "origin")
-                + ", unseen " + e.unseen + "t)" + (back ? ", walking home" : ""));
-    }
-
-    private boolean canReturn(Watcher bot, Origin origin) {
-        if (!Objects.equals(bot.dimension(), origin.dimension())) {
+        if (s == null || !mayStart()) {
             return false;
         }
-        if (!up.steeringAvailable()) {
-            warnOnce("steering", "aggro: inhabitants cannot walk back to its home anchor: " + up.steeringProblem());
+        Long until = watching.get(name);
+        boolean due = (until != null && until >= now) || (now + stagger(name, cfg.scanIntervalTicks())) % cfg.scanIntervalTicks() == 0;
+        if (!due) {
             return false;
         }
-        return true;
-    }
-
-    // ---------------------------------------------------------------- return
-
-    private void stepReturn(long now, Watcher bot, BotState st, Config cfg) {
-        Return r = st.ret;
-        String name = bot.name();
-        if (!Objects.equals(bot.dimension(), r.origin.dimension())) {
-            abandon(name, st, "bot changed level");
-            return;
-        }
-        double d = bot.position().horizontalTo(r.origin.pos());
-        r.distance = d;
-        if (d <= cfg.returnArriveDistance()) {
-            st.ret = null;
-            st.home = null;
-            returned++;
-            log.debug("aggro: " + name + " is back home (" + fmt(d) + " blocks away, " + (now - r.startTick)
-                    + " ticks)");
-            return;
-        }
-        if (now - r.startTick >= cfg.returnMaxTicks()) {
-            abandon(name, st, "took too long, " + fmt(d) + " blocks left");
-            return;
-        }
-        if (d < r.best - RETURN_PROGRESS) {
-            r.best = d;
-            r.bestTick = now;
-        } else if (now - r.bestTick >= cfg.returnStuckTicks()) {
-            abandon(name, st, "stuck, " + fmt(d) + " blocks left");
-            return;
-        }
-        up.steer(bot.handle(), r.origin.pos(), RETURN_SPEED);
-    }
-
-    /** The walk back is given up: the bot stays where it is and the home anchor is cleared. */
-    private void abandon(String name, BotState st, String reason) {
-        st.ret = null;
-        st.home = null;
-        abandoned.merge(reason.contains(",") ? reason.substring(0, reason.indexOf(',')) : reason, 1L, Long::sum);
-        log.debug("aggro: " + name + " stops walking back: " + reason);
-    }
-
-    // ---------------------------------------------------------------- drop
-
-    /** The bot died or left: forget its engagement and its pending return, and release a force we set. */
-    private void dropBot(String name, String reason) {
-        BotState st = states.remove(name);
-        if (st == null) {
-            return;
-        }
-        Engagement e = st.engagement;
-        if (e != null && e.forcedByUs != null && !e.external) {
-            releaseOurForce(name, e);
-        }
-        log.debug("aggro: " + name + " dropped its " + (e != null ? "engagement" : "return") + ": " + reason);
-    }
-
-    private void dropAll(String reason) {
-        for (String name : new ArrayList<>(states.keySet())) {
-            dropBot(name, reason);
-        }
-    }
-
-    private void releaseOurForce(String name, Engagement e) {
-        try {
-            String forced = up.forcedTarget(name);
-            if (forced != null && forced.equalsIgnoreCase(e.forcedByUs)) {
-                up.clearTarget(name);
-            }
-        } catch (RuntimeException ex) {
-            noteFailure("releasing the forced target of " + name, ex);
-        }
-    }
-
-    // ================================================================ acquisition
-
-    private void acquire(long now, AggroWorld world, Watcher bot, Config cfg) {
-        Settings s = settings;
-        if (s == null) {
-            return;
-        }
-        List<? extends Body> near = world.playersWithin(bot, cfg.acquireRange());
+        List<? extends Body> near = world.playersWithin(bot, modMax);
         if (near.isEmpty()) {
-            return;
-        }
-        // The bot must be idle: no target of its own (revenge, faction enemy, anything) and no forced name.
-        if (up.currentTarget(bot.name()) != null || up.forcedTarget(bot.name()) != null) {
-            return;
+            return false;
         }
         List<Body> ordered = new ArrayList<>(near);
         ordered.sort(Comparator.<Body>comparingDouble(bot::distanceTo)
                 .thenComparing(b -> b.name().toLowerCase(Locale.ROOT)));
+        boolean anyExposure = false;
         for (Body candidate : ordered) {
-            if (!validTarget(bot, candidate, s, cfg.acquireRange())) {
+            if (!validTarget(bot, candidate, s)) {
                 continue;
             }
-            Perception.Notice how = noticeOf(bot, candidate, cfg);
-            if (how == Perception.Notice.NONE) {
-                continue;
+            Perception.Reading reading = read(bot, candidate, cfg);
+            String key = ExposureTracker.key(name, candidate.name());
+            if (reading.exposed()) {
+                anyExposure = true;
+                long ticks = exposure.sighted(key, now);
+                if (Perception.noticed(ticks, reading.requiredTicks())) {
+                    startChase(now, bot, st, candidate, reading.sense(), ticks, Cause.ACQUIRED);
+                    watching.remove(name);
+                    return true;
+                }
+            } else {
+                exposure.missed(key, now);
+                if (reading.sense() == Perception.Sense.INVESTIGATE && st != null) {
+                    st.hint = candidate.position();
+                    st.hintTick = now;
+                }
             }
-            up.setTarget(bot.name(), candidate.name());
-            BotState st = state(bot.name());
-            boolean[] temporary = {false};
-            Origin origin = beginOrigin(bot, st, temporary);
-            Engagement e = new Engagement(candidate.handle(), candidate.name(), Cause.ACQUIRED, origin, temporary[0],
-                    now, false, candidate.name(), how);
-            st.engagement = e;
-            if (temporary[0]) {
-                e.homeDistance = homeDistance(bot, st);
-            }
-            acquisitions++;
-            logInfo(now, bot.name(), "aggro: " + bot.name() + " noticed " + candidate.name() + " at "
-                    + fmt(bot.distanceTo(candidate)) + " blocks by " + noticedText(how)
-                    + (temporary[0] ? " while walking home (temporary origin, home " + fmt(e.homeDistance)
-                    + " away)" : ""));
-            return;
         }
+        if (anyExposure) {
+            watching.put(name, now + WATCH_TICKS);
+        } else {
+            watching.remove(name);
+        }
+        return false;
+    }
+
+    private static int stagger(String name, int interval) {
+        return (name.hashCode() & 0x7fffffff) % Math.max(1, interval);
     }
 
     /**
-     * Whether {@code bot} notices {@code candidate} now, and how: {@link Perception#notice} over the two bodies' eyes,
-     * look direction and stance, with occlusion (a clear view, when {@code requireLineOfSight} is on) asked last.
-     * Without perception (switched off, or a view that cannot tell the eyes and the stance) it is the plain,
-     * omnidirectional line of sight of before.
+     * What {@code bot} makes of {@code candidate} this tick: {@link Perception#read} over the two bodies' eyes, look
+     * direction and stance, with occlusion (a clear view, when {@code requireLineOfSight} is on) asked last. Without
+     * perception (switched off, or a view that cannot tell the eyes and the stance) it is plain line of sight:
+     * in range and unobstructed, at once.
      */
-    private Perception.Notice noticeOf(Watcher bot, Body candidate, Config cfg) {
+    Perception.Reading read(Watcher bot, Body candidate, Config cfg) {
         BooleanSupplier clear = () -> !cfg.requireLineOfSight() || bot.canSee(candidate);
         Perception.Params p = cfg.perception();
         AggroWorld.Senses me = p.enabled() ? bot.senses() : null;
         AggroWorld.Senses them = me == null ? null : candidate.senses();
         double distance = bot.distanceTo(candidate);
         if (me == null || them == null) {
-            return Perception.notice(p.disabled(), cfg.acquireRange(), 0.0, distance, Perception.Subject.player(false,
-                    false, false), clear);
+            return Perception.read(p.disabled(), modMax, 0.0, distance, Perception.Subject.player(false, false, false),
+                    clear);
         }
         double theta = Perception.angleDeg(me.look().x(), me.look().y(), me.look().z(),
                 them.eye().x() - me.eye().x(), them.eye().y() - me.eye().y(), them.eye().z() - me.eye().z());
-        return Perception.notice(p, cfg.acquireRange(), theta, distance, them.subject(), clear);
+        return Perception.read(p, modMax, theta, distance, them.subject(), clear);
     }
 
-    private static String noticedText(Perception.Notice how) {
-        return how == Perception.Notice.HEARING ? "hearing" : "sight";
+    /** True when the bot has an unobstructed view of {@code b} within the mod maximum (no cone: an engaged bot faces it). */
+    private boolean sees(Watcher bot, Body b, Config cfg) {
+        return Objects.equals(bot.dimension(), b.dimension()) && bot.distanceTo(b) <= modMax
+                && (!cfg.requireLineOfSight() || bot.canSee(b));
+    }
+
+    private static String senseText(Perception.Sense how) {
+        return how == Perception.Sense.HEARING ? "hearing" : how == Perception.Sense.SIGHT ? "sight" : "a hit";
     }
 
     /**
-     * The same rules as PvP BOT's own target validity for a player, plus the range: alive, not spectator /
-     * creative / invulnerable unless {@code attackInvincible}, not a faction ally unless friendly fire, and a
-     * PvP BOT bot only when {@code targetOtherBots}, any other player only when {@code targetPlayers}.
+     * The same rules as PvP BOT's own target validity for a player: alive, not spectator / creative / invulnerable unless
+     * {@code attackInvincible}, not a faction ally unless friendly fire, and a PvP BOT bot only when
+     * {@code targetOtherBots}, any other player only when {@code targetPlayers}. There is no distance rule here.
      */
-    boolean validTarget(Watcher bot, Body candidate, Settings s, double range) {
+    boolean validTarget(Watcher bot, Body candidate, Settings s) {
         if (candidate.name().equalsIgnoreCase(bot.name()) || !candidate.alive() || !candidate.isPlayer()) {
             return false;
         }
-        if (bot.distanceTo(candidate) > range || !Objects.equals(bot.dimension(), candidate.dimension())) {
+        if (!Objects.equals(bot.dimension(), candidate.dimension())) {
             return false;
         }
         if (!s.attackInvincible() && !attackable(candidate)) {
@@ -721,6 +758,475 @@ public final class AggroController {
 
     private static boolean attackable(Body b) {
         return !b.spectator() && !b.creative() && !b.invulnerable();
+    }
+
+    // ---------------------------------------------------------------- CHASE
+
+    private void chase(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
+        String name = bot.name();
+        Target held = mayStart() ? up.currentTarget(name) : null;
+        if (st.kind != Kind.EXTERNAL) {
+            String forced = up.forcedTarget(name);
+            if (forced != null && isSomebodyElses(forced, st, held)) {
+                st.kind = Kind.EXTERNAL;
+                log.debug("aggro: " + name + " now has a forced target set by someone else (" + forced + "); tracked only");
+            }
+        }
+        switch (st.kind) {
+            case EXTERNAL -> chaseExternal(now, world, bot, st, held, cfg);
+            case MOB -> chaseMob(now, world, bot, st, held, cfg);
+            default -> chasePlayer(now, world, bot, st, held, cfg);
+        }
+    }
+
+    /**
+     * Whether a forced name is somebody else's. It is ours when this controller set it, when it names the target the hunt
+     * began with (PvP BOT writes the attacker's name itself in its wind-burst and elytra flow), or when it names the bot's
+     * current revenge target (its last attacker).
+     */
+    private static boolean isSomebodyElses(String forced, BotState st, Target held) {
+        return !forced.equalsIgnoreCase(st.forcedByUs) && !forced.equalsIgnoreCase(st.firstName)
+                && !(held != null && held.revenge() && forced.equalsIgnoreCase(held.name()));
+    }
+
+    private void chasePlayer(long now, AggroWorld world, Watcher bot, BotState st, Target held, Config cfg) {
+        if (held != null) {
+            st.entity = held.entity();
+            st.target = held.name();
+        }
+        Body target = world.bodyOf(st.entity);
+        String bad = invalidTarget(bot, target);
+        if (bad != null) {
+            giveUps.merge(bad, 1L, Long::sum);
+            up.clearTarget(bot.name());
+            beginReturn(now, bot, st, bad);
+            return;
+        }
+        // PvP BOT dropped its target (beyond the mod maximum, or invalid there): the chase is lost.
+        boolean visible = held != null && sees(bot, target, cfg);
+        if (visible) {
+            st.unseen = 0;
+            st.lastSeenTick = now;
+            Pos p = target.position();
+            st.lkp = p;
+            if (st.haveLast) {
+                st.velX = 0.5 * st.velX + 0.5 * (p.x() - st.lastX);
+                st.velZ = 0.5 * st.velZ + 0.5 * (p.z() - st.lastZ);
+            }
+            st.lastX = p.x();
+            st.lastZ = p.z();
+            st.haveLast = true;
+            return;
+        }
+        st.unseen++;
+        if (st.unseen >= cfg.loseGraceTicks() || held == null) {
+            beginPursue(now, bot, st, held == null ? "PvP BOT dropped the target" : "out of sight for "
+                    + st.unseen + " ticks");
+        }
+    }
+
+    private void chaseMob(long now, AggroWorld world, Watcher bot, BotState st, Target held, Config cfg) {
+        Body mob = held == null ? null : world.bodyOf(held.entity());
+        if (held == null || mob == null || !mob.alive()) {
+            up.clearTarget(bot.name());
+            giveUps.merge("mob fight over", 1L, Long::sum);
+            beginReturn(now, bot, st, "mob fight over");
+            return;
+        }
+        st.entity = held.entity();
+        st.target = held.name();
+        if (sees(bot, mob, cfg)) {
+            st.unseen = 0;
+            st.lkp = mob.position();
+            return;
+        }
+        st.unseen++;
+        if (st.unseen >= cfg.loseGraceTicks()) {
+            up.clearTarget(bot.name());
+            giveUps.merge("mob out of sight", 1L, Long::sum);
+            beginReturn(now, bot, st, "mob out of sight for " + st.unseen + " ticks");
+        }
+    }
+
+    private void chaseExternal(long now, AggroWorld world, Watcher bot, BotState st, Target held, Config cfg) {
+        String name = bot.name();
+        if (up.forcedTarget(name) == null) {
+            // Not forced any more: an ordinary fight again (or over); judged as one from the next step.
+            log.debug("aggro: " + name + " no longer has an external forced target");
+            st.phase = Phase.IDLE;
+            if (st.home != null) {
+                beginReturn(now, bot, st, "external target over");
+            } else {
+                states.remove(name);
+            }
+            return;
+        }
+        if (held != null) {
+            st.entity = held.entity();
+            st.target = held.name();
+            Body target = world.bodyOf(held.entity());
+            st.unseen = target != null && !sees(bot, target, cfg) ? st.unseen + 1 : 0;
+        }
+    }
+
+    /** Why the target cannot be chased any more, or null when it can. */
+    private String invalidTarget(Watcher bot, Body target) {
+        if (target == null || !target.alive()) {
+            return "target gone";
+        }
+        if (!Objects.equals(bot.dimension(), target.dimension())) {
+            return "target in another level";
+        }
+        Settings s = settings;
+        if (s != null && !s.attackInvincible() && !attackable(target)) {
+            return "target no longer attackable";
+        }
+        return null;
+    }
+
+    // ---------------------------------------------------------------- PURSUE
+
+    /** The target is lost: PvP BOT's target is cleared (also its revenge memory) and the bot walks to the last known position. */
+    private void beginPursue(long now, Watcher bot, BotState st, String why) {
+        String name = bot.name();
+        up.clearTarget(name);
+        giveUps.merge("lost", 1L, Long::sum);
+        if (!up.steeringAvailable()) {
+            warnOnce("steering", "aggro: inhabitants cannot walk to where they lost a player: " + up.steeringProblem());
+            st.home = null;
+            states.remove(name);
+            return;
+        }
+        st.phase = Phase.PURSUE;
+        st.phaseStart = now;
+        st.pursueGoal = st.lkp != null ? st.lkp : bot.position();
+        st.predicted = false;
+        resetWalk(st, now);
+        st.hint = null;
+        transition(now, name, "pursues " + st.target + "'s last position, " + fmt(bot.position().horizontalTo(st.pursueGoal))
+                + " away (" + why + ")");
+    }
+
+    private void pursue(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
+        if (scanForChase(now, world, bot, st, cfg)) {
+            return;
+        }
+        if (!Objects.equals(bot.dimension(), st.home == null ? bot.dimension() : st.home.dimension())) {
+            abandon(bot, st, "bot changed level");
+            return;
+        }
+        if (now - st.phaseStart >= cfg.returnMaxTicks()) {
+            beginSearch(now, bot, st, "the walk took too long");
+            return;
+        }
+        switch (walkTo(now, bot, st, st.pursueGoal, ARRIVE_LKP, cfg, true)) {
+            case ARRIVED -> {
+                if (!st.predicted) {
+                    st.predicted = true;
+                    Pos ahead = predictedGoal(st);
+                    if (ahead != null) {
+                        st.pursueGoal = ahead;
+                        resetWalk(st, now);
+                        log.debug("aggro: " + bot.name() + " continues along the last heading of " + st.target);
+                        return;
+                    }
+                }
+                beginSearch(now, bot, st, "arrived at the last known position");
+            }
+            case BLOCKED -> beginSearch(now, bot, st, "no way to the last known position");
+            default -> {
+            }
+        }
+    }
+
+    /** A few blocks further along the last heading when the target was moving, else null. */
+    private static Pos predictedGoal(BotState st) {
+        double speed = Math.sqrt(st.velX * st.velX + st.velZ * st.velZ);
+        if (!st.haveLast || speed < SIGNIFICANT_SPEED || st.lkp == null) {
+            return null;
+        }
+        double len = Math.max(3.0, Math.min(8.0, speed * 20.0));
+        return new Pos(st.lkp.x() + st.velX / speed * len, st.lkp.y(), st.lkp.z() + st.velZ / speed * len);
+    }
+
+    // ---------------------------------------------------------------- SEARCH
+
+    private void beginSearch(long now, Watcher bot, BotState st, String why) {
+        st.phase = Phase.SEARCH;
+        st.searchStart = now;
+        st.focus = st.lkp != null ? st.lkp : bot.position();
+        st.visited.clear();
+        st.points = 0;
+        st.spot = null;
+        st.hint = null;
+        st.hintUsed = Long.MIN_VALUE;
+        resetWalk(st, now);
+        startSweep(now, bot, st);
+        up.halt(bot.handle());
+        transition(now, bot.name(), "searches for " + st.target + " (" + why + ")");
+    }
+
+    private void search(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
+        if (scanForChase(now, world, bot, st, cfg)) {
+            return;
+        }
+        long elapsed = now - st.searchStart;
+        if (elapsed >= cfg.searchTicks()) {
+            up.halt(bot.handle());
+            beginReturn(now, bot, st, "the search is over");
+            return;
+        }
+        if (st.hint != null && st.hintTick > st.hintUsed) {
+            // A sound from behind cover: the search moves there, within the same window.
+            st.hintUsed = st.hintTick;
+            if (st.focus == null || st.hint.horizontalTo(st.focus) > 3.0) {
+                st.focus = st.hint;
+                st.spot = null;
+                st.sweeping = false;
+                resetWalk(st, now);
+                log.debug("aggro: " + bot.name() + " heard something and searches there");
+            }
+        }
+        if (st.sweeping) {
+            sweep(now, bot, st);
+            return;
+        }
+        if (st.spot != null) {
+            Walk w = walkTo(now, bot, st, st.spot, ARRIVE_SPOT, cfg, true);
+            if (w != Walk.WALKING || now - st.spotStart > MAX_SPOT_TICKS) {
+                if (w == Walk.ARRIVED) {
+                    st.points++;
+                }
+                st.visited.add(st.spot);
+                st.spot = null;
+                startSweep(now, bot, st);
+                up.halt(bot.handle());
+            }
+            return;
+        }
+        double speed = Math.sqrt(st.velX * st.velX + st.velZ * st.velZ);
+        double hx = speed > SIGNIFICANT_SPEED ? st.velX / speed : 0.0;
+        double hz = speed > SIGNIFICANT_SPEED ? st.velZ / speed : 0.0;
+        List<SearchSpot> spots = world.searchSpots(bot, st.focus, SPOT_RADIUS);
+        SearchSpot pick = SearchPlanner.choose(bot.position(), st.focus, hx, hz, spots, st.visited,
+                cfg.searchTicks() - elapsed);
+        if (pick == null) {
+            // Nowhere new worth walking to: stand and look round again.
+            st.visited.add(bot.position());
+            startSweep(now, bot, st);
+            return;
+        }
+        st.spot = pick.pos();
+        st.spotStart = now;
+        resetWalk(st, now);
+    }
+
+    private void startSweep(long now, Watcher bot, BotState st) {
+        st.sweeping = true;
+        st.sweepStep = 0;
+        st.sweepStepStart = now;
+        Pos me = bot.position();
+        Pos toward = st.focus != null && me.horizontalTo(st.focus) > 1.5 ? st.focus : null;
+        st.sweepBase = toward == null ? 0.0 : Math.atan2(-(toward.x() - me.x()), toward.z() - me.z());
+    }
+
+    /** Look round in quarter turns (a 120 degree view cone covers the circle in four), standing still. */
+    private void sweep(long now, Watcher bot, BotState st) {
+        if (now - st.sweepStepStart >= SWEEP_STEP_TICKS) {
+            st.sweepStep++;
+            st.sweepStepStart = now;
+        }
+        if (st.sweepStep >= SWEEP_STEPS) {
+            st.sweeping = false;
+            return;
+        }
+        double yaw = st.sweepBase + st.sweepStep * (Math.PI / 2.0);
+        Pos me = bot.position();
+        Pos at = new Pos(me.x() - Math.sin(yaw) * 8.0, me.y() + 1.62, me.z() + Math.cos(yaw) * 8.0);
+        up.look(bot.handle(), at);
+        up.halt(bot.handle());
+    }
+
+    // ---------------------------------------------------------------- RETURN
+
+    /**
+     * The hunt is over: walk back to the HOME anchor (never to a temporary point). Without a home, or when walking is
+     * not possible, the bot stays where it is.
+     */
+    private void beginReturn(long now, Watcher bot, BotState st, String why) {
+        String name = bot.name();
+        Origin home = st.home;
+        if (home == null || !Objects.equals(bot.dimension(), home.dimension())) {
+            states.remove(name);
+            return;
+        }
+        if (!up.steeringAvailable()) {
+            warnOnce("steering", "aggro: inhabitants cannot walk back to their home anchor: " + up.steeringProblem());
+            st.home = null;
+            states.remove(name);
+            return;
+        }
+        st.phase = Phase.RETURN;
+        st.phaseStart = now;
+        resetWalk(st, now);
+        transition(now, name, "returns home, " + fmt(bot.position().horizontalTo(home.pos())) + " away (" + why + ")");
+    }
+
+    private void ret(long now, AggroWorld world, Watcher bot, BotState st, Config cfg) {
+        String name = bot.name();
+        if (scanForChase(now, world, bot, st, cfg)) {
+            return;
+        }
+        Origin home = st.home;
+        if (home == null || !Objects.equals(bot.dimension(), home.dimension())) {
+            abandon(bot, st, "bot changed level");
+            return;
+        }
+        Pos here = bot.position();
+        if (here.horizontalTo(home.pos()) <= cfg.returnArriveDistance() && Math.abs(here.y() - home.pos().y()) <= HOME_HEIGHT) {
+            up.halt(bot.handle());
+            st.home = null;
+            states.remove(name);
+            returned++;
+            log.debug("aggro: " + name + " is back home (" + fmt(here.horizontalTo(home.pos())) + " blocks away, "
+                    + (now - st.phaseStart) + " ticks)");
+            return;
+        }
+        if (now - st.phaseStart >= cfg.returnMaxTicks()) {
+            up.halt(bot.handle());
+            abandoned.merge("took too long", 1L, Long::sum);
+            logInfo(now, name, "aggro: " + name + " gave up walking home after " + (now - st.phaseStart) + " ticks ("
+                    + fmt(here.horizontalTo(home.pos())) + " blocks left) and stays where it is");
+            st.home = null;
+            states.remove(name);
+            return;
+        }
+        walkTo(now, bot, st, home.pos(), cfg.returnArriveDistance(), cfg, false);
+    }
+
+    private void abandon(Watcher bot, BotState st, String reason) {
+        abandoned.merge(reason, 1L, Long::sum);
+        log.debug("aggro: " + bot.name() + " stops walking home: " + reason);
+        up.halt(bot.handle());
+        st.home = null;
+        states.remove(bot.name());
+    }
+
+    // ---------------------------------------------------------------- walking
+
+    private void resetWalk(BotState st, long now) {
+        st.route = null;
+        st.routeGoal = null;
+        st.routePartial = false;
+        st.nextPlanTick = now;
+        st.stuckReplans = 0;
+        st.straightBest = Double.MAX_VALUE;
+        st.straightBestTick = now;
+    }
+
+    /**
+     * One tick of walking toward {@code goal}: plan a route when there is none (bounded: at most one plan per
+     * {@value #PLAN_INTERVAL_TICKS} ticks per bot and {@value #MAX_PLANS_PER_TICK} per tick overall), follow it waypoint by
+     * waypoint with PvP BOT's own look and move input, and replan when stuck. Without a route (no planner, or nothing
+     * found yet) the bot steers straight at the goal so it is never idle.
+     *
+     * @param giveUp true: report {@link Walk#BLOCKED} when there is no way or no progress; false: keep trying (the
+     *               caller has its own time limit)
+     */
+    private Walk walkTo(long now, Watcher bot, BotState st, Pos goal, double arrive, Config cfg, boolean giveUp) {
+        Pos here = bot.position();
+        double d = here.horizontalTo(goal);
+        if (d <= arrive) {
+            up.halt(bot.handle());
+            return Walk.ARRIVED;
+        }
+        if (st.route != null && st.routeGoal != null && st.routeGoal.distanceTo(goal) > 1.0) {
+            st.route = null;
+            st.nextPlanTick = now;
+        }
+        if (st.route == null && now >= st.nextPlanTick && plansThisTick < MAX_PLANS_PER_TICK) {
+            plansThisTick++;
+            PathPlanner.Plan plan = planner.plan(bot.handle(), goal, modMax);
+            if (plan.hasRoute()) {
+                st.route = new PathFollower(plan.waypoints(), now);
+                st.routeGoal = goal;
+                st.routePartial = !plan.reachesGoal();
+                st.nextPlanTick = now + PLAN_INTERVAL_TICKS;
+            } else {
+                st.nextPlanTick = now + PLAN_RETRY_TICKS;
+                if (plan.outcome() == PathPlanner.Outcome.NONE && giveUp) {
+                    return Walk.BLOCKED;
+                }
+            }
+        }
+        if (st.route != null) {
+            Pos wp = st.route.current(here, now);
+            if (wp == null) {
+                boolean partial = st.routePartial;
+                st.route = null;
+                st.nextPlanTick = now + (partial ? PLAN_RETRY_TICKS : 0);
+                if (partial && giveUp) {
+                    return Walk.BLOCKED;
+                }
+            } else if (st.route.stuck(here, now, cfg.stuckTicks())) {
+                st.route = null;
+                st.stuckReplans++;
+                st.nextPlanTick = now;
+                if (st.stuckReplans > MAX_STUCK_REPLANS) {
+                    if (giveUp) {
+                        return Walk.BLOCKED;
+                    }
+                    st.stuckReplans = 0;
+                    st.nextPlanTick = now + PLAN_RETRY_TICKS;
+                }
+            } else {
+                up.steer(bot.handle(), wp, WALK_SPEED);
+                return Walk.WALKING;
+            }
+        }
+        // No route yet or right now: head straight for the goal, and notice when that gets nowhere.
+        if (d < st.straightBest - 0.5) {
+            st.straightBest = d;
+            st.straightBestTick = now;
+        } else if (giveUp && st.route == null && now - st.straightBestTick >= cfg.stuckTicks() * 2L && now >= st.nextPlanTick) {
+            return Walk.BLOCKED;
+        }
+        up.steer(bot.handle(), goal, WALK_SPEED);
+        return Walk.WALKING;
+    }
+
+    // ---------------------------------------------------------------- drop
+
+    /** The bot died or left: forget its hunt, and release a force we set. */
+    private void dropBot(String name, String reason) {
+        BotState st = states.remove(name);
+        exposure.forgetObserver(name);
+        watching.remove(name);
+        if (st == null) {
+            return;
+        }
+        if (st.phase == Phase.CHASE && st.forcedByUs != null && st.kind == Kind.PLAYER) {
+            releaseOurForce(name, st);
+        }
+        log.debug("aggro: " + name + " dropped its hunt (" + st.phase.name().toLowerCase(Locale.ROOT) + "): " + reason);
+    }
+
+    private void dropAll(String reason) {
+        for (String name : new ArrayList<>(states.keySet())) {
+            dropBot(name, reason);
+        }
+        watching.clear();
+    }
+
+    private void releaseOurForce(String name, BotState st) {
+        try {
+            String forced = up.forcedTarget(name);
+            if (forced != null && forced.equalsIgnoreCase(st.forcedByUs)) {
+                up.clearTarget(name);
+            }
+        } catch (RuntimeException ex) {
+            noteFailure("releasing the forced target of " + name, ex);
+        }
     }
 
     // ================================================================ modes
@@ -758,15 +1264,14 @@ public final class AggroController {
             case ACTIVE -> {
                 Config cfg = config.get();
                 log.info(previous == Mode.UNKNOWN
-                        ? "aggro: active, inhabitants notice players within " + fmt(cfg.acquireRange())
-                        + " blocks in line of sight and give up " + fmt(cfg.leashRange()) + " blocks from where the chase "
-                        + "began (its origin) or after " + cfg.loseSightTicks() + " ticks unseen"
-                        + (cfg.returnToOrigin() ? ", then walk back" : "")
+                        ? "aggro: active, inhabitants chase players they see or hear (line of sight, up to " + fmt(modMax)
+                        + " blocks, after a " + fmt(cfg.perception().reactionTicks() / 20.0) + " s reaction), search "
+                        + fmt(cfg.searchTicks() / 20.0) + " s where they lost them, then walk back to where they started"
                         : text);
             }
             case INERT_AUTO_TARGET -> log.info("aggro: inert, PvP BOT's own auto-target is on and already acquires "
-                    + "targets by itself, so nothing is noticed here (the leash and the walk back still apply; "
-                    + "turn auto-target off to use the aggro range)");
+                    + "targets by itself, so nothing is noticed here (the lost-target search and the walk home still "
+                    + "apply; turn auto-target off to use line of sight)");
             case OFF -> log.debug(text);
             case UNKNOWN -> {
             }
@@ -774,25 +1279,12 @@ public final class AggroController {
         }
     }
 
-    /** WARN once when the chase can outrun PvP BOT's own limit, so PvP BOT may drop a target before the leash decides. */
-    private void checkLeash(Config cfg) {
-        Settings s = settings;
-        if (s == null) {
-            return;
-        }
-        double max = s.maxTargetDistance();
-        if (cfg.leashRange() + cfg.acquireRange() > max) {
-            String key = cfg.leashRange() + "|" + cfg.acquireRange() + "|" + max;
-            if (!key.equals(warnedLeash)) {
-                warnedLeash = key;
-                log.warn("aggro: leashRange " + fmt(cfg.leashRange()) + " + acquireRange " + fmt(cfg.acquireRange())
-                        + " is more than PvP BOT's maxTargetDistance " + fmt(max) + "; PvP BOT may drop a target "
-                        + "before the leash decides (raise maxTargetDistance or lower the aggro ranges)");
-            }
-        }
-    }
-
     // ================================================================ logging
+
+    /** A transition, always at debug. */
+    private void transition(long now, String bot, String what) {
+        log.debug("aggro: " + bot + " " + what);
+    }
 
     /** One INFO per bot per {@link #INFO_GAP_TICKS}; the rest go to debug. */
     private void logInfo(long now, String bot, String text) {
@@ -830,68 +1322,93 @@ public final class AggroController {
     }
 
     public Stats stats() {
-        int engaged = 0;
+        int chasing = 0;
+        int pursuing = 0;
+        int searching = 0;
         int returning = 0;
         for (BotState s : states.values()) {
-            if (s.engagement != null) {
-                engaged++;
-            }
-            if (s.ret != null) {
-                returning++;
+            switch (s.phase) {
+                case CHASE, REACT -> chasing++;
+                case PURSUE -> pursuing++;
+                case SEARCH -> searching++;
+                case RETURN -> returning++;
+                default -> {
+                }
             }
         }
-        return new Stats(mode, engaged, returning, acquisitions, hitEngagements, returned,
+        return new Stats(mode, chasing, pursuing, searching, returning, acquisitions, hitEngagements, returned,
                 Map.copyOf(giveUps), Map.copyOf(abandoned));
     }
 
-    /** The name of the target of the engagement running on {@code botName}, or null. */
+    /** Where {@code botName} is in the hunt ({@link Phase#IDLE} when it is not hunting). */
+    public Phase phaseOf(String botName) {
+        BotState s = states.get(botName);
+        return s == null ? Phase.IDLE : s.phase;
+    }
+
+    /** The name of the player or mob {@code botName} is hunting, or null. */
     public String engagedWith(String botName) {
         BotState s = states.get(botName);
-        return s == null || s.engagement == null ? null : s.engagement.name;
+        return s == null || s.phase == Phase.IDLE ? null : s.target;
     }
 
-    /** The cause of the engagement running on {@code botName}, or null. */
+    /** The cause of the current hunt of {@code botName}, or null. */
     public Cause causeOf(String botName) {
         BotState s = states.get(botName);
-        return s == null || s.engagement == null ? null : s.engagement.cause;
+        return s == null || s.phase == Phase.IDLE ? null : s.cause;
     }
 
-    /** True while {@code botName} is walking back to its home anchor. */
-    public boolean isReturning(String botName) {
-        BotState s = states.get(botName);
-        return s != null && s.ret != null;
-    }
-
-    /** True while {@code botName} has a home anchor (an engagement or a walk back is pending). */
+    /** True while {@code botName} has a home anchor (a hunt is running or a walk home is pending). */
     public boolean hasHome(String botName) {
         BotState s = states.get(botName);
         return s != null && s.home != null;
     }
 
-    /** True while the engagement running on {@code botName} is measured from a temporary origin. */
-    public boolean hasTemporaryOrigin(String botName) {
+    /** The home anchor of {@code botName}, or null. */
+    public Pos homeOf(String botName) {
         BotState s = states.get(botName);
-        return s != null && s.engagement != null && s.engagement.temporary;
+        return s == null || s.home == null ? null : s.home.pos();
+    }
+
+    /** How many search points {@code botName} has checked in the current search. */
+    public int pointsChecked(String botName) {
+        BotState s = states.get(botName);
+        return s == null ? 0 : s.points;
     }
 
     /**
-     * One short text about one bot for the status output, e.g.
-     * {@code engaged Steve (acquired by sight) 12.3 from origin, unseen 40t} ({@code by hearing} when the player was
-     * heard rather than seen), {@code engaged Steve (hit) 5.2 from temp origin, home 20.1 away, unseen 0t}, {@code returning home, 18.0 to go} or
-     * {@code idle}. Distances are as of the last tick.
+     * One short text about one bot for the status output, e.g. {@code chasing Jack (seen 0.4 s ago; noticed by sight after
+     * 0.4 s)}, {@code pursuing Jack's last position, 6.2 to go}, {@code searching for Jack, 7.5 s left, 3 points checked},
+     * {@code returning home, 18.0 to go} or {@code idle}. Distances and times are as of the last tick.
      */
     public String describe(String botName) {
         BotState s = states.get(botName);
-        if (s != null && s.engagement != null) {
-            Engagement e = s.engagement;
-            return "engaged " + e.name + " (" + e.cause.name().toLowerCase(Locale.ROOT)
-                    + (e.noticed != null ? " by " + noticedText(e.noticed) : "")
-                    + (e.external ? ", external" : "") + ") " + fmt(e.leashDistance)
-                    + (e.temporary ? " from temp origin, home " + fmt(e.homeDistance) + " away" : " from origin")
-                    + ", unseen " + e.unseen + "t";
-        }
-        if (s != null && s.ret != null) {
-            return "returning home, " + fmt(s.ret.distance) + " to go";
+        if (s != null && s.phase != Phase.IDLE) {
+            Config cfg = config.get();
+            String how = s.noticed != null ? "; noticed by " + senseText(s.noticed) + " after " + fmt(s.reaction / 20.0) + " s"
+                    : s.cause == Cause.HIT ? "; hit, reacted after " + fmt(s.reaction / 20.0) + " s" : "";
+            switch (s.phase) {
+                case REACT:
+                    return "turning to " + s.target + "'s hit (reacting)";
+                case CHASE:
+                    if (s.kind == Kind.EXTERNAL) {
+                        return "fighting " + s.target + " (forced by someone else; not managed)";
+                    }
+                    return (s.kind == Kind.MOB ? "fighting " : "chasing ") + s.target + " (seen "
+                            + fmt(s.unseen / 20.0) + " s ago" + (s.kind == Kind.MOB ? "" : how) + ")";
+                case PURSUE:
+                    return "pursuing " + s.target + "'s last position, "
+                            + fmt(s.pursueGoal == null || s.pos == null ? 0.0 : s.pursueGoal.horizontalTo(s.pos)) + " to go";
+                case SEARCH:
+                    return "searching for " + s.target + ", "
+                            + fmt(Math.max(0L, cfg.searchTicks() - (lastTick - s.searchStart)) / 20.0) + " s left, "
+                            + s.points + " points checked";
+                case RETURN:
+                    return "returning home, " + fmt(s.home == null || s.pos == null ? 0.0
+                            : s.home.pos().horizontalTo(s.pos)) + " to go";
+                default:
+                    break;
+            }
         }
         return switch (mode) {
             case ACTIVE -> "idle";

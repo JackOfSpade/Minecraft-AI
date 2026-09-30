@@ -11,11 +11,19 @@ public interface AggroWorld {
 
     /** A point in a level. */
     record Pos(double x, double y, double z) {
-        /** Distance ignoring height, the measure the leash and the return use. */
+        /** Distance ignoring height, the measure the walks use. */
         public double horizontalTo(Pos other) {
             double dx = x - other.x;
             double dz = z - other.z;
             return Math.sqrt(dx * dx + dz * dz);
+        }
+
+        /** Straight-line distance. */
+        public double distanceTo(Pos other) {
+            double dx = x - other.x;
+            double dy = y - other.y;
+            double dz = z - other.z;
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
         }
     }
 
@@ -73,6 +81,19 @@ public interface AggroWorld {
          * the view cone, sneaking and noise are {@link Perception}'s business.
          */
         boolean canSee(Body other);
+
+        /**
+         * The attacker of a hit this inhabitant took since this was last asked (a player, a bot or a mob), or null. It
+         * is how a hit is noticed WITHOUT relying on PvP BOT's revenge memory (which is only set when PvP BOT's own
+         * settings allow it); each hit is reported once.
+         */
+        default Body newHitAttacker() {
+            return null;
+        }
+    }
+
+    /** A cell worth walking to when searching, with how much hidden space it would open up (see {@link SearchPlanner}). */
+    record SearchSpot(Pos pos, double opening) {
     }
 
     /** Every online inhabitant (dead or alive). */
@@ -90,4 +111,13 @@ public interface AggroWorld {
      * ones far away.
      */
     List<? extends Body> playersWithin(Watcher bot, double range);
+
+    /**
+     * Cells around {@code focus} an inhabitant could walk to and look around from, best guesses first not required: the
+     * controller scores them ({@link SearchPlanner}). At most a few dozen, standable, each with its opening value.
+     * Bounded work: this is called once per search point, not per tick.
+     */
+    default List<SearchSpot> searchSpots(Watcher bot, Pos focus, double radius) {
+        return List.of();
+    }
 }

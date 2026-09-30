@@ -55,6 +55,19 @@ class PvpBotAdapterManagedSettingsTest {
     }
 
     @Test
+    void theBowDrawTimeIsWrittenIntoItsFieldAndReadBack() throws Exception {
+        AdapterFixture f = AdapterFixture.probed();
+        assertEquals(40, field("bowMinDrawTime"), "PvP BOT's own default is the artificial 2 second draw");
+        f.adapter.manageSettings(new ManagedSettings(null, null, null, null, null, null, null, null, 20));
+        assertEquals(20, field("bowMinDrawTime"), "vanilla full power");
+        assertEquals(1, saves());
+        assertTrue(f.sink.info.stream().anyMatch(l -> l.startsWith("PvP BOT settings:") && l.contains("bowMinDrawTime 40 -> 20")),
+                f.sink.info.toString());
+        f.adapter.manageSettings(new ManagedSettings(null, null, null, null, null, null, null, null, 20));
+        assertEquals(1, saves(), "already at 20: nothing to write");
+    }
+
+    @Test
     void oneInfoLineNamesExactlyWhatChanged() {
         AdapterFixture f = AdapterFixture.probed();
         f.adapter.manageSettings(SHIPPED);
@@ -131,7 +144,7 @@ class PvpBotAdapterManagedSettingsTest {
     void aSettingsClassWithoutTheManagedFieldsIsReportedAsProblemsNotAnException() {
         UpstreamSettingsWriter.Handles none = UpstreamSettingsWriter.resolve(Object.class);
         assertTrue(none.fields().isEmpty());
-        assertEquals(9, none.problems().size(), none.problems().toString());
+        assertEquals(10, none.problems().size(), none.problems().toString());
         assertFalse(none.canWrite("maxTargetDistance"));
     }
 

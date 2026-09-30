@@ -213,6 +213,15 @@ final class UpstreamCalls {
         return invoke(m.method(), settings) instanceof Double d ? d : null;
     }
 
+    /** {@code getBowMinDrawTime}, or null when it is missing or returns something else. */
+    Integer readBowMinDrawTime(Object settings) throws Throwable {
+        UpstreamContract.Member m = contract.bowMinDrawTimeGetter;
+        if (settings == null || m == null || !m.ok()) {
+            return null;
+        }
+        return invoke(m.method(), settings) instanceof Integer i ? i : null;
+    }
+
     /** {@code getMaxTargetDistance}, or null when it is missing or returns something else. */
     Double readMaxTargetDistance(Object settings) throws Throwable {
         return readDouble(settings, UpstreamContract.MAX_TARGET_DISTANCE_GETTER);
@@ -250,6 +259,11 @@ final class UpstreamCalls {
         invoke(contract.navMoveToward.method(), null, bot, to, speed);
     }
 
+    /** One tick of turning toward a point with upstream's own look call, without walking. */
+    void look(ServerPlayer bot, Vec3 at) throws Throwable {
+        invoke(contract.navLookAt.method(), null, bot, at);
+    }
+
     void setTarget(String bot, String target) throws Throwable {
         invoke(contract.combatSetTarget.method(), null, bot, target);
     }
@@ -272,7 +286,7 @@ final class UpstreamCalls {
                 readDouble(settings, "getRangedMinRange"), readDouble(settings, "getRangedOptimalRange"),
                 readDouble(settings, "getRangedMaxRange"), readBoolean(settings, "isAutoEquipWeapon"),
                 readBoolean(settings, "isAutoTargetEnabled"), readBoolean(settings, "isRangedRetreatOnClose"),
-                readDouble(settings, "getMeleeRange"));
+                readDouble(settings, "getMeleeRange"), readBowMinDrawTime(settings));
     }
 
     /**

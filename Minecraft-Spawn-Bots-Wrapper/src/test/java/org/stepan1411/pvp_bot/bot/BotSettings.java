@@ -21,6 +21,7 @@ public class BotSettings {
     private int checkInterval = 20;
     private boolean combatEnabled = true;
     private boolean autoTargetEnabled = false;
+    private int bowMinDrawTime = 40;
     private boolean rangedEnabled = true;
     private boolean maceEnabled = true;
     private boolean spearEnabled = false;
@@ -120,6 +121,7 @@ public class BotSettings {
     public boolean isFactionsEnabled() { return factionsEnabled; }
     public boolean isFriendlyFireEnabled() { return friendlyFireEnabled; }
     public double getMaxTargetDistance() { return maxTargetDistance; }
+    public int getBowMinDrawTime() { return bowMinDrawTime; }
     public double getRangedMinRange() { return rangedMinRange; }
     public double getRangedOptimalRange() { return rangedOptimalRange; }
     public double getRangedMaxRange() { return rangedMaxRange; }

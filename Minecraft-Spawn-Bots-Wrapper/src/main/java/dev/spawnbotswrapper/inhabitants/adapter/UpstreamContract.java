@@ -57,6 +57,8 @@ final class UpstreamContract {
     /** Contract ids R11 (boolean) and R12 (int) beyond the capability getters. */
     private static final List<String> EXTRA_BOOLEAN_GETTERS = List.of("isProfileLagFix", "isSafeSpawn", "isUseSpecialNames");
     private static final List<String> INT_GETTERS = List.of("getMaxMassSpawn", "getCheckInterval");
+    /** Int getter read for the managed bow draw time (not a capability input, so a missing one is only a missing read). */
+    static final String BOW_MIN_DRAW_TIME_GETTER = "getBowMinDrawTime";
     static final String MAX_TARGET_DISTANCE_GETTER = "getMaxTargetDistance";
     /** Double getters read for the managed ranges (kept apart from {@link #getters}: they are not capability inputs). */
     static final List<String> DOUBLE_GETTERS = List.of(MAX_TARGET_DISTANCE_GETTER, "getRangedMinRange",
@@ -86,6 +88,8 @@ final class UpstreamContract {
     final Map<String, Member> getters;
     /** The managed-range getters, by name (see {@link #DOUBLE_GETTERS}); optional. */
     final Map<String, Member> doubleGetters;
+    /** {@code BotSettings.getBowMinDrawTime()}; optional. */
+    final Member bowMinDrawTimeGetter;
     /** Field and save handles of the settings the addon may write; optional, see {@link UpstreamSettingsWriter}. */
     final UpstreamSettingsWriter.Handles managed;
 
@@ -169,6 +173,7 @@ final class UpstreamContract {
             dg.put(name, instanceMethod(settings, "", name, double.class));
         }
         doubleGetters = Map.copyOf(dg);
+        bowMinDrawTimeGetter = instanceMethod(settings, "", BOW_MIN_DRAW_TIME_GETTER, int.class);
         managed = UpstreamSettingsWriter.resolve(settings.type);
 
         createPath = staticMethod(path, "", "createPath", boolean.class, String.class);

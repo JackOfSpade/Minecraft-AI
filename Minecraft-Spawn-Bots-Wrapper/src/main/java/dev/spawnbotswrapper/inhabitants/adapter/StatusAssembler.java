@@ -209,12 +209,12 @@ final class StatusAssembler {
                 : "patrols DISABLED: " + pathProblems(c)));
         String combatProblem = c.combatControlProblem();
         String steeringProblem = c.steeringProblem();
-        details.add("Aggro range (BotCombat targets): " + (combatProblem == null
+        details.add("Aggro hunter (BotCombat targets): " + (combatProblem == null
                 ? "setTarget/getTarget/clearTarget and the forced-target field resolved"
                 + (c.factionAreAllies.ok() ? "" : " (faction check unavailable)")
                 + (c.lastAttackerField != null ? "" : " (revenge memory unreadable: hits count as 'other')")
-                + (steeringProblem == null ? "; walk back via BotNavigation.lookAtPosition/moveTowardPosition"
-                : "; walk back DISABLED, " + steeringProblem)
+                + (steeringProblem == null ? "; walking via BotNavigation.lookAtPosition/moveTowardPosition"
+                : "; walking DISABLED, " + steeringProblem)
                 : "DISABLED, " + combatProblem));
         details.add("Commands: " + commandLine(tree));
         details.add("Spawn tier: " + primary.label() + tierChain(order) + " (spawning.backend=" + backend + ")");

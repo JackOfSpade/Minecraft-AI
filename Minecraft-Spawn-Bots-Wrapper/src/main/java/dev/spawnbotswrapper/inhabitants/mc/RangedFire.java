@@ -1,74 +1,54 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
-import dev.spawnbotswrapper.inhabitants.combat.CrossbowPacer;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.projectile.Projectile;
-import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.slf4j.Logger;
 
-import java.util.HashSet;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * Fires an inhabitant's loaded crossbow and paces its shots (config {@code rangedPacing}; see {@link CrossbowPacer} for
- * the rules and for why this exists: PvP BOT itself can never fire a loaded crossbow on this Minecraft version).
+ * Lets an inhabitant's crossbow cycle at its NATURAL speed: exactly what a person who spam-clicks the crossbow gets,
+ * with no rate limit of this addon's own. Once per server tick, after PvP BOT's own tick (the caller registers it in a
+ * phase behind the default one), for every inhabitant holding a crossbow in the main hand:
+ * <ol>
+ *   <li><b>Release the draw when it is loaded.</b> Vanilla loads the crossbow the moment the (enchantment adjusted)
+ *       charge time has passed (Quick Charge III: 10 ticks; none: 25), but PvP BOT keeps every draw for a fixed 25
+ *       ticks whatever the enchantment, which is an artificial wait. When the bot is drawing and
+ *       {@code CrossbowItem.isCharged} has become true, the draw is released ({@code releaseUsingItem}, nothing else).</li>
+ *   <li><b>Fire the loaded crossbow.</b> PvP BOT cannot fire a loaded crossbow on this Minecraft version (it calls the
+ *       release of an item that is not being used, which does nothing). When the crossbow is loaded, the bot is not using
+ *       an item and PvP BOT's target is alive and in line of sight, the crossbow is fired through the vanilla
+ *       right-click path {@code ServerPlayerGameMode.useItem}, exactly what a player's click does.</li>
+ * </ol>
+ * The cycle is charge time plus about two ticks: about 12 ticks with Quick Charge III, about 27 without. The only gates
+ * are vanilla mechanics (charge time, item use) and "has a live target in line of sight" (no shooting at nothing);
+ * there is no cooldown, interval or aim delay here. No projectile is created here and no damage, accuracy or speed is
+ * touched. A loaded crossbow fires with no arrow left in the inventory too (the out-of-ammo bolt already in it), because
+ * PvP BOT's mode plays no part in the gate. Bows need no trigger: PvP BOT releases them itself, at {@code pvpbotSettings.bowMinDrawTime} (20 = full power).
  * <p>
- * Two pieces, both vanilla APIs only, no mixins and nothing that touches PvP BOT or HeroBot classes:
- * <ul>
- *   <li>{@link #tick}, once per server tick and AFTER PvP BOT's own tick (the caller registers it in a phase behind
- *       the default one; PvP BOT ticks its bots at the end of the same server tick): decides per inhabitant with a
- *       crossbow and fires through the vanilla right-click path {@code ServerPlayerGameMode.useItem}, exactly what a
- *       player's click does. No projectile is created here and no damage, accuracy or speed is touched.</li>
- *   <li>{@link #register}, a Fabric entity-load hook: every crossbow projectile an inhabitant launches (ours, or one
- *       fired by a held "use" action of the bot fake player, which right-clicks a loaded crossbow every tick and made
- *       inhabitants shoot about twice a second) puts the crossbow on the vanilla item cooldown for the shot interval.
- *       Vanilla refuses a use of an item on cooldown, so the interval binds every shooter.</li>
- * </ul>
- * The PvP BOT state it needs (its target, its mode, its targeting radius) is read through the adapter. Everything is
- * fail-soft: one failure disables the tick with one warning (the cooldown hook keeps working), never a crash.
+ * The PvP BOT state it needs (its target) is read through the adapter. Everything is fail-soft: one failure disables
+ * the tick with one warning, never a crash.
  */
 public final class RangedFire {
     private final Supplier<ServerSession> session;
     private final Logger log;
-    private final CrossbowPacer pacer = new CrossbowPacer();
     /** Set after the tick threw once (logged once): a bug must not repeat 20 times a second. */
     private boolean broken;
     private long shotsFired;
-    private long lastPrune;
-    /** Failure messages already logged (bounded), so a repeating failure is one line, not twenty a second. */
-    private final Set<String> warned = new HashSet<>();
+    private long drawsReleased;
 
     public RangedFire(Supplier<ServerSession> session, Logger log) {
         this.session = session;
         this.log = log;
-    }
-
-    /** Registers the projectile hook; call once from the mod entrypoint. */
-    public void register() {
-        ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
-            if (entity instanceof Projectile projectile) {
-                try {
-                    onProjectile(projectile);
-                } catch (OutOfMemoryError e) {
-                    throw e;
-                } catch (Throwable t) {
-                    log.warn("crossbow pacing (projectile) failed: {}", t.toString());
-                }
-            }
-        });
     }
 
     /** Crossbow shots this addon has fired itself since start (for tests and diagnostics). */
@@ -76,48 +56,15 @@ public final class RangedFire {
         return shotsFired;
     }
 
-    /** Server stopped: game time restarts with the next world, so nothing timed may survive. */
+    /** Loaded draws this addon has released early since start (for tests and diagnostics). */
+    public long drawsReleased() {
+        return drawsReleased;
+    }
+
+    /** Server stopped: nothing timed may survive into the next world. */
     public void reset() {
-        pacer.reset();
         broken = false;
-        lastPrune = 0;
-        warned.clear();
     }
-
-    // ------------------------------------------------------------------ the cooldown hook
-
-    private void onProjectile(Projectile projectile) {
-        // A freshly launched projectile has not ticked; one loaded back from disk has, and must not count as a shot.
-        if (projectile.tickCount != 0 || !(projectile.getOwner() instanceof ServerPlayer shooter)
-                || !crossbowShot(projectile, shooter)) {
-            return;
-        }
-        Settings settings = settings(shooter.level().getServer());
-        if (settings == null || !settings.pacing().enabled() || !isInhabitant(settings.services(), shooter)) {
-            return;
-        }
-        long now = shooter.level().getGameTime();
-        pacer.shot(shooter.getName().getString(), now);
-        shooter.getCooldowns().addCooldown(new ItemStack(Items.CROSSBOW), CrossbowPacer.cooldownAfterShot(settings.pacing()));
-    }
-
-    /**
-     * True for the projectile kinds a crossbow launches, fired by a shooter whose crossbow was the item that fired: a bow
-     * shot (the release of a bow being used) with a crossbow in the other hand is not one and must not start the
-     * crossbow cooldown ({@link CrossbowPacer#crossbowFired}).
-     */
-    private static boolean crossbowShot(Projectile projectile, ServerPlayer shooter) {
-        boolean inMain = shooter.getMainHandItem().is(Items.CROSSBOW);
-        boolean inOff = shooter.getOffhandItem().is(Items.CROSSBOW);
-        boolean using = shooter.isUsingItem();
-        if (!CrossbowPacer.crossbowFired(inMain || inOff, using, using && shooter.getUseItem().is(Items.CROSSBOW))) {
-            return false;
-        }
-        String type = BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).getPath();
-        return type.equals("arrow") || type.equals("spectral_arrow") || type.equals("firework_rocket");
-    }
-
-    // ------------------------------------------------------------------ the tick
 
     /** Once per server tick, after PvP BOT's tick. */
     public void tick(MinecraftServer server) {
@@ -130,134 +77,59 @@ public final class RangedFire {
             throw e;
         } catch (Throwable t) {
             broken = true;
-            log.warn("crossbow trigger failed and is switched off until restart (the shot pacing keeps working): {}",
-                    t.toString());
+            log.warn("crossbow trigger failed and is switched off until restart: {}", t.toString());
         }
-    }
-
-    private record Settings(CommandServices services, CrossbowPacer.Settings pacing, InhabitantsConfig config) {
-    }
-
-    private Settings settings(MinecraftServer server) {
-        ServerSession current = session.get();
-        if (current == null || current.server() != server) {
-            return null;
-        }
-        CommandServices services = current.services();
-        InhabitantsConfig cfg = services == null ? null : services.config().get();
-        if (cfg == null || !cfg.enabled || cfg.rangedPacing == null || services.population() == null) {
-            return null;
-        }
-        InhabitantsConfig.RangedPacing p = cfg.rangedPacing;
-        return new Settings(services, new CrossbowPacer.Settings(p.enabled, p.aimSettleTicks, p.crossbowMinShotIntervalTicks), cfg);
     }
 
     private void run(MinecraftServer server) {
-        Settings settings = settings(server);
-        if (settings == null || !settings.pacing().enabled()) {
-            if (!pacer.isEmpty()) {
-                pacer.reset();
-            }
+        ServerSession current = session.get();
+        if (current == null || current.server() != server) {
             return;
         }
-        CommandServices services = settings.services();
-        PvpBotOperations adapter = services.adapter();
-        double[] radius = {Double.NaN};
-        for (ServerPlayer bot : server.getPlayerList().getPlayers()) {
-            try {
-                handle(bot, settings, services, adapter, radius);
-            } catch (OutOfMemoryError e) {
-                throw e;
-            } catch (RuntimeException e) {
-                // One bot's failure must not stop the others; the same message is logged once.
-                if (warned.size() < 16 && warned.add(e.toString())) {
-                    log.warn("crossbow trigger failed for {}: {}", bot.getName().getString(), e.toString());
-                }
-            }
+        CommandServices services = current.services();
+        InhabitantsConfig cfg = services == null ? null : services.config().get();
+        if (cfg == null || !cfg.enabled || services.population() == null) {
+            return;
         }
-        long serverTick = server.getTickCount();
-        if (serverTick - lastPrune >= 100 || serverTick < lastPrune) {
-            lastPrune = serverTick;
-            Set<String> online = new HashSet<>();
-            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-                online.add(p.getName().getString());
-            }
-            for (String name : pacer.tracked()) {
-                if (!online.contains(name)) {
-                    pacer.forget(name);
-                }
+        PvpBotOperations adapter = services.adapter();
+        for (ServerPlayer bot : server.getPlayerList().getPlayers()) {
+            if (bot.getMainHandItem().is(Items.CROSSBOW)) {
+                handle(bot, services, adapter);
             }
         }
     }
 
-    /** One player: nothing unless it is an inhabitant holding (or just having held) a crossbow; fires when the pacer says so. */
-    private void handle(ServerPlayer bot, Settings settings, CommandServices services, PvpBotOperations adapter,
-                        double[] radius) {
-        ItemStack main = bot.getMainHandItem();
-        String name = bot.getName().getString();
-        boolean crossbow = main.is(Items.CROSSBOW);
-        if (!crossbow && !pacer.isTracked(name)) {
-            return;
-        }
+    /** One player holding a crossbow: nothing unless it is an inhabitant. */
+    private void handle(ServerPlayer bot, CommandServices services, PvpBotOperations adapter) {
         if (!isInhabitant(services, bot)) {
             return;
         }
-        boolean loaded = crossbow && CrossbowItem.isCharged(main);
-        boolean using = bot.isUsingItem();
-        boolean reachable = false;
-        Boolean ranged = null;
-        if (loaded && !using && adapter != null) {
-            if (Double.isNaN(radius[0])) {
-                radius[0] = targetRadius(adapter, settings.config());
+        ItemStack main = bot.getMainHandItem();
+        if (bot.isUsingItem()) {
+            // Drawing: the moment vanilla has loaded it (isCharged), stop holding the draw.
+            if (bot.getUsedItemHand() == InteractionHand.MAIN_HAND && CrossbowItem.isCharged(main)) {
+                bot.releaseUsingItem();
+                drawsReleased++;
             }
-            Optional<PvpBotOperations.CombatView> view = adapter.combatView(name);
-            if (view.isPresent()) {
-                // PvP BOT flips to melee mode when the bot has no arrow left, but a bolt already in the crossbow can still
-                // be fired: without an arrow in the inventory the loaded crossbow counts as ranged whatever the mode says.
-                ranged = view.get().mode() == null ? null : view.get().mode().equals("RANGED") || !hasArrow(bot);
-                reachable = reachable(bot, view.get().target(), radius[0]);
-            }
+            return;
         }
-        long now = bot.level().getGameTime();
-        CrossbowPacer.Verdict verdict = pacer.evaluate(name, now, settings.pacing(), new CrossbowPacer.Look(crossbow,
-                loaded, using, crossbow && bot.getCooldowns().isOnCooldown(main), reachable, ranged));
-        if (verdict == CrossbowPacer.Verdict.FIRE) {
+        if (!CrossbowItem.isCharged(main) || adapter == null) {
+            return;
+        }
+        Optional<PvpBotOperations.CombatView> view = adapter.combatView(bot.getName().getString());
+        if (view.isPresent() && hasLiveTargetInSight(bot, view.get().target())) {
             bot.gameMode.useItem(bot, bot.level(), main, InteractionHand.MAIN_HAND);
             shotsFired++;
         }
     }
 
-    /** An arrow of any kind anywhere in slots 0-35 (PvP BOT's own ammo test). */
-    private static boolean hasArrow(ServerPlayer bot) {
-        for (int i = 0; i < 36; i++) {
-            if (bot.getInventory().getItem(i).getItem() instanceof ArrowItem) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** PvP BOT's own targeting radius when readable, else the configured one, else the mod maximum of 128. */
-    private static double targetRadius(PvpBotOperations adapter, InhabitantsConfig cfg) {
-        java.util.OptionalDouble live = adapter.targetRadius();
-        if (live.isPresent()) {
-            return live.getAsDouble();
-        }
-        if (cfg.pvpbotSettings != null && cfg.pvpbotSettings.maxTargetDistance != null) {
-            return cfg.pvpbotSettings.maxTargetDistance;
-        }
-        return 128.0;
-    }
-
-    /** The target is alive, in the same level, within the radius and in line of sight. */
-    private static boolean reachable(ServerPlayer bot, Entity target, double radius) {
-        return target != null && target.isAlive() && target.level() == bot.level() && bot.distanceTo(target) <= radius
-                && bot.hasLineOfSight(target);
+    /** The target is alive, in the same level and in line of sight (vanilla's own check, which caps at 128 blocks). */
+    private static boolean hasLiveTargetInSight(ServerPlayer bot, Entity target) {
+        return target != null && target.isAlive() && target.level() == bot.level() && bot.hasLineOfSight(target);
     }
 
     /** An inhabitant is a player of this addon's own roster (the same name index the combat log uses). */
     private static boolean isInhabitant(CommandServices services, ServerPlayer player) {
-        return services != null && services.population() != null
-                && services.population().findBot(player.getName().getString()).isPresent();
+        return services.population().findBot(player.getName().getString()).isPresent();
     }
 }

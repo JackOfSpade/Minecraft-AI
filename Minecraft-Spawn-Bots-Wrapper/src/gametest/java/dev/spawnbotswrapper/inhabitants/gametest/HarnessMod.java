@@ -16,8 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * GameTest can say when (and how often) an inhabitant fired. Vanilla events only; nothing here touches PvP BOT.
  */
 public final class HarnessMod implements ModInitializer {
-    /** One launched projectile. */
-    public record Shot(long tick, String type) {
+    /** One launched projectile; {@code speed} is its launch speed in blocks per tick (a full-power bow arrow: 3.0). */
+    public record Shot(long tick, String type, double speed) {
     }
 
     private static final Map<UUID, List<Shot>> SHOTS = new ConcurrentHashMap<>();
@@ -30,7 +30,8 @@ public final class HarnessMod implements ModInitializer {
                 if (owner != null) {
                     List<Shot> list = SHOTS.computeIfAbsent(owner.getUUID(), id -> new ArrayList<>());
                     synchronized (list) {
-                        list.add(new Shot(level.getGameTime(), projectile.getType().toShortString()));
+                        list.add(new Shot(level.getGameTime(), projectile.getType().toShortString(),
+                                projectile.getDeltaMovement().length()));
                     }
                 }
             }

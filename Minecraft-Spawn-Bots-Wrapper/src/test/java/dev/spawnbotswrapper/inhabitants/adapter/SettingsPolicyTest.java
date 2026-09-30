@@ -32,6 +32,19 @@ class SettingsPolicyTest {
     }
 
     @Test
+    void theBowDrawTimeIsPlannedAsAnIntChange() {
+        Plan plan = SettingsPolicy.plan(new ManagedSettings(null, null, null, null, null, null, null, null, 20),
+                new Current(null, null, null, null, null, null, null, null, 40));
+        assertEquals(List.of("bowMinDrawTime"), names(plan));
+        assertEquals("bowMinDrawTime 40 -> 20", plan.summary());
+        assertEquals(List.of(), SettingsPolicy.plan(new ManagedSettings(null, null, null, null, null, null, null, null, 20),
+                new Current(null, null, null, null, null, null, null, null, 20)).changes());
+        assertEquals(List.of("bowMinDrawTime"), names(SettingsPolicy.plan(
+                new ManagedSettings(null, null, null, null, null, null, null, null, 20),
+                new Current(null, null, null, null, null, null, null, null, null))), "an unreadable current value is written");
+    }
+
+    @Test
     void theRealShippedValuesRaiseTheCeilingToTheModMaximumAndTurnPvpBotsOwnAcquisitionOff() {
         ManagedSettings real = new ManagedSettings(128.0, 8.0, 12.0, 16.0, false, false);
         Plan plan = SettingsPolicy.plan(real, UPSTREAM);

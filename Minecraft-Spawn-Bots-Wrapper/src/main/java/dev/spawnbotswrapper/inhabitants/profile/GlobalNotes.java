@@ -41,9 +41,10 @@ final class GlobalNotes {
                     + "ranged gear, cobwebs and crystal/anchor kits are unused.");
         } else if (!caps.autoTargetEnabled()) {
             out.add("Auto-target is off (PvP BOT's own; the addon's managed setting pvpbotSettings.autoTargetEnabled): this bot "
-                    + "never picks a target on sight by itself. While the addon's aggro range is on (config aggro) that range "
-                    + "acquires players within a short distance in line of sight, and a hit from farther away starts a chase, so "
-                    + "the bot is not passive; with the aggro range off it stays passive until it is attacked (revenge), given a "
+                    + "never picks a target on sight by itself. While the addon's line-of-sight hunter is on (config aggro) it "
+                    + "notices players it can see (no block-distance limit, after a short reaction time; nobody is seen from "
+                    + "behind), and a hit from any distance starts a chase, so the bot is not passive; with the hunter off it "
+                    + "stays passive until it is attacked (revenge), given a "
                     + "forced target or placed in a hostile faction. It is a global PvP BOT setting, not a per-bot choice.");
         }
     }

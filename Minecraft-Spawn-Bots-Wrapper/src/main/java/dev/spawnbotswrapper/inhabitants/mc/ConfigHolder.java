@@ -62,6 +62,7 @@ public final class ConfigHolder implements Supplier<InhabitantsConfig> {
     public Reload reload() {
         ConfigIO.LoadResult result = ConfigIO.load(file);
         List<String> messages = new ArrayList<>(result.warnings());
+        messages.addAll(result.notes());
         if (result.fatalError() != null) {
             String why = result.fatalError().replace(DEFAULTS_SENTENCE, "; the file was NOT overwritten");
             messages.add(0, "reload failed, the previous configuration stays active: " + why);

@@ -18,7 +18,8 @@
       "dev.spawnbotswrapper.inhabitants.gametest.ManagedSettingsGameTests",
       "dev.spawnbotswrapper.inhabitants.gametest.CombatLogGameTests",
       "dev.spawnbotswrapper.inhabitants.gametest.AggroSmokeGameTests",
-      "dev.spawnbotswrapper.inhabitants.gametest.MeleeLegalityGameTests"
+      "dev.spawnbotswrapper.inhabitants.gametest.MeleeLegalityGameTests",
+      "dev.spawnbotswrapper.inhabitants.gametest.AggroGameTests"
     ]
   },
   "depends": {
