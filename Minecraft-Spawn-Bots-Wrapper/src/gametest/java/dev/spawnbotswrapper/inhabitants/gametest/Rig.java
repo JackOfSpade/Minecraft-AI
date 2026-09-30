@@ -262,6 +262,29 @@ final class Rig {
         bot.getFoodData().setFoodLevel(20);
     }
 
+    /**
+     * Turns the inhabitant (body and head) toward the test target, once, when it is dressed. A spawned inhabitant looks
+     * wherever the spawn happened to leave it, and the aggro controller only notices a still player inside the bot's view
+     * cone (the Perception model), so a test that waits for the bot to notice a player standing in the open would fail
+     * whenever the spawn looked away. Tests that place their player elsewhere later pin the facing themselves.
+     */
+    void faceTarget() {
+        if (bot == null || target == null) {
+            return;
+        }
+        double dx = target.getX() - bot.getX();
+        double dz = target.getZ() - bot.getZ();
+        if (dx * dx + dz * dz < 1.0e-6) {
+            return;
+        }
+        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+        bot.setYRot(yaw);
+        bot.setYHeadRot(yaw);
+        bot.setXRot(0.0F);
+        bot.yRotO = yaw;
+        bot.xRotO = 0.0F;
+    }
+
     /** Which loadout {@link #awaitDressed} gives the inhabitant. */
     enum Loadout {
         SKIRMISHER,
@@ -293,6 +316,7 @@ final class Rig {
             case MELEE_ONLY -> dressMeleeOnly();
             case BOW_AND_SWORD -> dressBowAndSword();
         }
+        faceTarget();
         dressed[0] = true;
         dressedAt[0] = ctx.getTick();
         LOG.info("[{}] dressed {} at test tick {}; PvP BOT settings: autoEquipWeapon={} autoTarget={} maxTarget={} ranged={}/{}/{}",
