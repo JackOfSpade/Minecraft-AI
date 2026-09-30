@@ -204,13 +204,18 @@ final class UpstreamCalls {
         return invoke(m.method(), settings) instanceof Boolean b ? b : null;
     }
 
-    /** {@code getMaxTargetDistance}, or null when it is missing or returns something else. */
-    Double readMaxTargetDistance(Object settings) throws Throwable {
-        UpstreamContract.Member m = contract.combatGetters.get(UpstreamContract.MAX_TARGET_DISTANCE_GETTER);
+    /** A double getter's value from the managed-range getters, or null when the getter is missing or returns something else. */
+    Double readDouble(Object settings, String getter) throws Throwable {
+        UpstreamContract.Member m = contract.doubleGetters.get(getter);
         if (settings == null || m == null || !m.ok()) {
             return null;
         }
         return invoke(m.method(), settings) instanceof Double d ? d : null;
+    }
+
+    /** {@code getMaxTargetDistance}, or null when it is missing or returns something else. */
+    Double readMaxTargetDistance(Object settings) throws Throwable {
+        return readDouble(settings, UpstreamContract.MAX_TARGET_DISTANCE_GETTER);
     }
 
     // ---------------------------------------------------------------- combat targets (aggro range)
@@ -259,6 +264,63 @@ final class UpstreamCalls {
             throw new IllegalStateException(contract.factionAreAllies.failure());
         }
         return truth(invoke(contract.factionAreAllies.method(), null, a, b));
+    }
+
+    /** The current values of the managed settings as PvP BOT has them; a component is null when it cannot be read. */
+    SettingsPolicy.Current currentManaged(Object settings) throws Throwable {
+        return new SettingsPolicy.Current(readDouble(settings, "getMaxTargetDistance"),
+                readDouble(settings, "getRangedMinRange"), readDouble(settings, "getRangedOptimalRange"),
+                readDouble(settings, "getRangedMaxRange"), readBoolean(settings, "isAutoEquipWeapon"));
+    }
+
+    /**
+     * Writes the planned changes into the settings object and then saves the per-world file once. A change whose field
+     * is not writable is skipped and named in the returned list (nothing throws for a missing name).
+     */
+    List<String> applyManaged(Object settings, SettingsPolicy.Plan plan) throws Throwable {
+        List<String> skipped = new ArrayList<>();
+        boolean wrote = false;
+        for (SettingsPolicy.Change change : plan.changes()) {
+            if (!contract.managed.canWrite(change.name())) {
+                skipped.add(change.name());
+                continue;
+            }
+            UpstreamSettingsWriter.write(contract.managed, settings, change.name(), change.to());
+            wrote = true;
+        }
+        if (wrote) {
+            UpstreamSettingsWriter.save(contract.managed);
+        }
+        return skipped;
+    }
+
+    // ---------------------------------------------------------------- combat state (read-only)
+
+    /** What PvP BOT currently intends for one bot; {@code target} may be null, the other parts null when unreadable. */
+    record CombatRead(Object target, String mode, Boolean drawingBow, Integer bowDrawTicks) {
+    }
+
+    /** Reads the bot's target and combat state. Only for bots PvP BOT lists: upstream creates a state for an unknown name. */
+    CombatRead readCombat(String bot) throws Throwable {
+        Object target = contract.combatGetTarget.ok() ? invoke(contract.combatGetTarget.method(), null, bot) : null;
+        String mode = null;
+        Boolean drawing = null;
+        Integer drawTicks = null;
+        if (contract.combatGetState.ok() && !contract.stateFields.isEmpty()) {
+            Object state = invoke(contract.combatGetState.method(), null, bot);
+            if (state != null) {
+                java.lang.reflect.Field fMode = contract.stateFields.get(UpstreamContract.FIELD_MODE);
+                java.lang.reflect.Field fDraw = contract.stateFields.get(UpstreamContract.FIELD_DRAWING);
+                java.lang.reflect.Field fTicks = contract.stateFields.get(UpstreamContract.FIELD_DRAW_TICKS);
+                Object m = fMode == null ? null : fMode.get(state);
+                mode = m == null ? null : m.toString();
+                Object d = fDraw == null ? null : fDraw.get(state);
+                drawing = d instanceof Boolean b ? b : null;
+                Object t = fTicks == null ? null : fTicks.get(state);
+                drawTicks = t instanceof Integer i ? i : null;
+            }
+        }
+        return new CombatRead(target, mode, drawing, drawTicks);
     }
 
     // ---------------------------------------------------------------- paths

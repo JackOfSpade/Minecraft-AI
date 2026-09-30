@@ -233,13 +233,53 @@ strong for a structure guardian, so Piercing is **off by default**. The list is 
   but the application filters the loadout, so a re-dressing can never put a disabled enchantment back. Removing an
   id from the list makes stored loadouts whole again on their next re-dressing.
 
+## Managed PvP BOT settings (`pvpbotSettings`)
+
+PvP BOT keeps its combat settings per world (`config/pvpbot/worlds/<world>/settings.json`), and its defaults suit
+a duel arena, not a structure inhabitant: it looks for targets up to **64 blocks** away, archers park 20 blocks from
+their target, and a housekeeping routine (`autoEquipWeapon`) re-selects the best **melee** weapon every
+`checkInterval` ticks. For a bot that carries a sword AND a bow or crossbow that last one ends every draw before it
+completes (the selected slot leaves the ranged weapon inside the tick), so such a bot never shoots. The addon
+therefore holds these settings at chosen values:
+
+```jsonc
+"pvpbotSettings": {
+  "maxTargetDistance": 10.0,     // blocks, 4..64 (PvP BOT's own default: 64)
+  "rangedMinRange": 6.0,         // archers back off below this (PvP BOT: 20)
+  "rangedOptimalRange": 8.0,     // PvP BOT: 40
+  "rangedMaxRange": 10.0,        // archers walk toward a target beyond this (PvP BOT: 60)
+  "autoEquipWeapon": false       // PvP BOT: true
+}
+```
+
+* A `null` or absent key inside the block leaves PvP BOT's own value alone; a config file without the block at all
+  gets the values above. `"pvpbotSettings": null` manages nothing.
+* Validation: `maxTargetDistance` is clamped to 4..64; the three ranges must satisfy
+  `rangedMinRange < rangedOptimalRange <= rangedMaxRange <= maxTargetDistance` (judged with PvP BOT's own value for
+  any you leave out), otherwise **all three ranged keys are skipped** with a warning and the other keys still apply.
+* When it is applied: at the first tick (before the PvP BOT probe report, so the report shows the real values) and
+  again **every time PvP BOT loads its per-world settings** (`/pvpbot reload`), which the addon notices because PvP
+  BOT then replaces its settings object. Nothing is written when the values already match. The values are written
+  into PvP BOT's settings object directly, not through its setters (they clamp the optimal range to at least 10 and
+  the maximum to at least 15), and then PvP BOT's own save routine writes the settings file once.
+* One INFO line names what changed: `PvP BOT settings: maxTargetDistance 64 -> 10, autoEquipWeapon true -> false`.
+  A missing PvP BOT field is one warning and never an exception. `/inhabitants adapter` (and the probe report) warn
+  when the effective `rangedMinRange` is above `maxTargetDistance`: ranged bots would back away from every target
+  inside their own targeting radius.
+* The other settings stay PvP BOT's: `autoTargetEnabled` in particular is NOT managed (with it off, inhabitants
+  fight only what attacked them and never open fire on sight; turn it on with `pvpbot settings auto-target true` or
+  in `settings.json`). Whoever hits an inhabitant from beyond `maxTargetDistance` (an arrow from far away) is NOT
+  pursued: PvP BOT's revenge logic remembers the last attacker for 30 seconds but only targets one that is within
+  `maxTargetDistance`, so the bot stays put until you come inside that radius (within those 30 seconds it then
+  attacks you); melee hits are always inside it.
+
 ## Managed PvP BOT setting: critical-hit fall phase
 
 PvP BOT's melee routine only swings after a jump-crit with `crit-fall-ticks` ticks of descent (its default is
 6), so bots looked passive at close range. The addon manages this one setting itself: at every server start it
 runs PvP BOT's own command `pvpbot settings crit-fall-ticks <criticalFallTicks>` (config key
 `criticalFallTicks`, default **3**, `0` = leave PvP BOT alone), through the same console mechanism as
-`startupCommands`. Criticals stay enabled. The addon never edits PvP BOT's settings files. An explicit
+`startupCommands`. Criticals stay enabled. An explicit
 `pvpbot settings crit-fall-ticks N` in your own `startupCommands` wins over the managed value.
 
 ## Lag governor (`tpsThrottle`)

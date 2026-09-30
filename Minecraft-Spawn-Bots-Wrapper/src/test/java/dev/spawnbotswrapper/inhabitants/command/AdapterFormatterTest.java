@@ -62,14 +62,14 @@ class AdapterFormatterTest {
     @Test
     void offSwitchesAreListedAndAutoTargetGetsTheExplanation() {
         List<String> t = text(Fixtures.availableStatus(), GlobalCapabilities.upstreamDefaults());
-        assertTrue(contains(t, "switches OFF (read-only, never changed by this addon): autoTarget, spear"), t.toString());
+        assertTrue(contains(t, "switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): autoTarget, spear"), t.toString());
         assertTrue(contains(t, "autoTarget is off: inhabitants stay passive until something attacks them"), t.toString());
     }
 
     @Test
     void allSwitchesOnMeansNoneOffAndNoHint() {
         List<String> t = text(Fixtures.availableStatus(), GlobalCapabilities.allEnabled());
-        assertTrue(contains(t, "switches OFF (read-only, never changed by this addon): none"), t.toString());
+        assertTrue(contains(t, "switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): none"), t.toString());
         assertFalse(contains(t, "autoTarget is off"), t.toString());
     }
 

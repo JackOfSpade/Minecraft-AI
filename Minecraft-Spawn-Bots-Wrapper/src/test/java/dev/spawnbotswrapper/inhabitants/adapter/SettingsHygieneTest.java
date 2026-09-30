@@ -63,8 +63,27 @@ class SettingsHygieneTest {
         List<Finding> f = findings(new SettingsSnapshot(true, true, 20, false), Telemetry.DISABLED);
         assertEquals(1, f.size());
         assertEquals(Severity.NOTE, f.get(0).severity());
-        assertTrue(f.get(0).text().contains("passive until they are attacked"));
-        assertTrue(f.get(0).text().contains("never changes"), "the addon does not fix it, it says so");
+        assertTrue(f.get(0).text().contains("never open fire on sight"));
+        assertTrue(f.get(0).text().contains("manages only the settings listed under pvpbotSettings"),
+                "the addon does not fix it, it says so and names what it does manage");
+    }
+
+    @Test
+    void aRangedMinimumAboveTheTargetingRadiusIsAWarning() {
+        List<Finding> f = findings(new SettingsSnapshot(true, true, 20, true, 10.0, 20.0), Telemetry.DISABLED);
+        assertEquals(1, f.size());
+        assertEquals(Severity.WARN, f.get(0).severity());
+        assertTrue(f.get(0).text().contains("rangedMinRange (20) is above maxTargetDistance (10)"), f.get(0).text());
+        assertTrue(f.get(0).text().contains("back away from every target"));
+    }
+
+    @Test
+    void aRangedMinimumWithinTheRadiusOrUnreadableIsFine() {
+        assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, true, 10.0, 6.0), Telemetry.DISABLED));
+        assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, true, 10.0, 10.0), Telemetry.DISABLED),
+                "equal is fine: a target exactly at the radius is still shot at");
+        assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, true, null, 20.0), Telemetry.DISABLED));
+        assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, true, 10.0, null), Telemetry.DISABLED));
     }
 
     @Test

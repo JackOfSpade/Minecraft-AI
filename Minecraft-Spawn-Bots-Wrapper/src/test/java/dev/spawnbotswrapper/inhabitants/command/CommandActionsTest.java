@@ -95,7 +95,7 @@ class CommandActionsTest {
     void adapterFallsBackToUpstreamDefaultsWhenTheSwitchesCannotBeRead() {
         fs.adapter.throwOnCapabilities = true;
         assertEquals(1, actions().adapter(reply));
-        assertTrue(reply.joined().contains("switches OFF (read-only, never changed by this addon): autoTarget, spear"),
+        assertTrue(reply.joined().contains("switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): autoTarget, spear"),
                 reply.joined());
 
         RecordingReply nullCaps = new RecordingReply();

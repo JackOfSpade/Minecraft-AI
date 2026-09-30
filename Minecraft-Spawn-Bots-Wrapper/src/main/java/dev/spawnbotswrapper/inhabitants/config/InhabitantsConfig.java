@@ -100,6 +100,17 @@ public final class InhabitantsConfig {
      */
     public int criticalFallTicks = DEFAULT_CRITICAL_FALL_TICKS;
 
+    /**
+     * PvP BOT settings this addon keeps at chosen values (see {@link PvpbotSettings}); applied every time PvP BOT loads
+     * its per-world settings, through the adapter, which is the only place that writes them. An absent block means the
+     * shipped values; inside a present block an absent or null key leaves PvP BOT's own value alone.
+     */
+    @SerializedName("pvpbotSettings")
+    public PvpbotSettings pvpbotSettings = PvpbotSettings.shipped();
+
+    /** Pacing of crossbow shots and the trigger for a loaded crossbow (see {@link RangedPacing}). */
+    public RangedPacing rangedPacing = new RangedPacing();
+
     public static final int DEFAULT_CRITICAL_FALL_TICKS = 3;
 
     /**
@@ -123,6 +134,67 @@ public final class InhabitantsConfig {
             this.occupiedChance = occupiedChance;
             this.minBots = minBots;
         }
+    }
+
+    /**
+     * PvP BOT settings the addon enforces (PvP BOT keeps them per world, in {@code config/pvpbot/worlds/<world>/settings.json}).
+     * A null value means "leave PvP BOT's own value alone". They are written straight into PvP BOT's settings object, NOT
+     * through its setters, because the setters clamp to ranges (ranged optimal at least 10, ranged max at least 15) that
+     * exclude the short ranges wanted here.
+     * <ul>
+     *   <li>{@link #maxTargetDistance} - how far PvP BOT looks for targets (blocks, 4..64). PvP BOT's own default is 64,
+     *       far more than a structure inhabitant should react to.</li>
+     *   <li>{@link #rangedMinRange}, {@link #rangedOptimalRange}, {@link #rangedMaxRange} - archer distances. Must satisfy
+     *       min &lt; optimal &lt;= max &lt;= maxTargetDistance, otherwise all three are left alone (with a warning).</li>
+     *   <li>{@link #autoEquipWeapon} - PvP BOT's housekeeping that keeps selecting the best MELEE weapon every
+     *       {@code checkInterval} ticks. For a bot that carries both a sword and a bow or crossbow it ends every draw
+     *       (the selected slot leaves the ranged weapon inside the tick), so such bots never shoot. false stops it;
+     *       melee combat picks its own weapon anyway.</li>
+     * </ul>
+     */
+    public static final class PvpbotSettings {
+        public Double maxTargetDistance;
+        public Double rangedMinRange;
+        public Double rangedOptimalRange;
+        public Double rangedMaxRange;
+        public Boolean autoEquipWeapon;
+
+        public PvpbotSettings() {
+        }
+
+        /** The values the addon ships with: the short ranges and no weapon auto-equip. */
+        public static PvpbotSettings shipped() {
+            PvpbotSettings s = new PvpbotSettings();
+            s.maxTargetDistance = 10.0;
+            s.rangedMinRange = 6.0;
+            s.rangedOptimalRange = 8.0;
+            s.rangedMaxRange = 10.0;
+            s.autoEquipWeapon = false;
+            return s;
+        }
+
+        /** True when nothing is managed. */
+        public boolean isEmpty() {
+            return maxTargetDistance == null && rangedMinRange == null && rangedOptimalRange == null
+                    && rangedMaxRange == null && autoEquipWeapon == null;
+        }
+    }
+
+    /**
+     * Crossbow trigger and pacing. PvP BOT can never fire a LOADED crossbow on this Minecraft version (it calls the
+     * release of an item that is not being used, which does nothing), so a crossbow inhabitant would hold its loaded
+     * weapon forever. Once per tick, after PvP BOT's own tick, this addon fires a loaded crossbow through the vanilla
+     * right-click path when PvP BOT's target is alive, in range and in sight and PvP BOT is in ranged mode. Every shot
+     * an inhabitant fires (this addon's or anything else's, e.g. a held "use" action) puts the crossbow on the vanilla
+     * item cooldown so shots are never closer together than {@link #crossbowMinShotIntervalTicks}.
+     */
+    public static final class RangedPacing {
+        /** Master switch: false leaves crossbows entirely to PvP BOT (loaded crossbows are then never fired by it). */
+        public boolean enabled = true;
+        /** Ticks a crossbow must have been loaded before it is fired, so the bot has settled its aim (0..40). */
+        public int aimSettleTicks = 4;
+        /** Minimum ticks between two shots of one inhabitant (PvP BOT's own cycle is a 25-tick draw plus one) (1..200). */
+        public int crossbowMinShotIntervalTicks = 26;
     }
 
     /** A partial rule; null fields inherit. */

@@ -135,8 +135,10 @@ remain authoritative once a structure has actually been processed.
 
 ## 5. What "per bot" can honestly mean
 
-PvP BOT reads every combat and behaviour setting from a global object, and the addon never changes it
-("silently modifying every existing bot" is exactly what the design avoids). The per-bot levers that do exist
+PvP BOT reads every combat and behaviour setting from a global object. The addon changes only the few settings
+listed under `pvpbotSettings` in its config (targeting radius, the archer distances, weapon auto-equip: see
+README, "Managed PvP BOT settings"), through one class (`adapter/UpstreamSettingsWriter`), only when they differ
+and only for the whole server, never per bot ("silently modifying every existing bot" is what the design avoids). The per-bot levers that do exist
 are:
 
 | Lever | Mechanism | Examples |

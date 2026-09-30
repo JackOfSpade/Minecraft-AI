@@ -12,6 +12,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
@@ -42,7 +43,8 @@ import java.util.TreeSet;
  *       here is case-insensitive and PvP BOT is always handed the spelling it listed.</li>
  *   <li>PvP BOT's removal wipes the inventory of whatever player the name resolves to, so it is only ever
  *       called for an online bot entity; real players are refused.</li>
- *   <li>PvP BOT's settings are ONE global singleton: they are read, never written.</li>
+ *   <li>PvP BOT's settings are ONE global singleton, shared by every bot. They are read; the few the addon manages
+ *       (see {@link ManagedSettings}) are written, by {@link UpstreamSettingsWriter} only, and only when they differ.</li>
  * </ul>
  * Everything runs on the server thread and never throws for upstream failures: they become return values,
  * {@link Status}, and at most one log line per distinct problem.
@@ -70,6 +72,10 @@ public final class PvpBotAdapter implements PvpBotOperations {
     private volatile Status status;
     private volatile Probed probed;
     private volatile Set<String> settingNames;
+    /** What the addon wants held in PvP BOT's settings, and which settings object and wish it was last applied for. */
+    private volatile ManagedSettings managedWanted = ManagedSettings.NONE;
+    private WeakReference<Object> managedAppliedTo = new WeakReference<>(null);
+    private ManagedSettings managedAppliedFor;
 
     private final PvpBotCombatControl targetControl;
     private final ListedNamesCache listedCache = new ListedNamesCache();
@@ -190,6 +196,13 @@ public final class PvpBotAdapter implements PvpBotOperations {
             UpstreamCalls calls = null;
             if (contract != null) {
                 calls = new UpstreamCalls(contract);
+                // The managed settings go in BEFORE the snapshot below, so the report and the hygiene findings describe
+                // what the bots will actually run with.
+                try {
+                    enforceManaged(calls, true, true);
+                } catch (Throwable t) {
+                    log.failure("applying the managed PvP BOT settings", t);
+                }
                 settings = contract.settingsGet.ok() ? snapshotOf(calls) : null;
                 telemetry = TelemetryProbe.read(environment.configDir().orElse(null));
             }
@@ -239,7 +252,9 @@ public final class PvpBotAdapter implements PvpBotOperations {
                     calls.readBoolean(settings, "isBotsRelogs"),
                     calls.readBoolean(settings, "isBotLeaveOnDeath"),
                     calls.readInt(settings, "getCheckInterval"),
-                    calls.readBoolean(settings, "isAutoTargetEnabled"));
+                    calls.readBoolean(settings, "isAutoTargetEnabled"),
+                    calls.readDouble(settings, "getMaxTargetDistance"),
+                    calls.readDouble(settings, "getRangedMinRange"));
         } catch (Throwable t) {
             log.failure("reading PvP BOT's settings", t);
             return SettingsSnapshot.unreadable();
@@ -255,6 +270,88 @@ public final class PvpBotAdapter implements PvpBotOperations {
         } catch (Throwable t) {
             log.failure("inspecting the command tree", t);
             return CommandTree.UNKNOWN;
+        }
+    }
+
+    @Override
+    public void manageSettings(ManagedSettings wanted) {
+        try {
+            managedWanted = wanted == null ? ManagedSettings.NONE : wanted;
+            Probed p = probed;
+            if (p != null && p.calls() != null && p.verdict().usable()) {
+                enforceManaged(p.calls(), false, false);
+            }
+        } catch (Throwable t) {
+            log.failure("applying the managed PvP BOT settings", t);
+        }
+    }
+
+    /**
+     * Applies {@link #managedWanted} to PvP BOT's settings object when it differs from what is there. Cheap when nothing
+     * changed (one static call and an identity check): PvP BOT replaces the object whenever it loads its per-world
+     * settings, and that is exactly when this runs the writes again. The identity is remembered BEFORE writing so a
+     * failure is reported once and not retried on every tick.
+     */
+    private void enforceManaged(UpstreamCalls calls, boolean force, boolean duringProbe) throws Throwable {
+        ManagedSettings wanted = managedWanted;
+        if (wanted.isEmpty() || !calls.contract().settingsGet.ok()) {
+            return;
+        }
+        Object settings = calls.settingsInstance();
+        if (settings == null || (!force && managedAppliedTo.get() == settings && wanted.equals(managedAppliedFor))) {
+            return;
+        }
+        managedAppliedTo = new WeakReference<>(settings);
+        managedAppliedFor = wanted;
+        SettingsPolicy.Plan plan = SettingsPolicy.plan(wanted, calls.currentManaged(settings));
+        for (String warning : plan.warnings()) {
+            log.warnOnce("managed-settings-warning|" + warning, "PvP BOT settings: " + warning);
+        }
+        if (!plan.changes().isEmpty()) {
+            List<String> skipped = calls.applyManaged(settings, plan);
+            for (String name : skipped) {
+                log.warnOnce("managed-settings-name|" + name, "PvP BOT settings: " + name + " cannot be managed ("
+                        + String.join("; ", calls.contract().managed.problems()) + ")");
+            }
+            String summary = plan.summary();
+            if (summary != null) {
+                log.info("PvP BOT settings: " + summary);
+            }
+        }
+        if (!duringProbe) {
+            // The probe's own report carries the same findings; a later re-apply has no report, so say it here.
+            SettingsHygiene.Finding ranged = SettingsHygiene.rangedFinding(calls.readDouble(settings, "getMaxTargetDistance"),
+                    calls.readDouble(settings, "getRangedMinRange"));
+            if (ranged != null) {
+                log.warnOnce("managed-settings-hygiene|" + ranged.text(), ranged.text());
+            }
+        }
+    }
+
+    @Override
+    public Optional<CombatView> combatView(String botName) {
+        try {
+            Probed p = probed;
+            if (p == null || p.calls() == null || !p.verdict().usable() || botName == null) {
+                return Optional.empty();
+            }
+            UpstreamCalls calls = p.calls();
+            if (!calls.contract().combatGetTarget.ok()) {
+                log.warnOnce("combat-view-missing", "PvP BOT integration: " + calls.contract().combatGetTarget.failure()
+                        + "; the bot's target cannot be read");
+                return Optional.empty();
+            }
+            Map<String, String> listed = listedOrNull(lastServer.get());
+            String exact = listed == null ? null : listed.get(NameRules.key(botName));
+            if (exact == null) {
+                return Optional.empty();
+            }
+            UpstreamCalls.CombatRead read = calls.readCombat(exact);
+            return Optional.of(new CombatView(read.target() instanceof Entity e ? e : null, read.mode(),
+                    read.drawingBow(), read.bowDrawTicks()));
+        } catch (Throwable t) {
+            log.failure("reading a bot's combat state", t);
+            return Optional.empty();
         }
     }
 

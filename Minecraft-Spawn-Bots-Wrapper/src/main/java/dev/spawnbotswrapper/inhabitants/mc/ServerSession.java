@@ -1,5 +1,6 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
+import dev.spawnbotswrapper.inhabitants.adapter.ManagedSettings;
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
 import dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
@@ -71,6 +72,8 @@ public final class ServerSession {
             initialised = true;
             initialise();
         }
+        // Cheap when nothing changed; re-applies the managed PvP BOT settings whenever PvP BOT reloads its own.
+        shared.guard().run("PvP BOT settings policy", this::manageUpstreamSettings);
         if (engine == null) {
             return;
         }
@@ -106,6 +109,8 @@ public final class ServerSession {
         guarded("startup commands", this::runStartupCommands);
         // The backend goes in first so the probe's report is about the spawn path that will actually be used.
         applyBackend();
+        // Handed over BEFORE the probe, which applies them so its report describes what the bots will run with.
+        guarded("PvP BOT settings policy", this::manageUpstreamSettings);
         guarded("PvP BOT probe", this::probeUpstream);
         guarded("audit of PvP BOT settings", this::auditUpstreamSettings);
         store = openStore();
@@ -140,6 +145,17 @@ public final class ServerSession {
                 shared.log().warn("startup command '{}' failed: {}", command, t.toString());
             }
         }
+    }
+
+    /** Tells the adapter which PvP BOT settings the configuration wants held (none while the addon is disabled). */
+    private void manageUpstreamSettings() {
+        InhabitantsConfig config = shared.config().get();
+        shared.adapter().manageSettings(config.enabled ? managedSettings(config.pvpbotSettings) : ManagedSettings.NONE);
+    }
+
+    static ManagedSettings managedSettings(InhabitantsConfig.PvpbotSettings s) {
+        return s == null ? ManagedSettings.NONE : new ManagedSettings(s.maxTargetDistance, s.rangedMinRange,
+                s.rangedOptimalRange, s.rangedMaxRange, s.autoEquipWeapon);
     }
 
     private void probeUpstream() {

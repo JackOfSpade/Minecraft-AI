@@ -41,7 +41,8 @@ final class GlobalNotes {
                     + "ranged gear, cobwebs and crystal/anchor kits are unused.");
         } else if (!caps.autoTargetEnabled()) {
             out.add("Auto-target is off: this bot stays passive until it is attacked (revenge), given a forced "
-                    + "target or placed in a hostile faction. It is a global PvP BOT setting, not a per-bot choice.");
+                    + "target or placed in a hostile faction, and never opens fire on sight. It is a global PvP BOT setting, not a per-bot "
+                    + "choice, and not one this addon manages (pvpbot settings auto-target true turns it on).");
         }
     }
 

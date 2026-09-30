@@ -12,6 +12,9 @@ import java.util.List;
  * against a nearby survival player, with the wrapper loaded. See {@link Rig} for the scene.
  */
 public final class RangedCombatGameTests {
+    /** Every test is its own environment: environments run one after another, so no bot ever sees another test's player. */
+    private static final String ENV = "pvpbot-inhabitants-gametest:";
+
     /** Ticks a test waits for the inhabitant to exist before it gives up. */
     private static final int SPAWN_TICKS = 200;
     /** The wrapper's default {@code rangedPacing.crossbowMinShotIntervalTicks}: PvP BOT's own 25-tick draw plus one. */
@@ -21,7 +24,7 @@ public final class RangedCombatGameTests {
      * What the user reported: an inhabitant with a crossbow next to a player who does not attack it never shoots
      * until the player hits it first. Nobody touches the bot here; it has to open fire on its own.
      */
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = ENV + "crossbow_unhit", maxTicks = 800)
     public void crossbowInhabitantFiresAtNearbyPlayerWithoutBeingHitFirst(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
@@ -49,7 +52,7 @@ public final class RangedCombatGameTests {
      * its shield through HeroBot's continuous "use" action, and that action right-clicks the crossbow every tick. Whatever
      * fires the crossbow, shots must never be closer together than the pacing interval.
      */
-    @GameTest(maxTicks = 900)
+    @GameTest(environment = ENV + "crossbow_swing", maxTicks = 900)
     public void crossbowShotsKeepThePacingIntervalWhileThePlayerSwingsAtThreeBlocks(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
@@ -94,7 +97,7 @@ public final class RangedCombatGameTests {
     }
 
     /** The same with a sword in the hotbar: this is the case weapon auto-equip broke (it keeps selecting the sword, which ends every draw). */
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = ENV + "bow_sword", maxTicks = 800)
     public void bowAndSwordInhabitantReleasesArrows(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();
@@ -118,7 +121,7 @@ public final class RangedCombatGameTests {
     }
 
     /** A bow-only inhabitant has to release arrows: every bow draw used to be cancelled by PvP BOT's own weapon auto-equip. */
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = ENV + "bow_only", maxTicks = 800)
     public void bowOnlyInhabitantReleasesArrows(GameTestHelper context) {
         Rig rig = new Rig(context);
         rig.buildPlatform();

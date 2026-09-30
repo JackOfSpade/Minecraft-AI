@@ -43,6 +43,24 @@ final class Upstream {
         return f.get(o);
     }
 
+    /** Makes PvP BOT read its per-world settings file again (what its reload command does to the settings): a NEW settings object. */
+    static void reloadSettings() {
+        try {
+            cls("BotSettings").getMethod("load").invoke(null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("PvP BOT settings could not be reloaded", e);
+        }
+    }
+
+    /** The settings object itself, to tell a reload (a new object) from a change of values. */
+    static Object settingsObject() {
+        try {
+            return cls("BotSettings").getMethod("get").invoke(null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** A getter of the settings singleton, by name. */
     static Object setting(String getter) {
         try {

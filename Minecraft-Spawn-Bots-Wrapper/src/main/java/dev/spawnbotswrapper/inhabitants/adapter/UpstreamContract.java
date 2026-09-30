@@ -57,6 +57,14 @@ final class UpstreamContract {
     /** Contract ids R11 (boolean) and R12 (int) beyond the capability getters. */
     private static final List<String> EXTRA_BOOLEAN_GETTERS = List.of("isProfileLagFix", "isSafeSpawn", "isUseSpecialNames");
     private static final List<String> INT_GETTERS = List.of("getMaxMassSpawn", "getCheckInterval");
+    static final String MAX_TARGET_DISTANCE_GETTER = "getMaxTargetDistance";
+    /** Double getters read for the managed ranges (kept apart from {@link #getters}: they are not capability inputs). */
+    static final List<String> DOUBLE_GETTERS = List.of(MAX_TARGET_DISTANCE_GETTER, "getRangedMinRange",
+            "getRangedOptimalRange", "getRangedMaxRange");
+    /** Public fields of BotCombat.CombatState the addon reads (never written). */
+    static final String FIELD_MODE = "currentMode";
+    static final String FIELD_DRAWING = "isDrawingBow";
+    static final String FIELD_DRAW_TICKS = "bowDrawTicks";
 
     // ---- BotManager
     final Member spawn3;
@@ -75,6 +83,10 @@ final class UpstreamContract {
     final Class<?> settingsClass;
     /** Getter name to member, for every name in {@link #CAPABILITY_GETTERS} plus the extra R11/R12 getters. */
     final Map<String, Member> getters;
+    /** The managed-range getters, by name (see {@link #DOUBLE_GETTERS}); optional. */
+    final Map<String, Member> doubleGetters;
+    /** Field and save handles of the settings the addon may write; optional, see {@link UpstreamSettingsWriter}. */
+    final UpstreamSettingsWriter.Handles managed;
 
     // ---- BotPath / BotNavigation (patrols)
     final Member createPath;
@@ -95,8 +107,10 @@ final class UpstreamContract {
     final Member combatSetTarget;
     final Member combatGetTarget;
     final Member combatClearTarget;
-    /** {@code BotCombat.getState(String)}; its result is only used to read {@link #forcedTargetField}. */
+    /** {@code BotCombat.getState(String)}: the per-bot combat state; its fields are read, never written. */
     final Member combatGetState;
+    /** Public fields of the combat state by name ({@link #FIELD_MODE} ...); a missing one is simply absent. */
+    final Map<String, Field> stateFields;
     /** The public {@code forcedTargetName} field of the per-bot combat state; null when it cannot be used. */
     final Field forcedTargetField;
     /** Why {@link #forcedTargetField} is null, else null. */
@@ -149,6 +163,12 @@ final class UpstreamContract {
             g.put(name, instanceMethod(settings, "R12", name, int.class));
         }
         getters = Map.copyOf(g);
+        Map<String, Member> dg = new LinkedHashMap<>();
+        for (String name : DOUBLE_GETTERS) {
+            dg.put(name, instanceMethod(settings, "", name, double.class));
+        }
+        doubleGetters = Map.copyOf(dg);
+        managed = UpstreamSettingsWriter.resolve(settings.type);
 
         createPath = staticMethod(path, "", "createPath", boolean.class, String.class);
         deletePath = staticMethod(path, "", "deletePath", boolean.class, String.class);
@@ -167,6 +187,7 @@ final class UpstreamContract {
         combatGetTarget = staticMethod(combat, "", "getTarget", Entity.class, String.class);
         combatClearTarget = staticMethod(combat, "", "clearTarget", void.class, String.class);
         combatGetState = staticMethod(combat, "", "getState", Object.class, String.class);
+        stateFields = stateFields(load(locator, UpstreamNames.CLASS_COMBAT_STATE).type);
         String[] fieldProblem = new String[1];
         forcedTargetField = forcedTargetField(combatGetState, fieldProblem);
         forcedTargetProblem = forcedTargetField == null ? fieldProblem[0] : null;
@@ -178,7 +199,6 @@ final class UpstreamContract {
         for (String name : COMBAT_BOOLEAN_GETTERS) {
             cg.put(name, instanceMethod(settings, "", name, boolean.class));
         }
-        cg.put(MAX_TARGET_DISTANCE_GETTER, instanceMethod(settings, "", MAX_TARGET_DISTANCE_GETTER, double.class));
         combatGetters = Map.copyOf(cg);
         Owner faction = load(locator, UpstreamNames.CLASS_BOT_FACTION);
         factionAreAllies = staticMethod(faction, "", "areAllies", boolean.class, String.class, String.class);
@@ -189,7 +209,6 @@ final class UpstreamContract {
     /** BotSettings getters read only by the aggro range (isCombatEnabled / isAutoTargetEnabled are capability getters). */
     static final List<String> COMBAT_BOOLEAN_GETTERS = List.of("isTargetPlayers", "isTargetOtherBots",
             "isAttackInvincible", "isFactionsEnabled", "isFriendlyFireEnabled");
-    static final String MAX_TARGET_DISTANCE_GETTER = "getMaxTargetDistance";
     private static final String FORCED_TARGET_FIELD = "forcedTargetName";
     private static final String LAST_ATTACKER_FIELD = "lastAttacker";
 
@@ -264,6 +283,24 @@ final class UpstreamContract {
             }
         }
         return missing.isEmpty() ? null : String.join("; ", missing);
+    }
+
+    private static Map<String, Field> stateFields(Class<?> state) {
+        Map<String, Field> out = new LinkedHashMap<>();
+        if (state == null || !Modifier.isPublic(state.getModifiers())) {
+            return out;
+        }
+        for (String name : List.of(FIELD_MODE, FIELD_DRAWING, FIELD_DRAW_TICKS)) {
+            try {
+                Field f = state.getField(name);
+                if (!Modifier.isStatic(f.getModifiers())) {
+                    out.put(name, f);
+                }
+            } catch (Throwable t) {
+                // absent: the field is optional, the reads then simply omit it
+            }
+        }
+        return out;
     }
 
     private static String capabilityGetterId(String name) {

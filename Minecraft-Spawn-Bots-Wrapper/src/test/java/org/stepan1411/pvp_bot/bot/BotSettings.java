@@ -50,6 +50,9 @@ public class BotSettings {
     private boolean factionsEnabled = false;
     private boolean friendlyFireEnabled = false;
     private double maxTargetDistance = 64.0;
+    private double rangedMinRange = 20.0;
+    private double rangedOptimalRange = 40.0;
+    private double rangedMaxRange = 60.0;
 
     public static BotSettings get() {
         Recorder.guard("BotSettings.get", "");
@@ -77,7 +80,8 @@ public class BotSettings {
     }
 
     public static void save() {
-        Recorder.FORBIDDEN.add("BotSettings.save");
+        // The addon may write the few settings it manages and then save; tests that must not see a write check for this call.
+        Recorder.guard("BotSettings.save", "");
     }
 
     public boolean isAutoEquipArmor() { return autoEquipArmor; }
@@ -114,6 +118,9 @@ public class BotSettings {
     public boolean isFactionsEnabled() { return factionsEnabled; }
     public boolean isFriendlyFireEnabled() { return friendlyFireEnabled; }
     public double getMaxTargetDistance() { return maxTargetDistance; }
+    public double getRangedMinRange() { return rangedMinRange; }
+    public double getRangedOptimalRange() { return rangedOptimalRange; }
+    public double getRangedMaxRange() { return rangedMaxRange; }
 
     public void setBotsRelogs(boolean v) { Recorder.FORBIDDEN.add("setBotsRelogs"); }
     public void setBotLeaveOnDeath(boolean v) { Recorder.FORBIDDEN.add("setBotLeaveOnDeath"); }

@@ -6,6 +6,7 @@ import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -88,6 +89,35 @@ public interface PvpBotOperations {
 
     /** Names of PvP BOT's settings fields (metadata only), so the setting catalog can be audited for drift. */
     Set<String> discoverUpstreamSettingNames();
+
+    /**
+     * Tells the adapter which PvP BOT settings the addon wants held at a value (null or an empty set: none). The adapter
+     * applies them to PvP BOT's settings object when they differ, at the probe and again whenever PvP BOT replaces that
+     * object by loading its per-world settings (its reload command), so calling this once per tick with the current
+     * configuration is cheap and keeps them enforced. Writes PvP BOT's per-world settings file when something changed
+     * and logs ONE line naming what changed; a missing upstream name is one warning, never an exception.
+     */
+    default void manageSettings(ManagedSettings wanted) {
+    }
+
+    /**
+     * What PvP BOT currently intends for this bot: its target (null when none) and combat mode/bow state where readable.
+     * Empty when the bot is not listed or the state cannot be read. Read-only.
+     */
+    default Optional<CombatView> combatView(String botName) {
+        return Optional.empty();
+    }
+
+    /**
+     * PvP BOT's per-bot combat intent.
+     *
+     * @param target      the entity it targets, or null
+     * @param mode        its weapon mode as text ("RANGED", "MELEE", ...), or null when unreadable
+     * @param drawingBow  whether it believes it is drawing a bow or crossbow, or null when unreadable
+     * @param bowDrawTicks ticks of the draw it counts, or null when unreadable
+     */
+    record CombatView(Entity target, String mode, Boolean drawingBow, Integer bowDrawTicks) {
+    }
 
     // ---------------------------------------------------------------- spawning
 

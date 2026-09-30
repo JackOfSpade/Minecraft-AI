@@ -64,6 +64,8 @@ class ArchitectureTest {
      */
     private static final Set<String> ALLOWED_SETTER_LITERALS =
             Set.of("setLoop", "setAttack", "setWalkType", "setTarget");
+    /** The one adapter class that may write the few PvP BOT settings the addon manages (and so name their save routine). */
+    private static final String SETTINGS_WRITER = "UpstreamSettingsWriter.java";
 
     // ================================================================ the real tree
 
@@ -155,7 +157,8 @@ class ArchitectureTest {
             Lexed lexed = Lexed.of(Files.readString(p));
             for (String s : lexed.strings()) {
                 boolean setter = s.matches("set[A-Z]\\w*");
-                boolean lifecycle = s.equals("load") || s.equals("save") || s.equals("reload");
+                boolean lifecycle = s.equals("load") || s.equals("reload")
+                        || (s.equals("save") && !p.getFileName().toString().equals(SETTINGS_WRITER));
                 if ((setter && !ALLOWED_SETTER_LITERALS.contains(s)) || lifecycle) {
                     violations.add(p.getFileName() + ": names the upstream member \"" + s + "\"");
                 }

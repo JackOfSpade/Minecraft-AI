@@ -39,6 +39,8 @@ final class UpstreamNames {
      * code does) while PvP BOT's factions setting is on. Named nowhere but here (see ArchitectureTest).
      */
     static final String CLASS_BOT_FACTION = PACKAGE + ".bot.BotFaction";
+    /** The per-bot combat state object BotCombat keeps (a public static nested class). */
+    static final String CLASS_COMBAT_STATE = PACKAGE + ".bot.BotCombat$CombatState";
     static final String CLASS_MAIN = PACKAGE + ".Pvp_bot";
     static final String FIELD_MOD_ID = "MOD_ID";
 

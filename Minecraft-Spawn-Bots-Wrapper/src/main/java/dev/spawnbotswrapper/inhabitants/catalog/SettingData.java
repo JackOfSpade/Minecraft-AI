@@ -47,7 +47,11 @@ final class SettingData {
                                 + "swapped into hotbar slot 0 and selected, displacing slot 0; a bow pushed out of the "
                                 + "hotbar that way is not held for shooting. It cannot be switched off per bot, so "
                                 + "this is a layout constraint on loadouts (best melee weapon in slot 0), not a trait. "
-                                + "Audits: partial at best."),
+                                + "Worse than a layout constraint: every checkInterval ticks it re-selects the melee weapon, "
+                                + "which ends any bow or crossbow draw in progress of a bot that carries both, so such a bot "
+                                + "never shoots. This addon therefore manages it: config pvpbotSettings.autoEquipWeapon "
+                                + "(shipped false) is written into the settings whenever PvP BOT loads them; melee combat "
+                                + "selects its own weapon regardless. Audits: partial at best."),
                 flag("dropWorseArmor", "drop-armor", false).global(
                         "No per-bot proxy: default-off toggle that tosses strictly worse armor of the same slot after "
                                 + "each equip pass (elytra counts as chest armor and goes once a chestplate is worn). "
@@ -98,7 +102,10 @@ final class SettingData {
                 decimal("maxTargetDistance", "view-distance", 5.0, 128.0, 64.0).global(
                         "No per-bot proxy: search and acceptance radius (blocks, 3D, no dimension check) for forced, "
                                 + "revenge, faction and auto targets; also sizes the per-tick entity query when "
-                                + "auto-target is on. A forced order beyond it is ignored."),
+                                + "auto-target is on. A forced order beyond it is ignored. This addon manages it: config "
+                                + "pvpbotSettings.maxTargetDistance (shipped 10, allowed 4..64; PvP BOT's own 64 is far "
+                                + "more than a structure inhabitant should react to) is written into the settings whenever "
+                                + "PvP BOT loads them."),
                 decimal("meleeRange", "melee-range", 2.0, 6.0, 3.5).perBot(ATTRIBUTE,
                         "vitals.attributes[minecraft:entity_interaction_range]",
                         "Partial, reach only. Varies: entity_interaction_range 2..6 (vanilla 3.0); on the 'attack "
@@ -110,13 +117,17 @@ final class SettingData {
                 decimal("rangedMinRange", "ranged-min-range", 3.0, 20.0, 20.0).global(
                         "No per-bot proxy: numeric tuning. Archers park at about min to min+2 blocks (20 to 22 by "
                                 + "default), not at rangedOptimalRange; the loadout only decides who is an archer. The "
-                                + "default equals the clamp maximum."),
+                                + "default equals the clamp maximum. Managed by this addon: config "
+                                + "pvpbotSettings.rangedMinRange (shipped 6), written straight into the field because the "
+                                + "setter would clamp the ranges below."),
                 decimal("rangedOptimalRange", "ranged-optimal-range", 10.0, 50.0, 40.0).global(
                         "No per-bot proxy: only used while retreating with a bow (no food, health under 50 percent), "
-                                + "not in normal engagement. The loadout only decides who is an archer."),
+                                + "not in normal engagement. The loadout only decides who is an archer. Managed by this "
+                                + "addon: config pvpbotSettings.rangedOptimalRange (shipped 8; the setter would raise it to 10)."),
                 decimal("rangedMaxRange", "ranged-max-range", 15.0, 100.0, 60.0).global(
                         "No per-bot proxy: archers walk toward a target beyond this distance instead of shooting. The "
-                                + "loadout only decides who is an archer."),
+                                + "loadout only decides who is an archer. Managed by this addon: config "
+                                + "pvpbotSettings.rangedMaxRange (shipped 10; the setter would raise it to 15)."),
                 decimal("maceRange", NO_KEY, 3.0, 10.0, 6.0).global(
                         "No per-bot proxy: mace mode-selection distance and engagement radius (twice the value). A "
                                 + "mace in the loadout only decides who can use mace mode. No command key: "

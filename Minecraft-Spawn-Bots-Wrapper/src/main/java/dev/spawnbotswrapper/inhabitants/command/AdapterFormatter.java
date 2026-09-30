@@ -101,10 +101,11 @@ final class AdapterFormatter {
         addIfOff(off, "botsRelogs", c.botsRelogs());
         addIfOff(off, "botLeaveOnDeath", c.botLeaveOnDeath());
         addIfOff(off, "clearOnRemove", c.clearOnRemove());
-        out.add(label("Global PvP BOT switches OFF (read-only, never changed by this addon): ")
+        out.add(label("Global PvP BOT switches OFF (read from PvP BOT; this addon manages only pvpbotSettings): ")
                 + (off.isEmpty() ? good("none") : plain(String.join(", ", off))));
         if (!c.autoTargetEnabled()) {
-            out.add(label("  autoTarget is off: inhabitants stay passive until something attacks them (a PvP BOT setting)."));
+            out.add(label("  autoTarget is off: inhabitants stay passive until something attacks them and never open fire on sight "
+                    + "(a PvP BOT setting this addon does not manage: pvpbot settings auto-target true)."));
         }
     }
 

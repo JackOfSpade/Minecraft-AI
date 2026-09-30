@@ -1,6 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.config;
 
 import dev.spawnbotswrapper.inhabitants.util.BotNameShape;
+import dev.spawnbotswrapper.inhabitants.util.RangedDistances;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -108,6 +109,8 @@ public final class ConfigValidator {
         validateTpsThrottle(c, w);
         validateCombatLog(c, w);
         validateAggro(c, w);
+        validatePvpbotSettings(c, w);
+        validateRangedPacing(c, w);
 
         if (c.spawning == null) {
             c.spawning = new InhabitantsConfig.Spawning();
@@ -154,6 +157,53 @@ public final class ConfigValidator {
                     + t.degradedFloorMillis + ") so the state has hysteresis; using " + fixed);
             t.recoveredFloorMillis = fixed;
         }
+    }
+
+    /** Smallest and largest {@code pvpbotSettings.maxTargetDistance} (blocks). */
+    public static final double MIN_TARGET_DISTANCE = 4.0;
+    public static final double MAX_TARGET_DISTANCE = 64.0;
+
+    private static void validatePvpbotSettings(InhabitantsConfig c, List<String> w) {
+        if (c.pvpbotSettings == null) {
+            c.pvpbotSettings = new InhabitantsConfig.PvpbotSettings();
+            w.add("'pvpbotSettings' is null; no PvP BOT setting is managed");
+        }
+        InhabitantsConfig.PvpbotSettings s = c.pvpbotSettings;
+        s.maxTargetDistance = finiteOrNull(w, "pvpbotSettings.maxTargetDistance", s.maxTargetDistance);
+        s.rangedMinRange = finiteOrNull(w, "pvpbotSettings.rangedMinRange", s.rangedMinRange);
+        s.rangedOptimalRange = finiteOrNull(w, "pvpbotSettings.rangedOptimalRange", s.rangedOptimalRange);
+        s.rangedMaxRange = finiteOrNull(w, "pvpbotSettings.rangedMaxRange", s.rangedMaxRange);
+        if (s.maxTargetDistance != null) {
+            s.maxTargetDistance = clamp(w, "pvpbotSettings.maxTargetDistance", s.maxTargetDistance,
+                    MIN_TARGET_DISTANCE, MAX_TARGET_DISTANCE);
+        }
+        // The ordering can only be judged here when every value involved is configured; a partly configured set is
+        // judged again when it is applied, against the values PvP BOT itself has for the missing ones.
+        String problem = RangedDistances.problem(s.rangedMinRange, s.rangedOptimalRange, s.rangedMaxRange, s.maxTargetDistance);
+        if (problem != null && s.rangedMinRange != null && s.rangedOptimalRange != null && s.rangedMaxRange != null) {
+            w.add("pvpbotSettings: " + problem + "; the three ranged ranges are not managed");
+            s.rangedMinRange = null;
+            s.rangedOptimalRange = null;
+            s.rangedMaxRange = null;
+        }
+    }
+
+    private static Double finiteOrNull(List<String> w, String name, Double v) {
+        if (v != null && (v.isNaN() || v.isInfinite())) {
+            w.add(name + " is not a finite number; not managed");
+            return null;
+        }
+        return v;
+    }
+
+    private static void validateRangedPacing(InhabitantsConfig c, List<String> w) {
+        if (c.rangedPacing == null) {
+            c.rangedPacing = new InhabitantsConfig.RangedPacing();
+            w.add("'rangedPacing' is null; using the defaults");
+        }
+        c.rangedPacing.aimSettleTicks = clamp(w, "rangedPacing.aimSettleTicks", c.rangedPacing.aimSettleTicks, 0, 40);
+        c.rangedPacing.crossbowMinShotIntervalTicks = clamp(w, "rangedPacing.crossbowMinShotIntervalTicks",
+                c.rangedPacing.crossbowMinShotIntervalTicks, 1, 200);
     }
 
     private static void validateCombatLog(InhabitantsConfig c, List<String> w) {

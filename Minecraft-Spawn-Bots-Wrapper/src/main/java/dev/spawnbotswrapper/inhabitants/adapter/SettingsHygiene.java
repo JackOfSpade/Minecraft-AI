@@ -1,5 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.adapter;
 
+import dev.spawnbotswrapper.inhabitants.util.RangedDistances;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,10 +32,30 @@ final class SettingsHygiene {
      * (a wrong warning is worse than none).
      */
     record SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval,
-                            Boolean autoTargetEnabled) {
-        static SettingsSnapshot unreadable() {
-            return new SettingsSnapshot(null, null, null, null);
+                            Boolean autoTargetEnabled, Double maxTargetDistance, Double rangedMinRange) {
+        /** The snapshot of the four switches alone (the ranged distances then count as unreadable). */
+        SettingsSnapshot(Boolean botsRelogs, Boolean botLeaveOnDeath, Integer checkInterval, Boolean autoTargetEnabled) {
+            this(botsRelogs, botLeaveOnDeath, checkInterval, autoTargetEnabled, null, null);
         }
+
+        static SettingsSnapshot unreadable() {
+            return new SettingsSnapshot(null, null, null, null, null, null);
+        }
+    }
+
+    /**
+     * The ranged minimum above the targeting radius: an archer backs off whenever the target is closer than its
+     * minimum range, and a target is only ever picked within the targeting radius, so with the minimum beyond the
+     * radius every archer would back out of its own targeting range. Null when fine or unreadable.
+     */
+    static Finding rangedFinding(Double maxTargetDistance, Double rangedMinRange) {
+        if (maxTargetDistance != null && rangedMinRange != null && rangedMinRange > maxTargetDistance) {
+            return new Finding(Severity.WARN, "PvP BOT setting rangedMinRange (" + RangedDistances.text(rangedMinRange)
+                    + ") is above maxTargetDistance (" + RangedDistances.text(maxTargetDistance) + "): ranged inhabitants "
+                    + "would back away from every target inside their own targeting radius. Lower rangedMinRange or "
+                    + "raise maxTargetDistance (pvpbotSettings in this addon's config manages both)");
+        }
+        return null;
     }
 
     static List<Finding> findings(SettingsSnapshot s, TelemetryProbe.Telemetry telemetry) {
@@ -59,9 +81,14 @@ final class SettingsHygiene {
             }
             if (Boolean.FALSE.equals(s.autoTargetEnabled())) {
                 out.add(new Finding(Severity.NOTE,
-                        "PvP BOT setting autoTarget is OFF (its default): inhabitants stay passive until they are "
-                                + "attacked. It is a global PvP BOT setting that this addon never changes; enable "
-                                + "it in PvP BOT if inhabitants should attack on sight"));
+                        "PvP BOT setting autoTarget is OFF (its default): inhabitants only fight what attacked them (or "
+                                + "what an order or a faction names) and never open fire on sight. This addon manages only the "
+                                + "settings listed under pvpbotSettings in its config, not this one; enable it in PvP BOT "
+                                + "(pvpbot settings auto-target true) if inhabitants should attack players in range"));
+            }
+            Finding ranged = rangedFinding(s.maxTargetDistance(), s.rangedMinRange());
+            if (ranged != null) {
+                out.add(ranged);
             }
         }
         if (telemetry != null && telemetry.sends()) {
