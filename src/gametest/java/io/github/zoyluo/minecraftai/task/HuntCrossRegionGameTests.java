@@ -488,9 +488,9 @@ public final class HuntCrossRegionGameTests {
                 sawReacquire.set(true);
             }
             if (description.contains("phase=PICKUP")) {
-                require(context, world.getEntitiesOfClass(
-                                net.minecraft.world.entity.animal.chicken.Chicken.class,
-                                new AABB(start).inflate(16.0D), chicken -> chicken.isAlive()).isEmpty(),
+                // Only this test's own chickens count: animals that earlier tests of the run left in the neighbouring arenas are
+                // alive within 16 blocks now and then, and they are no prey of this hunt.
+                require(context, !original.isAlive() && (replacement.get() == null || !replacement.get().isAlive()),
                         "hunt opened pickup debt while the reloaded chicken was still alive");
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
