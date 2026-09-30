@@ -624,4 +624,60 @@ public final class InhabitantStateGameTests {
             }
         });
     }
+
+    /**
+     * The issued marker never leaves the wrapper's own bookkeeping: a shot arrow's pickup stack and what a dying mob drops
+     * arrive in the world unmarked (the entity-load hook), as a dropped sword does in {@code state_issued_items}.
+     */
+    @GameTest(environment = ENV + "state_issued_shots", maxTicks = 40)
+    public void aShotArrowAndADeathDropArriveInTheWorldUnmarked(GameTestHelper context) {
+        net.minecraft.server.level.ServerLevel level = context.getLevel();
+        net.minecraft.world.phys.Vec3 at = context.absoluteVec(new net.minecraft.world.phys.Vec3(2.5, 2.0, 2.5));
+        ItemStack marked = new ItemStack(Items.ARROW);
+        IssuedItems.mark(marked);
+        if (!IssuedItems.isIssued(marked)) {
+            context.fail(net.minecraft.network.chat.Component.literal("fixture: the arrow stack was not marked"));
+            return;
+        }
+        net.minecraft.world.entity.projectile.arrow.Arrow arrow =
+                new net.minecraft.world.entity.projectile.arrow.Arrow(level, at.x, at.y, at.z, marked, null);
+        level.addFreshEntity(arrow);
+        if (IssuedItems.isIssued(arrow.getPickupItemStackOrigin())) {
+            context.fail(net.minecraft.network.chat.Component.literal("a shot arrow's pickup stack is still marked as issued"));
+            return;
+        }
+        arrow.discard();
+
+        net.minecraft.world.entity.monster.zombie.Zombie zombie =
+                net.minecraft.world.entity.EntityType.ZOMBIE.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        if (zombie == null) {
+            context.fail(net.minecraft.network.chat.Component.literal("fixture: no zombie"));
+            return;
+        }
+        zombie.setPos(at.x + 2, at.y, at.z);
+        ItemStack sword = new ItemStack(Items.IRON_SWORD);
+        IssuedItems.mark(sword);
+        zombie.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, sword);
+        zombie.setDropChance(net.minecraft.world.entity.EquipmentSlot.MAINHAND, 2.0F); // above 1: always dropped, kept or not
+        level.addFreshEntity(zombie);
+        zombie.kill(level);
+        List<net.minecraft.world.entity.item.ItemEntity> drops = level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                new net.minecraft.world.phys.AABB(zombie.blockPosition()).inflate(4.0));
+        boolean sawSword = false;
+        for (net.minecraft.world.entity.item.ItemEntity drop : drops) {
+            if (drop.getItem().is(Items.IRON_SWORD)) {
+                sawSword = true;
+                if (IssuedItems.isIssued(drop.getItem())) {
+                    context.fail(net.minecraft.network.chat.Component.literal("an issued stack dropped on death is still marked"));
+                    return;
+                }
+            }
+            drop.discard();
+        }
+        if (!sawSword) {
+            context.fail(net.minecraft.network.chat.Component.literal("fixture: the zombie dropped no sword, so nothing was checked"));
+            return;
+        }
+        context.succeed();
+    }
 }

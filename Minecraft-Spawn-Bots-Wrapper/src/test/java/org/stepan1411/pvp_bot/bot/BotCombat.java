@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * Test-only fake of the upstream combat class: the per-bot combat state with its public forced-target field
- * and the three target calls the aggro range makes. Mirrors upstream's behaviour where it matters:
+ * and the three target calls the aggro hunter makes. Mirrors upstream's behaviour where it matters:
  * {@code getState} creates the state on first access, {@code clearTarget} resets more than the forced name and
  * {@code setTarget(bot, null)} resets nothing else.
  */

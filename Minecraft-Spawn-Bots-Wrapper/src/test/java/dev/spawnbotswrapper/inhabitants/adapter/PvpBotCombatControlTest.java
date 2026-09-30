@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The aggro range's window into PvP BOT: target calls, settings and the walk-back navigation calls. */
+/** The aggro hunter's window into PvP BOT: target calls, settings and the walk-back navigation calls. */
 class PvpBotCombatControlTest {
 
     @Test

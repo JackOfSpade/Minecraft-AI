@@ -70,7 +70,7 @@ class SettingsHygieneTest {
     @Test
     void autoTargetOffIsTheIntendedStateWhileTheAggroHunterIsOn() {
         assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, false, null, null, true), Telemetry.DISABLED),
-                "the aggro range acquires targets, so PvP BOT's own auto-target being off is not a finding");
+                "the aggro hunter acquires targets, so PvP BOT's own auto-target being off is not a finding");
         assertEquals(List.of(), findings(new SettingsSnapshot(true, true, 20, false, 64.0, 8.0, true), Telemetry.DISABLED));
     }
 

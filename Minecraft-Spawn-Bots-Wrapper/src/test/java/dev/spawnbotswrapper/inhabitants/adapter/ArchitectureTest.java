@@ -60,7 +60,7 @@ class ArchitectureTest {
             "PatrolManager.java", "CapabilityReader.java");
     /**
      * setLoop/setAttack/setWalkType are path setters; setTarget is BotCombat's forced-target setter (a combat
-     * call, not a settings writer: the aggro range hands PvP BOT a target, it never changes a setting).
+     * call, not a settings writer: the aggro hunter hands PvP BOT a target, it never changes a setting).
      */
     private static final Set<String> ALLOWED_SETTER_LITERALS =
             Set.of("setLoop", "setAttack", "setWalkType", "setTarget");
