@@ -471,9 +471,20 @@ public final class CreatureSenses {
     // ------------------------------------------------------------------ hits
 
     private void onHit(RecentDamage.Hit hit) {
-        BotState s = bots.get(hit.victim());
-        if (s == null || !enabled()) {
+        if (!enabled()) {
             return;
+        }
+        BotState s = bots.get(hit.victim());
+        if (s == null) {
+            // A bot struck in the very tick it was spawned (before the coordinator has read it once) is still struck: its memory is
+            // opened now, and the first scan adopts it.
+            AIPlayerEntity victim = io.github.zoyluo.minecraftai.manager.AIPlayerManager.INSTANCE.getByUuid(hit.victim())
+                    .filter(AIPlayerEntity::isAlive).orElse(null);
+            if (victim == null) {
+                return;
+            }
+            s = new BotState(victim);
+            bots.put(hit.victim(), s);
         }
         try {
             AIPlayerEntity bot = s.bot;
