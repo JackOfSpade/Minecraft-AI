@@ -107,6 +107,13 @@ def prepareGameTestRun = tasks.register('prepareGameTestRun') {
   "factionsEnabled": true
 }
 ''', 'UTF-8')
+        // -PharnessFixesOff=true: the addon's two ranged-combat fixes (pvpbotSettings, rangedPacing) switched off, i.e. what a
+        // profile ran with before them. The same tests then show the failures the fixes are for.
+        def fixesOff = providers.gradleProperty('harnessFixesOff').orNull == 'true'
+        def fixesConfig = fixesOff ? ',\n  "pvpbotSettings": null,\n  "rangedPacing": { "enabled": false }' : ''
+        if (fixesOff) {
+            logger.lifecycle('harnessFixesOff: pvpbotSettings and rangedPacing are switched off in this run')
+        }
         // The addon's own config: natural structure population is off (nothing matches "include"), so the only
         // inhabitants are the ones a test asks the engine for; no waiting periods, no throttles, no random loadouts.
         new File(runDir, 'config').mkdirs()
@@ -115,9 +122,7 @@ def prepareGameTestRun = tasks.register('prepareGameTestRun') {
   "processing": { "restoreSettleTicks": 0, "initialDelayTicks": 0, "spawnIntervalTicks": 0, "maxLiveBots": 8 },
   "profiles": { "randomize": false, "behaviorVariation": false, "attributeVariation": false },
   "tpsThrottle": { "enabled": false },
-  "dormancy": { "enabled": false }
-}
-''', 'UTF-8')
+  "dormancy": { "enabled": false }''' + fixesConfig + '\n}\n', 'UTF-8')
     }
 }
 
