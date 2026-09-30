@@ -1,19 +1,16 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.config.DisabledEnchantments;
+import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
-import net.minecraft.core.Holder;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.ai.attributes.Attribute;
-import net.minecraft.world.entity.ai.attributes.AttributeInstance;
-import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -23,15 +20,14 @@ import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.Team;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
- * Applies a {@link BotProfile} to a live bot using the vanilla API only: inventory contents, vanilla
- * attribute modifiers, health and hunger. PvP BOT is never touched; it reads what the bot carries and its
+ * Applies a {@link BotProfile} to a live bot using the vanilla API only: inventory contents, health and hunger
+ * (never an attribute modifier: an inhabitant has the attributes of a vanilla player and whatever its gear and effects give). PvP BOT is never touched; it reads what the bot carries and its
  * attributes on its own.
  * <ul>
  *   <li><b>Only bots.</b> The applier is constructed with a predicate that says whether an entity is a bot
@@ -40,8 +36,8 @@ import java.util.function.Supplier;
  *   <li><b>Silent.</b> Items are written straight into the inventory rather than through
  *       {@code equipStack}, which would play equip sounds and emit vibration game events; a bot spawning in
  *       an ancient city must not set off the sculk sensors around it.</li>
- *   <li><b>Idempotent.</b> Attribute modifiers use fixed ids ({@link ModifierIds}) and overwrite, so applying
- *       twice gives the same result as applying once. Items overwrite their planned slots.</li>
+ *   <li><b>Idempotent.</b> Applying twice gives the same result as applying once: items overwrite their planned
+ *       slots. Attribute modifiers of this addon (older versions added them, see {@link ModifierIds}) are removed.</li>
  *   <li><b>Marked.</b> {@link #mark} adds a scoreboard command tag, which vanilla saves in the player's data;
  *       after a restart {@link #isMarked} tells whether the profile is already on the entity.</li>
  * </ul>
@@ -271,11 +267,16 @@ public final class ProfileApplier implements ProfileApplication {
 
     private static boolean applyVitals(ServerPlayer bot, BotProfile.Vitals vitals, List<String> warnings) {
         try {
-            // Attributes first: max health is one of them, and health is a fraction of it.
-            List<Map.Entry<String, BotProfile.AttributeMod>> mods = new ArrayList<>(vitals.attributes().entrySet());
-            mods.sort(Map.Entry.comparingByKey());
-            for (Map.Entry<String, BotProfile.AttributeMod> mod : mods) {
-                applyAttribute(bot, mod.getKey(), mod.getValue(), warnings);
+            // A profile stored by an older version may list attribute modifiers (max health, reach, knockback
+            // resistance, ...). They gave a bot stats no player has, so they are never applied, and any that an older
+            // version already put on this entity goes before health is set (health is a fraction of the maximum).
+            if (!vitals.attributes().isEmpty()) {
+                warnings.add("ignored " + vitals.attributes().size() + " stored attribute modifier(s): inhabitants have "
+                        + "vanilla attributes only");
+            }
+            List<String> stripped = VanillaRules.stripWrapperModifiers(bot);
+            if (!stripped.isEmpty()) {
+                warnings.add("removed attribute modifiers of this addon: " + String.join(", ", stripped));
             }
             bot.setHealth(initialHealth(bot.getMaxHealth(), vitals.healthFraction()));
             bot.getFoodData().setFoodLevel(vitals.foodLevel());
@@ -291,58 +292,52 @@ public final class ProfileApplier implements ProfileApplication {
         return Math.min(maxHealth, Math.max(1.0f, (float) (maxHealth * fraction)));
     }
 
-    private static void applyAttribute(ServerPlayer bot, String attributeId, BotProfile.AttributeMod mod, List<String> warnings) {
+    @Override
+    public BotSnapshot capture(ServerPlayer bot, List<String> warnings) {
         try {
-            Identifier id = ItemStackFactory.parseId(attributeId);
-            Optional<Holder.Reference<Attribute>> attribute = id == null
-                    ? Optional.empty()
-                    : BuiltInRegistries.ATTRIBUTE.get(id);
-            if (attribute.isEmpty()) {
-                warnings.add("unknown attribute '" + attributeId + "'; skipped");
-                return;
-            }
-            AttributeInstance instance = bot.getAttribute(attribute.get());
-            if (instance == null) {
-                warnings.add("players have no " + id + " attribute; skipped");
-                return;
-            }
-            install(instance, id, mod, warnings);
+            return isBot.test(bot) ? BotSnapshots.capture(bot, warnings) : null;
         } catch (RuntimeException e) {
-            warnings.add("attribute " + attributeId + " could not be applied: " + e);
-        }
-    }
-
-    /**
-     * Puts the profile's modifier on one attribute under the fixed addon id, replacing any earlier one.
-     * Persistent, so it is saved with the player and survives a restart. Returns false (with a warning) for
-     * an unknown operation or a non-finite value.
-     */
-    static boolean install(AttributeInstance instance, Identifier attributeId, BotProfile.AttributeMod mod, List<String> warnings) {
-        AttributeModifier.Operation operation = operationOf(mod.operation());
-        if (operation == null) {
-            warnings.add("unknown modifier operation '" + mod.operation() + "' for " + attributeId + "; skipped");
-            return false;
-        }
-        if (!Double.isFinite(mod.value())) {
-            warnings.add("non-finite modifier value for " + attributeId + "; skipped");
-            return false;
-        }
-        Identifier modifierId = Identifier.fromNamespaceAndPath(ModifierIds.NAMESPACE,
-                ModifierIds.pathFor(attributeId.getNamespace(), attributeId.getPath()));
-        instance.addOrReplacePermanentModifier(new AttributeModifier(modifierId, mod.value(), operation));
-        return true;
-    }
-
-    /** Maps the profile's operation name to vanilla's; null when unknown. */
-    static AttributeModifier.Operation operationOf(String name) {
-        if (name == null) {
+            warnings.add("the state could not be captured: " + e);
             return null;
         }
-        return switch (name) {
-            case BotProfile.Op.ADD_VALUE -> AttributeModifier.Operation.ADD_VALUE;
-            case BotProfile.Op.ADD_MULTIPLIED_BASE -> AttributeModifier.Operation.ADD_MULTIPLIED_BASE;
-            case BotProfile.Op.ADD_MULTIPLIED_TOTAL -> AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL;
-            default -> null;
-        };
+    }
+
+    @Override
+    public Result restore(ServerPlayer bot, BotSnapshot snapshot, boolean inventory) {
+        List<String> warnings = new ArrayList<>();
+        try {
+            if (!isBot.test(bot)) {
+                warnings.add("refused to restore " + bot.getGameProfile().name() + ": it is not a bot");
+                return new Result(false, false, warnings);
+            }
+            // The maximum first (an old modifier may still be on the entity), because health is clamped to it.
+            VanillaRules.stripWrapperModifiers(bot);
+            int pearls = 0;
+            List<String> enchantments = List.of();
+            if (inventory) {
+                BotSnapshots.restoreInventory(bot.getInventory(), bot.registryAccess(), snapshot, warnings);
+                pearls = removeEnderPearls(bot.getInventory());
+                enchantments = removeDisabledEnchantments(bot.getInventory(), disabledEnchantments.get());
+            }
+            BotSnapshots.restoreVitals(bot, snapshot, inventory, warnings);
+            return new Result(true, true, warnings, pearls, enchantments);
+        } catch (RuntimeException e) {
+            warnings.add("the saved state could not be restored: " + e);
+            return new Result(false, false, warnings);
+        }
+    }
+
+    @Override
+    public BotGateway.StateFixes enforceVanilla(ServerPlayer bot) {
+        try {
+            if (!isBot.test(bot)) {
+                return BotGateway.StateFixes.NONE;
+            }
+            BotGateway.StateFixes survival = VanillaRules.enforceSurvival(bot);
+            return new BotGateway.StateFixes(survival.previousGameMode(), survival.abilities(),
+                    VanillaRules.stripWrapperModifiers(bot));
+        } catch (RuntimeException e) {
+            return BotGateway.StateFixes.NONE;
+        }
     }
 }

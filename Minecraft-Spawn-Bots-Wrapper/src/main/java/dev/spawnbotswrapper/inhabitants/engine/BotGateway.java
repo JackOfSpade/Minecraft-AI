@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.engine;
 
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 
 import java.util.List;
 import java.util.UUID;
@@ -65,9 +66,47 @@ public interface BotGateway {
 
     /**
      * Re-asserts per-bot upstream state that does not survive a restart (path following, the path itself)
-     * for a bot that is back online. Returns true when something had to be re-applied.
+     * for a bot that is back online, and puts back what a restart resets on a fake player. Returns true when
+     * something had to be re-applied.
+     * <ul>
+     *   <li>A bot the addon already dressed (marked) keeps its inventory from the player's own saved data; only its
+     *       health, hunger and missing effects are restored from {@code snapshot} (HeroBot heals a fake player to full
+     *       health when it is created).</li>
+     *   <li>A bot that is not marked yet is restored from {@code snapshot} completely when there is one (so what it
+     *       used up stays used up) and dressed from {@code profile} only when it never was snapshotted.</li>
+     * </ul>
      */
+    boolean restore(String botName, BotProfile profile, BotSnapshot snapshot);
+
+    /** The same without a snapshot: what a bot of a record that was never snapshotted gets. */
     boolean restore(String botName, BotProfile profile);
+
+    /**
+     * The live state of an online inhabitant as a {@link BotSnapshot} (inventory, selected slot, health, hunger,
+     * effects, experience), or null when it is not online, not a bot, dead, or cannot be read. Never throws.
+     */
+    default BotSnapshot snapshot(String botName) {
+        return null;
+    }
+
+    /**
+     * Brings a bot back from dormancy exactly as it was: its whole snapshot is written slot by slot and then its
+     * vitals (nothing is dressed from the profile, so arrows, food, potions, gear condition and health stay what they
+     * were), then its behaviour (path) is assigned again and the bot is marked as dressed.
+     */
+    default ApplyResult wake(String botName, BotProfile profile, BotSnapshot snapshot) {
+        return applyProfile(botName, profile);
+    }
+
+    /**
+     * Makes an online inhabitant an ordinary survival player again: survival game mode without creative-style
+     * abilities, and no attribute modifier of this addon. Includes what was already fixed since the last call (a
+     * fresh spawn is checked the moment it appears). Returns what was wrong; {@link StateFixes#isEmpty()} when nothing
+     * was. Cheap and idempotent; never throws.
+     */
+    default StateFixes enforceVanilla(String botName) {
+        return StateFixes.NONE;
+    }
 
     /**
      * Removes every ender pearl from an online inhabitant's inventory and returns how many were removed (0 when
@@ -106,6 +145,42 @@ public interface BotGateway {
 
         /** Definitively refused or impossible. */
         record Failed(String reason) implements SpawnPoll {
+        }
+    }
+
+
+    /**
+     * What {@link #enforceVanilla} found wrong with an inhabitant.
+     *
+     * @param previousGameMode the game mode it was in when it was not SURVIVAL, else null
+     * @param abilities        creative-style abilities it had (instabuild, mayfly, invulnerable, flying)
+     * @param modifiers        addon-added attribute modifiers that were removed, one description each
+     */
+    record StateFixes(String previousGameMode, List<String> abilities, List<String> modifiers) {
+        public static final StateFixes NONE = new StateFixes(null, List.of(), List.of());
+
+        public StateFixes {
+            abilities = abilities == null ? List.of() : List.copyOf(abilities);
+            modifiers = modifiers == null ? List.of() : List.copyOf(modifiers);
+        }
+
+        public boolean isEmpty() {
+            return previousGameMode == null && abilities.isEmpty() && modifiers.isEmpty();
+        }
+
+        /** Both findings together (the earlier game mode wins: it is the one that was really found). */
+        public StateFixes and(StateFixes other) {
+            if (other == null || other.isEmpty()) {
+                return this;
+            }
+            if (isEmpty()) {
+                return other;
+            }
+            java.util.ArrayList<String> a = new java.util.ArrayList<>(abilities);
+            other.abilities.stream().filter(x -> !a.contains(x)).forEach(a::add);
+            java.util.ArrayList<String> m = new java.util.ArrayList<>(modifiers);
+            m.addAll(other.modifiers);
+            return new StateFixes(previousGameMode != null ? previousGameMode : other.previousGameMode, a, m);
         }
     }
 

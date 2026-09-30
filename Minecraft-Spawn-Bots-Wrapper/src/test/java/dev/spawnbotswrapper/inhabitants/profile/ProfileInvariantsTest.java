@@ -31,9 +31,8 @@ class ProfileInvariantsTest {
             out.add(new Config("only " + flag + " off", allOnExcept(flag), everythingOptions()));
         }
         InhabitantsConfig.Profiles bare = everythingOptions();
-        bare.attributeVariation = false;
         bare.behaviorVariation = false;
-        out.add(new Config("no attributes, no behaviour", allOn(), bare));
+        out.add(new Config("no behaviour", allOn(), bare));
         return out;
     }
 

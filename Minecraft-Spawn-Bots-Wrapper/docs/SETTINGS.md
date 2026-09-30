@@ -2,8 +2,8 @@
 
 PvP BOT keeps every bot-behaviour switch on **one process-wide, global settings object** (a singleton):
 there is no per-bot settings instance anywhere upstream. This addon can therefore only make two bots
-behave differently for a setting PvP BOT reads PER BOT instead (their inventory, a vanilla entity
-attribute, PvP BOT's own per-bot path/patrol mechanism) — everything else is either shared by every
+behave differently for a setting PvP BOT reads PER BOT instead (their inventory, PvP BOT's own per-bot
+path/patrol mechanism; never an entity attribute, because an inhabitant has the stats of a vanilla player) — everything else is either shared by every
 inhabitant on the server or is not something this addon touches at all.
 
 `SettingCatalog` classifies every upstream setting into exactly one of four categories:
@@ -39,7 +39,7 @@ classification the code does not actually make.
 | `rangedOptimalRange` | `ranged-optimal-range` | double 10.0..50.0 | `40.0` | GLOBAL_ONLY | - | - | No per-bot proxy: only used while retreating with a bow (no food, health under 50 percent), not in normal engagement. The loadout only decides who is an archer. Managed by this addon: config pvpbotSettings.rangedOptimalRange (shipped 12). |
 | `rangedMaxRange` | `ranged-max-range` | double 15.0..100.0 | `60.0` | GLOBAL_ONLY | - | - | No per-bot proxy: archers walk toward a target beyond this distance instead of shooting. The loadout only decides who is an archer. Managed by this addon: config pvpbotSettings.rangedMaxRange (shipped 16). The managed values are written straight into the fields, so they may deliberately lie outside PvP BOT's setter clamps (the shipped 8/12/16 happen to sit inside them; the catalog bounds only describe what the setters accept). |
 | `maceRange` | - | double 3.0..10.0 | `6.0` | GLOBAL_ONLY | - | - | No per-bot proxy: mace mode-selection distance and engagement radius (twice the value). A mace in the loadout only decides who can use mace mode. No command key: settings.json or the GUI payload only. |
-| `attackCooldown` | `attack-cooldown` | int 1..40 | `10` | PER_BOT_RANDOMIZABLE | ATTRIBUTE | vitals.attributes[minecraft:attack_speed]; loadout: the held weapon sets the vanilla recharge | Partial, attack tempo. Varies: the real interval, max(global attackCooldown, vanilla recharge of the held weapon at the bot's attack_speed); the attribute and the weapon change how long a bot waits, never below the global floor. Does not vary: the setting itself, and the low-health multiplier (x1.5) hits every bot. At the default of 10 ticks the weapon already dominates (sword about 12.5 ticks, axe 20 or more). |
+| `attackCooldown` | `attack-cooldown` | int 1..40 | `10` | GLOBAL_ONLY | - | - | No per-bot proxy: global floor between attacks. The real interval is max(global attackCooldown, vanilla recharge of the held weapon at the vanilla attack_speed of 4.0): the weapon in the loadout sets the tempo, and an inhabitant no longer carries an attack speed modifier (older versions of this addon rolled one, a stat no player has). The low-health multiplier (x1.5) hits every bot. At the default of 10 ticks the weapon already dominates (sword about 12.5 ticks, axe 20 or more). |
 | `moveSpeed` | `move-speed` | double 0.1..2.0 | `1.0` | GLOBAL_ONLY | - | - | No per-bot proxy. Audits split: one saw movement_speed as a coarse substitute, the other showed that HeroBot overwrites the input fields PvP BOT writes, so all motion is velocity impulses scaled by this global scalar and neither the attribute nor speed potions change it. Conservative: not an attribute upstream, not randomized. A path walkType changes sprint and hop, not this scalar, and path followers move at a fixed 1.0. Verified in HeroBot HEAD only. |
 | `criticalsEnabled` | `criticals` | boolean | `true` | GLOBAL_ONLY | - | - | No per-bot proxy: global toggle for jump-crit hits; it also decides which melee path is used (direct attack versus 'attack once'), see meleeRange. jump_strength or gravity attributes can only sabotage it (a too short fall phase means the bot never attacks), so they are never varied. |
 | `criticalFallTicks` | `crit-fall-ticks` | int 1..10 | `6` | GLOBAL_ONLY | - | - | No per-bot proxy: consecutive falling ticks required before a crit hit. Attribute-sensitive only in a perverse way (jump strength, gravity), so not varied. The melee routine only swings after a full jump-and-fall of this many ticks, so a large value makes bots look passive at close range. This addon manages it: at every server start it runs 'pvpbot settings crit-fall-ticks 3' (config key criticalFallTicks, 0 = unmanaged) instead of keeping upstream's 6. |
@@ -106,8 +106,8 @@ classification the code does not actually make.
 ## Counts
 
 <!-- SETTINGS-COUNTS:BEGIN -->
-- PER_BOT_RANDOMIZABLE: 21
-- GLOBAL_ONLY: 38
+- PER_BOT_RANDOMIZABLE: 19
+- GLOBAL_ONLY: 40
 - ADMIN_OPERATIONAL: 9
 - UNSUPPORTED: 0
 - Total: 68

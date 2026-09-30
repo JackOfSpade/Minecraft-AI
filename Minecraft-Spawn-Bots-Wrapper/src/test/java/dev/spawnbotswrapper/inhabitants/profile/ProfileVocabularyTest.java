@@ -166,8 +166,8 @@ class ProfileVocabularyTest {
                 + difference(ProfileVocabulary.enchantments(), enchants));
         assertEquals(Set.copyOf(ProfileVocabulary.potions()), potions, "unreachable: "
                 + difference(ProfileVocabulary.potions(), potions));
-        assertEquals(Set.copyOf(ProfileVocabulary.attributes()), attributes, "unreachable: "
-                + difference(ProfileVocabulary.attributes(), attributes));
+        // The vocabulary still lists the attributes a stored profile of an older version may name, but nothing generates one.
+        assertTrue(attributes.isEmpty(), "no attribute modifier is generated any more: " + attributes);
     }
 
     private static List<String> difference(List<String> listed, Set<String> seen) {

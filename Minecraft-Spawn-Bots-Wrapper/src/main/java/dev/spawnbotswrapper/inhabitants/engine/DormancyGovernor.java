@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.engine;
 
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 
@@ -64,6 +65,18 @@ final class DormancyGovernor {
     }
 
     private void goDormant(BotRecord bot, InhabitantsConfig cfg) {
+        // What the bot carries and how it is doing goes into its record BEFORE it is removed (removing it empties its
+        // inventory), so it wakes with exactly that: arrows fired stay fired, gear stays worn, wounds stay wounds. A bot
+        // that has not been restored yet after a restart is not snapshotted: its live state is not its own yet.
+        if (roster.isRestored(bot)) {
+            BotSnapshot snapshot = ctx.snapshot(bot.name);
+            if (snapshot != null) {
+                bot.snapshot = snapshot;
+            } else if (bot.snapshot == null) {
+                ctx.info("Inhabitant {} went dormant without a saved state (its state could not be read); it will be dressed "
+                        + "from its profile when it wakes", bot.name);
+            }
+        }
         ctx.discard(bot.name);
         bot.state = BotState.DORMANT;
         ctx.store.markDirty();

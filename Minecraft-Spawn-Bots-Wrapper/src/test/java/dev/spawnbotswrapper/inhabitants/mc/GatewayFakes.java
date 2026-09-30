@@ -1,7 +1,9 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
+import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -178,6 +180,33 @@ final class GatewayFakes {
             clearFlags.add(clearInventoryFirst);
             profiles.add(profile);
             return new Result(loadoutApplied, vitalsApplied, warnings, pearlsRemoved, enchantmentsRemoved);
+        }
+
+        /** What capture answers (null = the bot could not be read). */
+        BotSnapshot captured;
+        final List<ServerPlayer> captureCalls = new ArrayList<>();
+        final List<BotSnapshot> restoredSnapshots = new ArrayList<>();
+        final List<Boolean> restoredInventoryFlags = new ArrayList<>();
+        BotGateway.StateFixes fixes = BotGateway.StateFixes.NONE;
+        final List<ServerPlayer> enforced = new ArrayList<>();
+
+        @Override
+        public BotSnapshot capture(ServerPlayer bot, List<String> warnings) {
+            captureCalls.add(bot);
+            return captured;
+        }
+
+        @Override
+        public Result restore(ServerPlayer bot, BotSnapshot snapshot, boolean inventory) {
+            restoredSnapshots.add(snapshot);
+            restoredInventoryFlags.add(inventory);
+            return new Result(loadoutApplied, vitalsApplied, warnings, pearlsRemoved, enchantmentsRemoved);
+        }
+
+        @Override
+        public BotGateway.StateFixes enforceVanilla(ServerPlayer bot) {
+            enforced.add(bot);
+            return fixes;
         }
 
         @Override

@@ -5,6 +5,7 @@ import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -381,6 +382,152 @@ public final class McBotGatewayMcCases {
         assertTrue(rig.gateway.applyProfile("Inh_Bot", standing()).loadoutApplied());
         rig.gateway.forget("Inh_Bot");
         assertEquals(List.of(), rig.gateway.stripDisabledEnchantments("Inh_Bot"));
+    }
+
+    // ------------------------------------------------------------------------------ saved state
+
+    private static BotSnapshot savedState() {
+        BotSnapshot s = new BotSnapshot();
+        s.stacks.add(new BotSnapshot.Entry(9, "{\"id\":\"minecraft:arrow\",\"count\":37}"));
+        s.health = 7.0f;
+        s.foodLevel = 11;
+        return s;
+    }
+
+    public static void aMarkedBotThatCameBackGetsOnlyItsVitalsPutBackNotADressing() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.managed = true;
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.mark(rig.bot);
+        BotSnapshot saved = savedState();
+        assertTrue(rig.gateway.restore("Inh_Bot", standing(), saved), "something was put back");
+        assertEquals(List.of(saved), rig.applier.restoredSnapshots);
+        assertEquals(List.of(false), rig.applier.restoredInventoryFlags, "its inventory came back with the player data");
+        assertTrue(rig.applier.clearFlags.isEmpty(), "and nothing was dressed from the profile");
+    }
+
+    public static void anUnmarkedBotIsRestoredFromItsSavedStateNotItsProfile() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.managed = true;
+        rig.adapter.entity = Optional.of(rig.bot);
+        BotSnapshot saved = savedState();
+        assertTrue(rig.gateway.restore("Inh_Bot", standing(), saved));
+        assertEquals(List.of(saved), rig.applier.restoredSnapshots);
+        assertEquals(List.of(true), rig.applier.restoredInventoryFlags, "the whole state, inventory included");
+        assertTrue(rig.applier.clearFlags.isEmpty(), "the profile is not applied: that would refill everything");
+        assertTrue(rig.applier.isMarked(rig.bot), "the marker and the saved state stay in step");
+    }
+
+    public static void anUnmarkedBotThatWasNeverSavedFallsBackToItsProfile() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.managed = true;
+        rig.adapter.entity = Optional.of(rig.bot);
+        BotProfile profile = standing();
+        assertTrue(rig.gateway.restore("Inh_Bot", profile, null));
+        assertTrue(rig.applier.restoredSnapshots.isEmpty());
+        assertEquals(List.of(true), rig.applier.clearFlags);
+        assertSame(profile, rig.applier.profiles.get(0));
+    }
+
+    public static void aFailedSnapshotRestoreDoesNotMarkTheBot() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.managed = true;
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.loadoutApplied = false;
+        rig.gateway.restore("Inh_Bot", standing(), savedState());
+        assertFalse(rig.applier.isMarked(rig.bot), "so the next restart tries again");
+    }
+
+    public static void reapplyOnRestoreOffStillLeavesTheVitalsOfAMarkedBotRestored() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.managed = true;
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.config.profiles.reapplyOnRestore = false;
+        rig.applier.mark(rig.bot);
+        assertTrue(rig.gateway.restore("Inh_Bot", standing(), savedState()),
+                "the switch is about re-dressing; a wound is not a dressing");
+        assertEquals(List.of(false), rig.applier.restoredInventoryFlags);
+    }
+
+    public static void wakingAppliesTheSavedStateAssignsThePathAndMarksTheBotWithoutDressingIt() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.entity = Optional.of(rig.bot);
+        BotSnapshot saved = savedState();
+        BotProfile profile = patrolling();
+        BotGateway.ApplyResult result = rig.gateway.wake("Inh_Bot", profile, saved);
+        assertTrue(result.allApplied(), result.warnings().toString());
+        assertEquals(List.of(saved), rig.applier.restoredSnapshots);
+        assertEquals(List.of(true), rig.applier.restoredInventoryFlags);
+        assertTrue(rig.applier.clearFlags.isEmpty(), "never dressed from the profile");
+        assertEquals(1, rig.adapter.assigned.size(), "the path is assigned again");
+        assertTrue(rig.applier.isMarked(rig.bot));
+    }
+
+    public static void wakingABotThatIsNotThereReportsItInsteadOfThrowing() {
+        Rig rig = new Rig();
+        BotGateway.ApplyResult result = rig.gateway.wake("Inh_Bot", standing(), savedState());
+        assertFalse(result.loadoutApplied());
+        assertFalse(result.warnings().isEmpty());
+        assertTrue(rig.applier.restoredSnapshots.isEmpty());
+    }
+
+    public static void aSnapshotIsTheAppliersCaptureOfTheOnlineBotAndNullWhenItIsNotThere() {
+        Rig rig = new Rig();
+        rig.applier.captured = savedState();
+        assertNull(rig.gateway.snapshot("Inh_Bot"), "no entity, no snapshot");
+        rig.adapter.entity = Optional.of(rig.bot);
+        assertSame(rig.applier.captured, rig.gateway.snapshot("Inh_Bot"));
+        rig.adapter.findFailure = new IllegalStateException("lookup broke");
+        assertNull(rig.gateway.snapshot("Inh_Bot"), "a lookup that throws is a bot that cannot be read");
+    }
+
+    // ------------------------------------------------------------------------------ survival mode and vanilla stats
+
+    public static void aFreshSpawnIsPutRightTheMomentItAppearsAndTheSweepReportsWhatWasWrong() {
+        Rig rig = new Rig();
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.fixes = new BotGateway.StateFixes("creative", List.of("instabuild"), List.of());
+        BotGateway.SpawnHandle handle = rig.gateway.requestSpawn(request());
+        rig.adapter.state = new PvpBotOperations.SpawnState.Ready(UUID.randomUUID());
+        assertInstanceOf(BotGateway.SpawnPoll.Ready.class, rig.gateway.poll(handle));
+        assertEquals(1, rig.applier.enforced.size(), "checked when the poll saw it ready, before anything else looks at it");
+
+        rig.applier.fixes = BotGateway.StateFixes.NONE; // now an ordinary survival player: only what was found before is left to report
+        BotGateway.StateFixes reported = rig.gateway.enforceVanilla("Inh_Bot");
+        assertEquals("creative", reported.previousGameMode());
+        assertEquals(List.of("instabuild"), reported.abilities());
+        assertTrue(rig.gateway.enforceVanilla("Inh_Bot").isEmpty(), "reported once");
+    }
+
+    public static void aRestoreAlsoPutsTheEntityRightAndForgettingDropsWhatWasPending() {
+        Rig rig = new Rig();
+        rig.online("Inh_Bot");
+        rig.adapter.managed = true;
+        rig.adapter.entity = Optional.of(rig.bot);
+        rig.applier.mark(rig.bot);
+        rig.applier.fixes = new BotGateway.StateFixes(null, List.of(), List.of("minecraft:max_health +12.00 (add_value)"));
+        rig.gateway.restore("Inh_Bot", standing(), null);
+        assertEquals(1, rig.applier.enforced.size());
+        rig.applier.fixes = BotGateway.StateFixes.NONE;
+        assertEquals(List.of("minecraft:max_health +12.00 (add_value)"), rig.gateway.enforceVanilla("Inh_Bot").modifiers());
+
+        rig.applier.fixes = new BotGateway.StateFixes("adventure", List.of(), List.of());
+        rig.gateway.restore("Inh_Bot", standing(), null);
+        rig.gateway.forget("Inh_Bot");
+        rig.applier.fixes = BotGateway.StateFixes.NONE;
+        assertTrue(rig.gateway.enforceVanilla("Inh_Bot").isEmpty(), "forgotten with the bot");
+    }
+
+    public static void aBotThatIsNotThereHasNothingToPutRight() {
+        Rig rig = new Rig();
+        assertTrue(rig.gateway.enforceVanilla("Inh_Bot").isEmpty());
+        assertTrue(rig.applier.enforced.isEmpty());
     }
 
     // ------------------------------------------------------------------------------ restore

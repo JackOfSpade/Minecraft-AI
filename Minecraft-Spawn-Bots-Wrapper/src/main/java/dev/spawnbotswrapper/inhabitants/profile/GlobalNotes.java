@@ -27,7 +27,6 @@ final class GlobalNotes {
         kits(out, inv, caps);
         defence(out, inv, caps);
         sustain(out, inv, caps);
-        attributes(out, profile.vitals());
 
         if (out.isEmpty()) {
             out.add("none: every behaviour this bot's loadout can use is enabled globally");
@@ -154,17 +153,6 @@ final class GlobalNotes {
         if (inv.has(ItemIds.COBWEB) && !caps.cobwebEnabled()) {
             out.add("Carries cobwebs but the cobweb setting is off globally: it never places them on its target "
                     + "(a water bucket only helps it escape a web it stands in).");
-        }
-    }
-
-    private static void attributes(List<String> out, BotProfile.Vitals vitals) {
-        if (vitals.attributes().containsKey(ItemIds.ENTITY_INTERACTION_RANGE)) {
-            out.add("Its interaction-range modifier only changes how far its attack commands reach; the effective "
-                    + "melee reach is the lower of it and PvP BOT's global melee range.");
-        }
-        if (vitals.attributes().containsKey(ItemIds.ATTACK_SPEED)) {
-            out.add("Its attack-speed modifier can only slow attacks down: PvP BOT waits for the longer of its own "
-                    + "attack cooldown and the vanilla weapon cooldown.");
         }
     }
 

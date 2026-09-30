@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.engine;
 
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -55,6 +56,21 @@ final class FakeBots implements BotGateway {
     final List<String> forgets = new ArrayList<>();
     final List<String> removes = new ArrayList<>();
     final List<Applied> restores = new ArrayList<>();
+    /** The snapshot each restore call carried, in the same order as {@link #restores} (null when none). */
+    final List<BotSnapshot> restoreSnapshots = new ArrayList<>();
+    /** What snapshot(name) answers, by lower-case name (the live state of the fake bot); a name that is not here answers null. */
+    final Map<String, BotSnapshot> liveState = new HashMap<>();
+    /** When set, answers snapshot(name) instead of {@link #liveState} (a state that depends on the name). */
+    java.util.function.Function<String, BotSnapshot> snapshotSource;
+    final List<String> snapshotCalls = new ArrayList<>();
+    record Woke(String name, BotProfile profile, BotSnapshot snapshot) {
+    }
+    final List<Woke> wakes = new ArrayList<>();
+    /** What enforceVanilla(name) reports, by lower-case name; the fake keeps answering the same. */
+    final Map<String, StateFixes> vanillaFixes = new HashMap<>();
+    final List<String> enforceCalls = new ArrayList<>();
+    boolean throwSnapshot;
+    boolean throwWake;
     final List<String> pearlStripCalls = new ArrayList<>();
     /** Pearls "found" per strip call, by lower-case name; the fake keeps answering the same number. */
     final Map<String, Integer> pearlsToStrip = new HashMap<>();
@@ -250,12 +266,43 @@ final class FakeBots implements BotGateway {
 
     @Override
     public boolean restore(String botName, BotProfile profile) {
+        return restore(botName, profile, null);
+    }
+
+    @Override
+    public boolean restore(String botName, BotProfile profile, BotSnapshot snapshot) {
         restoreCalls++;
         if (throwRestore) {
             throw new IllegalStateException("injected restore failure");
         }
         restores.add(new Applied(botName, profile));
+        restoreSnapshots.add(snapshot);
         return true;
+    }
+
+    @Override
+    public BotSnapshot snapshot(String botName) {
+        snapshotCalls.add(botName);
+        if (throwSnapshot) {
+            throw new IllegalStateException("injected snapshot failure");
+        }
+        return snapshotSource != null ? snapshotSource.apply(botName) : liveState.get(key(botName));
+    }
+
+    @Override
+    public ApplyResult wake(String botName, BotProfile profile, BotSnapshot snapshot) {
+        if (throwWake) {
+            throw new IllegalStateException("injected wake failure");
+        }
+        wakes.add(new Woke(botName, profile, snapshot));
+        online.add(key(botName));
+        return applyResult;
+    }
+
+    @Override
+    public StateFixes enforceVanilla(String botName) {
+        enforceCalls.add(botName);
+        return vanillaFixes.getOrDefault(key(botName), StateFixes.NONE);
     }
 
     @Override

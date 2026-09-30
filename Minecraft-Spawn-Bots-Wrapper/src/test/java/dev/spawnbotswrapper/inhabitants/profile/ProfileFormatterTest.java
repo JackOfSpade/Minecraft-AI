@@ -94,16 +94,8 @@ class ProfileFormatterTest {
             assertTrue(all.contains("walk type: " + p.behavior().walkType()));
             assertTrue(all.contains("combatant: yes"), "every inhabitant fights");
             assertTrue(all.contains("waypoints: " + p.behavior().waypointCount() + " planned"));
-            for (var attribute : p.vitals().attributes().entrySet()) {
-                String name = switch (attribute.getKey()) {
-                    case NS + "max_health" -> "max health";
-                    case NS + "entity_interaction_range" -> "interaction reach";
-                    case NS + "attack_speed" -> "attack speed";
-                    case NS + "knockback_resistance" -> "knockback resistance";
-                    default -> "scale";
-                };
-                assertTrue(all.contains(name), name + " missing in\n" + all);
-            }
+            assertTrue(p.vitals().attributes().isEmpty(), "new profiles carry no attribute modifiers");
+            assertTrue(all.contains("attributes: none (vanilla values)"), all);
         }
     }
 
@@ -125,56 +117,22 @@ class ProfileFormatterTest {
                 text(pa, allOn()));
     }
 
+    /**
+     * Profiles stored by an older version may still list attribute modifiers. They are not applied to the bot any more
+     * (an inhabitant has the stats of a vanilla player), so the report must not show them as if they were: health is a
+     * fraction of the vanilla 20, and the stored entries are called what they are.
+     */
     @Test
-    void attributesShowTheirResultingValues() {
+    void attributesStoredByAnOlderVersionAreReportedAsNotApplied() {
         Map<String, BotProfile.AttributeMod> attributes = new LinkedHashMap<>();
         attributes.put(NS + "max_health", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 7));
-        attributes.put(NS + "entity_interaction_range", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 0.9));
-        attributes.put(NS + "attack_speed", new BotProfile.AttributeMod(BotProfile.Op.ADD_MULTIPLIED_BASE, -0.35));
         attributes.put(NS + "knockback_resistance", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 0.4));
-        attributes.put(NS + "scale", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, -0.25));
         String out = text(profile(List.of(), new BotProfile.Vitals(0.5, 14, attributes), BotProfile.Behavior.standing()),
                 allOn());
-        assertTrue(out.contains("max health 27 (20 base + 7)"), out);
-        assertTrue(out.contains("interaction reach 3.9 (3 base + 0.9)"), out);
-        assertTrue(out.contains("attack speed 2.6 (4 base -35%)"), out);
-        assertTrue(out.contains("knockback resistance 0.4 (0 base + 0.4)"), out);
-        assertTrue(out.contains("scale 0.75 (1 base - 0.25)"), out);
-        assertTrue(out.contains("health: starts at 50% of max (13.5 of 27 HP)"), out);
+        assertTrue(out.contains("attributes: none applied (vanilla values); 2 stored by an older version are ignored"), out);
+        assertTrue(out.contains("health: starts at 50% of max (10 of 20 HP)"), out);
         assertTrue(out.contains("food level: 14/20"), out);
-    }
-
-    @Test
-    void attributesAreListedMostRelevantFirstAndUnknownOnesLast() {
-        Map<String, BotProfile.AttributeMod> attributes = new LinkedHashMap<>();
-        attributes.put("modded:luck_boost", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 2));
-        attributes.put(NS + "scale", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 0.1));
-        attributes.put(NS + "knockback_resistance", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 0.5));
-        attributes.put(NS + "attack_speed", new BotProfile.AttributeMod(BotProfile.Op.ADD_MULTIPLIED_BASE, -0.1));
-        attributes.put(NS + "entity_interaction_range", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 1));
-        attributes.put(NS + "max_health", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 4));
-        List<String> lines = ProfileFormatter.format(
-                profile(List.of(), new BotProfile.Vitals(1, 20, attributes), BotProfile.Behavior.standing()), allOn());
-        List<String> order = new ArrayList<>();
-        for (String line : lines) {
-            for (String name : List.of("max health", "interaction reach", "attack speed", "knockback resistance",
-                    "scale", "modded:luck_boost")) {
-                if (line.startsWith("    " + name)) {
-                    order.add(name);
-                }
-            }
-        }
-        assertEquals(List.of("max health", "interaction reach", "attack speed", "knockback resistance", "scale",
-                "modded:luck_boost"), order);
-    }
-
-    @Test
-    void aReducedMaxHealthIsShownWithAMinus() {
-        Map<String, BotProfile.AttributeMod> attributes = Map.of(NS + "max_health",
-                new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, -7));
-        String out = text(profile(List.of(), new BotProfile.Vitals(1.0, 20, attributes), BotProfile.Behavior.standing()),
-                allOn());
-        assertTrue(out.contains("max health 13 (20 base - 7)"), out);
+        assertFalse(out.contains("max health 27"), out);
     }
 
     @Test
@@ -343,17 +301,6 @@ class ProfileFormatterTest {
                 BotProfile.WalkType.WALK, 0, 1, List.of());
         assertFalse(anyNoteContains(notes(profile(List.of(), new BotProfile.Vitals(1, 20, Map.of()), fighter), allOn()),
                 "pacifist path follower"));
-    }
-
-    @Test
-    void attributeNotesExplainTheirLimits() {
-        Map<String, BotProfile.AttributeMod> attributes = Map.of(
-                NS + "entity_interaction_range", new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 2.0),
-                NS + "attack_speed", new BotProfile.AttributeMod(BotProfile.Op.ADD_MULTIPLIED_BASE, -0.2));
-        List<String> n = notes(profile(List.of(), new BotProfile.Vitals(1, 20, attributes), BotProfile.Behavior.standing()),
-                allOn());
-        assertTrue(anyNoteContains(n, "lower of it and PvP BOT's global melee range"), n.toString());
-        assertTrue(anyNoteContains(n, "can only slow attacks down"), n.toString());
     }
 
     @Test

@@ -163,8 +163,7 @@ class ProfileGeneratorTest {
                 + " hotbar:8=cooked_porkchopx42 inventory:-1=totem_of_undying inventory:-1=totem_of_undying"
                 + " inventory:-1=golden_applex2 inventory:-1=potion<healing> inventory:-1=potion<healing>"
                 + " inventory:-1=potion<healing> inventory:-1=water_bucket"
-                + " | hp 0.52 food 12 attack_speedm-0.29 entity_interaction_rangev1.3 knockback_resistancev0.05"
-                + " max_healthv17.0 | STAND true bhop 0.0 0",
+                + " | hp 0.52 food 12 | STAND true bhop 0.0 0",
                 fingerprint(generator.create(1L, caps, new TransientDeckStore())));
         assertEquals("Smasher | hotbar:0=mace+density5+fire_aspect1+unbreaking2+wind_burst3~0.15"
                 + " hotbar:1=crossbow+quick_charge2 hotbar:8=golden_carrotx59 inventory:-1=wind_chargex31"
@@ -174,52 +173,40 @@ class ProfileGeneratorTest {
                 + " inventory:-1=potion<strong_healing> inventory:-1=splash_potion<swiftness>"
                 + " inventory:-1=splash_potion<swiftness> inventory:-1=splash_potion<swiftness>"
                 + " inventory:-1=splash_potion<swiftness> inventory:-1=cobwebx5 inventory:-1=water_bucket"
-                + " | hp 0.85 food 7 attack_speedm-0.13 entity_interaction_rangev2.4 knockback_resistancev0.8"
-                + " max_healthv12.0 | PATROL_PINGPONG true bhop 33.7 3",
+                + " | hp 0.85 food 7 | PATROL_PINGPONG true bhop 33.7 3",
                 fingerprint(generator.create(987654321L, caps, new TransientDeckStore())));
     }
 
+    /**
+     * An inhabitant has the stats of a vanilla player: earlier versions rolled permanent attribute modifiers (max health,
+     * reach, attack speed, knockback resistance, scale) that no item or effect stands behind, a buff or a nerf no player
+     * can have. Under every option, no profile carries one.
+     */
     @Test
-    void attributeVariationOffMeansNoAttributes() {
-        InhabitantsConfig.Profiles o = everythingOptions();
-        o.attributeVariation = false;
-        for (BotProfile p : profiles(generate(400, allOn(), o))) {
-            assertTrue(p.vitals().attributes().isEmpty(), p.vitals().toString());
+    void noProfileCarriesAnAttributeModifier() {
+        for (InhabitantsConfig.Profiles o : List.of(defaultOptions(), everythingOptions())) {
+            for (BotProfile p : profiles(generate(600, allOn(), o))) {
+                assertTrue(p.vitals().attributes().isEmpty(), p.vitals().toString());
+            }
         }
     }
 
+    /**
+     * The four attribute rolls of the earlier versions are still drawn (and dropped): the coverage decks and the random
+     * stream are consumed exactly as before, so a seeded (deterministic) world keeps every other roll where it was; the
+     * pinned profiles in {@link #profilesAreStableAcrossJvmRuns} are the proof, this names the mechanism.
+     */
     @Test
-    void attributeVariationOnProducesEveryDocumentedAttributeButNotScaleByDefault() {
-        Set<String> seen = new HashSet<>();
-        for (BotProfile p : profiles(generate(600, allOn(), defaultOptions()))) {
-            seen.addAll(p.vitals().attributes().keySet());
-        }
-        assertEquals(Set.of(NS + "max_health", NS + "entity_interaction_range", NS + "attack_speed",
-                NS + "knockback_resistance"), seen);
-    }
-
-    @Test
-    void scaleOnlyVariesWhenAsked() {
-        InhabitantsConfig.Profiles on = defaultOptions();
-        on.scaleVariation = true;
-        Set<String> seen = new HashSet<>();
-        for (BotProfile p : profiles(generate(400, allOn(), on))) {
-            seen.addAll(p.vitals().attributes().keySet());
-        }
-        assertTrue(seen.contains(NS + "scale"));
-
-        InhabitantsConfig.Profiles off = defaultOptions();
-        off.scaleVariation = false;
-        for (BotProfile p : profiles(generate(400, allOn(), off))) {
-            assertFalse(p.vitals().attributes().containsKey(NS + "scale"));
-        }
-        // scale is one of the attributes: with attribute variation off it cannot appear either
-        InhabitantsConfig.Profiles noAttributes = defaultOptions();
-        noAttributes.scaleVariation = true;
-        noAttributes.attributeVariation = false;
-        for (BotProfile p : profiles(generate(200, allOn(), noAttributes))) {
-            assertTrue(p.vitals().attributes().isEmpty());
-        }
+    void theHistoricAttributeRollsAreStillDrawnSoSeededWorldsStayIdentical() {
+        Set<String> keys = new HashSet<>();
+        DeckStore recording = (key, size) -> {
+            keys.add(key);
+            return new TransientDeckStore().deck(key, size);
+        };
+        generator(defaultOptions()).create(11L, allOn(), recording);
+        assertTrue(keys.containsAll(Set.of("profile.attr.maxHealth", "profile.attr.reach", "profile.attr.attackSpeed",
+                "profile.attr.knockbackResistance")), keys.toString());
+        assertFalse(keys.contains("profile.attr.scale"));
     }
 
     @Test
@@ -279,11 +266,15 @@ class ProfileGeneratorTest {
     void optionsAreReadLivePerCall() {
         InhabitantsConfig.Profiles o = defaultOptions();
         ProfileGenerator generator = generator(o);
-        BotProfile before = generator.create(5L, allOn(), new TransientDeckStore());
-        assertFalse(before.vitals().attributes().isEmpty());
-        o.attributeVariation = false;
-        BotProfile after = generator.create(5L, allOn(), new TransientDeckStore());
-        assertTrue(after.vitals().attributes().isEmpty());
+        boolean someoneMoved = false;
+        for (long seed = 1; seed <= 40; seed++) {
+            someoneMoved |= !generator.create(seed, allOn(), new TransientDeckStore()).behavior().equals(BotProfile.Behavior.standing());
+        }
+        assertTrue(someoneMoved, "with behaviour variation on, some bots patrol");
+        o.behaviorVariation = false;
+        for (long seed = 1; seed <= 40; seed++) {
+            assertEquals(BotProfile.Behavior.standing(), generator.create(seed, allOn(), new TransientDeckStore()).behavior());
+        }
     }
 
     @Test

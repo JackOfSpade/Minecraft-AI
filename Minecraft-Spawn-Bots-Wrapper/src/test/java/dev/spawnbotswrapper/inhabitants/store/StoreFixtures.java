@@ -158,6 +158,7 @@ final class StoreFixtures {
         assertEquals(e.profile, a.profile, who + " profile");
         assertEquals(e.profileVersion, a.profileVersion, who + " profileVersion");
         assertEquals(e.profileApplied, a.profileApplied, who + " profileApplied");
+        assertEquals(e.snapshot, a.snapshot, who + " snapshot");
     }
 
     static String read(Path file) throws IOException {

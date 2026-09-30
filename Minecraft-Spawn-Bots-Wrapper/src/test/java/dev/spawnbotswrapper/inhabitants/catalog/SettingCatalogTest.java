@@ -270,17 +270,14 @@ class SettingCatalogTest {
             }
         }
 
-        assertEquals(Set.of("minecraft:entity_interaction_range", "minecraft:attack_speed"), used,
-                "max_health (thresholds are ratios), movement_speed, jump_strength, gravity and knockback_resistance "
-                        + "are not proxies for any setting");
+        assertEquals(Set.of(), used, "an inhabitant has the attributes of a vanilla player, so no setting is randomized "
+                + "through an attribute any more");
     }
 
     // ------------------------------------------------------------------ the recorded decisions
 
     private static final Map<String, Mechanism> PER_BOT_DECISIONS = Map.ofEntries(
             Map.entry("autoEquipArmor", Mechanism.LOADOUT),
-            Map.entry("meleeRange", Mechanism.ATTRIBUTE),
-            Map.entry("attackCooldown", Mechanism.ATTRIBUTE),
             Map.entry("rangedEnabled", Mechanism.LOADOUT),
             Map.entry("maceEnabled", Mechanism.LOADOUT),
             Map.entry("spearEnabled", Mechanism.LOADOUT),
@@ -312,18 +309,19 @@ class SettingCatalogTest {
         assertTrue(spec("bhopEnabled").profileFacet().contains("behavior.walkType"));
         assertTrue(spec("idleWanderEnabled").profileFacet().contains("behavior.stance"));
         assertTrue(spec("idleWanderRadius").profileFacet().contains("behavior.patrolRadius"));
-        assertTrue(spec("meleeRange").profileFacet().contains("minecraft:entity_interaction_range"));
-        assertTrue(spec("attackCooldown").profileFacet().contains("minecraft:attack_speed"));
         assertTrue(spec("rangedEnabled").profileFacet().contains("bow/crossbow + arrows"));
         assertTrue(spec("crystalPvpEnabled").profileFacet().contains("obsidian"));
         assertTrue(spec("crystalPvpEnabled").profileFacet().contains("end_crystal"));
     }
 
     @Test
-    void reachIsOnlyAPartialProxyAndSaysWhy() {
+    void reachAndAttackTempoAreGlobalNowThatNoAttributeIsRolled() {
         String note = spec("meleeRange").note();
-        assertTrue(note.contains("min(attribute, global meleeRange)"), "effective reach formula");
+        assertEquals(Category.GLOBAL_ONLY, spec("meleeRange").category());
+        assertTrue(note.contains("min(entity_interaction_range, global meleeRange)"), "effective reach formula");
         assertTrue(note.contains("no reach check"), "the default jump-crit path ignores the attribute");
+        assertEquals(Category.GLOBAL_ONLY, spec("attackCooldown").category());
+        assertTrue(spec("attackCooldown").note().contains("no longer carries an attack speed modifier"));
     }
 
     private static final List<String> MUST_STAY_GLOBAL = List.of(
@@ -334,7 +332,8 @@ class SettingCatalogTest {
             "mendDurabilityThreshold", "shieldHealthThreshold", "shieldHoldTicks", "shieldRaiseTicks",
             "minHungerToEat", "retreatHealthPercent", "criticalHealthPercent", "factionsEnabled",
             "friendlyFireEnabled", "missChance", "mistakeChance", "shieldBreakChance", "attackInvincible",
-            "aimSpeed", "shieldMace", "arrowPredictionEnabled", "rangedStrafeEnabled", "rangedRetreatOnClose");
+            "aimSpeed", "shieldMace", "arrowPredictionEnabled", "rangedStrafeEnabled", "rangedRetreatOnClose",
+            "meleeRange", "attackCooldown");
 
     @Test
     void behaviourSettingsWithoutATruthfulProxyAreNeverRandomized() {
@@ -420,8 +419,8 @@ class SettingCatalogTest {
         }
 
         assertEquals(68, total);
-        assertEquals(21, parts.get(Category.PER_BOT_RANDOMIZABLE).size());
-        assertEquals(38, parts.get(Category.GLOBAL_ONLY).size());
+        assertEquals(19, parts.get(Category.PER_BOT_RANDOMIZABLE).size());
+        assertEquals(40, parts.get(Category.GLOBAL_ONLY).size());
         assertEquals(9, parts.get(Category.ADMIN_OPERATIONAL).size());
         assertEquals(0, parts.get(Category.UNSUPPORTED).size());
     }

@@ -6,6 +6,7 @@ import dev.spawnbotswrapper.inhabitants.config.ConfigIO;
 import dev.spawnbotswrapper.inhabitants.mc.AggroDriver;
 import dev.spawnbotswrapper.inhabitants.mc.CombatLogger;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
+import dev.spawnbotswrapper.inhabitants.mc.EatGate;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
 import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
@@ -62,6 +63,8 @@ public final class InhabitantsMod implements ModInitializer {
     private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER);
     private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER);
     private final OutOfAmmoGapCloser gapCloser = new OutOfAmmoGapCloser(() -> session, LOGGER);
+    /** Vanilla's rule that food is only eaten below a full food bar, which PvP BOT's own eating skips. */
+    private final EatGate eatGate = new EatGate(LOGGER);
 
     @Override
     public void onInitialize() {
@@ -211,6 +214,9 @@ public final class InhabitantsMod implements ModInitializer {
         rangedFire.tick(server);
         gapCloser.tick(server);
         if (current != null && current.server() == server) {
+            shared.guard().run("eat gate", () -> eatGate.tick(server));
+        }
+        if (current != null && current.server() == server) {
             combat.tick(server.getTickCount());
         }
     }
@@ -222,6 +228,7 @@ public final class InhabitantsMod implements ModInitializer {
             aggro.reset();
             rangedFire.reset();
             gapCloser.reset();
+            eatGate.reset();
             current.shutdown();
         }
     }

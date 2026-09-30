@@ -60,8 +60,6 @@ runs on defaults until you fix it.
   "profiles": {
     "randomize": true,
     "coverageBuckets": 8,
-    "attributeVariation": true,
-    "scaleVariation": false,
     "behaviorVariation": true,
     "allowExplosiveKits": false,
     "allowElytra": false,
@@ -181,7 +179,7 @@ PvP BOT keeps every combat setting in **one process-wide singleton**; this addon
 listed under `pvpbotSettings` (see "Managed PvP BOT settings" below), server-wide and never per bot, so it never
 silently changes ONE existing bot's behaviour. Per-bot variety therefore comes only from
 what a bot **carries** (PvP BOT chooses its weapon mode, shield/totem/potion/food/mending behaviour from
-its inventory), from the few vanilla **attributes** PvP BOT actually reads, and from PvP BOT's own **patrol
+its inventory), from its starting health and hunger, and from PvP BOT's own **patrol
 path** system (stance and walk type; every path has its attack flag on, see "Every inhabitant fights" below).
 
 The full table — every one of PvP BOT's 68 settings, whether it can vary per bot, and exactly how — is in
@@ -611,6 +609,41 @@ PvP BOT persists paths but not who follows them — leaving restored inhabitants
 the settle window, every bot that is already online *and* listed by PvP BOT gets its path rebuilt and its follower
 re-attached (and, if `profiles.reapplyOnRestore`, its profile re-applied) within one roster pass (~1 s); a bot
 PvP BOT has not restored yet is simply retried, never treated as gone, so the reconcile/orphan logic is unchanged.
+
+## Inhabitants are ordinary survival players: what they use up stays used up
+
+The point of an inhabitant is that it plays like a player, with the limits of a player: it can run out of arrows,
+food, potions, blocks and tool durability, and nothing refills it.
+
+* **Saved state.** The live state of every inhabitant (all 41 inventory slots including armor and offhand as vanilla
+  item data with count, damage and components, the selected slot, health, food level, saturation, exhaustion, active
+  effects, experience, fire and air) is written into its record in `populations.json`: once right after its first
+  dressing, then about every 5 seconds while it is online (only when it changed), again when it goes dormant and once
+  more when the server stops.
+* **Dormancy keeps it.** A bot that goes dormant is removed by PvP BOT (which empties its inventory). It used to wake
+  dressed again from its stored profile, with a full quiver, fresh food, potions and totems, pristine gear and full
+  health. It now wakes with exactly the saved state, slot by slot, and is never dressed a second time. A record from
+  before this change has no saved state: it is dressed from its profile once (one INFO line per bot) and saved from
+  then on.
+* **A restart does not heal.** HeroBot creates a fake player at full health. After a restart the saved health,
+  hunger, saturation, exhaustion and missing effects are put back (health never above the current maximum).
+  A bot the addon has not dressed yet (no marker) is restored from its saved state when it has one, from the
+  profile only when it never was saved (`profiles.reapplyOnRestore` still switches this whole re-dressing off).
+* **Survival mode.** HeroBot spawns a fake player in **creative** unless told otherwise, and PvP BOT's own switch to
+  survival can run before the player exists. Every inhabitant the addon sees (spawn, restore, and every 5 s) that is in
+  another game mode or has creative-style abilities (instabuild, mayfly, invulnerable, flying) is put into survival
+  through vanilla's own path; one WARN per bot.
+* **Vanilla stats only.** Earlier versions gave every bot permanent attribute modifiers with no item or effect
+  behind them (max health -10..+20, reach, knockback resistance up to 1.0, attack speed). A normal player cannot have
+  those, so `profiles.attributeVariation` and `profiles.scaleVariation` are gone (an old config that still names them
+  is fine: unknown options are ignored). Modifiers of this addon that an earlier version put on an existing bot are
+  removed (one INFO line per bot) and its health is clamped to the new maximum. Armor, toughness, netherite knockback
+  resistance and enchantments come from gear and stay. Seeded (deterministic) worlds keep every other roll: the old
+  attribute rolls are still drawn and dropped.
+* **No eating at a full food bar.** PvP BOT starts eating with `startUsingItem`, which skips vanilla's rule that food
+  can only be eaten below 20 food unless it is always edible. An inhabitant that is eating food which a player could
+  not eat right now is stopped in the same tick (golden apples, chorus fruit and the like are always edible and are
+  left alone; potions and milk are not food and are never touched).
 
 ## Admin / testing commands
 

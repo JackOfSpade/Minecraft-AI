@@ -340,6 +340,9 @@ public final class PopulationEngine implements EngineControl {
     /** Flushes persistence; call on server stop. */
     public void shutdown() {
         shutDown = true;
+        // The live state of every inhabitant goes into its record first: a restart heals a fake player, and without this
+        // the records would hold the state of up to five seconds earlier.
+        ctx.guard("final snapshots", roster::snapshotAll);
         ctx.guard("shutdown", ctx.store::flush);
     }
 

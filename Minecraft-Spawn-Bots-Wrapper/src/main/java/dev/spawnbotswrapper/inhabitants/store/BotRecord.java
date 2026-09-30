@@ -39,6 +39,13 @@ public final class BotRecord {
     public int profileVersion;
     /** True once the loadout/vitals/behaviour were applied to the live entity. */
     public boolean profileApplied;
+    /**
+     * The latest live state of the bot (inventory, health, hunger, effects, ...), refreshed while it is online and
+     * taken once more when it goes dormant or the server stops; null for a bot that was never snapshotted (records
+     * from before snapshots existed, or a bot that is not yet dressed). A bot that comes back is restored from it
+     * rather than dressed again from {@link #profile}, so what it used up stays used up.
+     */
+    public BotSnapshot snapshot;
 
     public BotRecord() {
     }

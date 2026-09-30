@@ -366,65 +366,37 @@ public final class ProfileApplierMcCases {
         return Identifier.fromNamespaceAndPath("pvpbot_inhabitants", path);
     }
 
-    public static void aModifierIsInstalledUnderTheFixedAddonId() {
-        AttributeInstance health = maxHealth();
-        List<String> warnings = new ArrayList<>();
-        assertTrue(ProfileApplier.install(health, Identifier.parse("minecraft:max_health"),
-                new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 10.0), warnings));
-        assertEquals(30.0, health.getValue(), 1e-9);
-        assertEquals(20.0, health.getBaseValue(), 1e-9, "the base value is never touched");
-        assertTrue(health.hasModifier(modifierId("profile/max_health")));
-        assertEquals(1, health.getPermanentModifiers().size(), "persistent, so it is saved with the player");
-        assertTrue(warnings.isEmpty());
+    /** What older versions put on every bot: a permanent modifier under the addon's own id. */
+    private static void addOldStyleModifier(AttributeInstance instance, String path, double amount) {
+        instance.addOrReplacePermanentModifier(
+                new AttributeModifier(modifierId(path), amount, AttributeModifier.Operation.ADD_VALUE));
     }
 
-    public static void applyingAgainReplacesTheModifierInsteadOfStackingOrThrowing() {
+    public static void theAddonsOwnModifiersAreRemovedAndTheBaseValueIsUntouched() {
         AttributeInstance health = maxHealth();
-        Identifier id = Identifier.parse("minecraft:max_health");
-        ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 10.0), new ArrayList<>());
-        ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 10.0), new ArrayList<>());
-        assertEquals(30.0, health.getValue(), 1e-9, "same profile twice = same result");
-        ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, -4.0), new ArrayList<>());
-        assertEquals(16.0, health.getValue(), 1e-9, "a different value replaces the old one");
-        assertEquals(1, health.getModifiers().size());
-    }
-
-    public static void allThreeOperationsAreSupported() {
-        AttributeInstance base = maxHealth();
-        ProfileApplier.install(base, Identifier.parse("minecraft:max_health"),
-                new BotProfile.AttributeMod(BotProfile.Op.ADD_MULTIPLIED_BASE, 0.5), new ArrayList<>());
-        assertEquals(30.0, base.getValue(), 1e-9);
-
-        AttributeInstance total = maxHealth();
-        ProfileApplier.install(total, Identifier.parse("minecraft:max_health"),
-                new BotProfile.AttributeMod(BotProfile.Op.ADD_MULTIPLIED_TOTAL, -0.5), new ArrayList<>());
-        assertEquals(10.0, total.getValue(), 1e-9);
-
-        assertEquals(AttributeModifier.Operation.ADD_VALUE, ProfileApplier.operationOf("add_value"));
-        assertEquals(AttributeModifier.Operation.ADD_MULTIPLIED_BASE, ProfileApplier.operationOf("add_multiplied_base"));
-        assertEquals(AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, ProfileApplier.operationOf("add_multiplied_total"));
-    }
-
-    public static void moddedAttributesGetTheirNamespaceInTheModifierId() {
-        AttributeInstance health = maxHealth();
-        ProfileApplier.install(health, Identifier.parse("somemod:vigor"),
-                new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, 1.0), new ArrayList<>());
-        assertTrue(health.hasModifier(modifierId("profile/somemod/vigor")));
-    }
-
-    public static void badModifiersAreRejectedWithoutChangingAnything() {
-        AttributeInstance health = maxHealth();
-        List<String> warnings = new ArrayList<>();
-        Identifier id = Identifier.parse("minecraft:max_health");
-        assertFalse(ProfileApplier.install(health, id, new BotProfile.AttributeMod("multiply", 2.0), warnings));
-        assertFalse(ProfileApplier.install(health, id, new BotProfile.AttributeMod(null, 2.0), warnings));
-        assertFalse(ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, Double.NaN), warnings));
-        assertFalse(ProfileApplier.install(health, id, new BotProfile.AttributeMod(BotProfile.Op.ADD_VALUE, Double.POSITIVE_INFINITY), warnings));
-        assertEquals(3 + 1, warnings.size(), warnings.toString());
+        addOldStyleModifier(health, "profile/max_health", 12.0);
+        assertEquals(32.0, health.getValue(), 1e-9);
+        List<String> removed = VanillaRules.stripFrom("minecraft:max_health", health);
+        assertEquals(1, removed.size(), removed.toString());
+        assertTrue(removed.get(0).startsWith("minecraft:max_health +12.00"), removed.get(0));
         assertEquals(20.0, health.getValue(), 1e-9);
+        assertEquals(20.0, health.getBaseValue(), 1e-9, "the base value is never touched");
         assertTrue(health.getModifiers().isEmpty());
-        assertNull(ProfileApplier.operationOf("nonsense"));
-        assertNull(ProfileApplier.operationOf(null));
+    }
+
+    public static void aModifierThatIsNotTheAddonsStays() {
+        AttributeInstance health = maxHealth();
+        addOldStyleModifier(health, "profile/max_health", -6.0);
+        // What a vanilla source (an item, an effect) puts on: it must survive.
+        health.addPermanentModifier(new AttributeModifier(Identifier.parse("minecraft:some_source"), 4.0,
+                AttributeModifier.Operation.ADD_VALUE));
+        addOldStyleModifier(health, "profile/somemod/vigor", 1.0);
+        List<String> removed = VanillaRules.stripFrom("minecraft:max_health", health);
+        assertEquals(2, removed.size(), removed.toString());
+        assertEquals(24.0, health.getValue(), 1e-9);
+        assertEquals(1, health.getModifiers().size());
+        assertTrue(health.hasModifier(Identifier.parse("minecraft:some_source")));
+        assertTrue(VanillaRules.stripFrom("minecraft:max_health", health).isEmpty(), "idempotent");
     }
 
     public static void startingHealthIsAFractionOfMaxButNeverBelowHalfAHeart() {

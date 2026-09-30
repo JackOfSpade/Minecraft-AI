@@ -126,6 +126,7 @@ final class InMemoryStorage implements PopulationStorage {
             n.profile = b.profile;
             n.profileVersion = b.profileVersion;
             n.profileApplied = b.profileApplied;
+            n.snapshot = b.snapshot;
             c.bots.add(n);
         }
         return c;

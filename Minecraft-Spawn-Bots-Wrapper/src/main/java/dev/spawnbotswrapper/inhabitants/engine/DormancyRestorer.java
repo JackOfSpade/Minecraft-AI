@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.engine;
 
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
@@ -111,7 +112,26 @@ final class DormancyRestorer {
             return; // reset or otherwise no longer ours: leave whatever exists alone
         }
         try {
-            ctx.bots.applyProfile(bot.name, bot.profile);
+            BotSnapshot snapshot = bot.snapshot;
+            if (snapshot != null && snapshot.usable()) {
+                // Exactly what it had, slot by slot; nothing is dressed from the profile (that would refill the quiver,
+                // repair the gear and heal the bot).
+                BotGateway.ApplyResult woke = ctx.bots.wake(bot.name, bot.profile, snapshot);
+                if (woke != null && !woke.allApplied()) {
+                    ctx.log.warn("wake-partial", "Inhabitant " + bot.name + " woke only partly (loadout " + woke.loadoutApplied()
+                            + ", vitals " + woke.vitalsApplied() + ", behaviour " + woke.behaviorApplied() + "): " + woke.warnings());
+                }
+            } else {
+                // A record from before snapshots existed (or a bot whose state could never be read): the profile is all
+                // there is. Logged once per bot, because the snapshot taken below makes the next wake exact.
+                ctx.info("Inhabitant {} has no saved state (its record predates them); it is dressed from its profile now "
+                        + "and its state is saved from here on", bot.name);
+                ctx.bots.applyProfile(bot.name, bot.profile);
+                BotSnapshot fresh = ctx.snapshot(bot.name);
+                if (fresh != null) {
+                    bot.snapshot = fresh;
+                }
+            }
         } catch (OutOfMemoryError e) {
             throw e;
         } catch (Throwable t) {

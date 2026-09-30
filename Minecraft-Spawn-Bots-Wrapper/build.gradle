@@ -120,7 +120,7 @@ def prepareGameTestRun = tasks.register('prepareGameTestRun') {
         new File(runDir, 'config/pvpbot_inhabitants.json').setText('''{
   "include": ["gametest:none"],
   "processing": { "restoreSettleTicks": 0, "initialDelayTicks": 0, "spawnIntervalTicks": 0, "maxLiveBots": 8 },
-  "profiles": { "randomize": false, "behaviorVariation": false, "attributeVariation": false },
+  "profiles": { "randomize": false, "behaviorVariation": false },
   "tpsThrottle": { "enabled": false },
   "dormancy": { "enabled": false }''' + fixesConfig + '\n}\n', 'UTF-8')
     }

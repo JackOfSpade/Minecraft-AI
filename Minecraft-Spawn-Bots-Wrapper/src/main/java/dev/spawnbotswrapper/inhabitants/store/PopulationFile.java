@@ -316,6 +316,9 @@ final class PopulationFile {
             if (bot.name == null) {
                 warnings.add("a bot of structure " + key + " has no name; it cannot be found by name");
             }
+            if (bot.snapshot != null) {
+                bot.snapshot.normalised();
+            }
             // dataVersion 3 migration: profiles are authoritative and never regenerated, so a profile stored
             // as a pacifist is corrected in place. Its path (attack=false upstream) is rebuilt with attack=true
             // the next time the bot's patrol is (re)assigned, which happens on every restore.

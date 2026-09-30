@@ -7,7 +7,6 @@ import dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog.ValueType;
 
 import java.util.List;
 
-import static dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog.Mechanism.ATTRIBUTE;
 import static dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog.Mechanism.LOADOUT;
 import static dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog.Mechanism.PATH;
 
@@ -109,17 +108,20 @@ final class SettingData {
                                 + "is written into the settings whenever PvP BOT loads them. 128 is a ceiling only: line of "
                                 + "sight decides when a chase ends, and the high value keeps PvP "
                                 + "BOT from dropping a chased target early and lets a hit from far away register as revenge."),
-                decimal("meleeRange", "melee-range", 2.0, 6.0, 3.5).perBot(ATTRIBUTE,
-                        "vitals.attributes[minecraft:entity_interaction_range]",
-                        "Partial, reach only. Varies: entity_interaction_range 2..6 (vanilla 3.0); on the 'attack "
+                decimal("meleeRange", "melee-range", 2.0, 6.0, 3.5).global(
+                        "No per-bot proxy: global melee reach. Older versions of this addon varied the bot's "
+                                + "entity_interaction_range per bot; an inhabitant now has the attributes of a vanilla player "
+                                + "(no modifier without an item or effect behind it), so nothing varies. On the 'attack "
                                 + "once' path (criticals off, mace hits, shield-break hits) effective reach = "
-                                + "min(attribute, global meleeRange), so it can only clamp down. Does not vary: "
-                                + "approach and attack-attempt distance stay the global meleeRange, and the default "
-                                + "jump-crit path (criticals on) calls the vanilla attack directly with no reach "
-                                + "check. A block in the line of sight is hit first. Verified in HeroBot HEAD only. Managed by this "
-                                + "addon: config pvpbotSettings.meleeRange (shipped 2.5, PvP BOT's own default is 3.5): a bot "
-                                + "switches to its melee weapon within twice this (5 blocks) and attacks within it (2.5 blocks "
-                                + "between the two centres, inside vanilla's 3.0 reach)."),
+                                + "min(entity_interaction_range, global meleeRange), so the global value can only clamp "
+                                + "down from vanilla 3.0; approach and attack-attempt distance stay the global meleeRange, "
+                                + "and the default jump-crit path (criticals on) calls the vanilla attack directly with no "
+                                + "reach check. A block in the line of sight is hit first. Verified in HeroBot HEAD only. "
+                                + "Managed by this addon: config pvpbotSettings.meleeRange (shipped 2.5, PvP BOT's own default "
+                                + "is 3.5): a bot switches to its melee weapon within twice this (5 blocks) and attacks within "
+                                + "it (2.5 blocks between the two centres, inside vanilla's 3.0 reach). While it is managed at "
+                                + "2.5, an entity_interaction_range above 2.5 on a bot (for example from a modded attribute) has "
+                                + "no effect on PvP BOT's attack path: the effective reach is min(attribute, 2.5)."),
                 decimal("rangedMinRange", "ranged-min-range", 3.0, 20.0, 20.0).global(
                         "No per-bot proxy: numeric tuning. Archers park at about min to min+2 blocks (20 to 22 by "
                                 + "default), not at rangedOptimalRange; the loadout only decides who is an archer. The "
@@ -140,13 +142,13 @@ final class SettingData {
                         "No per-bot proxy: mace mode-selection distance and engagement radius (twice the value). A "
                                 + "mace in the loadout only decides who can use mace mode. No command key: "
                                 + "settings.json or the GUI payload only."),
-                whole("attackCooldown", "attack-cooldown", 1, 40, 10).perBot(ATTRIBUTE,
-                        "vitals.attributes[minecraft:attack_speed]; loadout: the held weapon sets the vanilla recharge",
-                        "Partial, attack tempo. Varies: the real interval, max(global attackCooldown, vanilla recharge "
-                                + "of the held weapon at the bot's attack_speed); the attribute and the weapon change "
-                                + "how long a bot waits, never below the global floor. Does not vary: the setting "
-                                + "itself, and the low-health multiplier (x1.5) hits every bot. At the default of 10 "
-                                + "ticks the weapon already dominates (sword about 12.5 ticks, axe 20 or more)."),
+                whole("attackCooldown", "attack-cooldown", 1, 40, 10).global(
+                        "No per-bot proxy: global floor between attacks. The real interval is max(global attackCooldown, "
+                                + "vanilla recharge of the held weapon at the vanilla attack_speed of 4.0): the weapon in "
+                                + "the loadout sets the tempo, and an inhabitant no longer carries an attack speed "
+                                + "modifier (older versions of this addon rolled one, a stat no player has). The "
+                                + "low-health multiplier (x1.5) hits every bot. At the default of 10 ticks the weapon "
+                                + "already dominates (sword about 12.5 ticks, axe 20 or more)."),
                 decimal("moveSpeed", "move-speed", 0.1, 2.0, 1.0).global(
                         "No per-bot proxy. Audits split: one saw movement_speed as a coarse substitute, the other "
                                 + "showed that HeroBot overwrites the input fields PvP BOT writes, so all motion is "

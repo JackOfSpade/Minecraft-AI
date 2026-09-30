@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.engine;
 
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import dev.spawnbotswrapper.inhabitants.store.PopulationStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -208,6 +209,31 @@ final class EngineContext {
         }
     }
 
+    /** The live state of an online inhabitant; null when it cannot be read (or the gateway threw). */
+    BotSnapshot snapshot(String name) {
+        try {
+            return bots.snapshot(name);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("snapshot", String.valueOf(name), t);
+            return null;
+        }
+    }
+
+    /** Puts an online inhabitant right (survival, vanilla attributes); what was wrong, or none when the gateway threw. */
+    BotGateway.StateFixes enforceVanilla(String name) {
+        try {
+            BotGateway.StateFixes fixes = bots.enforceVanilla(name);
+            return fixes == null ? BotGateway.StateFixes.NONE : fixes;
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("enforceVanilla", String.valueOf(name), t);
+            return BotGateway.StateFixes.NONE;
+        }
+    }
+
     /** Best effort: takes a bot the addon could not finish out of the world and releases its upstream state. */
     void discard(String name) {
         guard("discard", () -> bots.remove(name));
@@ -235,6 +261,11 @@ final class EngineContext {
         } else {
             LOG.debug(message, args);
         }
+    }
+
+    /** A rare, operator-relevant anomaly (never per tick; at most once per bot and kind): always written at WARN. */
+    void warn(String message, Object... args) {
+        LOG.warn(message, args);
     }
 
     /** A rare, operator-relevant event (never per tick or per bot): always written at INFO. */

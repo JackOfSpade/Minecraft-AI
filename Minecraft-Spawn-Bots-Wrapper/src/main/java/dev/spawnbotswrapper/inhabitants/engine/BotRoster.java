@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.engine;
 
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
@@ -36,6 +37,12 @@ final class BotRoster {
     /** Each online inhabitant's inventory is swept (ender pearls, disabled enchantments) at most this often (5 s). */
     static final int PEARL_SWEEP_TICKS = 100;
 
+    /** Each online inhabitant's state (inventory, health, hunger, effects) is saved to its record at most this often (5 s), and only when it changed. */
+    static final int SNAPSHOT_TICKS = 100;
+
+    /** Each online inhabitant is checked for survival mode and for stats of this addon's older versions this often (5 s). */
+    static final int VANILLA_SWEEP_TICKS = 100;
+
     private static final class Tracked {
         final StructureKey structure;
         final BotRecord bot;
@@ -49,6 +56,12 @@ final class BotRoster {
         /** The first removal of each kind is logged at INFO, later ones only in debug mode. */
         boolean pearlsLogged;
         boolean enchantmentsLogged;
+        /** Tick from which the next state snapshot is due. */
+        long nextSnapshot;
+        /** Tick from which the next survival-mode / vanilla-attribute check is due. */
+        long nextVanillaSweep;
+        boolean gameModeLogged;
+        boolean modifiersLogged;
 
         Tracked(StructureKey structure, BotRecord bot) {
             this.structure = structure;
@@ -208,7 +221,9 @@ final class BotRoster {
             Tracked t = entries.get(cursor++);
             observe(t, now);
             maybeRestore(t, cfg);
+            sweepVanilla(t, now, cfg);
             sweepPearls(t, now, cfg);
+            snapshotIfDue(t, now);
         }
     }
 
@@ -240,7 +255,9 @@ final class BotRoster {
             }
             setOnline(t, true);
             maybeRestore(t, cfg);
+            sweepVanilla(t, ctx.now(), cfg);
             sweepPearls(t, ctx.now(), cfg);
+            snapshotIfDue(t, ctx.now());
         }
     }
 
@@ -280,7 +297,7 @@ final class BotRoster {
         }
         t.restored = true;
         try {
-            boolean changed = ctx.bots.restore(t.bot.name, t.bot.profile);
+            boolean changed = ctx.bots.restore(t.bot.name, t.bot.profile, t.bot.snapshot);
             ctx.debug(cfg, "Restored upstream state of inhabitant {} (changed: {})", t.bot.name, changed);
         } catch (OutOfMemoryError e) {
             throw e;
@@ -334,6 +351,81 @@ final class BotRoster {
             throw e;
         } catch (Throwable e) {
             ctx.log.error("stripDisabledEnchantments", t.bot.name, e);
+        }
+    }
+
+    /** True when this bot has been through {@link #maybeRestore} since it came online (its live state is its own again). */
+    boolean isRestored(BotRecord bot) {
+        Tracked t = byName.get(EngineContext.lower(bot.name));
+        return t != null && t.online && t.restored;
+    }
+
+    /**
+     * Writes the live state of every restored online inhabitant into its record now, changed or not; called when the
+     * server stops so a restart brings each bot back with exactly the health, hunger and items it had. A bot that has
+     * not been restored yet after a start is skipped: what it carries is not its own state yet (a fake player is created
+     * at full health).
+     */
+    void snapshotAll() {
+        for (Tracked t : new ArrayList<>(entries)) {
+            if (t.online && t.restored && t.bot.profile != null) {
+                ctx.guard("snapshot", () -> snapshot(t, true));
+            }
+        }
+    }
+
+    private void snapshotIfDue(Tracked t, long now) {
+        if (!t.online || !t.restored || t.bot.profile == null || now < t.nextSnapshot) {
+            return;
+        }
+        t.nextSnapshot = now + SNAPSHOT_TICKS;
+        ctx.guard("snapshot", () -> snapshot(t, false));
+    }
+
+    private void snapshot(Tracked t, boolean force) {
+        BotSnapshot next = ctx.snapshot(t.bot.name);
+        if (next == null) {
+            return;
+        }
+        BotSnapshot previous = t.bot.snapshot;
+        if (BotSnapshot.worthPersisting(previous, next) || (force && !next.equals(previous))) {
+            t.bot.snapshot = next;
+            ctx.store.markDirty();
+        }
+    }
+
+    /**
+     * Keeps an online inhabitant an ordinary survival player with vanilla attributes: HeroBot spawns a fake player in
+     * CREATIVE unless told otherwise (PvP BOT's own switch to survival can run before the player exists), and older
+     * versions of this addon gave every bot permanent attribute modifiers (max health, reach, knockback resistance,
+     * attack speed) that no item or effect stands behind. Both are corrected through vanilla's own paths, the first
+     * occurrence per bot and kind at WARN/INFO, later ones only in debug mode. Never throws.
+     */
+    private void sweepVanilla(Tracked t, long now, InhabitantsConfig cfg) {
+        if (!t.online || now < t.nextVanillaSweep) {
+            return;
+        }
+        t.nextVanillaSweep = now + VANILLA_SWEEP_TICKS;
+        BotGateway.StateFixes fixes = ctx.enforceVanilla(t.bot.name);
+        if (fixes.previousGameMode() != null || !fixes.abilities().isEmpty()) {
+            String what = (fixes.previousGameMode() != null ? "game mode " + fixes.previousGameMode() : "")
+                    + (fixes.previousGameMode() != null && !fixes.abilities().isEmpty() ? ", " : "")
+                    + (fixes.abilities().isEmpty() ? "" : "abilities " + fixes.abilities());
+            if (!t.gameModeLogged) {
+                t.gameModeLogged = true;
+                ctx.warn("Inhabitant {} was not an ordinary survival player ({}); it was put into survival mode", t.bot.name, what);
+            } else {
+                ctx.debug(cfg, "Put inhabitant {} back into survival mode ({})", t.bot.name, what);
+            }
+        }
+        if (!fixes.modifiers().isEmpty()) {
+            if (!t.modifiersLogged) {
+                t.modifiersLogged = true;
+                ctx.info("Removed attribute modifiers that older versions of this addon gave inhabitant {}: {} (inhabitants have "
+                        + "vanilla attributes only)", t.bot.name, fixes.modifiers());
+            } else {
+                ctx.debug(cfg, "Removed more attribute modifiers from inhabitant {}: {}", t.bot.name, fixes.modifiers());
+            }
         }
     }
 

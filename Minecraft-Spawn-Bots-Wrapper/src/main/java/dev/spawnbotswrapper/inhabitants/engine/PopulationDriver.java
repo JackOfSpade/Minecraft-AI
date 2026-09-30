@@ -549,6 +549,9 @@ final class PopulationDriver {
         bot.profile = profile;
         bot.profileVersion = profile.version();
         bot.profileApplied = applied.allApplied();
+        // The first snapshot is taken right after the dressing, so the marker on the entity and the saved state stay in
+        // step: a bot that comes back is restored from what it had, never dressed a second time.
+        bot.snapshot = ctx.snapshot(bot.name);
         if (uuid != null) {
             bot.uuid = uuid.toString();
         }

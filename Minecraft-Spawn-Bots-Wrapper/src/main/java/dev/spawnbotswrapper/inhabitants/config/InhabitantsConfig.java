@@ -229,19 +229,15 @@ public final class InhabitantsConfig {
 
     public static final class Profiles {
         /**
-         * Give every bot an independently randomized loadout / attribute / behaviour profile.
+         * Give every bot an independently randomized loadout / starting health and hunger / behaviour profile. Bots never get attribute modifiers (max health, reach, ...): they have the stats of a vanilla player.
          * When false bots keep whatever PvP BOT gives a fresh bot (nothing).
          */
         public boolean randomize = true;
         /** How many buckets a numeric range is divided into for coverage sampling (2-64). */
         public int coverageBuckets = 8;
-        /** Also vary vanilla entity attributes (movement speed, max health, ...) per bot. */
-        public boolean attributeVariation = true;
-        /** Allow the SCALE (body size) attribute to vary. Off by default: tiny/huge bots can break pathing through doors. */
-        public boolean scaleVariation = false;
         /** Give bots a PvP BOT patrol path and/or faction where PvP BOT supports it (see README). */
         public boolean behaviorVariation = true;
-        /** Re-apply the stored profile if a bot comes back (e.g. after a restart) without its items/attributes. */
+        /** Dress a bot again if it comes back (e.g. after a restart) without its items and without a marker: from its last saved state when there is one, from the stored profile only when it never was saved. */
         public boolean reapplyOnRestore = true;
         /**
          * Allow loadouts with end crystals + obsidian, or respawn anchors + glowstone. PvP BOT's crystal/anchor

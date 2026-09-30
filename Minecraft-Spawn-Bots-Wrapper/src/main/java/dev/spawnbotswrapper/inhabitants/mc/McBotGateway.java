@@ -5,6 +5,7 @@ import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -15,6 +16,8 @@ import java.util.function.Supplier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@link BotGateway} on top of the PvP BOT adapter, the profile applier and the running server: the engine's
@@ -30,6 +33,7 @@ import net.minecraft.world.phys.Vec3;
  * {@link #poll} answers Failed, so the engine has exactly one code path for "did it work". Server thread only.
  */
 public final class McBotGateway implements BotGateway {
+    private static final Logger LOG = LoggerFactory.getLogger(McBotGateway.class);
     /** Tickets older than this are forgotten; the engine gives up on a spawn long before. */
     private static final int TICKET_MAX_AGE_TICKS = 6000;
     private static final int MAX_REJECTIONS = 1024;
@@ -48,6 +52,11 @@ public final class McBotGateway implements BotGateway {
      */
     private final Map<String, Integer> pendingPearls = new HashMap<>();
     private final Map<String, List<String>> pendingEnchantments = new HashMap<>();
+    /**
+     * What the checks of a bot's state found wrong (game mode, abilities, addon attribute modifiers) before the roster's
+     * next sweep of that bot reported it, by lower-case name: a fresh spawn is put right the moment it appears.
+     */
+    private final Map<String, StateFixes> pendingFixes = new HashMap<>();
 
     public McBotGateway(ServerAccess access, PvpBotOperations adapter, ProfileApplication applier,
                         Supplier<InhabitantsConfig> config) {
@@ -125,6 +134,9 @@ public final class McBotGateway implements BotGateway {
         }
         if (state instanceof PvpBotOperations.SpawnState.Ready ready) {
             tickets.remove(handle.id());
+            // HeroBot creates a fake player in CREATIVE unless told otherwise, and PvP BOT's own switch to survival can run
+            // before the player exists: make it an ordinary survival player before anything else looks at it.
+            enforce(handle.name());
             return new SpawnPoll.Ready(ready.uuid());
         }
         if (state instanceof PvpBotOperations.SpawnState.Failed failed) {
@@ -156,6 +168,48 @@ public final class McBotGateway implements BotGateway {
         }
         boolean behavior = applyBehavior(botName, profile.behavior(), warnings);
         return new ApplyResult(applied.loadoutApplied(), applied.vitalsApplied(), behavior, warnings);
+    }
+
+    @Override
+    public ApplyResult wake(String botName, BotProfile profile, BotSnapshot snapshot) {
+        Optional<ServerPlayer> entity = findBot(botName);
+        if (entity.isEmpty()) {
+            return new ApplyResult(false, false, false, List.of("bot " + botName + " is not online, or is not a bot"));
+        }
+        ServerPlayer bot = entity.get();
+        List<String> warnings = new ArrayList<>();
+        // Nothing is dressed from the profile: the bot gets back exactly what it had, slot by slot, and how it was doing.
+        ProfileApplication.Result restored = applier.restore(bot, snapshot, true);
+        stash(botName, restored);
+        warnings.addAll(restored.warnings());
+        if (restored.loadoutApplied() && restored.vitalsApplied()) {
+            applier.mark(bot);
+        }
+        stashFixes(botName, applier.enforceVanilla(bot));
+        boolean behavior = applyBehavior(botName, profile.behavior(), warnings);
+        return new ApplyResult(restored.loadoutApplied(), restored.vitalsApplied(), behavior, warnings);
+    }
+
+    @Override
+    public BotSnapshot snapshot(String botName) {
+        Optional<ServerPlayer> entity = findBot(botName);
+        if (entity.isEmpty()) {
+            return null;
+        }
+        List<String> warnings = new ArrayList<>();
+        BotSnapshot snapshot = applier.capture(entity.get(), warnings);
+        if (!warnings.isEmpty()) {
+            LOG.warn("The state of inhabitant {} was saved with problems: {}", botName, warnings);
+        }
+        return snapshot;
+    }
+
+    @Override
+    public StateFixes enforceVanilla(String botName) {
+        Optional<ServerPlayer> entity = findBot(botName);
+        StateFixes pending = pendingFixes.remove(key(botName));
+        StateFixes found = entity.isEmpty() ? StateFixes.NONE : applier.enforceVanilla(entity.get());
+        return pending == null ? found : pending.and(found);
     }
 
     @Override
@@ -199,6 +253,7 @@ public final class McBotGateway implements BotGateway {
     @Override
     public void forget(String botName) {
         pendingPearls.remove(key(botName));
+        pendingFixes.remove(key(botName));
         pendingEnchantments.remove(key(botName));
         try {
             adapter.clearPatrol(botName);
@@ -218,6 +273,11 @@ public final class McBotGateway implements BotGateway {
 
     @Override
     public boolean restore(String botName, BotProfile profile) {
+        return restore(botName, profile, null);
+    }
+
+    @Override
+    public boolean restore(String botName, BotProfile profile, BotSnapshot snapshot) {
         if (!isManaged(botName)) {
             return false;
         }
@@ -227,16 +287,30 @@ public final class McBotGateway implements BotGateway {
         if (behavior.usesPath() && reassignPath(botName, behavior)) {
             changed = true;
         }
-        if (config.get().profiles.reapplyOnRestore) {
-            Optional<ServerPlayer> entity = findBot(botName);
-            if (entity.isPresent() && !applier.isMarked(entity.get())) {
-                ProfileApplication.Result applied = applier.apply(entity.get(), profile, true);
+        Optional<ServerPlayer> entity = findBot(botName);
+        if (entity.isEmpty()) {
+            return changed;
+        }
+        ServerPlayer bot = entity.get();
+        // The entity is new after a restart: survival like any player, and none of the stats older versions gave it.
+        stashFixes(botName, applier.enforceVanilla(bot));
+        if (applier.isMarked(bot)) {
+            // Its inventory came back with the player's own saved data; only what the fake-player spawn resets (it heals
+            // the bot to full health) is put back from the last snapshot, so a wounded bot is still wounded.
+            if (snapshot != null) {
+                ProfileApplication.Result applied = applier.restore(bot, snapshot, false);
                 stash(botName, applied);
-                if (applied.loadoutApplied() && applied.vitalsApplied()) {
-                    applier.mark(entity.get());
-                }
                 changed = true;
             }
+        } else if (config.get().profiles.reapplyOnRestore) {
+            ProfileApplication.Result applied = snapshot != null
+                    ? applier.restore(bot, snapshot, true)
+                    : applier.apply(bot, profile, true);
+            stash(botName, applied);
+            if (applied.loadoutApplied() && applied.vitalsApplied()) {
+                applier.mark(bot);
+            }
+            changed = true;
         }
         return changed;
     }
@@ -269,6 +343,21 @@ public final class McBotGateway implements BotGateway {
         }
         if (!applied.enchantmentsRemoved().isEmpty()) {
             pendingEnchantments.computeIfAbsent(key(botName), k -> new ArrayList<>()).addAll(applied.enchantmentsRemoved());
+        }
+    }
+
+    /** Puts a bot right at once and remembers what was wrong until the next sweep reports it. */
+    private void enforce(String botName) {
+        try {
+            stashFixes(botName, findBot(botName).map(applier::enforceVanilla).orElse(StateFixes.NONE));
+        } catch (RuntimeException e) {
+            LOG.warn("Could not check the game mode of {}: {}", botName, e.toString());
+        }
+    }
+
+    private void stashFixes(String botName, StateFixes fixes) {
+        if (fixes != null && !fixes.isEmpty()) {
+            pendingFixes.merge(key(botName), fixes, StateFixes::and);
         }
     }
 

@@ -1,6 +1,8 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
+import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
+import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
 import java.util.List;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -37,6 +39,25 @@ public interface ProfileApplication {
      * a bot, or on any failure.
      */
     List<String> stripDisabledEnchantments(ServerPlayer bot);
+
+    /**
+     * Captures the live state of a bot (never a non-bot): null when the entity is not a bot, dead, or on any failure.
+     * Warnings about slots that could not be saved are appended to {@code warnings}.
+     */
+    BotSnapshot capture(ServerPlayer bot, List<String> warnings);
+
+    /**
+     * Writes a snapshot back onto a bot: with {@code inventory} the whole inventory and selected slot, then health,
+     * hunger, effects, experience, fire and air; without it (a bot that kept its inventory across a restart) only
+     * health, hunger and the effects the bot lacks. Nothing is dressed from a profile. Never throws.
+     */
+    Result restore(ServerPlayer bot, BotSnapshot snapshot, boolean inventory);
+
+    /**
+     * Makes the bot an ordinary survival player: survival game mode and no creative-style ability, and none of this
+     * addon's attribute modifiers (older versions added permanent ones). Never for a non-bot. Returns what was wrong.
+     */
+    BotGateway.StateFixes enforceVanilla(ServerPlayer bot);
 
     /**
      * @param loadoutApplied the inventory section ran to completion (individual items may still have been

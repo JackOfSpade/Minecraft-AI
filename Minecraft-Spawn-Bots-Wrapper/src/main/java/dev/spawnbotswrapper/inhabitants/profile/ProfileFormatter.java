@@ -27,10 +27,6 @@ public final class ProfileFormatter {
 
     private static final String INDENT = "  ";
 
-    /** Most relevant first: health, then reach and attack tempo, then knockback resistance and body scale. */
-    private static final List<String> ATTRIBUTE_ORDER = List.of(ItemIds.MAX_HEALTH, ItemIds.ENTITY_INTERACTION_RANGE,
-            ItemIds.ATTACK_SPEED, ItemIds.KNOCKBACK_RESISTANCE, ItemIds.SCALE);
-
     /**
      * Plain-text lines (no colour codes; the command layer may colour them) describing everything in the
      * profile, followed by notes on which behaviours are currently switched off GLOBALLY in PvP BOT
@@ -248,62 +244,16 @@ public final class ProfileFormatter {
 
     private static void vitals(List<String> out, BotProfile.Vitals v) {
         out.add("Vitals:");
-        BotProfile.AttributeMod healthMod = v.attributes().get(ItemIds.MAX_HEALTH);
-        double maxHealth = applied(ItemIds.MAX_HEALTH, healthMod);
+        double maxHealth = ItemIds.ATTRIBUTE_BASE.getOrDefault(ItemIds.MAX_HEALTH, 20.0);
         out.add(INDENT + "health: starts at " + Math.round(v.healthFraction() * 100) + "% of max ("
                 + num(v.healthFraction() * maxHealth) + " of " + num(maxHealth) + " HP)");
         out.add(INDENT + "food level: " + v.foodLevel() + "/20");
         if (v.attributes().isEmpty()) {
             out.add(INDENT + "attributes: none (vanilla values)");
-            return;
-        }
-        out.add(INDENT + "attributes:");
-        Map<String, BotProfile.AttributeMod> sorted = new TreeMap<>(v.attributes());
-        for (String known : ATTRIBUTE_ORDER) {
-            BotProfile.AttributeMod mod = sorted.remove(known);
-            if (mod != null) {
-                out.add(INDENT + INDENT + attribute(known, mod));
-            }
-        }
-        for (Map.Entry<String, BotProfile.AttributeMod> e : sorted.entrySet()) {
-            out.add(INDENT + INDENT + path(e.getKey()) + ": " + e.getValue().operation() + " " + num(e.getValue().value()));
-        }
-    }
-
-    /** The attribute's final value: vanilla base, then the one modifier this addon applies. */
-    private static double applied(String attribute, BotProfile.AttributeMod mod) {
-        double base = ItemIds.ATTRIBUTE_BASE.getOrDefault(attribute, 0.0);
-        if (mod == null) {
-            return base;
-        }
-        return switch (String.valueOf(mod.operation())) {
-            case BotProfile.Op.ADD_VALUE -> base + mod.value();
-            case BotProfile.Op.ADD_MULTIPLIED_BASE, BotProfile.Op.ADD_MULTIPLIED_TOTAL -> base * (1.0 + mod.value());
-            default -> base;
-        };
-    }
-
-    private static String attribute(String id, BotProfile.AttributeMod mod) {
-        String name = switch (id) {
-            case ItemIds.MAX_HEALTH -> "max health";
-            case ItemIds.ENTITY_INTERACTION_RANGE -> "interaction reach";
-            case ItemIds.ATTACK_SPEED -> "attack speed";
-            case ItemIds.KNOCKBACK_RESISTANCE -> "knockback resistance";
-            case ItemIds.SCALE -> "scale";
-            default -> path(id);
-        };
-        double base = ItemIds.ATTRIBUTE_BASE.getOrDefault(id, 0.0);
-        double result = applied(id, mod);
-        String op = String.valueOf(mod.operation());
-        String how;
-        if (BotProfile.Op.ADD_VALUE.equals(op)) {
-            how = num(base) + " base " + (mod.value() < 0 ? "- " : "+ ") + num(Math.abs(mod.value()));
-        } else if (BotProfile.Op.ADD_MULTIPLIED_BASE.equals(op) || BotProfile.Op.ADD_MULTIPLIED_TOTAL.equals(op)) {
-            how = num(base) + " base " + (mod.value() < 0 ? "-" : "+") + num(Math.abs(mod.value()) * 100) + "%";
         } else {
-            how = "unknown operation " + op + " " + num(mod.value());
+            out.add(INDENT + "attributes: none applied (vanilla values); " + v.attributes().size()
+                    + " stored by an older version are ignored");
         }
-        return name + " " + num(result) + " (" + how + ")";
     }
 
     private static void behavior(List<String> out, BotProfile.Behavior b) {

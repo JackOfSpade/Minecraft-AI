@@ -9,7 +9,6 @@ import dev.spawnbotswrapper.inhabitants.util.SplitMix64;
 
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.function.Supplier;
 
 /**
@@ -22,8 +21,8 @@ import java.util.function.Supplier;
  * current options - never on the clock or on call order elsewhere.
  * <p>
  * The profile only expresses what PvP BOT lets an addon vary per bot without touching its global settings
- * singleton: inventory, a few vanilla attributes it actually reads, and its own path system for stance and
- * patrol. There is no combat AI here; see {@link LoadoutRoller} for how capability switches gate items.
+ * singleton: inventory, starting health and hunger, and its own path system for stance and patrol. Never an attribute
+ * modifier: an inhabitant has the stats of a vanilla player. There is no combat AI here; see {@link LoadoutRoller} for how capability switches gate items.
  */
 public final class ProfileGenerator implements ProfileFactory {
 
@@ -66,7 +65,7 @@ public final class ProfileGenerator implements ProfileFactory {
                 decks == null ? new TransientDeckStore() : decks, buckets), buckets);
 
         LoadoutRoller.Rolled loadout = LoadoutRoller.roll(roller, caps, opts);
-        BotProfile.Vitals vitals = vitals(roller, caps, opts);
+        BotProfile.Vitals vitals = vitals(roller, caps);
         BotProfile.Behavior behavior = opts.behaviorVariation ? behavior(roller) : BotProfile.Behavior.standing();
         String archetype = Archetypes.label(loadout.facts(), behavior);
 
@@ -76,36 +75,24 @@ public final class ProfileGenerator implements ProfileFactory {
     }
 
     /**
-     * Movement speed is deliberately not varied: PvP BOT applies its own moveSpeed as a velocity scalar,
-     * so the vanilla attribute would change nothing it reads. The four attributes below are the ones it
-     * does consult (health ratios, hit reach, attack cooldown) plus knockback resistance for durability.
+     * Health fraction and food level only. An inhabitant has the attributes of a vanilla player: earlier versions also
+     * rolled permanent modifiers for max health, reach, attack speed and knockback resistance, stats with no item or
+     * effect behind them that no player can have, so nothing of the kind is generated or applied any more. Those four
+     * rolls are still DRAWN (and dropped), exactly as before, so every other roll of a seeded world stays where it was and
+     * an existing deterministic world keeps its loadouts and behaviours.
+     * <p>
+     * Movement speed was never varied: PvP BOT applies its own moveSpeed as a velocity scalar, so the vanilla attribute
+     * would change nothing it reads.
      */
-    private BotProfile.Vitals vitals(Roller r, GlobalCapabilities caps, InhabitantsConfig.Profiles o) {
+    private BotProfile.Vitals vitals(Roller r, GlobalCapabilities caps) {
         double health = r.fraction("profile.vitals.health", 0.35, 1.0, 2);
         // Starting hunger is only interesting while PvP BOT's eating logic is on to react to it.
         int food = caps.autoEatEnabled() ? r.count("profile.vitals.food", 6, 20) : 20;
-        Map<String, BotProfile.AttributeMod> attributes = new TreeMap<>();
-        if (o.attributeVariation) {
-            int maxHealth = r.count("profile.attr.maxHealth", -10, 20);
-            put(attributes, ItemIds.MAX_HEALTH, BotProfile.Op.ADD_VALUE, maxHealth);
-            put(attributes, ItemIds.ENTITY_INTERACTION_RANGE, BotProfile.Op.ADD_VALUE,
-                    r.fraction("profile.attr.reach", -1.0, 3.0, 1));
-            put(attributes, ItemIds.ATTACK_SPEED, BotProfile.Op.ADD_MULTIPLIED_BASE,
-                    r.fraction("profile.attr.attackSpeed", -0.6, 0.0, 2));
-            put(attributes, ItemIds.KNOCKBACK_RESISTANCE, BotProfile.Op.ADD_VALUE,
-                    r.fraction("profile.attr.knockbackResistance", 0.0, 1.0, 2));
-            if (o.scaleVariation) {
-                put(attributes, ItemIds.SCALE, BotProfile.Op.ADD_VALUE, r.fraction("profile.attr.scale", -0.4, 0.5, 2));
-            }
-        }
-        return new BotProfile.Vitals(health, food, attributes);
-    }
-
-    /** A modifier of exactly zero changes nothing, so it is left out rather than stored as noise. */
-    private static void put(Map<String, BotProfile.AttributeMod> into, String attribute, String op, double value) {
-        if (value != 0.0) {
-            into.put(attribute, new BotProfile.AttributeMod(op, value));
-        }
+        r.count("profile.attr.maxHealth", -10, 20);
+        r.fraction("profile.attr.reach", -1.0, 3.0, 1);
+        r.fraction("profile.attr.attackSpeed", -0.6, 0.0, 2);
+        r.fraction("profile.attr.knockbackResistance", 0.0, 1.0, 2);
+        return new BotProfile.Vitals(health, food, Map.of());
     }
 
     /**

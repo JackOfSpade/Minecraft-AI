@@ -57,11 +57,6 @@ class ProfileCoverageTest {
         return n;
     }
 
-    private static double attributeValue(BotProfile p, String attribute) {
-        BotProfile.AttributeMod m = p.vitals().attributes().get(attribute);
-        return m == null ? 0.0 : m.value();
-    }
-
     private static List<BotProfile.ItemSpec> specsMatching(List<BotProfile> from, Predicate<String> item) {
         List<BotProfile.ItemSpec> out = new ArrayList<>();
         for (BotProfile p : from) {
@@ -132,62 +127,28 @@ class ProfileCoverageTest {
                 ? (double) countOf(p, ItemIds.FIREWORK_ROCKET) : null), 0, 64, true, true);
     }
 
-    private static void assertVitalsCovered(String tag, List<BotProfile> from, boolean withScale) {
+    private static void assertVitalsCovered(String tag, List<BotProfile> from) {
         assertCovered(tag + " healthFraction", collect(from, p -> p.vitals().healthFraction()), 0.35, 1.0, false, true);
         assertCovered(tag + " foodLevel", collect(from, p -> (double) p.vitals().foodLevel()), 6, 20, true, true);
-        assertCovered(tag + " max health modifier", collect(from, p -> attributeValue(p, ItemIds.MAX_HEALTH)),
-                -10, 20, true, true);
-        assertCovered(tag + " interaction range modifier", collect(from, p -> attributeValue(p, ItemIds.ENTITY_INTERACTION_RANGE)),
-                -1.0, 3.0, false, true);
-        assertCovered(tag + " attack speed modifier", collect(from, p -> attributeValue(p, ItemIds.ATTACK_SPEED)),
-                -0.6, 0.0, false, true);
-        assertCovered(tag + " knockback resistance", collect(from, p -> attributeValue(p, ItemIds.KNOCKBACK_RESISTANCE)),
-                0.0, 1.0, false, true);
-        if (withScale) {
-            assertCovered(tag + " scale modifier", collect(from, p -> attributeValue(p, ItemIds.SCALE)),
-                    -0.4, 0.5, false, true);
-        }
     }
 
     @Test
     void vitalsCoverTheirRangeOnTheStockConfiguration() {
-        assertVitalsCovered("stock", profiles(stock), false);
+        assertVitalsCovered("stock", profiles(stock));
     }
 
     @Test
     void vitalsCoverTheirRangeWithEveryOptInEnabled() {
-        assertVitalsCovered("full", fullProfiles, true);
+        assertVitalsCovered("full", fullProfiles);
     }
 
     @Test
-    void attributesStayInTheirDocumentedRanges() {
+    void noAttributeModifierIsEverGenerated() {
         for (BotProfile p : fullProfiles) {
-            for (var e : p.vitals().attributes().entrySet()) {
-                BotProfile.AttributeMod m = e.getValue();
-                switch (e.getKey()) {
-                    case NS + "max_health" -> {
-                        assertEquals(BotProfile.Op.ADD_VALUE, m.operation());
-                        double finalHp = 20 + m.value();
-                        assertTrue(finalHp >= 10 && finalHp <= 40, "final max health " + finalHp);
-                    }
-                    case NS + "entity_interaction_range" -> {
-                        assertEquals(BotProfile.Op.ADD_VALUE, m.operation());
-                        double reach = 3 + m.value();
-                        assertTrue(reach >= 2 - 1e-9 && reach <= 6 + 1e-9, "final reach " + reach);
-                    }
-                    case NS + "attack_speed" -> {
-                        assertEquals(BotProfile.Op.ADD_MULTIPLIED_BASE, m.operation());
-                        assertTrue(m.value() >= -0.6 && m.value() <= 0.0, "attack speed " + m.value());
-                    }
-                    case NS + "knockback_resistance" -> {
-                        assertEquals(BotProfile.Op.ADD_VALUE, m.operation());
-                        assertTrue(m.value() >= 0.0 && m.value() <= 1.0);
-                    }
-                    case NS + "scale" -> assertTrue(1 + m.value() >= 0.6 - 1e-9 && 1 + m.value() <= 1.5 + 1e-9);
-                    default -> fail("unexpected attribute " + e.getKey());
-                }
-                assertNotEquals(0.0, m.value(), "a zero modifier must be omitted");
-            }
+            assertTrue(p.vitals().attributes().isEmpty(), "an inhabitant has vanilla attributes only: " + p.vitals());
+        }
+        for (BotProfile p : profiles(stock)) {
+            assertTrue(p.vitals().attributes().isEmpty(), "an inhabitant has vanilla attributes only: " + p.vitals());
         }
     }
 

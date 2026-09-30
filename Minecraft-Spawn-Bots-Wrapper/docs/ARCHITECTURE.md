@@ -147,14 +147,13 @@ are:
 | Lever | Mechanism | Examples |
 |---|---|---|
 | **Loadout** | PvP BOT chooses weapon mode, shield, totem, potion, food and mending behaviour from what a bot carries | armor tiers/enchants/wear, sword vs axe vs mace vs bow vs crossbow, arrows, shield, totems, food, potions, XP bottles, cobwebs |
-| **Vanilla attributes PvP BOT really reads** | attribute modifiers with fixed addon-owned ids | entity interaction range (melee reach), attack speed |
 | **PvP BOT's own path system** | per-bot path with waypoints, walk type and an attack flag | guard post / patrol / ring, patrol radius, bhop/sprint/walk (the attack flag is always ON: every inhabitant fights) |
 | **Initial vitals** | health and hunger at spawn | injured or hungry bots so eat/retreat logic is exercised |
 
-Max health and knockback resistance are still varied on the profile (they are legitimate vanilla flavour -
-different bots really do have different HP pools) but are not counted as proxies for any PvP BOT setting:
-PvP BOT reads health only as a *ratio* of the current maximum (so max health rescales absolute HP without
-moving any threshold) and never reads knockback resistance at all. Settings with no truthful per-bot proxy
+There is deliberately no attribute lever: earlier versions rolled permanent attribute modifiers (max health,
+reach, attack speed, knockback resistance) that no item or effect stands behind, stats a player cannot have, so an
+inhabitant has the attributes of a vanilla player and the addon removes those modifiers from bots that still carry
+them (`meleeRange` and `attackCooldown`, which used them as proxies, are GLOBAL_ONLY now). Settings with no truthful per-bot proxy
 (ranged distances, aim speed, miss/mistake chance, shield timings, revenge, auto-target, ...) stay
 **GLOBAL_ONLY** and are documented, not pretended: see [SETTINGS.md](SETTINGS.md). `SettingCatalog` classifies all 68 settings in code and, at startup, compares
 itself with the settings a running PvP BOT reports, logging any new or removed setting so a future upstream
