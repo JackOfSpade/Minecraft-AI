@@ -1717,7 +1717,7 @@ public final class AggroController {
      */
     public boolean isEngaged(String botName) {
         Phase p = phaseOf(botName);
-        return p == Phase.REACT || p == Phase.CHASE || p == Phase.PURSUE || p == Phase.SEARCH;
+        return p == Phase.CHASE || p == Phase.PURSUE || p == Phase.SEARCH;
     }
 
     /** The home anchor of {@code botName}, or null. */
