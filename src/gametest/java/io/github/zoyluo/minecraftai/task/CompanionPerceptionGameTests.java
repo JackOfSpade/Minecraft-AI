@@ -137,6 +137,32 @@ public final class CompanionPerceptionGameTests {
         });
     }
 
+    @GameTest(environment = ENV + "noticed_zombie_from_behind_makes_the_watcher_take_up_the_fight", maxTicks = 320)
+    public void noticedZombieFromBehindMakesTheWatcherTakeUpTheFight(GameTestHelper context) {
+        Fixture f = new Fixture(context);
+        AIPlayerEntity bot = f.bot("PerceptionFightGT", 0, 0);
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD));
+        f.hold(bot);
+        Husk husk = f.walkingHusk(0, -20);
+        context.onEachTick(() -> {
+            boolean noticed = CreatureSenses.INSTANCE.noticed(bot, husk);
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            boolean reacting = active instanceof CombatTask || active instanceof EvadeTask;
+            if (!noticed) {
+                f.require(!reacting, "the watcher reacted to a zombie the bot had not noticed: " + (active == null ? "no task" : active.describe()));
+                f.require(bot.getHealth() >= bot.getMaxHealth(), "the zombie hit the bot before it was noticed");
+                return;
+            }
+            // Noticed: the bot's own safety takes over (it turns round and fights, at human speed) before the zombie lands a blow.
+            if (reacting) {
+                f.finish();
+            } else if (bot.getHealth() < bot.getMaxHealth()) {
+                f.require(false, "the noticed zombie hit the bot and the watcher never took up the fight: "
+                        + (active == null ? "no task" : active.describe()));
+            }
+        });
+    }
+
     // ------------------------------------------------------------------ a creeper behind
 
     @GameTest(environment = ENV + "creeper_behind_is_noticed_by_its_hiss_not_before", maxTicks = 200)
@@ -338,6 +364,33 @@ public final class CompanionPerceptionGameTests {
                 step[0] = 3;
             } else if (step[0] == 3) {
                 f.require(CreatureSenses.INSTANCE.listenerCount() <= base + 1, "listeners leaked after despawn");
+                f.finish();
+            }
+        });
+    }
+
+    @GameTest(environment = ENV + "hearing_listener_moves_with_the_bot_to_another_level", maxTicks = 60)
+    public void hearingListenerMovesWithTheBotToAnotherLevel(GameTestHelper context) {
+        Fixture f = new Fixture(context);
+        int base = CreatureSenses.INSTANCE.listenerCount();
+        AIPlayerEntity bot = f.bot("PerceptionLevelGT", 0, 0);
+        ServerLevel nether = f.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+        f.require(nether != null, "fixture: the server has no Nether");
+        int[] step = {0};
+        context.onEachTick(() -> {
+            int tick = (int) context.getTick();
+            int count = CreatureSenses.INSTANCE.listenerCount();
+            if (step[0] == 0 && tick >= 3) {
+                f.require(count == base + 1 && CreatureSenses.INSTANCE.listenerLevel(bot).orElse(null) == f.level,
+                        "the bot's listener is not registered in its own level: " + CreatureSenses.INSTANCE.listenerLevel(bot));
+                // Above the Nether roof: nothing to fall into or suffocate in for the one tick it takes to look.
+                bot.teleportTo(nether, f.x(0), 140.0D, f.z(0), Set.of(), 0.0F, 0.0F, true);
+                step[0] = 1;
+            } else if (step[0] == 1) {
+                f.require(bot.level() == nether, "fixture: the bot did not arrive in the Nether");
+                f.require(count == base + 1 && CreatureSenses.INSTANCE.listenerLevel(bot).orElse(null) == nether,
+                        "the listener did not move with the bot to the other level (count " + (count - base) + ", level "
+                                + CreatureSenses.INSTANCE.listenerLevel(bot).map(l -> l.dimension().identifier().toString()).orElse("none") + ")");
                 f.finish();
             }
         });

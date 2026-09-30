@@ -104,6 +104,14 @@ The `behaviour` section of `minecraftai.json` holds the companion behaviour swit
 | `behaviour.follow.sprintGap` | `10.0` | The follower sprints from this gap on. |
 | `behaviour.warden.sneakAway` | `true` | Wardens are never fought. A bot sneaks away from a calm one and sprints away from one that hunts it. |
 | `behaviour.combat.aim.maxTurnDegPerSec` | `540.0` | Human aim: the fastest a companion's head turns (degrees per second) while it aims a weapon or strikes; no instant spin-and-shoot. A shot leaves only when the aim is within 1.5 degrees of the shot direction (with a settle jitter that fades: sigma = 0.3 deg + 2.5 deg * exp(-t/0.25 s) after a fast turn), and a melee strike lands only on the entity under the crosshair (vanilla's pick along the real look vector within the weapon's vanilla attack range). Walking, mining and placing keep their own facing. |
+| `behaviour.perception.enabled` | `true` | Realistic noticing of creatures (docs/PERCEPTION.md): a companion notices a mob, player or bot only when it SEES it (inside the view cone of its real look vector, a clear line, within `perception.radius`) for the reaction time, or hears it (vanilla vibrations) and sees it, or is struck by it. Nobody is noticed from behind while silent. Off: the earlier omnidirectional line of sight exactly (no listener is registered). Items, boats and deliberate searches for animals and villagers are always omnidirectional. |
+| `behaviour.perception.reactionBaseSeconds` | `0.5` | The reaction time up close (seconds). Every distance has its own value: `(base + (at64 - base) * distance / 64) * angleFactor * sneakFactor / visibility`. |
+| `behaviour.perception.reactionAt64Seconds` | `2.0` | The reaction time at 64 blocks (linear in between; 10 blocks is 0.73 s). Must not be below the base. |
+| `behaviour.perception.fullAttentionHalfAngleDeg` | `30` | Inside this angle off the look direction the reaction time is not lengthened. 0..180, not above the peripheral angle. |
+| `behaviour.perception.peripheralHalfAngleDeg` | `100` | The edge of the view field (a 200 degree field); beyond it (behind) nothing is seen, only heard. |
+| `behaviour.perception.peripheralMultiplier` | `2.0` | The reaction time factor at the peripheral edge (linear from 1 at the full attention angle); 1..20. |
+| `behaviour.perception.sneakMultiplier` | `2.0` | How much longer a sneaking creature takes to notice; 1..20. |
+| `behaviour.perception.hearing.listenerRadius` | `16` | The vanilla vibration radius in blocks (the Warden's; a sculk sensor's is 8). Vanilla decides sneaking (silent), wool (blocks vibrations) and travel time. |
 
 These switches only exist as configuration from this version on; the behaviours they name are switched on by the jobs that implement them, and until then a switch has no effect.
 

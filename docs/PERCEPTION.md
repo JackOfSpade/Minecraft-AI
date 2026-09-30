@@ -9,9 +9,12 @@ read(observer O, subject S, heard?) -> SIGHT | HEARING | NONE   and the exposure
 
 * Wrapper (PvP BOT inhabitants noticing players and Minecraft-AI bots): `combat/Perception` and `combat/ExposureTracker`,
   used by `AggroController` (the "line of sight hunter").
-* Minecraft-AI (bots noticing creatures): `perception/CreaturePerception` (job "pr").
+* Minecraft-AI (companion bots noticing creatures): `perception/CreaturePerception` (the same pure function),
+  `perception/ExposureTracker`, `perception/BotEars` (vanilla vibrations) and `perception/CreatureSenses` (the level adapter);
+  see "Minecraft-AI's mapping" below.
 
-Both run the golden vectors in [`perception/vectors.json`](perception/vectors.json) and must agree on every case.
+Both run the golden vectors in [`perception/vectors.json`](perception/vectors.json) and must agree on every case
+(Minecraft-AI: `CreaturePerceptionTest`; wrapper: `PerceptionTest`).
 
 **Sight has no block limit inside the view cone.** The only hard-coded distance rule is the wrapper's *engage limit* of
 64 blocks: a bot never ENGAGES (acquires, chases, pursues) a target it sees and measures farther away than that. It is a
@@ -83,6 +86,49 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
 * The old range-based and tick-based keys (`acquireRange`, `leashRange`, `loseSightTicks`, `peripheralFactor`, `sneakFactor`,
   `reactionTicks`, `distanceReactionTicksPer32`, `frontHalfAngleDeg`, `hearWalk`, `hearSprint`, `hearCombat`,
   `combatNoiseTicks`) are ignored with one INFO line when an old config still carries them.
+
+## Minecraft-AI's mapping
+
+Companion bots are `AIPlayerEntity`s (real `ServerPlayer`s), so the same rules apply to what THEY notice: creatures (mobs,
+players, other bots), never objects. Sight has no engage limit here; the farthest a companion sees is its profile observation
+radius (`perception.radius`, 16 by default; a warden is watched out to 24, the quiet-zone scan), because the 64 block engage limit
+is a PvP BOT rule. The 64 in the formula is only its slope.
+
+* **State, not rays, at the call sites.** `CreatureSenses.tickBot` runs once per bot per server tick (`BotTickCoordinator`,
+  before anything else): it reads every creature around the bot (the cheap distance and angle filters first, the eye ray and
+  then the body-centre ray last), counts the continuous exposure per creature (`ExposureTracker`: one missed tick tolerated,
+  every re-sighting after a gap starts again from zero) and keeps the set of creatures the bot has NOTICED.
+  `ObservableWorldQuery.canNoticeCreature(bot, creature)` is then a lookup.
+* **Awareness.** A creature that has been noticed stays noticed while plain occlusion is clear (no cone, no reaction time: an
+  engaged bot faces what it fights). One tick with no line is tolerated; after that it is forgotten, and the next sighting
+  is a new reaction. A creature that leaves the observation radius, dies or despawns is forgotten at once.
+* **Hearing** is vanilla's vibration system, called per bot (`BotEars`: `VibrationSystem.Data`/`User`/`Listener`, a
+  `DynamicGameEventListener`, `VibrationSystem.Ticker` every tick; radius `behaviour.perception.hearing.listenerRadius`, 16 =
+  the Warden's; vanilla decides sneaking, wool and travel time). A sound whose source is a creature in clear view within 4 blocks
+  is where it came from: the bot is "turned to it" for 30 ticks (sight without the cone, the reaction time still applies).
+  A sound with nobody in view is an INVESTIGATE hint (`CreatureSenses.hint`; an idle bot turns to look). NO MAGIC: only the
+  position of the sound is used. Listeners are removed on despawn, death, level change, when perception is switched off and
+  when the server stops (`CreatureSenses.listenerCount()` is the test seam).
+* **Blows.** A melee blow makes its (adjacent) striker known at once (`RecentDamage` attribution). A projectile from an unseen
+  shooter gives only the direction it came from (the reverse of its velocity at impact, traced back to the first block): a
+  hint, never the shooter.
+* **Projectiles.** An arrow or trident in flight is noticed if its shot was heard (the vanilla `PROJECTILE_SHOOT` vibration,
+  near where the projectile has come from) or the projectile itself is in view (inside the view field, clear line). There is no
+  reaction time for an object flying at the bot: it is a flinch, not a recognition.
+* **The owner's sight** still nominates: `SharedVision.seenByBotOrOwner` is "the bot noticed it, or its owner sees it" (foreign
+  bots only), and `HostileBotIntent` only samples the intent of a foreign bot that someone on the protected side has noticed.
+* **Config** `behaviour.perception`: `enabled` (default true; false = today's omnidirectional line of sight exactly, no listener),
+  `reactionBaseSeconds`, `reactionAt64Seconds`, `fullAttentionHalfAngleDeg`, `peripheralHalfAngleDeg`, `peripheralMultiplier`,
+  `sneakMultiplier` and `hearing.listenerRadius` (see OPERATING_PROFILES.md).
+* **Call sites.** `PerceptionCallSiteClassificationTest` lists every caller of `canNoticeCreature`, `canObserveEntity` and
+  `hasLineOfSight` with its class: creature noticing (DangerWatcher threat scans, AggroSense, CombatCore target acquisition,
+  CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision,
+  HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance), objects and deliberate searches (kept
+  omnidirectional: drops, boats, prey, breeding, milking, trading, the landmark evidence of the mining assist, the
+  explicit `attack_entity` command) and physical strike legality (kept).
+* **GameTests** run every other suite with perception OFF (their fixtures spawn a hostile at any angle and expect the next scan
+  to react); `CompanionPerceptionGameTests` switch it on for their own batch, and `MINECRAFTAI_HARNESS_PERCEPTION=on` runs any
+  suite with it.
 
 ## Scope
 

@@ -72,6 +72,11 @@ final class BotEars implements VibrationSystem {
         return registeredIn != null;
     }
 
+    /** The level the listener is registered in, or null. */
+    ServerLevel registeredLevel() {
+        return registeredIn;
+    }
+
     /** Registers in {@code level} (leaving the previous one), or just moves along when already there; then delivers due vibrations. */
     void tick(ServerLevel level, int listenerRadius) {
         radius = listenerRadius;

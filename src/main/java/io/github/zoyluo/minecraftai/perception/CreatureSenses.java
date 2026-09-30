@@ -117,7 +117,7 @@ public final class CreatureSenses {
 
     private final Map<UUID, BotState> bots = new HashMap<>();
     private boolean listening;
-    private Runnable unlisten = () -> { };
+
     private final Set<UUID> failed = new HashSet<>();
 
     private CreatureSenses() {
@@ -129,7 +129,7 @@ public final class CreatureSenses {
             return;
         }
         listening = true;
-        unlisten = RecentDamage.addListener(this::onHit);
+        RecentDamage.addListener(this::onHit);
     }
 
     // ------------------------------------------------------------------ configuration
@@ -228,7 +228,6 @@ public final class CreatureSenses {
         long now = level.getGameTime();
         Params params = cfg.params();
         int radius = observationRadius();
-        double scanRange = Math.max(radius, WARDEN_SIGHT_RANGE);
 
         s.ears.tick(level, cfg.hearingRadius());
         List<BotEars.Sound> sounds = s.ears.drain();
@@ -236,9 +235,19 @@ public final class CreatureSenses {
 
         Vec3 eye = bot.getEyePosition();
         Vec3 look = bot.getViewVector(1.0F);
-        List<LivingEntity> around = level.getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(scanRange),
+        List<LivingEntity> around = new ArrayList<>(level.getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(radius),
                 e -> e != bot && e.isAlive() && !e.isSpectator() && (e instanceof Mob || e instanceof Player)
-                        && bot.distanceToSqr(e) <= sightLimit(e, radius) * sightLimit(e, radius));
+                        && bot.distanceToSqr(e) <= (double) radius * radius));
+        if (WARDEN_SIGHT_RANGE > radius) {
+            // A warden is watched farther (the quiet-zone scan): a class-specific query, far cheaper than widening the general one.
+            for (Warden warden : level.getEntitiesOfClass(Warden.class, bot.getBoundingBox().inflate(WARDEN_SIGHT_RANGE),
+                    w -> w.isAlive() && !w.isSpectator()
+                            && bot.distanceToSqr(w) <= WARDEN_SIGHT_RANGE * WARDEN_SIGHT_RANGE)) {
+                if (!around.contains(warden)) {
+                    around.add(warden);
+                }
+            }
+        }
 
         // Sounds first: a creature in clear view near the sound is where it came from (the bot turns to it); a sound with nobody in
         // view is a place to investigate.
@@ -323,10 +332,6 @@ public final class CreatureSenses {
             return;
         }
         HumanAim.lookToward(s.bot, hint.pos());
-    }
-
-    private static double sightLimit(LivingEntity e, int radius) {
-        return e instanceof Warden ? Math.max(radius, WARDEN_SIGHT_RANGE) : radius;
     }
 
     /**
@@ -508,6 +513,12 @@ public final class CreatureSenses {
             }
         }
         return n;
+    }
+
+    /** The level {@code bot}'s vibration listener is registered in, or empty when it has none (a seam for the leak tests). */
+    public Optional<ServerLevel> listenerLevel(AIPlayerEntity bot) {
+        BotState s = bots.get(bot.getUUID());
+        return s == null ? Optional.empty() : Optional.ofNullable(s.ears.registeredLevel());
     }
 
     /** How many bots have perception state (a seam for tests). */
