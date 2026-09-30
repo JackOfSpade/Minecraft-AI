@@ -70,7 +70,7 @@ class PrivilegedBoundarySourceTest {
         }
     }
 
-    
+    @Test
     void suffocationAndDrowningRescuesDecideTheCapabilityBeforeAnyColumnScan() throws IOException {
         String safety = read("task/NavSafetyNet.java");
         int suffocation = safety.indexOf("private boolean escapeSuffocation(");
