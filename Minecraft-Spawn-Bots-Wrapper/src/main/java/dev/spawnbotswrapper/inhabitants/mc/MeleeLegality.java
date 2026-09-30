@@ -61,6 +61,13 @@ import java.util.function.Supplier;
  * stopped: it acts in the same tick as the hit that provoked it, before the aggro controller can clear it. Mob victims are not
  * asked about (PvP BOT's own revenge against mobs is left as it is); projectiles are gated at fire time, not at impact.
  * <p>
+ * <p>
+ * <b>Human aim.</b> After those checks a legal blow must also have the victim under the crosshair of where the bot REALLY looks
+ * (its tracked aim, see {@link HumanAimDriver}; PvP BOT snaps the rotation onto its victim, but the head turns at a human speed):
+ * the ray from the eye along the tracked look enters the victim's box (grown by the weapon's hitbox margin) within vanilla's
+ * maximum range with no collider block in front. A bot that has not turned to its victim cannot hit it. Independent of the
+ * legality switch (it belongs to {@code aggro.aim.enabled}); a vanilla sweep victim of a legal blow stays legal.
+ * <p>
  * Limit: the event fires for normal players and mobs (whom inhabitants hit). A HeroBot fake player re-implements the whole
  * hurt routine and never fires it, so an inhabitant hitting ANOTHER inhabitant is not covered; that is rare and left alone.
  * <p>
@@ -76,15 +83,28 @@ public final class MeleeLegality {
     /** Whether an inhabitant (first name) may hurt a player (second name) now: the reaction-time rule, see the class comment. */
     private final BiPredicate<String, String> mayHitPlayer;
     private long reactionVetoes;
+    /** Human aim: a blow lands only on a victim under the crosshair of where the bot really looks (may be null). */
+    private final HumanAimDriver aim;
+    private long aimVetoes;
 
     public MeleeLegality(Supplier<ServerSession> session, Logger log) {
         this(session, log, (bot, victim) -> true);
     }
 
     public MeleeLegality(Supplier<ServerSession> session, Logger log, BiPredicate<String, String> mayHitPlayer) {
+        this(session, log, mayHitPlayer, null);
+    }
+
+    public MeleeLegality(Supplier<ServerSession> session, Logger log, BiPredicate<String, String> mayHitPlayer, HumanAimDriver aim) {
         this.session = session;
         this.log = log;
         this.mayHitPlayer = mayHitPlayer;
+        this.aim = aim;
+    }
+
+    /** Melee blows vetoed because the victim was not under the crosshair of the bot's tracked aim yet (for tests and diagnostics). */
+    public long aimVetoes() {
+        return aimVetoes;
     }
 
     /** Melee blows on players vetoed because the inhabitant had no CONFIRMED engagement with them yet (for tests and diagnostics). */
@@ -140,10 +160,13 @@ public final class MeleeLegality {
                         name, target.getName().getString());
                 return false;
             }
-            if (cfg.combat == null || cfg.combat.meleeLegality == null || !cfg.combat.meleeLegality.enabled) {
+            boolean legality = cfg.combat != null && cfg.combat.meleeLegality != null && cfg.combat.meleeLegality.enabled;
+            // Human aim: where the bot really looks (its tracked aim), null when human aim is off or the bot is not tracked yet.
+            Vec3 look = aim == null ? null : aim.lookOf(attacker);
+            if (!legality && look == null) {
                 return true;
             }
-            return decide(level, attacker, name, victim);
+            return decide(level, attacker, name, victim, legality, look);
         } catch (OutOfMemoryError e) {
             throw e;
         } catch (Throwable t) {
@@ -158,7 +181,8 @@ public final class MeleeLegality {
                 || source.is(DamageTypes.MOB_ATTACK) || source.is(DamageTypes.MOB_ATTACK_NO_AGGRO);
     }
 
-    private boolean decide(ServerLevel level, ServerPlayer attacker, String name, LivingEntity victim) {
+    private boolean decide(ServerLevel level, ServerPlayer attacker, String name, LivingEntity victim, boolean legality,
+                            Vec3 look) {
         long now = level.getGameTime();
         AABB bb = victim.getBoundingBox();
         Box box = new Box(bb.minX, bb.minY, bb.minZ, bb.maxX, bb.maxY, bb.maxZ);
@@ -171,8 +195,17 @@ public final class MeleeLegality {
         double reach = range.effectiveMaxRange(attacker) + range.hitboxMargin();
         Vec3 eye = attacker.getEyePosition();
         double distance = MeleeGeometry.distanceToBox(eye.x, eye.y, eye.z, box);
-        MeleeVetoLog.Reason reason = inAttackRange(range, attacker, bb)
+        MeleeVetoLog.Reason reason = !legality ? null : inAttackRange(range, attacker, bb)
                 ? clearLine(level, attacker, eye, box, reach) : MeleeVetoLog.Reason.OUT_OF_REACH;
+        if (reason == null && look != null && !underCrosshair(level, attacker, eye, look, range, bb)) {
+            // Human aim: a legal blow also needs the victim under the crosshair of where the bot really looks. A bot that has
+            // not turned to its victim cannot hit it.
+            aimVetoes++;
+            log.debug("melee legality: vetoed {} on {}: not under its crosshair yet (the head is still turning; aim {} deg off)",
+                    name, victim instanceof ServerPlayer p ? p.getName().getString() : victim.getType().toShortString(),
+                    String.format(Locale.ROOT, "%.1f", offAim(eye, look, bb)));
+            return false;
+        }
         if (reason == null) {
             primaries.remember(now, attacker.getUUID(), victim.getUUID(), box);
             return true;
@@ -197,6 +230,38 @@ public final class MeleeLegality {
      */
     static boolean inAttackRange(AttackRange range, LivingEntity attacker, AABB box) {
         return range.isInRange(attacker, box, MeleeGeometry.TOLERANCE);
+    }
+
+    /**
+     * Whether the ray from the eye along the tracked look enters the victim's box (grown by the attack range's hitbox margin)
+     * within the weapon's maximum range without a block with a collision shape in front of it: the victim is under the crosshair.
+     */
+    static boolean underCrosshair(ServerLevel level, ServerPlayer attacker, Vec3 eye, Vec3 look, AttackRange range, AABB bb) {
+        double margin = range.hitboxMargin();
+        Box box = new Box(bb.minX - margin, bb.minY - margin, bb.minZ - margin, bb.maxX + margin, bb.maxY + margin,
+                bb.maxZ + margin);
+        double entry = MeleeGeometry.entryDistance(eye.x, eye.y, eye.z, eye.x + look.x, eye.y + look.y, eye.z + look.z, box);
+        if (entry < 0.0 || !MeleeGeometry.withinReach(entry, range.effectiveMaxRange(attacker))) {
+            return false;
+        }
+        if (entry <= MeleeGeometry.SURFACE_EPSILON) {
+            return true;
+        }
+        double stop = entry - MeleeGeometry.SURFACE_EPSILON;
+        Vec3 end = eye.add(look.scale(stop));
+        return level.clip(new ClipContext(eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, attacker)).getType()
+                == HitResult.Type.MISS;
+    }
+
+    /** The angle (degrees) between the look direction and the direction from the eye to the centre of the box (for the debug line). */
+    private static double offAim(Vec3 eye, Vec3 look, AABB bb) {
+        Vec3 to = bb.getCenter().subtract(eye);
+        double len = to.length();
+        if (len < 1.0e-6) {
+            return 0.0;
+        }
+        double dot = Math.max(-1.0, Math.min(1.0, to.dot(look) / len));
+        return Math.toDegrees(Math.acos(dot));
     }
 
     /** Null when a human could have targeted the box from the eye, else why not. */

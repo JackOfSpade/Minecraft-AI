@@ -80,6 +80,50 @@ class AggroConfigTest {
     }
 
     @Test
+    void theHumanAimDefaultsAreAFastFlickAndAreWritten(@TempDir Path dir) {
+        Path f = dir.resolve("cfg.json");
+        ConfigIO.load(f);
+        ConfigIO.LoadResult again = ConfigIO.load(f);
+        assertTrue(again.warnings().isEmpty(), again.warnings().toString());
+        InhabitantsConfig.AggroAim m = again.config().aggro.aim;
+        assertTrue(m.enabled);
+        assertEquals(540.0, m.maxTurnDegPerSec, "a fast human flick: 27 degrees per tick");
+        assertEquals(1.5, m.fireToleranceDeg);
+        assertEquals(0.25, m.fireTargetRadius);
+        assertEquals(0.3, m.jitterBaseDeg);
+        assertEquals(2.5, m.jitterSettleDeg);
+        assertEquals(0.25, m.jitterSettleSeconds);
+        String json = ConfigIO.toJson(again.config());
+        for (String key : new String[]{"maxTurnDegPerSec", "fireToleranceDeg", "fireTargetRadius", "jitterBaseDeg",
+                "jitterSettleDeg", "jitterSettleSeconds"}) {
+            assertTrue(json.contains("\"" + key + "\""), key + " is written: " + json);
+        }
+    }
+
+    @Test
+    void theHumanAimValuesAreValidated(@TempDir Path dir) throws IOException {
+        InhabitantsConfig.Aggro low = load(dir, "{ \"aim\": { \"maxTurnDegPerSec\": 1, \"fireToleranceDeg\": 0, \"fireTargetRadius\": 0, "
+                + "\"jitterBaseDeg\": -1, \"jitterSettleDeg\": -1, \"jitterSettleSeconds\": 0 } }");
+        assertEquals(30.0, low.aim.maxTurnDegPerSec);
+        assertEquals(0.1, low.aim.fireToleranceDeg);
+        assertEquals(0.05, low.aim.fireTargetRadius);
+        assertEquals(0.0, low.aim.jitterBaseDeg);
+        assertEquals(0.0, low.aim.jitterSettleDeg);
+        assertEquals(0.01, low.aim.jitterSettleSeconds);
+        InhabitantsConfig.Aggro high = load(dir, "{ \"aim\": { \"maxTurnDegPerSec\": 99999, \"fireToleranceDeg\": 99, "
+                + "\"fireTargetRadius\": 99, \"jitterBaseDeg\": 99, \"jitterSettleDeg\": 99, \"jitterSettleSeconds\": 99 } }");
+        assertEquals(3600.0, high.aim.maxTurnDegPerSec);
+        assertEquals(10.0, high.aim.fireToleranceDeg);
+        assertEquals(1.0, high.aim.fireTargetRadius);
+        assertEquals(5.0, high.aim.jitterBaseDeg);
+        assertEquals(15.0, high.aim.jitterSettleDeg);
+        assertEquals(5.0, high.aim.jitterSettleSeconds);
+        InhabitantsConfig.Aggro off = load(dir, "{ \"aim\": { \"enabled\": false } }");
+        assertFalse(off.aim.enabled);
+        assertEquals(540.0, off.aim.maxTurnDegPerSec, "the rest keeps its defaults");
+    }
+
+    @Test
     void theArriveDistanceIsKeptSane(@TempDir Path dir) throws IOException {
         assertEquals(0.5, load(dir, "{ \"returnArriveDistance\": 0 }").returnArriveDistance);
         assertEquals(16.0, load(dir, "{ \"returnArriveDistance\": 99 }").returnArriveDistance);

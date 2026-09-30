@@ -50,10 +50,17 @@ public final class AggroDriver {
     private long lastHitPrune;
     /** Vanilla vibration listeners of the inhabitants (their hearing); see {@link InhabitantEars}. */
     private final InhabitantEars ears;
+    /** Where each inhabitant really looks (human aim); its view cone and sight use this, not the rotation PvP BOT snapped. */
+    private final HumanAimDriver aim;
 
     public AggroDriver(Supplier<ServerSession> session, Logger log) {
+        this(session, log, null);
+    }
+
+    public AggroDriver(Supplier<ServerSession> session, Logger log, HumanAimDriver aim) {
         this.session = session;
         this.log = log;
+        this.aim = aim;
         this.ears = new InhabitantEars(message -> log.warn("aggro: {}", message));
     }
 
@@ -90,7 +97,7 @@ public final class AggroDriver {
         }
         InhabitantsConfig.Aggro aggro = cfg.aggro == null ? new InhabitantsConfig.Aggro() : cfg.aggro;
         boolean hearing = cfg.enabled && aggro.enabled && (aggro.perception == null || aggro.perception.enabled);
-        World world = new World(server, services, hits, ears);
+        World world = new World(server, services, hits, ears, aim);
         List<ServerPlayer> bodies = new ArrayList<>();
         for (AggroWorld.Watcher w : world.inhabitants()) {
             bodies.add(((PlayerBody) w).player);
@@ -440,12 +447,25 @@ public final class AggroDriver {
         private final ServerPlayer player;
         private final HitPoller hits;
         private final InhabitantEars ears;
+        private final HumanAimDriver aim;
 
-        PlayerBody(ServerPlayer player, HitPoller hits, InhabitantEars ears) {
+        PlayerBody(ServerPlayer player, HitPoller hits, InhabitantEars ears, HumanAimDriver aim) {
             super(player);
             this.player = player;
             this.hits = hits;
             this.ears = ears;
+            this.aim = aim;
+        }
+
+        /**
+         * Eye and stance as ever, but the look is the TRACKED aim (human aim): a bot still turning toward something cannot see
+         * what is behind it, whatever rotation PvP BOT snapped to this tick.
+         */
+        @Override
+        public AggroWorld.Senses senses() {
+            AggroWorld.Senses s = super.senses();
+            Vec3 look = aim == null || s == null ? null : aim.lookOf(player);
+            return look == null ? s : new AggroWorld.Senses(s.eye(), new AggroWorld.Pos(look.x, look.y, look.z), s.subject());
         }
 
         @Override
@@ -484,12 +504,14 @@ public final class AggroDriver {
         private final CommandServices services;
         private final HitPoller hits;
         private final InhabitantEars ears;
+        private final HumanAimDriver aim;
 
-        World(MinecraftServer server, CommandServices services, HitPoller hits, InhabitantEars ears) {
+        World(MinecraftServer server, CommandServices services, HitPoller hits, InhabitantEars ears, HumanAimDriver aim) {
             this.server = server;
             this.services = services;
             this.hits = hits;
             this.ears = ears;
+            this.aim = aim;
         }
 
         /** The inhabitants online, found in ONE pass over the player list per tick (this view lives for one tick). */
@@ -506,7 +528,7 @@ public final class AggroDriver {
             for (ServerPlayer p : online) {
                 String name = p.getName().getString();
                 if (services.population().findBot(name).isPresent()) {
-                    PlayerBody body = new PlayerBody(p, hits, ears);
+                    PlayerBody body = new PlayerBody(p, hits, ears, aim);
                     inhabitants.add(body);
                     byName.put(name.toLowerCase(Locale.ROOT), body);
                 }

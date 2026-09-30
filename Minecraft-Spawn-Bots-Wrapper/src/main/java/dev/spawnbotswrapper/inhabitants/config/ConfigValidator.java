@@ -268,6 +268,16 @@ public final class ConfigValidator {
             a.hearing = new InhabitantsConfig.AggroHearing();
         }
         a.hearing.listenerRadius = clamp(w, "aggro.hearing.listenerRadius", a.hearing.listenerRadius, 1, 64);
+        if (a.aim == null) {
+            a.aim = new InhabitantsConfig.AggroAim();
+        }
+        InhabitantsConfig.AggroAim m = a.aim;
+        m.maxTurnDegPerSec = clamp(w, "aggro.aim.maxTurnDegPerSec", m.maxTurnDegPerSec, 30.0, 3600.0);
+        m.fireToleranceDeg = clamp(w, "aggro.aim.fireToleranceDeg", m.fireToleranceDeg, 0.1, 10.0);
+        m.fireTargetRadius = clamp(w, "aggro.aim.fireTargetRadius", m.fireTargetRadius, 0.05, 1.0);
+        m.jitterBaseDeg = clamp(w, "aggro.aim.jitterBaseDeg", m.jitterBaseDeg, 0.0, 5.0);
+        m.jitterSettleDeg = clamp(w, "aggro.aim.jitterSettleDeg", m.jitterSettleDeg, 0.0, 15.0);
+        m.jitterSettleSeconds = clamp(w, "aggro.aim.jitterSettleSeconds", m.jitterSettleSeconds, 0.01, 5.0);
     }
 
     /** A '#tag' under 'structures' belongs in 'tags'; a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */

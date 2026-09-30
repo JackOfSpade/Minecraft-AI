@@ -489,6 +489,8 @@ public final class InhabitantsConfig {
         public AggroPerception perception = new AggroPerception();
         /** How an inhabitant hears: vanilla vibrations. See {@link AggroHearing}. */
         public AggroHearing hearing = new AggroHearing();
+        /** How fast and how steadily an inhabitant aims: human turn speed, aim tolerance, jitter. See {@link AggroAim}. */
+        public AggroAim aim = new AggroAim();
     }
 
     /**
@@ -528,6 +530,37 @@ public final class InhabitantsConfig {
     public static final class AggroHearing {
         /** Blocks within which a vibration is heard: 16 is the Warden's listener radius (the sculk sensor's is 8). Range 1..64. */
         public int listenerRadius = 16;
+    }
+
+    /**
+     * Human aim for the aggro controller (the {@code aggro.aim} block; see {@code HumanAim}). PvP BOT snaps an inhabitant's
+     * rotation onto its target every tick, which is instant and perfect: shot in the back, a bot would spin round and shoot at
+     * once. These are HUMAN LIMITS, not artificial handicaps: they model a player's hand and eye.
+     * <ul>
+     *   <li>The head turns at most {@link #maxTurnDegPerSec} (540 = a fast mouse flick, 27 degrees per tick, a half turn in
+     *       a third of a second), the shorter way round; the view cone, sight and every shot use where it really looks.</li>
+     *   <li>A shot is only released once the aim is within {@link #fireToleranceDeg} of the wanted direction, and within the angle
+     *       the target's {@link #fireTargetRadius} subtends at that distance (so it would actually hit).</li>
+     *   <li>Right after a flick the hand shakes: jitter of {@code jitterBaseDeg + jitterSettleDeg * exp(-t / jitterSettleSeconds)}
+     *       degrees (standard deviation), t being the time since the aim first came on target.</li>
+     * </ul>
+     * {@code enabled=false} leaves PvP BOT's rotation alone (instant, perfect aim).
+     */
+    public static final class AggroAim {
+        /** Master switch; off = PvP BOT's instant, perfect aim. */
+        public boolean enabled = true;
+        /** Fastest head turn, degrees per second (540 = 27 per tick). Range 30..3600. */
+        public double maxTurnDegPerSec = 540.0;
+        /** The widest aim error (degrees) at which a shot is still released, at short range. Range 0.1..10. */
+        public double fireToleranceDeg = 1.5;
+        /** Blocks: the target's hit radius; at distance d the tolerance is at most atan(radius / d). Range 0.05..1. */
+        public double fireTargetRadius = 0.25;
+        /** Steady aim jitter, degrees (standard deviation). Range 0..5. */
+        public double jitterBaseDeg = 0.3;
+        /** Extra jitter right after the aim came on target, degrees (standard deviation). Range 0..15. */
+        public double jitterSettleDeg = 2.5;
+        /** Time constant (seconds) of how fast that extra jitter fades. Range 0.01..5. */
+        public double jitterSettleSeconds = 0.25;
     }
 
     /**

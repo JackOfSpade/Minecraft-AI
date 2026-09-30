@@ -254,3 +254,19 @@ a `DynamicGameEventListener` per inhabitant, `Ticker.tick` every tick, the liste
 controller only consumes the sounds (`AggroWorld.Watcher.drainSounds`). The damage-level reaction gate is
 `AggroController.mayAttackPlayer`, asked by `mc.MeleeLegality` (melee blows on players) and `mc.RangedFire` (a loaded
 crossbow). A Baritone-backed `PathPlanner` can replace the vanilla one without touching the state machine.
+
+### Human aim
+
+PvP BOT snaps an inhabitant's yaw, pitch and head yaw straight onto its target inside its own tick (`lookAtTarget`,
+`lookAtTargetWithPrediction`), which is instant and perfect. `combat.HumanAim` (pure math: the rate limit with the shorter way
+round, the fire tolerance, the settle jitter, the arrow re-aim arithmetic) and `mc.HumanAimDriver` (the glue) put a human
+hand and eye in between. The late tick phase runs `aggro hunter -> out-of-ammo gap closer -> humanAim.tick -> crossbow trigger ->
+rest`, so the driver runs behind every writer of a look direction: it reads the rotation the entity has then (the direction PvP
+BOT or the hunt WANTS), turns a TRACKED aim toward it at most `aggro.aim.maxTurnDegPerSec` (540 deg/s = 27 deg per tick), and
+writes the tracked aim back into yaw, pitch and head yaw, so the bot visibly turns at human speed and PvP BOT's next tick starts
+from where the bot really looks. Everything that depends on where the bot looks uses the tracked aim: the aggro view cone
+(`AggroDriver.PlayerBody.senses`), a crossbow shot (`RangedFire` fires only within the tolerance of the wanted direction, along
+the tracked aim plus jitter, by setting the rotation for the duration of `useItem`: vanilla's shot vector is the shooter's view
+vector), an arrow PvP BOT releases inside its own tick (re-aimed at `ENTITY_LOAD`, tick 0, by vanilla's
+`Projectile.shootFromRotation` with the launch speed the bow gave it; never deleted), and a melee blow (`MeleeLegality` vetoes it
+unless the victim is under the crosshair of the tracked aim within vanilla's reach). No mixin, no PvP BOT class touched.

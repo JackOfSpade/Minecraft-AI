@@ -32,7 +32,7 @@ import java.util.function.Supplier;
  * </ol>
  * The cycle is charge time plus about two ticks: about 12 ticks with Quick Charge III, about 27 without. The only gates
  * are vanilla mechanics (charge time, item use) and "has a live target in line of sight" (no shooting at nothing);
- * there is no cooldown, interval or aim delay here. No projectile is created here and no damage, accuracy or speed is
+ * there is no cooldown or interval of this addon's own here (the aim rule below is the hand and the eye). No projectile is created here and no damage, accuracy or speed is
  * touched. A loaded crossbow fires with no arrow left in the inventory too (the out-of-ammo bolt already in it), because
  * PvP BOT's mode plays no part in the gate. Bows need no trigger: PvP BOT releases them itself, at
  * {@code pvpbotSettings.bowMinDrawTime} (20 = full power).
@@ -41,6 +41,12 @@ import java.util.function.Supplier;
  * (it was continuously in sight for the full reaction time, and again after every re-sighting) and it is in line of sight this
  * tick, so a pre-loaded crossbow fires at the earliest one reaction time after the player comes into view. Bows are PvP BOT's
  * own (it draws only while it holds a target, and the target is only handed over once confirmed).
+ * <p>
+ * <b>Human aim.</b> The bot shoots only once its TRACKED aim (see {@link HumanAimDriver}: the head turns at human speed) is within
+ * tolerance of the direction PvP BOT wants, and the bolt leaves along that aim plus the hand's jitter. Vanilla's crossbow shot
+ * vector is the shooter's view vector ({@code CrossbowItem.shootProjectile} with no target), so setting the rotation for the
+ * duration of the {@code useItem} call is all it takes; the rotation is put back right after. This is a human limit of the hand
+ * and the eye, not a rate limit: a bot already looking at its target fires the tick the crossbow is loaded.
  * <p>
  * The PvP BOT state it needs (its target) is read through the adapter. Everything is fail-soft: one failure disables
  * the tick with one warning, never a crash.
@@ -56,15 +62,28 @@ public final class RangedFire {
     /** Whether an inhabitant (first name) may hurt a player (second name) now: only within a CONFIRMED engagement (the reaction time). */
     private final BiPredicate<String, String> mayFirePlayer;
     private long shotsHeldBack;
+    /** Human aim: a shot needs the bot to actually point at its target, and leaves along where it points (may be null). */
+    private final HumanAimDriver aim;
+    private long shotsHeldOnAim;
 
     public RangedFire(Supplier<ServerSession> session, Logger log) {
         this(session, log, (bot, victim) -> true);
     }
 
     public RangedFire(Supplier<ServerSession> session, Logger log, BiPredicate<String, String> mayFirePlayer) {
+        this(session, log, mayFirePlayer, null);
+    }
+
+    public RangedFire(Supplier<ServerSession> session, Logger log, BiPredicate<String, String> mayFirePlayer, HumanAimDriver aim) {
         this.session = session;
         this.log = log;
         this.mayFirePlayer = mayFirePlayer;
+        this.aim = aim;
+    }
+
+    /** Ticks a loaded crossbow was held back because the bot had not turned onto its target yet (tests and diagnostics). */
+    public long shotsHeldOnAim() {
+        return shotsHeldOnAim;
     }
 
     /** Ticks a loaded crossbow was held back because the engagement with its player target was not confirmed (tests and diagnostics). */
@@ -146,7 +165,18 @@ public final class RangedFire {
                 shotsHeldBack++;
                 return;
             }
-            bot.gameMode.useItem(bot, bot.level(), main, InteractionHand.MAIN_HAND);
+            HumanAimDriver.Shot shot = aim == null ? null : aim.decideShot(bot, view.get().target());
+            if (shot != null && !shot.allowed()) {
+                // Human aim: the head is still turning onto the target. The bolt leaves along where the bot really looks.
+                shotsHeldOnAim++;
+                return;
+            }
+            Runnable launch = () -> bot.gameMode.useItem(bot, bot.level(), main, InteractionHand.MAIN_HAND);
+            if (shot == null) {
+                launch.run();
+            } else {
+                aim.launchAlong(bot, shot, launch);
+            }
             shotsFired++;
         }
     }

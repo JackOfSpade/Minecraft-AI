@@ -274,6 +274,17 @@ final class Rig {
         bot.yHeadRotO = yaw;
         bot.setXRot(0.0F);
         bot.xRotO = 0.0F;
+        pinAim();
+    }
+
+    /**
+     * Pins the inhabitant's TRACKED aim (human aim, see HumanAim) to the rotation it has now. Every fixture that writes the bot's
+     * rotation calls this, otherwise the human turn speed would treat the write as something PvP BOT wants and swing the bot there.
+     */
+    void pinAim() {
+        if (botName != null) {
+            InhabitantsMod.aimSnap(botName);
+        }
     }
 
     /** Where the inhabitant is in the aggro hunt (IDLE, CHASE, PURSUE, SEARCH, RETURN). */
@@ -546,6 +557,7 @@ final class Rig {
         bot.setXRot(0.0F);
         bot.yRotO = yaw;
         bot.xRotO = 0.0F;
+        pinAim();
     }
 
     /** Which loadout {@link #awaitDressed} gives the inhabitant. */

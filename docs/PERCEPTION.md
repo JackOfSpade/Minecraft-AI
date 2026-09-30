@@ -21,7 +21,7 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
 ## Model
 
 1. **Sighted this tick.** All of: same level; inside the view field; the view unobstructed; not fully invisible.
-   * *View field.* theta is the 3D angle between O's look vector and the direction from O's eye to S's eye.
+   * *View field.* theta is the 3D angle between O's look vector and the direction from O's eye to S's eye. (In the wrapper O's look vector is where the inhabitant REALLY looks: its head turns at a human speed limit, see the wrapper's "Human aim", so a bot that is still turning cannot see behind itself.)
      `theta <= fullAttentionHalfAngleDeg` (30) is full attention; the field reaches out to `peripheralHalfAngleDeg` (100,
      a 200 degree field); beyond that S is behind, never sighted.
    * *Occlusion.* A ray from O's eye to S's eye; if blocked, a second ray to S's body centre (a head over a wall counts).

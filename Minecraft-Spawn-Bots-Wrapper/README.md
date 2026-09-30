@@ -94,7 +94,8 @@ runs on defaults until you fix it.
   // how inhabitants notice, chase, search for and walk back from players: what they see (no block limit in the view cone,
   // engagement limited to 64 blocks) and hear (vanilla vibrations), with a reaction time (see "The line-of-sight hunter")
   "aggro": { "enabled": true, "loseGraceTicks": 10, "searchTicks": 200, "returnArriveDistance": 1.5,
-             "perception": { "reactionBaseSeconds": 0.5, "reactionAt64Seconds": 2.0 }, "hearing": { "listenerRadius": 16 } },
+             "perception": { "reactionBaseSeconds": 0.5, "reactionAt64Seconds": 2.0 }, "hearing": { "listenerRadius": 16 },
+             "aim": { "maxTurnDegPerSec": 540 } },
 
   "debugCommands": true,
   "commandPermissionLevel": 2
@@ -411,9 +412,10 @@ without attacking or moving, and repeat that every tick: it stood there holding 
 ## Natural bow and crossbow speed (no artificial limits)
 
 The philosophy: an inhabitant shoots as fast as a person with the same weapon and the same enchantments would, and
-uses nothing but vanilla mechanics. There is **no rate limit, cooldown or aim delay of this addon's own**; the only
-gates on a shot are vanilla's (the charge time, the item use) and "has a live target in line of sight" (no shooting at
-nothing).
+uses nothing but vanilla mechanics. There is **no rate limit or cooldown of this addon's own**; the only
+gates on a shot are vanilla's (the charge time, the item use), "has a live target in line of sight" (no shooting at
+nothing) and the human limits of the hand and the eye (the head turns at a person's speed and a shot needs the aim on the
+target, see "Human aim"; a bot that already looks at its target fires the tick the crossbow is loaded).
 
 * **Bows.** PvP BOT holds a bow draw for `bowMinDrawTime` ticks, default 40 (2 s), which is an artificial wait: vanilla
   full power is reached after 20. The addon manages `bowMinDrawTime` at **20** (see "Managed PvP BOT settings"), so an
@@ -624,6 +626,61 @@ visited nodes) and knows walking, jumping up, dropping, swimming, doors, lava, f
 with PvP BOT's own look and move input; a route that makes no progress for `stuckTicks` is replanned, and route
 planning is limited to one plan per 20 ticks per bot and two per server tick overall. The interface exists so a
 Baritone-backed planner (Minecraft-AI, when it is loaded) can be dropped in later without touching the state machine.
+
+## Human aim (`aggro.aim`)
+
+PvP BOT snaps an inhabitant's yaw, pitch and head yaw straight onto its target every tick, which is instant and perfect: shot
+in the back, an inhabitant with a crossbow would spin round in one tick and shoot with no delay. This addon puts a person's
+hand and eye between PvP BOT and the entity. These are **human limits, not artificial handicaps**: they model how fast a head
+can turn and how steady a hand is right after a turn. Nothing else about a shot (speed, damage, accuracy of the weapon,
+charge time) is touched.
+
+```jsonc
+"aim": {
+  "enabled": true,               // false: PvP BOT's instant, perfect aim is left alone
+  "maxTurnDegPerSec": 540,       // 30..3600: fastest head turn (a fast mouse flick): 27 degrees per tick, a half turn in a third of a second
+  "fireToleranceDeg": 1.5,       // 0.1..10: the widest aim error at which a shot is still released, at short range
+  "fireTargetRadius": 0.25,      // 0.05..1 blocks: the target's hit radius; at distance d the tolerance is at most atan(radius / d)
+  "jitterBaseDeg": 0.3,          // 0..5: steady aim jitter (standard deviation, degrees)
+  "jitterSettleDeg": 2.5,        // 0..15: extra jitter right after the aim came on target
+  "jitterSettleSeconds": 0.25    // 0.01..5: how fast that extra jitter fades (time constant)
+}
+```
+
+* **Turning.** Each tick, after PvP BOT's own tick and the hunt's steering, the addon reads the rotation the bot has (what PvP
+  BOT wants it to look at) and turns a *tracked aim* toward it by at most `maxTurnDegPerSec / 20` degrees, always the shorter
+  way round (yaw wraps at +-180; yaw and pitch move together, so the combined step is what is limited). The tracked aim is
+  written back into the entity, so the bot **visibly turns at human speed** and PvP BOT's movement and next look start from
+  where the bot really looks. An idle bot that wanders, looks at a sound or sweeps its head while searching is limited the same
+  way: people do not snap their heads either. If nothing sets a new direction the bot finishes the turn it was making.
+* **What the tracked aim decides.** The view cone and sight of the hunt (`docs/PERCEPTION.md`: a bot that is still turning
+  cannot see behind itself, so a player shot-from-behind must first be turned to, then seen for the reaction time); every
+  crossbow shot; every arrow PvP BOT releases; every melee blow.
+* **Crossbow shots** are allowed only while the engagement is CONFIRMED (see "The line-of-sight hunter") **and** the tracked
+  aim is within the tolerance of the direction PvP BOT wants: at most `fireToleranceDeg` (1.5 degrees) and, farther out, the angle
+  the target's hit radius subtends (`atan(0.25 / distance)`: 1.4 degrees at 10 blocks, 0.36 at 40), so a shot released within
+  tolerance would actually hit what it is aimed at. The bolt leaves along the tracked aim plus jitter: vanilla's shot vector is
+  the shooter's view vector (`CrossbowItem.shootProjectile` with no target), so the rotation is set for the duration of
+  `useItem` and put back. A bot that already looks at its target fires the tick the crossbow is loaded; there is no rate limit.
+* **Steadiness.** Right after a fast turn a hand shakes: the jitter's standard deviation is
+  `jitterBaseDeg + jitterSettleDeg * exp(-t / jitterSettleSeconds)` = `0.3 + 2.5 * exp(-t / 0.25 s)` degrees, `t` being the time
+  since the aim first came within tolerance (it restarts if the aim is lost by more than twice the tolerance). Shots (bolts and
+  arrows) leave along the jittered direction: 2.8 degrees of spread at the moment the aim comes on target, 1.2 degrees after
+  a quarter second, 0.3 degrees when settled.
+* **Bow arrows.** PvP BOT snaps its look and releases inside its own tick, before the addon's phase, so the arrow would
+  leave along the snapped aim. At the moment an arrow of an inhabitant enters the world (tick 0) it is re-aimed along the
+  tracked aim plus jitter with vanilla's own `Projectile.shootFromRotation` (the launch speed the bow gave it is kept: 3.0 for
+  a full draw; the vanilla inaccuracy of 1.0 is applied again; crit, piercing and enchantments are untouched). If the target
+  is not confirmed at that moment the arrow still flies along the tracked aim: it was a legitimate release and is never removed.
+* **Melee.** A melee blow by an inhabitant lands only if the victim is under the bot's crosshair along the *tracked* aim: the
+  ray from the eye along it enters the victim's box (grown by the weapon's `attack_range` hitbox margin) within vanilla's reach
+  for the weapon without a block in front. A bot that has not turned to you cannot hit you (vetoed like the melee legality
+  rule: no damage, no knockback; counted at debug level). Sweeping-edge victims of a legal blow stay legal, as in vanilla.
+* Real-server tests (`HumanAimGameTests`): shot in the back from 10 blocks (at most 27 degrees per tick; first shot 24 ticks after the hit,
+  no earlier than the player entering the view cone plus the reaction time), the yaw ramp, a sword bot facing away that cannot
+  hit until it has turned (and the control that hits at once), arrows along the tracked aim (deterministic and with PvP BOT's
+  own release, the player moved to the other side one tick before it).
+* Fail-soft: a bug switches human aim off with one warning (the bots then aim as PvP BOT does). Only inhabitants are touched.
 
 ## Combat log
 

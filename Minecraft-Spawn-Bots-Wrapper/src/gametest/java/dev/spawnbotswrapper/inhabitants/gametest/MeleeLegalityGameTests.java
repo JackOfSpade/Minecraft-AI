@@ -85,11 +85,15 @@ public final class MeleeLegalityGameTests {
             rig.bot.setXRot(0.0F);
             rig.bot.yRotO = EAST;
             rig.bot.xRotO = 0.0F;
+            rig.pinAim();
         }
 
-        /** Every tick: face the player and make sure PvP BOT has him as its target (it never acquires a walled-in player). */
+        /**
+         * Every tick: make sure PvP BOT has the player as its target (it never acquires a walled-in player). The bot is faced
+         * toward the player once, when the scene is placed; after that PvP BOT decides where it wants to look and the human aim
+         * turns the head there (pinning the rotation every tick would fight it: a bot with a raised eye looks DOWN at its victim).
+         */
         void engage() {
-            face();
             if (Upstream.target(rig.botName).equals("none")) {
                 rig.forceTarget();
             }

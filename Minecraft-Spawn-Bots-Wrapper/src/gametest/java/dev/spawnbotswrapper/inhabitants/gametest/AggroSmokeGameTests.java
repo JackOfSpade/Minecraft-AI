@@ -70,6 +70,7 @@ public final class AggroSmokeGameTests {
             rig.bot.setXRot(0.0F);
             rig.bot.yRotO = EAST;
             rig.bot.xRotO = 0.0F;
+            rig.pinAim();
         }
 
         boolean hasTarget() {

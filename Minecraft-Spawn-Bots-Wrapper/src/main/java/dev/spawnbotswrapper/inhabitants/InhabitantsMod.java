@@ -8,6 +8,7 @@ import dev.spawnbotswrapper.inhabitants.mc.CombatLogger;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
 import dev.spawnbotswrapper.inhabitants.mc.EatGate;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
+import dev.spawnbotswrapper.inhabitants.mc.HumanAimDriver;
 import dev.spawnbotswrapper.inhabitants.mc.IssuedItemGuard;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
 import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
@@ -60,10 +61,12 @@ public final class InhabitantsMod implements ModInitializer {
     private final McTpsGateway tps = new McTpsGateway();
     private final CombatLogger combat = new CombatLogger(() -> session, LOGGER);
     /** The line-of-sight hunter (inhabitants notice, chase, search for and walk back from players); see AggroController. */
-    private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER);
+    /** Human aim: inhabitants turn their heads at human speed and shoot only where they really point (see HumanAim). */
+    private final HumanAimDriver humanAim = new HumanAimDriver(() -> session, LOGGER);
+    private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER, humanAim);
     /** No cheating: vetoes melee hits by inhabitants that a human client could not make (through walls, beyond reach). */
-    private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER, aggro::mayAttackPlayer);
-    private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER, aggro::mayAttackPlayer);
+    private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER, aggro::mayAttackPlayer, humanAim);
+    private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER, aggro::mayAttackPlayer, humanAim);
     private final OutOfAmmoGapCloser gapCloser = new OutOfAmmoGapCloser(() -> session, LOGGER);
     /** Vanilla's rule that food is only eaten below a full food bar, which PvP BOT's own eating skips. */
     private final EatGate eatGate = new EatGate(LOGGER);
@@ -92,6 +95,7 @@ public final class InhabitantsMod implements ModInitializer {
         combat.aggroState(aggro::describe);
         combat.meleeVetoState(meleeLegality::describe);
         meleeLegality.register();
+        humanAim.register();
         // A real death (any cause) of an inhabitant spends its structure slot for good; removal by this addon is never a death.
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             ServerSession current = session;
@@ -175,6 +179,27 @@ public final class InhabitantsMod implements ModInitializer {
         return mod == null ? new long[2] : new long[]{mod.meleeLegality.reactionVetoes(), mod.rangedFire.shotsHeldBack()};
     }
 
+    /**
+     * Pins the tracked aim of an inhabitant to the rotation its entity has right now (no turning): what a test does after it
+     * places a bot facing a direction, so the human turn speed does not turn the fixture into a slow swing. A seam for the GameTests.
+     */
+    public static boolean aimSnap(String botName) {
+        InhabitantsMod mod = instance;
+        return mod != null && mod.humanAim.snap(botName);
+    }
+
+    /** {yaw, pitch, wantedYaw, wantedPitch, errorDeg, settledSeconds} of the tracked aim of an inhabitant, or null. A seam for the GameTests. */
+    public static double[] aimOf(String botName) {
+        InhabitantsMod mod = instance;
+        return mod == null ? null : mod.humanAim.aimOf(botName);
+    }
+
+    /** Human aim counters {arrows re-aimed, crossbow shots held for want of aim, melee blows vetoed for want of aim}. A seam for the GameTests. */
+    public static long[] aimCounters() {
+        InhabitantsMod mod = instance;
+        return mod == null ? new long[3] : new long[]{mod.humanAim.arrowsReaimed(), mod.rangedFire.shotsHeldOnAim(), mod.meleeLegality.aimVetoes()};
+    }
+
     private static void logConfigLoad(ConfigHolder holder, ConfigIO.LoadResult result) {
         if (result.created()) {
             LOGGER.info("Wrote a default configuration to {}", holder.file());
@@ -240,8 +265,13 @@ public final class InhabitantsMod implements ModInitializer {
         if (current != null && current.server() == server) {
             shared.guard().run("aggro hunter", () -> aggro.tick(server));
         }
-        rangedFire.tick(server);
         gapCloser.tick(server);
+        if (current != null && current.server() == server) {
+            // Behind every writer of a look direction (PvP BOT, the hunt's steering, the gap closer): whatever they asked the head
+            // to look at, it turns there at human speed. The crossbow trigger below reads where it really looks.
+            humanAim.tick(server);
+        }
+        rangedFire.tick(server);
         if (current != null && current.server() == server) {
             shared.guard().run("eat gate", () -> eatGate.tick(server));
         }
@@ -255,6 +285,7 @@ public final class InhabitantsMod implements ModInitializer {
         if (current != null && current.server() == server) {
             combat.flush(server.getTickCount());
             aggro.reset();
+            humanAim.reset();
             rangedFire.reset();
             gapCloser.reset();
             eatGate.reset();

@@ -27,6 +27,16 @@ final class Upstream {
         }
     }
 
+    /** The bow draw ticks PvP BOT counts for this bot (-1 when it is not drawing or cannot be read). */
+    static int bowDrawTicks(String bot) {
+        try {
+            Object st = cls("BotCombat").getMethod("getState", String.class).invoke(null, bot);
+            return Boolean.TRUE.equals(field(st, "isDrawingBow")) ? ((Number) field(st, "bowDrawTicks")).intValue() : -1;
+        } catch (Throwable e) {
+            return -1;
+        }
+    }
+
     /** PvP BOT's combat state fields: mode, isDrawingBow, bowDrawTicks. */
     static String combatState(String bot) {
         try {
