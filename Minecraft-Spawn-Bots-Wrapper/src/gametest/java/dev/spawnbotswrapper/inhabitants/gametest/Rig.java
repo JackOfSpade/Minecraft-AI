@@ -66,6 +66,28 @@ final class Rig {
         this.level = ctx.getLevel();
         this.server = level.getServer();
         this.botFeet = ctx.absolutePos(new BlockPos(4, LAYER_Y, 4));
+        removeStaleBots();
+    }
+
+    /**
+     * Removes bots that an earlier test left online. The engine removes a finished test's bot a few ticks later, and the next
+     * test starts at the same place at once: the leftover then fights the new inhabitant (it did: a chase of "the player"
+     * that was a leftover bot, a kill the test never asked for).
+     */
+    private void removeStaleBots() {
+        try {
+            CommandServices services = InhabitantsMod.servicesOf(server);
+            if (services == null || services.adapter() == null) {
+                return;
+            }
+            for (ServerPlayer p : new java.util.ArrayList<>(server.getPlayerList().getPlayers())) {
+                if (services.adapter().isBotEntity(p)) {
+                    services.adapter().removeBot(server, p.getName().getString());
+                }
+            }
+        } catch (RuntimeException e) {
+            LOG.warn("removing stale bots failed: {}", e.toString());
+        }
     }
 
     void fail(String message) {
@@ -104,6 +126,10 @@ final class Rig {
             CommandServices services = InhabitantsMod.servicesOf(server);
             if (services != null && requested) {
                 services.engine().reset(key(), true);
+            }
+            // The engine removes the bot a few ticks later; the next test starts at the same place at once.
+            if (services != null && services.adapter() != null && botName != null) {
+                services.adapter().removeBot(server, botName);
             }
         } catch (RuntimeException e) {
             LOG.warn("cleanup of the inhabitant failed: {}", e.toString());
