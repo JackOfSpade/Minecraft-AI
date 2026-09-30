@@ -713,6 +713,54 @@ public final class FarmSurvivalGameTests {
         });
     }
 
+    /**
+     * A straight walk across a field of ripe wheat is a walk, not a hop: farmland is 15/16 of a block high, so the bot's feet on it
+     * are inside the farmland cell, and the stone or farmland ahead at that height is ground to step along, not an obstacle to jump.
+     * A jump lands on farmland from above half a block, and vanilla then tramples it to dirt (and pops the crop) most of the time.
+     * The walk crosses seven cells of farmland and steps onto stone at both ends: the bot never leaves the ground and every cell
+     * is still farmland with its wheat.
+     */
+    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_walking_across_afield_never_jumps_or_tramples_it", maxTicks = 200)
+    public void walkingAcrossAFieldNeverJumpsOrTramplesIt(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(14, 4, 254));
+        forceChunks(context, feet, 12);
+        prepareGround(world, feet, 12);
+        BlockPos fieldOrigin = feet.offset(2, 0, -1);
+        field(world, fieldOrigin, 7, 3, MATURE_WHEAT);
+        AIPlayerEntity bot = spawnBot(context, "FarmWalkGT", feet);
+        requireStrict(context, bot);
+        BlockPos goal = feet.offset(11, 0, 0);
+        double highestFeet = feet.getY() + 0.1D;
+        boolean[] walking = {false};
+        context.failIfEver(() -> {
+            if (context.getTick() < 5) {
+                return;
+            }
+            if (!walking[0]) {
+                require(context, !bot.getActionPack().startWalkTo(Vec3.atBottomCenterOf(goal), 0.5D).isFailed(),
+                        "fixture: the walk across the field did not start");
+                walking[0] = true;
+                return;
+            }
+            require(context, bot.getY() <= highestFeet,
+                    "the bot jumped while walking across the field: feet y=" + bot.getY() + " at " + bot.blockPosition().toShortString());
+            for (int x = 0; x < 7; x++) {
+                for (int z = 0; z < 3; z++) {
+                    BlockPos cell = fieldOrigin.offset(x, 0, z);
+                    require(context, world.getBlockState(cell.below()).is(Blocks.FARMLAND) && world.getBlockState(cell).is(Blocks.WHEAT),
+                            "the walk trampled the field at " + cell.toShortString() + ": " + world.getBlockState(cell.below()));
+                }
+            }
+            if (bot.getActionPack().isWalkToIdle()) {
+                require(context, bot.position().distanceTo(Vec3.atBottomCenterOf(goal)) <= 1.0D,
+                        "the walk across the field stopped short at " + bot.blockPosition().toShortString());
+                AIPlayerManager.INSTANCE.despawn(world.getServer(), "FarmWalkGT");
+                context.succeed();
+            }
+        });
+    }
+
     /** Item entities only tick in entity-ticking chunks: force every chunk the fixture (and its drops) can reach. */
     private static void forceChunks(GameTestHelper context, BlockPos feet, int radius) {
         GameTestChunkForcing.forceForTest(context,

@@ -23,6 +23,10 @@ public final class WalkToController {
     private static final double HARD_PROGRESS_EPSILON = 0.005D;
     private static final int MAX_TICKS = 160;
     private static final int SIDLE_STEP_TICKS = 8;
+    /** Vanilla's player step height: a rise up to this is walked up without a jump. */
+    private static final double STEP_HEIGHT = 0.6D;
+    /** How high a standing jump lifts a player's feet (jump velocity 0.42, gravity 0.08, drag 0.98: about 1.25 blocks). */
+    private static final double JUMP_HEIGHT = 1.25D;
 
     private final Vec3 target;
     private final double arrivalThreshold;
@@ -147,17 +151,25 @@ public final class WalkToController {
         };
     }
 
+    /**
+     * The obstacle ahead is judged by how far its top rises above the bot's feet: up to {@link #STEP_HEIGHT} vanilla walks the bot
+     * up it, up to {@link #JUMP_HEIGHT} it takes a jump, anything higher blocks the walk. The cells are sampled at the feet plus the
+     * step height (see {@link #footPos}), so the ground the bot stands in is never mistaken for a step: feet on farmland, a dirt path
+     * or soul sand are inside that block's cell, and the next cell of the same ground ahead is only 1/16 higher.
+     */
     private static JumpDecision shouldJump(Vec3 current, Vec3 move, ServerLevel world, MinecraftAiConfig.Nav nav) {
         BlockPos front = footPos(current, move, nav.jumpReach());
         BlockState frontState = world.getBlockState(front);
-        BlockState aboveFront = world.getBlockState(front.above());
-        BlockPos playerPos = BlockPos.containing(current);
+        BlockPos playerPos = feetCell(current);
         BlockState abovePlayer = world.getBlockState(playerPos.above());
         boolean headClear = isClear(world, front.above()) && isClear(world, playerPos.above());
 
         if (hasCollision(frontState, world, front)) {
-            double top = collisionTop(frontState, world, front);
-            if (top <= 1.0D && headClear) {
+            double rise = front.getY() + collisionTop(frontState, world, front) - current.y;
+            if (rise <= STEP_HEIGHT) {
+                return new JumpDecision(false, false, false);
+            }
+            if (rise <= JUMP_HEIGHT && headClear) {
                 return new JumpDecision(true, false, false);
             }
             return new JumpDecision(false, true, false);
@@ -211,8 +223,18 @@ public final class WalkToController {
         return state.getCollisionShape(world, pos).max(Direction.Axis.Y);
     }
 
+    /**
+     * The cell at the bot's feet level {@code distance} ahead. It is sampled a step height above the feet: on a full block that is
+     * the feet cell itself, and on ground lower than a full block (farmland, a dirt path, soul sand, a slab) it is the cell above
+     * that ground, not the ground block the feet are inside.
+     */
     private static BlockPos footPos(Vec3 current, Vec3 move, double distance) {
-        return BlockPos.containing(current.x + move.x * distance, current.y, current.z + move.z * distance);
+        return BlockPos.containing(current.x + move.x * distance, current.y + STEP_HEIGHT, current.z + move.z * distance);
+    }
+
+    /** The cell the bot's feet stand in, by the same rule as {@link #footPos}. */
+    private static BlockPos feetCell(Vec3 current) {
+        return BlockPos.containing(current.x, current.y + STEP_HEIGHT, current.z);
     }
 
     private static Vec3 rotate(Vec3 move, double degrees) {
