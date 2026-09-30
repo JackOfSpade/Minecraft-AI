@@ -167,11 +167,18 @@ final class Rig {
         buildPlatform(12);
     }
 
-    /** Removes hostile mobs that already stand around the scene (natural spawns would fight the inhabitant). */
+    /** Removes hostile mobs that already stand around the scene (natural spawns would fight the inhabitant), and the arrows and
+     * dropped items an earlier test left there. */
     void clearHostiles() {
         net.minecraft.world.phys.AABB area = new net.minecraft.world.phys.AABB(botFeet).inflate(60.0, 20.0, 60.0);
         for (net.minecraft.world.entity.Entity e : level.getEntities((net.minecraft.world.entity.Entity) null, area,
                 x -> x instanceof net.minecraft.world.entity.monster.Enemy)) {
+            e.discard();
+        }
+        // Arrows and dropped items of an earlier test lie in the same arena: a bot picks them up (a quiver that grew by itself).
+        for (net.minecraft.world.entity.Entity e : level.getEntities((net.minecraft.world.entity.Entity) null, area,
+                x -> x instanceof net.minecraft.world.entity.projectile.Projectile
+                        || x instanceof net.minecraft.world.entity.item.ItemEntity)) {
             e.discard();
         }
     }
@@ -614,6 +621,15 @@ final class Rig {
     }
 
     /** One line of the bot's state for the run log. */
+    /** What the aggro perception reads off the test player: stance, movement and noise, for failure messages. */
+    String aggroSubjectTrace() {
+        return "player[shift=" + target.isShiftKeyDown() + " discrete=" + target.isDiscrete() + " crouching=" + target.isCrouching()
+                + " sprint=" + target.isSprinting() + " swinging=" + target.swinging + " hurtTime=" + target.hurtTime
+                + " using=" + target.isUsingItem() + " moved=" + String.format(Locale.ROOT, "%.3f",
+                Math.hypot(target.getX() - target.xo, target.getZ() - target.zo)) + " gameMode="
+                + target.gameMode.getGameModeForPlayer() + "] status=" + InhabitantsMod.aggroDescribe(botName);
+    }
+
     String trace() {
         Inventory inv = bot.getInventory();
         ItemStack main = bot.getMainHandItem();

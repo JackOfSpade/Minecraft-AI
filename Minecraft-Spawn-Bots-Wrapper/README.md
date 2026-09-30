@@ -361,6 +361,8 @@ nothing).
   The cycle is the charge time plus about two ticks: about **12 ticks with Quick Charge III**, about 27 without: what a
   person spam-clicking gets. Real-server test: eight gaps of exactly 12 ticks with a Quick Charge III crossbow, never
   faster than the 10 tick charge allows.
+  A crossbow that is still loaded when the last arrow is gone fires too (PvP BOT's mode plays no part in the gate), so the
+  out-of-ammo bolt is not wasted; then the sword comes out (see "Sword up close, and out of arrows").
 * Removed: the earlier crossbow pacing (`rangedPacing.crossbowMinShotIntervalTicks`, the item cooldown that enforced it)
   and the aim-settle delay (`rangedPacing.aimSettleTicks`). A config that still has a `rangedPacing` block loads fine:
   the keys are ignored with one INFO line and are not written back. (An item held on a continuous "use" action, for

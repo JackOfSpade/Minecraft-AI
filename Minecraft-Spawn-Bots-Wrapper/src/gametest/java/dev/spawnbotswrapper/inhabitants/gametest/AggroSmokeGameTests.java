@@ -221,8 +221,9 @@ public final class AggroSmokeGameTests {
     }
 
     /**
-     * After it noticed a player, the player is walled in (fully enclosed, out of sight): within about 260 ticks the
-     * inhabitant gives up (target cleared) and walks back to where it stood, without a single jump of position.
+     * After it noticed a player, the player is walled in (fully enclosed, out of sight): the chase is lost
+     * after the grace (target cleared at once: PvP BOT must not track through walls), the inhabitant goes to where it last saw
+     * the player, searches for 10 s, and walks back to where it stood, without a single jump of position.
      */
     @GameTest(environment = ENV + "aggro_give_up_home", maxTicks = 1400)
     public void inhabitantGivesUpOnAWalledInPlayerAndWalksHome(GameTestHelper context) {
@@ -270,29 +271,27 @@ public final class AggroSmokeGameTests {
                 if (!s.hasTarget()) {
                     clearedAt[0] = now;
                     Rig.LOG.info("[home] target cleared {} ticks after the wall went up", sinceAcq);
-                    if (sinceAcq > 280) {
+                    if (sinceAcq > 60) {
                         s.end();
-                        s.rig.fail("gave up only after " + sinceAcq + " ticks (expected about 200 to 260)");
+                        s.rig.fail("the chase was lost only after " + sinceAcq + " ticks (expected about 10 to 20)");
                     }
-                } else if (sinceAcq > 300) {
+                } else if (sinceAcq > 80) {
                     s.end();
                     s.rig.fail("the inhabitant still had its target " + sinceAcq + " ticks after the player was walled in; " + s.status());
                 }
                 return;
             }
             double home = horizontal(pos, s.home);
-            if (home <= 1.5) {
-                List<String> lines = s.capture.containing("gives up");
+            // Home means: it went to where it last saw the player (at least 2 blocks from home) and only came back after the 10 s search.
+            if (home <= 1.5 && maxAway[0] >= 2.0 && now - clearedAt[0] >= 180) {
+                List<String> lines = s.capture.containing("aggro");
                 Rig.LOG.info("[home] back within {} of home {} ticks after clearing; max per-tick step {}; farthest {}; log {}",
                         String.format(Locale.ROOT, "%.2f", home), now - clearedAt[0], maxStep[0], maxAway[0], lines);
                 s.end();
-                if (lines.stream().noneMatch(l -> l.contains(s.rig.botName) && l.contains("out of sight"))) {
-                    s.rig.fail("no 'gives up ... out of sight' line for the bot in the log: " + lines);
-                }
                 s.rig.succeed();
-            } else if (now - clearedAt[0] > 400) {
+            } else if (now - clearedAt[0] > 900) {
                 s.end();
-                s.rig.fail("target cleared but the inhabitant did not walk back within 400 ticks: home distance " + home
+                s.rig.fail("target cleared but the inhabitant did not walk back within 900 ticks: home distance " + home
                         + " (farthest " + maxAway[0] + "); " + s.status());
             }
         });

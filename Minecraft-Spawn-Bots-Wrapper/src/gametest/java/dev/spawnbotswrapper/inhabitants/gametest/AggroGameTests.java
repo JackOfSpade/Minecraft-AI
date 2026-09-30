@@ -196,7 +196,7 @@ public final class AggroGameTests {
                 double offset = 1.5 + 0.2 * Math.sin(since * 0.3);
                 rig.walkTargetTo(rig.homeX() - offset, rig.bot.getY(), rig.homeZ());
                 if (rig.hasTarget() || !rig.phase().equals("IDLE")) {
-                    rig.fail("the bot noticed a player sneaking behind it after " + since + " ticks: phase " + rig.phase());
+                    rig.fail("the bot noticed a player sneaking behind it after " + since + " ticks: phase " + rig.phase() + " " + rig.aggroSubjectTrace());
                 }
                 if (since >= 120) {
                     if (rig.tryHit(2.0F)) {

@@ -33,7 +33,8 @@ import java.util.function.Supplier;
  * are vanilla mechanics (charge time, item use) and "has a live target in line of sight" (no shooting at nothing);
  * there is no cooldown, interval or aim delay here. No projectile is created here and no damage, accuracy or speed is
  * touched. A loaded crossbow fires with no arrow left in the inventory too (the out-of-ammo bolt already in it), because
- * PvP BOT's mode plays no part in the gate. Bows need no trigger: PvP BOT releases them itself, at {@code pvpbotSettings.bowMinDrawTime} (20 = full power).
+ * PvP BOT's mode plays no part in the gate. Bows need no trigger: PvP BOT releases them itself, at
+ * {@code pvpbotSettings.bowMinDrawTime} (20 = full power).
  * <p>
  * The PvP BOT state it needs (its target) is read through the adapter. Everything is fail-soft: one failure disables
  * the tick with one warning, never a crash.
