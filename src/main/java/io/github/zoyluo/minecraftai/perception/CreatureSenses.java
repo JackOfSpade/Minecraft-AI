@@ -600,15 +600,20 @@ public final class CreatureSenses {
             double reach = 4.0D + 3.2D * Math.max(0, projectile.tickCount);
             for (Shot shot : s.shots) {
                 if (shot.pos().distanceTo(projectile.position()) <= reach) {
-                    return true;
+                    // A shot that was heard counts from any direction (hearing adds awareness from behind), but only with a clear
+                    // line to the projectile: an arrow on the far side of a wall is a sound, not something to raise a shield at.
+                    return clearLine(bot, projectile);
                 }
             }
         }
         Vec3 toward = projectile.position().subtract(bot.getEyePosition());
         Vec3 look = bot.getViewVector(1.0F);
         double theta = CreaturePerception.angleDeg(look.x, look.y, look.z, toward.x, toward.y, toward.z);
-        return theta <= params.peripheralHalfAngleDeg()
-                && bot.level().clip(new ClipContext(bot.getEyePosition(), projectile.position(), ClipContext.Block.COLLIDER,
+        return theta <= params.peripheralHalfAngleDeg() && clearLine(bot, projectile);
+    }
+
+    private static boolean clearLine(AIPlayerEntity bot, Entity projectile) {
+        return bot.level().clip(new ClipContext(bot.getEyePosition(), projectile.position(), ClipContext.Block.COLLIDER,
                 ClipContext.Fluid.NONE, bot)).getType() == HitResult.Type.MISS;
     }
 

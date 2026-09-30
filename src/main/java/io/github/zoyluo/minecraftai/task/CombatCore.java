@@ -453,13 +453,20 @@ public final class CombatCore {
             return false;
         }
         if (bot.isUsingItem()) {
-            // A raised shield is lowered to swing, exactly as a player releases it; any other use in
-            // progress (a drawn bow, food) keeps the hands busy and forbids the attack.
-            if (bot.getUsedItemHand() != net.minecraft.world.InteractionHand.OFF_HAND
-                    || !bot.getOffhandItem().is(net.minecraft.world.item.Items.SHIELD)) {
+            // A raised shield is lowered to swing, exactly as a player releases it; any other use in progress (a drawn bow, food)
+            // keeps the hands busy and forbids the attack, and so does a shield the reactive owner holds against a noticed threat.
+            if (ShieldGuard.holdsShield(bot) || !ShieldGuard.usingShield(bot)) {
                 return false;
             }
-            bot.releaseUsingItem();
+            // The shield comes down only for a swing that can land: the aim is brought onto the target first (human turn speed),
+            // and a swing the legality rules refuse never costs the shield. The swing itself is the NEXT tick's: the client drops
+            // an attack click on the tick the use key is released (Minecraft.handleKeybinds), so no player lowers and hits at once.
+            HumanAim.lookToward(bot, target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D));
+            if (!HumanAim.isUnderCrosshair(bot, target) || StrikeLegality.strikeRefusal(bot, target) != null) {
+                return false;
+            }
+            ShieldGuard.lower(bot);
+            return false;
         }
         return InteractAction.attackEntity(bot, target).isSuccess();
     }

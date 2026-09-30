@@ -16,13 +16,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CombatShieldAndPriorityContractTest {
     private static final Path COMBAT_TASK = Path.of(
             "src/main/java/io/github/zoyluo/minecraftai/task/CombatTask.java");
+    private static final Path SHIELD_GUARD = Path.of(
+            "src/main/java/io/github/zoyluo/minecraftai/task/ShieldGuard.java");
     private static final Path DANGER_WATCHER = Path.of(
             "src/main/java/io/github/zoyluo/minecraftai/task/DangerWatcher.java");
 
     @Test
-    void reactiveShieldOnlyRunsDuringMeleeOrientedPhasesNeverWhileDrawingABow() throws IOException {
+    void theCombatTaskYieldsToTheShieldGuardOnlyInMeleePhasesNeverWhileDrawingABow() throws IOException {
         String combat = read(COMBAT_TASK);
-        assertTrue(combat.contains("isMeleeOrientedPhase() && handleReactiveShield(bot)"),
+        assertTrue(combat.contains("isMeleeOrientedPhase() && ShieldGuard.INSTANCE.holding(bot)"),
                 "the reaction must be gated to melee phases so it never fights the bow draw for "
                         + "the single active hand");
         int predicate = combat.indexOf("private boolean isMeleeOrientedPhase()");
@@ -33,18 +35,26 @@ class CombatShieldAndPriorityContractTest {
                 && body.contains("Phase.BLOCK"));
         assertFalse(body.contains("Phase.RANGED") || body.contains("Phase.COVER"),
                 "ranged/peekaboo phases must never be treated as melee-oriented");
+        int exchange = combat.indexOf("boolean isRangedExchange()");
+        String exchangeBody = combat.substring(exchange, combat.indexOf('}', exchange));
+        assertTrue(exchangeBody.contains("rangedLoadout != null") && exchangeBody.contains("Phase.RANGED")
+                        && exchangeBody.contains("Phase.COVER_PEEK"),
+                "a ranged exchange (bow out, arrow in the offhand) is what the guard leaves alone");
+        assertTrue(read(SHIELD_GUARD).contains("combat.isRangedExchange()"),
+                "the guard must not take the hand from a ranged exchange");
     }
 
     @Test
-    void reactiveShieldTurnsToFaceTheThreatBeforeRaisingIt() throws IOException {
-        String combat = read(COMBAT_TASK);
-        int handler = combat.indexOf("private boolean handleReactiveShield");
-        int lookAt = combat.indexOf("HumanAim.lookToward(bot, faceTowards)", handler);
-        int raise = combat.indexOf("InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND)", handler);
-        assertTrue(handler >= 0 && lookAt > handler && raise > lookAt,
+    void theShieldGuardTurnsToFaceTheThreatBeforeRaisingIt() throws IOException {
+        String guard = read(SHIELD_GUARD);
+        int engage = guard.indexOf("private void engage(");
+        int face = guard.indexOf("faceIntoArc(bot, threat.facePoint(), threat.halfArcDeg())", engage);
+        int raise = guard.indexOf("raise(bot, Owner.REACTIVE)", engage);
+        assertTrue(engage >= 0 && face > engage && raise > face,
                 "the bot must turn to face the incoming projectile/creeper before raising the shield");
-        assertTrue(combat.contains("ProjectileThreat.mostImminent(bot)"));
-        assertTrue(combat.contains("creeper.getSwelling(1.0F) >= SHIELD_CREEPER_FUSE_THRESHOLD"));
+        assertTrue(guard.contains("ProjectileThreat.incoming(bot, shield)"));
+        assertTrue(guard.contains("creeper.getSwelling(1.0F) >= CREEPER_FUSE_THRESHOLD"));
+        assertTrue(guard.contains("HumanAim.lookToward(bot, source)"), "the turn is a human-speed turn, never an instant spin");
     }
 
     @Test

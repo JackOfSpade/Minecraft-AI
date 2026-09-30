@@ -38,12 +38,18 @@ public final class BotTickCoordinator {
             }
             // SAFE-1: the environmental safety net runs first; if the bot is currently self-rescuing (drowning/lava), it takes over this tick, skipping the other checks.
             if (NavSafetyNet.INSTANCE.tickBot(server, bot)) {
+                // The rescue has the bot: a shield the reactive owner raised comes down (it would slow every stroke).
+                ShieldGuard.INSTANCE.standDown(bot, "safety_net");
                 continue;
             }
             StuckWatcher.INSTANCE.tickBot(server, bot);
             boolean handled = runDanger && DangerWatcher.INSTANCE.scanBot(server, bot);
             // Mining assist (shadow sensing): never consumes the tick, never throws, one static check when off.
             MiningAssistCoordinator.INSTANCE.tickBot(server, bot, handled);
+            // The reactive shield owner (see ShieldGuard): what the bot has noticed that a shield can stop, from every task, and a
+            // shield it raised that nothing threatens any more. The tasks of this tick read its state; it never consumes the tick
+            // and never throws.
+            ShieldGuard.INSTANCE.tickBot(server, bot);
             if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {
                 continue;
             }

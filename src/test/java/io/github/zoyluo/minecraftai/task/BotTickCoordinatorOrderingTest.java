@@ -59,8 +59,11 @@ class BotTickCoordinatorOrderingTest {
     @Test
     void theExistingControlFlowAroundTheCallIsUntouched() throws IOException {
         String source = source();
+        // The safety net's rescue still ends the bot's tick (it only stands the reactive shield down first: ShieldGuard).
         assertTrue(source.contains(
                 "            if (NavSafetyNet.INSTANCE.tickBot(server, bot)) {\n"
+                        + "                // The rescue has the bot: a shield the reactive owner raised comes down (it would slow every stroke).\n"
+                        + "                ShieldGuard.INSTANCE.standDown(bot, \"safety_net\");\n"
                         + "                continue;\n"
                         + "            }\n"));
         assertTrue(source.contains(

@@ -69,11 +69,13 @@ final class CompanionPerceptionSourceContractTest {
         assertTrue(body.contains("Items.BOW") && body.contains("Items.CROSSBOW") && body.contains("CrossbowItem.isCharged(stack)")
                         && body.contains("getMainHandItem()") && body.contains("getOffhandItem()"),
                 "a bow drawn, a crossbow charging, or a loaded crossbow in either hand");
-        String combat = read("task/CombatTask.java");
-        int drawing = combat.indexOf("static boolean isDrawingBowAt(LivingEntity shooter, AIPlayerEntity bot)");
-        String drawingBody = combat.substring(drawing, combat.indexOf("private static LivingEntity nearbyImminentCreeper"));
+        String guard = read("task/ShieldGuard.java");
+        int drawing = guard.indexOf("static boolean isDrawingBowAt(LivingEntity shooter, AIPlayerEntity bot)");
+        String drawingBody = guard.substring(drawing, guard.length());
         assertTrue(drawingBody.contains("CombatCore.isRangedWeaponUp(shooter, SHOOTER_DRAW_TICKS)") && !drawingBody.contains("Items.BOW"),
-                "CombatTask recognises the shooter through the neutral helper, not the bow item");
+                "the shield guard recognises the shooter through the neutral helper, not the bow item");
+        assertTrue(read("task/CombatTask.java").contains("return ShieldGuard.isDrawingBowAt(shooter, bot);"),
+                "CombatTask keeps its entry point, which is the guard's");
         String sense = read("task/AggroSense.java");
         int any = sense.indexOf("private static boolean isDrawingBowAtAny");
         String anyBody = sense.substring(any, sense.indexOf("DRAW_AIM_DOT", any));

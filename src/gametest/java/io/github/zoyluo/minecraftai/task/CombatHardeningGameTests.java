@@ -773,8 +773,9 @@ public final class CombatHardeningGameTests {
                 drawRestarts[0]++;
                 skeleton.startUsingItem(InteractionHand.MAIN_HAND);
             }
-            boolean shieldUp = bot.isUsingItem() && bot.getUsedItemHand() == InteractionHand.OFF_HAND
-                    && bot.getOffhandItem().is(Items.SHIELD);
+            // The husk the bot fights stands in reach, so the melee rhythm legitimately raises the shield between the bot's own swings
+            // (phase BLOCK, owned by the combat task): what this test is about is the shield guard's RESPONSE to the shooter.
+            boolean shieldUp = ShieldGuard.INSTANCE.holding(bot) && bot.getOffhandItem().is(Items.SHIELD);
             if (turnedAt[0] < 0) {
                 require(context, !shieldUp,
                         "the shield went up for a skeleton drawing with its head turned away (tick "

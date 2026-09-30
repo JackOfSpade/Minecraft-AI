@@ -48,10 +48,11 @@ final class CombatHardeningSourceContractTest {
         int block = combat.indexOf("private void block(AIPlayerEntity bot)");
         String blockBody = combat.substring(block, combat.indexOf("private void reposition(AIPlayerEntity bot)"));
         assertTrue(blockBody.contains("bot.getActionPack().stopMovement();"),
-                "the shield is only ever up with movement stopped");
-        assertTrue(blockBody.contains("bot.getAttackStrengthScale(0.5F) >= 0.95F")
-                        && blockBody.contains("strike(bot);"),
-                "BLOCK must hand back to a swing the moment the cooldown completes");
+                "the melee rhythm stands its ground with the shield up (moving with it is slowed elsewhere)");
+        int swingCase = blockBody.indexOf("case SWING ->");
+        assertTrue(blockBody.contains("bot.getAttackStrengthScale(0.5F) >= 0.95F") && swingCase > 0
+                        && blockBody.substring(swingCase).contains("phase = Phase.STRIKE;"),
+                "BLOCK must hand back to a swing (STRIKE, the next tick) the moment the cooldown completes and the aim is on the target");
     }
 
     @Test
@@ -118,7 +119,7 @@ final class CombatHardeningSourceContractTest {
                 "the shot refusal must name a friend on the line of fire");
         assertTrue(combat.contains("CombatCore.safeStrafeInput("),
                 "the REPOSITION strafe needs a footing check");
-        assertTrue(combat.contains("\"shooter_draw\""));
+        assertTrue(read("task/ShieldGuard.java").contains("\"shooter_draw\""));
 
         String creeper = read("task/CreeperDefenseTask.java");
         assertTrue(creeper.contains("SHIELD") && creeper.contains("shouldRaiseShield")

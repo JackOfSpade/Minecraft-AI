@@ -3,9 +3,8 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.EquipAction;
-import io.github.zoyluo.minecraftai.action.InteractAction;
+import io.github.zoyluo.minecraftai.action.HumanAim;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
-import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -25,7 +24,6 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.level.ClipContext;
@@ -372,16 +370,14 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private void faceAndRaiseShield(AIPlayerEntity bot) {
+        // The head turns to the creeper at the human aim speed (a shield blocks inside the vanilla front arc only), and the shield
+        // goes up through the one vanilla use path every shield use shares (ShieldGuard.raise: main hand first, then the offhand).
         if (lastSeenPos != null) {
-            LookAction.lookAt(bot, Vec3.atCenterOf(lastSeenPos));
+            HumanAim.lookToward(bot, Vec3.atCenterOf(lastSeenPos));
         }
         bot.getActionPack().stopMovement();
-        if (!bot.getOffhandItem().is(net.minecraft.world.item.Items.SHIELD)
-                && !EquipAction.equipShieldOffhand(bot)) {
-            return;
-        }
-        if (!bot.isUsingItem() || bot.getUsedItemHand() != InteractionHand.OFF_HAND) {
-            InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
+        if (!ShieldGuard.usingShield(bot)) {
+            ShieldGuard.raise(bot, ShieldGuard.Owner.TASK);
         }
     }
 
@@ -408,7 +404,7 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private void endShield(AIPlayerEntity bot, String reason) {
-        bot.releaseUsingItem();
+        ShieldGuard.lower(bot);
         bot.getActionPack().stopAll();
         BotLog.danger(bot, "creeper_shield_ended",
                 "reason", reason,

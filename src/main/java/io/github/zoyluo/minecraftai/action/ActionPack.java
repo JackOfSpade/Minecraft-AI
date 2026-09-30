@@ -1117,8 +1117,11 @@ public final class ActionPack {
         this.walkTo = null;
         clearRouteLease();
         stopMovement();
-        // Cancel, never release: releasing a drawn bow fires it, and stopAll is an interruption, not a shot.
-        player.stopUsingItem();
+        // Cancel, never release: releasing a drawn bow fires it, and stopAll is an interruption, not a shot. A shield the reactive
+        // owner holds against a noticed threat is not the task's to drop (the owner lowers it itself when the threat is over).
+        if (!io.github.zoyluo.minecraftai.task.ShieldGuard.holdsShield(player)) {
+            player.stopUsingItem();
+        }
     }
 
     public boolean hasActiveActions() {
@@ -1280,6 +1283,11 @@ public final class ActionPack {
      * the delay lives: {@link #tickMining} and the route executor's dig-through sub-miners both tick through here.
      */
     public ActionResult tickBreak(MiningController controller) {
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            // A player cannot break a block while the use key is down (Minecraft.continueAttack needs no item in use): with the shield
+            // up against a noticed threat the break waits, its progress kept.
+            return ActionResult.IN_PROGRESS;
+        }
         if (player.level().getGameTime() < nextBreakAt) {
             return ActionResult.IN_PROGRESS;
         }

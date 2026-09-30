@@ -51,7 +51,8 @@ class PerceptionCallSiteClassificationTest {
         m.put("task/AggroSense.java", Counts.of(1, 1, 0));                     // mob aggressors noticed; object: the OWNER (a friend) being hurt, plain sight
         m.put("task/SharedVision.java", Counts.of(1, 0, 1));                   // seenByBotOrOwner: the bot part is noticing; ownerSees is the owner's own ray
         m.put("task/CombatCore.java", Counts.of(2, 1, 5));                     // ranged threats, target acquisition (hostile: notice; non-hostile deliberate search: object); physical: strike/reach rays
-        m.put("task/CombatTask.java", Counts.of(4, 0, 4));                     // drawing shooter, imminent creeper, pressure, shoot-from-here; physical: strike legality and lost-sight timer
+        m.put("task/CombatTask.java", Counts.of(2, 0, 4));                     // pressure, shoot-from-here; physical: strike legality and lost-sight timer
+        m.put("task/ShieldGuard.java", Counts.of(4, 0, 0));                    // the reactive shield owner: a creeper with a late fuse, a guardian beam, a shooter drawing at the bot, a projectile's shooter being tracked (all noticed)
         m.put("task/CreeperDefenseTask.java", Counts.of(1, 0, 0));
         m.put("task/EmergencyShelterTask.java", Counts.of(3, 0, 2));           // physical: melee strike from the shelter
         m.put("task/EvadeTask.java", Counts.of(3, 1, 0));                      // object: the OWNER's direction (a friend), plain sight

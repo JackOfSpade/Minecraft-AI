@@ -31,6 +31,11 @@ public final class InteractAction {
      * legal hostile ({@code CombatTask}, {@code AttackEntityTask}) or change its angle.
      */
     public static ActionResult attackEntity(AIPlayerEntity player, Entity target) {
+        if (player.isUsingItem()) {
+            // A player cannot attack while the use key is down (a raised shield, a drawn bow, food): the client drops the click
+            // (Minecraft.handleKeybinds). A raised shield is lowered by its owner first (CombatCore.strikeIfReady), never here.
+            return ActionResult.failed("hands_busy");
+        }
         String refusal = StrikeLegality.strikeRefusal(player, target);
         if (refusal != null) {
             BotLog.action(player, "attack_refused", "reason", refusal,

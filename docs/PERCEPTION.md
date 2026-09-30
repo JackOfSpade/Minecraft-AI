@@ -113,9 +113,12 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
 * **Blows.** A melee blow makes its (adjacent) striker known at once (`RecentDamage` attribution). A projectile from an unseen
   shooter gives only the direction it came from (the reverse of its velocity at impact, traced back to the first block): a
   hint, never the shooter.
-* **Projectiles.** An arrow or trident in flight is noticed if its shot was heard (the vanilla `PROJECTILE_SHOOT` vibration,
-  near where the projectile has come from) or the projectile itself is in view (inside the view field, clear line). There is no
-  reaction time for an object flying at the bot: it is a flinch, not a recognition.
+* **Projectiles.** A projectile in flight (an arrow, a trident, a fireball, ...) is sensed if its shot was heard (the vanilla
+  `PROJECTILE_SHOOT` vibration, near where the projectile has come from, and with a clear line to the projectile) or the
+  projectile itself is in view (inside the view field, clear line). Acting on it follows the same reaction rule as a creature
+  (`docs/SHIELD_USE.md`): a projectile from a shooter the bot is tracking was anticipated and is answered at once; any other is a first
+  sighting and waits the reaction time of the formula (angle factor 1 when only its shot was heard), so a shot from a shooter nobody
+  noticed normally just hits, and a shot from behind that nobody heard or saw always does.
 * **The owner's sight** still nominates: `SharedVision.seenByBotOrOwner` is "the bot noticed it, or its owner sees it" (foreign
   bots only), and `HostileBotIntent` only samples the intent of a foreign bot that someone on the protected side has noticed.
 * **Config** `behaviour.perception`: `enabled` (default true; false = today's omnidirectional line of sight exactly, no listener),
@@ -123,7 +126,7 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   `sneakMultiplier` and `hearing.listenerRadius` (see OPERATING_PROFILES.md).
 * **Call sites.** `PerceptionCallSiteClassificationTest` lists every caller of `canNoticeCreature`, `canObserveEntity` and
   `hasLineOfSight` with its class: creature noticing (DangerWatcher threat scans, AggroSense, CombatCore target acquisition,
-  CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision,
+  CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision, ShieldGuard,
   HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance), objects and deliberate searches (kept
   omnidirectional: drops, boats, prey, breeding, milking, trading, the landmark evidence of the mining assist) and physical strike legality (kept).
   The `attack_entity` command only considers creatures the bot has noticed (animals and villagers stay omnidirectional) and is refused with `busy` while another task runs (never replaces it, and a refused call does not turn the bot's head: a busy bot
