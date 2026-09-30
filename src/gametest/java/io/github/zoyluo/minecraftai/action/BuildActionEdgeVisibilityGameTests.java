@@ -181,6 +181,43 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildNoFallback");
     }
 
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_mid_air_placement_without_a_support_face_fails_in_both_profiles", maxTicks = 40)
+    public void midAirPlacementWithoutASupportFaceFailsInBothProfiles(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
+        clear(context, feet);
+        context.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        // A cell in reach and in plain view with all six neighbours empty: a player has nothing to click.
+        BlockPos unsupported = feet.north(2).above();
+        AIPlayerEntity bot = spawn(context, "BuildMidAir", feet, Vec3.atBottomCenterOf(feet));
+        equipTwoCobblestone(bot);
+        require(context, ObservableWorldQuery.canObserveCell(bot, unsupported),
+                "the mid-air cell is not visible enough to expose a direct-placement fallback");
+        for (Direction direction : Direction.values()) {
+            require(context, context.getLevel().getBlockState(unsupported.relative(direction)).isAir(),
+                    "fixture: the mid-air cell has a neighbour " + direction);
+        }
+
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            for (OperatingProfile profile : OperatingProfile.values()) {
+                setConfig(withProfile(original, profile));
+                require(context, MinecraftAiConfig.get().profile() == profile,
+                        "fixture failed to switch to profile " + profile);
+                ActionResult result = BuildAction.placeBlockAt(bot, unsupported);
+                require(context, result.isFailed(),
+                        "mid-air placement succeeded under profile " + profile);
+                require(context, context.getLevel().getBlockState(unsupported).isAir(),
+                        "profile " + profile + " wrote a block into mid-air");
+                require(context, bot.getMainHandItem().getCount() == 2,
+                        "failed placement under profile " + profile + " consumed a block");
+            }
+        } finally {
+            setConfig(original);
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "BuildMidAir");
+        }
+        context.succeed();
+    }
+
     @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_ordinary_supported_placement_still_uses_vanilla_interaction", maxTicks = 40)
     public void ordinarySupportedPlacementStillUsesVanillaInteraction(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
@@ -286,6 +323,25 @@ public final class BuildActionEdgeVisibilityGameTests {
         require(context, ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, source),
                 "fluid source was not observable through its exposed inset");
         cleanup(context, bot, name);
+    }
+
+    private static MinecraftAiConfig withProfile(MinecraftAiConfig config, OperatingProfile profile) {
+        return new MinecraftAiConfig(
+                profile,
+                config.operatorCapabilities(),
+                config.llm(),
+                config.perception(),
+                config.brain(),
+                config.watchdog(),
+                config.logging(),
+                config.survival(),
+                config.combat(),
+                config.night(),
+                config.mining(),
+                config.goal(),
+                config.nav(),
+                config.pickup(),
+                config.conversation());
     }
 
     private static MinecraftAiConfig withPerceptionRadius(MinecraftAiConfig config, int radius) {

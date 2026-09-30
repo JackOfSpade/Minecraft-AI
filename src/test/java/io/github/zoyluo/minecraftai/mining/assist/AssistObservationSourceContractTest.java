@@ -445,10 +445,9 @@ class AssistObservationSourceContractTest {
         String source = read(MAIN.resolve("action/BuildAction.java"));
         int place = source.indexOf("AStarPathfinder.invalidateCache(\"block_place\");");
         int placeNote = source.indexOf("BotEdits.notePlaced(player, destination);");
-        int fallback = source.indexOf("AStarPathfinder.invalidateCache(\"block_place_fallback\");");
-        int fallbackNote = source.indexOf("BotEdits.notePlaced(player, pos);");
-        assertTrue(place > 0 && placeNote > place && fallback > placeNote && fallbackNote > fallback);
-        assertEquals(2, count(source, "BotEdits.notePlaced("));
+        assertTrue(place > 0 && placeNote > place);
+        assertFalse(source.contains("block_place_fallback"), "the mid-air fallback placement is gone");
+        assertEquals(1, count(source, "BotEdits.notePlaced("));
         assertFalse(source.contains("ObservableWorldQuery.canObserveBlock"),
                 "face-center observation must not pre-empt the exact inset click sampler");
     }

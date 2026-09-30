@@ -37,7 +37,7 @@ class BuildActionVisibilitySourceTest {
     }
 
     @Test
-    void placeAtDoesNotUseFaceCenterVisibilityOrDirectMutationInStrictMode()
+    void placeAtDoesNotUseFaceCenterVisibilityOrDirectMutationInAnyProfile()
             throws IOException {
         String source = Files.readString(SOURCE);
         int placeAt = source.indexOf("public static ActionResult placeBlockAt(");
@@ -52,13 +52,35 @@ class BuildActionVisibilitySourceTest {
         assertTrue(body.contains("placeBlock(player, against, direction, InteractionHand.MAIN_HAND, true)"),
                 "every support still goes through the exact placeBlock proof (plain supports first)");
 
-        int strict = body.indexOf("OperatingProfile.STRICT_SURVIVAL");
-        int failedReturn = body.indexOf("return lastFailure;", strict);
-        int fallback = body.indexOf("directPlaceFallback(player, pos, InteractionHand.MAIN_HAND)");
-        assertTrue(strict >= 0 && failedReturn > strict && fallback > failedReturn,
-                "strict mode must return before the direct world-mutation fallback");
+        assertFalse(body.contains("OperatingProfile"),
+                "no profile may grant a placement path a survival player lacks");
+        assertFalse(body.contains("setBlock("),
+                "placeBlockAt must never write the world directly: only a real click on a real support face places");
+        assertFalse(source.contains("directPlaceFallback"), "the mid-air placement fallback is gone");
+        assertFalse(source.contains("setBlock("),
+                "BuildAction never writes a block itself");
     }
 
+
+    @Test
+    void everyBlockUseRepeatsThePacketHandlersMayInteractCheckFirst() throws IOException {
+        String source = Files.readString(SOURCE);
+        assertTrue(source.contains("!player.level().mayInteract(player, pos)"),
+                "vanilla's ServerLevel.mayInteract (spawn protection, world border) is the check");
+        int from = 0;
+        int uses = 0;
+        while ((from = source.indexOf("player.gameMode.useItemOn(", from)) >= 0) {
+            int guard = source.lastIndexOf("isProtectedArea(player,", from);
+            int previousUse = source.lastIndexOf("player.gameMode.useItemOn(", from - 1);
+            assertTrue(guard >= 0 && guard > previousUse,
+                    "a block use at offset " + from + " has no protected-area check before it");
+            uses++;
+            from++;
+        }
+        assertEquals(3, uses, "useItemOnHit, useItemOnFace and useItemOnCell are the only block-use sites");
+        assertTrue(source.contains("ActionResult.failed(PROTECTED_AREA)"));
+        assertEquals("protected_area", BuildAction.PROTECTED_AREA);
+    }
     @Test
     void exactPlacementSampleRangeUsesTheSmallerPhysicalBoundary() {
         assertEquals(1.0D, BuildAction.exactPlacementSampleRange(0, 4.5D));
@@ -98,9 +120,9 @@ class BuildActionVisibilitySourceTest {
     void theProbeRayNeverTurnsTheBotsHeadOrCallsVanillasLookDirectionRaycast() throws IOException {
         String source = Files.readString(SOURCE);
         int rayTo = source.indexOf("private static BlockHitResult rayTo(");
-        int directFallback = source.indexOf("private static ActionResult directPlaceFallback(", rayTo);
-        assertTrue(rayTo >= 0 && directFallback > rayTo);
-        String body = source.substring(rayTo, directFallback);
+        int interactive = source.indexOf("static boolean isInteractiveSupport(", rayTo);
+        assertTrue(rayTo >= 0 && interactive > rayTo);
+        String body = source.substring(rayTo, interactive);
 
         assertFalse(body.contains("LookAction.lookAt"),
                 "the pure probe ray must never rotate the player");

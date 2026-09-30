@@ -7,7 +7,6 @@ import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import io.github.zoyluo.minecraftai.mode.FaceAim;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +14,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -46,6 +44,19 @@ public final class BuildAction {
 
     public static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face, InteractionHand hand) {
         return placeBlock(player, against, face, hand, false);
+    }
+
+    /** Reported when the clicked block is inside spawn protection or outside the world border, as vanilla refuses it. */
+    public static final String PROTECTED_AREA = "protected_area";
+
+    /**
+     * The check the packet handler makes before it lets a right click on a block reach the game mode
+     * ({@code ServerGamePacketListenerImpl#handleUseItemOn}: {@code ServerLevel#mayInteract}, which refuses spawn
+     * protection for a non-operator and anything outside the world border). Our clicks skip the packet handler, so the
+     * check is repeated before every block use.
+     */
+    public static boolean isProtectedArea(AIPlayerEntity player, BlockPos pos) {
+        return !player.level().mayInteract(player, pos);
     }
 
     /** Reported by the first pass of {@link #placeBlockAt} for a support that has an interaction of its own. */
@@ -81,6 +92,9 @@ public final class BuildAction {
         }
         if (deferInteractive && isInteractiveSupport(player.level(), against)) {
             return ActionResult.failed(SUPPORT_INTERACTIVE_DEFERRED);
+        }
+        if (isProtectedArea(player, against)) {
+            return ActionResult.failed(PROTECTED_AREA);
         }
         BlockPos destination = against.relative(face);
         Use use = useItemOnHitCrouching(player, hit, hand);
@@ -135,6 +149,9 @@ public final class BuildAction {
         ItemStack stack = player.getItemInHand(hand);
         var item = stack.getItem();
         BlockPos destination = hit.getBlockPos().relative(hit.getDirection());
+        if (isProtectedArea(player, hit.getBlockPos())) {
+            return new Use(net.minecraft.world.InteractionResult.FAIL, false, destination);
+        }
         var before = player.level().getBlockState(destination);
         net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
                 player,
@@ -200,6 +217,9 @@ public final class BuildAction {
         if (!player.isWithinBlockInteractionRange(pos, 0.0D)) {
             return ActionResult.failed("out_of_reach_or_sight");
         }
+        if (isProtectedArea(player, pos)) {
+            return ActionResult.failed(PROTECTED_AREA);
+        }
         net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
                 player, player.level(), stack, hand, hit);
         if (!result.consumesAction()) {
@@ -240,6 +260,9 @@ public final class BuildAction {
             BlockHitResult hit = rotateAndRaycast(player, target, sampleRange);
             if (hit == null || hit.getType() != HitResult.Type.BLOCK || !pos.equals(hit.getBlockPos())) {
                 continue;
+            }
+            if (isProtectedArea(player, pos)) {
+                return ActionResult.failed(PROTECTED_AREA);
             }
             net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
                     player, player.level(), stack, hand, hit);
@@ -292,13 +315,6 @@ public final class BuildAction {
                 return result;
             }
             lastFailure = preferPlacementFailure(lastFailure, result);
-        }
-        if (MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL) {
-            return lastFailure;
-        }
-        ActionResult fallback = directPlaceFallback(player, pos, InteractionHand.MAIN_HAND);
-        if (fallback.isSuccess()) {
-            return fallback;
         }
         return lastFailure;
     }
@@ -358,6 +374,9 @@ public final class BuildAction {
     }
 
     private static int placementFailurePriority(String reason) {
+        if (PROTECTED_AREA.equals(reason)) {
+            return 5;
+        }
         if (reason != null && reason.startsWith("interact_block_")) {
             return 4;
         }
@@ -455,44 +474,6 @@ public final class BuildAction {
         Vec3 end = eye.add(direction.scale(sampleRange));
         return player.level().clip(new ClipContext(
                 eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-    }
-
-    private static ActionResult directPlaceFallback(AIPlayerEntity player, BlockPos pos, InteractionHand hand) {
-        double reach = player.blockInteractionRange();
-        if (player.getEyePosition().distanceToSqr(pos.getCenter()) > reach * reach) {
-            return ActionResult.failed("target_out_of_reach");
-        }
-        if (!ObservableWorldQuery.canObserveCell(player, pos)) {
-            return ActionResult.failed("target_not_visible");
-        }
-        ItemStack stack = player.getItemInHand(hand);
-        if (!(stack.getItem() instanceof BlockItem blockItem)) {
-            return ActionResult.failed("not_block_item");
-        }
-        var item = stack.getItem();
-        var existing = player.level().getBlockState(pos);
-        // Allow replaceable cells (fluid source blocks, tall grass, etc.): capping lava is just
-        // placing a block directly onto a fluid cell, a legal vanilla player action.
-        if (!existing.isAir() && !existing.canBeReplaced()) {
-            return ActionResult.failed("target_not_air");
-        }
-        var placementState = blockItem.getBlock().defaultBlockState();
-        if (!placementState.canSurvive(player.level(), pos)
-                || !player.level().isUnobstructed(placementState, pos, CollisionContext.of(player))) {
-            return ActionResult.failed("target_blocked_or_unsupported");
-        }
-        if (!player.level().setBlock(pos, placementState, 3)) {
-            return ActionResult.failed("world_mutation_rejected");
-        }
-        if (!player.getAbilities().instabuild) {
-            stack.shrink(1);
-        }
-        player.swing(hand);
-        player.resetLastActionTime();
-        AStarPathfinder.invalidateCache("block_place_fallback");
-        BotEdits.notePlaced(player, pos);
-        BotLog.action(player, "place_fallback", "pos", LogFields.pos(pos), "item", item);
-        return ActionResult.SUCCESS;
     }
 
     /**

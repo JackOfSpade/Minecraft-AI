@@ -182,20 +182,17 @@ class PrivilegedBoundarySourceTest {
     }
 
     @Test
-    void directMutationFallbacksKeepReachAndVisibilityGuards() throws IOException {
+    void placementHasNoDirectMutationFallbackAndTheOtherGuardsRemain() throws IOException {
         String build = read("action/BuildAction.java");
-        assertTrue(build.contains("target_out_of_reach"));
-        assertTrue(build.contains("target_not_visible"));
         assertFalse(build.contains("ObservableWorldQuery.canObserveBlock"),
                 "face-center observation must not pre-empt the exact inset click sampler");
-        assertTrue(build.contains("ObservableWorldQuery.canObserveCell"));
-        assertTrue(build.contains("isUnobstructed(placementState, pos, CollisionContext.of(player))"),
-                "direct placement fallback must respect entity/world collision");
         assertTrue(build.contains("player.pick(sampleRange, 1.0F, false)"),
                 "exact placement rays must use the perception-and-interaction bounded range");
         assertTrue(build.contains("hit.getDirection() != face"));
-        assertTrue(build.contains("OperatingProfile.STRICT_SURVIVAL"),
-                "strict mode must not use direct setBlockState placement fallback");
+        assertFalse(build.contains("OperatingProfile"),
+                "no profile may use a placement path a survival player lacks");
+        assertFalse(build.contains("setBlock("),
+                "a block is only ever placed by a real click on a real support face");
 
         String buildTask = read("task/BuildTask.java");
         assertTrue(buildTask.contains("StructureVerifier.verify"));
