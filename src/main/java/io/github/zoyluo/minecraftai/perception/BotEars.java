@@ -127,8 +127,9 @@ final class BotEars implements VibrationSystem {
         @Override
         public boolean canReceiveVibration(ServerLevel level, BlockPos pos, Holder<GameEvent> event,
                                            GameEvent.Context context) {
-            // Dead or gone bots hear nothing; a bot does not hear its own steps and blows.
-            return bot.isAlive() && !bot.isRemoved() && context.sourceEntity() != bot;
+            // Dead or gone bots hear nothing; a bot does not hear its own steps and blows, nor wonder about an item it dropped itself.
+            return bot.isAlive() && !bot.isRemoved() && context.sourceEntity() != bot
+                    && !(context.sourceEntity() instanceof net.minecraft.world.entity.item.ItemEntity item && item.getOwner() == bot);
         }
 
         @Override

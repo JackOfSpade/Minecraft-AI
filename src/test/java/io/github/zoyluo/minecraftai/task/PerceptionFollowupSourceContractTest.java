@@ -47,6 +47,20 @@ final class PerceptionFollowupSourceContractTest {
     }
 
     @Test
+    void anUnexplainedSoundTurnsTheHeadOfAnIdleBotOnlyAndNeverAnItemItDroppedItself() throws IOException {
+        String senses = read("perception/CreatureSenses.java");
+        String look = between(senses, "private static void lookAtHint(BotState s, long now)", "HumanAim.lookToward(s.bot, hint.pos());");
+        assertTrue(look.contains("TaskManager.INSTANCE.getActive(s.bot).isPresent()")
+                        && look.contains("s.bot.getActionPack().hasActiveActions()"),
+                "a bot in the middle of an action (step, dig, route, item use) keeps its head where the action needs it");
+        String ears = read("perception/BotEars.java");
+        String receive = between(ears, "public boolean canReceiveVibration(", "public void onReceiveVibration(");
+        assertTrue(receive.contains("context.sourceEntity() != bot")
+                        && receive.contains("instanceof net.minecraft.world.entity.item.ItemEntity item && item.getOwner() == bot"),
+                "a bot does not hear its own steps and blows, nor an item it dropped itself");
+    }
+
+    @Test
     void theProjectileTestWithPerceptionOffIsExactlyTheOldTestIncludingTheCapabilityBypass() throws IOException {
         String senses = read("perception/CreatureSenses.java");
         String projectile = between(senses, "public boolean noticedProjectile(AIPlayerEntity bot, Entity projectile)",

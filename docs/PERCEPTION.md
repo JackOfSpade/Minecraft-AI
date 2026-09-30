@@ -106,8 +106,9 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   `DynamicGameEventListener`, `VibrationSystem.Ticker` every tick; radius `behaviour.perception.hearing.listenerRadius`, 16 =
   the Warden's; vanilla decides sneaking, wool and travel time). A sound whose source is a creature in clear view within 4 blocks
   is where it came from: the bot is "turned to it" for 30 ticks (sight without the cone, the reaction time still applies).
-  A sound with nobody in view is an INVESTIGATE hint (`CreatureSenses.hint`; an idle bot turns to look). NO MAGIC: only the
-  position of the sound is used. Listeners are removed on despawn, death, level change, when perception is switched off and
+  A sound with nobody in view is an INVESTIGATE hint (`CreatureSenses.hint`; an idle bot, one with no task and no action in
+  progress, turns to look; a bot busy with a step, a dig or a route keeps its head on its work). A bot does not hear its own steps
+  and blows, nor an item it dropped itself. NO MAGIC: only the position of the sound is used. Listeners are removed on despawn, death, level change, when perception is switched off and
   when the server stops (`CreatureSenses.listenerCount()` is the test seam).
 * **Blows.** A melee blow makes its (adjacent) striker known at once (`RecentDamage` attribution). A projectile from an unseen
   shooter gives only the direction it came from (the reverse of its velocity at impact, traced back to the first block): a

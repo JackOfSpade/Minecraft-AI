@@ -422,11 +422,15 @@ public final class CreatureSenses {
         lookAtHint(s, now);
     }
 
-    /** An idle bot keeps its head turned toward a place it could not explain (a sound out of sight, the direction of a blow). */
+    /**
+     * An idle bot keeps its head turned toward a place it could not explain (a sound out of sight, the direction of a blow). Only an
+     * idle one: a bot in the middle of an action (a walked step, a dig, a route, an item in use) keeps its head where the action
+     * needs it, exactly as without perception; turning it would steer the step or spend the turn its own aim needs.
+     */
     private static void lookAtHint(BotState s, long now) {
         Hint hint = s.hint;
         if (hint == null || now - hint.tick() > LOOK_TICKS || !s.noticed.isEmpty()
-                || TaskManager.INSTANCE.getActive(s.bot).isPresent()) {
+                || TaskManager.INSTANCE.getActive(s.bot).isPresent() || s.bot.getActionPack().hasActiveActions()) {
             return;
         }
         HumanAim.lookToward(s.bot, hint.pos());
