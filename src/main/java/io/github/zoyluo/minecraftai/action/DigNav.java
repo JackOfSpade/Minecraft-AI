@@ -26,11 +26,14 @@ public final class DigNav {
 
     /**
      * Advance one block toward target by digging: clear the facing blocks (feet position + head position) ->
-     * once clear, walk into it (descend actively if it's lower, since the bot has no passive gravity).
+     * once clear, walk into it (a walked step down if it is lower, gravity lands the bot; never a teleport).
      * Returns true = progress was made this tick (currently digging or already stepped); false = that
      * direction is blocked (e.g. adjacent lava), the caller should reroute or fail.
      */
     public static boolean digStep(AIPlayerEntity bot, BlockMiner miner, BlockPos target) {
+        if (!bot.getActionPack().stepIdle()) {
+            return true; // a walked step down is in flight: nothing else moves the bot until its landing is verified
+        }
         ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
         BlockPos step = stepToward(feet, target);
@@ -45,7 +48,14 @@ public final class DigNav {
             // The facing block is already air -> step into it (descend if lower, walk if level/higher).
             miner.cancel(bot);
             if (step.getY() < feet.getY()) {
-                bot.getActionPack().descendInto(step);
+                // Down: a walked step (walk off the edge, or drop into the hole just dug) whose landing is verified on a later tick;
+                // the caller keeps calling digStep, which leaves the bot alone while the step is in flight.
+                ActionPack pack = bot.getActionPack();
+                WalkedStep descent = pack.beginDescend(step, "dig_nav");
+                if (descent == null) {
+                    return false; // no legal landing there (not standable, a hazard, something in the way): reroute or fail
+                }
+                pack.runStep(descent);
             } else {
                 bot.getActionPack().startWalkTo(step.getCenter());
             }

@@ -10,6 +10,8 @@ public final class WalkedStepRules {
     public static final int MIN_TIMEOUT_TICKS = 20;
     /** Full-speed ticks a step is given per block it covers (a walk needs about 4.7, the rest is slack for a jump, a slab, a nudge). */
     public static final int TIMEOUT_TICKS_PER_BLOCK = 8;
+    /** A drop presses no key once the bot is this close to the middle of its hole (a body 0.6 wide falls into a one-block hole from within 0.2). */
+    public static final double DROP_CENTRED = 0.1D;
     /** Ground friction leaves a released walker sliding about 1.3 ticks of its speed: the keys are let go that far before the point. */
     public static final double BRAKE_FACTOR = 1.3D;
     /** Largest horizontal speed of the vanilla-client style push out of a block (LocalPlayer.moveTowardsClosestSpace uses 0.1). */
@@ -61,6 +63,7 @@ public final class WalkedStepRules {
             case FLAT -> dy == 0 && horizontal == 1;
             case STEP_UP -> dy == 1 && horizontal == 1;
             case STEP_DOWN -> dy >= -3 && dy <= -1 && horizontal == 1;
+            case DROP -> dy >= -3 && dy <= -1 && dx == 0 && dz == 0;
             case SWIM -> Math.abs(dy) <= 1 && horizontal <= 1 && (horizontal + Math.abs(dy)) > 0;
             case SNEAK_SHIFT, RECENTER, PUSH_OUT -> dx == 0 && dy == 0 && dz == 0;
         };
@@ -80,14 +83,14 @@ public final class WalkedStepRules {
     /** True for the kinds that end in a cell (the bot's block position must equal it) rather than at a point. */
     public static boolean endsInCell(WalkedStep.Kind kind) {
         return switch (kind) {
-            case FLAT, STEP_UP, STEP_DOWN, SWIM -> true;
+            case FLAT, STEP_UP, STEP_DOWN, DROP, SWIM -> true;
             case SNEAK_SHIFT, RECENTER, PUSH_OUT -> false;
         };
     }
 
-    /** Whether the walk keys are let go for the last stretch of a point-step (a cell-step keeps walking until it is in the cell). */
+    /** Whether the walk keys are let go for the last stretch of a step that settles on a point (a cell-step keeps walking until it is in the cell; a drop settles over its hole). */
     public static boolean brakes(WalkedStep.Kind kind) {
-        return kind == WalkedStep.Kind.RECENTER || kind == WalkedStep.Kind.SNEAK_SHIFT;
+        return kind == WalkedStep.Kind.RECENTER || kind == WalkedStep.Kind.SNEAK_SHIFT || kind == WalkedStep.Kind.DROP;
     }
 
     /**

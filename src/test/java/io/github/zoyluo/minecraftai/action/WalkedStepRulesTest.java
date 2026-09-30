@@ -26,6 +26,13 @@ class WalkedStepRulesTest {
         assertTrue(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 1, -3, 0), "three blocks is the damage-free drop");
         assertFalse(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 1, -4, 0));
         assertFalse(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 0, -1, 0), "walking down needs an edge to walk off");
+
+        assertTrue(WalkedStepRules.offsetAllowed(Kind.DROP, 0, -1, 0), "a hole just dug underfoot");
+        assertTrue(WalkedStepRules.offsetAllowed(Kind.DROP, 0, -3, 0));
+        assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 0, -4, 0), "four blocks is not a damage-free fall");
+        assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 0, 0, 0));
+        assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 0, 1, 0), "a drop never goes up");
+        assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 1, -1, 0), "a drop is straight down; a neighbour is a walked step down");
     }
 
     @Test
@@ -35,12 +42,13 @@ class WalkedStepRulesTest {
             assertFalse(WalkedStepRules.offsetAllowed(kind, 1, 0, 0), kind.name());
             assertFalse(WalkedStepRules.endsInCell(kind), kind.name());
         }
-        for (Kind kind : new Kind[]{Kind.FLAT, Kind.STEP_UP, Kind.STEP_DOWN, Kind.SWIM}) {
+        for (Kind kind : new Kind[]{Kind.FLAT, Kind.STEP_UP, Kind.STEP_DOWN, Kind.DROP, Kind.SWIM}) {
             assertTrue(WalkedStepRules.endsInCell(kind), kind.name());
         }
         assertTrue(WalkedStepRules.brakes(Kind.RECENTER));
         assertTrue(WalkedStepRules.brakes(Kind.SNEAK_SHIFT));
         assertFalse(WalkedStepRules.brakes(Kind.FLAT), "a cell-step keeps walking until it is in the cell");
+        assertTrue(WalkedStepRules.brakes(Kind.DROP), "a drop settles over its hole instead of running past it");
     }
 
     @Test

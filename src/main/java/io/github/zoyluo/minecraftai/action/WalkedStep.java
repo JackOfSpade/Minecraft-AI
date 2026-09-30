@@ -34,6 +34,8 @@ public final class WalkedStep {
         STEP_UP,
         /** Walk off the edge onto the adjacent cell one to three blocks lower (gravity lands it). */
         STEP_DOWN,
+        /** Fall straight down into the cell one to three blocks below (a hole the bot has just dug): no key is needed, gravity lands it. */
+        DROP,
         /** Forward, and jump while the head is under water or the target is higher, to the adjacent water cell. */
         SWIM,
         /** Sneak and walk to a point a little over the edge of the support (sneaking will not fall off it): inside the bot's cell, or up to {@value WalkedStepRules#IN_CELL_MAX_OFFSET} block from the point it stands at, so a little into the next cell. */
@@ -144,7 +146,7 @@ public final class WalkedStep {
 
     /** Whether the step walks off an edge: a sneak must not be applied to it (a sneaking player does not walk off). */
     public boolean descends() {
-        return kind == Kind.STEP_DOWN;
+        return kind == Kind.STEP_DOWN || kind == Kind.DROP;
     }
 
     /**
@@ -181,7 +183,7 @@ public final class WalkedStep {
             if (kind == Kind.STEP_UP && !passable(level, here.above())) {
                 return "no_headroom";
             }
-            if (kind == Kind.STEP_DOWN) {
+            if (kind == Kind.STEP_DOWN || kind == Kind.DROP) {
                 for (int y = target.getY() + 1; y <= here.getY() + 1; y++) {
                     BlockPos column = new BlockPos(target.getX(), y, target.getZ());
                     if (!level.getBlockState(column).getCollisionShape(level, column).isEmpty()) {
@@ -295,6 +297,13 @@ public final class WalkedStep {
         if (distance > 3.0D || bot.getY() < cell.getY() - 3.6D) {
             return fail("left_course");
         }
+        if (kind == Kind.DROP && distance <= WalkedStepRules.DROP_CENTRED) {
+            // Over its hole: nothing to press, gravity does the step.
+            pack.setForward(0.0F);
+            pack.setStrafing(0.0F);
+            pack.setJumping(false);
+            return Result.RUNNING;
+        }
         if (WalkedStepRules.brakes(kind) && WalkedStepRules.shouldBrake(distance, speed)) {
             pack.setForward(0.0F);
             pack.setStrafing(0.0F);
@@ -363,7 +372,7 @@ public final class WalkedStep {
                 }
                 return refusal(bot, cell, kind);
             }
-            case SWIM -> {
+            case SWIM, DROP -> {
                 return refusal(bot, cell, kind);
             }
             case RECENTER, SNEAK_SHIFT -> {

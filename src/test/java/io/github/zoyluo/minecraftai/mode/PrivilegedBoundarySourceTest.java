@@ -95,6 +95,28 @@ class PrivilegedBoundarySourceTest {
     }
 
     @Test
+    void digDownAndDigNavMoveByWalkedStepsNeverByTeleportPrimitives() throws IOException {
+        // R5: the stair descent, the horizontal advance and the return up the trail of DigDownTask, and the descent of DigNav, are
+        // input-driven WalkedSteps whose landing is verified on a later tick; neither calls a teleport primitive.
+        for (String file : new String[]{"task/DigDownTask.java", "action/DigNav.java"}) {
+            String source = read(file);
+            assertFalse(source.contains("FakePlayerMotion"), file + " must not use a FakePlayerMotion primitive");
+            assertFalse(source.contains(".descendInto("), file + " must not use the teleporting descendInto");
+            assertFalse(source.contains("teleportTo("), file + " must not teleport");
+            assertTrue(source.contains("beginDescend(") || source.contains("WalkedStep"), file + " moves by walked steps");
+        }
+        String digDown = read("task/DigDownTask.java");
+        int launch = digDown.indexOf("private void launchStep(");
+        int settle = digDown.indexOf("private void settleStep(");
+        int landing = digDown.indexOf("rememberDescentStep(bot.blockPosition())", settle);
+        assertTrue(launch >= 0 && settle > launch && landing > settle,
+                "the trail is extended from the verified landing in settleStep, never in the tick that launches a step");
+        String launchBody = digDown.substring(launch, settle);
+        assertFalse(launchBody.contains("rememberDescentStep(") || launchBody.contains("returnTrailIndex"),
+                "launching a step changes neither the trail nor the return cursor");
+    }
+
+    @Test
     void digDownRelocationUsesObservedFailureInsteadOfHiddenColumnScan() throws IOException {
         String digDown = read("task/DigDownTask.java");
         assertFalse(digDown.contains("dryColumn("),

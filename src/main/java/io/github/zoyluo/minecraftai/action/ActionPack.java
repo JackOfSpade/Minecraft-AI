@@ -1044,6 +1044,29 @@ public final class ActionPack {
     }
 
     /**
+     * The input-driven counterpart of {@link #descendInto}: a step that walks the bot down into the just-mined {@code cell}, to be run
+     * with {@link #runStep}. A cell diagonally below-adjacent is a {@link WalkedStep.Kind#STEP_DOWN} (walk off the edge and let gravity
+     * land it); the cell directly below is a {@link WalkedStep.Kind#DROP} (no key: gravity lands it). Nothing moves the bot: the descent
+     * has happened only when the step has verified the landing (the next tick or later, never in the tick that starts it). Null when
+     * the cell is not below the bot or the landing is refused (not standable, a hazard, a block or an entity in the way).
+     */
+    public WalkedStep beginDescend(BlockPos cell, String reason) {
+        BlockPos here = player.blockPosition();
+        if (cell.getY() >= here.getY()) {
+            return null;
+        }
+        WalkedStep.Kind kind = cell.getX() == here.getX() && cell.getZ() == here.getZ()
+                ? WalkedStep.Kind.DROP : WalkedStep.Kind.STEP_DOWN;
+        String refused = WalkedStep.refusal(player, cell, kind);
+        if (refused != null) {
+            BotLog.action(player, "descend_step_refused", "reason", reason, "from", LogFields.pos(here),
+                    "to", LogFields.pos(cell), "why", refused);
+            return null;
+        }
+        return WalkedStep.begin(player, cell, kind, reason);
+    }
+
+    /**
      * Actively sinks the bot down one cell into the given (already-air) block.
      * Key point: the bot is a ServerPlayer, and the server side **does not run travel()**
      * (a real player's movement/gravity is driven by the client, and a fake player has no

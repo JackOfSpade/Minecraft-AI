@@ -6,6 +6,8 @@ import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -94,6 +96,16 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         LIMIT
     }
 
+    /** Why a walked step runs: the diagonal stair down, the horizontal advance, or one step of the return up the recorded trail. */
+    private enum StepPurpose {
+        STAIR,
+        HORIZONTAL,
+        RETURN
+    }
+
+    /** Ticks a bot that lost a step in the air is given to land before its pose is recorded anyway (a fall is a few ticks). */
+    private static final int UNSETTLED_LIMIT = 100;
+
     /**
      * A failed descent is not allowed to strand the bot below its exact entry point.  Persist the
      * terminal outcome while the same factual trail is being unwound; only after that debt is
@@ -144,6 +156,14 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     private long returnBestDistanceSquared;
     private boolean returnSafetyRecovery;
     private ReturnOutcome returnOutcome = ReturnOutcome.COMPLETE;
+
+    /** What the walked step in flight is for (see {@link #launchStep}); null while none is. Never persisted: a checkpoint holds the trail, not a step. */
+    private StepPurpose stepPurpose;
+    private BlockPos stepOrigin;
+    private int stepDirIndex;
+    /** Set when a step was abandoned or failed: the bot may be in the air between two trail cells, so no pose is recorded until it stands on something. */
+    private boolean poseUnsettled;
+    private int unsettledTicks;
     private final List<BlockPos> entryRelocationCandidates = new ArrayList<>();
     private int entryRelocationIndex;
     private int entryRelocationAttempts;
@@ -241,7 +261,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
         boolean transitionedToLavaReturn = false;
         if (phase == Phase.DESCEND) {
-            TrailUpdate update = rememberDescentStep(current);
+            abandonStep(bot);
+            TrailUpdate update = rememberPose(bot);
             beginReturn(bot, update == TrailUpdate.LIMIT
                     ? ReturnOutcome.TRAIL_LIMIT : ReturnOutcome.WALLED);
             transitionedToLavaReturn = returnOutcome == ReturnOutcome.WALLED;
@@ -494,6 +515,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             rejectedLandingDirections = restored.rejectedLandingDirections();
         }
         bot.getActionPack().stopAll();
+        abandonStep(bot);
+        poseUnsettled = true; // a restored bot may be mid-air: its pose is recorded only once it stands on something
+        unsettledTicks = 0;
         BotLog.task(bot, "dig_down_restored",
                 "phase", phase,
                 "start", startPos.toShortString(),
@@ -507,17 +531,19 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     protected void onAbort(AIPlayerEntity bot) {
         miner.cancel(bot);
         bot.getActionPack().stopAll();
+        abandonStep(bot);
     }
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
         miner.cancel(bot);
         bot.getActionPack().stopAll();
+        abandonStep(bot);
         if (startPos == null) {
             return;
         }
         if (phase == Phase.DESCEND) {
-            TrailUpdate update = rememberDescentStep(bot.blockPosition());
+            TrailUpdate update = rememberPose(bot);
             // A safety task is allowed to move the bot after pause().  Publish durable RETURN
             // debt now, while the last factual work cell is still known, so a paused snapshot or
             // a process restart can never reinterpret the displaced underground pose as a fresh
@@ -566,6 +592,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         if (startPos == null) {
             tickEntryRelocation(bot);
             return;
+        }
+        if (holdForStepOrLanding(bot)) {
+            return; // a walked step is in flight (or its bot is still landing): the trail changes only when the landing is verified
         }
         if (phase == Phase.RETURN) {
             returnToSurface(bot);
@@ -762,22 +791,13 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             miner.tick(bot); // start mining this cell immediately, don't waste a tick
             return;
         }
-        // Body space is clear -> step diagonally down onto the next stair tier. The bot has no
-        // passive gravity, so it still needs an active one-cell move; a 1-cell diagonal
-        // micro-displacement = stepping down one stair, not the kind of large-scale map teleport
-        // roam does (after descending, the just-broken block's drops land right within the pickup
-        // radius, which also fixes the collected=0 problem).
-        if (bot.getActionPack().descendInto(next)) {
-            TrailUpdate landingUpdate = rememberDescentStep(bot.blockPosition());
-            if (landingUpdate == TrailUpdate.LIMIT) {
-                failAfterExactReturn(bot, ReturnOutcome.TRAIL_LIMIT);
-                return;
-            }
-            if (landingUpdate == TrailUpdate.DISCONNECTED) {
-                failAfterExactReturn(bot, ReturnOutcome.SAFETY_INTERRUPTED);
-                return;
-            }
-            clearRejectedLandingDirections();
+        // Body space is clear -> walk diagonally down onto the next stair tier: a walked step (off the edge of the tier, gravity
+        // lands it one block lower), exactly what a player does with the keys. The landing joins the trail when it is verified on a
+        // later tick (settleStep); after descending, the just-broken block's drops land right within the pickup radius, which also
+        // fixes the collected=0 problem.
+        WalkedStep descent = bot.getActionPack().beginDescend(next, "dig_down_stair");
+        if (descent != null) {
+            launchStep(bot, descent, StepPurpose.STAIR, stairDirIndex);
             return;
         }
         // Terrain may change between viability check and movement (falling blocks/entities), and
@@ -836,6 +856,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         int exhaustedWorkBudget = Math.min(workBudget(), maxWorkBudget);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
+        abandonStep(bot);
         clearRejectedLandingDirections();
         phase = Phase.RETURN;
         returnOutcome = outcome == null ? ReturnOutcome.COMPLETE : outcome;
@@ -858,6 +879,134 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         BotLog.action(bot, "dig_down_return_start", "from", bot.blockPosition().toShortString(),
                 "to", startPos.toShortString(), "trail", descentTrail.size(),
                 "outcome", returnOutcome);
+    }
+
+    /**
+     * Hands a walked step to the pack. The bot is moved by its keys only: the step's landing is verified on a later tick (see
+     * {@link #settleStep}) and the trail, the return cursor and the checkpoint change only then, never in the tick that starts the step.
+     */
+    private void launchStep(AIPlayerEntity bot, WalkedStep walked, StepPurpose purpose, int dirIndex) {
+        stepPurpose = purpose;
+        stepOrigin = bot.blockPosition().immutable();
+        stepDirIndex = dirIndex;
+        bot.getActionPack().runStep(walked);
+    }
+
+    /**
+     * Forgets a step the pack no longer runs (a pause, an abort, a hazard return or a restart cancelled it, keys released). The bot may
+     * be between two trail cells, so nothing is recorded from its pose until it stands on something again; the trail INDEX is
+     * re-derived from where it lands, the bot is never moved to fit the trail.
+     */
+    private void abandonStep(AIPlayerEntity bot) {
+        bot.getActionPack().cancelStep();
+        if (stepPurpose != null) {
+            stepPurpose = null;
+            poseUnsettled = true;
+            unsettledTicks = 0;
+        }
+    }
+
+    /** True while the bot must be left alone: a step is in flight (or was just settled), or it is still falling after one was lost. */
+    private boolean holdForStepOrLanding(AIPlayerEntity bot) {
+        if (stepPurpose != null) {
+            if (bot.getActionPack().stepIdle()) {
+                settleStep(bot);
+            }
+            return true;
+        }
+        if (poseUnsettled) {
+            if (WalkedStep.supported(bot) || bot.isInWater() || ++unsettledTicks > UNSETTLED_LIMIT) {
+                poseUnsettled = false;
+            } else {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A step ended: the landing it verified is the only thing that changes the trail; a failed step is re-derived from the pose. */
+    private void settleStep(AIPlayerEntity bot) {
+        StepPurpose purpose = stepPurpose;
+        BlockPos origin = stepOrigin;
+        int dirIndex = stepDirIndex;
+        stepPurpose = null;
+        WalkedStep.Result result = bot.getActionPack().stepResult();
+        boolean landed = result != null && result.succeeded();
+        if (!landed) {
+            poseUnsettled = true;
+            unsettledTicks = 0;
+            BotLog.action(bot, "dig_down_step_failed", "purpose", purpose,
+                    "from", origin.toShortString(), "at", bot.blockPosition().toShortString(),
+                    "why", result == null ? "cancelled" : result.reason());
+        }
+        boolean stillAtOrigin = bot.blockPosition().equals(origin);
+        switch (purpose) {
+            case STAIR -> {
+                if (landed) {
+                    afterDescentLanding(bot, false);
+                } else if (stillAtOrigin) {
+                    rejectLandingDirection(origin, dirIndex);
+                }
+            }
+            case HORIZONTAL -> {
+                if (landed) {
+                    afterDescentLanding(bot, true);
+                } else if (stillAtOrigin) {
+                    rejectLandingDirection(origin, dirIndex);
+                    hdirIndex = (dirIndex + 1) % HDIRS.length;
+                }
+            }
+            case RETURN -> {
+                if (landed) {
+                    returnTrailIndex--;
+                    returnPathFallback = false;
+                    resetReturnProgressLease(bot.blockPosition());
+                } else {
+                    returnPathFallback = true;
+                    BotLog.action(bot, "dig_down_return_path_fallback",
+                            "from", origin.toShortString(), "to", pendingReturnWaypoint().toShortString(),
+                            "reason", "micro_step_failed", "why", result == null ? "cancelled" : result.reason());
+                }
+            }
+        }
+    }
+
+    /** The verified landing of a stair or horizontal step joins the factual trail (and is checkpointed with it on this same tick). */
+    private void afterDescentLanding(AIPlayerEntity bot, boolean horizontal) {
+        TrailUpdate landingUpdate = rememberDescentStep(bot.blockPosition());
+        if (landingUpdate == TrailUpdate.LIMIT) {
+            failAfterExactReturn(bot, ReturnOutcome.TRAIL_LIMIT);
+            return;
+        }
+        if (landingUpdate == TrailUpdate.DISCONNECTED) {
+            failAfterExactReturn(bot, ReturnOutcome.SAFETY_INTERRUPTED);
+            return;
+        }
+        clearRejectedLandingDirections();
+        if (horizontal) {
+            noteWorkProgress();
+        }
+    }
+
+    /**
+     * Records the bot's pose in the trail unless a step was lost and it has not landed yet (then nothing is recorded: it may be in the
+     * air between two trail cells).
+     */
+    private TrailUpdate rememberPose(AIPlayerEntity bot) {
+        if (poseUnsettled && !WalkedStep.supported(bot) && !bot.isInWater()) {
+            return TrailUpdate.UNCHANGED;
+        }
+        poseUnsettled = false;
+        return rememberDescentStep(bot.blockPosition());
+    }
+
+    /** The kind of walked step that covers a return-trail micro-step, or null when no walk does (up a pure vertical, two blocks up). */
+    private static WalkedStep.Kind returnStepKind(BlockPos from, BlockPos to) {
+        int dy = to.getY() - from.getY();
+        if (to.getX() == from.getX() && to.getZ() == from.getZ()) {
+            return dy < 0 ? WalkedStep.Kind.DROP : null;
+        }
+        return WalkedStepRules.walkKindFor(dy);
     }
 
     private TrailUpdate rememberDescentStep(BlockPos current) {
@@ -1008,25 +1157,21 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return;
         }
 
-        int dy = waypoint.getY() - at.getY();
         if (!returnPathFallback
                 && isValidReturnMicroStep(at, waypoint)
                 && isSafeReturnLanding(bot.level(), waypoint)) {
             bot.getActionPack().stopAll();
-            boolean moved = dy > 0
-                    ? io.github.zoyluo.minecraftai.mode.FakePlayerMotion.jumpTo(
-                    bot, waypoint, "dig_down_return_trail")
-                    : io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepTo(
-                    bot, waypoint, "dig_down_return_trail");
-            if (moved) {
-                returnTrailIndex--;
-                returnPathFallback = false;
-                resetReturnProgressLease(bot.blockPosition());
+            WalkedStep.Kind kind = returnStepKind(at, waypoint);
+            String refused = kind == null ? "no_walk" : WalkedStep.refusal(bot, waypoint, kind);
+            if (refused == null) {
+                // One walked step back up (or down) the recorded trail; the cursor moves when its landing is verified (settleStep).
+                launchStep(bot, WalkedStep.begin(bot, waypoint, kind, "dig_down_return_trail"), StepPurpose.RETURN, -1);
+                return;
             } else {
                 returnPathFallback = true;
                 BotLog.action(bot, "dig_down_return_path_fallback",
                         "from", at.toShortString(), "to", waypoint.toShortString(),
-                        "reason", "micro_step_failed");
+                        "reason", "micro_step_failed", "why", refused);
             }
         } else {
             if (!returnPathFallback) {
@@ -1431,7 +1576,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     // Staircase diagonal-down: switch to the next direction that neither touches a fluid nor lacks a
     // genuine tread support. Where a natural slope meets a cliff, ahead/next may both be air; the
-    // old logic only checked water/lava and would call descendInto on the same unsupported next forever.
+    // old logic only checked water/lava and would try to step onto the same unsupported next forever.
     private boolean rotateStair(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int i = 0; i < HDIRS.length; i++) {
@@ -1473,8 +1618,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * reject this direction when they are ALREADY genuinely observable right now (natural open
      * terrain, a previously mined cavity, or a nearby exposed pocket — never a peek through solid
      * rock). Cells still hidden behind unmined rock report UNKNOWN here and never block progress;
-     * mining ahead is what legitimately exposes them, and the per-tick {@code descendInto}/
-     * {@code stepToStandable} landing check reacts the instant that happens.
+     * mining ahead is what legitimately exposes them, and the walked step's per-tick landing check
+     * reacts the instant that happens.
      */
     static boolean isViableStairDirection(AIPlayerEntity bot, BlockPos feet, Direction direction) {
         ServerLevel world = bot.level();
@@ -1543,7 +1688,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             // state is just as naturally visible as it would be to a real player standing next to a
             // wall, so it's checked unconditionally. side.down() (the tread) remains unknowable,
             // hidden behind solid rock, until side itself is mined open -- never pre-read here;
-            // stepToStandable() below rechecks it only at the exact moment a landing is actually
+            // the walked step below rechecks it only at the exact moment a landing is actually
             // needed, which is precisely the honest, reactive "only see it once you break through" check.
             if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.above())) {
                 hdirIndex = (hdirIndex + 1) % HDIRS.length; // water/lava is visibly touching the body in this direction, switch to another
@@ -1571,23 +1716,13 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             // dig horizontally. This is only an adjacent cell, so startWalkTo must not be restarted
             // every tick: an already-dug-through long corridor would sway back and forth as the
             // controller repeatedly changes target, eventually falsely triggering NO_PROGRESS with no
-            // new block broken. Use the shared adjacent physical step instead, and write the landing
-            // cell into the factual trail on the same tick, guaranteeing an exact return trip even
-            // after an interruption/restart.
+            // new block broken. Use one walked step instead (its keys, its own timeout), and write the
+            // landing cell into the factual trail on the tick its landing is verified, guaranteeing an
+            // exact return trip even after an interruption/restart.
             miner.cancel(bot);
-            if (io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                    bot, side, "dig_down_horizontal")) {
-                TrailUpdate stepUpdate = rememberDescentStep(bot.blockPosition());
-                if (stepUpdate == TrailUpdate.LIMIT) {
-                    failAfterExactReturn(bot, ReturnOutcome.TRAIL_LIMIT);
-                    return;
-                }
-                if (stepUpdate == TrailUpdate.DISCONNECTED) {
-                    failAfterExactReturn(bot, ReturnOutcome.SAFETY_INTERRUPTED);
-                    return;
-                }
-                clearRejectedLandingDirections();
-                noteWorkProgress();
+            if (WalkedStep.refusal(bot, side, WalkedStep.Kind.FLAT) == null) {
+                launchStep(bot, WalkedStep.begin(bot, side, WalkedStep.Kind.FLAT, "dig_down_horizontal"),
+                        StepPurpose.HORIZONTAL, hdirIndex);
                 return;
             }
             rejectLandingDirection(feet, hdirIndex);

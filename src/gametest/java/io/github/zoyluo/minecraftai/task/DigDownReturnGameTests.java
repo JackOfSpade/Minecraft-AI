@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.goal.Goal;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.goal.GoalResult;
 import io.github.zoyluo.minecraftai.goal.GoalStep;
+import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
@@ -168,9 +169,7 @@ public final class DigDownReturnGameTests {
         task.start(bot);
         require(context, task.state() == TaskState.RUNNING,
                 "fixture DESCEND task did not start: " + task.failureReason());
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, pauseAnchor, "gametest_dig_down_pause_anchor"),
-                "fixture could not settle the adjacent pause anchor");
+        BotFixtureMoves.place(bot, pauseAnchor);
 
         task.pause(bot);
         DigDownTask.DigDownCheckpoint paused = DigDownTask.DigDownCheckpoint
@@ -187,9 +186,7 @@ public final class DigDownReturnGameTests {
 
         for (int step = 1; step <= 5; step++) {
             BlockPos safetyStep = pauseAnchor.east(step);
-            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                            bot, safetyStep, "gametest_dig_down_safety_displacement"),
-                    "fixture could not apply safety displacement step " + step);
+            BotFixtureMoves.place(bot, safetyStep);
         }
         require(context, bot.blockPosition().equals(displaced),
                 "fixture did not end at the non-adjacent safety pose");
@@ -260,6 +257,9 @@ public final class DigDownReturnGameTests {
             world.setBlock(landing.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             world.setBlock(landing, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             world.setBlock(landing.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            // A stair a bot dug clears ahead and ahead.up over every tread: the head room a hop up the trail needs. The walked
+            // return checks it (WalkedStep no_headroom); the old teleport never did.
+            world.setBlock(landing.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         world.setBlock(oldFrontier, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         for (int step = 0; step <= 4; step++) {
@@ -422,9 +422,7 @@ public final class DigDownReturnGameTests {
         pausedTask.cancel(bot, "simulate_process_restart");
 
         for (int step = 1; step <= 4; step++) {
-            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                            bot, tail.east(step), "gametest_dig_down_restart_displacement"),
-                    "fixture could not apply restart displacement step " + step);
+            BotFixtureMoves.place(bot, tail.east(step));
         }
         DigDownTask restoredTask = new DigDownTask(Blocks.STONE, 8, pausedCheckpoint);
         restoredTask.start(bot);
@@ -488,35 +486,43 @@ public final class DigDownReturnGameTests {
                 1, 0, -20, false).encode();
         DigDownTask task = new DigDownTask(Blocks.STONE, 8, returnDebt);
         task.start(bot);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(middle),
-                "fixture did not settle the next factual return cell");
-        DigDownTask.DigDownCheckpoint beforePause = DigDownTask.DigDownCheckpoint
-                .decode(task.checkpoint()).orElse(null);
-        require(context, beforePause != null && beforePause.returnTrailIndex() == 0,
-                "fixture did not advance the return cursor before the second pause");
-
-        task.pause(bot);
-        DigDownTask.DigDownCheckpoint paused = DigDownTask.DigDownCheckpoint
-                .decode(task.checkpoint()).orElse(null);
-        require(context, paused != null
-                        && paused.phase() == DigDownTask.Phase.RETURN
-                        && paused.returnOutcome() == DigDownTask.ReturnOutcome.SAFETY_INTERRUPTED
-                        && paused.returnTrailIndex() == 1,
-                "RETURN pause did not restore the current factual cell as its first waypoint: "
-                        + task.checkpoint());
-
-        for (int step = 1; step <= 4; step++) {
-            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                            bot, middle.east(step), "gametest_dig_down_return_repause_displacement"),
-                    "fixture could not apply RETURN displacement step " + step);
-        }
-        require(context, bot.blockPosition().equals(displaced),
-                "fixture did not end away from the repaused return trail");
-        task.resume(bot);
 
         AtomicBoolean rejoinedMiddle = new AtomicBoolean();
+        // The step onto the next factual cell is walked: phase 0 ticks the task until that landing is verified and the cursor has
+        // advanced, then pauses it there, displaces the bot (fixture move) and resumes; phase 1 is the return itself.
+        int[] phase = {0};
+        int[] waited = {0};
         context.failIfEver(() -> {
+            if (phase[0] == 0) {
+                require(context, ++waited[0] < 100, "the return never advanced onto the next factual cell: "
+                        + bot.blockPosition().toShortString() + " " + task.checkpoint());
+                task.tick(bot);
+                DigDownTask.DigDownCheckpoint beforePause = DigDownTask.DigDownCheckpoint
+                        .decode(task.checkpoint()).orElse(null);
+                if (beforePause == null || beforePause.returnTrailIndex() != 0) {
+                    return;
+                }
+                require(context, bot.blockPosition().equals(middle),
+                        "fixture did not settle the next factual return cell");
+                task.pause(bot);
+                DigDownTask.DigDownCheckpoint paused = DigDownTask.DigDownCheckpoint
+                        .decode(task.checkpoint()).orElse(null);
+                require(context, paused != null
+                                && paused.phase() == DigDownTask.Phase.RETURN
+                                && paused.returnOutcome() == DigDownTask.ReturnOutcome.SAFETY_INTERRUPTED
+                                && paused.returnTrailIndex() == 1,
+                        "RETURN pause did not restore the current factual cell as its first waypoint: "
+                                + task.checkpoint());
+
+                for (int step = 1; step <= 4; step++) {
+                    BotFixtureMoves.place(bot, middle.east(step));
+                }
+                require(context, bot.blockPosition().equals(displaced),
+                        "fixture did not end away from the repaused return trail");
+                task.resume(bot);
+                phase[0] = 1;
+                return;
+            }
             if (bot.blockPosition().equals(middle)) {
                 rejoinedMiddle.set(true);
             }
@@ -554,9 +560,7 @@ public final class DigDownReturnGameTests {
                 descentCheckpoint(start, List.of(start, tail), 8, 1));
         task.start(bot);
         for (int step = 1; step <= 4; step++) {
-            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                            bot, tail.east(step), "gametest_dig_down_unexpected_displacement"),
-                    "fixture could not apply unexpected displacement step " + step);
+            BotFixtureMoves.place(bot, tail.east(step));
         }
 
         task.tick(bot);
@@ -842,9 +846,7 @@ public final class DigDownReturnGameTests {
                         + rawPausedCheckpoint);
 
         for (int step = 1; step <= displacement; step++) {
-            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                            bot, tail.south(step), "gametest_dig_down_restart_displacement"),
-                    "fixture could not apply safety displacement step " + step);
+            BotFixtureMoves.place(bot, tail.south(step));
         }
         require(context, bot.blockPosition().equals(displaced),
                 "fixture did not end at the displaced restart pose");
@@ -1075,7 +1077,7 @@ public final class DigDownReturnGameTests {
         finish(context, bot, "DigDownScaledRestoreGT");
     }
 
-    @GameTest(maxTicks = 240)
+    @GameTest(maxTicks = 700)
     public void horizontalOpenCorridorAdvancesFactuallyAndNeverBacktracks(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(6, 5, 18));
@@ -1096,65 +1098,85 @@ public final class DigDownReturnGameTests {
         DigDownTask task = new DigDownTask(Blocks.STONE, 1, checkpoint);
         task.start(bot);
 
-        for (int distance = 1; distance <= openCells; distance++) {
-            task.tick(bot);
-            BlockPos expected = start.north(distance);
-            require(context, task.state() == TaskState.RUNNING,
-                    "horizontal corridor task ended before the first solid boundary: "
-                            + task.state() + ":" + task.failureReason());
-            require(context, bot.blockPosition().equals(expected),
-                    "horizontal corridor did not advance exactly one factual cell on step "
-                            + distance + ": expected=" + expected.toShortString()
-                            + " actual=" + bot.blockPosition().toShortString());
-            DigDownTask.DigDownCheckpoint advanced = DigDownTask.DigDownCheckpoint
+        // Every advance is a walked step now: one cell takes several game ticks, and the trail grows only on the tick the landing
+        // is verified. The corridor is driven tick by tick: phase 0 advances cell by cell, phase 1 waits out the closed frontier's
+        // pickup settlement without backtracking, phase 2 walks the recorded trail back.
+        int[] phase = {0};
+        int[] cells = {0};
+        int[] ticks = {0};
+        Runnable[] frontierPart = new Runnable[1];
+        context.failIfEver(() -> {
+            if (frontierPart[0] != null) {
+                frontierPart[0].run();
+                return;
+            }
+            ticks[0]++;
+            require(context, ticks[0] < 650, "horizontal corridor timed out in phase " + phase[0]
+                    + " at " + bot.blockPosition().toShortString());
+            if (task.state() == TaskState.RUNNING) {
+                task.tick(bot);
+            }
+            DigDownTask.DigDownCheckpoint live = DigDownTask.DigDownCheckpoint
                     .decode(task.checkpoint()).orElse(null);
-            require(context, advanced != null
-                            && advanced.trail().size() == distance + 1
-                            && advanced.trail().getLast().equals(expected),
-                    "horizontal corridor step was not durably appended to the return trail: "
-                            + task.checkpoint());
-        }
-        // NORTH/EAST/WEST beyond the endpoint are unsupported; SOUTH is the already recorded
-        // corridor. A mining frontier must not reinterpret that return trail as fresh work.
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(start.north(openCells)),
-                "horizontal endpoint backtracked into its already recorded return trail");
-        require(context, task.state() == TaskState.RUNNING,
-                "horizontal endpoint exposed failure during its physical pickup settle tick");
-        DigDownTask.DigDownCheckpoint settling = DigDownTask.DigDownCheckpoint
-                .decode(task.checkpoint()).orElse(null);
-        require(context, settling != null
-                        && settling.phase() == DigDownTask.Phase.DESCEND
-                        && settling.trail().size() == openCells + 1,
-                "horizontal endpoint did not preserve DESCEND during pickup settlement: "
-                        + task.checkpoint());
-        for (int settleTick = 0; settleTick < 40
-                && DigDownTask.DigDownCheckpoint.decode(task.checkpoint())
-                .map(checkpointValue -> checkpointValue.phase() == DigDownTask.Phase.DESCEND)
-                .orElse(false); settleTick++) {
-            task.tick(bot);
-        }
-        DigDownTask.DigDownCheckpoint returning = DigDownTask.DigDownCheckpoint
-                .decode(task.checkpoint()).orElse(null);
-        require(context, returning != null
-                        && returning.phase() == DigDownTask.Phase.RETURN
-                        && returning.returnOutcome() == DigDownTask.ReturnOutcome.WALLED
-                        && returning.trail().size() == openCells + 1,
-                "closed horizontal frontier did not preserve a typed exact-return debt: "
-                        + task.checkpoint());
+            switch (phase[0]) {
+                case 0 -> {
+                    require(context, task.state() == TaskState.RUNNING,
+                            "horizontal corridor task ended before the first solid boundary: "
+                                    + task.state() + ":" + task.failureReason());
+                    require(context, live != null && live.trail().size() <= cells[0] + 2,
+                            "horizontal corridor appended more than one cell at a time: " + task.checkpoint());
+                    if (live != null && live.trail().size() == cells[0] + 2) {
+                        cells[0]++;
+                        BlockPos expected = start.north(cells[0]);
+                        require(context, bot.blockPosition().equals(expected),
+                                "horizontal corridor recorded a cell the bot was not standing in on step "
+                                        + cells[0] + ": expected=" + expected.toShortString()
+                                        + " actual=" + bot.blockPosition().toShortString());
+                        require(context, live.trail().getLast().equals(expected),
+                                "horizontal corridor step was not durably appended to the return trail: "
+                                        + task.checkpoint());
+                        if (cells[0] == openCells) {
+                            phase[0] = 1;
+                        }
+                    }
+                }
+                case 1 -> {
+                    // NORTH/EAST/WEST beyond the endpoint are unsupported; SOUTH is the already recorded
+                    // corridor. A mining frontier must not reinterpret that return trail as fresh work.
+                    require(context, bot.blockPosition().equals(start.north(openCells)),
+                            "horizontal endpoint backtracked into its already recorded return trail");
+                    require(context, task.state() == TaskState.RUNNING,
+                            "horizontal endpoint exposed failure during its physical pickup settle tick");
+                    require(context, live != null && live.trail().size() == openCells + 1,
+                            "horizontal endpoint changed its trail while settling: " + task.checkpoint());
+                    if (live.phase() == DigDownTask.Phase.RETURN) {
+                        require(context, live.returnOutcome() == DigDownTask.ReturnOutcome.WALLED,
+                                "closed horizontal frontier did not preserve a typed exact-return debt: "
+                                        + task.checkpoint());
+                        phase[0] = 2;
+                    }
+                }
+                default -> {
+                    if (task.state() == TaskState.RUNNING) {
+                        return;
+                    }
+                    require(context, task.state() == TaskState.FAILED
+                                    && task.failureReason().startsWith("dig_down_walled"),
+                            "closed horizontal frontier did not settle as WALLED after exact return: "
+                                    + task.state() + ":" + task.failureReason());
+                    require(context, bot.blockPosition().equals(start),
+                            "closed horizontal frontier failed away from its exact origin: "
+                                    + bot.blockPosition().toShortString());
+                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "DigDownHorizontalCorridorGT");
+                    frontierPart[0] = horizontalFrontierPart(context);
+                }
+            }
+        });
+    }
 
-        for (int i = 0; i < openCells + 3 && task.state() == TaskState.RUNNING; i++) {
-            task.tick(bot);
-        }
-        require(context, task.state() == TaskState.FAILED
-                        && task.failureReason().startsWith("dig_down_walled"),
-                "closed horizontal frontier did not settle as WALLED after exact return: "
-                        + task.state() + ":" + task.failureReason());
-        require(context, bot.blockPosition().equals(start),
-                "closed horizontal frontier failed away from its exact origin: "
-                        + bot.blockPosition().toShortString());
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "DigDownHorizontalCorridorGT");
-
+    /** The second half of the corridor test: a supported horizontal frontier is mined, its drop collected and the exact entry regained. */
+    private static Runnable horizontalFrontierPart(GameTestHelper context) {
+        var world = context.getLevel();
         BlockPos frontierStart = context.absolutePos(new BlockPos(8, 5, 8));
         BlockPos frontier = frontierStart.north();
         for (int dx = -2; dx <= 2; dx++) {
@@ -1184,7 +1206,7 @@ public final class DigDownReturnGameTests {
         frontierTask.start(frontierBot);
         AtomicBoolean frontierBroken = new AtomicBoolean();
 
-        context.failIfEver(() -> {
+        return () -> {
             if (frontierTask.state() == TaskState.RUNNING) {
                 frontierTask.tick(frontierBot);
             }
@@ -1209,7 +1231,7 @@ public final class DigDownReturnGameTests {
             AIPlayerManager.INSTANCE.despawn(
                     frontierBot.level().getServer(), "DigDownHorizontalFrontierGT");
             context.succeed();
-        });
+        };
     }
 
     @GameTest(maxTicks = 180)
@@ -1233,10 +1255,13 @@ public final class DigDownReturnGameTests {
         AIPlayerEntity bot = spawn(context, "DigDownNearBudgetSettleGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.NETHERITE_PICKAXE));
         int maxBudget = DigDownTask.maxWorkBudgetForTarget("minecraft:stone", 1);
+        // The debt is armed within about a dozen ticks of the fixture start (a break, then the walked step into the mined cell);
+        // twenty ticks of headroom keep the hard boundary after the arming and inside the pickup window, as the old
+        // eight covered a break followed by an instant teleport.
         Map<String, String> nearBudget = new DigDownTask.DigDownCheckpoint(
                 3, "minecraft:stone", 1, DigDownTask.Phase.DESCEND,
                 DigDownTask.ReturnOutcome.COMPLETE,
-                start, start.getY(), 0, 0, maxBudget - 8, maxBudget - 8,
+                start, start.getY(), 0, 0, maxBudget - 20, maxBudget - 20,
                 0, 0, 0, true, null, 0, List.of(start), -1, 0, -20, false).encode();
         DigDownTask initial = new DigDownTask(Blocks.STONE, 1, nearBudget);
         initial.start(bot);
