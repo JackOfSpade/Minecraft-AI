@@ -304,7 +304,7 @@ told apart from outside).
 ## Tools
 
 A break made by Baritone is priced and executed with the mod's own tool policy (`ToolSelector`), not with Baritone's auto-tool
-(which takes the fastest tool of the hotbar and spends an iron or diamond pickaxe on stone):
+(which takes the fastest tool of the hotbar and spends an iron or diamond pickaxe on stone). The policy is WORST-FIRST (`behaviour.gear.worstFirst`, default on; `GearValue`): among the stacks that can do the job it picks the lowest value, so a wooden pickaxe digs stone before a stone one, iron ore takes the stone (or copper) pickaxe, diamond ore the iron one; enchantments add value (an Efficiency V diamond pickaxe is still kept for last), Silk Touch goes last, a more worn stack goes before a fresh one of the same value, and a nearly broken tool is never used. With `worstFirst=false` the earlier policy applies (the cheapest renewable tier, stone before wood):
 
 * `BaritoneSettings`: `assumeExternalAutoTool=true` (Baritone never touches the selected slot; `autoTool` stays on because the cost
   model keys on it), `useSwordToMine=false`, `itemSaver=true`.
@@ -312,7 +312,7 @@ A break made by Baritone is priced and executed with the mod's own tool policy (
   running break keeps its tool, `MiningController.driven`). `false` = a sword is never a mining tool (leaves, cobweb).
 * Cost model: `BaritoneToolPolicy` (patch 0016) answers "which stack will break this block" from the same pure chooser
   (`ToolSelector.choose`) on a copy of the inventory made on the server thread (when a cost model for a search thread is created; a model for the server thread copies it on its first break-time query, and most never price a break), so a planned break
-  takes as long as the real one and a movement does not time out (the stone pickaxe is slower than the iron one).
+  takes as long as the real one and a movement does not time out (the wooden pickaxe is slower than the stone one, and that one slower than the iron one).
 * The follower's look: `FollowTask.faceTarget` leaves the head alone while a Baritone route runs (Baritone owns yaw and pitch;
   pitching at the player put the pitch back before every click and a follower could never break the lower block of a wall).
 
