@@ -23,8 +23,11 @@ class MiningServiceDisposalSourceContractTest {
         int open = service.indexOf("private void openDisposalPocket", admission);
         String body = service.substring(admission, open);
 
-        assertTrue(body.indexOf("ensureCenteredAtWorkFace(bot)")
-                        < body.indexOf("enterPocketPhase(Phase.OPEN_DISPOSAL_POCKET)"),
+        int centring = body.indexOf("centerWalk.recenter(bot, workFace");
+        int openPhase = body.indexOf("enterPocketPhase(Phase.OPEN_DISPOSAL_POCKET)");
+        assertTrue(admission >= 0 && open > admission, "the admission method moved: update this pin");
+        assertTrue(centring >= 0 && openPhase >= 0, "both anchors must exist, or the ordering check below proves nothing");
+        assertTrue(centring < openPhase,
                 "disposal must own a stationary centered face before OPEN becomes durable debt");
         assertTrue(walk.contains("bot.getDeltaMovement().horizontalDistanceSqr() <= SETTLED_SPEED_SQUARED"),
                 "an exact center with residual walk velocity must not count as centred until it has stopped");

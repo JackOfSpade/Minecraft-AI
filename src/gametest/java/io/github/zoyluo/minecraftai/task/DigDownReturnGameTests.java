@@ -1104,6 +1104,10 @@ public final class DigDownReturnGameTests {
         int[] phase = {0};
         int[] cells = {0};
         int[] ticks = {0};
+        // Pickup settlement: the first tick after the last corridor cell must still be DESCEND with the full trail (the old
+        // per-call test required exactly that), and DESCEND has to be observed before RETURN ever appears.
+        boolean[] settleStarted = {false};
+        boolean[] sawDescend = {false};
         Runnable[] frontierPart = new Runnable[1];
         context.failIfEver(() -> {
             if (frontierPart[0] != null) {
@@ -1149,7 +1153,18 @@ public final class DigDownReturnGameTests {
                             "horizontal endpoint exposed failure during its physical pickup settle tick");
                     require(context, live != null && live.trail().size() == openCells + 1,
                             "horizontal endpoint changed its trail while settling: " + task.checkpoint());
+                    if (!settleStarted[0]) {
+                        settleStarted[0] = true;
+                        require(context, live.phase() == DigDownTask.Phase.DESCEND,
+                                "horizontal endpoint did not preserve DESCEND during pickup settlement: " + task.checkpoint());
+                    }
+                    if (live.phase() == DigDownTask.Phase.DESCEND) {
+                        sawDescend[0] = true;
+                    }
                     if (live.phase() == DigDownTask.Phase.RETURN) {
+                        require(context, sawDescend[0],
+                                "closed horizontal frontier went to RETURN without DESCEND being observed with the full trail: "
+                                        + task.checkpoint());
                         require(context, live.returnOutcome() == DigDownTask.ReturnOutcome.WALLED,
                                 "closed horizontal frontier did not preserve a typed exact-return debt: "
                                         + task.checkpoint());
