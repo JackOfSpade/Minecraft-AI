@@ -123,6 +123,9 @@ public final class EmergencyShelterTask extends AbstractTask {
     private final Set<Direction> rejectedEgress = EnumSet.noneOf(Direction.class);
     private final Set<Direction> pressuredEgress = EnumSet.noneOf(Direction.class);
     private final BlockMiner exitMiner = new BlockMiner();
+    /** The egress whose observation port the bot has been looking through, and the task tick it began to. */
+    private BlockPos dwellEgress;
+    private int dwellStartedElapsed;
     private int placed;
     private int lastProgressTick;
     private int phaseStartedElapsed;
@@ -235,6 +238,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         ownedPlacements.clear();
         rejectedEgress.clear();
         pressuredEgress.clear();
+        dwellEgress = null;
         placed = 0;
         lastProgressTick = 0;
         phaseStartedElapsed = 0;
@@ -1166,6 +1170,9 @@ public final class EmergencyShelterTask extends AbstractTask {
         if (!forcePressureExit && resealObservedPressure(bot)) {
             return;
         }
+        if (!forcePressureExit && observationPortDwell(bot)) {
+            return;
+        }
         BlockPos obstruction = firstExitObstruction(bot, egressFeet);
         if (obstruction != null) {
             if (!ownsCurrentPlacement(bot, obstruction)) {
@@ -1245,6 +1252,30 @@ public final class EmergencyShelterTask extends AbstractTask {
                 "reseals", observationReseals);
         returnToPressureHold(bot, "shelter_pressure_hold_started");
         return true;
+    }
+
+    /**
+     * Looking through the open observation port takes the time a person needs to notice what stands outside (realistic perception,
+     * docs/PERCEPTION.md: the reaction time of the shared formula for the farthest pressure the exit cares about, straight ahead,
+     * plus the scan cadence): a hostile in view is NOTICED only after that, so the bot keeps the foot wall closed until the dwell is
+     * over instead of opening its door on a creature it has not yet registered. Zero with perception off.
+     *
+     * @return true while the bot is still looking through the port
+     */
+    private boolean observationPortDwell(AIPlayerEntity bot) {
+        if (egressFeet == null
+                || !isOpenCell(bot, egressFeet.above())
+                || isOpenCell(bot, egressFeet)
+                || !ownsCurrentPlacement(bot, egressFeet)) {
+            dwellEgress = null;
+            return false;
+        }
+        if (!egressFeet.equals(dwellEgress)) {
+            dwellEgress = egressFeet.immutable();
+            dwellStartedElapsed = elapsed;
+        }
+        return elapsed - dwellStartedElapsed
+                < io.github.zoyluo.minecraftai.perception.CreatureSenses.noticeDwellTicks(CombatCore.hostilePressureScanRange());
     }
 
     private int observableExitPressure(AIPlayerEntity bot) {

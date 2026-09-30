@@ -45,7 +45,7 @@ class PerceptionCallSiteClassificationTest {
         Map<String, Counts> m = new TreeMap<>();
         // ---- the predicates themselves
         m.put("mode/ObservableWorldQuery.java", Counts.of(2, 4, 2));            // definitions: canNoticeCreature(+Within), canObserveEntity(+Within), plain rays
-        m.put("perception/CreatureSenses.java", Counts.of(0, 0, 2));           // perception off: today's plain line-of-sight test
+        m.put("perception/CreatureSenses.java", Counts.of(0, 1, 2));           // perception off (and a passive animal, a failed scan): today's plain line-of-sight test; the projectile with perception off is exactly canObserveEntity
         // ---- creature noticing (converted)
         m.put("task/DangerWatcher.java", Counts.of(4, 0, 2));                  // death-site hostiles, fight-before-rescue, trapped fight back, last-resort shelter; physical: canReachThreat (owner-aware ray)
         m.put("task/AggroSense.java", Counts.of(1, 1, 0));                     // mob aggressors noticed; object: the OWNER (a friend) being hurt, plain sight
@@ -63,7 +63,7 @@ class PerceptionCallSiteClassificationTest {
         // ---- objects and deliberate searches (unchanged on purpose)
         m.put("action/HarvestCore.java", Counts.of(0, 2, 0));                  // dropped items
         m.put("action/MilkCowAction.java", Counts.of(0, 1, 0));                // deliberate search for a cow
-        m.put("brain/ToolRegistry.java", Counts.of(0, 1, 0));                  // attack_entity: an explicit command to hit something within arm's reach
+        m.put("brain/ToolRegistry.java", Counts.of(1, 0, 0));                  // attack_entity: candidates are creatures the bot has NOTICED (animals and villagers stay omnidirectional inside canNoticeCreature)
         m.put("mining/assist/PoiDetector.java", Counts.of(0, 1, 0));           // landmark evidence (habitation, warden) for the assist's scoring, not a threat notice
         m.put("task/BoatSupport.java", Counts.of(0, 1, 0));                    // boats
         m.put("task/BreedTask.java", Counts.of(0, 1, 0));                      // deliberate search for animals
@@ -144,9 +144,14 @@ class PerceptionCallSiteClassificationTest {
                 "task/RecoverDropsTask.java", "task/TradeTask.java", "mining/assist/PoiDetector.java")) {
             assertEquals(0, expected().get(file).notice(), file + " searches for objects or deliberately for animals");
         }
+    }
+
+    @Test
+    void theAttackToolOnlyConsidersCreaturesTheBotHasNoticed() throws IOException {
         String tool = code(Files.readString(MAIN.resolve("brain/ToolRegistry.java")));
-        assertTrue(tool.contains("ObservableWorldQuery.canObserveEntity(bot, entity));")
+        assertTrue(tool.contains("ObservableWorldQuery.canNoticeCreature(bot, entity));")
+                        && !tool.contains("canObserveEntity")
                         && tool.contains("StrikeLegality.strikeRefusal(bot, entity) == null"),
-                "attack_entity is an explicit command: omnidirectional candidates, and the same strike legality gate");
+                "attack_entity candidates are noticed creatures (its reply never reveals an unseen mob), through the same strike legality gate");
     }
 }

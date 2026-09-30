@@ -704,7 +704,9 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("attack_entity", "Attack a nearby entity by type", objectSchema()
+        register("attack_entity", "Attack a nearby entity by type. Only creatures the bot has NOTICED (seen, heard, or that struck it) are candidates. "
+                + "When the bot is busy with another task and would first have to turn to its target, the call is refused with 'busy' "
+                + "instead of replacing that task: stop it first, or wait until it is done.", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:cow"))
                 .required("entity_type")
                 .build(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
@@ -714,11 +716,13 @@ public final class ToolRegistry {
             // Never the owner or another bot, and only a target the bot could legally hit right now
             // (its box within vanilla's entity interaction range and no colliding block between): the
             // old 4.5-block scan let this tool land hits from five to seven blocks and through walls.
+            // A creature must also have been NOTICED (docs/PERCEPTION.md: seen for the reaction time, heard, or a blow), so the
+            // reply never reveals a mob the bot has not seen; animals and villagers keep omnidirectional observation.
             java.util.List<Entity> candidates = bot.level()
                     .getEntities(bot, bot.getBoundingBox().inflate(4.5D),
                             entity -> BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).equals(id)
                                     && !StrikeLegality.isFriendly(bot, entity)
-                                    && ObservableWorldQuery.canObserveEntity(bot, entity));
+                                    && ObservableWorldQuery.canNoticeCreature(bot, entity));
             Optional<Entity> target = candidates.stream()
                     .filter(entity -> StrikeLegality.strikeRefusal(bot, entity) == null)
                     .min(Comparator.comparingDouble(bot::distanceTo));
@@ -737,6 +741,14 @@ public final class ToolRegistry {
             // the task's own result.
             ActionResult first = InteractAction.attackEntity(bot, target.get());
             if (first.isFailed() && InteractAction.NOT_UNDER_CROSSHAIR.equals(first.reason())) {
+                // Starting the bounded attack would replace whatever the bot is doing (assign aborts the running task), so a bot that
+                // is busy says so: a safety task (a fight, an evade, a shelter) is never interrupted and the request is not kept; a
+                // mission the player paused stays paused; any other running task is left alone ("stop" first, or wait). Only an idle
+                // bot, or one that is already in an attack of its own, takes the new target.
+                String busy = attackBusyReason(bot);
+                if (busy != null) {
+                    return fail("busy: " + busy + "; the attack was not started");
+                }
                 Task attack = new AttackEntityTask(target.get());
                 assignLlm(bot, attack);
                 return ok("attack_started: turning to face " + entityType
@@ -744,6 +756,21 @@ public final class ToolRegistry {
             }
             return result(first);
         });
+    }
+
+    /** Why {@code attack_entity} cannot take the bot's hands right now, or null when it can (idle, or already attacking). */
+    private static String attackBusyReason(AIPlayerEntity bot) {
+        if (TaskManager.INSTANCE.isActiveSafety(bot)) {
+            return "the safety task " + TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse("safety")
+                    + " is handling a threat right now (this request is not kept)";
+        }
+        if (TaskManager.INSTANCE.isUserPaused(bot)) {
+            return "the player paused the mission";
+        }
+        return TaskManager.INSTANCE.getActive(bot)
+                .filter(task -> !(task instanceof AttackEntityTask))
+                .map(task -> "the task " + task.name() + " is running; call stop first to fight instead")
+                .orElse(null);
     }
 
     /** Terminal/mission-control commands: stop, pause, resume, cancel_all. */

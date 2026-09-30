@@ -124,11 +124,25 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   `hasLineOfSight` with its class: creature noticing (DangerWatcher threat scans, AggroSense, CombatCore target acquisition,
   CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision,
   HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance), objects and deliberate searches (kept
-  omnidirectional: drops, boats, prey, breeding, milking, trading, the landmark evidence of the mining assist, the
-  explicit `attack_entity` command) and physical strike legality (kept).
-* **GameTests** run every other suite with perception OFF (their fixtures spawn a hostile at any angle and expect the next scan
-  to react); `CompanionPerceptionGameTests` switch it on for their own batch, and `MINECRAFTAI_HARNESS_PERCEPTION=on` runs any
-  suite with it.
+  omnidirectional: drops, boats, prey, breeding, milking, trading, the landmark evidence of the mining assist) and physical strike legality (kept).
+  The `attack_entity` command only considers creatures the bot has noticed (animals and villagers stay omnidirectional) and is refused with `busy` while another task runs (never replaces it).
+* **Cost.** The scan is throttled (`CreatureSenses`): passive creatures (a mob that is neither an `Enemy` nor a `NeutralMob` and
+  hunts nothing: animals, villagers, fish) are not scanned at all and answer the plain omnidirectional test on demand (the scope
+  rule: animals and villagers keep omnidirectional observation); every other creature is read every second tick (alternating by
+  entity) unless it already has a run of exposure or a sound at it, so the reaction time keeps its tick granularity and a creature
+  entering the view is seen at most one tick later; one clear-view answer per creature per scan. The scan time is recorded per bot
+  as the `perception_scan` section of `BotProfiler`. A scan that throws never leaves the bot blind: for that tick (and the next) every
+  creature question is answered by the old omnidirectional test, and the failure is logged once per bot.
+* **Peeking takes the reaction time.** A creature out of sight for more than a tick is forgotten and is noticed again only after the
+  reaction time of looking at it, so a bot that peeks (round its cover column, through the observation port of its shelter) must
+  look for at least that long before it decides from what it sees: `CreatureSenses.noticeDwellTicks(distance)` (the shared
+  formula straight ahead plus the scan cadence, zero with perception off). The cover peek of `CombatTask` stays exposed that long
+  (at least `PEEKABOO_EXPOSE_TICKS`), and `EmergencyShelterTask` keeps the foot wall closed that long after it has opened the head
+  port, so the hostile outside is noticed before the door opens.
+* **GameTests** run the WHOLE suite with perception ON, as in production. A fixture that needs a bot to know a hostile faces the bot
+  toward it (or lets it make noise, or strike it) and waits the reaction time of the shared formula, computed from the real distance
+  and angle plus the scan cadence (`PerceptionFixtures`, never an arbitrary budget). `MINECRAFTAI_HARNESS_PERCEPTION=off` runs the
+  suite with the old omnidirectional test, for diagnosis only.
 
 ## Scope
 

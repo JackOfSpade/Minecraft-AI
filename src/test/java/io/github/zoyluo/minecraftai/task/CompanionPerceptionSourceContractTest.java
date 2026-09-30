@@ -103,11 +103,11 @@ final class CompanionPerceptionSourceContractTest {
     }
 
     @Test
-    void theHarnessRunsLegacyFixturesWithPerceptionOffAndTheNewTestsOptIn() throws IOException {
+    void theHarnessRunsTheWholeSuiteWithPerceptionOnAndOffIsADiagnosticEscape() throws IOException {
         String harness = Files.readString(Path.of(
                 "src/gametest/java/io/github/zoyluo/minecraftai/gametest/MinecraftAiHarnessTestMod.java"));
-        assertTrue(harness.contains("CreatureSenses.setHarnessDefaultOff(") && harness.contains("MINECRAFTAI_HARNESS_PERCEPTION"),
-                "the legacy suites run omnidirectional, as before, unless the lane asks for perception");
+        assertTrue(harness.contains("CreatureSenses.setHarnessDefaultOff(") && harness.contains("\"off\".equalsIgnoreCase(System.getenv(\"MINECRAFTAI_HARNESS_PERCEPTION\"))"),
+                "the whole suite runs with realistic perception, as in production; only MINECRAFTAI_HARNESS_PERCEPTION=off turns it off");
         String tests = Files.readString(Path.of(
                 "src/gametest/java/io/github/zoyluo/minecraftai/task/CompanionPerceptionGameTests.java"));
         assertTrue(tests.contains("CreatureSenses.forceEnabledForTests(true)") && tests.contains("CreatureSenses.forceEnabledForTests(false)"),

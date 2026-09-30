@@ -1333,6 +1333,16 @@ public final class ActionPack {
         return false;
     }
 
+    /**
+     * A test seam: forgets the last path request and its cooldown, so that a fixture that has just cancelled a route (the bot's first
+     * reaction to a threat it had only just noticed) can make the same request again in the same tick instead of being throttled as a
+     * repeat. Production never calls it.
+     */
+    public void forgetPathThrottleForTests() {
+        lastPathRequest = null;
+        nextPathfindTick = 0;
+    }
+
     /** Drops the legacy path executor and its request AND the route lease that went with it. */
     private void clearActivePathExecutor() {
         dropPathExecutor();

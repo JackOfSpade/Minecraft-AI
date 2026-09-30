@@ -1279,7 +1279,13 @@ public final class CombatTask extends AbstractTask {
         }
         if (peekStage == PeekStage.EXPOSED) {
             boolean aimed = CombatCore.aimForShot(bot, target);
-            if (++peekExposedTicks <= PEEKABOO_EXPOSE_TICKS) {
+            // Realistic perception (docs/PERCEPTION.md): the shooters behind the cover are not known while the bot hides (a creature out of
+            // sight for more than a tick is forgotten and is noticed again only after the reaction time of looking at it), so the peek lasts
+            // at least that long: what the bot decides from (how many shooters there are, whether to hide again) is what it has noticed.
+            // Zero extra with perception off.
+            int exposeTicks = Math.max(PEEKABOO_EXPOSE_TICKS,
+                    io.github.zoyluo.minecraftai.perception.CreatureSenses.noticeDwellTicks(bot.distanceTo(target)));
+            if (++peekExposedTicks <= exposeTicks) {
                 return;
             }
             if (!aimed && peekExposedTicks <= PEEKABOO_EXPOSE_LIMIT_TICKS) {
