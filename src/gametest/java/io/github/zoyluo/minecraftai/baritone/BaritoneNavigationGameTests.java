@@ -415,7 +415,10 @@ public final class BaritoneNavigationGameTests {
             try {
                 switch (phase[0]) {
                     case 0 -> { // Baritone runs east
-                        if (baritoneDrives) {
+                        // Counted from the first tick Baritone executes a path, not from setGoalAndPath: the path itself is
+                        // computed on Baritone's own thread in wall-clock time, and the GameTest server runs ticks back to back,
+                        // so under load 25 busy ticks could pass before any path existed (one full-suite run: x offset 0.5).
+                        if (baritoneDrives && c.baritone.getPathingBehavior().isPathing()) {
                             driven[0]++;
                         }
                         if (driven[0] == 25) {
