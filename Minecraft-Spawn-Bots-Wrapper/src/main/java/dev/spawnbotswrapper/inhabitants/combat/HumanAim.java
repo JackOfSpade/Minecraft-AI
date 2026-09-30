@@ -247,7 +247,11 @@ public final class HumanAim {
 
         /**
          * One tick. {@code entityYaw} and {@code entityPitch} are the entity's rotation now; {@code baseToleranceDeg} is the
-         * tolerance that starts and ends the settle timer.
+         * tolerance that starts and ends the settle timer. It is the BASE tolerance on purpose: the settle timer belongs to
+         * the aim itself, which does not know its target, while the shot gate scales the tolerance with the distance
+         * ({@link HumanAim#toleranceDeg}). The two differ only at long range, where the jitter decay may start a little before
+         * the aim is inside the gate's wider tolerance; {@code turn()} lands exactly on the wanted direction within one step,
+         * so the effect is small.
          *
          * @return the aim to write back into the entity
          */

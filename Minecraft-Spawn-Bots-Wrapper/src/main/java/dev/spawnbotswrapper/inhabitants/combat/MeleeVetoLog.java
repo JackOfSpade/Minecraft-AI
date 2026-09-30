@@ -18,8 +18,10 @@ public final class MeleeVetoLog {
     public enum Reason {
         /** A block with a collision shape stands between the eye and every point of the victim a client could aim at. */
         BLOCKED,
-        /** Vanilla's attack range of the weapon does not accept the victim's box: too far, or closer than the weapon's minimum range. */
-        OUT_OF_REACH
+        /** Vanilla's attack range of the weapon does not accept the victim's box: farther than the weapon's maximum range. */
+        OUT_OF_REACH,
+        /** Closer than the weapon's minimum range (a spear cannot jab something next to it, as in vanilla). */
+        TOO_CLOSE
     }
 
     private static final class PerBot {
@@ -30,6 +32,7 @@ public final class MeleeVetoLog {
         long total;
         long blocked;
         long reach;
+        long close;
         double farthest;
     }
 
@@ -39,6 +42,8 @@ public final class MeleeVetoLog {
      * Registers one veto.
      *
      * @param distance eye to nearest point of the victim's box, for the report
+     * @param reach the range limit that was violated: the maximum reach for BLOCKED and OUT_OF_REACH, the minimum range for
+     *              TOO_CLOSE
      * @return the INFO line to write now, or null (the veto is only counted)
      */
     public String veto(long now, String bot, Reason reason, String victim, double distance, double reach) {
@@ -57,18 +62,25 @@ public final class MeleeVetoLog {
             p.blocked++;
             p.sinceInfoBlocked++;
         } else {
+            // Both range reasons are "outside its attack range"; TOO_CLOSE is also counted on its own.
             p.reach++;
             p.sinceInfoReach++;
+            if (reason == Reason.TOO_CLOSE) {
+                p.close++;
+            }
         }
-        p.farthest = Math.max(p.farthest, distance);
+        if (reason != Reason.TOO_CLOSE) {
+            p.farthest = Math.max(p.farthest, distance); // a too-close veto is the nearest, never the farthest
+        }
         if (p.lastInfo != Long.MIN_VALUE && now >= p.lastInfo && now - p.lastInfo < INFO_INTERVAL_TICKS) {
             return null;
         }
         p.lastInfo = now;
         String line = String.format(Locale.ROOT,
                 "melee legality: vetoed %d hit(s) by %s since the last line (%d without a clear line, %d outside its attack range); "
-                        + "latest on %s at %.2f blocks (reach %.2f); %d vetoed by it in total",
-                p.sinceInfo, bot, p.sinceInfoBlocked, p.sinceInfoReach, victim, distance, reach, p.total);
+                        + "latest on %s at %.2f blocks (%s %.2f); %d vetoed by it in total",
+                p.sinceInfo, bot, p.sinceInfoBlocked, p.sinceInfoReach, victim, distance,
+                reason == Reason.TOO_CLOSE ? "too close, minimum range" : "reach", reach, p.total);
         p.sinceInfo = 0;
         p.sinceInfoBlocked = 0;
         p.sinceInfoReach = 0;
@@ -81,8 +93,8 @@ public final class MeleeVetoLog {
         if (p == null) {
             return null;
         }
-        return String.format(Locale.ROOT, "vetoes %d (wall %d, reach %d, farthest %.2f)", p.total, p.blocked,
-                p.reach, p.farthest);
+        return String.format(Locale.ROOT, "vetoes %d (wall %d, reach %d, of which too close %d, farthest %.2f)", p.total,
+                p.blocked, p.reach, p.close, p.farthest);
     }
 
     public void reset() {

@@ -102,6 +102,9 @@ public final class CombatLogger {
         this.meleeVetoState = meleeVetoState;
     }
 
+    /** A shot spawns at its shooter's eye: farther than this (squared, 4 blocks) from the owner it is not a fresh shot. */
+    private static final double FRESH_SHOT_RADIUS_SQ = 16.0;
+
     /** Registers the two Fabric events; call once from the mod entrypoint. */
     public void register() {
         // The selected slot at the START of a tick, to tell "the slot left the ranged weapon inside the tick" apart.
@@ -115,7 +118,11 @@ public final class CombatLogger {
         ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
             if (entity instanceof Projectile projectile) {
                 guarded("projectile", () -> {
-                    if (projectile.getOwner() instanceof ServerPlayer shooter) {
+                    // Only a FRESH shot counts: loaded this tick and next to its owner (a shot spawns at the shooter's eye).
+                    // An arrow re-loaded from chunk data lies wherever it landed, so it is not a shot of a draw that just ended.
+                    if (projectile.getOwner() instanceof ServerPlayer shooter && projectile.tickCount == 0
+                            && shooter.level() == projectile.level()
+                            && projectile.distanceToSqr(shooter) <= FRESH_SHOT_RADIUS_SQ) {
                         lastShot.put(shooter.getUUID(), (long) level.getServer().getTickCount());
                     }
                 });

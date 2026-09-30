@@ -61,7 +61,6 @@ import java.util.function.Supplier;
  * stopped: it acts in the same tick as the hit that provoked it, before the aggro controller can clear it. Mob victims are not
  * asked about (PvP BOT's own revenge against mobs is left as it is); projectiles are gated at fire time, not at impact.
  * <p>
- * <p>
  * <b>Human aim.</b> After those checks a legal blow must also have the victim under the crosshair of where the bot REALLY looks
  * (its tracked aim, see {@link HumanAimDriver}; PvP BOT snaps the rotation onto its victim, but the head turns at a human speed):
  * the ray from the eye along the tracked look enters the victim's box (grown by the weapon's hitbox margin) within vanilla's
@@ -195,8 +194,10 @@ public final class MeleeLegality {
         double reach = range.effectiveMaxRange(attacker) + range.hitboxMargin();
         Vec3 eye = attacker.getEyePosition();
         double distance = MeleeGeometry.distanceToBox(eye.x, eye.y, eye.z, box);
+        double minimum = range.effectiveMinRange(attacker);
         MeleeVetoLog.Reason reason = !legality ? null : inAttackRange(range, attacker, bb)
-                ? clearLine(level, attacker, eye, box, reach) : MeleeVetoLog.Reason.OUT_OF_REACH;
+                ? clearLine(level, attacker, eye, box, reach)
+                : minimum > 0.0 && distance < minimum ? MeleeVetoLog.Reason.TOO_CLOSE : MeleeVetoLog.Reason.OUT_OF_REACH;
         if (reason == null && look != null && !underCrosshair(level, attacker, eye, look, range, bb)) {
             // Human aim: a legal blow also needs the victim under the crosshair of where the bot really looks. A bot that has
             // not turned to its victim cannot hit it.
@@ -216,7 +217,8 @@ public final class MeleeLegality {
                 String.format(Locale.ROOT, "%.2f", range.effectiveMinRange(attacker)),
                 String.format(Locale.ROOT, "%.2f", range.effectiveMaxRange(attacker)),
                 String.format(Locale.ROOT, "%.3f", range.hitboxMargin()));
-        String line = vetoes.veto(now, name, reason, victimName, distance, reach);
+        String line = vetoes.veto(now, name, reason, victimName, distance,
+                reason == MeleeVetoLog.Reason.TOO_CLOSE ? minimum : reach);
         if (line != null) {
             log.info(line);
         }
@@ -226,7 +228,9 @@ public final class MeleeLegality {
     /**
      * Whether vanilla's attack range accepts the box from the attacker's eye: {@link AttackRange#isInRange} with the lag
      * tolerance ({@link MeleeGeometry#TOLERANCE}). Covers the maximum and the minimum range, the hitbox margin and the
-     * creative, spectator and mob factors, all vanilla's.
+     * creative, spectator and mob factors, all vanilla's. The lag tolerance is symmetric, exactly as in vanilla: it widens
+     * the accepted band at BOTH ends (minimum range minus margin minus tolerance up to maximum range plus margin plus
+     * tolerance), so it loosens a spear's minimum range slightly as well.
      */
     static boolean inAttackRange(AttackRange range, LivingEntity attacker, AABB box) {
         return range.isInRange(attacker, box, MeleeGeometry.TOLERANCE);

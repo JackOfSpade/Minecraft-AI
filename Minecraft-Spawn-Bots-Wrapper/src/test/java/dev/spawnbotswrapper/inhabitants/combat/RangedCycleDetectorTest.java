@@ -76,6 +76,23 @@ class RangedCycleDetectorTest {
     }
 
     @Test
+    void aDrawStartedInTheTickOfAnEarlierShotDoesNotInheritThatShot() {
+        Alert alert = null;
+        for (int round = 0; round < 3; round++) {
+            long start = 100 + round * 20L;
+            // the previous draw's arrow spawned in tick `start`, the same tick this new draw began
+            for (int i = 0; i < 6; i++) {
+                d.observe("Bob", new Sample(start + i, true, "bow", i, false, 1, "bow", start, 6, true));
+            }
+            Alert a = d.observe("Bob", new Sample(start + 6, false, "none", 0, false, 1, "bow", start, 6, true));
+            if (a != null) {
+                alert = a;
+            }
+        }
+        assertNotNull(alert, "three aborted draws, none completed by the earlier shot of the same tick");
+    }
+
+    @Test
     void aBowReleasedWithoutAnArrowIsAnAbort() {
         long lastShot = 50; // an old arrow from before every draw below
         Alert alert = null;

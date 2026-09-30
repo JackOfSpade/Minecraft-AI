@@ -34,7 +34,7 @@ class PopulationEngineSweepLoggingTest {
                 rig.bots.pearlsToStrip.put(FakeBots.key(b.name), 5);
                 rig.bots.enchantmentsToStrip.put(FakeBots.key(b.name), List.of("minecraft:piercing (crossbow)"));
             }
-            rig.run(BotRoster.PEARL_SWEEP_TICKS * 6);
+            rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 6);
             assertFalse(r.bots.isEmpty());
             for (BotRecord b : r.bots) {
                 assertEquals(1, log.count(Level.INFO, PEARL_LINE + b.name + " "), b.name + " pearls: INFO once");
@@ -53,7 +53,7 @@ class PopulationEngineSweepLoggingTest {
         try (EngineLogCapture log = new EngineLogCapture(Level.DEBUG)) {
             Rig rig = new Rig();
             populate(rig, Rig.village(0, 0));
-            rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+            rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
             assertTrue(log.matching("Removed ").isEmpty(), log.matching("Removed ").toString());
         }
     }
@@ -72,7 +72,7 @@ class PopulationEngineSweepLoggingTest {
             }
             rig.bots.pearlStripCalls.clear();
             rig.bots.enchantmentStripCalls.clear();
-            rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+            rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
             for (BotRecord b : r.bots) {
                 assertTrue(rig.bots.pearlStripCalls.contains(b.name), b.name + " is still swept for pearls");
                 assertTrue(rig.bots.enchantmentStripCalls.contains(b.name), b.name + " is still swept for enchantments");
@@ -95,7 +95,7 @@ class PopulationEngineSweepLoggingTest {
             for (BotRecord b : r.bots) {
                 rig.bots.pearlsToStrip.put(FakeBots.key(b.name), 5);
             }
-            rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+            rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
             for (BotRecord b : r.bots) {
                 assertEquals(1, log.count(Level.INFO, PEARL_LINE + b.name + " "), b.name);
             }

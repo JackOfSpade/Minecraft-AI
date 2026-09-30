@@ -35,7 +35,7 @@ class PopulationEnginePearlSweepTest {
             assertTrue(calls(rig, b.name) >= 1, b.name + " is swept on its first roster visit");
         }
         long before = rig.bots.pearlStripCalls.size();
-        rig.run(BotRoster.PEARL_SWEEP_TICKS * 5);
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 5);
         long after = rig.bots.pearlStripCalls.size();
         assertTrue(after - before >= 3L * 4, "periodic: about once per sweep period per bot, got " + (after - before));
         assertTrue(after - before <= 3L * 7, "cheap: not every roster pass, got " + (after - before));
@@ -64,7 +64,7 @@ class PopulationEnginePearlSweepTest {
         rig.bots.kill(name);
         rig.run(BotRoster.SCAN_PERIOD_TICKS * 2);
         rig.bots.pearlStripCalls.clear();
-        rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
         assertEquals(0, calls(rig, name), "nothing to sweep while it is not online");
         rig.bots.bringOnline(name);
         rig.run(BotRoster.SCAN_PERIOD_TICKS + 2);
@@ -78,9 +78,9 @@ class PopulationEnginePearlSweepTest {
         for (BotRecord b : r.bots) {
             rig.bots.pearlsToStrip.put(FakeBots.key(b.name), 5);
         }
-        rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
         rig.bots.throwStrip = true;
-        rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
         assertEquals(List.of(), rig.bots.forgets, "sweeping never changes who is considered alive");
         assertEquals(0, rig.bots.restores.size());
     }
@@ -92,15 +92,30 @@ class PopulationEnginePearlSweepTest {
     }
 
     @Test
-    void everyInhabitantGetsExactlyOneMigrationPassAndItsRecordSaysSo() {
+    void aBrandNewBotNeedsNoMigrationPassBecauseEverythingItCarriesIsIssued() {
         Rig rig = new Rig();
         StructureRecord r = populate(rig, Rig.village(0, 0));
         rig.run(BotRoster.SCAN_PERIOD_TICKS + 2);
         for (BotRecord b : r.bots) {
+            assertEquals(0, migrations(rig, b.name), b.name + ": no all-stack pass over a bot that carries only issued items");
+            assertTrue(b.itemsMigrated, b.name);
+        }
+        assertFalse(new BotRecord().itemsMigrated, "a stored record (Gson's no-argument constructor) that lacks the field is an old one");
+    }
+
+    @Test
+    void everyInhabitantOfAnOlderVersionGetsExactlyOneMigrationPassAndItsRecordSaysSo() {
+        Rig rig = new Rig();
+        StructureRecord r = populate(rig, Rig.village(0, 0));
+        for (BotRecord b : r.bots) {
+            b.itemsMigrated = false; // written before issued items were marked
+        }
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS + BotRoster.SCAN_PERIOD_TICKS + 2);
+        for (BotRecord b : r.bots) {
             assertEquals(1, migrations(rig, b.name), b.name + " is migrated on its first sweep");
             assertTrue(b.itemsMigrated, b.name + " is recorded as migrated");
         }
-        rig.run(BotRoster.PEARL_SWEEP_TICKS * 6);
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 6);
         for (BotRecord b : r.bots) {
             assertEquals(1, migrations(rig, b.name), b.name + ": never migrated a second time");
             assertTrue(calls(rig, b.name) >= 5, b.name + " keeps being swept for what the wrapper issued");
@@ -138,7 +153,7 @@ class PopulationEnginePearlSweepTest {
             }
             rig.bots.migrateDeferredFor.add(FakeBots.key(late));
             rig.bots.migrateCalls.clear();
-            rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+            rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
             assertFalse(late.isEmpty());
             assertTrue(migrations(rig, late) >= 2, "a pass that could not run is retried at every sweep");
             assertFalse(r.bots.get(0).itemsMigrated, "and is not recorded as done");
@@ -146,10 +161,10 @@ class PopulationEnginePearlSweepTest {
             assertEquals(1, log.count(org.apache.logging.log4j.Level.INFO,
                     "Removed disabled enchantment(s) from inhabitant " + r.bots.get(1).name + ":"));
             rig.bots.migrateDeferredFor.clear();
-            rig.run(BotRoster.PEARL_SWEEP_TICKS * 2);
+            rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 2);
             assertTrue(r.bots.get(0).itemsMigrated, "it is migrated as soon as it can be");
             long done = migrations(rig, late);
-            rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+            rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
             assertEquals(done, migrations(rig, late), "and then never again");
         }
     }
@@ -162,13 +177,13 @@ class PopulationEnginePearlSweepTest {
             b.itemsMigrated = false;
         }
         rig.bots.throwMigrate = true;
-        rig.run(BotRoster.PEARL_SWEEP_TICKS * 3);
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 3);
         for (BotRecord b : r.bots) {
             assertFalse(b.itemsMigrated, b.name + " is not recorded as migrated after a failure");
         }
         assertEquals(List.of(), rig.bots.forgets, "the failure never changes who is considered alive");
         rig.bots.throwMigrate = false;
-        rig.run(BotRoster.PEARL_SWEEP_TICKS * 2);
+        rig.run(BotRoster.INVENTORY_SWEEP_TICKS * 2);
         for (BotRecord b : r.bots) {
             assertTrue(b.itemsMigrated, b.name);
         }

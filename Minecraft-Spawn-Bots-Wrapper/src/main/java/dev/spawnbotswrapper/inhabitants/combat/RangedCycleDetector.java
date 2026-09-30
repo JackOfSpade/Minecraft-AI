@@ -19,9 +19,14 @@ import java.util.Set;
  * {@value #ALERT_COOLDOWN_TICKS} ticks per bot. It only observes: nothing here can change a bot.
  * <p>
  * A draw is COMPLETED when an arrow (or other projectile) owned by the bot spawned at or after the draw started
- * ({@link Sample#lastShotTick}), or when a crossbow ended the draw loaded. Anything else is ABORTED, and the alert
+ * ({@link Sample#lastShotTick}, strictly later than the start), or when a crossbow ended the draw loaded. Anything else is ABORTED, and the alert
  * records what changed when it stopped (hotbar slot, main-hand item, line of sight, distance) so the log says why.
  * No Minecraft, no clock, no logger. Server thread only.
+ * <p>
+ * Limit: samples are taken once per server tick (END_SERVER_TICK), so a transition that begins and ends inside one tick is
+ * invisible. A draw aborted after 0 or 1 tick and restarted at once is only seen as a restart when the use ticks of the
+ * new sample are lower than the previous sample's; a stop and restart that leaves the use ticks equal or higher between two
+ * samples is not counted. The diagnostic is a hint for the log, not a guarantee.
  */
 public final class RangedCycleDetector {
     public static final int WINDOW_TICKS = 200;
@@ -161,7 +166,9 @@ public final class RangedCycleDetector {
     }
 
     private static boolean completed(Active a, Sample end) {
-        if (end.lastShotTick() >= a.startTick) {
+        // Strictly after the start: a shot released in the very tick a new draw began belongs to the PREVIOUS draw (a real shot
+        // of this draw comes at least a charge time later), so a same-tick restart does not inherit it.
+        if (end.lastShotTick() > a.startTick) {
             return true;
         }
         return a.item.contains("crossbow") && end.crossbowCharged() && end.slot() == a.slot;

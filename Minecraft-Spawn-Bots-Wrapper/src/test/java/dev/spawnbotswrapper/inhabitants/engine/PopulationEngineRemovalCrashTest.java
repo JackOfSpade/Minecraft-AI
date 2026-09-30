@@ -95,6 +95,27 @@ class PopulationEngineRemovalCrashTest {
     }
 
     @Test
+    void aRemovalWhoseOutcomeTheGatewayCannotTellIsNeverReadAsADeath() {
+        // isOnline throws right after the bots were removed: the old code undid the mark ("still there") and journalled a live
+        // state, so once the gateway answered again the roster found the bots gone and spent their slots as deaths.
+        Rig rig = rig();
+        rig.cfg.processing.goneConfirmTicks = 100;
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(s);
+        rig.run(100);
+        rig.bots.beforeRemove = n -> rig.bots.throwIsOnline = true;
+        playerAt(rig, 900, 70, 0);
+        rig.run(100);
+        assertEquals(3, rig.bots.removes.size(), "the three unseen bots were removed");
+        rig.bots.throwIsOnline = false;
+        rig.run(400);
+        assertEquals(0, rig.record(s.key()).deadCount(), "a removal whose outcome was unknown is never a death");
+        assertTrue(rig.record(s.key()).bots.isEmpty(), "three vacant slots: " + rig.record(s.key()).bots);
+        assertEquals(3, rig.record(s.key()).vacantSlots());
+    }
+
+    @Test
     void withoutTheMarkTheSameCrashWouldHaveBeenReadAsADeath() {
         // the contrast: a bot that is gone WITHOUT the mark is concluded dead after the long confirmation (unchanged rule)
         Rig rig = rig();

@@ -71,8 +71,10 @@ public final class BotRecord {
     /**
      * True once the one-time sanitize pass of a bot from before issued items were marked has run (every pearl and disabled
      * enchantment stripped from all its stacks). Afterwards the sweeps judge only stacks the wrapper issued (marked), so what
-     * the bot picked up in the world is never touched. False for a record written by an older version, and for a new bot
-     * until its first sweep (the pass then finds nothing: everything it carries is issued and already judged).
+     * the bot picked up in the world is never touched. False for a record written by an older version (Gson builds records
+     * through the no-argument constructor, so a stored record keeps whatever it stored, false when the field is absent);
+     * true for a bot this version creates: everything it will carry is issued (marked) and judged at dressing, so the
+     * all-stack pass would only risk judging an item a player dropped at its feet in the first tick.
      */
     public boolean itemsMigrated;
 
@@ -83,5 +85,6 @@ public final class BotRecord {
         this.index = index;
         this.name = name;
         this.seed = seed;
+        this.itemsMigrated = true;
     }
 }

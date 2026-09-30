@@ -740,6 +740,11 @@ public final class PvpBotAdapter implements PvpBotOperations {
      * After a removal: when the bot is still in the world and alive, gives it back everything {@link BotRemoval#empty} took (its
      * items and experience), so a removal that failed never leaves an emptied bot behind.
      *
+     * <p>This relies on the removal being SYNCHRONOUS (disconnect, then a synchronous kill): when this runs, a bot that is still
+     * online and alive really was not removed. A removal that only took effect later would leave the bot with its items back
+     * and it would then drop them; if the removal ever becomes asynchronous, restore only when the attempt was not issued
+     * or the bot is verified alive after it has settled.</p>
+     *
      * @return whether the bot is still there (the removal did not happen)
      */
     private boolean putBackIfStillHere(MinecraftServer server, ServerPlayer entity, BotRemoval.Carried carried, String name) {

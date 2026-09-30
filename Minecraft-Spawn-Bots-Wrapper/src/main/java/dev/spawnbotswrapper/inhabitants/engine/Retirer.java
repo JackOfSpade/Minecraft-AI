@@ -224,11 +224,19 @@ final class Retirer {
         BotRecord bot = s.bot;
         ctx.discard(bot.name);
         Boolean stillThere = ctx.online(bot.name);
-        if (stillThere == null || stillThere) {
+        if (stillThere != null && stillThere) {
             // It could not be removed (the adapter put back what it had emptied). The record must not keep saying "asleep with
             // a saved copy" while the bot lives on.
             s.undo();
             return Result.KEPT;
+        }
+        if (stillThere == null) {
+            // The gateway cannot tell whether the removal took effect. Undoing would read as "still alive" and, if the bot IS
+            // gone, turn the removal into a death. The mark stays: tickLate removes the bot if it turns out to be there, and
+            // clears the mark once it is known to be offline (the snapshot stands).
+            watchLate(s.key, bot, cfg);
+            roster.untrackOne(bot);
+            return Result.SLEPT;
         }
         bot.removing = false;
         ctx.store.markDirty();
@@ -242,15 +250,26 @@ final class Retirer {
         BotRecord bot = m.bot;
         ctx.discard(bot.name);
         Boolean stillThere = ctx.online(bot.name);
-        if (stillThere == null || stillThere) {
+        if (stillThere != null && stillThere) {
             m.undo();
             return Result.KEPT;
         }
         roster.untrackOne(bot);
+        if (stillThere == null) {
+            // Cannot tell whether it is gone: keep the removing mark (a vacant slot, never a death) and let tickLate settle it.
+            watchLate(m.key, bot, cfg);
+            return Result.DELETED;
+        }
         dropRecord(m.key, bot);
         ctx.debug(cfg, "Inhabitant {} deleted ({}): no player ever saw it, nothing is kept and its slot is free again",
                 bot.name, reason);
         return Result.DELETED;
+    }
+
+    /** Watches a bot whose removal could not be confirmed, exactly like the bot of an interrupted removal (see {@link #tickLate}). */
+    private void watchLate(StructureKey key, BotRecord bot, InhabitantsConfig cfg) {
+        long period = Math.max(1, EngineContext.processing(cfg).goneConfirmTicks);
+        late.put(EngineContext.lower(bot.name), new Late(key, bot, ctx.now() + period));
     }
 
     /** Takes an unseen bot out of its structure's record: its slot is vacant (its index is never reused). */
@@ -380,9 +399,16 @@ final class Retirer {
                     if (!bot.seen) {
                         dropRecord(l.key(), bot);
                         late.remove(lower);
+                    } else if (bot.removing) {
+                        bot.removing = false; // the snapshot in the record is what counts; the bot may wake now
+                        ctx.store.markDirty();
                     }
                 }
                 continue;
+            }
+            if (!online && bot.seen && bot.removing) {
+                bot.removing = false; // known to be offline now: the removal took effect and the snapshot stands
+                ctx.store.markDirty();
             }
             if (now >= l.until()) {
                 late.remove(lower);

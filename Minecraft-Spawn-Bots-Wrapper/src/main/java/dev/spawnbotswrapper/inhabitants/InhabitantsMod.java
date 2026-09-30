@@ -11,11 +11,11 @@ import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.HumanAimDriver;
 import dev.spawnbotswrapper.inhabitants.mc.IssuedItemGuard;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
-import dev.spawnbotswrapper.inhabitants.mc.OffhandPolicy;
-import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
 import dev.spawnbotswrapper.inhabitants.mc.MeleeLegality;
+import dev.spawnbotswrapper.inhabitants.mc.OffhandPolicy;
+import dev.spawnbotswrapper.inhabitants.mc.OutOfAmmoGapCloser;
 import dev.spawnbotswrapper.inhabitants.mc.RangedFire;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
 import dev.spawnbotswrapper.inhabitants.mc.StepGuard;
@@ -61,9 +61,9 @@ public final class InhabitantsMod implements ModInitializer {
     private volatile ServerSession session;
     private final McTpsGateway tps = new McTpsGateway();
     private final CombatLogger combat = new CombatLogger(() -> session, LOGGER);
-    /** The line-of-sight hunter (inhabitants notice, chase, search for and walk back from players); see AggroController. */
     /** Human aim: inhabitants turn their heads at human speed and shoot only where they really point (see HumanAim). */
     private final HumanAimDriver humanAim = new HumanAimDriver(() -> session, LOGGER);
+    /** The line-of-sight hunter (inhabitants notice, chase, search for and walk back from players); see AggroController. */
     private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER, humanAim);
     /** No cheating: vetoes melee hits by inhabitants that a human client could not make (through walls, beyond reach). */
     private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER, aggro::mayAttackPlayer, humanAim);

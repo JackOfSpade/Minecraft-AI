@@ -35,7 +35,7 @@ final class BotRoster {
     static final int SCAN_PERIOD_TICKS = 20;
 
     /** Each online inhabitant's inventory is swept (ender pearls, disabled enchantments) at most this often (5 s). */
-    static final int PEARL_SWEEP_TICKS = 100;
+    static final int INVENTORY_SWEEP_TICKS = 100;
 
     /** Each online inhabitant's state (inventory, health, hunger, effects) is saved to its record at most this often (5 s), and only when it changed. */
     static final int SNAPSHOT_TICKS = 100;
@@ -52,7 +52,7 @@ final class BotRoster {
         boolean restored;
         boolean forgotten;
         /** Tick from which the next inventory sweep is due. */
-        long nextPearlSweep;
+        long nextInventorySweep;
         /** The first removal of each kind is logged at INFO, later ones only in debug mode. */
         boolean pearlsLogged;
         boolean enchantmentsLogged;
@@ -251,7 +251,7 @@ final class BotRoster {
             observe(t, now);
             maybeRestore(t, cfg);
             sweepVanilla(t, now, cfg);
-            sweepPearls(t, now, cfg);
+            sweepInventory(t, now, cfg);
             snapshotIfDue(t, now);
         }
     }
@@ -285,7 +285,7 @@ final class BotRoster {
             setOnline(t, true);
             maybeRestore(t, cfg);
             sweepVanilla(t, ctx.now(), cfg);
-            sweepPearls(t, ctx.now(), cfg);
+            sweepInventory(t, ctx.now(), cfg);
             snapshotIfDue(t, ctx.now());
         }
     }
@@ -336,7 +336,7 @@ final class BotRoster {
     }
 
     /**
-     * Sweeps the ISSUED (marked, see {@code IssuedItems}) stacks of an online inhabitant, at most once per {@link #PEARL_SWEEP_TICKS} per bot (so a freshly
+     * Sweeps the ISSUED (marked, see {@code IssuedItems}) stacks of an online inhabitant, at most once per {@link #INVENTORY_SWEEP_TICKS} per bot (so a freshly
      * restored bot is cleaned on its first visit and something picked up later goes within seconds): ender pearls,
      * which make PvP BOT's cobweb escape loop switch the held slot every tick and cancel the bot's own crossbow charge
      * and attacks (see {@code LoadoutRoller}), and every enchantment the config disables (Piercing by default: a
@@ -344,11 +344,11 @@ final class BotRoster {
      * logged and never reaches the caller or the other bots. The first removal per bot and kind is logged at INFO,
      * later ones only in debug mode. Never throws.
      */
-    private void sweepPearls(Tracked t, long now, InhabitantsConfig cfg) {
-        if (!t.online || now < t.nextPearlSweep) {
+    private void sweepInventory(Tracked t, long now, InhabitantsConfig cfg) {
+        if (!t.online || now < t.nextInventorySweep) {
             return;
         }
-        t.nextPearlSweep = now + PEARL_SWEEP_TICKS;
+        t.nextInventorySweep = now + INVENTORY_SWEEP_TICKS;
         migrateLegacyItems(t, cfg);
         try {
             logPearls(t, ctx.bots.stripEnderPearls(t.bot.name), cfg);

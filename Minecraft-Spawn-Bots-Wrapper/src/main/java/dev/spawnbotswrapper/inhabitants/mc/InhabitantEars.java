@@ -119,7 +119,10 @@ final class InhabitantEars {
     }
 
     private final Map<UUID, Ear> ears = new HashMap<>();
-    private final Set<UUID> failed = new HashSet<>();
+    /** Bots whose ear failed, with the game tick before which no new ear is built (back-off); also "already reported". */
+    private final Map<UUID, Long> failed = new HashMap<>();
+    /** Ticks a bot whose ear failed is left without one before the next attempt. */
+    static final long FAILURE_BACKOFF_TICKS = 100;
     private final java.util.function.Consumer<String> onFailure;
 
     InhabitantEars(java.util.function.Consumer<String> onFailure) {
@@ -142,6 +145,10 @@ final class InhabitantEars {
                 continue;
             }
             keep.add(p.getUUID());
+            Long retryAt = failed.get(p.getUUID());
+            if (retryAt != null && level.getGameTime() < retryAt) {
+                continue; // backing off after a failure: no ear is rebuilt every tick
+            }
             Ear ear = ears.get(p.getUUID());
             if (ear == null || ear.bot != p) {
                 if (ear != null) {
@@ -159,12 +166,14 @@ final class InhabitantEars {
                 // failure is reported once).
                 safeDetach(ear);
                 ears.remove(p.getUUID());
-                keep.remove(p.getUUID());
-                if (failed.add(p.getUUID())) {
+                if (failed.put(p.getUUID(), level.getGameTime() + FAILURE_BACKOFF_TICKS) == null) {
                     onFailure.accept("hearing of " + p.getName().getString() + " failed: " + e);
                 }
             }
         }
+        // A bot that is gone or dead is forgotten (the set would grow for the life of the server); a bot whose ear keeps
+        // failing stays in it, so it is reported once and retried only after the back-off.
+        failed.keySet().retainAll(keep);
         for (Iterator<Map.Entry<UUID, Ear>> it = ears.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<UUID, Ear> e = it.next();
             if (!keep.contains(e.getKey())) {
