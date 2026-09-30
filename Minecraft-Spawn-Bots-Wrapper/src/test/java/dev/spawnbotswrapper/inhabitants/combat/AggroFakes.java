@@ -44,6 +44,8 @@ final class AggroFakes {
         /** What this person is doing, for those who notice it. */
         Perception.Subject subject = Perception.Subject.player(false, false, false);
         int canSeeCalls;
+        /** Names vanilla's plain eye-to-eye line of sight cannot see (used when perception is off). */
+        final Set<String> plainBlind = new HashSet<>();
         /** Attackers of hits taken since the controller last asked (the hit feed). */
         final List<Person> hitQueue = new ArrayList<>();
         /** Where this person looked to during the last tick (recorded by the control). */
@@ -118,6 +120,11 @@ final class AggroFakes {
         public boolean canSee(Body other) {
             canSeeCalls++;
             return !blind.contains(other.name());
+        }
+
+        @Override
+        public boolean plainLineOfSight(Body other) {
+            return !plainBlind.contains(other.name());
         }
 
         @Override

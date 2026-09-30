@@ -704,8 +704,10 @@ public final class AggroController {
      * in range and unobstructed, at once.
      */
     Perception.Reading read(Watcher bot, Body candidate, Config cfg) {
-        BooleanSupplier clear = () -> !cfg.requireLineOfSight() || bot.canSee(candidate);
         Perception.Params p = cfg.perception();
+        // Perception off is exactly vanilla hasLineOfSight (one eye-to-eye ray); on, the eye ray and then a body-centre ray.
+        BooleanSupplier clear = () -> !cfg.requireLineOfSight()
+                || (p.enabled() ? bot.canSee(candidate) : bot.plainLineOfSight(candidate));
         AggroWorld.Senses me = p.enabled() ? bot.senses() : null;
         AggroWorld.Senses them = me == null ? null : candidate.senses();
         double distance = bot.distanceTo(candidate);

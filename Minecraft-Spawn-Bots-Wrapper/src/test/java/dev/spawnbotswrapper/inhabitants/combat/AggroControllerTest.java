@@ -120,6 +120,23 @@ class AggroControllerTest {
     }
 
     @Test
+    void perceptionOffUsesVanillaHasLineOfSightAndNothingElse() {
+        s.config = s.config.withPerception(s.config.perception().disabled());
+        steve.x = 12;
+        bot.blind.add("Steve"); // the eye-and-body-centre view is blocked ...
+        assertTrue(ticksUntilChase(10) > 0, "... but vanilla's single eye ray is what counts with perception off");
+    }
+
+    @Test
+    void perceptionOffDoesNotSeeWhatVanillaCannot() {
+        s.config = s.config.withPerception(s.config.perception().disabled());
+        steve.x = 12;
+        bot.plainBlind.add("Steve");
+        s.run(60);
+        assertEquals(List.of(), s.up.callsOf("set"));
+    }
+
+    @Test
     void withoutARayTheBlockedPlayerIsNotSeenEvenAtPointBlank() {
         steve.x = 3;
         bot.blind.add("Steve");

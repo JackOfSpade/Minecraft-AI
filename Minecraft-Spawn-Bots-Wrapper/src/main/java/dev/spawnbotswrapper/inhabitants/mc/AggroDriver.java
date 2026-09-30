@@ -386,6 +386,11 @@ public final class AggroDriver {
         }
 
         @Override
+        public boolean plainLineOfSight(AggroWorld.Body other) {
+            return other instanceof EntityBody b && player.hasLineOfSight(b.entity);
+        }
+
+        @Override
         public AggroWorld.Body newHitAttacker() {
             DamageSource source = player.getLastDamageSource();
             HitPoller.Hit hit = hits.observe(player.getUUID(), source, player.getHealth() + player.getAbsorptionAmount());

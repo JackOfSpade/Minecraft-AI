@@ -83,6 +83,14 @@ public interface AggroWorld {
         boolean canSee(Body other);
 
         /**
+         * Exactly vanilla {@code LivingEntity.hasLineOfSight(other)}: the same level, within 128 blocks, one collider ray
+         * from eye to eye. What noticing uses when perception is switched off. Defaults to {@link #canSee}.
+         */
+        default boolean plainLineOfSight(Body other) {
+            return canSee(other);
+        }
+
+        /**
          * The attacker of a hit this inhabitant took since this was last asked (a player, a bot or a mob), or null. It
          * is how a hit is noticed WITHOUT relying on PvP BOT's revenge memory (which is only set when PvP BOT's own
          * settings allow it); each hit is reported once.
