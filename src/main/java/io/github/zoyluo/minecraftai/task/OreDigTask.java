@@ -8,6 +8,8 @@ import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.action.WalkToController;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -48,7 +50,6 @@ import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.memory.EpisodeLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
@@ -153,6 +154,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static final int MIN_Y = -60;
     static final int VEIN_CAP = 64;
     private static final int PICKUP_GRACE_TICKS = 30;
+    /** Ticks a bot that lost a walked step in the air is left alone to land before the task decides anything. */
+    private static final int MOVE_UNSETTLED_LIMIT = 40;
     private static final int TARGET_DROP_RECOVERY_LIMIT = 200;
     static final int TARGET_DROP_LAST_SEEN_RANGE = 16;
     // Staying in place within the recovery window (a same-cell nudge or a silent pathfinding
@@ -262,6 +265,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private final int restoredActiveTargetBreakInventory;
     private final String oreFingerprint;
     private boolean restoringFace;
+    /**
+     * The walked step the bot is taking right now (a stair down, a hop up a ledge, a retreat out of a reoccupied cell) and what is
+     * published when it has verified its landing. Never persisted: the checkpoint keeps the face the step began on, and a pause, an
+     * abort or a restart cancels the step and re-derives everything from the bot's block position.
+     */
+    private MoveInFlight moveInFlight;
+    /** Moves whose step failed since the last verified landing: the same move is not launched again (the caller falls back). */
+    private final Set<String> failedMoves = new HashSet<>();
+    /** Ticks the bot has been left alone to settle after a step was lost in the air. */
+    private int moveUnsettledTicks;
+    private boolean moveUnsettled;
     private int restoreFaceStarted;
     private BlockPos pendingPickupPos;
     private BlockPos pendingPickupLastSeenPos;
@@ -903,6 +917,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
+        endMoveInFlight(bot);
         detourInterrupted(bot);
         publishInterruptionCursor(bot, true);
         clearPendingBlindAdvance();
@@ -930,6 +945,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
+        endMoveInFlight(bot);
         boolean detourWasLive = detourInterrupted(bot);
         publishInterruptionCursor(bot, false);
         clearPendingBlindAdvance();
@@ -989,6 +1005,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
+        // A walked step (stair down, hop up, retreat) is the only thing that moves the bot until its landing is verified; the
+        // cursor is published from that landing, and no mining or observation gate runs while a step is in flight.
+        if (holdForMoveInFlight(bot)) {
+            return;
+        }
         ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
         // Falling sand/gravel is updated after the task tick that opened a tunnel cell.  The cell
@@ -1698,9 +1719,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             boolean preserveRestoreTarget = restoringFace;
             miner.cancel(bot);
             bot.getActionPack().stopAll();
-            boolean moved = io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                    bot, retreat, "ore_dig_blocked_body_retreat");
-            if (moved && bot.blockPosition().equals(retreat)) {
+            // The retreat is a walked step out of the occupied cell onto the safe face; the cursor is published from
+            // the verified landing (a later tick), never in the tick that starts the step.
+            if (beginWalkedMove(bot, retreat, "ore_dig_blocked_body_retreat", () -> {
                 blockedBodyRecoveryTarget = null;
                 boolean fallingBranchCollapse = blindBranchCollision
                         && obstruction.getBlock() instanceof FallingBlock;
@@ -1730,6 +1751,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     rerouteBlindBranchAtObservedBoundary(
                             bot, world, "gravity", blocked);
                 }
+            })) {
                 return true;
             }
         }
@@ -3670,7 +3692,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // observed, supported lower cell as a real stair instead of collapsing every height
         // change into the same open-drop failure used for multi-block shafts. The move stays
         // fail-closed: the complete landing body/floor must be visible, dry, hazard-free and
-        // standable, and FakePlayerMotion rechecks collision/entity occupancy at commit time.
+        // standable, and the walked step rechecks collision/entity occupancy when it starts and its landing on every tick.
         if (intent == TunnelIntent.TARGET_APPROACH
                 && descendAcrossObservedOneBlockDrop(bot, world, step, goal)) {
             return;
@@ -3915,18 +3937,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         Standability.clearCache();
-        if (!Standability.isStandable(world, landing)
-                || !bot.getActionPack().descendInto(landing)
-                || !bot.blockPosition().equals(landing)) {
+        if (!Standability.isStandable(world, landing)) {
             return false;
         }
-        publishSynchronousMove(origin, landing);
-        BotLog.action(bot, "ore_dig_observed_lower_step",
-                "intent", "target_approach",
-                "from", origin.toShortString(),
-                "to", landing.toShortString(),
-                "steps_left", stripStepsLeft);
-        return true;
+        // A walked step off the edge (gravity lands it one block lower); the cursor is published from the verified landing.
+        return beginWalkedMove(bot, landing, "ore_dig_observed_lower_step", () -> {
+            publishSynchronousMove(origin, landing);
+            BotLog.action(bot, "ore_dig_observed_lower_step",
+                    "intent", "target_approach",
+                    "from", origin.toShortString(),
+                    "to", landing.toShortString(),
+                    "steps_left", stripStepsLeft);
+        });
     }
 
     /**
@@ -4025,19 +4047,113 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             return true;
         }
-        // Body clearance confirmed -> step diagonally down onto the next stair (a 1-block micro-move, not the map-crossing teleport that roam uses).
-        boolean moved = bot.getActionPack().descendInto(next);
-        if (moved && bot.blockPosition().equals(next)) {
-            publishSynchronousMove(feet, next);
-            return true;
-        }
-        return false;
+        // Body clearance confirmed -> walk diagonally down onto the next stair: a walked step off the edge of the tier, gravity lands
+        // it one block lower, exactly what a player does with the keys. The cursor is published from the verified landing.
+        return beginWalkedMove(bot, next, "ore_dig_stair_descent", () -> publishSynchronousMove(feet, next));
+    }
+
+    /** A walked move in flight: where it began, the cell it must verify, and the publication that runs on that verified landing. */
+    private record MoveInFlight(BlockPos origin, BlockPos landing, String what, Runnable onLanded) {
+    }
+
+    private static String moveKey(BlockPos origin, BlockPos landing) {
+        return origin.toShortString() + ">" + landing.toShortString();
     }
 
     /**
-     * Atomically publishes an already-completed fake-client move into OreDig's durable cursor.
-     * Unlike ordinary walking, these moves finish inside the current task tick, so waiting for the
-     * next onTick preflight can expose a stale face or preserve the one-origin reverse exception in
+     * Starts a walked step from the bot's cell to {@code landing} (a walk, a hop up or a walk off an edge chosen by the height
+     * difference; the cell straight below is a drop) when the world allows it right now. Nothing moves the bot: the keys do, and
+     * {@code onLanded} (the cursor publication) runs from {@link #holdForMoveInFlight} once the landing is verified, on a later
+     * tick. False, with nothing started, when the step is refused or the same move has already failed.
+     */
+    private boolean beginWalkedMove(AIPlayerEntity bot, BlockPos landing, String what, Runnable onLanded) {
+        BlockPos origin = bot.blockPosition().immutable();
+        if (failedMoves.contains(moveKey(origin, landing))) {
+            return false;
+        }
+        int dy = landing.getY() - origin.getY();
+        boolean straightDown = landing.getX() == origin.getX() && landing.getZ() == origin.getZ();
+        WalkedStep.Kind kind = straightDown && dy < 0 ? WalkedStep.Kind.DROP : WalkedStepRules.walkKindFor(dy);
+        if (kind == null) {
+            return false;
+        }
+        String refused = WalkedStep.refusal(bot, landing, kind);
+        if (refused != null) {
+            BotLog.action(bot, "ore_dig_walked_move_refused", "what", what,
+                    "from", origin.toShortString(), "to", landing.toShortString(), "why", refused);
+            return false;
+        }
+        bot.getActionPack().runStep(WalkedStep.begin(bot, landing, kind, what));
+        moveInFlight = new MoveInFlight(origin, landing.immutable(), what, onLanded);
+        return true;
+    }
+
+    /**
+     * True while the bot must be left alone: a walked step is in flight (or ended on this very tick and is published now), or it is
+     * still in the air after one was lost. Mining, observation and every gate run only when no step is in flight.
+     */
+    private boolean holdForMoveInFlight(AIPlayerEntity bot) {
+        MoveInFlight move = moveInFlight;
+        if (move == null) {
+            if (moveUnsettled) {
+                if (WalkedStep.supported(bot) || bot.isInWater() || ++moveUnsettledTicks > MOVE_UNSETTLED_LIMIT) {
+                    moveUnsettled = false;
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        }
+        if (!bot.getActionPack().stepIdle()) {
+            return true;
+        }
+        settleMove(bot, move);
+        return true;
+    }
+
+    /** A step ended (or was lost): the verified landing publishes the move; anything else is re-derived from the bot's block position. */
+    private void settleMove(AIPlayerEntity bot, MoveInFlight move) {
+        moveInFlight = null;
+        WalkedStep.Result result = bot.getActionPack().stepResult();
+        boolean landed = result != null && result.succeeded() && bot.blockPosition().equals(move.landing());
+        if (landed) {
+            failedMoves.clear();
+            move.onLanded().run();
+            return;
+        }
+        failedMoves.add(moveKey(move.origin(), move.landing()));
+        moveUnsettled = true;
+        moveUnsettledTicks = 0;
+        BotLog.action(bot, "ore_dig_walked_move_failed", "what", move.what(),
+                "from", move.origin().toShortString(), "at", bot.blockPosition().toShortString(),
+                "why", result == null ? "cancelled" : result.reason());
+    }
+
+    /**
+     * A pause or an abort while a step is in flight: a step that has already verified its landing is published (the cursor never
+     * lags behind where the bot stands); one still walking is cancelled, its keys released, and nothing is recorded (the checkpoint
+     * keeps the face it began on and the resumed task rejoins it from wherever the bot lands).
+     */
+    private void endMoveInFlight(AIPlayerEntity bot) {
+        MoveInFlight move = moveInFlight;
+        if (move == null) {
+            return;
+        }
+        if (bot.getActionPack().stepIdle()) {
+            settleMove(bot, move);
+            return;
+        }
+        moveInFlight = null;
+        bot.getActionPack().cancelStep();
+        moveUnsettled = true;
+        moveUnsettledTicks = 0;
+    }
+
+    /**
+     * Atomically publishes an already-completed move into OreDig's durable cursor. The moves that
+     * call it are walked steps published from their verified landing (see {@link #beginWalkedMove}),
+     * so the cursor never names a face the bot has not reached, and publishing before the next
+     * onTick preflight cannot expose a stale face or preserve the one-origin reverse exception in
      * an immediate checkpoint.  A factual move always consumes that exception, including a retreat
      * which happens to land on an older branch face.
      */
@@ -4469,11 +4585,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         bot, world, origin, direction);
                 if (raised != RaisedBoundaryLanding.NOT_APPLICABLE) {
                     BlockPos landing = origin.relative(direction).above();
+                    final int selected = candidate;
+                    // The hop up the ledge is a walked step (forward and jump); the cursor is published from the
+                    // verified landing, a later tick, so a restart or pause in the air keeps the face it began on.
                     if (raised == RaisedBoundaryLanding.READY
-                            && FakePlayerMotion.jumpTo(
-                            bot, landing, "ore_dig_open_drop_raised_landing")) {
+                            && beginWalkedMove(bot, landing, "ore_dig_open_drop_raised_landing", () -> {
                         clearStripMovementOwnership();
-                        stripDirIndex = candidate;
+                        stripDirIndex = selected;
                         publishSynchronousMove(origin, landing);
                         int closedDirection = stripDirIndex;
                         int closedLeg = stripLegIndex;
@@ -4492,6 +4610,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                 "landing", landing.toShortString(),
                                 "successor", STRIP_DIRS[stripDirIndex].getSerializedName(),
                                 "steps_left", stripStepsLeft);
+                    })) {
                         return true;
                     }
                     // A one-block ledge is structurally a possible raised landing even when its
@@ -4529,8 +4648,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (progressedOpenDrop
                 && isObservedSafeOpenEscapeCorridor(
                 bot, world, origin, rearDirection)
-                && FakePlayerMotion.stepToStandable(
-                bot, factualRear, "ore_dig_open_drop_rear_retreat")) {
+                && beginWalkedMove(bot, factualRear, "ore_dig_open_drop_rear_retreat", () -> {
             publishSynchronousMove(origin, factualRear);
             int closedDirection = stripDirIndex;
             int closedLeg = stripLegIndex;
@@ -4549,6 +4667,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "to", factualRear.toShortString(),
                     "successor", STRIP_DIRS[stripDirIndex].getSerializedName(),
                     "steps_left", stripStepsLeft);
+        })) {
             return true;
         }
         // This special closure is allowed only after the bot has already committed a real one-block

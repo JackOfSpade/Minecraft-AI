@@ -3,6 +3,8 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
+import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
@@ -196,9 +198,9 @@ public final class MiningHostileRecoveryGameTests {
         AIPlayerEntity bot = fixture.bot();
         assertStrictCapabilities(context, bot);
         BlockPos finalNorthRear = fixture.workFace().south();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, finalNorthRear, "mining_hostile_corner_setup"),
-                "fixture could not enter the factual old north leg");
+        // A fixture move (recorded as TEST, never as a correction): the miner starts in the factual old north leg.
+        BotFixtureMoves.place(bot, finalNorthRear);
+        TeleportAudit.reset(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 3));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
 
@@ -224,9 +226,7 @@ public final class MiningHostileRecoveryGameTests {
         // south, while east's geometric reverse west has never been traversed.
         initial.tick(bot);
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, fixture.workFace(), "mining_hostile_factual_corner_fixture"),
-                "fixture could not complete its final factual north step");
+        BotFixtureMoves.place(bot, fixture.workFace()); // the final factual north step, as a fixture move
         initial.tick(bot);
         Map<String, String> markedSuccessor = initial.checkpoint();
         require(context, "1".equals(markedSuccessor.get("direction"))
@@ -295,6 +295,9 @@ public final class MiningHostileRecoveryGameTests {
 
         AtomicInteger ticks = new AtomicInteger();
         context.failIfEver(() -> {
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "the barricade retreat or the resumed mining teleported the bot (corrections="
+                            + TeleportAudit.corrections(bot) + " last=" + TeleportAudit.lastCaller(bot) + ")");
             DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
             if (mining.state() == TaskState.FAILED || mining.state() == TaskState.CANCELLED) {
                 context.fail(Component.nullToEmpty("mining cursor ended during hostile recovery: "

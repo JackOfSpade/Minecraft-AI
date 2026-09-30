@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks down cursor identity and saved-face return without bootstrapping a Minecraft registry. */
@@ -104,7 +105,7 @@ class OreDigCheckpointSourceContractTest {
         int recovery = source.indexOf("private boolean recoverBlockedBody");
         int findCall = source.indexOf("findBlockedBodyRetreat(bot, world, feet)", recovery);
         int physicalCommit = source.indexOf(
-                "FakePlayerMotion.stepToStandable(", findCall);
+                "beginWalkedMove(bot, retreat, \"ore_dig_blocked_body_retreat\"", findCall);
         int finder = source.indexOf("private BlockPos findBlockedBodyRetreat", physicalCommit);
         int liveOwner = source.indexOf(
                 "ownsActiveBlindBranchCollision(bot, feet, lastFace)", finder);
@@ -143,7 +144,7 @@ class OreDigCheckpointSourceContractTest {
         int floorObserved = body.indexOf("ObservableWorldQuery.canObserveBlock(bot, floor)");
         int floorRead = body.indexOf("var floorState = world.getBlockState(floor)");
         int adjacentGate = body.indexOf("isObservedAdjacentFluidSafe(bot, world, step, landing)");
-        int movement = body.indexOf("bot.getActionPack().descendInto(landing)");
+        int movement = body.indexOf("beginWalkedMove(bot, landing, \"ore_dig_observed_lower_step\"");
         assertTrue(floorObserved >= 0 && floorRead > floorObserved
                         && adjacentGate > floorRead && movement > adjacentGate
                         && !body.contains("OreScan.adjacentHazard"),
@@ -505,5 +506,41 @@ class OreDigCheckpointSourceContractTest {
         int planner = executor.indexOf("GoalPlanner.GoalPlan fresh", handler);
         assertTrue(handler >= 0 && terminal > handler && planner > terminal,
                 "a factually trapped branch must terminate before the same cursor is replanned");
+    }
+
+    @Test
+    void oreDigHarvestAndBarricadeMoveByWalkedStepsNeverByTeleportPrimitives() throws IOException {
+        // R5: every OreDig move (stair, lower step, hop up a ledge, retreat) is an input-driven WalkedStep whose cursor publication runs
+        // from the verified landing, one or more ticks after the step starts; HarvestCore drops into pickup cells and the barricade
+        // retreat walk as well. None of the three calls a teleport primitive.
+        for (String file : new String[]{
+                "task/OreDigTask.java", "action/HarvestCore.java", "task/MiningBarricadeTask.java"}) {
+            String source = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/" + file));
+            assertFalse(source.contains(".descendInto("), file + " must not use the teleporting descendInto");
+            assertFalse(source.contains("FakePlayerMotion.stepToStandable(")
+                            || source.contains("FakePlayerMotion.jumpTo(")
+                            || source.contains("FakePlayerMotion.stepTo("),
+                    file + " must not call a FakePlayerMotion move primitive");
+            assertFalse(source.contains("teleportTo("), file + " must not teleport");
+        }
+        String source = Files.readString(SOURCE);
+        int begin = source.indexOf("private boolean beginWalkedMove(");
+        int hold = source.indexOf("private boolean holdForMoveInFlight(");
+        int settle = source.indexOf("private void settleMove(");
+        int publish = source.indexOf("move.onLanded().run()", settle);
+        assertTrue(begin >= 0 && hold > begin && settle > hold && publish > settle,
+                "a move's publication runs from settleMove, the verified landing");
+        String beginBody = source.substring(begin, hold);
+        assertFalse(beginBody.contains("publishSynchronousMove(") || beginBody.contains(".run()"),
+                "starting a walked move publishes nothing: the cursor changes only from the verified landing");
+        int onTick = source.indexOf("protected void onTick(AIPlayerEntity bot)");
+        int holdCall = source.indexOf("holdForMoveInFlight(bot)", onTick);
+        int firstGate = source.indexOf("recoverBlockedBody(bot, world, feet)", onTick);
+        assertTrue(holdCall > onTick && holdCall < firstGate,
+                "no gate, mining or observation runs while a walked move is in flight");
+        int pause = source.indexOf("protected void onPause(AIPlayerEntity bot)");
+        assertTrue(source.indexOf("endMoveInFlight(bot)", pause) > pause
+                        && source.indexOf("endMoveInFlight(bot)", pause) < source.indexOf("detourInterrupted(bot)", pause),
+                "a pause ends the step in flight before it publishes the interruption cursor");
     }
 }

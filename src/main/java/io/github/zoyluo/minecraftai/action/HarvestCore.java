@@ -459,11 +459,28 @@ public final class HarvestCore {
         int horizontal = Math.abs(shaftBase.getX() - current.getX())
                 + Math.abs(shaftBase.getZ() - current.getZ());
         if (vertical == -1 && horizontal == 0
-                && Standability.isStandable(bot.level(), shaftBase)) {
-            bot.getActionPack().descendInto(shaftBase);
+                && Standability.isStandable(bot.level(), shaftBase)
+                && walkDownInto(bot, shaftBase)) {
             return true;
         }
         return startExactPickupPath(bot, shaftBase);
+    }
+
+    /**
+     * Drops the bot into the open cell directly below it as a walked step ({@link ActionPack#beginDescend}); a step already in
+     * flight is left alone. False when the world refuses the step (the caller falls back to an exact route).
+     */
+    private static boolean walkDownInto(AIPlayerEntity bot, BlockPos cell) {
+        ActionPack pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            return true;
+        }
+        WalkedStep step = pack.beginDescend(cell, "physical_drop_pickup");
+        if (step == null) {
+            return false;
+        }
+        pack.runStep(step);
+        return true;
     }
 
     /**
@@ -522,10 +539,11 @@ public final class HarvestCore {
 
         if (vertical == -1 && horizontal == 0
                 && Standability.isStandable(bot.level(), stand)) {
-            // Server-side fake players receive no client gravity. Enter the adjacent open cell
-            // explicitly; ActionPack validates this as a single physical fake-client step.
-            bot.getActionPack().descendInto(stand);
-            return true;
+            // The drop is a walked step: no key is needed, gravity lands the bot in the open cell below it once it is
+            // centred over it. A refused step (something in the way) falls through to the exact route below.
+            if (walkDownInto(bot, stand)) {
+                return true;
+            }
         }
         if (vertical != 0) {
             // Pickup navigation may use an existing jump/drop route, but it must never dig or

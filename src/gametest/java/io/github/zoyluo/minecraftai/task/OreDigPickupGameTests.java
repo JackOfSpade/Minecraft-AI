@@ -6,6 +6,8 @@ import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
+import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import io.github.zoyluo.minecraftai.mining.MiningCursor;
@@ -905,9 +907,7 @@ public final class OreDigPickupGameTests {
         initial.start(bot);
         initial.tick(bot);
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, corner, "ore_factual_corner_fixture"),
-                "fixture could not complete the final factual north step");
+        BotFixtureMoves.place(bot, corner);
         require(context, ObservableWorldQuery.canObserveBlock(bot, lava),
                 "factual-corner lava was not visible through the open east body column");
         initial.tick(bot);
@@ -2064,7 +2064,10 @@ public final class OreDigPickupGameTests {
         // below while the bot remains suspended in the same X/Z column.
         world.setBlock(dropCell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(dropCell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        // The bot is held in the air (as a bot whose floor was just mined out) until its pickup routine starts the drop as a walked
+        // step; from then on gravity lands it in the shaft, the way a fall happens to a player.
         bot.setNoGravity(true);
+        TeleportAudit.reset(bot);
         ItemEntity drop = new ItemEntity(world,
                 dropCell.getX() + 0.5D, dropCell.getY() + 0.1D, dropCell.getZ() + 0.5D,
                 new ItemStack(Items.DIAMOND));
@@ -2086,6 +2089,11 @@ public final class OreDigPickupGameTests {
         context.failIfEver(() -> {
             assertAliveWithoutDeath(context, bot, deathBaseline);
             failIfTerminalError(context, task);
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "the drop into the pickup cell was a teleport: " + TeleportAudit.lastCaller(bot));
+            if (!bot.getActionPack().stepIdle()) {
+                bot.setNoGravity(false);
+            }
             if (bot.blockPosition().getY() == dropCell.getY()) {
                 enteredDropLevel.set(true);
             }
@@ -3001,9 +3009,7 @@ public final class OreDigPickupGameTests {
         task.start(bot);
         task.tick(bot);
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, progressed, "ore_tier_progressed_fixture"),
-                "fixture could not publish its factual EAST advance");
+        BotFixtureMoves.place(bot, progressed);
         int damageBefore = bot.getInventory().getNonEquipmentItems().stream()
                 .filter(stack -> stack.is(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamageValue)
@@ -3126,7 +3132,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_strip_physically_retreats_when_gravity_reoccupies_its_head", maxTicks = 20)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_strip_physically_retreats_when_gravity_reoccupies_its_head", maxTicks = 100)
     public void stripPhysicallyRetreatsWhenGravityReoccupiesItsHead(GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravelGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3142,9 +3148,7 @@ public final class OreDigPickupGameTests {
         task.start(bot);
         task.tick(bot); // publish start as the previous factual branch face
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, buried, "ore_strip_gravel_fixture"),
-                "fixture could not enter the next factual branch cell");
+        BotFixtureMoves.place(bot, buried);
         context.getLevel().setBlock(
                 buried.above(), Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
@@ -3152,40 +3156,46 @@ public final class OreDigPickupGameTests {
                         .getCollisionShape(context.getLevel(), buried.above()).isEmpty(),
                 "gravity fixture did not reoccupy the bot's head");
         float healthBefore = bot.getHealth();
+        TeleportAudit.reset(bot);
 
-        task.tick(bot);
-
-        require(context, task.state() == TaskState.RUNNING,
-                "recoverable strip collapse ended OreDig: "
+        task.tick(bot); // starts the walked retreat out of the occupied cell
+        require(context, task.state() == TaskState.RUNNING && !bot.getActionPack().stepIdle(),
+                "recoverable strip collapse did not start a walked retreat: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.blockPosition().equals(start),
-                "OreDig did not physically retreat to its previous face: "
-                        + buried.toShortString() + " -> " + bot.blockPosition().toShortString());
-        require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                "OreDig took damage before leaving the occupied body cell");
-        require(context, context.getLevel().getBlockState(buried.above()).is(Blocks.GRAVEL),
-                "strict retreat silently removed the gravity obstruction");
-        require(context, "1".equals(task.checkpoint().get("steps_left"))
-                        && "1".equals(task.checkpoint().get("direction"))
-                        && encode(start).equals(
-                        task.checkpoint().get("boundary_reroute_origin")),
-                "collapsed north branch did not publish its finite visible escape: "
-                        + task.checkpoint());
-
-        task.cancel(bot, "gametest_complete");
-        finish(context, fixture);
+        // The retreat is a walk (no teleport): the face is published when a later tick has verified the landing.
+        tickUntil(context, task, bot,
+                () -> encode(start).equals(task.checkpoint().get("boundary_reroute_origin")),
+                60, "strip collapse retreat", () -> {
+                    require(context, task.state() == TaskState.RUNNING,
+                            "recoverable strip collapse ended OreDig: "
+                                    + task.state() + ":" + task.failureReason());
+                    require(context, bot.blockPosition().equals(start),
+                            "OreDig did not physically retreat to its previous face: "
+                                    + buried.toShortString() + " -> " + bot.blockPosition().toShortString());
+                    // Walking out of a block takes a few ticks inside it: at most one vanilla suffocation hit (invulnerability
+                    // frames give one per ten ticks), never the death or a long stay the old instant teleport could not have.
+                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 2.0F,
+                            "OreDig lost more than one suffocation hit leaving the occupied body cell: "
+                                    + healthBefore + " -> " + bot.getHealth());
+                    require(context, gravityBlockPresent(context.getLevel(), buried, buried.above()),
+                            "strict retreat silently removed the gravity obstruction");
+                    require(context, "1".equals(task.checkpoint().get("steps_left"))
+                                    && "1".equals(task.checkpoint().get("direction")),
+                            "collapsed north branch did not publish its finite visible escape: "
+                                    + task.checkpoint());
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, fixture);
+                });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_blocked_body_retreat_immediately_publishes_marker_free_restart", maxTicks = 20)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_blocked_body_retreat_immediately_publishes_marker_free_restart", maxTicks = 100)
     public void blockedBodyRetreatImmediatelyPublishesMarkerFreeRestart(
             GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreRetreatCheckpointGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos safeRear = fixture.start();
         BlockPos blockedFace = safeRear.north();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, blockedFace, "ore_retreat_checkpoint_fixture"),
-                "fixture could not enter the blocked branch face");
+        BotFixtureMoves.place(bot, blockedFace);
         context.getLevel().setBlock(
                 blockedFace.above(), Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
@@ -3200,34 +3210,47 @@ public final class OreDigPickupGameTests {
 
         OreDigTask task = new OreDigTask(Set.of(Blocks.EMERALD_ORE), 1, checkpoint);
         task.start(bot);
-        task.tick(bot);
-
-        require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(safeRear),
-                "blocked-body recovery did not synchronously reach its factual rear: "
+        TeleportAudit.reset(bot);
+        task.tick(bot); // starts the walked retreat
+        require(context, task.state() == TaskState.RUNNING && !bot.getActionPack().stepIdle(),
+                "blocked-body recovery did not start a walked retreat: "
                         + task.state() + ":" + task.failureReason());
-        Map<String, String> immediate = task.checkpoint();
-        require(context, OreDigTask.inspectCheckpoint(immediate).isPresent()
-                        && encode(safeRear).equals(immediate.get("face"))
-                        && "1".equals(immediate.get("steps_left"))
-                        && "1".equals(immediate.get("direction"))
-                        && encode(safeRear).equals(
-                        immediate.get("boundary_reroute_origin")),
-                "same-tick retreat checkpoint did not bind its finite factual escape: "
-                        + immediate);
+        Map<String, String> inFlight = task.checkpoint();
+        require(context, encode(blockedFace).equals(inFlight.get("face"))
+                        && encode(blockedFace).equals(inFlight.get("boundary_reroute_origin")),
+                "the checkpoint named a face the bot had not reached while the step was in flight: " + inFlight);
 
-        task.cancel(bot, "gametest_immediate_checkpoint_restart");
-        OreDigTask restored = new OreDigTask(Set.of(Blocks.EMERALD_ORE), 1, immediate);
-        restored.start(bot);
-        Map<String, String> restarted = restored.checkpoint();
-        require(context, restored.state() == TaskState.RUNNING
-                        && OreDigTask.inspectCheckpoint(restarted).isPresent()
-                        && encode(safeRear).equals(restarted.get("face"))
-                        && encode(safeRear).equals(
-                        restarted.get("boundary_reroute_origin")),
-                "retreat restart lost or changed its bounded escape marker: " + restarted);
+        // The cursor is published from the verified landing, a later tick; a restart from that checkpoint binds the escape.
+        tickUntil(context, task, bot,
+                () -> encode(safeRear).equals(task.checkpoint().get("face")),
+                60, "blocked-body retreat", () -> {
+                    require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(safeRear),
+                            "blocked-body recovery did not reach its factual rear: "
+                                    + task.state() + ":" + task.failureReason());
+                    Map<String, String> immediate = task.checkpoint();
+                    require(context, OreDigTask.inspectCheckpoint(immediate).isPresent()
+                                    && encode(safeRear).equals(immediate.get("face"))
+                                    && "1".equals(immediate.get("steps_left"))
+                                    && "1".equals(immediate.get("direction"))
+                                    && encode(safeRear).equals(
+                                    immediate.get("boundary_reroute_origin")),
+                            "landing checkpoint did not bind its finite factual escape: "
+                                    + immediate);
 
-        restored.cancel(bot, "gametest_complete");
-        finish(context, fixture);
+                    task.cancel(bot, "gametest_immediate_checkpoint_restart");
+                    OreDigTask restored = new OreDigTask(Set.of(Blocks.EMERALD_ORE), 1, immediate);
+                    restored.start(bot);
+                    Map<String, String> restarted = restored.checkpoint();
+                    require(context, restored.state() == TaskState.RUNNING
+                                    && OreDigTask.inspectCheckpoint(restarted).isPresent()
+                                    && encode(safeRear).equals(restarted.get("face"))
+                                    && encode(safeRear).equals(
+                                    restarted.get("boundary_reroute_origin")),
+                            "retreat restart lost or changed its bounded escape marker: " + restarted);
+
+                    restored.cancel(bot, "gametest_complete");
+                    finish(context, fixture);
+                });
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_collapsed_lateral_detour_tries_remaining_fresh_side_without_closing_leg", maxTicks = 400)
@@ -3269,15 +3292,22 @@ public final class OreDigPickupGameTests {
         world.setBlock(westDetour, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(westDetour.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, westDetour, "ore_detour_collapse_fixture"),
-                "fixture could not enter the factual west detour");
+        BotFixtureMoves.place(bot, westDetour);
         world.setBlock(
                 westDetour.above(), Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
         float healthBefore = bot.getHealth();
+        TeleportAudit.reset(bot);
 
-        task.tick(bot);
+        task.tick(bot); // starts the walked retreat out of the collapsed detour
+        require(context, task.state() == TaskState.RUNNING && !bot.getActionPack().stepIdle(),
+                "collapsed west detour did not start a walked retreat: "
+                        + task.state() + ":" + task.failureReason());
+        TickRunner runner = new TickRunner(context, bot);
+        runner.until(task,
+                () -> encode(start).equals(task.checkpoint().get("boundary_reroute_origin"))
+                        && "2".equals(task.checkpoint().get("direction")),
+                60, "collapsed detour retreat", () -> {
         require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(start),
                 "collapsed west detour did not retreat to its factual origin: "
                         + task.state() + ":" + task.failureReason());
@@ -3287,54 +3317,45 @@ public final class OreDigPickupGameTests {
                         && encode(start).equals(south.get("boundary_reroute_origin")),
                 "collapse retreat did not immediately bind the remaining south branch: " + south);
         require(context, world.getBlockState(northBoundary).is(Blocks.GRAVEL)
-                        && (world.getBlockState(westDetour).is(Blocks.GRAVEL)
-                        || world.getBlockState(westDetour.above()).is(Blocks.GRAVEL)),
+                        && gravityBlockPresent(world, westDetour, westDetour.above()),
                 "collapse reroute silently removed a gravity obstruction");
 
         task.cancel(bot, "gametest_collapse_restart");
         OreDigTask restored = new OreDigTask(Set.of(Blocks.COAL_ORE), 1, south);
         restored.start(bot);
-        AtomicInteger ticks = new AtomicInteger();
-        context.failIfEver(() -> {
-            restored.tick(bot);
-            Map<String, String> live = restored.checkpoint();
-            require(context, restored.state() != TaskState.FAILED,
-                    "remaining fresh side failed after restart: " + restored.failureReason());
-            require(context, !bot.blockPosition().equals(northBoundary)
-                            && !bot.blockPosition().equals(westDetour),
-                    "restored detour entered a rejected gravity branch");
-            if (bot.blockPosition().equals(southDetour)
-                    && !live.containsKey("boundary_reroute_origin")) {
-                // Movement is integrated after the task callback. The first callback that sees the
-                // factual cell may have cleared the marker but not yet debited directional progress.
-                if ("39".equals(live.get("steps_left"))) {
-                    if (ticks.incrementAndGet() > 300) {
-                        context.fail(Component.nullToEmpty(
-                                "factual south move never consumed its finite cursor: " + live));
-                    }
-                    return;
-                }
-                require(context, "2".equals(live.get("direction"))
-                                && Integer.parseInt(live.get("steps_left")) < 39,
-                        "factual south move did not consume its finite cursor: " + live);
-                require(context, world.getBlockState(northBoundary).is(Blocks.GRAVEL)
-                                && (world.getBlockState(westDetour).is(Blocks.GRAVEL)
-                                || world.getBlockState(westDetour.above()).is(Blocks.GRAVEL)),
-                        "finite reroute mutated a protected gravity obstruction");
-                require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                        "collapse recovery lost health before reaching the safe branch");
-                restored.cancel(bot, "gametest_complete");
-                finish(context, fixture);
-                return;
-            }
-            if (ticks.incrementAndGet() > 300) {
-                context.fail(Component.nullToEmpty(
-                        "restored south detour never published factual movement: " + live));
-            }
+        // Movement is integrated after the task callback: the first callback that sees the factual cell may have cleared the marker
+        // but not yet debited directional progress, so the stage is done once the finite cursor has been consumed.
+        runner.until(restored,
+                () -> {
+                    require(context, restored.state() != TaskState.FAILED,
+                            "remaining fresh side failed after restart: " + restored.failureReason());
+                    require(context, !bot.blockPosition().equals(northBoundary)
+                                    && !bot.blockPosition().equals(westDetour),
+                            "restored detour entered a rejected gravity branch");
+                    Map<String, String> live = restored.checkpoint();
+                    return bot.blockPosition().equals(southDetour)
+                            && !live.containsKey("boundary_reroute_origin")
+                            && !"39".equals(live.get("steps_left"));
+                },
+                300, "restored south detour", () -> {
+                    Map<String, String> live = restored.checkpoint();
+                    require(context, "2".equals(live.get("direction"))
+                                    && Integer.parseInt(live.get("steps_left")) < 39,
+                            "factual south move did not consume its finite cursor: " + live);
+                    require(context, world.getBlockState(northBoundary).is(Blocks.GRAVEL)
+                                    && gravityBlockPresent(world, westDetour, westDetour.above()),
+                            "finite reroute mutated a protected gravity obstruction");
+                    // Walking out of the collapsed cell takes a few ticks inside a block: at most one vanilla suffocation hit.
+                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 2.0F,
+                            "collapse recovery lost more than one suffocation hit before reaching the safe branch: "
+                                    + healthBefore + " -> " + bot.getHealth());
+                    restored.cancel(bot, "gametest_complete");
+                    finish(context, fixture);
+                });
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_pending_pickup_gravity_retreat_does_not_become_blind_branch_terminal", maxTicks = 20)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_pending_pickup_gravity_retreat_does_not_become_blind_branch_terminal", maxTicks = 100)
     public void pendingPickupGravityRetreatDoesNotBecomeBlindBranchTerminal(
             GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupGravityOwnerGT");
@@ -3360,9 +3381,7 @@ public final class OreDigPickupGameTests {
                         task.checkpoint().get("pending_pickup_pos")),
                 "fixture lost pickup ownership before the gravity collision");
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, blockedFace, "ore_pickup_gravity_owner_fixture"),
-                "fixture could not enter the occupied forward cell");
+        BotFixtureMoves.place(bot, blockedFace);
         world.setBlock(
                 blockedFace.above(), Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
         for (BlockPos rejected : new BlockPos[]{
@@ -3372,32 +3391,43 @@ public final class OreDigPickupGameTests {
         }
         Standability.clearCache();
         float healthBefore = bot.getHealth();
+        TeleportAudit.reset(bot);
 
-        task.tick(bot);
+        task.tick(bot); // starts the walked retreat
+        require(context, task.state() == TaskState.RUNNING && !bot.getActionPack().stepIdle(),
+                "pickup-owned gravity collision did not start a walked retreat: "
+                        + task.state() + ":" + task.failureReason());
+        // The retreat lands on a later tick; the pickup ledger and the cursor are untouched throughout.
+        tickUntil(context, task, bot,
+                () -> bot.blockPosition().equals(safeRear) && bot.getActionPack().stepIdle(),
+                60, "pickup-owned gravity retreat", () -> {
+                    task.tick(bot); // publishes the landing
+                    Map<String, String> live = task.checkpoint();
+                    require(context, task.state() == TaskState.RUNNING,
+                            "pickup-owned retreat was misclassified as a blind branch terminal: "
+                                    + task.failureReason());
+                    require(context, bot.blockPosition().equals(safeRear),
+                            "pickup-owned gravity collision did not reach its factual safe rear");
+                    require(context, encode(pendingDrop).equals(live.get("pending_pickup_pos"))
+                                    && "0".equals(live.get("pending_pickup_inventory")),
+                            "gravity retreat discarded or rewrote the pending pickup ledger: " + live);
+                    require(context, "0".equals(live.get("direction"))
+                                    && "48".equals(live.get("steps_left"))
+                                    && !live.containsKey("boundary_reroute_origin"),
+                            "non-branch pickup owner mutated the strip cursor or reroute marker: " + live);
+                    require(context, gravityBlockPresent(world, blockedFace, blockedFace.above()),
+                            "pickup-owned retreat silently removed the gravity obstruction");
+                    // Walking out of the occupied cell takes a few ticks inside a block: at most one vanilla suffocation hit.
+                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 2.0F,
+                            "pickup-owned retreat lost more than one suffocation hit before reaching safety: "
+                                    + healthBefore + " -> " + bot.getHealth());
 
-        Map<String, String> live = task.checkpoint();
-        require(context, task.state() == TaskState.RUNNING,
-                "pickup-owned retreat was misclassified as a blind branch terminal: "
-                        + task.failureReason());
-        require(context, bot.blockPosition().equals(safeRear),
-                "pickup-owned gravity collision did not reach its factual safe rear");
-        require(context, encode(pendingDrop).equals(live.get("pending_pickup_pos"))
-                        && "0".equals(live.get("pending_pickup_inventory")),
-                "gravity retreat discarded or rewrote the pending pickup ledger: " + live);
-        require(context, "0".equals(live.get("direction"))
-                        && "48".equals(live.get("steps_left"))
-                        && !live.containsKey("boundary_reroute_origin"),
-                "non-branch pickup owner mutated the strip cursor or reroute marker: " + live);
-        require(context, world.getBlockState(blockedFace.above()).is(Blocks.GRAVEL),
-                "pickup-owned retreat silently removed the gravity obstruction");
-        require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                "pickup-owned retreat lost health before reaching safety");
-
-        task.cancel(bot, "gametest_complete");
-        finish(context, fixture);
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, fixture);
+                });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_stair_descent_immediately_publishes_marker_free_restart_without_reverse", maxTicks = 20)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_stair_descent_immediately_publishes_marker_free_restart_without_reverse", maxTicks = 100)
     public void stairDescentImmediatelyPublishesMarkerFreeRestartWithoutReverse(
             GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreDescentCheckpointGT");
@@ -3432,10 +3462,19 @@ public final class OreDigPickupGameTests {
                         && encode(start).equals(
                         task.checkpoint().get("boundary_reroute_origin")),
                 "fixture consumed the reroute marker before the synchronous descent");
-        task.tick(bot); // digDownOneLayer -> descendInto(landing)
-
+        TeleportAudit.reset(bot);
+        task.tick(bot); // digDownOneLayer starts the walked stair step
+        require(context, task.state() == TaskState.RUNNING && !bot.getActionPack().stepIdle()
+                        && encode(start).equals(task.checkpoint().get("face"))
+                        && encode(start).equals(task.checkpoint().get("boundary_reroute_origin")),
+                "the stair did not start as a walked step that leaves the cursor on its origin: "
+                        + task.state() + ":" + task.failureReason() + " " + task.checkpoint());
+        // The landing is published by a later tick, once the step has verified it: never in the tick that starts it.
+        tickUntil(context, task, bot,
+                () -> encode(landing).equals(task.checkpoint().get("face")),
+                60, "stair descent", () -> {
         require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(landing),
-                "target stair did not synchronously reach its landing: "
+                "target stair did not reach its landing: "
                         + task.state() + ":" + task.failureReason());
         Map<String, String> immediate = task.checkpoint();
         require(context, OreDigTask.inspectCheckpoint(immediate).isPresent()
@@ -3472,9 +3511,10 @@ public final class OreDigPickupGameTests {
                         + " checkpoint=" + restored.checkpoint());
 
         finish(context, fixture);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_stair_descent_skips_unsupported_preferred_direction", maxTicks = 20)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_stair_descent_skips_unsupported_preferred_direction", maxTicks = 100)
     public void stairDescentSkipsUnsupportedPreferredDirection(GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreSupportedDescentGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3515,23 +3555,28 @@ public final class OreDigPickupGameTests {
         OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1, checkpoint);
         task.start(bot);
         task.tick(bot); // acquire the observed diagonal ore
-        task.tick(bot); // choose north instead of the unsupported preferred west stair
+        TeleportAudit.reset(bot);
+        task.tick(bot); // choose north instead of the unsupported preferred west stair (a walked step)
 
-        require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(supported),
-                "stair approach did not choose its supported alternate: "
-                        + task.state() + ":" + task.failureReason()
-                        + " pos=" + bot.blockPosition().toShortString());
-        require(context, world.getBlockState(unsupported).isAir()
-                        && world.getBlockState(unsupported.below()).isAir(),
-                "stair approach opened or entered the unsupported preferred column");
-        require(context, encode(supported).equals(task.checkpoint().get("face")),
-                "supported descent did not publish its factual face: " + task.checkpoint());
+        tickUntil(context, task, bot,
+                () -> encode(supported).equals(task.checkpoint().get("face")),
+                60, "supported stair descent", () -> {
+                    require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(supported),
+                            "stair approach did not choose its supported alternate: "
+                                    + task.state() + ":" + task.failureReason()
+                                    + " pos=" + bot.blockPosition().toShortString());
+                    require(context, world.getBlockState(unsupported).isAir()
+                                    && world.getBlockState(unsupported.below()).isAir(),
+                            "stair approach opened or entered the unsupported preferred column");
+                    require(context, encode(supported).equals(task.checkpoint().get("face")),
+                            "supported descent did not publish its factual face: " + task.checkpoint());
 
-        task.cancel(bot, "gametest_complete");
-        finish(context, fixture);
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, fixture);
+                });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_target_approach_uses_only_observed_supported_one_block_lower_step", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_target_approach_uses_only_observed_supported_one_block_lower_step", maxTicks = 100)
     public void targetApproachUsesOnlyObservedSupportedOneBlockLowerStep(
             GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetLowerStepGT");
@@ -3568,22 +3613,27 @@ public final class OreDigPickupGameTests {
         OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1, checkpoint);
         task.start(bot);
         task.tick(bot); // acquire the observed finite ore
-        task.tick(bot); // commit exactly one lower natural-cave stair
+        TeleportAudit.reset(bot);
+        task.tick(bot); // commit exactly one lower natural-cave stair (a walked step off the ledge)
 
-        Map<String, String> descended = task.checkpoint();
-        require(context, task.state() == TaskState.RUNNING
-                        && bot.blockPosition().equals(landing)
-                        && encode(landing).equals(descended.get("face"))
-                        && "17".equals(descended.get("steps_left"))
-                        && OreDigTask.inspectCheckpoint(descended).isPresent(),
-                "target lower stair did not preserve its exact cursor/budget: "
-                        + task.state() + ":" + task.failureReason() + " " + descended);
-        require(context, world.getBlockState(ore).is(Blocks.DIAMOND_ORE)
-                        && bot.onGround(),
-                "target lower stair broke the finite ore or published an unsupported pose");
+        tickUntil(context, task, bot,
+                () -> encode(landing).equals(task.checkpoint().get("face")),
+                60, "lower target stair", () -> {
+                    Map<String, String> descended = task.checkpoint();
+                    require(context, task.state() == TaskState.RUNNING
+                                    && bot.blockPosition().equals(landing)
+                                    && encode(landing).equals(descended.get("face"))
+                                    && "17".equals(descended.get("steps_left"))
+                                    && OreDigTask.inspectCheckpoint(descended).isPresent(),
+                            "target lower stair did not preserve its exact cursor/budget: "
+                                    + task.state() + ":" + task.failureReason() + " " + descended);
+                    require(context, world.getBlockState(ore).is(Blocks.DIAMOND_ORE)
+                                    && bot.onGround(),
+                            "target lower stair broke the finite ore or published an unsupported pose");
 
-        task.cancel(bot, "gametest_complete");
-        finish(context, fixture);
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, fixture);
+                });
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_target_lower_step_rejects_observed_fluid_neighbour_in_strict_mode", maxTicks = 40)
@@ -3864,7 +3914,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_fresh_strip_uses_upper_escape_before_mining_unsupported_lateral_support", maxTicks = 30)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_fresh_strip_uses_upper_escape_before_mining_unsupported_lateral_support", maxTicks = 120)
     public void freshStripUsesUpperEscapeBeforeMiningUnsupportedLateralSupport(
             GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreRaisedLandingGT");
@@ -3904,6 +3954,7 @@ public final class OreDigPickupGameTests {
 
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 1);
         task.start(bot);
+        TeleportAudit.reset(bot);
         task.tick(bot); // publish the fresh north leg
         require(context, "0".equals(task.checkpoint().get("direction"))
                         && "48".equals(task.checkpoint().get("steps_left")),
@@ -3927,8 +3978,12 @@ public final class OreDigPickupGameTests {
                     .sum();
             require(context, liveDamage == ironDamageBefore,
                     "raised landing recovery consumed pick durability");
-            if (!bot.blockPosition().equals(raised)) {
-                if (boundaryTicks.incrementAndGet() > 20) {
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "the raised landing was a teleport: " + TeleportAudit.lastCaller(bot));
+            // The hop up the ledge is a walked step: the bot passes through the raised cell in the air, and the marked successor
+            // is published only from the verified landing (a later tick), so wait for the published face.
+            if (!bot.blockPosition().equals(raised) || !encode(raised).equals(task.checkpoint().get("face"))) {
+                if (boundaryTicks.incrementAndGet() > 80) {
                     context.fail(Component.nullToEmpty(
                             "fresh strip never revisited its observed open-drop boundary: "
                                     + task.checkpoint()));
@@ -4600,9 +4655,7 @@ public final class OreDigPickupGameTests {
         bot.getActionPack().stopAll();
         require(context, !Standability.isStandable(world, openDrop),
                 "fixture did not create an unsupported forward body column");
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, lip, "ore_strip_rear_retreat_fixture"),
-                "fixture could not complete its exact factual branch advance");
+        BotFixtureMoves.place(bot, lip);
         AtomicInteger ticks = new AtomicInteger();
         java.util.concurrent.atomic.AtomicBoolean reachedLip =
                 new java.util.concurrent.atomic.AtomicBoolean(true);
@@ -4707,9 +4760,7 @@ public final class OreDigPickupGameTests {
         task.start(bot);
         task.tick(bot);
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, lip, "ore_retreat_successor_drop_fixture"),
-                "fixture could not complete its factual SOUTH advance");
+        BotFixtureMoves.place(bot, lip);
         int stoneDamageBefore = bot.getInventory().getNonEquipmentItems().stream()
                 .filter(stack -> stack.is(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamageValue)
@@ -4825,9 +4876,7 @@ public final class OreDigPickupGameTests {
         task.start(bot);
         task.tick(bot);
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, lip, "ore_strip_unsafe_rear_fixture"),
-                "fixture could not complete its factual branch advance");
+        BotFixtureMoves.place(bot, lip);
         // The rear was factual when crossed, but the world changed before the boundary decision.
         // Recovery must revalidate it instead of trusting stale ownership.
         world.setBlock(start.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
@@ -4926,9 +4975,7 @@ public final class OreDigPickupGameTests {
         first.start(bot);
         first.tick(bot);
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, lip, "ore_strip_scan_delay_fixture"),
-                "fixture could not complete its exact factual branch advance");
+        BotFixtureMoves.place(bot, lip);
         // Keep the direct-walk owner live for this same task tick. The task must not consume the
         // cursor or discover a new owner until that controller settles.
         bot.getActionPack().startWalkTo(
@@ -5001,9 +5048,7 @@ public final class OreDigPickupGameTests {
                         "gametest_ore_branch_pause_resume"));
         TaskManager.INSTANCE.tickAll(context.getLevel().getServer());
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, lip, "ore_strip_pause_resume_fixture"),
-                "fixture could not complete its unpublished branch advance");
+        BotFixtureMoves.place(bot, lip);
         bot.getActionPack().startWalkTo(
                 lip.getCenter(),
                 io.github.zoyluo.minecraftai.action.WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
@@ -5024,9 +5069,7 @@ public final class OreDigPickupGameTests {
                         && Integer.parseInt(paused.get("budget_used")) == budgetBeforeGuard,
                 "survival guard consumed or rewrote the unpublished branch: " + paused);
 
-        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, safetyFace, "ore_strip_pause_safety_displacement"),
-                "fixture safety task could not displace the paused miner");
+        BotFixtureMoves.place(bot, safetyFace);
         bot.setHealth(bot.getMaxHealth());
         bot.hurtTime = 0;
         TaskManager.INSTANCE.resumeFromPause(bot);
@@ -6195,6 +6238,82 @@ public final class OreDigPickupGameTests {
                     "checkpoint transform changed " + key + ": before=" + expected.get(key)
                             + ", after=" + actual.get(key));
         }
+    }
+
+    /**
+     * OreDig moves by walked steps (R5: no micro-teleports), so a move is over only when a later game tick has verified its landing:
+     * the task is ticked once per game tick until {@code done} holds (then {@code then} runs on that tick), and every tick asserts
+     * that the bot was never teleported. {@code TeleportAudit.reset(bot)} belongs right before the measured phase.
+     */
+    private static void tickUntil(GameTestHelper context, OreDigTask task, AIPlayerEntity bot,
+                                  java.util.function.BooleanSupplier done, int maxTicks, String what, Runnable then) {
+        new TickRunner(context, bot).until(task, done, maxTicks, what, then);
+    }
+
+    /**
+     * The stages of a test that follow each other over game ticks. One tick callback is registered on the first stage (a game test
+     * must not register callbacks from inside a callback); a stage's {@code then} may queue the next stage.
+     */
+    private static final class TickRunner {
+        private record Stage(OreDigTask task, java.util.function.BooleanSupplier done, int maxTicks, String what, Runnable then) {
+        }
+
+        private final GameTestHelper context;
+        private final AIPlayerEntity bot;
+        private final java.util.ArrayDeque<Stage> stages = new java.util.ArrayDeque<>();
+        private boolean registered;
+        private int ticks;
+
+        TickRunner(GameTestHelper context, AIPlayerEntity bot) {
+            this.context = context;
+            this.bot = bot;
+        }
+
+        void until(OreDigTask task, java.util.function.BooleanSupplier done, int maxTicks, String what, Runnable then) {
+            stages.add(new Stage(task, done, maxTicks, what, then));
+            if (!registered) {
+                registered = true;
+                context.onEachTick(this::tick);
+            }
+        }
+
+        private void tick() {
+            Stage stage = stages.peek();
+            if (stage == null) {
+                return;
+            }
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    stage.what() + ": the bot was teleported (corrections=" + TeleportAudit.corrections(bot)
+                            + " last=" + TeleportAudit.lastCaller(bot) + ")");
+            if (stage.done().getAsBoolean()) {
+                stages.poll();
+                ticks = 0;
+                stage.then().run();
+                return;
+            }
+            require(context, ++ticks <= stage.maxTicks(),
+                    stage.what() + ": not done after " + stage.maxTicks() + " ticks: " + stage.task().state() + ":"
+                            + stage.task().failureReason() + " at " + bot.blockPosition().toShortString() + " "
+                            + stage.task().checkpoint());
+            require(context, stage.task().state() == TaskState.RUNNING,
+                    stage.what() + ": the task ended as " + stage.task().state() + ":" + stage.task().failureReason());
+            stage.task().tick(bot);
+        }
+    }
+
+    /**
+     * Whether the gravel of a gravity fixture is still there: as a block in one of {@code cells}, or as a falling block on its way down
+     * (the retreat is a walk, so the gravel above a vacated cell starts falling while the test still looks: a bot that mined it would
+     * leave neither a block nor a falling block).
+     */
+    private static boolean gravityBlockPresent(net.minecraft.server.level.ServerLevel world, BlockPos... cells) {
+        for (BlockPos cell : cells) {
+            if (world.getBlockState(cell).is(Blocks.GRAVEL)) {
+                return true;
+            }
+        }
+        return !world.getEntitiesOfClass(net.minecraft.world.entity.item.FallingBlockEntity.class,
+                new AABB(cells[0]).inflate(3.0D), entity -> entity.getBlockState().is(Blocks.GRAVEL)).isEmpty();
     }
 
     private static void finish(GameTestHelper context, PickupFixture fixture) {

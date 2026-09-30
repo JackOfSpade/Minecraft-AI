@@ -1,12 +1,13 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.OptionalInt;
@@ -34,6 +35,8 @@ public final class MiningBarricadeTask extends AbstractTask {
     private final BlockPos retreatFeet;
     private final BlockPos barrierFeet;
     private Phase phase = Phase.RETREAT;
+    private boolean retreatStepLaunched;
+    private boolean retreatStepFailed;
     private int phaseStartedElapsed;
     private int lastProgressElapsed;
     private String lastPlacementFailure = "none";
@@ -80,6 +83,8 @@ public final class MiningBarricadeTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.RETREAT;
+        retreatStepLaunched = false;
+        retreatStepFailed = false;
         phaseStartedElapsed = 0;
         lastProgressElapsed = 0;
         lastPlacementFailure = "none";
@@ -123,13 +128,26 @@ public final class MiningBarricadeTask extends AbstractTask {
             fail("mining_barricade_retreat_timeout");
             return;
         }
-        if (!bot.getActionPack().isPathExecutorIdle()) {
+        ActionPack pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            return; // the walked retreat step is in flight; the barricade is placed after arrival (tickSeal)
+        }
+        if (!pack.isPathExecutorIdle()) {
             return;
         }
         BlockPos here = bot.blockPosition();
-        if (here.getY() == retreatFeet.getY()
+        if (retreatStepLaunched) {
+            // The step ended and the bot is not on the retreat cell (arrival is checked first): fall back to the route.
+            retreatStepLaunched = false;
+            retreatStepFailed = true;
+        }
+        if (!retreatStepFailed
+                && here.getY() == retreatFeet.getY()
                 && horizontalManhattan(here, retreatFeet) == 1
-                && FakePlayerMotion.stepToStandable(bot, retreatFeet, "mining_barricade_retreat")) {
+                && WalkedStep.refusal(bot, retreatFeet, WalkedStep.Kind.FLAT) == null) {
+            // One block back is a walked step (forward key), never a teleport; the tunnel is sealed only once the bot stands there.
+            pack.runStep(WalkedStep.begin(bot, retreatFeet, WalkedStep.Kind.FLAT, "mining_barricade_retreat"));
+            retreatStepLaunched = true;
             lastProgressElapsed = elapsed;
             return;
         }
