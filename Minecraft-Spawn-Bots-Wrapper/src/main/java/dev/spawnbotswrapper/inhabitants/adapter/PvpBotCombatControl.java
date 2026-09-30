@@ -22,18 +22,32 @@ import java.util.function.Supplier;
  */
 final class PvpBotCombatControl implements TargetControl {
 
+    /** Pauses and resumes the patrol of a bot (the adapter's patrol manager; the control never sees paths). */
+    interface PatrolHold {
+        void pause(String bot);
+
+        void resume(String bot);
+    }
+
     private final Supplier<UpstreamCalls> calls;
     private final Diagnostics log;
     private final Predicate<String> listed;
+    private final PatrolHold hold;
 
     /**
      * @param calls  the current probe's call layer, or null when PvP BOT is not usable
      * @param listed whether PvP BOT currently lists a name as one of its bots
      */
-    PvpBotCombatControl(Supplier<UpstreamCalls> calls, Diagnostics log, Predicate<String> listed) {
+    PvpBotCombatControl(Supplier<UpstreamCalls> calls, Diagnostics log, Predicate<String> listed, PatrolHold hold) {
         this.calls = calls;
         this.log = log;
         this.listed = listed;
+        this.hold = hold;
+    }
+
+    /** Without a patrol hold (tests, or nothing to hold). */
+    PvpBotCombatControl(Supplier<UpstreamCalls> calls, Diagnostics log, Predicate<String> listed) {
+        this(calls, log, listed, null);
     }
 
     private UpstreamCalls usable() {
@@ -197,6 +211,20 @@ final class PvpBotCombatControl implements TargetControl {
             c.look(player, new Vec3(at.x(), at.y(), at.z()));
         } catch (Throwable t) {
             throw fail("turning a bot toward a point", t);
+        }
+    }
+
+    @Override
+    public void pausePatrol(String bot) {
+        if (hold != null) {
+            hold.pause(bot);
+        }
+    }
+
+    @Override
+    public void resumePatrol(String bot) {
+        if (hold != null) {
+            hold.resume(bot);
         }
     }
 

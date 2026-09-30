@@ -209,6 +209,8 @@ public final class AggroController {
         Phase phase = Phase.IDLE;
         /** Where the bot FIRST started aggro'ing; kept until it is back there. */
         Origin home;
+        /** PvP BOT's patrol of this bot is paused while the hunt walks it (see {@link TargetControl#pausePatrol}). */
+        boolean patrolPaused;
 
         // ---- the target
         Kind kind = Kind.PLAYER;
@@ -857,7 +859,7 @@ public final class AggroController {
             if (st.home != null) {
                 beginReturn(now, bot, st, "external target over");
             } else {
-                states.remove(name);
+                finish(name);
             }
             return;
         }
@@ -894,9 +896,10 @@ public final class AggroController {
         if (!up.steeringAvailable()) {
             warnOnce("steering", "aggro: inhabitants cannot walk to where they lost a player: " + up.steeringProblem());
             st.home = null;
-            states.remove(name);
+            finish(name);
             return;
         }
+        holdPatrol(name, st);
         st.phase = Phase.PURSUE;
         st.phaseStart = now;
         st.pursueGoal = st.lkp != null ? st.lkp : bot.position();
@@ -1057,15 +1060,16 @@ public final class AggroController {
         String name = bot.name();
         Origin home = st.home;
         if (home == null || !Objects.equals(bot.dimension(), home.dimension())) {
-            states.remove(name);
+            finish(name);
             return;
         }
         if (!up.steeringAvailable()) {
             warnOnce("steering", "aggro: inhabitants cannot walk back to their home anchor: " + up.steeringProblem());
             st.home = null;
-            states.remove(name);
+            finish(name);
             return;
         }
+        holdPatrol(name, st);
         st.phase = Phase.RETURN;
         st.phaseStart = now;
         resetWalk(st, now);
@@ -1086,7 +1090,7 @@ public final class AggroController {
         if (here.horizontalTo(home.pos()) <= cfg.returnArriveDistance() && Math.abs(here.y() - home.pos().y()) <= HOME_HEIGHT) {
             up.halt(bot.handle());
             st.home = null;
-            states.remove(name);
+            finish(name);
             returned++;
             log.debug("aggro: " + name + " is back home (" + fmt(here.horizontalTo(home.pos())) + " blocks away, "
                     + (now - st.phaseStart) + " ticks)");
@@ -1098,7 +1102,7 @@ public final class AggroController {
             logInfo(now, name, "aggro: " + name + " gave up walking home after " + (now - st.phaseStart) + " ticks ("
                     + fmt(here.horizontalTo(home.pos())) + " blocks left) and stays where it is");
             st.home = null;
-            states.remove(name);
+            finish(name);
             return;
         }
         walkTo(now, bot, st, home.pos(), cfg.returnArriveDistance(), cfg, false);
@@ -1109,7 +1113,26 @@ public final class AggroController {
         log.debug("aggro: " + bot.name() + " stops walking home: " + reason);
         up.halt(bot.handle());
         st.home = null;
-        states.remove(bot.name());
+        finish(bot.name());
+    }
+
+    /**
+     * Pauses PvP BOT's own patrol of this bot for the length of the hunt: its patrol movement is applied every tick and
+     * would pull the bot toward its next patrol point against the pursuit, search and walk home.
+     */
+    private void holdPatrol(String name, BotState st) {
+        if (!st.patrolPaused) {
+            st.patrolPaused = true;
+            up.pausePatrol(name);
+        }
+    }
+
+    /** The hunt of this bot is over: forget it, and let its patrol walk again if it was paused. */
+    private void finish(String name) {
+        BotState st = states.remove(name);
+        if (st != null && st.patrolPaused) {
+            up.resumePatrol(name);
+        }
     }
 
     // ---------------------------------------------------------------- walking
@@ -1204,6 +1227,13 @@ public final class AggroController {
         watching.remove(name);
         if (st == null) {
             return;
+        }
+        if (st.patrolPaused) {
+            try {
+                up.resumePatrol(name);
+            } catch (RuntimeException e) {
+                noteFailure("resuming the patrol of " + name, e);
+            }
         }
         if (st.phase == Phase.CHASE && st.forcedByUs != null && st.kind == Kind.PLAYER) {
             releaseOurForce(name, st);

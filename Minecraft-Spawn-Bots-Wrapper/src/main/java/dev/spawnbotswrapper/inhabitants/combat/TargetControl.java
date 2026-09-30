@@ -100,6 +100,16 @@ public interface TargetControl {
     /** Stops the walking input of {@code bot} (forward and sideways movement and sprint), so it stands still. */
     void halt(Object bot);
 
+    /**
+     * Keeps PvP BOT's own patrol from walking {@code bot} while a hunt walks it (PvP BOT's patrol movement is applied
+     * every tick and would pull the bot toward its next patrol point against the hunt's steering). Idempotent, fail-soft,
+     * and a no-op for a bot that has no patrol of this addon.
+     */
+    void pausePatrol(String bot);
+
+    /** Lets the patrol walk the bot again after {@link #pausePatrol}; a no-op when it was not paused. */
+    void resumePatrol(String bot);
+
     /** A control that is never available; what callers get when there is no PvP BOT. */
     TargetControl NONE = new TargetControl() {
         @Override
@@ -170,6 +180,14 @@ public interface TargetControl {
         @Override
         public void halt(Object bot) {
             throw new UpstreamFailure("PvP BOT is not available");
+        }
+
+        @Override
+        public void pausePatrol(String bot) {
+        }
+
+        @Override
+        public void resumePatrol(String bot) {
         }
     };
 }

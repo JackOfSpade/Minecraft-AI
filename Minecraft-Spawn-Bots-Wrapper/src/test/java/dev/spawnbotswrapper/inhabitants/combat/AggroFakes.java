@@ -346,6 +346,16 @@ final class AggroFakes {
             calls.add("halt " + ((Person) bot).name);
         }
 
+        @Override
+        public void pausePatrol(String bot) {
+            calls.add("pause-patrol " + bot);
+        }
+
+        @Override
+        public void resumePatrol(String bot) {
+            calls.add("resume-patrol " + bot);
+        }
+
         /** PvP BOT's own tick: resolve every bot's target the way BotCombat.findTarget orders its sources. */
         void pvpTick() {
             for (Person bot : new ArrayList<>(world.online.values())) {

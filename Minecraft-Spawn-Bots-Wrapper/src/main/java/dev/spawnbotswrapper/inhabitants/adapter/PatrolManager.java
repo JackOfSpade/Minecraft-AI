@@ -30,6 +30,8 @@ final class PatrolManager {
     }
 
     private final Map<String, Owned> owned = new HashMap<>();
+    /** Keys of the bots whose follower is stopped for a hunt (the path itself is kept). */
+    private final java.util.Set<String> paused = new java.util.HashSet<>();
     private final Diagnostics log;
 
     PatrolManager(Diagnostics log) {
@@ -111,6 +113,7 @@ final class PatrolManager {
     void clear(UpstreamCalls calls, String botName) {
         String key = NameRules.key(botName);
         Owned mine = owned.remove(key);
+        paused.remove(key);
         if (calls == null || botName == null) {
             return;
         }
@@ -155,6 +158,39 @@ final class PatrolManager {
         }
     }
 
+    /**
+     * Stops the bot's follower WITHOUT deleting its path, because a hunt walks the bot for a while (upstream's patrol
+     * movement is applied every tick and would pull it toward its next patrol point against the hunt's steering).
+     * Idempotent; a no-op for a bot without a patrol of ours. {@link #resume} starts the follower again.
+     */
+    void pause(UpstreamCalls calls, String botName) {
+        String key = NameRules.key(botName);
+        Owned mine = owned.get(key);
+        if (calls == null || mine == null || !paused.add(key)) {
+            return;
+        }
+        try {
+            calls.stopFollowing(mine.bot());
+        } catch (Throwable t) {
+            paused.remove(key);
+            log.failure("pausing the patrol of " + botName, t);
+        }
+    }
+
+    /** Starts the follower of a paused patrol again (from its first point); a no-op when it was not paused. */
+    void resume(UpstreamCalls calls, String botName) {
+        String key = NameRules.key(botName);
+        Owned mine = owned.get(key);
+        if (!paused.remove(key) || calls == null || mine == null) {
+            return;
+        }
+        try {
+            calls.startFollowing(mine.bot(), mine.path());
+        } catch (Throwable t) {
+            log.failure("resuming the patrol of " + botName, t);
+        }
+    }
+
     /** True when the bot follows a path this manager created. */
     boolean isPatrolling(UpstreamCalls calls, String botName) {
         Owned mine = owned.get(NameRules.key(botName));
@@ -177,12 +213,14 @@ final class PatrolManager {
             clear(calls, o.bot());
         }
         owned.clear();
+        paused.clear();
         return all.size();
     }
 
     /** Forgets tracking without touching upstream (its state is gone or unreachable). */
     void forgetAll() {
         owned.clear();
+        paused.clear();
     }
 
     private boolean refuse(String bot, String reason) {

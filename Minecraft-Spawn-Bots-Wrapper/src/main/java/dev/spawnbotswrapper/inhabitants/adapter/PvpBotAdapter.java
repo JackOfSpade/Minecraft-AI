@@ -114,7 +114,18 @@ public final class PvpBotAdapter implements PvpBotOperations {
         this.backend = backend == null ? SpawnBackend.AUTO : backend;
         this.spawns = new SpawnTracker(log);
         this.patrols = new PatrolManager(log);
-        this.targetControl = new PvpBotCombatControl(this::usableCalls, log, this::isManaged);
+        this.targetControl = new PvpBotCombatControl(this::usableCalls, log, this::isManaged,
+                new PvpBotCombatControl.PatrolHold() {
+                    @Override
+                    public void pause(String bot) {
+                        patrols.pause(patrolCalls(), bot);
+                    }
+
+                    @Override
+                    public void resume(String bot) {
+                        patrols.resume(patrolCalls(), bot);
+                    }
+                });
         this.status = notProbed();
     }
 

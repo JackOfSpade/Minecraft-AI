@@ -145,6 +145,57 @@ class AggroHuntTest {
         assertTrue(s.planner.goals.stream().allMatch(g -> Math.abs(g.x() - 8) < 1e-9 && Math.abs(g.z()) < 1e-9), s.planner.goals.toString());
     }
 
+    // ---------------------------------------------------------------- the patrol
+
+    @Test
+    void thePatrolIsPausedForThePursuitSearchAndWalkHomeAndResumedWhenHome() {
+        steve.x = 8;
+        assertTrue(untilPhase(Phase.CHASE, 40) <= 40);
+        assertEquals(List.of(), s.up.callsOf("pause-patrol"), "PvP BOT's own combat handling covers the chase itself");
+        s.run(3);
+        bot.blind.add("Steve");
+        untilPhase(Phase.PURSUE, 30);
+        assertEquals(List.of("pause-patrol Warden7"), s.up.callsOf("pause-patrol"), "paused once, when the walking starts");
+        untilPhase(Phase.SEARCH, 300);
+        untilPhase(Phase.RETURN, 400);
+        assertEquals(1, s.up.callsOf("pause-patrol").size());
+        assertEquals(List.of(), s.up.callsOf("resume-patrol"), "still walking home");
+        assertEquals(Phase.IDLE, runUntilIdle(600));
+        assertEquals(List.of("resume-patrol Warden7"), s.up.callsOf("resume-patrol"));
+    }
+
+    @Test
+    void theWalkHomeAfterAMobFightPausesThePatrolToo() {
+        Person zombie = s.world.add("Zombie", 3);
+        zombie.player = false;
+        s.up.other.put("Warden7", zombie);
+        s.run(2);
+        bot.x = 12;
+        zombie.alive = false;
+        s.run(2);
+        assertEquals(Phase.RETURN, s.phase());
+        assertEquals(List.of("pause-patrol Warden7"), s.up.callsOf("pause-patrol"));
+        assertEquals(Phase.IDLE, runUntilIdle(400));
+        assertEquals(List.of("resume-patrol Warden7"), s.up.callsOf("resume-patrol"));
+    }
+
+    @Test
+    void aWalkHomeThatGivesUpAlsoResumesThePatrol() {
+        s.config = new AggroController.Config(true, true, 10, 200, 1.5, 40, 60, 3, s.config.perception());
+        noticeThenLoseSteve();
+        s.up.walkSpeed = 0.0;
+        assertEquals(Phase.IDLE, runUntilIdle(1500));
+        assertEquals(List.of("resume-patrol Warden7"), s.up.callsOf("resume-patrol"));
+    }
+
+    @Test
+    void switchingTheControllerOffMidHuntResumesThePatrol() {
+        noticeThenLoseSteve();
+        s.config = new AggroController.Config(false, true, 10, 200, 1.5, 40, 1200, 3, s.config.perception());
+        s.run(2);
+        assertEquals(List.of("resume-patrol Warden7"), s.up.callsOf("resume-patrol"));
+    }
+
     // ---------------------------------------------------------------- seen again
 
     @Test

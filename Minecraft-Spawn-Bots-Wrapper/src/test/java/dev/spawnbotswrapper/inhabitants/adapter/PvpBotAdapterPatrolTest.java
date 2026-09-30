@@ -54,6 +54,46 @@ class PvpBotAdapterPatrolTest {
         return f.adapter.assignPatrol(null, bot, b);
     }
 
+    // ---------------------------------------------------------------- pausing for a hunt
+
+    @Test
+    void aHuntPausesThePatrolWithoutDeletingItsPathAndResumesItAfterwards() {
+        AdapterFixture f = AdapterFixture.probed();
+        assertTrue(assign(f, "Inh_Foo", behavior(Stance.PATROL_CYCLE, true, "sprint", 3)));
+        assertEquals("inh_inh_foo", BotPath.followerOf("Inh_Foo"));
+        f.adapter.targetControl().pausePatrol("Inh_Foo");
+        assertNull(BotPath.followerOf("Inh_Foo"), "upstream's patrol movement stops");
+        assertNotNull(BotPath.getPath("inh_inh_foo"), "the path stays");
+        f.adapter.targetControl().pausePatrol("Inh_Foo");
+        f.adapter.targetControl().resumePatrol("Inh_Foo");
+        assertEquals("inh_inh_foo", BotPath.followerOf("Inh_Foo"), "the patrol walks again");
+        long stops = Recorder.CALLS.stream().filter(c -> c.startsWith("stopFollowing:")).count();
+        assertEquals(1, stops, "pausing is idempotent");
+        f.adapter.targetControl().resumePatrol("Inh_Foo");
+        long starts = Recorder.CALLS.stream().filter(c -> c.startsWith("startFollowing:")).count();
+        assertEquals(2, starts, "resuming what is not paused does nothing");
+    }
+
+    @Test
+    void aBotWithoutAPatrolOfOursIsNeverPausedOrResumed() {
+        AdapterFixture f = AdapterFixture.probed();
+        f.adapter.targetControl().pausePatrol("Somebody");
+        f.adapter.targetControl().resumePatrol("Somebody");
+        assertEquals(List.of(), pathCalls());
+    }
+
+    @Test
+    void clearingAPatrolForgetsThatItWasPaused() {
+        AdapterFixture f = AdapterFixture.probed();
+        assertTrue(assign(f, "Inh_Foo", behavior(Stance.PATROL_CYCLE, true, "sprint", 3)));
+        f.adapter.targetControl().pausePatrol("Inh_Foo");
+        f.adapter.clearPatrol("Inh_Foo");
+        assertTrue(assign(f, "Inh_Foo", behavior(Stance.PATROL_CYCLE, true, "sprint", 3)));
+        f.adapter.targetControl().resumePatrol("Inh_Foo");
+        long starts = Recorder.CALLS.stream().filter(c -> c.startsWith("startFollowing:")).count();
+        assertEquals(2, starts, "a new patrol is not 'resumed' by an old pause");
+    }
+
     // ---------------------------------------------------------------- building
 
     @Test
