@@ -515,14 +515,29 @@ public final class OreDigOpportunisticLifecycleGameTests {
         // settle within SETTLE_TOTAL_TICKS=60, and treat a lost drop as non-terminal -- design 4.9). dy=1 +
         // a solid roof (not dy=0): see the pose comment on the first test in this file (the one buried cell
         // this adds per member is its own roof, not a neighbour either drop could ever roll into).
+        //
+        // MEMBER B'S PLACE (regression hunt, pace commit d2b583f): B used to sit at (6,1,3), a straight
+        // x-neighbour of A, whose only stand is the cell one step east of A's stand. Reaching that pose
+        // needs adjacentHazard(stand) == OBSERVED_GONE, and the one neighbour of that stand that matters --
+        // the open cell under B -- is hidden behind B itself from the eye of a bot standing at A's stand
+        // unless the bot's sub-cell arrival offset is below ~0.38 on one axis (ray from eye y+1.62 down to that
+        // cell's centre crosses B's row at t~0.55). The pace policy walks the last blocks and stops inside
+        // the arrival tolerance, at about (+0.42, +0.42) of the cell, so the real-server log answered
+        // ore_dig_detour_skip reason=no_pose for B (UNKNOWN is never dry, design I1) in most runs and the
+        // 900-tick window never saw B broken. That is the design working, not a bug; the fixture's own
+        // geometry made B's pose depend on a fraction of a block. B now sits at (6,1,2): still A's diagonal
+        // (26-neighbourhood) vein member, but at head height one step east of A's stand, i.e. inside the
+        // break envelope of the very cell the bot already stands on (hasRecoverableTargetBreakPose). Its pose
+        // is the bot's own feet, so no hazard proof of a cell hidden behind the ore is involved, whatever
+        // the arrival offset.
         BlockPos memberA = room.at(5, 1, 3);
         room.set(5, 1, 3, Blocks.DIAMOND_ORE);
         room.set(5, 2, 3, Blocks.STONE);
-        BlockPos memberB = room.at(6, 1, 3);
-        room.set(6, 1, 3, Blocks.DIAMOND_ORE);
-        room.set(6, 2, 3, Blocks.STONE);
-        BlockPos guard = room.at(7, 1, 3); // sealed solid just past memberB: never a legal walk target either
-        room.set(7, 1, 3, Blocks.STONE);
+        BlockPos memberB = room.at(6, 1, 2);
+        room.set(6, 1, 2, Blocks.DIAMOND_ORE);
+        room.set(6, 2, 2, Blocks.STONE);
+        BlockPos guard = room.at(7, 1, 2); // sealed solid just past memberB: never a legal walk target either
+        room.set(7, 1, 2, Blocks.STONE);
         AIPlayerEntity bot = h.spawn("DetourDropGT", room, 0, 0);
         // A stone pick is mandatory for OreDig's own strip/channel through ordinary rock: the channel-tool
         // policy floors every mined block (including the mission's own coal/lapis target) at STONE tier and,
