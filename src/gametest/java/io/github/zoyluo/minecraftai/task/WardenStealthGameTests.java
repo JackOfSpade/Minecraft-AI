@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.github.zoyluo.minecraftai.brain.ToolDefinition;
@@ -89,16 +90,18 @@ public final class WardenStealthGameTests {
     // Calm: sneak away
     // ---------------------------------------------------------------------------------------------------------------
 
-    @GameTest(environment = ENV + "calm_warden_evade_sneaks_away", maxTicks = 1700)
+    @GameTest(environment = ENV + "calm_warden_evade_sneaks_away", maxTicks = 1700 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void calmWardenEvadeSneaksAway(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 44, 24);
         AIPlayerEntity bot = f.bot("WsCalm", 0, 0, false);
         Warden warden = f.warden(-10.0D, 0.0D);
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
         float health = bot.getHealth();
         assignEvade(f, bot);
         Gaits gaits = new Gaits();
         int[] tick = {0};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             gaits.sample(bot);
             f.require(warden.getPose() != Pose.ROARING, "fixture: the warden started roaring");
@@ -111,22 +114,25 @@ public final class WardenStealthGameTests {
             f.require(now < 1650, "the bot never got 20 blocks from the calm warden in " + now + " ticks: "
                     + bot.distanceTo(warden) + " " + gaits.summary());
         });
+        });
     }
 
     // ---------------------------------------------------------------------------------------------------------------
     // Hunting: sprint away
     // ---------------------------------------------------------------------------------------------------------------
 
-    @GameTest(environment = ENV + "hunting_warden_evade_sprints", maxTicks = 500)
+    @GameTest(environment = ENV + "hunting_warden_evade_sprints", maxTicks = 500 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void huntingWardenEvadeSprints(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 44, 24);
         AIPlayerEntity bot = f.bot("WsHunt", 0, 0, false);
         Warden warden = f.warden(-10.0D, 0.0D);
         warden.setPose(Pose.ROARING);
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
         assignEvade(f, bot);
         Gaits gaits = new Gaits();
         int[] tick = {0};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             gaits.sample(bot);
             warden.setPose(Pose.ROARING); // a NoAI warden keeps the pose it is given; make sure it stays "hunting"
@@ -137,13 +143,16 @@ public final class WardenStealthGameTests {
             }
             f.require(now < 450, "the bot never got 20 blocks from the hunting warden: " + bot.distanceTo(warden) + " " + gaits.summary());
         });
+        });
     }
 
-    @GameTest(environment = ENV + "calm_warden_turning_angry_mid_evade_switches_to_sprint", maxTicks = 900)
+    @GameTest(environment = ENV + "calm_warden_turning_angry_mid_evade_switches_to_sprint", maxTicks = 900 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void calmWardenTurningAngryMidEvadeSwitchesToSprint(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 44, 24);
         AIPlayerEntity bot = f.bot("WsTurn", 0, 0, false);
         Warden warden = f.warden(-10.0D, 0.0D);
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
         assignEvade(f, bot);
         int turnTick = 60;
         int[] tick = {0};
@@ -151,7 +160,7 @@ public final class WardenStealthGameTests {
         int[] sneakAfter = {0};
         Gaits after = new Gaits();
         Gaits before = new Gaits();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             if (now < turnTick) {
                 before.sample(bot);
@@ -179,13 +188,14 @@ public final class WardenStealthGameTests {
             }
             f.require(now < 800, "timeout");
         });
+        });
     }
 
     // ---------------------------------------------------------------------------------------------------------------
     // Creeping down a drop
     // ---------------------------------------------------------------------------------------------------------------
 
-    @GameTest(environment = ENV + "sneaking_evade_still_descends_a_drop", maxTicks = 1700)
+    @GameTest(environment = ENV + "sneaking_evade_still_descends_a_drop", maxTicks = 1700 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void sneakingEvadeStillDescendsADrop(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 44, 24);
         // The way east drops two blocks from x = 6 on: a sneaking bot must still get down it (the enforcer lifts the sneak on the drop).
@@ -197,6 +207,8 @@ public final class WardenStealthGameTests {
         }
         AIPlayerEntity bot = f.bot("WsDrop", 0, 0, false);
         Warden warden = f.warden(-10.0D, 0.0D);
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
         double startY = bot.getY();
         double startX = bot.getX();
         EvadeTask evade = assignEvade(f, bot);
@@ -205,7 +217,7 @@ public final class WardenStealthGameTests {
         // edge zone (the drop is 6 blocks east) and the lower level after it.
         gaits.judgeOnly = b -> b.getX() < startX + 3.0D || b.getY() <= startY - 1.9D && b.getX() > startX + 8.0D;
         int[] tick = {0};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             gaits.sample(bot);
             f.require(evade.state() != TaskState.FAILED, "the evade failed: " + evade.failureReason());
@@ -217,19 +229,22 @@ public final class WardenStealthGameTests {
             f.require(now < 1650, "the creeping bot never got down the drop and 20 blocks away: y=" + bot.getY() + " start " + startY
                     + " dist " + bot.distanceTo(warden) + " evade " + evade.state() + " " + gaits.summary());
         });
+        });
     }
 
-    @GameTest(environment = ENV + "sneaking_evade_on_baritone", maxTicks = 1700)
+    @GameTest(environment = ENV + "sneaking_evade_on_baritone", maxTicks = 1700 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void sneakingEvadeOnBaritone(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 44, 24);
         AIPlayerEntity bot = f.bot("WsBari", 0, 0, true);
         Warden warden = f.warden(-10.0D, 0.0D);
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
         float health = bot.getHealth();
         EvadeTask evade = assignEvade(f, bot);
         f.require(bot.getActionPack().hasBaritoneRoute(), "the flight did not start a Baritone route");
         Gaits gaits = new Gaits();
         int[] tick = {0};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             gaits.sample(bot);
             var outcome = bot.getActionPack().lastRouteOutcome();
@@ -244,6 +259,7 @@ public final class WardenStealthGameTests {
             }
             f.require(now < 1650, "the bot never got 20 blocks from the calm warden: " + bot.distanceTo(warden) + " " + gaits.summary()
                     + " last route " + outcome);
+        });
         });
     }
 

@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import java.util.List;
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -58,24 +60,28 @@ public final class AutoEatSprintLimitGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "does_not_eat_mid_fight_then_eats_as_soon_as_it_ends", maxTicks = 320)
+    @GameTest(environment = ENV + "does_not_eat_mid_fight_then_eats_as_soon_as_it_ends", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void doesNotEatMidFightThenEatsAsSoonAsItEnds(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 20, 10);
         AIPlayerEntity bot = f.bot("AeFight", -2, 0, false);
         ServerPlayer target = f.target(1, 0);
-        bot.getFoodData().setFoodLevel(7);
-        bot.getFoodData().setSaturation(0.0F);
+        bot.getFoodData().setFoodLevel(20);
         f.give(bot, new ItemStack(Items.BREAD, 4));
         f.give(bot, new ItemStack(Items.WOODEN_SWORD));
         // A zombie next to the bot that stays and takes a long time to kill: the fight lasts as long as the test wants.
         Zombie zombie = f.zombie(-4.0D, 0.0D, true);
         zombie.getAttribute(Attributes.MAX_HEALTH).setBaseValue(400.0D);
         zombie.setHealth(400.0F);
+        // The bot notices the zombie (it is full, so it does not eat meanwhile), THEN it is hungry: the fight and the hunger start together.
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
+        bot.getFoodData().setFoodLevel(7);
+        bot.getFoodData().setSaturation(0.0F);
         FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_auto_eat_fight");
         int[] tick = {0};
         int[] zombieGoneAt = {-1};
         boolean[] ateSeen = {false};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             if (zombieGoneAt[0] < 0) {
@@ -97,6 +103,7 @@ public final class AutoEatSprintLimitGameTests {
             }
             f.require(now < 300, "the bot did not eat to full after the fight, active: " + (active == null ? "none" : active.name())
                     + " food " + bot.getFoodData().getFoodLevel());
+        });
         });
     }
 
@@ -135,19 +142,23 @@ public final class AutoEatSprintLimitGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "defers_eating_next_to_a_calm_warden", maxTicks = 300)
+    @GameTest(environment = ENV + "defers_eating_next_to_a_calm_warden", maxTicks = 300 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void defersEatingNextToACalmWarden(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 20, 18);
         AIPlayerEntity bot = f.bot("AeWarden", -2, 0, false);
         ServerPlayer target = f.target(1, 0);
-        bot.getFoodData().setFoodLevel(7);
-        bot.getFoodData().setSaturation(0.0F);
+        bot.getFoodData().setFoodLevel(20);
         f.give(bot, new ItemStack(Items.BREAD, 4));
         Warden warden = f.warden(-2.0D, 12.0D);
+        // The bot notices the calm warden (it is full, so it does not eat meanwhile), THEN it is hungry.
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
+        bot.getFoodData().setFoodLevel(7);
+        bot.getFoodData().setSaturation(0.0F);
         FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_auto_eat_warden");
         int[] tick = {0};
         int[] wardenGoneAt = {-1};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             if (wardenGoneAt[0] < 0) {
@@ -164,6 +175,7 @@ public final class AutoEatSprintLimitGameTests {
             }
             f.require(now < 280, "the bot did not eat once the warden was gone, active: " + (active == null ? "none" : active.name())
                     + " food " + bot.getFoodData().getFoodLevel());
+        });
         });
     }
 }

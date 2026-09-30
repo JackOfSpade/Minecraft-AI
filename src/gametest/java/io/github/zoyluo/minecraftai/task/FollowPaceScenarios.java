@@ -263,11 +263,15 @@ final class FollowPaceScenarios {
         ServerPlayer target = f.target(1, 0);
         Warden warden = f.warden(-6.0D, 14.0D);
         bot.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 4000, 0, false, false));
+        // Perception: the bot knows the warden is there because it has seen it: it looks at it and notices it (the reaction time of the
+        // shared formula) before the follow starts. Once noticed it stays known while the line to it is clear, also behind the bot.
+        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.faceToward(bot, warden);
+        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.afterNoticed(context, bot, java.util.List.of(warden), () -> {
         FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_follow_pace_warden");
         Watch watch = new Watch(bot);
         int[] tick = {0};
         int[] stats = new int[3]; // moving ticks, moving without shift, sprint ticks
-        context.failIfEver(() -> {
+        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             f.require(!(active instanceof EvadeTask), "the follower evaded a calm warden 14 blocks away");
@@ -292,6 +296,7 @@ final class FollowPaceScenarios {
                 f.require(stats[2] == 0, "the follower sprinted near a calm warden: " + stats[2] + " ticks");
                 f.finish();
             }
+        });
         });
     }
 

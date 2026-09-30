@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -192,7 +193,7 @@ public final class MiningHostileRecoveryGameTests {
     // This long live-entity sequence builds beyond EMPTY_STRUCTURE's tiny template.
     // Keep it out of the short sibling batch so a neighbouring context cannot complete
     // and clear one of these deliberately retained hostiles before the final assertion.
-    @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_ore_dig_retreats_and_permanently_barricades_four_hostiles", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_ore_dig_retreats_and_permanently_barricades_four_hostiles", maxTicks = 500 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void oreDigRetreatsAndPermanentlyBarricadesFourHostiles(GameTestHelper context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeGT");
         AIPlayerEntity bot = fixture.bot();
@@ -251,6 +252,10 @@ public final class MiningHostileRecoveryGameTests {
         require(context, OreDigTask.inspectCheckpoint(forgedPartialCorner).isEmpty(),
                 "checkpoint codec accepted a partial marker as a factual normal corner");
 
+        // The four hostiles in the chamber ahead are noticed before the mission is assigned: the bot turns to them and waits the reaction time
+        // (with no mission running the watcher's own reaction is reset, so the barricade decision below is the one the fixture asserts).
+        PerceptionFixtures.faceToward(bot, fixture.hostiles().get(0));
+        PerceptionFixtures.afterNoticedFresh(context, bot, fixture.hostiles(), since -> {
         initial.cancel(bot, "gametest_marked_successor_restart");
         OreDigTask mining = new OreDigTask(Set.of(Blocks.IRON_ORE), 3, markedSuccessor);
         TaskManager.INSTANCE.assign(bot, mining,
@@ -294,7 +299,7 @@ public final class MiningHostileRecoveryGameTests {
                 "safety routing changed the persisted mining budget");
 
         AtomicInteger ticks = new AtomicInteger();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             require(context, TeleportAudit.corrections(bot) == 0,
                     "the barricade retreat or the resumed mining teleported the bot (corrections="
                             + TeleportAudit.corrections(bot) + " last=" + TeleportAudit.lastCaller(bot) + ")");
@@ -365,6 +370,7 @@ public final class MiningHostileRecoveryGameTests {
                             + successor);
             restarted.cancel(bot, "gametest_complete");
             finish(context, fixture);
+        });
         });
     }
 

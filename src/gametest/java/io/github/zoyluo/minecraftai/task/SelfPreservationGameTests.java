@@ -355,7 +355,8 @@ public final class SelfPreservationGameTests {
                 case 0 -> {
                     if (active instanceof FireExtinguishTask fire) {
                         rescue[0] = fire;
-                        BlockPos huskFeet = bot.blockPosition().west(3);
+                        // Ahead of the bot (it walks east to the water), inside its view: a hostile behind it would not be noticed.
+                        BlockPos huskFeet = bot.blockPosition().east(3);
                         var h = net.minecraft.world.entity.EntityType.HUSK.create(world,
                                 net.minecraft.world.entity.EntitySpawnReason.COMMAND);
                         require(context, h != null, "could not create the husk fixture");
@@ -365,6 +366,11 @@ public final class SelfPreservationGameTests {
                         world.addFreshEntity(h);
                         husk[0] = h;
                         bot.setHealth(retreatHp);
+                        // The bot STAYS at the retreat health while it notices the husk (the reaction time of the shared formula):
+                        // with a full, saturated stomach it would heal above it within those ticks and the fight would rightly no
+                        // longer come first. Hungry enough not to regenerate (vanilla: food 18 or more), not hungry enough to eat.
+                        bot.getFoodData().setFoodLevel(17);
+                        bot.getFoodData().setSaturation(0.0F);
                         stage[0] = 1;
                     }
                 }

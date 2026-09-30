@@ -432,6 +432,9 @@ public final class SurvivalReflexGameTests {
         husk.setNoAi(true);
         husk.snapTo(huskFeet.getX() + 0.5D, huskFeet.getY(), huskFeet.getZ() + 0.5D, 90.0F, 0.0F);
         world.addFreshEntity(husk);
+        // Perception: the bot looks at the husk (it notices it after the reaction time of the shared formula, 0.71 s at nine blocks,
+        // well before the tick-40 check); whether the watcher then fights it is what this test is about.
+        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.faceToward(bot, husk);
         Set<Task> combats = new HashSet<>();
         int[] ticks = {0};
         TimeLockedRun.run(context, 500, () -> {
@@ -481,6 +484,7 @@ public final class SurvivalReflexGameTests {
         husk.setNoAi(true);
         husk.snapTo(huskFeet.getX() + 0.5D, huskFeet.getY(), huskFeet.getZ() + 0.5D, 90.0F, 0.0F);
         world.addFreshEntity(husk);
+        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.faceToward(bot, husk); // perception: the bot looks at it
         int[] ticks = {0};
         TimeLockedRun.run(context, 600, () -> {
             world.setDayTime(18000L);

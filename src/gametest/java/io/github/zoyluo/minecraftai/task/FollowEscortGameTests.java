@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import java.util.List;
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -222,17 +224,19 @@ public final class FollowEscortGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "low_health_follower_still_evades", maxTicks = 160)
+    @GameTest(environment = ENV + "low_health_follower_still_evades", maxTicks = 160 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void lowHealthFollowerStillEvades(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 40, 10);
         AIPlayerEntity bot = f.bot("FeLowHp", -6, 0, false);
         f.give(bot, new ItemStack(Items.WOODEN_SWORD));
         ServerPlayer target = f.target(16, 0);
-        f.zombie(0.0D, 4.0D, true);
+        net.minecraft.world.entity.monster.zombie.Zombie zombie = f.zombie(0.0D, 4.0D, true);
         bot.setHealth(8.0F);
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         f.follow(bot, target.getGameProfile().name(), "gametest_escort_lowhp");
         int[] tick = {0};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             bot.setHealth(8.0F);
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
@@ -240,6 +244,7 @@ public final class FollowEscortGameTests {
                 f.finish();
             }
             f.require(now < 120, "the wounded follower never evaded, active: " + (active == null ? "none" : active.name()));
+        });
         });
     }
 
@@ -262,17 +267,19 @@ public final class FollowEscortGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "low_health_with_warden_evades_instead_of_shelter", maxTicks = 160)
+    @GameTest(environment = ENV + "low_health_with_warden_evades_instead_of_shelter", maxTicks = 160 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void lowHealthWithWardenEvadesInsteadOfShelter(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 40, 12);
         AIPlayerEntity bot = f.bot("FeWardenLow", -6, 0, false);
         f.give(bot, new ItemStack(Items.COBBLESTONE, 64));
         ServerPlayer target = f.target(16, 0);
-        f.warden(-6.0D, 6.0D);
+        net.minecraft.world.entity.monster.warden.Warden warden = f.warden(-6.0D, 6.0D);
         bot.setHealth(8.0F);
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
         f.follow(bot, target.getGameProfile().name(), "gametest_escort_warden_low");
         int[] tick = {0};
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             bot.setHealth(8.0F);
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
@@ -281,6 +288,7 @@ public final class FollowEscortGameTests {
                 f.finish();
             }
             f.require(now < 120, "the wounded bot next to a warden never evaded, active: " + (active == null ? "none" : active.name()));
+        });
         });
     }
 

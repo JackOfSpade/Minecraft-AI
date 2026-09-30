@@ -741,6 +741,8 @@ public final class MinecraftAiVerifySubcommand {
         }
         zombie.snapTo(bot.getX() + 2.0D, bot.getY(), bot.getZ(), 0.0F, 0.0F);
         world.addFreshEntity(zombie);
+        // Perception: the bot looks at the zombie, so it notices it after the reaction time instead of only when it is struck.
+        io.github.zoyluo.minecraftai.action.LookAction.lookAt(bot, zombie.getEyePosition());
         return assignTask(bot, "combat", new CombatTask(EntityType.ZOMBIE, 1, MinecraftAiConfig.get().combat().retreatHp()),
                 600,
                 ignored -> !zombie.isAlive());

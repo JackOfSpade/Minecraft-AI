@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.baritone;
 
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalNear;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
@@ -280,11 +281,14 @@ public final class BaritoneCapabilityGameTests {
     // Mob avoidance
     // ---------------------------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_mob_avoidance_bends_the_route_around_hostile_the_bot_can_see", maxTicks = 600)
+    @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_mob_avoidance_bends_the_route_around_hostile_the_bot_can_see", maxTicks = 600 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void mobAvoidanceBendsTheRouteAroundHostileTheBotCanSee(GameTestHelper context) {
         Course c = Course.begin(context, "CapMobSeenGT", -2, 26, 12, 14, MinecraftAiConfig.BaritoneCaps.defaults(), 0, 0);
         Slime slime = slime(c, 12, 0, 0);
         c.snapshot();
+        // The bot must have NOTICED the hostile for its route to bend around it: it turns to it and waits the reaction time first.
+        PerceptionFixtures.faceToward(c.bot, slime);
+        PerceptionFixtures.afterNoticed(context, c.bot, List.of(slime), since -> {
         BlockPos goal = c.feet.offset(24, 0, 0);
         c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
         c.await(500, run -> {
@@ -294,6 +298,7 @@ public final class BaritoneCapabilityGameTests {
             System.out.println("BARITONE_AVOID seen closest=" + String.format("%.2f", closest));
             require(context, closest >= 4.5D, "the route passed within " + closest + " blocks of a hostile the bot could see");
             run.requireNoEdits();
+        });
         });
     }
 
@@ -355,6 +360,11 @@ public final class BaritoneCapabilityGameTests {
         List<AIPlayerEntity> bots = List.of(c.bot, second, third);
         for (AIPlayerEntity bot : bots) {
             BaritoneRegistry.INSTANCE.get(bot);
+            // Perception: each bot looks east, at the middle of the two slime rows, so every slime is inside its view; the count below
+            // is taken at tick 60, after the reaction time of the shared formula for the farthest and widest of them.
+            PerceptionFixtures.facePoint(bot, Vec3.atCenterOf(c.feet.offset(10, 0, 0)));
+            require(context, PerceptionFixtures.reactionTicks(bot, slimes) < 60,
+                    "fixture: the slimes are not all noticed by tick 60 by the formula: " + PerceptionFixtures.reactionTicks(bot, slimes));
         }
         long[] nanos = {0L};
         int[] ticks = {0};
@@ -564,7 +574,7 @@ public final class BaritoneCapabilityGameTests {
         /** {@code check} runs when Baritone lets go of the bot (arrived, or gave up); a run still busy after {@code limit} ticks fails. */
         void await(int limit, Consumer<Run> check) {
             Run run = new Run(this);
-            context.onEachTick(() -> {
+            PerceptionFixtures.scheduleEachTick(context, () -> {
                 if (run.done) {
                     return;
                 }

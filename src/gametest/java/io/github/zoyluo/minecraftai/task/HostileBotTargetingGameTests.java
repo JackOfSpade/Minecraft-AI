@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
@@ -57,7 +58,7 @@ public final class HostileBotTargetingGameTests {
 
     // ------------------------------------------------------------------ the R1 rules
 
-    @GameTest(environment = ENV + "foreign_bot_that_hits_the_owner_becomes_a_visible_target", maxTicks = 80)
+    @GameTest(environment = ENV + "foreign_bot_that_hits_the_owner_becomes_a_visible_target", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void foreignBotThatHitsTheOwnerBecomesAVisibleTarget(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity bot = f.bot("HbtOwnerHitGT", 0, 0);
@@ -65,6 +66,8 @@ public final class HostileBotTargetingGameTests {
         ServerPlayer foreign = f.foreign(3, 0);
         f.face(foreign, bot);
 
+        PerceptionFixtures.faceToward(bot, foreign);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(foreign), since -> {
         // MockPlayers.ownerFor registers the owner the way AIPlayerManager.spawn(..., owner) does.
         f.require(AIPlayerManager.INSTANCE.ownerOf(bot).filter(owner.getUUID()::equals).isPresent()
                         && AIPlayerManager.INSTANCE.isAnyBotOwner(owner.getUUID())
@@ -98,9 +101,10 @@ public final class HostileBotTargetingGameTests {
         ActionResult hit = InteractAction.attackEntity(bot, foreign);
         f.require(hit.isSuccess() && foreign.getHealth() < before, "the strike did not hurt the aggressor: " + hit.reason());
         f.finish();
+        });
     }
 
-    @GameTest(environment = ENV + "foreign_bot_that_hits_asibling_bot_is_targeted_by_the_other_bot", maxTicks = 60)
+    @GameTest(environment = ENV + "foreign_bot_that_hits_asibling_bot_is_targeted_by_the_other_bot", maxTicks = 60 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void foreignBotThatHitsASiblingBotIsTargetedByTheOtherBot(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity first = f.bot("HbtSiblingAGT", 0, 0);
@@ -110,6 +114,8 @@ public final class HostileBotTargetingGameTests {
         ServerPlayer foreign = f.foreign(3, 0);
         f.require(CombatCore.isFriendly(first, foreign) && !CombatCore.hostileTo(first, foreign), "the foreign bot started hostile");
 
+        PerceptionFixtures.faceToward(first, foreign);
+        PerceptionFixtures.afterNoticed(context, first, List.of(foreign), since -> {
         float before = second.getHealth();
         f.require(second.hurtServer(f.level, f.level.damageSources().playerAttack(foreign), 2.0F) && second.getHealth() < before,
                 "the hit on the sibling bot was not real");
@@ -118,9 +124,10 @@ public final class HostileBotTargetingGameTests {
                 "the other bot does not treat the aggressor of its sibling as hostile");
         f.require(CombatCore.isFriendly(first, second) && CombatCore.isFriendly(second, first), "sibling bots stopped being friends");
         f.finish();
+        });
     }
 
-    @GameTest(environment = ENV + "foreign_bot_that_hits_another_owners_bot_is_targeted", maxTicks = 60)
+    @GameTest(environment = ENV + "foreign_bot_that_hits_another_owners_bot_is_targeted", maxTicks = 60 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void foreignBotThatHitsAnotherOwnersBotIsTargeted(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity ours = f.bot("HbtOwnerOneGT", 0, 0);
@@ -129,6 +136,8 @@ public final class HostileBotTargetingGameTests {
         ServerPlayer secondOwner = f.owner(theirs, -4, 5);
         ServerPlayer foreign = f.foreign(3, 0);
 
+        PerceptionFixtures.faceToward(ours, foreign);
+        PerceptionFixtures.afterNoticed(context, ours, List.of(foreign), since -> {
         float before = theirs.getHealth();
         f.require(theirs.hurtServer(f.level, f.level.damageSources().playerAttack(foreign), 2.0F) && theirs.getHealth() < before,
                 "the hit on the other owner's bot was not real");
@@ -139,6 +148,7 @@ public final class HostileBotTargetingGameTests {
         // The other owner is a human that owns a bot: not a foreign bot, not friendly by the bot rule, and not hostile either.
         f.require(!HostileBotLedger.isMarkableForeignBot(secondOwner), "a bot owner is markable");
         f.finish();
+        });
     }
 
     @GameTest(environment = ENV + "passive_armed_foreign_bot_stays_friendly", maxTicks = 260)
@@ -185,6 +195,7 @@ public final class HostileBotTargetingGameTests {
         foreign.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
         Husk husk = f.husk(-4, -4);
         f.face(foreign, husk);
+        f.face(owner, foreign); // the owner stands beside the fight and watches it: the witness of the swings
         boolean[] suspectedAfterZombie = {false};
         context.onEachTick(() -> {
             long t = context.getTick();
@@ -216,17 +227,19 @@ public final class HostileBotTargetingGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "armed_charge_is_suspect_but_not_a_target", maxTicks = 120)
+    @GameTest(environment = ENV + "armed_charge_is_suspect_but_not_a_target", maxTicks = 120 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void armedChargeIsSuspectButNotATarget(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity bot = f.bot("HbtChargeGT", 0, 0);
         ServerPlayer owner = f.owner(bot, -6, 6);
         ServerPlayer foreign = f.foreign(7, 0);
         foreign.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
+        PerceptionFixtures.faceToward(bot, foreign);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(foreign), since -> {
         boolean[] suspected = {false};
         int[] suspectedAt = {-1};
-        context.onEachTick(() -> {
-            long t = context.getTick();
+        PerceptionFixtures.everyTick(context, () -> {
+            long t = since.getAsLong();
             long now = f.level.getGameTime();
             if (t >= 1 && t <= 20) {
                 f.place(foreign, Math.max(3.0D, 7.0D - 0.2D * t), 0.0D); // 0.2 blocks per tick from 7 to 3 blocks
@@ -257,9 +270,10 @@ public final class HostileBotTargetingGameTests {
                 f.finish();
             }
         });
+        });
     }
 
-    @GameTest(environment = ENV + "exclusive_bow_aim_marks", maxTicks = 90)
+    @GameTest(environment = ENV + "exclusive_bow_aim_marks", maxTicks = 90 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void exclusiveBowAimMarks(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity bot = f.bot("HbtAimGT", -5, 5);
@@ -267,10 +281,12 @@ public final class HostileBotTargetingGameTests {
         ServerPlayer foreign = f.foreign(-2, 0);
         foreign.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BOW));
         f.face(foreign, owner);
+        PerceptionFixtures.faceToward(bot, foreign);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(foreign), since -> {
         // Phase A: a cow stands in the line of fire, nearer than the owner: the aim is not exclusive, nothing is marked.
         Cow cow = f.cow(1, 0);
-        context.onEachTick(() -> {
-            long t = context.getTick();
+        PerceptionFixtures.everyTick(context, () -> {
+            long t = since.getAsLong();
             long now = f.level.getGameTime();
             f.face(foreign, owner);
             if (t == 1) {
@@ -293,9 +309,10 @@ public final class HostileBotTargetingGameTests {
                 f.finish();
             }
         });
+        });
     }
 
-    @GameTest(environment = ENV + "marked_aggressor_behind_walls_seen_by_nobody_is_not_targeted", maxTicks = 60)
+    @GameTest(environment = ENV + "marked_aggressor_behind_walls_seen_by_nobody_is_not_targeted", maxTicks = 60 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void markedAggressorBehindWallsSeenByNobodyIsNotTargeted(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity bot = f.bot("HbtHiddenGT", 0, 0);
@@ -315,10 +332,13 @@ public final class HostileBotTargetingGameTests {
                 "an unseen aggressor triggered a threat task: " + (active == null ? "" : active.describe()));
 
         f.clearWall(2);
+        PerceptionFixtures.faceToward(bot, foreign);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(foreign), since -> {
         f.require(bot.hasLineOfSight(foreign), "the wall did not open");
         f.require(!CombatCore.isFriendly(bot, foreign) && CombatCore.hostileTo(bot, foreign),
                 "the marked aggressor is not a target once the wall opens");
         f.finish();
+        });
     }
 
     @GameTest(environment = ENV + "owner_seen_aggressor_is_nominated_but_never_struck_through_a_wall", maxTicks = 100)
@@ -373,12 +393,14 @@ public final class HostileBotTargetingGameTests {
         f.finish();
     }
 
-    @GameTest(environment = ENV + "aggressor_mark_expires_after_memory", maxTicks = 60)
+    @GameTest(environment = ENV + "aggressor_mark_expires_after_memory", maxTicks = 60 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void aggressorMarkExpiresAfterMemory(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity bot = f.bot("HbtExpiryGT", 0, 0);
         f.owner(bot, -4, 0);
         ServerPlayer foreign = f.foreign(3, 0);
+        PerceptionFixtures.faceToward(bot, foreign);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(foreign), since -> {
         int memory = HostileBotLedger.memoryTicks();
         f.require(memory == 600, "the default aggressor memory is not 600 ticks: " + memory);
         // A mark set 598 game ticks ago (the ledger takes the tick as an argument; a test cannot wait 600 ticks).
@@ -386,7 +408,7 @@ public final class HostileBotTargetingGameTests {
         HostileBotLedger.mark(foreign.getUUID(), markedAt, "test");
         f.require(!CombatCore.isFriendly(bot, foreign), "a mark 598 ticks old is not live");
         boolean[] seenExpired = {false};
-        context.onEachTick(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             long age = f.level.getGameTime() - markedAt;
             boolean friendly = CombatCore.isFriendly(bot, foreign);
             f.require(friendly == age > memory, "age " + age + ": friendly=" + friendly + " but the memory is " + memory);
@@ -396,6 +418,7 @@ public final class HostileBotTargetingGameTests {
                 f.require(seenExpired[0], "the mark never expired");
                 f.finish();
             }
+        });
         });
     }
 
@@ -465,14 +488,16 @@ public final class HostileBotTargetingGameTests {
         f.finish();
     }
 
-    @GameTest(environment = ENV + "aggro_sense_flags_zombie_that_hurt_the_owner", maxTicks = 60)
+    @GameTest(environment = ENV + "aggro_sense_flags_zombie_that_hurt_the_owner", maxTicks = 60 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void aggroSenseFlagsZombieThatHurtTheOwner(GameTestHelper context) {
         Fixture f = new Fixture(context);
         AIPlayerEntity bot = f.bot("HbtSenseGT", -6, 0);
         ServerPlayer owner = f.owner(bot, -6, 3);
         Zombie zombie = f.zombie(6, 0); // 12 blocks away: observed (16) but outside the 10 block pressure envelope
-        context.onEachTick(() -> {
-            long t = context.getTick();
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(zombie), since -> {
+        PerceptionFixtures.everyTick(context, () -> {
+            long t = since.getAsLong();
             if (t == 2) {
                 AggroSense.Snapshot calm = AggroSense.snapshot(bot);
                 f.require(!calm.pressure() && calm.aggressorCount() == 0 && !calm.ownerUnderAttack(),
@@ -493,6 +518,7 @@ public final class HostileBotTargetingGameTests {
                 f.require(!snapshot.playerKindAggressor() && !snapshot.rangedOrExplosive(), "a zombie is neither a player nor ranged");
                 f.finish();
             }
+        });
         });
     }
 

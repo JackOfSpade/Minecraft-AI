@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -31,6 +32,7 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.isSealed
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.preparePlatform;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.runLocked;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.runLockedHooked;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterShell;
 
 /**
@@ -118,7 +120,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         finish(context, bot, "BarricadeWoodGuardGT");
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_one_block_cannot_dispatch_doomed_shelter_or_grow_pause_stack", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_one_block_cannot_dispatch_doomed_shelter_or_grow_pause_stack", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void oneBlockCannotDispatchDoomedShelterOrGrowPauseStack(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 180, 4));
         prepareEscapeCorridor(context, feet);
@@ -135,6 +137,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         require(context, EmergencyShelterTask.hasShelterBlock(bot)
                         && !EmergencyShelterTask.hasMaterialsForCurrentPose(bot),
                 "one-block fixture did not distinguish item presence from full admission");
+        PerceptionFixtures.faceToward(bot, hostile);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(hostile), since -> {
         require(context, ObservableWorldQuery.canObserveEntity(bot, hostile)
                         && CombatCore.hasLineOfSight(bot, hostile),
                 "one-block fixture hostile was not factually observable");
@@ -165,9 +169,10 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 "failed exact shelter admission consumed its only block");
         hostile.discard();
         finish(context, bot, "ShelterOneBlockGateGT");
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_emergency_shelter_supersedes_safety_evade_without_nesting_pause_frame", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_emergency_shelter_supersedes_safety_evade_without_nesting_pause_frame", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void emergencyShelterSupersedesSafetyEvadeWithoutNestingPauseFrame(
             GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 220, 4));
@@ -180,6 +185,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         "gametest_shelter_safety_supersede"));
         EnderMan hostile = spawnProvokedEnderman(context, feet.east(8), bot);
 
+        PerceptionFixtures.faceToward(bot, hostile);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(hostile), since -> {
         require(context, DangerWatcher.isActiveHostileThreat(bot, hostile)
                         && ObservableWorldQuery.canObserveEntity(bot, hostile)
                         && CombatCore.hasLineOfSight(bot, hostile),
@@ -225,14 +232,20 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 "active shelter scan replaced ownership or grew the pause stack");
         hostile.discard();
         finish(context, bot, "ShelterSafetySwapGT");
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_generic_threat_supersedes_non_defense_safety_without_nesting_mission", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_generic_threat_supersedes_non_defense_safety_without_nesting_mission", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void genericThreatSupersedesNonDefenseSafetyWithoutNestingMission(
             GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 240, 4));
         prepareEscapeCorridor(context, feet);
         AIPlayerEntity bot = spawn(context, "ThreatSafetySwapGT", feet);
+        // The bot notices the provoked enderman first, while idle; the mission frame and the non-defense SAFETY holder are set up from a
+        // clean slate afterwards (the watcher reacts in the very tick it is noticed).
+        EnderMan hostile = spawnProvokedEnderman(context, feet.east(8), bot);
+        PerceptionFixtures.faceToward(bot, hostile);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(hostile), since -> {
         HoldingTask mission = new HoldingTask("threat_swap_mission");
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
@@ -241,7 +254,6 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         HoldingTask safetyHolder = new HoldingTask("critical_hunt_holder");
         TaskManager.INSTANCE.assign(bot, safetyHolder,
                 TaskOrigin.safety("critical_hunt_for_food"));
-        EnderMan hostile = spawnProvokedEnderman(context, feet.east(8), bot);
 
         require(context, mission.state() == TaskState.PAUSED
                         && TaskManager.INSTANCE.peekPaused(bot).orElse(null) == mission
@@ -272,9 +284,10 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 "generic SAFETY-to-SAFETY replacement nested the non-defense holder");
         hostile.discard();
         finish(context, bot, "ThreatSafetySwapGT");
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_trapped_fight_back_replaces_non_defense_safety_without_nesting_mission", maxTicks = 16000)
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_trapped_fight_back_replaces_non_defense_safety_without_nesting_mission", maxTicks = 16000 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void trappedFightBackReplacesNonDefenseSafetyWithoutNestingMission(
             GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 260, 4));
@@ -287,6 +300,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         "gametest_trapped_fight_back_safety_supersede"));
         Husk hostile = spawnDisabledHusk(context, feet.east(3));
 
+        PerceptionFixtures.faceToward(bot, hostile);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(hostile), since -> {
         require(context, EvadeTask.admitBestSurfaceEscapePath(
                         bot, hostile, hostile.blockPosition(), 12) == null
                         && bot.getActionPack().isPathExecutorIdle(),
@@ -305,7 +320,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
         HoldingTask[] safetyHolder = {null};
         long[] holderAssignedTick = {-1L};
-        runLocked(context, () -> {
+        runLockedHooked(context, () -> {
             context.getLevel().setDayTime(1000L);
             require(context, bot.isAlive() && bot.blockPosition().equals(feet),
                     "trapped fight-back fixture moved or died before replacement");
@@ -323,7 +338,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 safetyHolder[0] = new HoldingTask("critical_hunt_holder");
                 TaskManager.INSTANCE.assign(bot, safetyHolder[0],
                         TaskOrigin.safety("critical_hunt_for_food"));
-                holderAssignedTick[0] = context.getTick();
+                holderAssignedTick[0] = since.getAsLong();
                 require(context, !DangerWatcher.hasActiveHostileDefenseOwner(bot),
                         "non-defense SAFETY holder was classified as trapped protection");
             }
@@ -350,15 +365,16 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
             }
             require(context, TaskManager.INSTANCE.pausedDepth(bot) == 1,
                     "waiting for trapped_fight_back grew the mission pause stack");
-            if (context.getTick() - holderAssignedTick[0] > 120) {
+            if (since.getAsLong() - holderAssignedTick[0] > 120) {
                 context.fail(Component.nullToEmpty(
                         "trapped_fight_back never replaced non-defense SAFETY: active="
                                 + (active == null ? "idle" : active.name())));
             }
         });
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_critical_creeper_without_route_or_materials_retains_one_safety_owner", maxTicks = 16000)
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_critical_creeper_without_route_or_materials_retains_one_safety_owner", maxTicks = 16000 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void criticalCreeperWithoutRouteOrMaterialsRetainsOneSafetyOwner(
             GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 280, 4));
@@ -376,6 +392,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         require(context, !EmergencyShelterTask.hasShelterBlock(bot)
                         && !EmergencyShelterTask.hasMaterialsForCurrentPose(bot),
                 "critical backoff fixture unexpectedly carried shelter material");
+        PerceptionFixtures.faceToward(bot, hostile);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(hostile), since -> {
         require(context, DangerWatcher.isActiveHostileThreat(bot, hostile)
                         && ObservableWorldQuery.canObserveEntity(bot, hostile)
                         && CombatCore.hasLineOfSight(bot, hostile),
@@ -397,8 +415,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         && TaskManager.INSTANCE.pausedDepth(bot) == 1,
                 "first Creeper defense did not preserve exactly one mission frame");
 
-        long started = context.getTick();
-        runLocked(context, () -> {
+        long started = since.getAsLong();
+        runLockedHooked(context, () -> {
             context.getLevel().setDayTime(1000L);
             bot.setHealth(4.7F);
             bot.getFoodData().setFoodLevel(17);
@@ -422,10 +440,11 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                             .map(TaskOrigin::safety).orElse(false),
                     "critical Creeper defense lost SAFETY ownership");
 
-            if (context.getTick() - started >= 160) {
+            if (since.getAsLong() - started >= 160) {
                 hostile.discard();
                 finish(context, bot, "CreeperBackoffOwnerGT");
             }
+        });
         });
     }
 

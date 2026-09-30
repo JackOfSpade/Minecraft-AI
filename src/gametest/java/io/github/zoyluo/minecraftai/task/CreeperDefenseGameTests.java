@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import java.util.List;
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
@@ -35,7 +37,7 @@ import java.util.Set;
  * ESCAPE, BUILD_WALL and HOLD_BARRIER; no test-only production hook is required.</p>
  */
 public final class CreeperDefenseGameTests {
-    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_late_fuse_assignment_starts_physical_defense_synchronously", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_late_fuse_assignment_starts_physical_defense_synchronously", maxTicks = 40 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void lateFuseAssignmentStartsPhysicalDefenseSynchronously(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperLateFuseGT", 200);
         BlockPos origin = bot.blockPosition().immutable();
@@ -46,6 +48,8 @@ public final class CreeperDefenseGameTests {
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_late_fuse_mission"));
         Creeper creeper = spawnDisabledCreeper(context, origin.east(2));
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(creeper), since -> {
         creeper.ignite();
         creeper.setSwellDir(1);
         for (int tick = 0; tick < 20; tick++) {
@@ -80,9 +84,10 @@ public final class CreeperDefenseGameTests {
                 "late-fuse onStart only scheduled a future path; no synchronous physical"
                         + " fast-step or core-wall action occurred: " + active.describe());
         finish(context, bot, "CreeperLateFuseGT", creeper);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_hidden_near_memory_is_not_overwritten_by_far_unarmed_creeper", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_hidden_near_memory_is_not_overwritten_by_far_unarmed_creeper", maxTicks = 40 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void hiddenNearMemoryIsNotOverwrittenByFarUnarmedCreeper(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperMemoryGT", 206);
         BlockPos origin = bot.blockPosition().immutable();
@@ -92,6 +97,8 @@ public final class CreeperDefenseGameTests {
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_creeper_memory"));
         Creeper near = spawnDisabledCreeper(context, origin.east(3));
+        PerceptionFixtures.faceToward(bot, near);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(near), since -> {
         DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active instanceof CreeperDefenseTask,
@@ -107,20 +114,31 @@ public final class CreeperDefenseGameTests {
         buildOccludingWall(context, origin.east(), 1);
         require(context, !ObservableWorldQuery.canObserveEntity(bot, near),
                 "near Creeper remained observable through the memory occluder");
-        Creeper far = spawnDisabledCreeper(context, origin.west(5));
+        Creeper far = spawnDisabledCreeper(context, origin.west(8));
         require(context, ObservableWorldQuery.canObserveEntity(bot, far)
                         && !far.isIgnited() && far.getSwellDir() <= 0,
                 "far replacement fixture was not a visible unarmed Creeper");
 
+        // The far creeper must be NOTICED for this to prove anything. The remembered source's distance is part of the premise (a bot that
+        // walked on would change which creeper is nearer), so the bot stays where the fixture put it and looks at the far creeper.
+        Vec3 pinned = bot.position();
+        PerceptionFixtures.everyTick(context, () -> {
+            bot.teleportTo(context.getLevel(), pinned.x, pinned.y, pinned.z, Set.of(), bot.getYRot(), bot.getXRot(), true);
+            bot.setDeltaMovement(Vec3.ZERO);
+            PerceptionFixtures.faceToward(bot, far);
+        });
+        PerceptionFixtures.afterNoticed(context, bot, List.of(far), since2 -> {
         active.tick(bot);
         require(context, active.describe().contains("source=" + nearSource),
                 "visible unarmed far Creeper overwrote the more dangerous hidden near memory:"
                         + " near=" + nearSource + " far=" + compact(far.blockPosition())
                         + " owner=" + active.describe());
         finish(context, bot, "CreeperMemoryGT", near, far);
+        });
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_older_occluded_risk_cannot_complete_while_second_risk_just_turned_hidden", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_older_occluded_risk_cannot_complete_while_second_risk_just_turned_hidden", maxTicks = 40 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void olderOccludedRiskCannotCompleteWhileSecondRiskJustTurnedHidden(
             GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperAllRiskGraceGT", 236);
@@ -129,6 +147,8 @@ public final class CreeperDefenseGameTests {
         assertStrictCapabilities(context, bot);
 
         Creeper older = spawnDisabledCreeper(context, origin.east(3));
+        PerceptionFixtures.faceToward(bot, older);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(older), since -> {
         older.ignite();
         older.setSwellDir(1);
         for (int tick = 0; tick < 20; tick++) {
@@ -143,13 +163,17 @@ public final class CreeperDefenseGameTests {
                         + owner.describe());
         older.discard();
 
-        for (int tick = 0; tick < 98; tick++) {
+        // The second risk appears now, standing in the bot's view; the owner keeps running while the bot notices it (the reaction time of
+        // the shared formula), and the manual ticks below then bring the owner to its 98th tick, the timeline this test always had.
+        Creeper newer = spawnDisabledCreeper(context, origin.west(5));
+        PerceptionFixtures.faceToward(bot, newer);
+        PerceptionFixtures.afterNoticedWithin(context, bot, List.of(newer), 100.0D, since2 -> {
+        while (owner.elapsedTicks() < 98) {
             owner.tick(bot);
         }
         require(context, owner.state() == TaskState.RUNNING,
                 "older risk completed before its own observation grace");
 
-        Creeper newer = spawnDisabledCreeper(context, origin.west(5));
         require(context, ObservableWorldQuery.canObserveEntity(bot, newer),
                 "second-risk fixture was not factually observable");
         owner.tick(bot);
@@ -179,6 +203,8 @@ public final class CreeperDefenseGameTests {
                         + " independently reached grace and physical clearance: "
                         + owner.describe() + " state=" + owner.state());
         finish(context, bot, "CreeperAllRiskGraceGT");
+        });
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_lateral_oscillation_cannot_reset_away_progress", maxTicks = 60)
@@ -221,13 +247,15 @@ public final class CreeperDefenseGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_two_legal_blocks_complete_core_and_hold_without_side_material", maxTicks = 60)
+    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_two_legal_blocks_complete_core_and_hold_without_side_material", maxTicks = 60 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void twoLegalBlocksCompleteCoreAndHoldWithoutSideMaterial(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperTwoBlockCoreGT", 218);
         BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 2));
         assertStrictCapabilities(context, bot);
         Creeper creeper = spawnDisabledCreeper(context, origin.east(3));
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(creeper), since -> {
         creeper.ignite();
         creeper.setSwellDir(1);
         // A fuse already past the late threshold leaves no time for a walked step, so the two-high
@@ -263,6 +291,7 @@ public final class CreeperDefenseGameTests {
                         && isPhysicalBarrierCell(bot, wall.above()),
                 "central wall was not maintained during the hidden-pressure hold");
         finish(context, bot, "CreeperTwoBlockCoreGT");
+        });
     }
 
     /**
@@ -309,7 +338,7 @@ public final class CreeperDefenseGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_hidden_creeper_memory_yields_to_non_creeper_low_hp_shelter", maxTicks = 60)
+    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_hidden_creeper_memory_yields_to_non_creeper_low_hp_shelter", maxTicks = 60 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void hiddenCreeperMemoryYieldsToNonCreeperLowHpShelter(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperShelterHandoffGT", 224);
         BlockPos origin = bot.blockPosition().immutable();
@@ -323,6 +352,8 @@ public final class CreeperDefenseGameTests {
         // four-block core-wall boundary so this fixture tests scheduler handoff rather than
         // deliberately teleporting back into an owned placement cell.
         Creeper creeper = spawnDisabledCreeper(context, origin.east(5));
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(creeper), since -> {
         DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task creeperOwner = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, creeperOwner instanceof CreeperDefenseTask
@@ -342,6 +373,13 @@ public final class CreeperDefenseGameTests {
                 "Creeper was not hidden while its owner retained last-seen memory");
 
         Zombie zombie = spawnDisabledZombie(context, origin.west(3));
+        // The zombie strikes the bot (a real blow: the striker is known at once, the bot busy with its creeper memory has no time to turn
+        // and look); the bot is low on health afterwards.
+        if (!bot.connection.hasClientLoaded()) {
+            bot.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket());
+        }
+        require(context, bot.hurtServer(context.getLevel(), context.getLevel().damageSources().mobAttack(zombie), 0.5F),
+                "the zombie's blow on the bot was not real");
         bot.setHealth(4.7F);
         bot.getFoodData().setFoodLevel(17);
         require(context, ObservableWorldQuery.canObserveEntity(bot, zombie)
@@ -362,9 +400,10 @@ public final class CreeperDefenseGameTests {
                         && TaskManager.INSTANCE.pausedDepth(bot) == 1,
                 "SAFETY-to-SAFETY shelter handoff duplicated or replaced the mission frame");
         finish(context, bot, "CreeperShelterHandoffGT", creeper, zombie);
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_non_safety_eat_is_paused_and_resumed_as_exact_instance", maxTicks = 180)
+    @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_non_safety_eat_is_paused_and_resumed_as_exact_instance", maxTicks = 180 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void nonSafetyEatIsPausedAndResumedAsExactInstance(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperEatResumeGT", 230);
         BlockPos origin = bot.blockPosition().immutable();
@@ -376,6 +415,8 @@ public final class CreeperDefenseGameTests {
         TaskManager.INSTANCE.assign(bot, eat,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_non_safety_eat"));
         Creeper creeper = spawnDisabledCreeper(context, origin.east(4));
+        PerceptionFixtures.faceToward(bot, creeper);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(creeper), since -> {
         DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
@@ -426,6 +467,7 @@ public final class CreeperDefenseGameTests {
                         .orElse(false),
                 "resumed EatTask lost its original non-SAFETY origin");
         finish(context, bot, "CreeperEatResumeGT");
+        });
     }
 
     private static AIPlayerEntity spawnArenaBot(GameTestHelper context,

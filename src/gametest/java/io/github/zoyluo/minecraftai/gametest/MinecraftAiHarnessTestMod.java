@@ -21,12 +21,12 @@ public final class MinecraftAiHarnessTestMod implements ModInitializer {
         // MiningAssistRuntime.forceEnable(uuid). An explicit env or file mode still wins. MinecraftAiMod loads
         // the config first (this mod depends on it) and setHarnessDefaultOff re-parses either way.
         MiningAssistRuntime.setHarnessDefaultOff(true);
-        // Likewise realistic perception (docs/PERCEPTION.md): the legacy fixtures spawn a hostile a few blocks away at any angle and
-        // expect the very next scan to react, which is the omnidirectional line of sight (behaviour.perception.enabled=false). The tests
-        // of the perception itself (CompanionPerceptionGameTests) switch it on for their own batch. MINECRAFTAI_HARNESS_PERCEPTION=on
-        // runs any other suite with the realistic perception too (a lane for finding fixtures that assume an omniscient bot).
+        // Realistic perception (docs/PERCEPTION.md) is ON for the whole suite, as in production: a fixture that needs a bot to know a
+        // hostile faces the bot toward it (or lets it make noise / strike it) and waits the reaction time of the shared formula
+        // (PerceptionFixtures). MINECRAFTAI_HARNESS_PERCEPTION=off is an escape for diagnosis only: it runs the suite with the old
+        // omnidirectional line of sight (behaviour.perception.enabled=false), to tell a fixture problem from a product one.
         io.github.zoyluo.minecraftai.perception.CreatureSenses.setHarnessDefaultOff(
-                !"on".equalsIgnoreCase(System.getenv("MINECRAFTAI_HARNESS_PERCEPTION")));
+                "off".equalsIgnoreCase(System.getenv("MINECRAFTAI_HARNESS_PERCEPTION")));
         // Bots must not change how often they scan because a busy test server ticks slowly: a GameTest is counted in ticks, not in
         // milliseconds. A scenario that wants a degraded server forces it for its own bot (TpsGuard.forceDegradedForTests).
         io.github.zoyluo.minecraftai.observe.TpsGuard.setHarnessPinned(true);

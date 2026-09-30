@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import java.util.List;
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -19,7 +21,7 @@ public final class EvadeEscortGameTests {
     private static final String ENV = "minecraftai-gametest:evade_escort_game_tests_";
     private static final double MOVING = 0.03D;
 
-    @GameTest(environment = ENV + "retreat_swings_only_at_what_is_in_melee_range", maxTicks = 260)
+    @GameTest(environment = ENV + "retreat_swings_only_at_what_is_in_melee_range", maxTicks = 260 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void retreatSwingsOnlyAtWhatIsInMeleeRange(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 40, 12);
         AIPlayerEntity bot = f.bot("EeEscort", -6, 0, false);
@@ -29,6 +31,8 @@ public final class EvadeEscortGameTests {
         // Beside the way east, inside reach while the bot passes; and one far off to the side, which must be left alone.
         Zombie beside = f.zombie(-2.0D, 2.0D, true);
         Zombie far = f.zombie(-2.0D, 9.0D, true);
+        PerceptionFixtures.faceToward(bot, beside);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(beside), since -> {
         EvadeTask evade = new EvadeTask(new Threat(Threat.Type.HOSTILE, Threat.Severity.HIGH, source, source.blockPosition()));
         TaskManager.INSTANCE.assign(bot, evade, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_evade_escort"));
         int[] tick = {0};
@@ -37,7 +41,7 @@ public final class EvadeEscortGameTests {
         int[] excludeUntil = {0};
         int[] checked = {0};
         double startX = bot.getX();
-        context.failIfEver(() -> {
+        PerceptionFixtures.everyTick(context, () -> {
             int now = ++tick[0];
             f.require(evade.state() != TaskState.FAILED, "the evade failed: " + evade.failureReason());
             Vec3 here = bot.position();
@@ -63,6 +67,7 @@ public final class EvadeEscortGameTests {
                 f.require(checked[0] >= 15, "fixture: only " + checked[0] + " moving ticks were checked");
                 f.finish();
             }
+        });
         });
     }
 

@@ -36,7 +36,7 @@ public final class FollowPaceGameTests {
         FollowPaceScenarios.sprintsWhenZombieAggroOnOwner(context, false, "FpL");
     }
 
-    @GameTest(environment = ENV + "follower_sneaks_near_calm_warden", maxTicks = 240)
+    @GameTest(environment = ENV + "follower_sneaks_near_calm_warden", maxTicks = 240 + io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.MAX_WAIT_TICKS)
     public void followerSneaksNearCalmWarden(GameTestHelper context) {
         FollowPaceScenarios.sneaksNearCalmWarden(context, false, "FpL");
     }

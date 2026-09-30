@@ -103,6 +103,18 @@ final class ShelterGameTestFixtures {
      * which used to complete every test built on this helper at tick 1, before any assertion ran.
      */
     static void runLocked(GameTestHelper context, Runnable perTick) {
+        runLocked(context, perTick, context::failIfEver);
+    }
+
+    /**
+     * {@link #runLocked} for a scenario that starts inside a tick callback (after the bot noticed its threat, see
+     * {@code PerceptionFixtures.afterNoticed}): its per-tick check is registered with the fixture's own hook list.
+     */
+    static void runLockedHooked(GameTestHelper context, Runnable perTick) {
+        runLocked(context, perTick, check -> io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.everyTick(context, check));
+    }
+
+    private static void runLocked(GameTestHelper context, Runnable perTick, java.util.function.Consumer<Runnable> register) {
         boolean[] timeLockAcquired = {false};
         boolean[] over = {false};
         GameTestCleanup.whenFinished(context, () -> {
@@ -112,7 +124,7 @@ final class ShelterGameTestFixtures {
                 GameTestTimeLock.release();
             }
         });
-        context.failIfEver(() -> {
+        register.accept(() -> {
             if (over[0]) {
                 return;
             }
