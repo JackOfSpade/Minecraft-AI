@@ -263,26 +263,34 @@ public final class AggroGameTests {
      * blocks), searches for about 10 s (a window of 190 to 215 ticks), gives up, and walks back to within 1.5 blocks of where
      * it started, without ever moving more than 1.5 blocks in one tick (no teleport).
      */
-    @GameTest(environment = ENV + "aggro_search_return", maxTicks = 1500)
+    @GameTest(environment = ENV + "aggro_search_return", maxTicks = 1800)
     public void aggroALostPlayerIsPursuedSearchedForTenSecondsAndTheBotWalksHome(GameTestHelper context) {
         Rig rig = new Rig(context);
-        rig.buildPlatform();
-        sealedCell(rig, 10, 8);
-        rig.createTarget(10.0);
+        rig.buildPlatform(HUNT_ARENA);
+        sealedCell(rig, HUNT_DISTANCE, 8);
+        rig.createTarget(HUNT_DISTANCE);
         Hunt hunt = new Hunt(rig, context);
         context.onEachTick(() -> hunt.tick(false));
     }
 
     /**
+     * Where the hunt scenes happen: the player is noticed 20 blocks away, hides in a sealed cell there, and the search (which
+     * looks up to 12 blocks around the last known position) therefore always ends at least 8 blocks from where the bot
+     * started: the walk home is long enough to be interrupted.
+     */
+    private static final int HUNT_DISTANCE = 20;
+    private static final int HUNT_ARENA = 34;
+
+    /**
      * (e) While the bot walks home the player steps into view again: it chases again; the player hides once more, and the bot
      * still walks back to its FIRST start point (not to where it stood when it noticed the player the second time).
      */
-    @GameTest(environment = ENV + "aggro_resight_return", maxTicks = 2400)
+    @GameTest(environment = ENV + "aggro_resight_return", maxTicks = 3000)
     public void aggroSeeingThePlayerAgainOnTheWayHomeRestartsTheHuntButHomeStaysTheFirstStartPoint(GameTestHelper context) {
         Rig rig = new Rig(context);
-        rig.buildPlatform();
-        sealedCell(rig, 10, 8);
-        rig.createTarget(10.0);
+        rig.buildPlatform(HUNT_ARENA);
+        sealedCell(rig, HUNT_DISTANCE, 8);
+        rig.createTarget(HUNT_DISTANCE);
         Hunt hunt = new Hunt(rig, context);
         context.onEachTick(() -> hunt.tick(true));
     }
@@ -386,7 +394,7 @@ public final class AggroGameTests {
 
         /** The player vanishes into the sealed cell: nobody sees or hears anything in there. */
         void hide() {
-            rig.placeTargetAt(rig.homeX() + 10.0, rig.bot.getY(), rig.homeZ() + 8.0);
+            rig.placeTargetAt(rig.homeX() + HUNT_DISTANCE, rig.bot.getY(), rig.homeZ() + 8.0);
             hiddenAt = context.getTick();
             Rig.LOG.info("[hunt] the player hid at test tick {}; last seen at ({}, {}) relative to the start", hiddenAt,
                     fmt(lkpX - rig.homeX()), fmt(lkpZ - rig.homeZ()));
@@ -396,17 +404,20 @@ public final class AggroGameTests {
             if ((phase.equals("PURSUE") || phase.equals("SEARCH")) && rechased == reappeared) {
                 minLkpDistance = Math.min(minLkpDistance, rig.horizontalTo(lkpX, lkpZ));
             }
-            if (hiddenAt >= 0 && context.getTick() - hiddenAt > 1300) {
+            if (hiddenAt >= 0 && context.getTick() - hiddenAt > 1500) {
                 rig.fail("the hunt did not end: phase " + phase + " " + rig.trace());
             }
-            if (resight && !reappeared && phase.equals("RETURN") && rig.horizontalTo(rig.homeX(), rig.homeZ()) < 6.5) {
-                // the bot walks west toward home: the player steps into view in front of it
-                double px = rig.bot.getX() - 8.0;
-                rig.placeTargetAt(px, rig.bot.getY(), rig.bot.getZ());
+            double toHome = rig.horizontalTo(rig.homeX(), rig.homeZ());
+            if (resight && !reappeared && phase.equals("RETURN") && toHome > 6.0) {
+                // the bot walks toward home: the player steps into view 8 blocks ahead of it, on its way
+                double ux = (rig.homeX() - rig.bot.getX()) / toHome;
+                double uz = (rig.homeZ() - rig.bot.getZ()) / toHome;
+                rig.placeTargetAt(rig.bot.getX() + ux * 8.0, rig.bot.getY(), rig.bot.getZ() + uz * 8.0);
                 reappeared = true;
                 reappearedAt = context.getTick();
                 lastPhase = "?";
-                Rig.LOG.info("[hunt] the player stepped into view at test tick {}, 8 blocks in front of the bot", reappearedAt);
+                Rig.LOG.info("[hunt] the player stepped into view at test tick {}, 8 blocks ahead of the bot, {} from home", reappearedAt,
+                        fmt(toHome));
                 return;
             }
             if (reappeared && !rechased) {
