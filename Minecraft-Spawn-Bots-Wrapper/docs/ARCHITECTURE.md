@@ -35,6 +35,8 @@ dev.spawnbotswrapper.inhabitants
 ├─ profile/                 BotProfile schema, ProfileGenerator, ProfileFormatter, vocabulary
 ├─ spawn/                   position finding + patrol planning     (pure logic over a BlockProbe)
 ├─ catalog/                 SettingCatalog: classification of every PvP BOT setting
+├─ combat/                  the line-of-sight hunter (pure): Perception, ExposureTracker, AggroController, PathPlanner,
+│                           PathFollower, SearchPlanner; combat log ledgers and diagnostics
 ├─ mc/                      Minecraft glue: chunk-event detection, block probe, profile applier, gateways
 ├─ adapter/                 PvpBotAdapter: the ONLY class that references PvP BOT / HeroBot
 └─ command/                 /inhabitants admin and test commands
@@ -136,7 +138,8 @@ remain authoritative once a structure has actually been processed.
 ## 5. What "per bot" can honestly mean
 
 PvP BOT reads every combat and behaviour setting from a global object. The addon changes only the few settings
-listed under `pvpbotSettings` in its config (targeting radius, the archer distances, weapon auto-equip: see
+listed under `pvpbotSettings` in its config (targeting radius, the archer distances, weapon auto-equip, PvP BOT's own
+auto-target, the bow draw time: see
 README, "Managed PvP BOT settings"), through one class (`adapter/UpstreamSettingsWriter`), only when they differ
 and only for the whole server, never per bot ("silently modifying every existing bot" is what the design avoids). The per-bot levers that do exist
 are:
@@ -197,3 +200,18 @@ the profile logic.
 * The abandoned-structure log is append-only and indexed by chunk, so a heavily explored world does not slow
   saving down; only the small set of occupied structures is rewritten.
 * Block inspection never loads or generates a chunk.
+
+## 7. The line-of-sight hunter
+
+`combat.AggroController` is pure decision logic over three ports: `AggroWorld` (inhabitants, players, eyes, look
+direction, stance, occlusion rays, hits taken, candidate search cells), `TargetControl` (PvP BOT's targets and its look /
+move-toward / halt input, implemented by the adapter) and `PathPlanner` (routes as waypoint lists). Everything Minecraft is
+in `mc.AggroDriver` (world view) and `mc.VanillaPathPlanner` (vanilla pathfinding through a detached helper mob that is
+never added to the level); PvP BOT is only ever touched through the adapter. It runs in a Fabric tick phase ordered after
+PvP BOT's own bot tick (`mc.LateTickPhase`) so that its steering is the last input each tick.
+
+The state machine per inhabitant is IDLE -> CHASE -> PURSUE -> SEARCH -> RETURN -> IDLE (plus REACT, the reaction
+delay after a visible hit); see the README for the rules. Time, not distance, is what noticing is made of
+(`Perception` + `ExposureTracker`, shared with Minecraft-AI through `docs/perception/vectors.json`); the only distance limit
+is the mod maximum of 128 blocks. A Baritone-backed `PathPlanner` can replace the vanilla one without touching the state
+machine.
