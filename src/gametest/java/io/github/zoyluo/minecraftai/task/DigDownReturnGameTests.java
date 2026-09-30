@@ -1338,9 +1338,16 @@ public final class DigDownReturnGameTests {
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                List<ItemEntity> drops = world.getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(4.0D),
+                        drop -> drop.isAlive() && drop.getItem().is(Items.COBBLESTONE));
                 context.fail(Component.nullToEmpty("near-budget settlement ended as "
                         + task.state() + ":" + task.failureReason()
-                        + " checkpoint=" + task.checkpoint()));
+                        + " checkpoint=" + task.checkpoint() + " restarted=" + restarted.get()
+                        + " released=" + pickupReleased.get() + " drops_near=" + drops.stream()
+                                .map(drop -> String.format(java.util.Locale.ROOT, "%.2f@%s", drop.distanceTo(bot),
+                                        drop.blockPosition().toShortString()))
+                                .toList()
+                        + " bot=" + bot.position()));
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {

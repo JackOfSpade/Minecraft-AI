@@ -346,6 +346,8 @@ public final class SelfPreservationGameTests {
         net.minecraft.world.entity.monster.zombie.Husk[] husk = {null};
         int[] stage = {0};
         int[] outAt = {-1};
+        // What the bot could know of the husk in the first ticks of stage 1 (for the failure message only).
+        java.util.List<String> firstTicks = new java.util.ArrayList<>();
         context.failIfEver(() -> {
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             require(context, bot.isAlive() && bot.getHealth() > 0.0F, "the burning bot died, stage=" + stage[0]);
@@ -379,9 +381,15 @@ public final class SelfPreservationGameTests {
                         bot.hurtTime = 0;
                         stage[0] = 2;
                     } else {
+                        if (firstTicks.size() < 12) {
+                            firstTicks.add(context.getTick() + ":hp=" + bot.getHealth()
+                                    + ",ticking=" + world.isPositionEntityTicking(husk[0].blockPosition())
+                                    + ",found=" + !world.getEntitiesOfClass(husk[0].getClass(), bot.getBoundingBox().inflate(10.0D)).isEmpty()
+                                    + ",sight=" + bot.hasLineOfSight(husk[0]) + ",active=" + (active == null ? "none" : active.name()));
+                        }
                         require(context, context.getTick() < 200,
                                 "a critical fight never took over from the fire rescue: active="
-                                        + (active == null ? "none" : active.name()));
+                                        + (active == null ? "none" : active.name()) + " first ticks " + firstTicks);
                     }
                 }
                 default -> {
