@@ -14,7 +14,8 @@
     ],
     "fabric-gametest": [
       "dev.spawnbotswrapper.inhabitants.gametest.RangedCombatGameTests",
-      "dev.spawnbotswrapper.inhabitants.gametest.ManagedSettingsGameTests"
+      "dev.spawnbotswrapper.inhabitants.gametest.ManagedSettingsGameTests",
+      "dev.spawnbotswrapper.inhabitants.gametest.CombatLogGameTests"
     ]
   },
   "depends": {

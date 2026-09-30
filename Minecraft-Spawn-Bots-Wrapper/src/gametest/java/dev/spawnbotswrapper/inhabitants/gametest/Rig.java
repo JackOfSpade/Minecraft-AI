@@ -57,6 +57,7 @@ final class Rig {
     String botName;
     private boolean requested;
     private boolean cleaned;
+    private final java.util.List<Runnable> cleanups = new java.util.ArrayList<>();
     /** Unique per scene: the population store remembers a structure key for good, so a reused key would be refused. */
     private final String structureId = "gametest:arena_" + Long.toHexString(System.nanoTime());
 
@@ -73,6 +74,11 @@ final class Rig {
         throw new IllegalStateException(message);
     }
 
+    /** Something to undo when the scene ends (settings a test changed for the whole server). */
+    void onCleanup(Runnable undo) {
+        cleanups.add(undo);
+    }
+
     void succeed() {
         cleanup();
         ctx.succeed();
@@ -87,6 +93,13 @@ final class Rig {
             return;
         }
         cleaned = true;
+        for (Runnable r : cleanups) {
+            try {
+                r.run();
+            } catch (RuntimeException e) {
+                LOG.warn("cleanup step failed: {}", e.toString());
+            }
+        }
         try {
             CommandServices services = InhabitantsMod.servicesOf(server);
             if (services != null && requested) {

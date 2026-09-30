@@ -68,14 +68,17 @@ public final class BotStateProbeMcCases {
         assertTrue(net.minecraft.world.item.CrossbowItem.isCharged(crossbow));
     }
 
-    public static void upstreamTextNamesTheGlobalSwitchesAndSaysTheTargetIsNotReadable() {
+    public static void upstreamTextNamesTheGlobalSwitchesOnlyTheTargetIsReadPerBot() {
         McBootstrap.ensure();
         assertNull(BotStateProbe.upstreamText(null));
         String text = BotStateProbe.upstreamText(
                 dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities.upstreamDefaults());
         assertNotNull(text);
         assertTrue(text.contains("combat=") && text.contains("autoTarget=") && text.contains("ranged="), text);
-        assertTrue(text.contains("target=not-readable"), text);
+        assertFalse(text.contains("target"), text);
+        assertEquals("target=unreadable", BotStateProbe.intentText(java.util.Optional.empty()));
+        assertEquals("target=none mode=MELEE draw=0", BotStateProbe.intentText(java.util.Optional.of(
+                new dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations.CombatView(null, "MELEE", false, 0))));
         // the snapshot type accepts it and prints it
         StateSnapshot s = new StateSnapshot(0, "empty", null, "empty", false, "none", 0, 0, 0, 0, false, false,
                 false, null, -1, null, true, false, false, text);

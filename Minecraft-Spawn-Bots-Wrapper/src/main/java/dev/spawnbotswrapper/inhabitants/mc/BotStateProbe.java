@@ -1,5 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
+import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
+import dev.spawnbotswrapper.inhabitants.combat.IntentText;
 import dev.spawnbotswrapper.inhabitants.combat.StateSnapshot;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -95,13 +97,28 @@ final class BotStateProbe {
                 || e.level().getBlockState(e.blockPosition().above()).is(Blocks.COBWEB);
     }
 
-    /** PvP BOT's GLOBAL switches (its per-bot target is internal state the adapter does not read). */
+    /** PvP BOT's GLOBAL switches; the per-bot part (target, mode, draw) is {@link #intentText}. */
     static String upstreamText(GlobalCapabilities caps) {
         if (caps == null) {
             return null;
         }
         return "global(combat=" + (caps.combatEnabled() ? 1 : 0) + ",autoTarget=" + (caps.autoTargetEnabled() ? 1 : 0)
-                + ",ranged=" + (caps.rangedEnabled() ? 1 : 0) + ";target=not-readable)";
+                + ",ranged=" + (caps.rangedEnabled() ? 1 : 0) + ")";
+    }
+
+    /** What PvP BOT intends for one bot, from the adapter's read of its combat state; "target=unreadable" when there is none. */
+    static String intentText(java.util.Optional<PvpBotOperations.CombatView> view) {
+        if (view == null || view.isEmpty()) {
+            return IntentText.unreadable();
+        }
+        PvpBotOperations.CombatView v = view.get();
+        return IntentText.of(v.target() == null ? null : entityName(v.target()), v.mode(), v.drawingBow(), v.bowDrawTicks());
+    }
+
+    /** A player's name, else the entity type's registry path. */
+    static String entityName(Entity entity) {
+        return entity instanceof Player p ? p.getName().getString()
+                : BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).getPath();
     }
 
     /**
@@ -121,8 +138,7 @@ final class BotStateProbe {
         double distance = -1;
         Boolean los = null;
         if (other != null) {
-            name = other instanceof Player p ? p.getName().getString()
-                    : BuiltInRegistries.ENTITY_TYPE.getKey(other.getType()).getPath();
+            name = entityName(other);
             distance = bot.distanceTo(other);
             los = bot.hasLineOfSight(other);
         }

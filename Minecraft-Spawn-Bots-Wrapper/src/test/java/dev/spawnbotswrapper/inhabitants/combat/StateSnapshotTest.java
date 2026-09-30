@@ -12,10 +12,10 @@ class StateSnapshotTest {
     void aBotDrawingAnUnloadedCrossbowNextToAPlayer() {
         StateSnapshot s = new StateSnapshot(2, "crossbow", false, "shield", true, "crossbow", 7, 18, 12, 0,
                 true, true, true, "Steve", 2.345, true, true, false, false,
-                "global(combat=1,autoTarget=1,ranged=1;target=not-readable)");
+                "global(combat=1,autoTarget=1,ranged=1) target=Steve mode=RANGED draw=1/12");
         assertEquals("slot=2 main=crossbow(unloaded) off=shield using=crossbow(7/25t) ammo=arrows:12,rockets:0"
                 + " carries=bow,crossbow,melee nearest=Steve@2.3 los=yes ground=1 water=0 web=0"
-                + " pvpbot=global(combat=1,autoTarget=1,ranged=1;target=not-readable)", s.format());
+                + " pvpbot=global(combat=1,autoTarget=1,ranged=1) target=Steve mode=RANGED draw=1/12", s.format());
     }
 
     @Test

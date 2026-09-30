@@ -52,6 +52,16 @@ final class Upstream {
         }
     }
 
+    /** Turns PvP BOT's weapon auto-equip on or off through its public setter (a test that needs the old behaviour back). */
+    static void setAutoEquipWeapon(boolean value) {
+        try {
+            Object settings = settingsObject();
+            settings.getClass().getMethod("setAutoEquipWeapon", boolean.class).invoke(settings, value);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** The settings object itself, to tell a reload (a new object) from a change of values. */
     static Object settingsObject() {
         try {

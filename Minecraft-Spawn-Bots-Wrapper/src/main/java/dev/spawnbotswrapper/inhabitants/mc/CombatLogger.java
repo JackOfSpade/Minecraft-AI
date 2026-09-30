@@ -2,6 +2,8 @@ package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.combat.CombatLedger;
 import dev.spawnbotswrapper.inhabitants.combat.DamageTakenLog;
+import dev.spawnbotswrapper.inhabitants.combat.HitPoller;
+import dev.spawnbotswrapper.inhabitants.combat.IntentText;
 import dev.spawnbotswrapper.inhabitants.combat.RangedCycleDetector;
 import dev.spawnbotswrapper.inhabitants.combat.StateSnapshot;
 import dev.spawnbotswrapper.inhabitants.combat.CombatLedger.Actor;
@@ -10,6 +12,7 @@ import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -41,9 +44,14 @@ import java.util.function.Supplier;
  * own roster ({@code PopulationView.findBot}, the same name index {@link GameMessageFilter} uses); no upstream
  * class is consulted. Any other player is a "player", any non-player entity a "mob".
  * <p>
- * Target acquisition ("bot X targets player Y") is deliberately NOT logged: PvP BOT exposes the current target
- * only through internal state that the adapter does not read, and reading it per bot per tick is not free.
- * The first hit line of a fight shows who engaged whom instead.
+ * Target acquisition ("bot X targets player Y") is deliberately NOT logged as its own line (reading it per bot per
+ * tick is not free); the first hit line of a fight shows who engaged whom, and the state snapshot of the diagnostic
+ * lines carries PvP BOT's current target, mode and draw state, read through the adapter.
+ * <p>
+ * The bot mod's fake player class re-implements the whole vanilla hurt routine, so the Fabric damage event NEVER
+ * fires for an inhabitant, which is why its hits were never logged. Hits on inhabitants are therefore ALSO noticed
+ * by a per-tick poll of the entity's recorded last damage source and health ({@link HitPoller}); the event path
+ * stays for every other case, and a source the event delivered is never counted again.
  * <p>
  * Also writes two diagnostics (see the README, "Diagnostic lines"): one "Combat taken:" line per hit an inhabitant
  * takes, with a {@link StateSnapshot}, and a "ranged loop:" WARN when a bot repeatedly starts and abandons a bow or
@@ -64,6 +72,12 @@ public final class CombatLogger {
     private String upstreamText;
     /** Set after the ranged-loop watcher threw once (logged once): a broken diagnostic must not spam every tick. */
     private boolean rangedWatchBroken;
+    /** Notices hits on inhabitants that the damage event does not deliver (see the class comment). */
+    private final HitPoller hitPoll = new HitPoller();
+    private boolean hitWatchBroken;
+    private long lastHitPrune;
+    /** Selected hotbar slot of each watched bot at the START of the current server tick (see {@link #sampleTickStart}). */
+    private final Map<UUID, Integer> slotAtTickStart = new HashMap<>();
 
     /** Only inhabitants within this many blocks of a real player are watched for the ranged loop. */
     static final double RANGED_WATCH_RADIUS = 32.0;
@@ -83,6 +97,8 @@ public final class CombatLogger {
 
     /** Registers the two Fabric events; call once from the mod entrypoint. */
     public void register() {
+        // The selected slot at the START of a tick, to tell "the slot left the ranged weapon inside the tick" apart.
+        ServerTickEvents.START_SERVER_TICK.register(server -> guarded("tick start", () -> sampleTickStart(server)));
         ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamage, damage, blocked) ->
                 guarded("damage", () -> onDamage(entity, source, baseDamage, damage, blocked)));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) ->
@@ -105,6 +121,16 @@ public final class CombatLogger {
         CombatLedger current = ledger;
         if (current != null) {
             guarded("tick", () -> current.tick(serverTicks));
+        }
+        if (!hitWatchBroken) {
+            try {
+                watchHits(serverTicks);
+            } catch (OutOfMemoryError e) {
+                throw e;
+            } catch (Throwable t) {
+                hitWatchBroken = true;
+                log.warn("hit poll diagnostic failed and is switched off until restart: {}", t.toString());
+            }
         }
         if (!rangedWatchBroken) {
             try {
@@ -129,6 +155,8 @@ public final class CombatLogger {
         taken.reset();
         rangedLoop.reset();
         lastShot.clear();
+        hitPoll.reset();
+        slotAtTickStart.clear();
         upstreamTick = Long.MIN_VALUE;
         if (current != null) {
             guarded("flush", () -> {
@@ -151,6 +179,14 @@ public final class CombatLogger {
     // ------------------------------------------------------------------ events
 
     private void onDamage(LivingEntity victim, DamageSource source, float baseDamage, float damage, boolean blocked) {
+        if (victim instanceof ServerPlayer player) {
+            hitPoll.delivered(player.getUUID(), source);
+        }
+        handleDamage(victim, source, baseDamage, damage, blocked);
+    }
+
+    /** The damage handling proper, shared by the event and by the poll of hits the event never delivers. */
+    private void handleDamage(LivingEntity victim, DamageSource source, float baseDamage, float damage, boolean blocked) {
         Context c = context(victim, source);
         if (c == null) {
             return;
@@ -188,7 +224,7 @@ public final class CombatLogger {
                     .map(loc -> loc.structure().asString()).orElse(null);
         }
         Entity other = attackerEntity != null ? attackerEntity : nearestRealPlayer(bot, services, Double.MAX_VALUE);
-        String snapshot = BotStateProbe.snapshot(bot, other, upstream(services, c.now)).format();
+        String snapshot = BotStateProbe.snapshot(bot, other, upstream(services, bot, c.now)).format();
         String aggro = aggroState.apply(c.victim.name());
         if (aggro != null) {
             snapshot = snapshot + " aggro[" + aggro + "]";
@@ -215,6 +251,20 @@ public final class CombatLogger {
             }
         }
         return upstreamText;
+    }
+
+    /** The global switches (cached) plus what PvP BOT intends for THIS bot (target, mode, draw), read through the adapter. */
+    private String upstream(CommandServices services, ServerPlayer bot, long now) {
+        if (services == null || services.adapter() == null) {
+            return null;
+        }
+        String intent;
+        try {
+            intent = BotStateProbe.intentText(services.adapter().combatView(bot.getName().getString()));
+        } catch (RuntimeException e) {
+            intent = IntentText.unreadable();
+        }
+        return IntentText.join(upstream(services, now), intent);
     }
 
     /** The closest real (non-inhabitant) player in the same level within {@code maxDistance}, or null. */
@@ -289,14 +339,68 @@ public final class CombatLogger {
                     using != null, using == null ? "none" : using, using == null ? 0 : p.getTicksUsingItem(),
                     BotStateProbe.anyCrossbowCharged(p), p.getInventory().getSelectedSlot(),
                     BotStateProbe.itemName(p.getMainHandItem()), lastShot.getOrDefault(p.getUUID(), -1L),
-                    p.distanceTo(near), p.hasLineOfSight(near)));
+                    p.distanceTo(near), p.hasLineOfSight(near), slotAtTickStart.getOrDefault(p.getUUID(), -1)));
             if (alert != null) {
                 log.warn(RangedCycleDetector.line(alert,
-                        BotStateProbe.snapshot(p, near, upstream(services, now)).format()));
+                        BotStateProbe.snapshot(p, near, upstream(services, p, now)).format()));
             }
         }
         if (seen != null) {
             rangedLoop.retainOnly(seen);
+        }
+    }
+
+    /**
+     * Records the selected slot of every bot that is drawing a bow or crossbow (or was just seen doing so) at the START of
+     * the server tick, before PvP BOT or anything else has run in it. Read by the ranged-loop watcher at the END of the
+     * tick to tell that the selection left the ranged weapon inside the tick.
+     */
+    private void sampleTickStart(MinecraftServer server) {
+        slotAtTickStart.clear();
+        if (rangedWatchBroken) {
+            return;
+        }
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            if (BotStateProbe.usedRanged(p) != null || rangedLoop.tracking(p.getName().getString())) {
+                slotAtTickStart.put(p.getUUID(), p.getInventory().getSelectedSlot());
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ hits the damage event does not deliver
+
+    /**
+     * Every server tick: polls each inhabitant's recorded last damage source and health ({@link HitPoller}) and feeds a
+     * hit it finds through the same handling as the damage event. Cheap: real players are skipped by a class-name
+     * check, an inhabitant costs a few field reads.
+     */
+    private void watchHits(long now) {
+        ServerSession current = session.get();
+        CommandServices services = current == null ? null : current.services();
+        if (services == null || services.population() == null || services.adapter() == null) {
+            return;
+        }
+        InhabitantsConfig cfg = services.config().get();
+        if (cfg == null || cfg.combatLog == null || !cfg.combatLog.enabled) {
+            return;
+        }
+        for (ServerPlayer p : current.server().getPlayerList().getPlayers()) {
+            if (!services.adapter().isBotEntity(p) || !isInhabitant(p, services)) {
+                continue;
+            }
+            DamageSource source = p.getLastDamageSource();
+            HitPoller.Hit hit = hitPoll.observe(p.getUUID(), source, p.getHealth() + p.getAbsorptionAmount());
+            if (hit != null) {
+                guarded("damage (poll)", () -> handleDamage(p, source, hit.damage(), hit.damage(), hit.blocked()));
+            }
+        }
+        if (now - lastHitPrune >= 100 || now < lastHitPrune) {
+            lastHitPrune = now;
+            Set<UUID> online = new HashSet<>();
+            for (ServerPlayer p : current.server().getPlayerList().getPlayers()) {
+                online.add(p.getUUID());
+            }
+            hitPoll.retainOnly(online);
         }
     }
 

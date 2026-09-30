@@ -149,15 +149,22 @@ public final class InhabitantsMod implements ModInitializer {
         ServerSession current = session;
         if (current != null && current.server() == server) {
             shared.guard().run("server tick", current::tick);
-            combat.tick(server.getTickCount());
         }
     }
 
+    /**
+     * Everything that runs behind PvP BOT's own end-of-tick work: the aggro range (its walk back is the last input
+     * written), the crossbow trigger (PvP BOT's target, its mode) and the combat diagnostics (the selected slot and
+     * item use it left).
+     */
     private void onLateServerTick(MinecraftServer server) {
         ServerSession current = session;
         if (current != null && current.server() == server) {
             shared.guard().run("aggro range", () -> aggro.tick(server));
-            rangedFire.tick(server);
+        }
+        rangedFire.tick(server);
+        if (current != null && current.server() == server) {
+            combat.tick(server.getTickCount());
         }
     }
 

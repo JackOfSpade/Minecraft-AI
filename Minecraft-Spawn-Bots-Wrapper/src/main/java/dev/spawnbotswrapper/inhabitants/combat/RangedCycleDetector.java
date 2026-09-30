@@ -41,9 +41,19 @@ public final class RangedCycleDetector {
      * @param lastShotTick    tick a projectile owned by this bot last spawned, or -1 for never
      * @param distance        blocks to the nearest real player; negative when unknown
      * @param lineOfSight     line of sight to that player; null when not measured
+     * @param slotAtTickStart selected hotbar slot at the START of this server tick (before anything ran), or -1 when
+     *                        not sampled; a value that differs from the slot the draw started in, while {@code slot}
+     *                        (the END of the tick) is back, shows something moved the selection away from the ranged
+     *                        weapon and back inside the tick
      */
     public record Sample(long tick, boolean usingRanged, String usedItem, int useTicks, boolean crossbowCharged, int slot,
-                         String mainHand, long lastShotTick, double distance, Boolean lineOfSight) {
+                         String mainHand, long lastShotTick, double distance, Boolean lineOfSight, int slotAtTickStart) {
+        /** A sample without the start-of-tick slot (not sampled). */
+        public Sample(long tick, boolean usingRanged, String usedItem, int useTicks, boolean crossbowCharged, int slot,
+                      String mainHand, long lastShotTick, double distance, Boolean lineOfSight) {
+            this(tick, usingRanged, usedItem, useTicks, crossbowCharged, slot, mainHand, lastShotTick, distance,
+                    lineOfSight, -1);
+        }
     }
 
     /** One draw that ended without a shot. */
@@ -161,6 +171,11 @@ public final class RangedCycleDetector {
         List<String> parts = new ArrayList<>();
         if (s.slot() != a.slot) {
             parts.add("slot switch " + a.slot + "->" + s.slot());
+        }
+        if (s.slotAtTickStart() >= 0 && s.slotAtTickStart() != a.slot) {
+            parts.add("selected slot left the ranged weapon inside the tick (slot " + a.slot + " at the draw's start, "
+                    + s.slotAtTickStart() + " at the start of this tick, " + s.slot() + " at its end; likely PvP BOT's "
+                    + "weapon auto-equip)");
         }
         if (!a.mainHand.equals(s.mainHand())) {
             parts.add("main hand " + a.mainHand + "->" + s.mainHand());

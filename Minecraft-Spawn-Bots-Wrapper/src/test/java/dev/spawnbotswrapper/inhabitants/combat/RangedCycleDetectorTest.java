@@ -129,6 +129,55 @@ class RangedCycleDetectorTest {
         assertEquals("stopped with nothing else changed", alert.draws().get(2).why());
     }
 
+    /**
+     * The user's log: draws lasting 1-19 ticks that ended "stopped with nothing else changed" because the selected slot
+     * was moved off the crossbow at the end of the previous tick and put back inside this one, so both samples of the
+     * draw's own ends show the same slot. Sampling the slot at the START of the tick shows the departure.
+     */
+    @Test
+    void aSlotThatLeftTheRangedWeaponInsideTheTickIsNamedAsTheLikelyAutoEquip() {
+        for (int i = 0; i < 8; i++) {
+            d.observe("Bob", using(100 + i, "crossbow", i));
+        }
+        // at the start of tick 108 the selection was on slot 0 (the sword); by its end it is back on the crossbow slot 3
+        Alert none = d.observe("Bob", new Sample(108, false, "none", 0, false, 3, "crossbow", -1, 4.0, true, 0));
+        assertNull(none);
+        for (int i = 0; i < 8; i++) {
+            d.observe("Bob", using(120 + i, "crossbow", i));
+        }
+        d.observe("Bob", new Sample(128, false, "none", 0, false, 3, "crossbow", -1, 4.0, true, 0));
+        for (int i = 0; i < 8; i++) {
+            d.observe("Bob", using(140 + i, "crossbow", i));
+        }
+        Alert alert = d.observe("Bob", new Sample(148, false, "none", 0, false, 3, "crossbow", -1, 4.0, true, 0));
+        assertNotNull(alert);
+        String why = alert.draws().get(0).why();
+        assertTrue(why.contains("selected slot left the ranged weapon inside the tick"), why);
+        assertTrue(why.contains("slot 3 at the draw's start, 0 at the start of this tick, 3 at its end"), why);
+        assertTrue(why.contains("PvP BOT's weapon auto-equip"), why);
+        assertFalse(why.contains("slot switch"), "the end slot equals the start slot, so it is not a plain switch: " + why);
+    }
+
+    @Test
+    void anUnsampledOrUnchangedStartSlotAddsNothing() {
+        for (int i = 0; i < 8; i++) {
+            d.observe("Bob", using(100 + i, "crossbow", i));
+        }
+        d.observe("Bob", new Sample(108, false, "none", 0, false, 3, "crossbow", -1, 4.0, true, 3));
+        for (int i = 0; i < 8; i++) {
+            d.observe("Bob", using(120 + i, "crossbow", i));
+        }
+        d.observe("Bob", new Sample(128, false, "none", 0, false, 3, "crossbow", -1, 4.0, true, -1));
+        for (int i = 0; i < 8; i++) {
+            d.observe("Bob", using(140 + i, "crossbow", i));
+        }
+        Alert alert = d.observe("Bob", idle(148));
+        assertNotNull(alert);
+        for (RangedCycleDetector.Aborted draw : alert.draws()) {
+            assertEquals("stopped with nothing else changed", draw.why());
+        }
+    }
+
     @Test
     void aTargetThatMovedAwayAndOneThatVanishedAreNamed() {
         for (int i = 0; i < 4; i++) {

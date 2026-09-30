@@ -414,8 +414,8 @@ exist to find a bot that misbehaves in a fight, for example one that "starts to 
 half-way, starts again and never attacks":
 
 ```
-Combat taken: DuskRaven (inhabitant of minecraft:overworld|shipwreck|4,-7) took 4.0 damage from Steve (player) via player_attack with iron_sword; DuskRaven health now 16.0 at 10.5 64.0 -3.3 in minecraft:overworld | state: slot=2 main=crossbow(unloaded) off=shield using=crossbow(7/25t) ammo=arrows:12,rockets:0 carries=bow,crossbow,melee nearest=Steve@2.3 los=yes ground=1 water=0 web=0 pvpbot=global(combat=1,autoTarget=1,ranged=1;target=not-readable)
-ranged loop: DuskRaven aborted 3 bow/crossbow draws in 10 s | draws: crossbow started t1200 lasted 12 ticks, ended: slot switch 2->0, main hand crossbow->iron_sword; ... | ticks between a stop and the next start: 3,4 | state: ...
+Combat taken: DuskRaven (inhabitant of minecraft:overworld|shipwreck|4,-7) took 4.0 damage from Steve (player) via player with iron_sword; DuskRaven health now 16.0 at 10.5 64.0 -3.3 in minecraft:overworld | state: slot=2 main=crossbow(unloaded) off=shield using=crossbow(7/25t) ammo=arrows:12,rockets:0 carries=bow,crossbow,melee nearest=Steve@2.3 los=yes ground=1 water=0 web=0 pvpbot=global(combat=1,autoTarget=1,ranged=1) target=Steve mode=RANGED draw=1/7
+ranged loop: DuskRaven aborted 3 bow/crossbow draws in 10 s | draws: crossbow started t1200 lasted 12 ticks, ended: selected slot left the ranged weapon inside the tick (slot 2 at the draw's start, 0 at the start of this tick, 2 at its end; likely PvP BOT's weapon auto-equip); ... | ticks between a stop and the next start: 3,4 | state: ...
 ```
 
 * **`Combat taken:`** (INFO) one line per hit an inhabitant takes: who hit it (player name, mob type, or another
@@ -427,13 +427,23 @@ ranged loop: DuskRaven aborted 3 bow/crossbow draws in 10 s | draws: crossbow st
   `charged`/`unloaded`), off hand, the item in use with use ticks so far/total, arrows and firework rockets carried,
   which of bow/crossbow/melee weapon it carries, the attacker (else the nearest real player) with distance and an
   eye-to-eye line of sight, on ground / in water / in a cobweb, and PvP BOT's GLOBAL switches (combat, auto-target,
-  ranged). PvP BOT's per-bot current target is internal state the adapter does not read, so it is reported as
-  `target=not-readable` rather than guessed.
+  ranged), followed by what PvP BOT intends for THIS bot, read through the adapter: `target=Steve` (its current
+  target, `none`, or `unreadable` when PvP BOT does not list the bot or a name is missing upstream), `mode=RANGED`
+  (its weapon mode) and `draw=1/7` (it believes it is drawing, for 7 ticks; `draw=0` when not).
 * **`ranged loop:`** (WARN) for inhabitants within 32 blocks of a real player, every bow or crossbow draw is tracked;
   a draw is aborted when it ends with no projectile shot (an arrow owned by the bot spawning counts as a shot; a
   crossbow ending loaded counts as completed). Three or more aborted draws inside 10 s produce one line with each
   draw's length, what changed when it stopped (slot switch, main-hand item, line of sight lost, target moved or
-  vanished, use restarted) and the ticks between a stop and the next start; at most one such line per bot per 30 s.
+  vanished, use restarted, and "selected slot left the ranged weapon inside the tick" when the hotbar selection, sampled
+  at the START and at the END of the server tick, was moved off the bow or crossbow and back within one tick, which is
+  the signature of PvP BOT's weapon auto-equip, see `pvpbotSettings`) and the ticks between a stop and the next
+  start; at most one such line per bot per 30 s.
+* **Why hits on inhabitants were never logged before:** the bot mod's fake player class re-implements the whole vanilla
+  hurt routine, so the Fabric damage event (which the combat log listens to) never fires for an inhabitant; only
+  deaths and hits on OTHER players were seen. Inhabitants are now also polled once per tick (recorded last damage
+  source plus health), which yields the same `Combat taken:` line and ledger entry; the damage of a hit noticed this
+  way is the health it cost (so 0.0 for a hit that was blocked or fully absorbed), and two hits within one tick are one
+  line with the summed damage.
 
 ## Restart: restored bots patrol and fight at once
 
