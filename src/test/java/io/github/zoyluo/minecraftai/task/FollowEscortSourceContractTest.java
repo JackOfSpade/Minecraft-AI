@@ -42,8 +42,8 @@ final class FollowEscortSourceContractTest {
         assertTrue(escort.contains("CombatCore.canStrikeNow(bot, entity)") && escort.contains("bot.isUsingItem()"));
         assertTrue(escort.contains("CombatCore.hostileTo(bot, entity)")
                         && escort.contains("!CombatCore.isMeleeForbiddenThreat(entity)")
-                        && escort.contains("ObservableWorldQuery.canObserveEntity(bot, entity)"),
-                "the candidates are the bot's own defence targets it can see, never a creeper or a warden");
+                        && escort.contains("ObservableWorldQuery.canNoticeCreature(bot, entity)"),
+                "the candidates are the bot's own defence targets it has noticed, never a creeper or a warden");
         assertFalse(escort.contains("stopMovement") || escort.contains("stopNavigation") || escort.contains("startPathTo")
                         || escort.contains("startApproachTo") || escort.contains("startWalkTo"),
                 "the escort never stops or redirects the follow");

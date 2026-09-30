@@ -21,6 +21,9 @@ public final class BotTickCoordinator {
         boolean runDanger = tick % guard.dangerScanInterval() == 0;
         boolean runBackground = tick % guard.scanInterval() == 0;
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
+            // Realistic perception (docs/PERCEPTION.md): what this bot has noticed, read once per tick before anything asks. It never
+            // consumes the tick and never throws.
+            io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.tickBot(server, bot);
             // SAFE-1: the environmental safety net runs first; if the bot is currently self-rescuing (drowning/lava), it takes over this tick, skipping the other checks.
             if (NavSafetyNet.INSTANCE.tickBot(server, bot)) {
                 continue;
@@ -44,5 +47,7 @@ public final class BotTickCoordinator {
                 }
             }
         }
+        // A bot that is gone (despawned, unloaded) leaves no vibration listener and no memory behind.
+        io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.endTick(AIPlayerManager.INSTANCE.all());
     }
 }

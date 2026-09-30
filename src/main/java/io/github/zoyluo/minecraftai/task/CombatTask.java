@@ -21,10 +21,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.entity.monster.skeleton.AbstractSkeleton;
 import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
@@ -80,7 +80,7 @@ public final class CombatTask extends AbstractTask {
     private static final int BLOCKED_SHOT_HOLD_LIMIT = 60;
     /** After a shot stayed blocked this long, the ranged weapon stays out of the plan this many ticks. */
     private static final int RANGED_SUPPRESS_TICKS = 200;
-    /** Peek cycles in a row whose shot a friend on the line of fire held back, before the ranged weapon is given up. */
+    /** Peek cycles in a row whose shot a friend on the line of fire (or the lack of a clear line) held back, before the ranged weapon is given up. */
     private static final int FRIENDLY_PEEK_LIMIT = 3;
     /** A warden's flight must clear its sonic boom range, not the generic six-block retreat step. */
     private static final int WARDEN_RETREAT_STEP_DISTANCE = CombatCore.WARDEN_ESCAPE_DISTANCE;
@@ -123,6 +123,10 @@ public final class CombatTask extends AbstractTask {
     private int blockedShotTicks;
     /** Consecutive peeks that ended with a friend on the line of fire (the drawn bow was kept, not shot). */
     private int friendlyBlockedPeeks;
+    /** Consecutive peeks that ended with no clear line to the target ("no_line_of_sight": the drawn weapon was kept, not shot). */
+    private int sightBlockedPeeks;
+    /** Consecutive strikes whose crosshair held the target's (non-hostile or unreachable) mount instead of the target. */
+    private int mountBlockedTicks;
     private BlockPos peekHideSpot;
     private BlockPos peekCoverFeet;
     private BlockPos peekExposeSpot;
@@ -209,6 +213,8 @@ public final class CombatTask extends AbstractTask {
         peekThreatsAtLastPeek = 0;
         blockedShotTicks = 0;
         friendlyBlockedPeeks = 0;
+        sightBlockedPeeks = 0;
+        mountBlockedTicks = 0;
     }
 
     /**
@@ -384,26 +390,27 @@ public final class CombatTask extends AbstractTask {
     }
 
     /**
-     * An observed skeleton that is visibly drawing a bow at the bot: its use pose is synced, its
-     * bow has been up long enough for the arrow to be imminent, and its head is aimed at the bot.
-     * Crossbows (a charged shot is held for a long time) and trident throwers are excluded by the
-     * bow check. Decided only on synced pose and head aim, never on the mob's hidden target.
+     * A noticed hostile shooter that visibly has its ranged weapon up at the bot: its use pose is synced, its bow (or crossbow) has
+     * been up long enough for the shot to be imminent, or its crossbow is loaded, and its head is aimed at the bot. The shooter side
+     * is weapon-neutral ({@link CombatCore#isRangedWeaponUp}): a skeleton's bow, a pillager's or a foreign bot's crossbow count
+     * the same; trident throwers stay out. Decided only on synced pose, held item and head aim, never on the mob's hidden target.
      */
     static LivingEntity nearbyDrawingShooter(AIPlayerEntity bot) {
-        return bot.level().getEntitiesOfClass(AbstractSkeleton.class,
+        return bot.level().getEntitiesOfClass(LivingEntity.class,
                         bot.getBoundingBox().inflate(SHOOTER_DRAW_RANGE),
-                        skeleton -> skeleton.isAlive()
-                                && ObservableWorldQuery.canObserveEntity(bot, skeleton)
-                                && isDrawingBowAt(skeleton, bot))
+                        shooter -> shooter != bot
+                                && shooter.isAlive()
+                                && CombatCore.hostileTo(bot, shooter)
+                                && ObservableWorldQuery.canNoticeCreature(bot, shooter)
+                                && isDrawingBowAt(shooter, bot))
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .orElse(null);
     }
 
+    /** True when {@code shooter} has a bow (or crossbow) up and its head is aimed at {@code bot}: see {@link #nearbyDrawingShooter}. */
     static boolean isDrawingBowAt(LivingEntity shooter, AIPlayerEntity bot) {
-        if (!shooter.isUsingItem()
-                || !shooter.getUseItem().is(Items.BOW)
-                || shooter.getTicksUsingItem() < SHOOTER_DRAW_TICKS) {
+        if (!CombatCore.isRangedWeaponUp(shooter, SHOOTER_DRAW_TICKS)) {
             return false;
         }
         Vec3 toBot = bot.getEyePosition().subtract(shooter.getEyePosition());
@@ -417,7 +424,7 @@ public final class CombatTask extends AbstractTask {
         return bot.level().getEntitiesOfClass(Creeper.class,
                         bot.getBoundingBox().inflate(SHIELD_CREEPER_FUSE_RANGE),
                         creeper -> creeper.isAlive()
-                                && ObservableWorldQuery.canObserveEntity(bot, creeper)
+                                && ObservableWorldQuery.canNoticeCreature(bot, creeper)
                                 && creeper.getSwelling(1.0F) >= SHIELD_CREEPER_FUSE_THRESHOLD)
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
@@ -553,6 +560,7 @@ public final class CombatTask extends AbstractTask {
     private void giveUpRangedForBlockedShot(AIPlayerEntity bot, String reason) {
         blockedShotTicks = 0;
         friendlyBlockedPeeks = 0;
+        sightBlockedPeeks = 0;
         rangedSuppressedUntil = elapsed + RANGED_SUPPRESS_TICKS;
         BotLog.action(bot, "ranged_suppressed", "reason", reason,
                 "until", rangedSuppressedUntil);
@@ -598,17 +606,51 @@ public final class CombatTask extends AbstractTask {
                 // The hit itself may have consumed the final point of durability. Equip the physical
                 // successor in the same task tick instead of allowing logged empty-hand attacks.
                 CombatCore.ensureMeleeWeapon(bot, target);
+                mountBlockedTicks = 0;
                 if (shouldBlock(bot)) {
                     beginBlock(bot);
                 } else {
                     repositionTicks = 8;
                     phase = Phase.REPOSITION;
                 }
+            } else {
+                handleMountInTheWay(bot);
             }
             return;
         }
         if (shouldBlock(bot)) {
             beginBlock(bot);
+        }
+    }
+
+    /** Ticks a strike may keep landing on the target's mount before the bot changes its angle. */
+    private static final int MOUNT_BLOCKED_LIMIT = 6;
+
+    /**
+     * A ready, legal strike that did not land because the bot's crosshair holds the target's MOUNT or vehicle, nearer than the target
+     * (a rider on a horse, a spider jockey): a human would hit the mount, and so does the bot, never through it
+     * ({@link InteractAction#mountInTheWay}). A mount that is itself a legal hostile becomes the target; any other mount (a horse
+     * that is nobody's enemy) is walked around: after a few ticks the bot strafes to another angle (REPOSITION), where the ray to
+     * the rider may clear the mount.
+     */
+    private void handleMountInTheWay(AIPlayerEntity bot) {
+        Entity mount = InteractAction.mountInTheWay(bot, target);
+        if (mount == null) {
+            mountBlockedTicks = 0;
+            return;
+        }
+        if (mount instanceof LivingEntity living && living.isAlive() && CombatCore.hostileTo(bot, living)
+                && !CombatCore.isMeleeForbiddenThreat(living) && !CombatCore.isFriendly(bot, living)) {
+            BotLog.action(bot, "combat_target_switched_to_mount", "mount", mount.getType(), "rider", target.getType());
+            target = living;
+            mountBlockedTicks = 0;
+            return;
+        }
+        if (++mountBlockedTicks > MOUNT_BLOCKED_LIMIT) {
+            mountBlockedTicks = 0;
+            BotLog.action(bot, "combat_mount_in_the_way", "mount", mount.getType(), "rider", target.getType());
+            repositionTicks = 8;
+            phase = Phase.REPOSITION;
         }
     }
 
@@ -875,7 +917,7 @@ public final class CombatTask extends AbstractTask {
     private static boolean isObservablePressure(AIPlayerEntity bot, LivingEntity entity) {
         return entity != null
                 && entity.isAlive()
-                && ObservableWorldQuery.canObserveEntity(bot, entity)
+                && ObservableWorldQuery.canNoticeCreature(bot, entity)
                 && CombatCore.hasLineOfSight(bot, entity);
     }
 
@@ -963,7 +1005,7 @@ public final class CombatTask extends AbstractTask {
         double distance = bot.distanceTo(target);
         if (distance <= RANGED_MELEE_SWITCH_DISTANCE
                 || distance > SEARCH_RANGE
-                || !ObservableWorldQuery.canObserveEntity(bot, target)
+                || !ObservableWorldQuery.canNoticeCreature(bot, target)
                 || !CombatCore.hasLineOfSight(bot, target)) {
             return false;
         }
@@ -1254,8 +1296,16 @@ public final class CombatTask extends AbstractTask {
                     giveUpRangedForBlockedShot(bot, refusal);
                     return;
                 }
+            } else if ("no_line_of_sight".equals(refusal)) {
+                // No clear line from the exposed cell either: counted like a friend on the line, or expose, refuse and hide would
+                // repeat for ever. Past the same limit the ranged weapon is given up and the fight goes on in melee.
+                if (++sightBlockedPeeks > FRIENDLY_PEEK_LIMIT) {
+                    giveUpRangedForBlockedShot(bot, refusal);
+                    return;
+                }
             } else if (refusal == null) {
                 friendlyBlockedPeeks = 0;
+                sightBlockedPeeks = 0;
                 if (aimed && RangedWeapon.shoot(bot)) {
                     BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
                 }

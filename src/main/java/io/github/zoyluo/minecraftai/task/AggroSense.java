@@ -169,7 +169,7 @@ public final class AggroSense {
                 if (entity instanceof Warden warden && !WardenState.isHunting(warden, victims, now)) {
                     continue; // a calm warden is no aggressor (and its distance history is not kept)
                 }
-                if (!CombatCore.hostileTo(bot, entity) || !ObservableWorldQuery.canObserveEntity(bot, entity)) {
+                if (!CombatCore.hostileTo(bot, entity) || !ObservableWorldQuery.canNoticeCreature(bot, entity)) {
                     continue;
                 }
                 seen.add(entity.getId());
@@ -279,8 +279,12 @@ public final class AggroSense {
         return reference != null && reference.distance() - nearestDistance >= CLOSING_DROP;
     }
 
+    /**
+     * A bow drawn, a crossbow being charged, or a loaded crossbow held, aimed at a victim: weapon-neutral
+     * ({@link CombatCore#isRangedWeaponUp}), the same recipe as {@code CombatTask.isDrawingBowAt}.
+     */
     private static boolean isDrawingBowAtAny(LivingEntity shooter, List<LivingEntity> victims) {
-        if (!shooter.isUsingItem() || !shooter.getUseItem().is(Items.BOW) || shooter.getTicksUsingItem() < DRAW_TICKS) {
+        if (!CombatCore.isRangedWeaponUp(shooter, DRAW_TICKS)) {
             return false;
         }
         for (LivingEntity victim : victims) {

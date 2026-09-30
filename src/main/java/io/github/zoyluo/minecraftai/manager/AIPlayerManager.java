@@ -238,6 +238,8 @@ public final class AIPlayerManager {
         RuntimeLifecycleCoordinator.INSTANCE.deleteBot(entity);
         players.remove(entity.getUUID());
         io.github.zoyluo.minecraftai.task.SharedVision.forget(entity.getUUID());
+        // The bot's vibration listener leaves the level's registry with it (and its memory of what it noticed is dropped).
+        io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.forget(entity.getUUID());
         nameIndex.remove(normalizeName(name));
         skinIndices.remove(entity.getUUID());
         clearOwner(entity.getUUID());

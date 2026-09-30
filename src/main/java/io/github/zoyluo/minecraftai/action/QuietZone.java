@@ -114,7 +114,7 @@ public final class QuietZone {
         List<LivingEntity> victims = victims(bot);
         for (Warden warden : wardens) {
             if (bot.distanceTo(warden) <= range
-                    && ObservableWorldQuery.canObserveEntityWithin(bot, warden, (int) WARDEN_SCAN_RANGE)
+                    && ObservableWorldQuery.canNoticeCreatureWithin(bot, warden, (int) WARDEN_SCAN_RANGE)
                     && !WardenState.isHunting(warden, victims, now)) {
                 return true;
             }
@@ -154,7 +154,7 @@ public final class QuietZone {
         }
         List<LivingEntity> victims = victims(bot);
         for (Warden warden : wardens) {
-            if (!warden.isAlive() || !ObservableWorldQuery.canObserveEntityWithin(bot, warden, (int) WARDEN_SCAN_RANGE)) {
+            if (!warden.isAlive() || !ObservableWorldQuery.canNoticeCreatureWithin(bot, warden, (int) WARDEN_SCAN_RANGE)) {
                 continue;
             }
             double distance = bot.distanceTo(warden);

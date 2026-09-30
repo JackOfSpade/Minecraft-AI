@@ -211,7 +211,7 @@ public final class DiagnosticLogger {
             AABB box = bot.getBoundingBox().inflate(24.0D);
             List<LivingEntity> ents = bot.level().getEntitiesOfClass(
                     LivingEntity.class, box,
-                    e -> e.isAlive() && e != bot && ObservableWorldQuery.canObserveEntity(bot, e));
+                    e -> e.isAlive() && e != bot && ObservableWorldQuery.canNoticeCreature(bot, e));
             int animals = 0;
             int hostiles = 0;
             LivingEntity nearAnimal = null;

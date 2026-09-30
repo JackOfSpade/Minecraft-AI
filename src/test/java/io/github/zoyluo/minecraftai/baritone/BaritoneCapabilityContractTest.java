@@ -57,7 +57,7 @@ class BaritoneCapabilityContractTest {
     @Test
     void mobAvoidanceReadsOnlyTheObservedEntities() throws IOException {
         String context = read("baritone/ServerPlayerContext.java");
-        assertTrue(context.contains("ObservableWorldQuery.canObserveEntity(self, mob)"), "a mob enters the list only when the bot observes it");
+        assertTrue(context.contains("ObservableWorldQuery.canNoticeCreature(self, mob)"), "a mob enters the list only when the bot has noticed it (realistic perception)");
         assertTrue(context.contains("mob instanceof Enemy"), "hostile mobs only");
         String driver = read("baritone/BaritoneDriver.java");
         assertTrue(driver.contains("BaritoneWaterFall.recover(bot, entry)"), "left-behind water is taken back by the driver");

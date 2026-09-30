@@ -24,6 +24,11 @@ public final class InteractAction {
      * per-tick turn budget, shared with the caller's own look), and only lands when the target is then the entity under the
      * bot's crosshair (vanilla's pick along its real look vector within its vanilla attack range). While the bot is still
      * turning the strike fails with {@code not_under_crosshair}; a caller that strikes every tick simply tries again.
+     *
+     * <p>A MOUNT IN THE WAY: when the target rides something (a horse, a boat, a spider under its jockey) and that vehicle is nearer
+     * on the crosshair ray, the crosshair holds the vehicle and the strike stays {@code not_under_crosshair}: a human would hit the
+     * mount, and the bot never strikes THROUGH it. {@link #mountInTheWay} names that vehicle so the caller can switch to it when it is a
+     * legal hostile ({@code CombatTask}, {@code AttackEntityTask}) or change its angle.
      */
     public static ActionResult attackEntity(AIPlayerEntity player, Entity target) {
         String refusal = StrikeLegality.strikeRefusal(player, target);
@@ -44,6 +49,24 @@ public final class InteractAction {
         BotLog.action(player, "attack", "target_type", target.getType(), "target_id", target.getId(),
                 "target_hp", target instanceof net.minecraft.world.entity.LivingEntity living ? living.getHealth() : -1.0F);
         return ActionResult.SUCCESS;
+    }
+
+    /**
+     * The mount or vehicle of {@code target} that the bot's crosshair holds instead of {@code target} (it is nearer on the ray), or
+     * null when the crosshair holds nothing of the kind: the reason a legal, aimed strike on a rider does not land. It only reads what
+     * the bot's own crosshair picks (vanilla's pick along the real look vector), never a hidden state.
+     */
+    public static Entity mountInTheWay(AIPlayerEntity player, Entity target) {
+        Entity under = HumanAim.crosshairEntity(player);
+        if (under == null || under == target) {
+            return null;
+        }
+        for (Entity vehicle = target.getVehicle(); vehicle != null; vehicle = vehicle.getVehicle()) {
+            if (vehicle == under) {
+                return under;
+            }
+        }
+        return null;
     }
 
     public static ActionResult useItemOnEntity(AIPlayerEntity player, Entity target, InteractionHand hand) {

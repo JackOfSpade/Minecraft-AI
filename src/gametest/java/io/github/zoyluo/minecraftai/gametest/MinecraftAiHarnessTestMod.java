@@ -16,6 +16,12 @@ public final class MinecraftAiHarnessTestMod implements ModInitializer {
         // MiningAssistRuntime.forceEnable(uuid). An explicit env or file mode still wins. MinecraftAiMod loads
         // the config first (this mod depends on it) and setHarnessDefaultOff re-parses either way.
         MiningAssistRuntime.setHarnessDefaultOff(true);
+        // Likewise realistic perception (docs/PERCEPTION.md): the legacy fixtures spawn a hostile a few blocks away at any angle and
+        // expect the very next scan to react, which is the omnidirectional line of sight (behaviour.perception.enabled=false). The tests
+        // of the perception itself (CompanionPerceptionGameTests) switch it on for their own batch. MINECRAFTAI_HARNESS_PERCEPTION=on
+        // runs any other suite with the realistic perception too (a lane for finding fixtures that assume an omniscient bot).
+        io.github.zoyluo.minecraftai.perception.CreatureSenses.setHarnessDefaultOff(
+                !"on".equalsIgnoreCase(System.getenv("MINECRAFTAI_HARNESS_PERCEPTION")));
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 dispatcher.register(Commands.literal("minecraftai")
                         .then(MinecraftAiTestSubcommand.build(registryAccess))

@@ -100,7 +100,7 @@ final class FollowEscort {
                         && bot.distanceTo(entity) <= ENGAGED_RANGE
                         && CombatCore.hostileTo(bot, entity)
                         && !CombatCore.isMeleeForbiddenThreat(entity)
-                        && ObservableWorldQuery.canObserveEntity(bot, entity));
+                        && ObservableWorldQuery.canNoticeCreature(bot, entity));
         if (near.isEmpty()) {
             return null;
         }

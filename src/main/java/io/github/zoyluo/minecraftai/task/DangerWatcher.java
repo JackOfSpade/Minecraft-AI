@@ -176,7 +176,7 @@ public final class DangerWatcher {
                     .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(8.0D),
                             entity -> isActiveHostileThreat(bot, entity))
                     .stream()
-                    .filter(entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
+                    .filter(entity -> ObservableWorldQuery.canNoticeCreature(bot, entity))
                     .toList().size();
             AIPlayerManager.INSTANCE.respawnDeadBot(bot);
             // Death-recovery reflex: dropped gear sits at the death point (despawns in 5 minutes); a
@@ -587,7 +587,7 @@ public final class DangerWatcher {
     static boolean shouldFightBeforeRescue(AIPlayerEntity bot, Threat threat) {
         return isHostileBacked(threat)
                 && bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
-                && ObservableWorldQuery.canObserveEntity(bot, threat.entity())
+                && ObservableWorldQuery.canNoticeCreature(bot, threat.entity())
                 && CombatCore.isWithinHostilePressureEnvelope(bot, threat.entity());
     }
 
@@ -1101,7 +1101,7 @@ public final class DangerWatcher {
                     .stream()
                     .filter(e -> isActiveHostileThreat(bot, e))
                     .filter(e -> !CombatCore.isMeleeForbiddenThreat(e))
-                    .filter(e -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, e))
+                    .filter(e -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canNoticeCreature(bot, e))
                     .findFirst().orElse(null);
             if (hostile != null) {
                 BotLog.danger(bot, "trapped_fight_back", "target", hostile.getType().toString());
@@ -1554,7 +1554,7 @@ public final class DangerWatcher {
         if (!isHostileBacked(threat)
                 || isCreeperThreat(threat)
                 || threat.entity() instanceof Warden
-                || !ObservableWorldQuery.canObserveEntity(bot, threat.entity())
+                || !ObservableWorldQuery.canNoticeCreature(bot, threat.entity())
                 || !CombatCore.hasLineOfSight(bot, threat.entity())
                 || !CombatCore.isWithinHostilePressureEnvelope(bot, threat.entity())) {
             return false;

@@ -390,7 +390,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     private LivingEntity observableInitiatingThreat(AIPlayerEntity bot) {
         if (initiatingThreat == null
                 || !DangerWatcher.isActiveHostileThreat(bot, initiatingThreat)
-                || !ObservableWorldQuery.canObserveEntity(bot, initiatingThreat)
+                || !ObservableWorldQuery.canNoticeCreature(bot, initiatingThreat)
                 || !CombatCore.hasLineOfSight(bot, initiatingThreat)) {
             return null;
         }
@@ -865,7 +865,7 @@ public final class EmergencyShelterTask extends AbstractTask {
                         placementBox,
                         entity -> entity != bot
                                 && DangerWatcher.isActiveHostileThreat(bot, entity)
-                                && ObservableWorldQuery.canObserveEntity(bot, entity))
+                                && ObservableWorldQuery.canNoticeCreature(bot, entity))
                 .stream()
                 .filter(entity -> placementBox.intersects(entity.getBoundingBox()))
                 .min(Comparator.comparingDouble(bot::distanceToSqr));
@@ -1253,7 +1253,7 @@ public final class EmergencyShelterTask extends AbstractTask {
                         LivingEntity.class,
                         new AABB(egressFeet).inflate(CombatCore.hostilePressureScanRange()),
                         entity -> DangerWatcher.isActiveHostileThreat(bot, entity)
-                                && ObservableWorldQuery.canObserveEntity(bot, entity)
+                                && ObservableWorldQuery.canNoticeCreature(bot, entity)
                                 && CombatCore.isWithinHostilePressureEnvelope(bot, entity))
                 .size();
     }

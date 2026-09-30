@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonObject;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.FarmAction;
@@ -32,6 +33,7 @@ import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.runtime.IntentControlTransaction;
+import io.github.zoyluo.minecraftai.task.AttackEntityTask;
 import io.github.zoyluo.minecraftai.task.BlueprintLoader;
 import io.github.zoyluo.minecraftai.task.BoardBoatTask;
 import io.github.zoyluo.minecraftai.task.BoatFollowTask;
@@ -728,7 +730,19 @@ public final class ToolRegistry {
                         .min(Comparator.comparingDouble(bot::distanceTo)).orElseThrow();
                 return fail("target_not_strikable: " + StrikeLegality.strikeRefusal(bot, nearest));
             }
-            return result(InteractAction.attackEntity(bot, target.get()));
+            // Human aim: a strike lands only on what is under the bot's crosshair, and the first call only starts the turn. A one-shot
+            // tool call must still work with the bot facing away, so when the ONLY thing missing is the turn the tool starts a short
+            // bounded attack (AttackEntityTask: turn at human speed, strike when under the crosshair, give up after
+            // AttackEntityTask.MAX_TICKS) and says so: the tool result is "started", never a claimed hit; how the attack ended is
+            // the task's own result.
+            ActionResult first = InteractAction.attackEntity(bot, target.get());
+            if (first.isFailed() && InteractAction.NOT_UNDER_CROSSHAIR.equals(first.reason())) {
+                Task attack = new AttackEntityTask(target.get());
+                assignLlm(bot, attack);
+                return ok("attack_started: turning to face " + entityType
+                        + "; the strike lands once it is under the crosshair (within " + AttackEntityTask.MAX_TICKS + " ticks)");
+            }
+            return result(first);
         });
     }
 

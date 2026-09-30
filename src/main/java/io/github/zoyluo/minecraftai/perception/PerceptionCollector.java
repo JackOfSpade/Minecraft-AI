@@ -184,7 +184,7 @@ public final class PerceptionCollector {
     private static List<PerceptionSnapshot.NearbyEntity> collectEntities(AIPlayerEntity bot, ServerLevel world, int radius, int limit) {
         return world.getEntities(bot, bot.getBoundingBox().inflate(radius), entity -> entity instanceof LivingEntity)
                 .stream()
-                .filter(entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
+                .filter(entity -> ObservableWorldQuery.canNoticeCreature(bot, entity))
                 .sorted(Comparator.comparingDouble(bot::distanceTo))
                 .limit(limit)
                 .map(entity -> toNearbyEntity(bot, entity))

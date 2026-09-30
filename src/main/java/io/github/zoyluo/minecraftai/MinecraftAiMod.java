@@ -91,7 +91,11 @@ public class MinecraftAiMod implements ModInitializer {
         // Pace: hostiles after the bot, its owner, the followed player or a Minecraft-AI bot keep it at a sprint (see AggroSense).
         io.github.zoyluo.minecraftai.action.PacePolicy.setDefaultPressureProbe(bot -> io.github.zoyluo.minecraftai.task.AggroSense.snapshot(bot).pressure());
         io.github.zoyluo.minecraftai.task.HostileBotLedger.install();
+        // Realistic perception (docs/PERCEPTION.md): a blow on a bot makes its striker known to it.
+        io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.install();
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            // Every bot's vibration listener leaves the game event registry before the levels close.
+            io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.clearAll();
             io.github.zoyluo.minecraftai.entity.RecentDamage.clear();
             io.github.zoyluo.minecraftai.entity.TeleportAudit.clearAll();
             io.github.zoyluo.minecraftai.task.HostileBotLedger.clearAll();

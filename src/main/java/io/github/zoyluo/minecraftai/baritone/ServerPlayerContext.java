@@ -85,8 +85,8 @@ public final class ServerPlayerContext implements IPlayerContext {
 
     /**
      * The bot itself, the dropped items it can observe (the mine and farm processes look for {@code ItemEntity}s) and, while mob
-     * avoidance is on, the hostile mobs it can observe (Baritone's {@code Avoidance} reads mobs from this list and nowhere else). Observability is the mod's own rule
-     * ({@link ObservableWorldQuery#canObserveEntity}): a strict-survival bot sees what is in range and in line of sight, a
+     * avoidance is on, the hostile mobs it has noticed (Baritone's {@code Avoidance} reads mobs from this list and nowhere else). Observability is the mod's own rule
+     * ({@link ObservableWorldQuery#canObserveEntity} for items, {@link ObservableWorldQuery#canNoticeCreature} for mobs): a strict-survival bot sees what is in range and in line of sight, a
      * bot with the hidden-scan privilege sees everything in range.
      *
      * <p>Called on the server thread this rebuilds the list if it is more than a few ticks old; called from a worker (the mine/farm rescans
@@ -122,11 +122,11 @@ public final class ServerPlayerContext implements IPlayerContext {
         }
         if (BaritoneAPI.getSettings().avoidance.value) {
             // Baritone's mob avoidance (Avoidance#create) reads mobs from this very list, so it can only ever steer around what the
-            // bot observes: a hostile mob in range and in line of sight (canObserveEntity). Hostile only: a cow is not a threat, and
+            // bot observes: a hostile mob in range and in line of sight (canNoticeCreature). Hostile only: a cow is not a threat, and
             // this is the whole cost of the feature (one entity query and a few rays per refresh, only while the bot is driven).
             int range = Math.max(1, MinecraftAiConfig.get().perception().radius());
             for (Mob mob : world().getEntitiesOfClass(Mob.class, self.getBoundingBox().inflate(range), mob -> mob instanceof Enemy && mob.isAlive())) {
-                if (ObservableWorldQuery.canObserveEntity(self, mob)) {
+                if (ObservableWorldQuery.canNoticeCreature(self, mob)) {
                     observed.add(mob);
                 }
             }

@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -121,6 +123,7 @@ public final class HostileBotIntent {
         }
         List<ServerPlayer> aggressors = null;
         List<ServerPlayer> victims = null;
+        List<AIPlayerEntity> observers = null;
         for (ServerPlayer player : players) {
             if (HostileBotLedger.isMarkableForeignBot(player)) {
                 if (aggressors == null) {
@@ -132,6 +135,12 @@ public final class HostileBotIntent {
                     victims = new ArrayList<>(4);
                 }
                 victims.add(player);
+                if (player instanceof AIPlayerEntity bot) {
+                    if (observers == null) {
+                        observers = new ArrayList<>(2);
+                    }
+                    observers.add(bot);
+                }
             }
         }
         if (aggressors == null) {
@@ -150,6 +159,15 @@ public final class HostileBotIntent {
             if (victims == null || !aggressor.isAlive() || aggressor.isSpectator()) {
                 continue;
             }
+            if (!perceived(aggressor, observers)) {
+                // Nobody on the protected side has noticed this player (no bot has seen or heard it, no owner is looking at it): its
+                // intent is not something anyone could witness, so nothing is sampled and the sustained counters start over.
+                for (Pair pair : track.pairs.values()) {
+                    pair.drawTicks = 0;
+                    pair.chargeTicks = 0;
+                }
+                continue;
+            }
             for (ServerPlayer victim : victims) {
                 if (!victim.isAlive() || aggressor.distanceToSqr(victim) > SAMPLE_RANGE * SAMPLE_RANGE) {
                     continue;
@@ -157,6 +175,28 @@ public final class HostileBotIntent {
                 samplePair(aggressor, victim, track.pairs.computeIfAbsent(victim.getUUID(), ignored -> new Pair()), now, swingStart);
             }
         }
+    }
+
+    /**
+     * Whether the protected side can witness {@code aggressor}: some Minecraft-AI bot in the level has NOTICED it (realistic
+     * perception: seen for the reaction time, heard and in view, or struck by it) or its owner is looking at it
+     * ({@link SharedVision#ownerSees}). The sampler reads the aggressor's swing, draw and closing speed, which only a witness could
+     * know, so it is gated on someone noticing it. With perception off everything is sampled, as before.
+     */
+    private static boolean perceived(ServerPlayer aggressor, List<AIPlayerEntity> observers) {
+        if (!CreatureSenses.enabled()) {
+            return true;
+        }
+        if (observers == null) {
+            return false;
+        }
+        for (AIPlayerEntity bot : observers) {
+            if (bot.level() == aggressor.level()
+                    && (CreatureSenses.INSTANCE.noticed(bot, aggressor) || SharedVision.ownerSees(bot, aggressor))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void samplePair(ServerPlayer aggressor, ServerPlayer victim, Pair pair, long now, boolean swingStart) {

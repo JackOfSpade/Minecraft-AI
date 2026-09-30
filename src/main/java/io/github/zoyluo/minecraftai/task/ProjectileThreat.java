@@ -1,7 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.world.entity.Entity;
@@ -33,7 +33,7 @@ public final class ProjectileThreat {
                 bot.getBoundingBox().inflate(SCAN_RANGE),
                 projectile -> projectile.isAlive()
                         && notOwnedByBot(bot, projectile)
-                        && ObservableWorldQuery.canObserveEntity(bot, projectile));
+                        && CreatureSenses.INSTANCE.noticedProjectile(bot, projectile));
         Incoming best = null;
         for (AbstractArrow projectile : candidates) {
             Double ticks = ticksToClosestApproach(

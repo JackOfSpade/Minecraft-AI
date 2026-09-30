@@ -23,11 +23,11 @@ class CreeperDefenseSourceContractTest {
         int scan = source.indexOf("private static List<VisibleCreeper>"
                 + " observableCreeperSnapshots");
         int observable = source.indexOf(
-                "entity -> ObservableWorldQuery.canObserveEntity(bot, entity)", scan);
+                "entity -> ObservableWorldQuery.canNoticeCreature(bot, entity)", scan);
         int fuse = source.indexOf("entity.getSwelling(1.0F)", observable);
         int charged = source.indexOf("entity.isPowered()", fuse);
         assertTrue(scan >= 0 && observable > scan && fuse > observable && charged > fuse,
-                "fuse/charged facts must be read only after exact entity observation");
+                "fuse/charged facts must be read only after the creeper is noticed (exact entity observation)");
         assertFalse(source.contains("getEntities("),
                 "wall admission must not discover hidden entity occupancy");
     }

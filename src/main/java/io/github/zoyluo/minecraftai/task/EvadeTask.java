@@ -274,7 +274,7 @@ public final class EvadeTask extends AbstractTask {
     /** Where the flight runs from: the observed source, else where it was last seen; null when there is no spatial direction to flee. */
     private BlockPos runAwaySource(AIPlayerEntity bot, LivingEntity source) {
         BlockPos from = null;
-        if (source != null && source.isAlive() && ObservableWorldQuery.canObserveEntity(bot, source)) {
+        if (source != null && source.isAlive() && ObservableWorldQuery.canNoticeCreature(bot, source)) {
             from = source.blockPosition();
         } else if (threat.pos() != null) {
             from = threat.pos();
@@ -323,7 +323,7 @@ public final class EvadeTask extends AbstractTask {
         Vec3 away = new Vec3(1.0D, 0.0D, 0.0D);
         if (source != null
                 && source.isAlive()
-                && ObservableWorldQuery.canObserveEntity(bot, source)) {
+                && ObservableWorldQuery.canNoticeCreature(bot, source)) {
             away = bot.position().subtract(source.position());
         } else if (rememberedSource != null) {
             away = bot.position().subtract(Vec3.atCenterOf(rememberedSource));
@@ -420,7 +420,7 @@ public final class EvadeTask extends AbstractTask {
         LivingEntity source = threat.entity();
         if (source == null
                 || !DangerWatcher.isActiveHostileThreat(bot, source)
-                || !ObservableWorldQuery.canObserveEntity(bot, source)) {
+                || !ObservableWorldQuery.canNoticeCreature(bot, source)) {
             return false;
         }
         // Creepers are never a melee target and can close the ordinary ten-block contact envelope

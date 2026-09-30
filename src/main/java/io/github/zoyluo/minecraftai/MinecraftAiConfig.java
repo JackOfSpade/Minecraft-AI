@@ -682,15 +682,21 @@ public record MinecraftAiConfig(
      * same defaults. Every section is null-tolerant: a missing section, key or Boolean is the default, a number that is missing,
      * zero, negative or NaN is the default. See docs/OPERATING_PROFILES.md ("Behaviour switches").
      */
-    public record Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden, CombatBehaviour combat) {
-        /** Source-compatible constructor for callers that predate the combat section: it carries the combat defaults. */
+    public record Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden, CombatBehaviour combat,
+                            PerceptionBehaviour perception) {
+        /** Source-compatible constructor for callers that predate the combat section: it carries the combat and perception defaults. */
         public Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden) {
-            this(pace, targeting, gear, follow, warden, CombatBehaviour.defaults());
+            this(pace, targeting, gear, follow, warden, CombatBehaviour.defaults(), PerceptionBehaviour.defaults());
+        }
+
+        /** Source-compatible constructor for callers that predate the perception section: it carries the perception defaults. */
+        public Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden, CombatBehaviour combat) {
+            this(pace, targeting, gear, follow, warden, combat, PerceptionBehaviour.defaults());
         }
 
         public static Behaviour defaults() {
             return new Behaviour(Pace.defaults(), Targeting.defaults(), Gear.defaults(), Follow.defaults(), Warden.defaults(),
-                    CombatBehaviour.defaults());
+                    CombatBehaviour.defaults(), PerceptionBehaviour.defaults());
         }
 
         Behaviour withDefaults(Behaviour defaults) {
@@ -700,7 +706,8 @@ public record MinecraftAiConfig(
                     gear == null ? defaults.gearOrDefaults() : gear.withDefaults(defaults.gearOrDefaults()),
                     follow == null ? defaults.followOrDefaults() : follow.withDefaults(defaults.followOrDefaults()),
                     warden == null ? defaults.wardenOrDefaults() : warden.withDefaults(defaults.wardenOrDefaults()),
-                    combat == null ? defaults.combatOrDefaults() : combat.withDefaults(defaults.combatOrDefaults()));
+                    combat == null ? defaults.combatOrDefaults() : combat.withDefaults(defaults.combatOrDefaults()),
+                    perception == null ? defaults.perceptionOrDefaults() : perception.withDefaults(defaults.perceptionOrDefaults()));
         }
 
         /** The pace section; never null. */
@@ -731,6 +738,119 @@ public record MinecraftAiConfig(
         /** The combat section; never null. */
         public CombatBehaviour combatOrDefaults() {
             return combat == null ? CombatBehaviour.defaults() : combat;
+        }
+
+        /** The perception section; never null. */
+        public PerceptionBehaviour perceptionOrDefaults() {
+            return perception == null ? PerceptionBehaviour.defaults() : perception;
+        }
+    }
+
+    /**
+     * Realistic noticing of creatures (the {@code "behaviour.perception"} section; the same model and the same golden vectors as the
+     * PvP BOT wrapper's {@code aggro.perception}, see docs/PERCEPTION.md). {@code enabled} (default true): a companion notices a
+     * creature only when it sees it (inside the view cone of its real look vector, a clear line, within the observation radius
+     * {@code perception.radius}) for the reaction time, or hears it (vanilla vibrations) and sees it, or is struck by it; false is
+     * today's omnidirectional line of sight exactly. {@code reactionBaseSeconds} / {@code reactionAt64Seconds}: the reaction time up
+     * close and at 64 blocks (linear in between); {@code fullAttentionHalfAngleDeg} / {@code peripheralHalfAngleDeg}: the angle of full
+     * attention and the edge of the view field (behind it nothing is seen); {@code peripheralMultiplier}: the reaction time factor at
+     * the edge; {@code sneakMultiplier}: how much longer a sneaking creature takes to notice; {@code hearing.listenerRadius}: the
+     * vibration radius in blocks (16 = the Warden's). A missing or invalid value is the default.
+     */
+    public record PerceptionBehaviour(Boolean enabled,
+                                      Double reactionBaseSeconds,
+                                      Double reactionAt64Seconds,
+                                      Double fullAttentionHalfAngleDeg,
+                                      Double peripheralHalfAngleDeg,
+                                      Double peripheralMultiplier,
+                                      Double sneakMultiplier,
+                                      Hearing hearing) {
+        public static PerceptionBehaviour defaults() {
+            return new PerceptionBehaviour(true, 0.5D, 2.0D, 30.0D, 100.0D, 2.0D, 2.0D, Hearing.defaults());
+        }
+
+        PerceptionBehaviour withDefaults(PerceptionBehaviour defaults) {
+            double base = nonNegativeOrDefault(reactionBaseSeconds, defaults.reactionBaseSeconds);
+            double at64 = nonNegativeOrDefault(reactionAt64Seconds, defaults.reactionAt64Seconds);
+            if (at64 < base) {
+                base = defaults.reactionBaseSeconds;
+                at64 = defaults.reactionAt64Seconds;
+            }
+            double full = angleOrDefault(fullAttentionHalfAngleDeg, defaults.fullAttentionHalfAngleDeg);
+            double peripheral = angleOrDefault(peripheralHalfAngleDeg, defaults.peripheralHalfAngleDeg);
+            if (full > peripheral) {
+                full = defaults.fullAttentionHalfAngleDeg;
+                peripheral = defaults.peripheralHalfAngleDeg;
+            }
+            return new PerceptionBehaviour(
+                    boolOrDefault(enabled, defaults.enabled),
+                    base,
+                    at64,
+                    full,
+                    peripheral,
+                    multiplierOrDefault(peripheralMultiplier, defaults.peripheralMultiplier),
+                    multiplierOrDefault(sneakMultiplier, defaults.sneakMultiplier),
+                    hearing == null ? defaults.hearingOrDefaults() : hearing.withDefaults(defaults.hearingOrDefaults()));
+        }
+
+        /** The hearing section; never null. */
+        public Hearing hearingOrDefaults() {
+            return hearing == null ? Hearing.defaults() : hearing;
+        }
+
+        /** True unless the section switches realistic perception off. */
+        public boolean enabledOn() {
+            return boolOrTrue(enabled, defaults().enabled);
+        }
+
+        /** The vibration listener radius in blocks. */
+        public int hearingRadius() {
+            return hearingOrDefaults().listenerRadiusOrDefault();
+        }
+
+        /** The tunables as the shared pure model wants them (a missing value reads as its default). */
+        public io.github.zoyluo.minecraftai.perception.CreaturePerception.Params params() {
+            PerceptionBehaviour d = defaults();
+            return new io.github.zoyluo.minecraftai.perception.CreaturePerception.Params(
+                    enabledOn(),
+                    reactionBaseSeconds == null ? d.reactionBaseSeconds : reactionBaseSeconds,
+                    reactionAt64Seconds == null ? d.reactionAt64Seconds : reactionAt64Seconds,
+                    fullAttentionHalfAngleDeg == null ? d.fullAttentionHalfAngleDeg : fullAttentionHalfAngleDeg,
+                    peripheralHalfAngleDeg == null ? d.peripheralHalfAngleDeg : peripheralHalfAngleDeg,
+                    peripheralMultiplier == null ? d.peripheralMultiplier : peripheralMultiplier,
+                    sneakMultiplier == null ? d.sneakMultiplier : sneakMultiplier);
+        }
+
+        private static double nonNegativeOrDefault(Double value, Double defaultValue) {
+            return value != null && Double.isFinite(value) && value >= 0.0D ? value : defaultValue;
+        }
+
+        private static double angleOrDefault(Double value, Double defaultValue) {
+            return value != null && Double.isFinite(value) && value >= 0.0D && value <= 180.0D ? value : defaultValue;
+        }
+
+        private static double multiplierOrDefault(Double value, Double defaultValue) {
+            return value != null && Double.isFinite(value) && value >= 1.0D && value <= 20.0D ? value : defaultValue;
+        }
+    }
+
+    /** How a companion hears: {@code listenerRadius} is the vanilla vibration radius in blocks (16 = the Warden's; the sculk sensor's is 8). */
+    public record Hearing(int listenerRadius) {
+        public static final int DEFAULT_LISTENER_RADIUS = 16;
+        /** The upper bound of a configured radius. */
+        public static final int MAX_LISTENER_RADIUS = 128;
+
+        public static Hearing defaults() {
+            return new Hearing(DEFAULT_LISTENER_RADIUS);
+        }
+
+        Hearing withDefaults(Hearing defaults) {
+            return new Hearing(listenerRadius > 0 && listenerRadius <= MAX_LISTENER_RADIUS
+                    ? listenerRadius : defaults.listenerRadius);
+        }
+
+        int listenerRadiusOrDefault() {
+            return listenerRadius > 0 && listenerRadius <= MAX_LISTENER_RADIUS ? listenerRadius : DEFAULT_LISTENER_RADIUS;
         }
     }
 

@@ -858,7 +858,7 @@ public final class CreeperDefenseTask extends AbstractTask {
                 .getEntitiesOfClass(
                         Creeper.class,
                         bot.getBoundingBox().inflate(CREEPER_SCAN_RANGE),
-                        entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
+                        entity -> ObservableWorldQuery.canNoticeCreature(bot, entity))
                 .stream()
                 .filter(Creeper::isAlive)
                 .map(entity -> {

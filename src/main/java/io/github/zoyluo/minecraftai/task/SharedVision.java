@@ -31,9 +31,9 @@ public final class SharedVision {
 
     private static final Map<UUID, OwnerLookup> OWNER_CACHE = new ConcurrentHashMap<>();
 
-    /** The bot's own observation, or the owner's view (foreign bots only). */
+    /** The bot's own noticing (realistic perception, see docs/PERCEPTION.md), or the owner's view (foreign bots only). */
     public static boolean seenByBotOrOwner(AIPlayerEntity bot, Entity entity) {
-        return ObservableWorldQuery.canObserveEntity(bot, entity) || ownerSees(bot, entity);
+        return ObservableWorldQuery.canNoticeCreature(bot, entity) || ownerSees(bot, entity);
     }
 
     /**

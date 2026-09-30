@@ -110,6 +110,27 @@ public final class CombatCore {
     }
 
     /**
+     * The shooter side of a ranged attack, weapon-neutral: a bow that has been drawn for at least {@code minDrawTicks}, a crossbow
+     * that has been charging that long, or a crossbow that is already loaded and held (in either hand) counts the same. Decided only
+     * on what an observer sees (the synced use pose and the held item), never on the mob's hidden target; where the weapon points is
+     * the caller's separate test (a bow or a loaded crossbow "aimed at" the bot or its owner).
+     */
+    static boolean isRangedWeaponUp(LivingEntity shooter, int minDrawTicks) {
+        if (shooter.isUsingItem()) {
+            net.minecraft.world.item.ItemStack used = shooter.getUseItem();
+            if ((used.is(net.minecraft.world.item.Items.BOW) || used.is(net.minecraft.world.item.Items.CROSSBOW))
+                    && shooter.getTicksUsingItem() >= minDrawTicks) {
+                return true;
+            }
+        }
+        return isLoadedCrossbow(shooter.getMainHandItem()) || isLoadedCrossbow(shooter.getOffhandItem());
+    }
+
+    private static boolean isLoadedCrossbow(net.minecraft.world.item.ItemStack stack) {
+        return stack.is(net.minecraft.world.item.Items.CROSSBOW) && net.minecraft.world.item.CrossbowItem.isCharged(stack);
+    }
+
+    /**
      * Mobs that hurt from range but are never a bow or melee target for this bot (ghast fireballs,
      * shulker bullets) still keep pressure while line of sight remains, exactly like a shooter.
      */
@@ -138,7 +159,7 @@ public final class CombatCore {
                         entity -> entity != bot
                                 && entity.isAlive()
                                 && isRangedThreat(entity)
-                                && ObservableWorldQuery.canObserveEntity(bot, entity)
+                                && ObservableWorldQuery.canNoticeCreature(bot, entity)
                                 && hasLineOfSight(bot, entity));
     }
 
@@ -304,13 +325,20 @@ public final class CombatCore {
                 && victim.tickCount - victim.getLastHurtByMobTimestamp() <= HURT_MEMORY_TICKS;
     }
 
+    /**
+     * The nearest live entity of {@code targetType} the bot may fight. A HOSTILE one must have been noticed (realistic perception:
+     * seen for the reaction time, heard and in view, or struck by it); a non-hostile one (a cow the bot was asked to kill) is a
+     * deliberate search, so the bot glances around for it: omnidirectional observation, as for every hunt.
+     */
     public static Optional<LivingEntity> nearestTarget(AIPlayerEntity bot, EntityType<?> targetType, double range) {
         return bot.level()
                 .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(range),
                         entity -> entity.isAlive() && entity.getType().equals(targetType) && entity != bot
                                 && !isFriendly(bot, entity))
                 .stream()
-                .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
+                .filter(entity -> hostileTo(bot, entity)
+                        ? ObservableWorldQuery.canNoticeCreature(bot, entity)
+                        : ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 

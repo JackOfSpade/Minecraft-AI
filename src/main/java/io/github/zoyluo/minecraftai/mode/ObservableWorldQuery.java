@@ -274,6 +274,47 @@ public final class ObservableWorldQuery {
     }
 
     /**
+     * Whether the bot has NOTICED a creature (a mob, a player, another bot): the realistic perception shared with the PvP BOT
+     * wrapper (see {@code docs/PERCEPTION.md}). Unlike {@link #canObserveEntity} it is not omnidirectional: the creature must be in the
+     * view cone of the bot's real look vector with a clear line for the reaction time, or be heard (vanilla vibrations) and in clear
+     * view, or have struck the bot; once noticed it is tracked by plain line of sight. It answers from the state kept by
+     * {@link io.github.zoyluo.minecraftai.perception.CreatureSenses} (one lookup, no ray). With
+     * {@code behaviour.perception.enabled=false}, for a non-creature, and under the strict capability bypass it is exactly
+     * {@link #canObserveEntity}. Objects (items, containers, crops, boats) and deliberate searches for animals and villagers keep
+     * {@link #canObserveEntity}: a bot glances around while it searches, and a cone would only make chores dumber.
+     */
+    public static boolean canNoticeCreature(AIPlayerEntity bot, Entity entity) {
+        if (!(entity instanceof net.minecraft.world.entity.LivingEntity living)
+                || !io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled()) {
+            return canObserveEntity(bot, entity);
+        }
+        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                "observable_entity_query").allowed()) {
+            return true;
+        }
+        return io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.noticed(bot, living);
+    }
+
+    /**
+     * {@link #canNoticeCreature} for a creature watched beyond the observation radius: the quiet-zone watch of a warden (24 blocks).
+     * Only a warden is scanned that far; anything else is bounded by the observation radius as ever. With perception off it is
+     * {@link #canObserveEntityWithin}.
+     */
+    public static boolean canNoticeCreatureWithin(AIPlayerEntity bot, Entity entity, int range) {
+        if (!(entity instanceof net.minecraft.world.entity.LivingEntity living)
+                || !io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled()) {
+            return canObserveEntityWithin(bot, entity, range);
+        }
+        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                "observable_entity_query").allowed()) {
+            return true;
+        }
+        int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
+        return bot.distanceToSqr(entity) <= (double) radius * radius
+                && io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.noticed(bot, living);
+    }
+
+    /**
      * Live-fauna observation at surface-search range: a real player sees animals at render
      * distance whenever line of sight holds, far beyond the interaction-scale radius that
      * bounds block reads. The raycast stays, so terrain still hides herds; only the distance
