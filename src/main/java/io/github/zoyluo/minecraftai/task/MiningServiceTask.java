@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.ContainerAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InCellWalk;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
@@ -17,7 +18,7 @@ import io.github.zoyluo.minecraftai.mining.MiningFoodReserve;
 import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.LinkedHashMap;
@@ -145,6 +146,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     private final java.util.LinkedHashSet<UUID> pocketEntityIds = new java.util.LinkedHashSet<>();
     private final java.util.LinkedHashMap<UUID, PocketLineage> pocketLineage =
             new java.util.LinkedHashMap<>();
+    private final InCellWalk centerWalk = new InCellWalk();
     private final java.util.LinkedHashMap<Item, Integer> pocketDropLedger =
             new java.util.LinkedHashMap<>();
     private final java.util.LinkedHashMap<Item, Integer> pocketBaseline =
@@ -1001,9 +1003,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         // OPEN phase is durable physical-debt authority, so it must never be entered until the
         // service owns a stationary, centered work face.  Once OPEN is published any later drift
         // correctly remains fail-closed and must be sealed as unresolved geometry debt.
-        if (!ensureCenteredAtWorkFace(bot)) {
+        // The recentre is a short walk with the movement keys: wait for it (a step in flight, or the last slide to a stop).
+        InCellWalk.Centering centering = centerWalk.recenter(bot, workFace, "disposal_work_face_center");
+        if (centering == InCellWalk.Centering.FAILED) {
             fail("mining_service_disposal_center_failed:at="
                     + bot.blockPosition().toShortString() + ":face=" + workFace.toShortString());
+            return;
+        }
+        if (centering != InCellWalk.Centering.CENTERED) {
             return;
         }
         int sealable = availableDisposableSealBlocks(bot);
@@ -2173,8 +2180,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private void collectOpeningSpoil(AIPlayerEntity bot, ItemEntity entity) {
-        FakePlayerMotion.nudgeWithinBlockToward(
-                bot, workFace, entity.position(), 0.45D, "disposal_opening_spoil");
+        InCellWalk.nudgeToward(bot, workFace, entity.position(), InCellWalk.MAX_NUDGE_REACH, "disposal_opening_spoil");
         note = "collecting_disposal_opening_spoil:"
                 + BuiltInRegistries.ITEM.getKey(entity.getItem().getItem());
         if (pocketPhaseAge() > POCKET_SETTLE_LIMIT) {
@@ -2182,18 +2188,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
     }
 
+    /**
+     * True while the bot stands still in the middle of the work face. Otherwise it walks there with its movement keys (a nudge toward
+     * spoil or the end of a walk leaves it off centre) and the caller asks again next tick; never moves the bot itself.
+     */
     private boolean ensureCenteredAtWorkFace(AIPlayerEntity bot) {
-        double centerX = workFace.getX() + 0.5D;
-        double centerZ = workFace.getZ() + 0.5D;
-        double dx = bot.getX() - centerX;
-        double dz = bot.getZ() - centerZ;
-        if (dx * dx + dz * dz <= 1.0E-6D
-                && bot.getDeltaMovement().lengthSqr() <= 1.0E-8D
-                && bot.onGround()) {
-            return true;
-        }
-        return FakePlayerMotion.returnToBlockCenter(
-                bot, workFace, "disposal_work_face_center");
+        return centerWalk.recenter(bot, workFace, "disposal_work_face_center") == InCellWalk.Centering.CENTERED;
     }
 
     /**

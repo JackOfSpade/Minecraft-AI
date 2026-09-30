@@ -20,6 +20,8 @@ public final class WalkedStepRules {
     public static final double IN_CELL_MAX_OFFSET = 0.75D;
     /** A point-step is done once the bot is this close to its point. */
     public static final double POINT_TOLERANCE = 0.2D;
+    /** A sneak shift over an edge is done this close to its point: it has to be over the edge (the eye past the face of the support), not near it. */
+    public static final double SHIFT_TOLERANCE = 0.05D;
     /** Ticks a push out is given (0.8 block at 0.1 per tick is 8, plus slack). */
     public static final int PUSH_OUT_MAX_TICKS = 24;
     /** The speed factor of a walk relative to the walking pace, on which {@link #tickCost} is scaled (walking clock weight is 1/1.3). */
@@ -148,9 +150,24 @@ public final class WalkedStepRules {
      * (or afloat: a swimmer pushing against a bank is lifted onto it by holding jump). A swim step holds the depth a swimmer holds:
      * jump while the feet are in the lower part of the target cell (a step up to a higher cell keeps jumping until it is there), and
      * let go to sink toward a lower one, so a level swim neither bobs up out of its cell nor sinks below it.
+     *
+     * <p>Why this is the vanilla rule: in water the jump key is a swim stroke (LivingEntity.jumpInLiquid, +0.04 upward per tick), not a
+     * jump, and a body with its head under water has no ground. A player who wants to rise holds it, one who wants to stay at the
+     * surface taps it, one who wants to dive lets go (and holds shift). Hence:
+     * <ul>
+     * <li>STEP_UP presses it whenever the body is below the target floor and either stands on something or is afloat ({@code inWater};
+     * a head under water implies it): the stroke that lifts a swimmer onto a bank or out of a pool, and the plain hop on land.</li>
+     * <li>SWIM presses it while the feet are below the hold depth of the target cell (its floor plus {@link #SWIM_HOLD_DEPTH}): swim up
+     * until the feet reach the cell, stay at the surface once there. That also covers a stroke that leaves the water for the air cell
+     * above it. A rule of "jump whenever the head is under water" would never let a dive happen and would bob a level swim up out of
+     * its cell, so the head is deliberately not part of the SWIM rule.</li>
+     * </ul>
+     * The swimming and rescue steps (NaturalSwimGameTests) hold their depth with it, and the pool exit, rim and pickup steps of the
+     * pickup job keep stroking until the feet are up.
      */
     public static boolean jumpNow(WalkedStep.Kind kind, boolean grounded, double feetY, int targetY, boolean headUnderwater) {
-        return jumpNow(kind, grounded, feetY, targetY, headUnderwater, false);
+        // A head under water means the body is in water: the jump key is a swim stroke whether or not the caller says so.
+        return jumpNow(kind, grounded, feetY, targetY, headUnderwater, headUnderwater);
     }
 
     /** {@link #jumpNow(WalkedStep.Kind, boolean, double, int, boolean)} for a bot that may be afloat ({@code inWater}). */

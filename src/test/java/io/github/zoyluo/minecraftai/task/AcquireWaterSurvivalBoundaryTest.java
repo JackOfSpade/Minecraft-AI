@@ -32,10 +32,12 @@ class AcquireWaterSurvivalBoundaryTest {
         assertFalse(task.contains("InventoryAction.giveItem("));
         assertFalse(task.contains("InventoryAction.removeItems("));
         assertFalse(task.contains("teleportTo("));
-        assertTrue(task.contains("FakePlayerMotion.shiftToSupportEdge(")
-                        && task.contains("FakePlayerMotion.returnToBlockCenter("),
+        assertTrue(task.contains("InCellWalk.beginEdgeShift(")
+                        && task.contains("InCellWalk.beginEdgeReturn("),
                 "multi-level cave ascent must pay for an isolated support with a bounded"
-                        + " sneak-bridge placement");
+                        + " sneak-bridge placement, walked with the movement keys (lean, place, walk back)");
+        assertFalse(task.contains("FakePlayerMotion."),
+                "the sneak-bridge lean and its return are walked steps, never a teleport primitive");
         assertFalse(task.contains("FakePlayerMotion.stepTo("),
                 "water acquisition itself must not manufacture adjacent travel");
         assertFalse(task.contains("FakePlayerMotion.jumpTo("),

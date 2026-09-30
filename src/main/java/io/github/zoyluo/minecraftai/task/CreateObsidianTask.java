@@ -7,11 +7,13 @@ import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.BucketAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.Comparator;
@@ -162,6 +164,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private BlockPos returnRim;
     /** Last work pose from which this remembered obsidian/lava cell was reached safely. */
     private BlockPos obsidianStandHint;
+    // The reason of the walked step this task started in the water recovery ("surface" or "rim"); judged when the step has ended.
+    private String recoveryWalk;
     private BlockPos standPos;
     private PourPlan pourPlan;
     private BlockPos activeBreakPos;
@@ -1307,6 +1311,22 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (pickupPos != null) {
             rememberVisiblePendingObsidianDrop(bot);
         }
+        if (recoveryWalk != null) {
+            // A swim stroke or a step out of the pool is in flight: it has the bot to itself. When it has ended the recovery is derived
+            // again from where the bot stands (a refused or failed step keeps the old failure reasons).
+            if (!bot.getActionPack().stepIdle()) {
+                return;
+            }
+            String walk = recoveryWalk;
+            recoveryWalk = null;
+            WalkedStep.Result walked = bot.getActionPack().stepResult();
+            if (walked != null && walked.failed()) {
+                fail("surface".equals(walk)
+                        ? "create_obsidian_water_recovery_surface_blocked"
+                        : "create_obsidian_water_recovery_rim_blocked");
+                return;
+            }
+        }
         if (waterSource != null && isStillWater(bot.level(), waterSource)) {
             if (InventoryAction.countItem(bot, Items.BUCKET) <= 0) {
                 fail("create_obsidian_bucket_lost_after_pour");
@@ -1314,13 +1334,17 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             }
             if (bot.blockPosition().getY() < waterSource.getY()
                     || (bot.blockPosition().getY() == waterSource.getY()
-                    && !bot.level().getFluidState(bot.blockPosition()).isEmpty())) {
+                    && !bot.level().getFluidState(bot.blockPosition()).isEmpty()
+                    && bot.isUnderWater())) {
+                // (A body standing in a shallow flowing sheet at the source's level already has its head in the air: a swim stroke
+                // cannot lift it a whole cell there, and it has no reason to.)
                 // Fake players have no client buoyancy. After collecting in the protected hole,
                 // make one collision-validated adjacent rise so the eye is above the flowing
                 // sheet and the retained source face becomes ray-visible again.
-                if (!FakePlayerMotion.stepTo(bot, bot.blockPosition().above(), "obsidian_surface")) {
-                    fail("create_obsidian_water_recovery_surface_blocked");
-                }
+                // A swim stroke (the jump key in water), not a hop: the step ends when the body is in the cell above.
+                bot.getActionPack().runStep(WalkedStep.begin(
+                        bot, bot.blockPosition().above(), WalkedStep.Kind.SWIM, "obsidian_surface"));
+                recoveryWalk = "surface";
                 return;
             }
             if (obsidianStandHint != null
@@ -1331,9 +1355,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 // Leave the water column while it still provides the legitimate upward movement,
                 // then recover from the dry remembered rim. Removing the source while suspended
                 // over the hole drops the fake player straight back to the pool floor.
-                if (!FakePlayerMotion.stepTo(bot, obsidianStandHint, "obsidian_return_rim")) {
-                    fail("create_obsidian_water_recovery_rim_blocked");
-                }
+                bot.getActionPack().runStep(WalkedStep.begin(
+                        bot, obsidianStandHint, WalkedStep.Kind.FLAT, "obsidian_return_rim"));
+                recoveryWalk = "rim";
                 return;
             }
             if (bot.getEyePosition().distanceToSqr(waterSource.getCenter()) <= REACH_MARGIN_SQUARED) {
@@ -1991,10 +2015,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * <p>Pathfinding endpoints must be standable, while a protected physical drop may sit in a
      * water-filled collision cell. When A* snaps that endpoint to the current safe cell, repeatedly
      * asking for the same path makes no physical progress. This adapter is deliberately bounded to
-     * three horizontal cells and validates every transit/final cell before issuing one fake-client
-     * move.</p>
+     * three horizontal cells and validates every transit/final cell before starting one walked
+     * step (real movement keys, see {@link WalkedStep}; the bot arrives a few ticks later, and the
+     * caller asks again while the step is in flight, which answers true without starting another).</p>
      */
     static boolean stepTowardPickupCell(AIPlayerEntity bot, BlockPos target) {
+        if (!bot.getActionPack().stepIdle()) {
+            return true;
+        }
         BlockPos from = bot.blockPosition();
         int deltaX = target.getX() - from.getX();
         int deltaY = target.getY() - from.getY();
@@ -2013,10 +2041,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         boolean adjacent = absX <= 1 && absY <= 1 && absZ <= 1 && changedAxes <= 2;
         if (adjacent && isSafePickupCollisionCell(bot, target)) {
             bot.getActionPack().stopAll();
-            if (deltaY > 0) {
-                return FakePlayerMotion.jumpTo(bot, target, "obsidian_pickup_collision_jump");
-            }
-            return FakePlayerMotion.stepTo(bot, target, "obsidian_pickup_collision_step");
+            return beginPickupStep(bot, target, "obsidian_pickup_collision_step");
         }
 
         // Align one horizontal axis at the current elevation. The intermediate must be a genuine
@@ -2036,11 +2061,27 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 continue;
             }
             bot.getActionPack().stopAll();
-            if (FakePlayerMotion.stepTo(bot, candidate, "obsidian_pickup_collision_align")) {
+            if (beginPickupStep(bot, candidate, "obsidian_pickup_collision_align")) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Starts the walked step onto one adjacent pickup cell: a swim stroke into a water-filled cell, else a walk, hop or drop onto the
+     * standable one. False when the step is not legal (no adjacent kind covers it, or the landing is refused).
+     */
+    private static boolean beginPickupStep(AIPlayerEntity bot, BlockPos cell, String reason) {
+        ServerLevel world = bot.level();
+        BlockPos from = bot.blockPosition();
+        boolean wet = world.getFluidState(cell).is(FluidTags.WATER) || world.getFluidState(cell.above()).is(FluidTags.WATER);
+        WalkedStep.Kind kind = wet ? WalkedStep.Kind.SWIM : WalkedStepRules.walkKindFor(cell.getY() - from.getY());
+        if (kind == null || WalkedStep.refusal(bot, cell, kind) != null) {
+            return false;
+        }
+        bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason));
+        return true;
     }
 
     private static boolean isSafePickupCollisionCell(AIPlayerEntity bot, BlockPos target) {

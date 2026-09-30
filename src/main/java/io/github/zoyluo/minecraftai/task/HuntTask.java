@@ -1453,9 +1453,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         if (bot.blockPosition().equals(stand)) {
             if (observedDropPosition == null) {
+                bot.getActionPack().cancelStep();
                 bot.getActionPack().stopMovement();
             } else {
-                io.github.zoyluo.minecraftai.mode.FakePlayerMotion.nudgeWithinBlockToward(
+                // Walk (inside the cell) toward the drop the bot sees; vanilla's pickup box does the rest.
+                io.github.zoyluo.minecraftai.action.InCellWalk.nudgeToward(
                         bot, stand, observedDropPosition, "physical_drop_pickup");
             }
             return true;

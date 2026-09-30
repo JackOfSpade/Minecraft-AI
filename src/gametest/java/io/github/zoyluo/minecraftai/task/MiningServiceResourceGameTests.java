@@ -52,28 +52,37 @@ public final class MiningServiceResourceGameTests {
                 ServicePolicy.defaultOre(false),
                 0, "admission-velocity", 0, cursor);
 
-        // Reproduce the sealed evidence pose: OreDig has reached the correct BlockPos but its
-        // physical walk ended on the forward edge with enough residual velocity to cross into the
-        // next cell on the following entity tick.
+        // Reproduce the evidence pose: OreDig has reached the correct BlockPos but its physical
+        // walk ended on the forward edge of the cell with residual walking velocity (a real walk
+        // stops within the cell). The service walks back to the middle with its movement keys (no
+        // teleport), so admission takes a few ticks; OPEN is published only once the bot stands
+        // centred and stopped, and nothing before that becomes durable geometry debt.
         bot.teleportTo(bot.level(), face.getX() + 0.5D, face.getY(),
-                face.getZ() + 0.95D, Set.of(), 0.0F, 0.0F, true);
+                face.getZ() + 0.8D, Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
-        bot.setDeltaMovement(0.0D, 0.0D, 0.85D);
+        bot.setDeltaMovement(0.0D, 0.0D, 0.1D);
+        io.github.zoyluo.minecraftai.entity.TeleportAudit.reset(bot);
         task.start(bot);
         task.tick(bot);
-        require(context, "OPEN_DISPOSAL_POCKET".equals(task.checkpoint().get("phase")),
-                "service published no OPEN transaction after admission centering: "
-                        + task.checkpoint());
-        require(context, bot.blockPosition().equals(face)
-                        && bot.getDeltaMovement().lengthSqr() == 0.0D,
-                "OPEN transaction retained the prior ore-walk motion state");
+        require(context, !"OPEN_DISPOSAL_POCKET".equals(task.checkpoint().get("phase")),
+                "service published OPEN while the bot was still off centre and sliding: " + task.checkpoint());
 
         AtomicReference<Integer> observedTicks = new AtomicReference<>(0);
+        AtomicReference<Boolean> opened = new AtomicReference<>(false);
         context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(bot);
             }
             Map<String, String> live = task.checkpoint();
+            if ("OPEN_DISPOSAL_POCKET".equals(live.get("phase")) && !opened.get()) {
+                opened.set(true);
+                double offset = Math.hypot(bot.getX() - (face.getX() + 0.5D), bot.getZ() - (face.getZ() + 0.5D));
+                require(context, offset <= 0.2D && bot.getDeltaMovement().horizontalDistanceSqr() <= 1.0E-8D,
+                        "OPEN transaction started off centre or still moving: offset=" + offset
+                                + " velocity=" + bot.getDeltaMovement());
+                require(context, io.github.zoyluo.minecraftai.entity.TeleportAudit.corrections(bot) == 0,
+                        "the centring teleported the bot");
+            }
             require(context, task.state() != TaskState.FAILED,
                     "admitted disposal failed after residual walk: " + task.failureReason());
             require(context, bot.blockPosition().equals(face),
@@ -86,7 +95,7 @@ public final class MiningServiceResourceGameTests {
                     "pre-OPEN motion became durable geometry debt: " + live);
             int ticks = observedTicks.get() + 1;
             observedTicks.set(ticks);
-            if (ticks < 8) {
+            if (ticks < 8 || !opened.get()) {
                 return;
             }
             task.abort(bot);

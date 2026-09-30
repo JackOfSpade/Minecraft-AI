@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.mode;
 
+import io.github.zoyluo.minecraftai.action.InCellWalk;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mixin.ServerEntityManagerCacheAccessorMixin;
@@ -10,7 +11,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.AABB;
@@ -235,56 +235,24 @@ public final class FakePlayerMotion {
     }
 
     /**
-     * A bounded same-cell pickup nudge. The player stays inside its current supported cell and
-     * never overlaps the neighbouring obstacle, but moves close enough for vanilla ItemEntity
-     * pickup reach to cover an item resting on top of that obstacle.
+     * A bounded same-cell pickup nudge: the bot walks (real inputs, see {@link InCellWalk#nudgeToward}) toward {@code target} inside
+     * the cell it stands in, close enough for vanilla's pickup box to cover an item on the far side of the block. It never moves the
+     * bot itself; kept under this name for the callers that have not moved to {@link InCellWalk} yet.
      */
     public static boolean nudgeWithinBlockToward(AIPlayerEntity bot,
                                                  BlockPos anchorFeet,
                                                  Vec3 target,
                                                  String reason) {
-        return nudgeWithinBlockToward(bot, anchorFeet, target, 0.15D, reason);
+        return InCellWalk.nudgeToward(bot, anchorFeet, target, reason);
     }
 
-    /** Same-cell pickup nudge with a caller-bounded offset for an already open adjacent cell. */
+    /** Same-cell pickup nudge with a caller-bounded reach for an already open adjacent cell. */
     public static boolean nudgeWithinBlockToward(AIPlayerEntity bot,
                                                  BlockPos anchorFeet,
                                                  Vec3 target,
                                                  double offset,
                                                  String reason) {
-        if (!bot.blockPosition().equals(anchorFeet) || !bot.onGround()) {
-            return false;
-        }
-        var world = bot.level();
-        Standability.clearCache();
-        if (!Standability.isStandable(world, anchorFeet)) {
-            return false;
-        }
-        double centerX = anchorFeet.getX() + 0.5D;
-        double centerZ = anchorFeet.getZ() + 0.5D;
-        double vx = target.x - centerX;
-        double vz = target.z - centerZ;
-        double length = Math.sqrt(vx * vx + vz * vz);
-        if (length < 1.0E-6D) {
-            return false;
-        }
-        double boundedOffset = Mth.clamp(offset, 0.05D, 0.45D);
-        double targetX = centerX + vx / length * boundedOffset;
-        double targetZ = centerZ + vz / length * boundedOffset;
-        double dx = targetX - bot.getX();
-        double dz = targetZ - bot.getZ();
-        var shiftedBox = bot.getBoundingBox().move(dx, 0.0D, dz);
-        if (!world.noCollision(bot, shiftedBox)) {
-            BotLog.action(bot, "fake_player_pickup_nudge_rejected", "reason", reason,
-                    "anchor", anchorFeet);
-            return false;
-        }
-        bot.getActionPack().stopMovement();
-        bot.getActionPack().setSneaking(true);
-        bot.teleportTo(world, targetX, anchorFeet.getY(), targetZ,
-                Collections.emptySet(), bot.getYRot(), bot.getXRot(), false);
-        BotLog.action(bot, "fake_player_pickup_nudge", "reason", reason, "anchor", anchorFeet);
-        return true;
+        return InCellWalk.nudgeToward(bot, anchorFeet, target, offset, reason);
     }
 
     /**

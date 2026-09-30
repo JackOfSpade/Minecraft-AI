@@ -2,7 +2,6 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.HashSet;
 import java.util.Set;
@@ -96,9 +95,10 @@ public final class KnownCellPickupSweep {
                     return Step.MOVING;
                 }
             } else if (target.equals(origin)) {
+                bot.getActionPack().cancelStep();
                 bot.getActionPack().stopMovement();
             } else {
-                FakePlayerMotion.nudgeWithinBlockToward(bot, target, origin.getCenter(), "physical_drop_pickup");
+                InCellWalk.nudgeToward(bot, target, origin.getCenter(), "physical_drop_pickup");
             }
             if (++dwell >= DWELL_TICKS) {
                 retire();

@@ -1395,7 +1395,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(maxTicks = 120)
     public void pickupMicrostepsCloseTwoCellGapWithoutAcceptingAdjacentPathSnap(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupMicroGT", 0, true);
         BlockPos start = fixture.start();
@@ -1403,17 +1403,31 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
         require(context, CreateObsidianTask.stepTowardPickupCell(fixture.bot(), target),
                 "first bounded pickup microstep was not issued");
-        require(context, fixture.bot().blockPosition().equals(start.east()),
-                "first pickup microstep skipped the exact adjacent transit cell: "
-                        + fixture.bot().blockPosition().toShortString());
-
-        context.runAtTickTime(1, () -> {
-            require(context, CreateObsidianTask.stepTowardPickupCell(fixture.bot(), target),
-                    "final bounded pickup collision step was not issued");
-            require(context, fixture.bot().blockPosition().equals(target),
-                    "pickup microsteps stopped beside the factual drop cell: "
-                            + fixture.bot().blockPosition().toShortString());
-            finish(context, fixture);
+        // The microsteps are walked (movement keys, a few ticks each), never a teleport: the bot has not arrived in the same tick,
+        // it passes through the exact adjacent transit cell, and the next step starts only after it has arrived.
+        require(context, !fixture.bot().blockPosition().equals(target),
+                "the first pickup microstep jumped straight to the drop cell");
+        boolean[] transit = {false};
+        int[] tick = {0};
+        context.onEachTick(() -> {
+            tick[0]++;
+            var bot = fixture.bot();
+            if (bot.blockPosition().equals(start.east())) {
+                transit[0] = true;
+            }
+            if (bot.blockPosition().equals(target)) {
+                require(context, transit[0],
+                        "the pickup microsteps skipped the exact adjacent transit cell "
+                                + start.east().toShortString());
+                finish(context, fixture);
+                return;
+            }
+            if (bot.getActionPack().stepIdle()) {
+                require(context, CreateObsidianTask.stepTowardPickupCell(bot, target),
+                        "bounded pickup collision step was not issued at " + bot.blockPosition().toShortString());
+            }
+            require(context, tick[0] < 100,
+                    "pickup microsteps stopped beside the factual drop cell: " + bot.blockPosition().toShortString());
         });
     }
 

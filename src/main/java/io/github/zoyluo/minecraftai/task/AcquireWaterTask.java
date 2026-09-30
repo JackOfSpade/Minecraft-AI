@@ -6,13 +6,14 @@ import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.BucketAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InCellWalk;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayDeque;
@@ -79,6 +80,31 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST
     };
 
+    /** The sneak-bridge in flight: the bot leans over the edge (SHIFTING), places, then walks back to the middle (RETURNING). */
+    private enum EdgeStage {
+        SHIFTING,
+        RETURNING
+    }
+
+    private static final class EdgePlacement {
+        final BlockPos anchor;
+        final Direction direction;
+        final BlockPos foundation;
+        final String item;
+        EdgeStage stage = EdgeStage.SHIFTING;
+        String placeFailure;
+        // The step of the current stage: its own state says when it ended, whatever else the action pack runs meanwhile.
+        WalkedStep step;
+
+        EdgePlacement(BlockPos anchor, Direction direction, BlockPos foundation, String item, WalkedStep step) {
+            this.step = step;
+            this.anchor = anchor.immutable();
+            this.direction = direction;
+            this.foundation = foundation.immutable();
+            this.item = item;
+        }
+    }
+
     private enum Phase {
         RETURN_SURFACE,
         SEARCH,
@@ -119,6 +145,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private int lastScanBudget = -SCAN_INTERVAL;
     private int lastPathAttemptBudget = -PATH_RETRY_INTERVAL;
     private BlockPos ascentTarget;
+    private EdgePlacement edge;
     private BlockPos ascentCommittedFrom;
     private boolean ascentPathStarted;
     private int ascentPathStartedBudget;
@@ -288,6 +315,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // task budget or weakening the fluid checks used by the new selection.
         ascentTarget = null;
         ascentPathStarted = false;
+        edge = null;
         ascentRelocationTarget = null;
         ascentRelocationOrigin = null;
         ascentRelocationPathStarted = false;
@@ -321,6 +349,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         }
         ascentTarget = null;
         ascentPathStarted = false;
+        edge = null;
 
         if (ascentRelocationTarget == null) {
             return;
@@ -357,6 +386,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         }
         ascentTarget = null;
         ascentPathStarted = false;
+        edge = null;
         ascentRelocationTarget = null;
         ascentRelocationOrigin = null;
         ascentRelocationPathStarted = false;
@@ -408,9 +438,15 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         if (touchingWater || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
             returnMiner.cancel(bot);
             ascentTarget = null;
+            edge = null;
             ascentPathStarted = false;
             bot.getActionPack().stopAll();
             NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+            return;
+        }
+        // The sneak-bridge in flight (lean, place, walk back) has the bot to itself: nothing else may start a route or a break.
+        if (edge != null) {
+            tickEdgePlacement(bot);
             return;
         }
         // A strict return stair can expose a real aquifer before it reaches the remembered
@@ -599,6 +635,10 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private boolean ascendOneStair(AIPlayerEntity bot) {
         ServerLevel world = bot.level();
         BlockPos current = bot.blockPosition();
+        if (edge != null) {
+            tickEdgePlacement(bot);
+            return true;
+        }
         prepareAscentLevel(current);
         if (ascentToolCraft != null) {
             tickAscentToolCraft(bot);
@@ -848,30 +888,70 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         if (!bot.onGround() && Standability.isStandable(bot.level(), current)) {
             bot.setOnGround(true);
         }
-        if (!FakePlayerMotion.shiftToSupportEdge(
-                bot, current, direction, "acquire_water_ascent_foundation")) {
+        // A real player sneak-bridges by leaning out over the edge (sneaking will not walk off it), placing against the side
+        // face of the support, and stepping back: three separate moments, so the bot walks the lean and the return with its
+        // movement keys and the placement happens between them (tickEdgePlacement).
+        if (!WalkedStep.supported(bot)) {
+            // Still settling out of the last hop: the lean starts from solid footing, so ask again next tick.
+            return;
+        }
+        WalkedStep lean = InCellWalk.beginEdgeShift(bot, current, direction, "acquire_water_ascent_foundation");
+        if (lean == null) {
             failedAscentSupports.add(support.immutable());
             ascentTarget = null;
             BotLog.action(bot, "acquire_water_ascent_foundation_failed",
                     "pos", foundation.toShortString(), "reason", "foundation_edge_unreachable");
             return;
         }
-        ActionResult result = BuildAction.placeBlock(
-                bot, current.below(), direction, InteractionHand.MAIN_HAND);
-        boolean returned = FakePlayerMotion.returnToBlockCenter(
-                bot, current, "acquire_water_ascent_foundation");
-        if (result.isFailed() || !returned) {
+        edge = new EdgePlacement(current, direction, foundation, item, lean);
+    }
+
+    /** Carries the sneak-bridge on: lean over the edge, place the foundation block, walk back to the middle of the cell. */
+    private void tickEdgePlacement(AIPlayerEntity bot) {
+        var pack = bot.getActionPack();
+        EdgePlacement current = edge;
+        if (!current.step.ended()) {
+            return;
+        }
+        WalkedStep.Result result = current.step.outcome();
+        BlockPos support = current.foundation.above();
+        if (current.stage == EdgeStage.SHIFTING) {
+            if (result == null || !result.succeeded()) {
+                edge = null;
+                pack.stopMovement();
+                if (result != null && "not_supported".equals(result.reason())) {
+                    // The bot left its footing between the request and the first tick (a hop still settling): not a verdict on the
+                    // support, so the ascent looks at the cell again.
+                    return;
+                }
+                failedAscentSupports.add(support.immutable());
+                ascentTarget = null;
+                BotLog.action(bot, "acquire_water_ascent_foundation_failed",
+                        "pos", current.foundation.toShortString(), "reason", "foundation_edge_unreachable");
+                return;
+            }
+            ActionResult placed = BuildAction.placeBlock(
+                    bot, current.anchor.below(), current.direction, InteractionHand.MAIN_HAND);
+            current.placeFailure = placed.isFailed() ? placed.reason() : null;
+            current.step = InCellWalk.beginEdgeReturn(bot, current.anchor, "acquire_water_ascent_foundation");
+            current.stage = EdgeStage.RETURNING;
+            return;
+        }
+        edge = null;
+        pack.stopMovement();
+        boolean returned = result != null && result.succeeded();
+        if (current.placeFailure != null || !returned) {
             failedAscentSupports.add(support.immutable());
             ascentTarget = null;
             BotLog.action(bot, "acquire_water_ascent_foundation_failed",
-                    "pos", foundation.toShortString(),
-                    "reason", result.isFailed() ? result.reason() : "foundation_edge_return_failed");
+                    "pos", current.foundation.toShortString(),
+                    "reason", current.placeFailure != null ? current.placeFailure : "foundation_edge_return_failed");
             return;
         }
         pathAttempts = 0;
         noteAscentProgress();
         BotLog.action(bot, "acquire_water_ascent_foundation_placed",
-                "pos", foundation.toShortString(), "item", item);
+                "pos", current.foundation.toShortString(), "item", current.item);
     }
 
     private boolean tickAscentRelocation(AIPlayerEntity bot, BlockPos current) {

@@ -16,7 +16,7 @@ class MiningServiceDisposalSourceContractTest {
     void disposalCentersAndStopsTheCursorFaceBeforePublishingOpenDebt()
             throws IOException {
         String service = read("task/MiningServiceTask.java");
-        String motion = read("mode/FakePlayerMotion.java");
+        String walk = read("action/InCellWalk.java");
         int admission = service.indexOf("private void startDisposalPocket(AIPlayerEntity bot,\n"
                 + "                                     int requiredFreeSlots,\n"
                 + "                                     Direction rejectedDirection");
@@ -26,10 +26,12 @@ class MiningServiceDisposalSourceContractTest {
         assertTrue(body.indexOf("ensureCenteredAtWorkFace(bot)")
                         < body.indexOf("enterPocketPhase(Phase.OPEN_DISPOSAL_POCKET)"),
                 "disposal must own a stationary centered face before OPEN becomes durable debt");
-        assertTrue(service.contains("bot.getDeltaMovement().lengthSqr() <= 1.0E-8D"),
-                "an exact center with residual walk velocity must still run the center return");
-        assertTrue(motion.contains("bot.setDeltaMovement(Vec3.ZERO);"));
-        assertTrue(motion.contains("bot.setOnGround(true);"));
+        assertTrue(walk.contains("bot.getDeltaMovement().horizontalDistanceSqr() <= SETTLED_SPEED_SQUARED"),
+                "an exact center with residual walk velocity must not count as centred until it has stopped");
+        assertTrue(service.contains("centerWalk.recenter(bot, workFace"),
+                "the work face is centred by a walked step (InCellWalk), never a teleport");
+        assertFalse(service.contains("FakePlayerMotion"),
+                "the disposal pocket never moves the bot itself");
     }
 
     @Test

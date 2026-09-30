@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
@@ -26,8 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>Bots have no forced pickup (no profile can vacuum a drop into the inventory), so {@code MineTask.pickup()} detects a successful
  * collection only by polling an inventory-count delta while {@code HarvestCore.chaseDropAnyOf}
- * (via {@code approachDropPhysically} / {@code FakePlayerMotion.nudgeWithinBlockToward}) chases the
- * drop. That chase can leave {@code ActionPack.sneaking} held true on the very tick vanilla's own
+ * (via {@code approachDropPhysically} / {@code InCellWalk.nudgeToward}) chases the
+ * drop. That chase can leave a key (formerly {@code ActionPack.sneaking}) held on the very tick vanilla's own
  * proximity pickup lands. If {@code pickup()} then transitions away (here: completes) without first
  * calling {@code stopAll()}, the dangling sneak makes {@code ActionPack.hasActiveActions()} report
  * true forever, which permanently blocks {@code DangerWatcher.scanBot}'s paused-task resume (it
@@ -36,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * found and fixed there.
  *
  * <p><b>Why the sneak is injected rather than awaited:</b> {@code FakePlayerMotion
- * .nudgeWithinBlockToward} only ever fires when the drop is grounded (it never fires on a still
+ * .nudgeToward} only ever fires when the drop is grounded (it never fires on a still
  * -falling item) AND the bot is already standing in the exact resolved pickup cell. Empirically (see
  * this test's own git history), an ordinary single-block exposed-ore mine -- adjacent, diagonal, or
  * directly overhead -- always resolves via vanilla's own eager proximity pickup (checked every tick
@@ -46,7 +47,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * against an obstacle) for no real gain in coverage. This test instead drives a completely real
  * mine-and-pickup cycle -- real {@code BlockMiner}, real vanilla drop, real vanilla proximity pickup,
  * real {@code MineTask.pickup()} inventory-count polling -- and directly holds {@code
- * ActionPack.sneaking} true (the exact flag {@code nudgeWithinBlockToward} sets) for the whole
+ * ActionPack.sneaking} true (the flag the former teleporting nudge left behind; the walked nudge holds no sneak, the
+ * fixture keeps it as a stand-in for any dangling key) for the whole
  * pre-pickup window, reproducing the documented precondition deterministically instead of chasing
  * incidental block-physics timing.</p>
  */
@@ -90,9 +92,8 @@ public final class MinePickupGameTests {
                 require(context, TaskManager.INSTANCE.peekPaused(bot).orElse(null) == pausedOwner
                                 && pausedOwner.state() == TaskState.PAUSED,
                         "paused owner was disturbed while MineTask was still mining/picking up");
-                // Reproduces the exact dangling flag FakePlayerMotion.nudgeWithinBlockToward
-                // leaves behind (see the class javadoc for why this is injected rather than
-                // awaited): once the real block break has happened but before the real vanilla
+                // Reproduces the dangling flag a mid-chase pickup nudge used to leave (see the class
+                // javadoc for why this is injected rather than awaited): once the real block break has happened but before the real vanilla
                 // pickup lands, hold it true, so whichever tick MineTask.pickup() next polls its
                 // inventory delta true it finds sneaking already dangling, exactly as a real
                 // mid-chase nudge would leave it. Scoped to strictly after the break so it can
@@ -109,6 +110,9 @@ public final class MinePickupGameTests {
                             + "MineTask completed");
             require(context, InventoryAction.countItem(bot, Items.RAW_IRON) >= 1,
                     "MineTask completed without actually collecting the ore drop");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "the pickup teleported the bot: corrections=" + TeleportAudit.corrections(bot)
+                            + " last=" + TeleportAudit.lastCaller(bot));
             // The most direct assertion of the fix itself: the moment pickup() detects success and
             // completes, the action pack must already be clean -- not merely "clean soon".
             require(context, !bot.getActionPack().hasActiveActions(),

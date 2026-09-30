@@ -51,6 +51,7 @@
       "io.github.zoyluo.minecraftai.task.ProspectScanBudgetGameTests",
       "io.github.zoyluo.minecraftai.task.GatherToolPolicyGameTests",
       "io.github.zoyluo.minecraftai.task.MinePickupGameTests",
+      "io.github.zoyluo.minecraftai.task.PickupNaturalMovementGameTests",
       "io.github.zoyluo.minecraftai.task.MineValuablesGameTests",
       "io.github.zoyluo.minecraftai.mining.assist.MiningAssistSenseGameTests",
       "io.github.zoyluo.minecraftai.task.OreDigOpportunisticGameTests",

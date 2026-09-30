@@ -95,8 +95,10 @@ class HuntConstrainedRouteSourceContractTest {
                         "bot, stand, surfaceFloorY(bot), pickupReturnAnchor"),
                 "every pickup path must retain the transaction return anchor");
         assertTrue(pickupRouting.contains(
-                        "FakePlayerMotion.nudgeWithinBlockToward("),
-                "same-cell physical pickup may retain the bounded nudge");
+                        "InCellWalk.nudgeToward("),
+                "same-cell physical pickup may retain the bounded nudge, walked with the movement keys");
+        assertFalse(pickupRouting.contains("FakePlayerMotion"),
+                "the pickup nudge is a walked step, never a teleport primitive");
         assertTrue(sweep.contains(
                         "bot, candidate, surfaceFloorY(bot), pickupReturnAnchor"),
                 "pickup observation sweeps must retain the transaction anchor");

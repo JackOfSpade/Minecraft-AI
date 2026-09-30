@@ -447,34 +447,38 @@ public final class GatherQuotaTask extends AbstractTask {
 
     // B: when the bot is underground (no sky overhead) and no reachable resource can be found
     // nearby, surface to the nearest open-sky standable point directly above, then retry
-    // gathering. Surfacing uses teleport (which clears fallDistance); if already in the open, it
-    // does nothing. This is a fallback beyond "centralized gathering" and rarely triggers.
+    // gathering. Surfacing is an emergency teleport (which clears fallDistance), so it exists only in the
+    // operator profile: the capability is decided FIRST and a denial (strict survival) returns before
+    // any of the upward cell lookups, because that scan reads cells the bot cannot see. If already in the
+    // open, it does nothing. This is a fallback beyond "centralized gathering" and rarely triggers.
     private boolean trySurface(AIPlayerEntity bot) {
         var world = bot.level();
         BlockPos feet = bot.blockPosition();
         if (world.canSeeSky(feet)) {
             return false;
         }
+        if (!io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(bot,
+                io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT, "gather_surface").allowed()) {
+            return false;
+        }
         int top = world.getMinY() + world.getHeight();
         for (int dy = 1; feet.getY() + dy < top - 1 && dy <= 80; dy++) {
             BlockPos candidate = feet.above(dy);
+            surfaceScanLookups++;
             if (Standability.isStandable(world, candidate) && world.canSeeSky(candidate)) {
-                boolean moved = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
-                        bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
-                        "gather_surface", () -> {
-                            bot.getActionPack().stopAll();
-                            bot.teleportTo(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
-                                    java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-                        });
-                if (moved) {
-                    BotLog.action(bot, "gather_surfaced",
-                            "to", candidate.getX() + "," + candidate.getY() + "," + candidate.getZ());
-                }
-                return moved;
+                bot.getActionPack().stopAll();
+                bot.teleportTo(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
+                        java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+                BotLog.action(bot, "gather_surfaced",
+                        "to", candidate.getX() + "," + candidate.getY() + "," + candidate.getZ());
+                return true;
             }
         }
         return false;
     }
+
+    /** Test hook: how many upward cells {@link #trySurface} has looked at (none while the capability is denied). */
+    static volatile int surfaceScanLookups;
 
     // Treeless-area fallback: a wide-range palette scan (PROSPECT_RANGE) locates the nearest target
     // block (e.g. logs) and pathfinds to that column's surface landing point; once there, nearby

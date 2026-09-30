@@ -100,9 +100,12 @@ class CreateObsidianSurvivalBoundaryTest {
         String danger = read("task/DangerWatcher.java");
         assertTrue(danger.contains("obsidianTask.controlsNearbyLava"),
                 "controlled dry pool work must not be replaced by an impossible generic evade");
-        assertTrue(task.contains("FakePlayerMotion.stepTo"));
-        assertTrue(task.contains("obsidian_surface"),
-                "a fake player must physically rise one validated cell before recovering the source");
+        assertFalse(task.contains("FakePlayerMotion"),
+                "pool recovery and pickup are walked steps, never a teleport primitive");
+        assertTrue(task.contains("WalkedStep.Kind.SWIM") && task.contains("obsidian_surface"),
+                "a fake player must physically swim up one validated cell before recovering the source");
+        assertTrue(task.contains("beginPickupStep(") && task.contains("obsidian_return_rim"),
+                "the rim and the pickup cells are reached by walked steps");
         assertTrue(task.contains("getFluidState(obsidianStandHint).isEmpty()"),
                 "source recovery must not oscillate back into a flooded remembered rim");
         assertTrue(task.contains("create_obsidian_water_recovery_failed"),

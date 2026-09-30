@@ -122,6 +122,7 @@ class WalkedStepRulesTest {
     void aHopPressesJumpOnlyWhileGroundedBelowTheTargetFloor() {
         assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 4.0D, 5, false));
         assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.4D, 5, false), "no air jumps");
+        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, true), "out of the water the jump key is a swim stroke");
         assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 5.0D, 5, false), "already at the target floor");
         assertFalse(WalkedStepRules.jumpNow(Kind.FLAT, true, 4.0D, 5, false));
         assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, true), "the head is under water: keep afloat");

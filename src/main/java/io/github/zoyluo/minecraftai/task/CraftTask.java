@@ -4,13 +4,13 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InCellWalk;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayList;
@@ -47,6 +47,11 @@ public final class CraftTask extends AbstractTask {
     private BlockPos selfPlacedTablePos;
     private final BlockMiner tableReclaimMiner = new BlockMiner();
     private int reclaimTicks;
+    // The walk back to the middle of the cell after the reclaim (see finishReclaim): the task completes when it is done.
+    private final InCellWalk settleWalk = new InCellWalk();
+    private BlockPos settleAnchor;
+    private int settleTicks;
+    private static final int SETTLE_LIMIT_TICKS = 60;
 
     // Placement relocation: when no acceptable placement cell exists around the bot's current
     // stance (e.g. every horizontal neighbour is a torch/solid block and the one open cell has no
@@ -102,6 +107,9 @@ public final class CraftTask extends AbstractTask {
         phase = Phase.PLANNING;
         selfPlacedTablePos = null;
         reclaimTicks = 0;
+        settleAnchor = null;
+        settleTicks = 0;
+        settleWalk.reset();
         resetTablePlacementRelocation();
     }
 
@@ -359,6 +367,10 @@ public final class CraftTask extends AbstractTask {
      * must not turn an already-successful craft into a failure.
      */
     private void reclaimTable(AIPlayerEntity bot) {
+        if (settleAnchor != null) {
+            settleAfterReclaim(bot);
+            return;
+        }
         if (selfPlacedTablePos == null || InventoryAction.countItem(bot, Items.CRAFTING_TABLE) > 0) {
             selfPlacedTablePos = null;
             finishReclaim(bot);
@@ -408,9 +420,9 @@ public final class CraftTask extends AbstractTask {
 
     /**
      * Completes RECLAIMING_TABLE from every exit path. The final approach tick before a successful
-     * pickup can leave the bot mid pickup-nudge -- {@code FakePlayerMotion.nudgeWithinBlockToward}
-     * sets sneaking true to hold it on the ledge for that nudge -- and nothing else clears it once
-     * this task stops calling {@code HarvestCore.chaseDropAnyOf}. A dangling sneak (or any other
+     * pickup can leave the bot mid pickup-nudge -- a walked step of {@code InCellWalk.nudgeToward}
+     * is still holding its keys -- and nothing else clears it once
+     * this task stops calling {@code HarvestCore.chaseDropAnyOf}. A dangling key (or any other
      * leftover action-pack state) makes {@code ActionPack.hasActiveActions()} report true forever,
      * which permanently blocks DangerWatcher's paused-task resume (it requires actions to be idle)
      * and deadlocks the bot with its mission step stuck PAUSED. Stop the action pack before handing
@@ -429,7 +441,24 @@ public final class CraftTask extends AbstractTask {
      */
     private void finishReclaim(AIPlayerEntity bot) {
         bot.getActionPack().stopAll();
-        FakePlayerMotion.returnToBlockCenter(bot, bot.blockPosition(), "craft_table_reclaim_settle");
+        settleAnchor = bot.blockPosition().immutable();
+        settleTicks = 0;
+        settleWalk.reset();
+        settleAfterReclaim(bot);
+    }
+
+    /**
+     * The recentre is a short walk inside the cell (real inputs, no teleport), so the task completes once the bot stands in the
+     * middle of its cell again, or when that walk cannot be done: the reclaim itself is best-effort and never turns a finished
+     * craft into a failure.
+     */
+    private void settleAfterReclaim(AIPlayerEntity bot) {
+        InCellWalk.Centering centering = settleWalk.recenter(bot, settleAnchor, "craft_table_reclaim_settle");
+        if (centering == InCellWalk.Centering.WALKING && ++settleTicks <= SETTLE_LIMIT_TICKS) {
+            return;
+        }
+        settleAnchor = null;
+        bot.getActionPack().stopAll();
         complete();
     }
 

@@ -87,6 +87,9 @@ public final class WalkedStep {
     private String failure;
     private Result finalResult;
     private int pushDirection = -1;
+    private boolean startedWet;
+
+    private boolean anchored;
 
     private WalkedStep(AIPlayerEntity bot, BlockPos cell, Vec3 point, Kind kind, String reason) {
         this.bot = bot;
@@ -104,6 +107,17 @@ public final class WalkedStep {
     /** A step to {@code point} inside the bot's cell (RECENTER, SNEAK_SHIFT) or, for PUSH_OUT, out of the block it overlaps. */
     public static WalkedStep begin(AIPlayerEntity bot, Vec3 point, Kind kind, String reason) {
         return new WalkedStep(bot, BlockPos.containing(point), point, kind, reason);
+    }
+
+    /**
+     * A step to {@code point} (a RECENTER or SNEAK_SHIFT) whose owning cell is {@code anchor} and not the cell that contains the point:
+     * the sneak shift over the edge of the support (the point lies a little in the next cell, over the void a sneaking body still
+     * stands at) and the recentre that walks back from it. The bot has to stand in the anchor cell or one of its neighbours.
+     */
+    public static WalkedStep beginAnchored(AIPlayerEntity bot, BlockPos anchor, Vec3 point, Kind kind, String reason) {
+        WalkedStep step = new WalkedStep(bot, anchor, point, kind, reason);
+        step.anchored = true;
+        return step;
     }
 
     public Kind kind() {
@@ -149,7 +163,7 @@ public final class WalkedStep {
         }
         ServerLevel level = bot.level();
         if (kind == Kind.SWIM) {
-            String hazard = swimHazard(level, target);
+            String hazard = swimHazard(level, target, startsWet(bot));
             if (hazard != null) {
                 return hazard;
             }
@@ -196,14 +210,20 @@ public final class WalkedStep {
         return Standability.isStandableFresh(level, landing) ? null : "no_landing";
     }
 
-    private static String swimHazard(ServerLevel level, BlockPos target) {
+    /** Whether the bot is in water right now (a stroke that leaves the water for the air above it is still a swim). */
+    private static boolean startsWet(AIPlayerEntity bot) {
+        return bot.isInWater() || bot.level().getFluidState(bot.blockPosition()).is(FluidTags.WATER);
+    }
+
+    private static String swimHazard(ServerLevel level, BlockPos target, boolean startedWet) {
         if (target.getY() < level.getMinY() + 1) {
             return "hazard:void";
         }
         if (level.getFluidState(target).is(FluidTags.LAVA) || level.getFluidState(target.above()).is(FluidTags.LAVA)) {
             return "hazard:lava";
         }
-        if (!level.getFluidState(target).is(FluidTags.WATER) && !level.getFluidState(target.above()).is(FluidTags.WATER)) {
+        if (!startedWet && !level.getFluidState(target).is(FluidTags.WATER)
+                && !level.getFluidState(target.above()).is(FluidTags.WATER)) {
             return "not_water";
         }
         return null;
@@ -237,6 +257,7 @@ public final class WalkedStep {
         double speed = lastPosition == null ? 0.0D : Math.hypot(position.x - lastPosition.x, position.z - lastPosition.z);
         lastPosition = position;
         if (ticks == 1) {
+            startedWet = startsWet(bot);
             String refused = firstTickRefusal();
             if (refused != null) {
                 return fail(refused);
@@ -246,7 +267,7 @@ public final class WalkedStep {
             BotLog.action(bot, "walked_step_begin", "kind", kind, "reason", reason,
                     "from", bot.blockPosition().toShortString(), "to", point);
         } else if (WalkedStepRules.endsInCell(kind)) {
-            String lost = kind == Kind.SWIM ? swimHazard(bot.level(), cell) : landingHazard(bot.level(), cell);
+            String lost = kind == Kind.SWIM ? swimHazard(bot.level(), cell, startedWet) : landingHazard(bot.level(), cell);
             if (lost != null) {
                 return fail(lost);
             }
@@ -313,12 +334,16 @@ public final class WalkedStep {
     private boolean arrived(double distance) {
         BlockPos here = bot.blockPosition();
         if (kind == Kind.SWIM) {
-            return here.equals(cell) && (bot.isInWater() || supported(bot));
+            // A stroke up out of the water ends in the air cell above the surface: feet in the cell is all there is to reach.
+            boolean dry = !bot.level().getFluidState(cell).is(FluidTags.WATER)
+                    && !bot.level().getFluidState(cell.above()).is(FluidTags.WATER);
+            return here.equals(cell) && (bot.isInWater() || supported(bot) || dry);
         }
         if (WalkedStepRules.endsInCell(kind)) {
             return here.equals(cell) && supported(bot);
         }
-        return distance <= WalkedStepRules.POINT_TOLERANCE && supported(bot);
+        return distance <= (kind == Kind.SNEAK_SHIFT ? WalkedStepRules.SHIFT_TOLERANCE : WalkedStepRules.POINT_TOLERANCE)
+                && supported(bot);
     }
 
     private AABB landingBox() {
@@ -345,6 +370,8 @@ public final class WalkedStep {
                 if (here.getY() != cell.getY() || Math.abs(here.getX() - cell.getX()) > 1 || Math.abs(here.getZ() - cell.getZ()) > 1) {
                     // The point may lie a little over the edge of the bot's cell (a sneak shift to see the side face of its support) or in the
                     // cell it stands next to (the walk back from there): the bot's cell and the point's cell are the same or neighbours.
+                    // This holds for every in-cell step (an anchored one names the cell that owns it, the same test applies); what keeps a
+                    // step from wandering is the offset bound below (IN_CELL_MAX_OFFSET), not the cell test.
                     return "not_in_cell";
                 }
                 if (Math.hypot(point.x - bot.getX(), point.z - bot.getZ()) > WalkedStepRules.IN_CELL_MAX_OFFSET) {
@@ -354,7 +381,9 @@ public final class WalkedStep {
                     return "not_supported";
                 }
                 if (kind == Kind.SNEAK_SHIFT) {
-                    BlockPos support = here.below();
+                    // The floor the body stands on: the owning cell's for an anchored step (its bot may already overhang the next cell), the
+                    // bot's own otherwise (its point, and so its cell, lies over the edge).
+                    BlockPos support = (anchored ? cell : here).below();
                     if (level.getBlockState(support).getCollisionShape(level, support).isEmpty()
                             || Standability.isDangerous(level.getBlockState(support))) {
                         return "unsafe_support";
@@ -439,6 +468,16 @@ public final class WalkedStep {
         } else {
             pack.stopMovement();
         }
+    }
+
+    /** Whether the step has ended (succeeded, failed or was cancelled): its own state, whatever step the pack runs now. */
+    public boolean ended() {
+        return ended;
+    }
+
+    /** How the step ended, or {@code null} while it is in flight or when it was cancelled. */
+    public Result outcome() {
+        return finalResult;
     }
 
     /** Lets go of every key of a step the owner abandons while it is in flight (a no-op after it has ended). */
