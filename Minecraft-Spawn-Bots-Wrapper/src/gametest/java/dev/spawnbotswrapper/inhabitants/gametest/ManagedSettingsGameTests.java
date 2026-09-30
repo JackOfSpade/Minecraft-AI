@@ -33,13 +33,15 @@ public final class ManagedSettingsGameTests {
         return "autoEquipWeapon=" + Upstream.setting("isAutoEquipWeapon") + " autoTarget=" + Upstream.setting("isAutoTargetEnabled") + " maxTargetDistance="
                 + Upstream.setting("getMaxTargetDistance") + " ranged=" + Upstream.setting("getRangedMinRange") + "/"
                 + Upstream.setting("getRangedOptimalRange") + "/" + Upstream.setting("getRangedMaxRange") + " retreatOnClose="
-                + Upstream.setting("isRangedRetreatOnClose") + " meleeRange=" + Upstream.setting("getMeleeRange");
+                + Upstream.setting("isRangedRetreatOnClose") + " meleeRange=" + Upstream.setting("getMeleeRange") + " bowMinDrawTime="
+                + Upstream.setting("getBowMinDrawTime");
     }
 
     private static boolean heldAtTheShippedValues() {
         return Boolean.FALSE.equals(Upstream.setting("isAutoEquipWeapon"))
                 && Double.valueOf(128.0).equals(Upstream.setting("getMaxTargetDistance"))
                 && Boolean.FALSE.equals(Upstream.setting("isAutoTargetEnabled"))
+                && Integer.valueOf(20).equals(Upstream.setting("getBowMinDrawTime"))
                 && Double.valueOf(8.0).equals(Upstream.setting("getRangedMinRange"))
                 && Double.valueOf(12.0).equals(Upstream.setting("getRangedOptimalRange"))
                 && Double.valueOf(16.0).equals(Upstream.setting("getRangedMaxRange"))
@@ -58,6 +60,8 @@ public final class ManagedSettingsGameTests {
                         "the settings file was not written with autoEquipWeapon=false:\n" + file);
                 require(context, file.contains("\"rangedOptimalRange\": 12.0"),
                         "the managed optimal range is not in the file:\n" + file);
+                require(context, file.contains("\"bowMinDrawTime\": 20"),
+                        "the managed bow draw time is not in the file:\n" + file);
             } catch (IOException e) {
                 context.fail(net.minecraft.network.chat.Component.nullToEmpty("cannot read " + settingsFile() + ": " + e));
             }
@@ -77,6 +81,7 @@ public final class ManagedSettingsGameTests {
                 String file = Files.readString(settingsFile(), StandardCharsets.UTF_8)
                         .replaceAll("\"autoEquipWeapon\": \\w+", "\"autoEquipWeapon\": true")
                         .replaceAll("\"autoTargetEnabled\": \\w+", "\"autoTargetEnabled\": true")
+                        .replaceAll("\"bowMinDrawTime\": [0-9]+", "\"bowMinDrawTime\": 40")
                         .replaceAll("\"maxTargetDistance\": [0-9.]+", "\"maxTargetDistance\": 40.0")
                         .replaceAll("\"rangedMinRange\": [0-9.]+", "\"rangedMinRange\": 20.0")
                         .replaceAll("\"rangedOptimalRange\": [0-9.]+", "\"rangedOptimalRange\": 40.0")
