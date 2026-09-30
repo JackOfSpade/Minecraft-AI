@@ -385,6 +385,29 @@ Combat: DuskRaven (inhabitant) died (fall)
   PvP BOT keeps its current target in internal state the adapter does not read, so the first hit line of a fight
   is the observable record of who engaged whom.
 
+### Melee legality (no hitting through walls)
+
+PvP BOT's melee routine has no line-of-sight check: an inhabitant chasing a player stood next to a one-block wall and
+killed him through it. The addon vetoes every melee hit an inhabitant makes that a human client could not have made
+(`combat.meleeLegality.enabled`, default `true`; the rule itself is vanilla and not configurable):
+
+* a hit counts as **melee** when the damage source has the attacking inhabitant as both the causing and the direct entity
+  (`player_attack` / `mob_attack`); projectiles, thorns, explosions and the like are never touched;
+* it is **legal** when a human could have targeted the victim: the crosshair ray from the eye reaches the victim's
+  bounding box within the attacker's `ENTITY_INTERACTION_RANGE` (vanilla survival 3.0, measured to the nearest point of
+  the box, plus a 0.2 block tolerance for position lag) and no block with a collision shape (fluids ignored) is on the
+  ray. A human can aim at any visible part of the box, so the nearest point, the centre, the head and the feet are tried;
+  a vanilla sweeping-edge victim of the same swing as a legal primary hit is legal too;
+* an illegal hit returns "no damage": no health loss, no knockback, no effect. PvP BOT's state is left alone, it simply
+  keeps failing to land hits until it has a real line;
+* every veto is a debug line; one INFO line per bot per minute reports the count and the reasons
+  (`melee legality: vetoed N hit(s) by <bot> since the last line (a without a clear line, b beyond reach); ...`).
+
+Limit: Fabric's damage event fires for normal players and mobs (whom inhabitants hit), not for a HeroBot victim, so an
+inhabitant hitting another inhabitant is not covered. PvP BOT's `meleeRange` of 3.5 is measured between entities; 3.5
+centre to centre is about 3.2 to the victim's box, which the tolerance still allows, so that setting itself is not a
+cheat beyond vanilla reach by more than the tolerance.
+
 ### Aggro range, leash and walk back
 
 PvP BOT's own auto-target notices any player within 64 blocks, through walls. This addon replaces it (the settings

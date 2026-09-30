@@ -71,6 +71,8 @@ public final class InhabitantsConfig {
     public TpsThrottle tpsThrottle = new TpsThrottle();
     /** Rate-limited log lines about fights involving inhabitants (hits, kills, deaths); see {@link CombatLog}. */
     public CombatLog combatLog = new CombatLog();
+    /** Rules of the fights themselves (currently only the melee legality rule); see {@link Combat}. */
+    public Combat combat = new Combat();
     /** How close a player must be before an inhabitant notices them, and when it gives up a chase; see {@link Aggro}. */
     public Aggro aggro = new Aggro();
     /** Despawns inhabitants that have drifted far from every real player, and restores them later unchanged. */
@@ -425,6 +427,25 @@ public final class InhabitantsConfig {
         public int coalesceTicks = 100;
         /** Hard cap on INFO combat lines per minute; lines beyond it are counted and reported once as "N suppressed". */
         public int maxLinesPerMinute = 30;
+    }
+
+    /** The {@code combat} block: what an inhabitant may do in a fight. */
+    public static final class Combat {
+        /** No cheating: an inhabitant's melee hit must be one a human client could make; see {@link MeleeLegality}. */
+        public MeleeLegality meleeLegality = new MeleeLegality();
+    }
+
+    /**
+     * The melee legality rule ({@code combat.meleeLegality}). PvP BOT's melee has no line-of-sight check, so an inhabitant
+     * used to hit a player THROUGH a wall. With this on, a melee hit by an inhabitant is vetoed (no damage, no knockback)
+     * unless a human could have targeted the victim: the crosshair ray from the eye reaches the victim's box within the
+     * attacker's entity interaction range (vanilla 3.0, plus a 0.2 lag tolerance) without a block that has a collision
+     * shape in between. The rule itself is vanilla and not configurable, only the switch is. Projectiles are never
+     * touched. See {@code MeleeLegality} in the sources.
+     */
+    public static final class MeleeLegality {
+        /** Master switch. */
+        public boolean enabled = true;
     }
 
     /**

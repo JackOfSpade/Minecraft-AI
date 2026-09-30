@@ -108,6 +108,7 @@ public final class ConfigValidator {
         }
         validateTpsThrottle(c, w);
         validateCombatLog(c, w);
+        validateCombat(c);
         validateAggro(c, w);
         validatePvpbotSettings(c, w);
         validateRangedPacing(c, w);
@@ -212,6 +213,15 @@ public final class ConfigValidator {
         }
         c.combatLog.coalesceTicks = clamp(w, "combatLog.coalesceTicks", c.combatLog.coalesceTicks, 1, 72000);
         c.combatLog.maxLinesPerMinute = clamp(w, "combatLog.maxLinesPerMinute", c.combatLog.maxLinesPerMinute, 1, 100000);
+    }
+
+    private static void validateCombat(InhabitantsConfig c) {
+        if (c.combat == null) {
+            c.combat = new InhabitantsConfig.Combat();
+        }
+        if (c.combat.meleeLegality == null) {
+            c.combat.meleeLegality = new InhabitantsConfig.MeleeLegality();
+        }
     }
 
     private static void validateAggro(InhabitantsConfig c, List<String> w) {

@@ -9,6 +9,7 @@ import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
+import dev.spawnbotswrapper.inhabitants.mc.MeleeLegality;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
 import dev.spawnbotswrapper.inhabitants.mc.RangedFire;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
@@ -56,6 +57,8 @@ public final class InhabitantsMod implements ModInitializer {
     private final CombatLogger combat = new CombatLogger(() -> session, LOGGER);
     /** The aggro range (inhabitants notice players within a short range, chase far); see AggroController. */
     private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER);
+    /** No cheating: vetoes melee hits by inhabitants that a human client could not make (through walls, beyond reach). */
+    private final MeleeLegality meleeLegality = new MeleeLegality(() -> session, LOGGER);
     private final RangedFire rangedFire = new RangedFire(() -> session, LOGGER);
 
     @Override
@@ -80,6 +83,7 @@ public final class InhabitantsMod implements ModInitializer {
         combat.register();
         combat.aggroState(aggro::describe);
         rangedFire.register();
+        meleeLegality.register();
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
         // After PvP BOT's own bot tick (default phase), so the walk back is the last input written and the crossbow
