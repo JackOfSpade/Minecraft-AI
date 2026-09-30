@@ -761,9 +761,9 @@ public final class FarmSurvivalGameTests {
     private static void requireStrict(GameTestHelper context, AIPlayerEntity bot) {
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
-        require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.FORCED_PICKUP,
+        require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                         "farm_survival_gametest").allowed(),
-                "strict_survival unexpectedly allowed forced pickup");
+                "strict_survival unexpectedly allowed a privileged capability");
     }
 
     private static void require(GameTestHelper context, boolean condition, String message) {

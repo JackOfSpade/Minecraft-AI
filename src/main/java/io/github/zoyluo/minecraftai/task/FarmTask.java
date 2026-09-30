@@ -525,7 +525,7 @@ public final class FarmTask extends AbstractTask {
         BotLog.action(bot, "harvest", "pos", cropPos);
         // The harvested produce/seed drops as an on-ground ItemEntity that does not go straight into the
         // inventory. The bot harvests from reach distance (<= 4.5 blocks), so the drops are usually out of
-        // vanilla's automatic pickup range. Forced pickup (FORCED_PICKUP) is denied in strict_survival, so
+        // vanilla's automatic pickup range. There is no forced pickup for a bot, so
         // the PICKUP phase walks over the observed drops like a player would.
         pickupTicks = 0;
         phase = Phase.PICKUP;
@@ -537,8 +537,7 @@ public final class FarmTask extends AbstractTask {
 
     /**
      * Walks over the observed harvest drops (produce and seeds) within a short radius until none is left or
-     * the budget is spent, then replants the harvested cell if seeds are on hand. Forced pickup still runs
-     * first when the profile allows it (HarvestCore.walkOverDrops).
+     * the budget is spent, then replants the harvested cell if seeds are on hand (HarvestCore.walkOverDrops).
      */
     private void pickup(AIPlayerEntity bot) {
         pickupTicks++;

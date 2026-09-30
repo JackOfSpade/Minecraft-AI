@@ -1308,7 +1308,6 @@ public final class GatherQuotaTask extends AbstractTask {
      * tries again); the exact-break quota is bounded regardless.
      */
     private void bootstrapPickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearbyAnyOf(bot, acceptItems);
         boolean collected = countAccepted(bot) > bootstrapPickupBaseline;
         if (!collected && --bootstrapPickupTicks > 0) {
             var visibleDrop = HarvestCore.nearestDropAnyOf(bot, acceptItems, 8.0D);
@@ -1378,7 +1377,6 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearbyAnyOf(bot, acceptItems);
         refreshCountSoFar(bot);
         long pickupStatNow = pickedUpAccepted(bot);
         if (confirmPickup(bot, pickupStatNow)) {
@@ -1934,7 +1932,7 @@ public final class GatherQuotaTask extends AbstractTask {
         int finalCount = countBrokenBlocks ? countSoFar : countAccepted(bot);
         CapabilityTally.Snapshot decisions = CapabilityTally.INSTANCE.snapshot(bot.getUUID());
         boolean consistent = GatherConsistency.isConsistent(gainedTotal, breaksCount, maxDropsPerBrokenBlock(),
-                unattributedGains, decisions.forcedPickupsAllowed());
+                unattributedGains);
         BotLog.action(bot, "gather_summary",
                 "item", itemLabel,
                 "target", targetCount,
@@ -1945,7 +1943,6 @@ public final class GatherQuotaTask extends AbstractTask {
                 "pickups", pickupsCount,
                 "pickup_misses", pickupMissesTotal,
                 "unattributed_gains", unattributedGains,
-                "forced_pickups", decisions.forcedPickupsAllowed(),
                 "capability_denials", decisions.denied(),
                 "elapsed_ticks", elapsed,
                 "outcome", outcome,

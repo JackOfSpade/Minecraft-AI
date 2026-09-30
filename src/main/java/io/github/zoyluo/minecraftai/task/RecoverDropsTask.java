@@ -121,8 +121,6 @@ public final class RecoverDropsTask extends AbstractTask {
         //  covers the death loop where a corpse-run to an underwater death point drowns the bot
         //  again; the knowledge base flags the area as dangerous after the second death, and the
         //  reflex gate talks it out of a third attempt.)
-        // Pick up along the way: drops may have been scattered onto the path by water flow or an explosion
-        HarvestCore.forcePickupNearbyAnyOf(bot, null, 4.0D, 2.0D);
 
         if (arrivedTick >= 0) {
             HarvestCore.sweepPickupAnyOf(bot, null, 10.0D, 6);

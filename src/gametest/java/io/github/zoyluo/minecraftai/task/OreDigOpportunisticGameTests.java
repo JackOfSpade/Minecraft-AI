@@ -1201,7 +1201,7 @@ public final class OreDigOpportunisticGameTests {
         void assertNoAllowedCapabilityDecision(AIPlayerEntity bot) {
             List<String> lines = botLog(bot.getGameProfile().name());
             if (lines == null || !hasSpawnLine(lines)) {
-                // No in-memory equivalent exists (CapabilityTally only counts allowed FORCED_PICKUP and denied
+                // No in-memory equivalent exists (CapabilityTally only counts denied
                 // decisions; an open MiningEvidenceAudit session closes the assist gate), so say so in the log
                 // instead of passing without a trace. Deliberately not a failure.
                 LOG.warn("[capability-canary skipped: no per-bot log] {}", bot.getGameProfile().name());

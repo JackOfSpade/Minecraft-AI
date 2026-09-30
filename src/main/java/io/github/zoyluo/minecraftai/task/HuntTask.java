@@ -266,7 +266,6 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     protected void onTick(AIPlayerEntity bot) {
         // Meat-collected count: force-pickup drops at the bot's feet + absolute delta against a
         // fixed baseline (meat from a kill that lands in the inventory shortly after is also counted).
-        HarvestCore.forcePickupNearbyAnyOf(bot, RAW_MEATS, 2.5D, 2.5D);
         int total = Math.max(0, HarvestCore.countInventoryItems(bot, RAW_MEATS) - meatBaseline);
         if (total > collected) {
             collected = total;

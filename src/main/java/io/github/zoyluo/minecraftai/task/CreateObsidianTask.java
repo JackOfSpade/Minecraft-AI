@@ -402,7 +402,6 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         ServerLevel world = bot.level();
 
-        HarvestCore.forcePickupNearbyAnyOf(bot, Set.of(Items.OBSIDIAN), 4.0D, 4.0D);
         int inventoryTotal = Math.max(0,
                 HarvestCore.countInventoryItems(bot, Set.of(Items.OBSIDIAN)) - invBaseline);
         var auditedPickups = MiningEvidenceAudit.auditedObsidianPickupCredits(bot);
@@ -1685,7 +1684,6 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             pickupInventoryBaseline = activeBreakInventoryBaseline;
             pickupGainTick = -1;
             returnRim = durableReturnRim(pickupPos);
-            HarvestCore.forcePickupNearbyAnyOf(bot, Set.of(Items.OBSIDIAN), 6.0D, 4.0D);
             BotLog.action(bot, "create_obsidian_pickup_pending",
                     "pos", pickupPos == null ? "none" : pickupPos.toShortString(),
                     "inventory", pickupInventoryBaseline,
@@ -1832,7 +1830,6 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void pickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearbyAnyOf(bot, Set.of(Items.OBSIDIAN), 6.0D, 4.0D);
         int inventoryNow = HarvestCore.countInventoryItems(bot, Set.of(Items.OBSIDIAN));
         if (inventoryNow > pickupInventoryBaseline && pickupGainTick < 0) {
             pickupGainTick = totalBudget();

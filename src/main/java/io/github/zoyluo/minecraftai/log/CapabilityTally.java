@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * how many were allowed or denied without changing what {@code CapabilityRuntime} actually
  * decides. {@code CapabilityRuntime.decide} already logs {@code capability_decision} for every
  * individual decision (throttled); this only accumulates counts a caller can read back later,
- * e.g. for the {@code gather_summary} {@code forced_pickups}/{@code capability_denials} fields.
+ * e.g. for the {@code gather_summary} {@code capability_denials} field.
  */
 public final class CapabilityTally {
     public static final CapabilityTally INSTANCE = new CapabilityTally();
@@ -27,11 +27,7 @@ public final class CapabilityTally {
             return;
         }
         Counts c = counts.computeIfAbsent(botId, id -> new Counts());
-        if (allowed) {
-            if (capability == PrivilegedCapability.FORCED_PICKUP) {
-                c.forcedPickupsAllowed.incrementAndGet();
-            }
-        } else {
+        if (!allowed) {
             c.denied.incrementAndGet();
         }
     }
@@ -46,7 +42,7 @@ public final class CapabilityTally {
     /** Reads the counts accumulated since the last {@link #reset}, without clearing them. */
     public Snapshot snapshot(UUID botId) {
         Counts c = counts.get(botId);
-        return c == null ? new Snapshot(0, 0) : new Snapshot(c.forcedPickupsAllowed.get(), c.denied.get());
+        return c == null ? new Snapshot(0) : new Snapshot(c.denied.get());
     }
 
     public void clear(UUID botId) {
@@ -59,12 +55,11 @@ public final class CapabilityTally {
         counts.clear();
     }
 
-    /** {@code forcedPickupsAllowed}: FORCED_PICKUP decisions that were allowed. {@code denied}: any capability denied. */
-    public record Snapshot(int forcedPickupsAllowed, int denied) {
+    /** {@code denied}: privileged decisions that were denied. */
+    public record Snapshot(int denied) {
     }
 
     private static final class Counts {
-        private final AtomicInteger forcedPickupsAllowed = new AtomicInteger();
         private final AtomicInteger denied = new AtomicInteger();
     }
 }

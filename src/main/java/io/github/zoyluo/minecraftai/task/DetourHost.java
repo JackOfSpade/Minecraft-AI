@@ -419,9 +419,6 @@ interface DetourHost {
     /** {@code HarvestCore.totalInventoryCount(bot)}: every item in the main inventory and the off hand. */
     int inventoryTotal();
 
-    /** One capability gated {@code HarvestCore.forcePickupNearbyAnyOf(bot, null, 3.0, 3.0)}; a no-op under strict survival. Called on every SETTLE_DROP tick. */
-    void tryForcedPickup();
-
     /**
      * See {@link DropView}. Queries ALL observable, visible item entities within 8 blocks of the bot
      * ({@code canObserveEntity}, invisible ones skipped), keeps those within 3.5 blocks of the break cell centre

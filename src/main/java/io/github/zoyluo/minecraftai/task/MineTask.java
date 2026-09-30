@@ -128,7 +128,6 @@ public final class MineTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops);
         int collected = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
         if (collected > 0) {
             // A prior tick's chaseDropAnyOf -> approachDropPhysically nudge can leave the action

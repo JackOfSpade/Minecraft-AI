@@ -282,64 +282,11 @@ public final class HarvestCore {
                 .min(Comparator.comparingDouble(entity -> entity.distanceTo(bot)));
     }
 
-    public static boolean forcePickupNearby(AIPlayerEntity bot, Item item, double maxH, double maxV) {
-        return forcePickupNearbyAnyOf(bot, item == null ? null : Set.of(item), maxH, maxV);
-    }
-
-    public static boolean forcePickupNearbyAnyOf(AIPlayerEntity bot, Set<Item> items, double maxH, double maxV) {
-        CapabilityDecision pickupDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.FORCED_PICKUP, "harvest_force_pickup");
-        CapabilityTally.INSTANCE.record(bot.getUUID(), PrivilegedCapability.FORCED_PICKUP, pickupDecision.allowed());
-        if (!pickupDecision.allowed()) {
-            return false;
-        }
-        AABB box = bot.getBoundingBox().inflate(maxH, maxV, maxH);
-        List<ItemEntity> drops = bot.level().getEntitiesOfClass(ItemEntity.class, box,
-                entity -> !entity.getItem().isEmpty()
-                        && matches(entity.getItem(), items)
-                        && ObservableWorldQuery.canObserveEntity(bot, entity)
-                        && canForcePickup(bot, entity, maxH, maxV));
-        boolean picked = false;
-        for (ItemEntity drop : drops) {
-            ItemStack remaining = drop.getItem().copy();
-            int before = remaining.getCount();
-            ActionResult result = InventoryAction.giveItem(bot, remaining);
-            int inserted = before - remaining.getCount();
-            if (inserted <= 0) {
-                continue;
-            }
-            picked = true;
-            BotLog.action(bot, "pickup_forced",
-                    "item", drop.getItem().getItem(),
-                    "count", inserted,
-                    "result", result.isSuccess() ? "all" : result.reason());
-            if (remaining.isEmpty()) {
-                drop.discard();
-            } else {
-                drop.setItem(remaining);
-            }
-        }
-        return picked;
-    }
-
-    public static boolean forcePickupNearby(AIPlayerEntity bot, Item item) {
-        MinecraftAiConfig.Pickup pickup = MinecraftAiConfig.get().pickup();
-        return forcePickupNearby(bot, item, pickup.forceRadiusH(), pickup.forceRadiusV());
-    }
-
-    public static boolean forcePickupNearbyAnyOf(AIPlayerEntity bot, Set<Item> items) {
-        MinecraftAiConfig.Pickup pickup = MinecraftAiConfig.get().pickup();
-        return forcePickupNearbyAnyOf(bot, items, pickup.forceRadiusH(), pickup.forceRadiusV());
-    }
-
     public static void chaseDrop(AIPlayerEntity bot, Item item, double radius) {
         chaseDropAnyOf(bot, item == null ? null : Set.of(item), radius);
     }
 
     public static void chaseDropAnyOf(AIPlayerEntity bot, Set<Item> items, double radius) {
-        if (forcePickupNearbyAnyOf(bot, items)) {
-            bot.getActionPack().stopMovement();
-            return;
-        }
         nearestDropAnyOf(bot, items, radius).ifPresent(drop -> {
             if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
                 approachDropPhysically(bot, drop);
@@ -348,8 +295,8 @@ public final class HarvestCore {
     }
 
     /**
-     * One tick of a plain walk-over pickup for drops lying in open ground (a harvested crop field): forced
-     * pickup first when the profile allows it, otherwise a direct walk (collision-driven, the same controller
+     * One tick of a plain walk-over pickup for drops lying in open ground (a harvested crop field): a direct walk
+     * (collision-driven, the same controller
      * a player-like walk uses) toward the nearest observed, settled drop of {@code items} within
      * {@code radius} whose straight approach is a {@link #isSafeWalkCorridor safe corridor}. Unlike
      * {@link #approachDropPhysically}, it assumes no standable-cell geometry: a bot standing on farmland
@@ -359,9 +306,6 @@ public final class HarvestCore {
      * instead of walked at. Returns whether a reachable drop is still on the ground within range.
      */
     public static boolean walkOverDrops(AIPlayerEntity bot, Set<Item> items, double radius) {
-        if (forcePickupNearbyAnyOf(bot, items)) {
-            bot.getActionPack().stopMovement();
-        }
         List<ItemEntity> drops = bot.level()
                 .getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(radius),
                         entity -> !entity.getItem().isEmpty() && matches(entity.getItem(), items)
@@ -466,27 +410,18 @@ public final class HarvestCore {
         return true;
     }
 
-    public static int sweepPickup(AIPlayerEntity bot, Item item, double radius, int maxTargets) {
-        return sweepPickupAnyOf(bot, item == null ? null : Set.of(item), radius, maxTargets);
+    public static void sweepPickup(AIPlayerEntity bot, Item item, double radius, int maxTargets) {
+        sweepPickupAnyOf(bot, item == null ? null : Set.of(item), radius, maxTargets);
     }
 
-    public static int sweepPickupAnyOf(AIPlayerEntity bot, Set<Item> items, double radius, int maxTargets) {
-        int picked = 0;
-        for (int i = 0; i < maxTargets; i++) {
-            if (!forcePickupNearbyAnyOf(bot, items)) {
-                break;
-            }
-            picked++;
-        }
-        if (picked > 0) {
-            return picked;
-        }
+    public static void sweepPickupAnyOf(AIPlayerEntity bot, Set<Item> items, double radius, int maxTargets) {
+        // A player collects what lies about by walking onto it: one drop at a time, through the vanilla pickup
+        // range and delay. Nothing is transferred from a distance.
         nearestDropAnyOf(bot, items, radius).ifPresent(drop -> {
             if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
                 approachDropPhysically(bot, drop);
             }
         });
-        return 0;
     }
 
     /**
@@ -642,12 +577,12 @@ public final class HarvestCore {
         return true;
     }
 
-    public static int sweepPickup(AIPlayerEntity bot, Item item, int maxTargets) {
-        return sweepPickup(bot, item, MinecraftAiConfig.get().pickup().sweepRadius(), maxTargets);
+    public static void sweepPickup(AIPlayerEntity bot, Item item, int maxTargets) {
+        sweepPickup(bot, item, MinecraftAiConfig.get().pickup().sweepRadius(), maxTargets);
     }
 
-    public static int sweepPickupAnyOf(AIPlayerEntity bot, Set<Item> items, int maxTargets) {
-        return sweepPickupAnyOf(bot, items, MinecraftAiConfig.get().pickup().sweepRadius(), maxTargets);
+    public static void sweepPickupAnyOf(AIPlayerEntity bot, Set<Item> items, int maxTargets) {
+        sweepPickupAnyOf(bot, items, MinecraftAiConfig.get().pickup().sweepRadius(), maxTargets);
     }
 
     public static int totalInventoryCount(AIPlayerEntity bot) {
@@ -892,15 +827,6 @@ public final class HarvestCore {
             }
         }
         return null;
-    }
-
-    private static boolean canForcePickup(AIPlayerEntity bot, ItemEntity drop, double maxH, double maxV) {
-        if (drop.hasPickUpDelay()) {
-            return false;
-        }
-        double dx = drop.getX() - bot.getX();
-        double dz = drop.getZ() - bot.getZ();
-        return dx * dx + dz * dz <= maxH * maxH && Math.abs(drop.getY() - bot.getY()) <= maxV;
     }
 
     private static boolean matches(ItemStack stack, Set<Item> items) {

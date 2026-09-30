@@ -21,18 +21,16 @@ class MinecraftAiConfigModeDefaultsTest {
         JsonObject flags = json.getAsJsonObject("operatorCapabilities");
         assertTrue(flags.get("hiddenBlockScan").getAsBoolean());
         assertTrue(flags.get("emergencyTeleport").getAsBoolean());
-        assertTrue(flags.get("forcedPickup").getAsBoolean());
         assertTrue(flags.get("manualTeleport").getAsBoolean());
     }
 
     @Test
     void partialOperatorFlagsPreserveExplicitFalseAndDefaultMissingValues() {
-        OperatorCapabilities merged = new OperatorCapabilities(false, null, null, false)
+        OperatorCapabilities merged = new OperatorCapabilities(false, null, false)
                 .withDefaults(OperatorCapabilities.defaults());
 
         assertEquals(Boolean.FALSE, merged.hiddenBlockScan());
         assertEquals(Boolean.TRUE, merged.emergencyTeleport());
-        assertEquals(Boolean.TRUE, merged.forcedPickup());
         assertEquals(Boolean.FALSE, merged.manualTeleport());
     }
 }

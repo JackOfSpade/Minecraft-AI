@@ -586,11 +586,6 @@ class FakeDetourHost implements DetourHost {
     }
 
     @Override
-    public void tryForcedPickup() {
-        calls.add("forcedPickup");
-    }
-
-    @Override
     public DropView observeDrop(BlockPos breakCell) {
         if (dropViewFn != null) {
             return dropViewFn.apply(breakCell);

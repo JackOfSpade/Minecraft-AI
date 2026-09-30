@@ -1218,7 +1218,6 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     }
 
     private void refreshCollected(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops, 4.0D, 12.0D);
         int total = Math.max(0, HarvestCore.countInventoryItems(bot, targetDrops) - invBaseline);
         if (total <= collected) {
             return;

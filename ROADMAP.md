@@ -46,7 +46,7 @@ Two operating strategies must be clearly distinguished:
 
 Implemented: new installs default to `strict_survival`; `operator` must be explicitly enabled. When an old config is missing the mode field, it starts in `operator` mode for backward compatibility and emits a one-time migration warning; invalid config and invalid environment variables fail closed to strict. The four enhanced capabilities are each independent toggles, and the actual profile/effective capabilities are shown simultaneously in the UI, the snapshot, and the structured logs.
 
-`strict_survival` does not enable hidden resource scanning, emergency teleportation, forced pickup, or manual teleportation; resource targets pass through a visibility boundary before being read. Navigation collision pre-checks, the first spawn/save restore, stepping down next to a fake-player, the bot's own fishing hook, and an explicit owner-follow position are documented runtime adapters and must not be reused by resource search.
+`strict_survival` does not enable hidden resource scanning, emergency teleportation, or manual teleportation; resource targets pass through a visibility boundary before being read. Navigation collision pre-checks, the first spawn/save restore, stepping down next to a fake-player, the bot's own fishing hook, and an explicit owner-follow position are documented runtime adapters and must not be reused by resource search.
 
 ## 3. Current Baseline
 

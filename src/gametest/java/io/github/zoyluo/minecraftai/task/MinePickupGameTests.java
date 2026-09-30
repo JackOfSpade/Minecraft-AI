@@ -24,8 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Regression coverage for the MineTask pickup-completion action-pack cleanup.
  *
- * <p>Under {@code strict_survival} (the fail-closed default), {@code HarvestCore
- * .forcePickupNearbyAnyOf} is always denied, so {@code MineTask.pickup()} detects a successful
+ * <p>Bots have no forced pickup (no profile can vacuum a drop into the inventory), so {@code MineTask.pickup()} detects a successful
  * collection only by polling an inventory-count delta while {@code HarvestCore.chaseDropAnyOf}
  * (via {@code approachDropPhysically} / {@code FakePlayerMotion.nudgeWithinBlockToward}) chases the
  * drop. That chase can leave {@code ActionPack.sneaking} held true on the very tick vanilla's own

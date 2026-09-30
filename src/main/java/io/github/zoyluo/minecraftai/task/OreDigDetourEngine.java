@@ -934,7 +934,6 @@ final class OreDigDetourEngine {
     private Result tickSettle(DetourHost host) {
         int now = host.now();
         int t = now - settleStart;
-        host.tryForcedPickup();
         if (host.inventoryTotal() > debt.baseline && !gained) {
             gained = true;
             beat(host);

@@ -79,8 +79,8 @@ final class BotInputBridge {
         // A sneaking player does not walk off an edge or down a ladder/vine, and the fall/descent/climb has to be made.
         boolean edge = movement.parkour || movement.descending || bot.onClimbable();
         boolean effectiveSneak = sneak || ((gait == Gait.SNEAK || pack.sneakRequested()) && !edge);
-        boolean usingItemSlow = bot.isUsingItem() && config.itemUseSlowdownEnabled();
-        float scale = PaceRules.inputScale(effectiveSneak, bot.isUsingItem(), config.itemUseSlowdownEnabled());
+        boolean usingItemSlow = bot.isUsingItem();
+        float scale = PaceRules.inputScale(effectiveSneak, bot.isUsingItem());
         bot.zza = forward * scale;
         bot.xxa = left * scale;
         bot.setJumping(jump);

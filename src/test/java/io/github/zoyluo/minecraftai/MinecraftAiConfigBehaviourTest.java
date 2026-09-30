@@ -26,8 +26,6 @@ final class MinecraftAiConfigBehaviourTest {
     private static void assertShippedDefaults(MinecraftAiConfig.Behaviour behaviour) {
         MinecraftAiConfig.Pace pace = behaviour.pace();
         assertTrue(pace.paceEnabled());
-        assertTrue(pace.itemUseSlowdownEnabled());
-        assertTrue(pace.movementExhaustionEnabled());
         assertTrue(pace.quietZoneCautionEnabled());
         assertEquals(8.0D, pace.routeSprintDistance());
         assertEquals(4.5D, pace.routeWalkDistance());
@@ -71,8 +69,6 @@ final class MinecraftAiConfigBehaviourTest {
         assertFalse(behaviour.pace().paceEnabled());
         assertEquals(12.0D, behaviour.pace().routeSprintDistance());
         assertEquals(4.5D, behaviour.pace().routeWalkDistance(), "the missing walk distance is the default");
-        assertTrue(behaviour.pace().itemUseSlowdownEnabled());
-        assertTrue(behaviour.pace().movementExhaustionEnabled());
         assertTrue(behaviour.pace().quietZoneCautionEnabled());
         assertFalse(behaviour.targeting().ownerVisionEnabled());
         assertEquals(900, behaviour.targeting().aggressorMemoryTicks());
@@ -113,9 +109,9 @@ final class MinecraftAiConfigBehaviourTest {
     @Test
     void notANumberAndInfinityFallBackToTheDefaults() {
         MinecraftAiConfig.Pace defaultPace = MinecraftAiConfig.Pace.defaults();
-        MinecraftAiConfig.Pace nan = new MinecraftAiConfig.Pace(null, null, null, Double.NaN, Double.NaN, null).withDefaults(defaultPace);
+        MinecraftAiConfig.Pace nan = new MinecraftAiConfig.Pace(null, Double.NaN, Double.NaN, null).withDefaults(defaultPace);
         assertEquals(defaultPace, nan);
-        MinecraftAiConfig.Pace infinite = new MinecraftAiConfig.Pace(true, true, true, Double.POSITIVE_INFINITY, 2.0D, true)
+        MinecraftAiConfig.Pace infinite = new MinecraftAiConfig.Pace(true, Double.POSITIVE_INFINITY, 2.0D, true)
                 .withDefaults(defaultPace);
         assertEquals(8.0D, infinite.routeSprintDistance());
         assertEquals(2.0D, infinite.routeWalkDistance());
@@ -155,12 +151,38 @@ final class MinecraftAiConfigBehaviourTest {
         assertEquals(7.0D, kept.sprintGap());
     }
 
+
+    @Test
+    void removedSwitchesAreIgnoredAndReportedNotHonoured() {
+        String json = "{\"operatorCapabilities\":{\"forcedPickup\":true,\"manualTeleport\":false},"
+                + "\"pickup\":{\"forceRadiusH\":9.0,\"forceRadiusV\":9.0,\"sweepRadius\":6.0},"
+                + "\"behaviour\":{\"pace\":{\"itemUseSlowdown\":false,\"movementExhaustion\":false,\"enabled\":true}}}";
+        MinecraftAiConfig config = parse(json, OperatingProfile.OPERATOR);
+        assertEquals(6.0D, config.pickup().sweepRadius(), "the surviving key of a partly removed section is still read");
+        assertEquals(Boolean.FALSE, config.operatorCapabilities().manualTeleport());
+        assertEquals(
+                java.util.List.of("behaviour.pace.itemUseSlowdown", "behaviour.pace.movementExhaustion",
+                        "operatorCapabilities.forcedPickup", "pickup.forceRadiusH", "pickup.forceRadiusV"),
+                MinecraftAiConfig.removedKeysPresent(JsonParser.parseString(json).getAsJsonObject()));
+        assertEquals(java.util.List.of(), MinecraftAiConfig.removedKeysPresent(JsonParser.parseString("{}").getAsJsonObject()));
+        assertEquals(java.util.List.of(), MinecraftAiConfig.removedKeysPresent(
+                JsonParser.parseString("{\"behaviour\":{\"pace\":{\"enabled\":false}}}").getAsJsonObject()));
+    }
+
+    @Test
+    void movementExhaustionHasNoConfigurationSwitch() throws java.io.IOException {
+        String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/entity/AIPlayerEntity.java"));
+        int start = source.indexOf("private void chargeMovementExhaustion()");
+        int end = source.indexOf("checkMovementStatistics(dx, dy, dz)", start);
+        assertTrue(start > 0 && end > start);
+        assertFalse(source.substring(start, end).contains("MinecraftAiConfig"),
+                "the hunger cost of moving is vanilla and unconditional");
+    }
     @Test
     void nullBooleansReadAsTheDefault() {
-        assertTrue(new MinecraftAiConfig.Pace(null, null, null, 0.0D, 0.0D, null).paceEnabled());
-        assertTrue(new MinecraftAiConfig.Pace(null, null, null, 0.0D, 0.0D, null).itemUseSlowdownEnabled());
-        assertTrue(new MinecraftAiConfig.Pace(null, null, null, 0.0D, 0.0D, null).movementExhaustionEnabled());
-        assertTrue(new MinecraftAiConfig.Pace(null, null, null, 0.0D, 0.0D, null).quietZoneCautionEnabled());
+        assertTrue(new MinecraftAiConfig.Pace(null, 0.0D, 0.0D, null).paceEnabled());
+        assertTrue(new MinecraftAiConfig.Pace(null, 0.0D, 0.0D, null).quietZoneCautionEnabled());
         assertTrue(new MinecraftAiConfig.Targeting(null, null, 0, 0, 0.0D).hostileBotsEnabled());
         assertTrue(new MinecraftAiConfig.Targeting(null, null, 0, 0, 0.0D).ownerVisionEnabled());
         assertTrue(new MinecraftAiConfig.Gear(null).worstFirstEnabled());
@@ -201,7 +223,7 @@ final class MinecraftAiConfigBehaviourTest {
     @Test
     void theCopiesCarryTheBehaviour() {
         MinecraftAiConfig.Behaviour custom = new MinecraftAiConfig.Behaviour(
-                new MinecraftAiConfig.Pace(false, true, true, 9.0D, 5.0D, true),
+                new MinecraftAiConfig.Pace(false, 9.0D, 5.0D, true),
                 MinecraftAiConfig.Targeting.defaults(),
                 new MinecraftAiConfig.Gear(false),
                 MinecraftAiConfig.Follow.defaults(),

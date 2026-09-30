@@ -41,11 +41,11 @@ class CapabilityGateTest {
         List<CapabilityDecision> decisions = new ArrayList<>();
         CapabilityGate gate = new CapabilityGate(
                 OperatingProfile.OPERATOR,
-                new OperatorCapabilities(false, false, true, false),
+                new OperatorCapabilities(false, true, false),
                 decisions::add);
 
         CapabilityGate.Execution<Integer> result = gate.call(
-                PrivilegedCapability.FORCED_PICKUP,
+                PrivilegedCapability.EMERGENCY_TELEPORT,
                 executions::incrementAndGet);
 
         assertTrue(result.executed());

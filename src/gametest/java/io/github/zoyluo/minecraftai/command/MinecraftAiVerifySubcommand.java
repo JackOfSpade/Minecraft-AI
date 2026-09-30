@@ -117,7 +117,6 @@ public final class MinecraftAiVerifySubcommand {
             "drowning",
             "nav_obstacle",
             "nav_gap",
-            "pickup_blocked",
             "mine_to_iron",
             "mine_iron_from_scratch",
             "mine_buried_iron",
@@ -535,7 +534,6 @@ public final class MinecraftAiVerifySubcommand {
             case "drowning" -> verifyDrowning(bot);
             case "nav_obstacle" -> assignNavObstacle(bot);
             case "nav_gap" -> assignNavGap(bot);
-            case "pickup_blocked" -> verifyPickupBlocked(bot);
             case "mine_to_iron" -> assignMineToIron(bot);
             case "mine_iron_from_scratch" -> assignMineIronFromScratch(bot);
             case "mine_buried_iron" -> assignMineBuriedIron(bot);
@@ -866,20 +864,6 @@ public final class MinecraftAiVerifySubcommand {
         bot.level().setBlock(ore, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         return assignTask(bot, "mine_exposed", new MineTask(Blocks.IRON_ORE, 1), 800,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
-    }
-
-    private static Result verifyPickupBlocked(AIPlayerEntity bot) {
-        prepareArea(bot);
-        clearInventory(bot);
-        ServerLevel world = bot.level();
-        BlockPos dropPos = bot.blockPosition().relative(Direction.NORTH);
-        world.setBlock(dropPos.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        ItemEntity drop = new ItemEntity(world, dropPos.getX() + 0.5D, dropPos.getY(), dropPos.getZ() + 0.5D, new ItemStack(Items.COBBLESTONE, 1));
-        world.addFreshEntity(drop);
-        boolean picked = HarvestCore.forcePickupNearby(bot, Items.COBBLESTONE);
-        return picked && InventoryAction.countItem(bot, Items.COBBLESTONE) >= 1
-                ? Result.pass("pickup_blocked", "forced pickup ok")
-                : Result.fail("pickup_blocked", "forced_pickup_missing");
     }
 
     private static Result assignMineToIron(AIPlayerEntity bot) {

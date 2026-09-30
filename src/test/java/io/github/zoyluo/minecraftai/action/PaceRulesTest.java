@@ -57,25 +57,22 @@ class PaceRulesTest {
 
     @Test
     void inputScaleIsOneWhenNothingSlowsTheBotDown() {
-        assertEquals(1.0F, PaceRules.inputScale(false, false, true));
+        assertEquals(1.0F, PaceRules.inputScale(false, false));
     }
 
     @Test
     void sneakingScalesByThreeTenths() {
-        assertEquals(0.3F, PaceRules.inputScale(true, false, true));
-        assertEquals(0.3F, PaceRules.inputScale(true, false, false));
+        assertEquals(0.3F, PaceRules.inputScale(true, false));
     }
 
     @Test
-    void usingAnItemScalesByTwoTenthsWhenTheSlowdownIsOn() {
-        assertEquals(0.2F, PaceRules.inputScale(false, true, true));
-        assertEquals(1.0F, PaceRules.inputScale(false, true, false), "pace.itemUseSlowdown=false");
+    void usingAnItemScalesByTwoTenthsAlways() {
+        assertEquals(0.2F, PaceRules.inputScale(false, true), "vanilla item-use slowdown has no switch");
     }
 
     @Test
     void sneakingAndUsingAnItemMultiply() {
-        assertEquals(0.3F * 0.2F, PaceRules.inputScale(true, true, true), 1.0E-7F);
-        assertEquals(0.3F, PaceRules.inputScale(true, true, false), 1.0E-7F);
+        assertEquals(0.3F * 0.2F, PaceRules.inputScale(true, true), 1.0E-7F);
     }
 
     @Test

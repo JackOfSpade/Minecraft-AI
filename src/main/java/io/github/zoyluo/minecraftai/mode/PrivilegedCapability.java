@@ -4,6 +4,5 @@ package io.github.zoyluo.minecraftai.mode;
 public enum PrivilegedCapability {
     HIDDEN_BLOCK_SCAN,
     EMERGENCY_TELEPORT,
-    FORCED_PICKUP,
     MANUAL_TELEPORT
 }

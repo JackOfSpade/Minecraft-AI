@@ -392,11 +392,11 @@ public final class ActionPack {
         boolean effectiveSprint = gait == Gait.SPRINT && geometry && PaceRules.sprintAllowed(player, forward, effectiveSneak);
         player.setShiftKeyDown(effectiveSneak);
         player.setSprinting(effectiveSprint);
-        float scale = PaceRules.inputScale(effectiveSneak, player.isUsingItem(), config.itemUseSlowdownEnabled());
+        float scale = PaceRules.inputScale(effectiveSneak, player.isUsingItem());
         player.zza = forward * scale;
         player.xxa = strafing * scale;
         noteEnforced(effectiveSneak ? Gait.SNEAK : effectiveSprint ? Gait.SPRINT : Gait.WALK, scale,
-                player.isUsingItem() && config.itemUseSlowdownEnabled());
+                player.isUsingItem());
     }
 
     private boolean controllerDriven() {

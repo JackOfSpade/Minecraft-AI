@@ -84,6 +84,32 @@ public record MinecraftAiConfig(
         return parsed == null ? null : parsed.withProfile(profile).withDefaults();
     }
 
+    /**
+     * Keys of an older {@code minecraftai.json} that no longer switch anything, because the behaviour they turned off is now
+     * unconditional (a bot pays the vanilla hunger cost of moving and the vanilla item-use slowdown, and collects drops only by
+     * walking onto them): they are ignored, and reported once.
+     */
+    static List<String> removedKeysPresent(JsonObject root) {
+        List<String> found = new java.util.ArrayList<>();
+        for (String path : REMOVED_KEYS) {
+            JsonElement node = root;
+            for (String part : path.split("[.]")) {
+                node = node != null && node.isJsonObject() ? node.getAsJsonObject().get(part) : null;
+            }
+            if (node != null) {
+                found.add(path);
+            }
+        }
+        return found;
+    }
+
+    private static final List<String> REMOVED_KEYS = List.of(
+            "behaviour.pace.itemUseSlowdown",
+            "behaviour.pace.movementExhaustion",
+            "operatorCapabilities.forcedPickup",
+            "pickup.forceRadiusH",
+            "pickup.forceRadiusV");
+
     /** API-key override from the environment: {@link #ENV_API_KEY} first, then the legacy name. */
     static String apiKeyFromEnv(Function<String, String> env) {
         for (String name : List.of(ENV_API_KEY, LEGACY_ENV_API_KEY)) {
@@ -111,6 +137,10 @@ public record MinecraftAiConfig(
                 if (root.has("deepseek") && !root.has("llm")) {
                     BotLog.warn(LogCategory.CONFIG, null, "config_legacy_key",
                             "key", "deepseek", "use", "llm");
+                }
+                List<String> removedKeys = removedKeysPresent(root);
+                if (!removedKeys.isEmpty()) {
+                    BotLog.config("config_removed_keys_ignored", "keys", removedKeys);
                 }
                 MinecraftAiConfig parsed = parse(root, profileResolution.profile());
                 if (parsed != null) {
@@ -222,7 +252,7 @@ public record MinecraftAiConfig(
                 new Mining(2, 0.10D, true),
                 new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue(), BaritoneCaps.defaults()),
-                new Pickup(2.75D, 2.5D, 8.0D), // measured 1.5/1.0 as too small: tree-drop items with a vertical gap >1 don't get pulled in → countSoFar=0 infinite loop
+                new Pickup(8.0D),
                 new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100),
                 new Storage(64, 16, 3, 24, true),
                 Behaviour.defaults());
@@ -259,7 +289,6 @@ public record MinecraftAiConfig(
                 "source", resolution.source(),
                 "configured_hidden_block_scan", configured.hiddenBlockScan(),
                 "configured_emergency_teleport", configured.emergencyTeleport(),
-                "configured_forced_pickup", configured.forcedPickup(),
                 "configured_manual_teleport", configured.manualTeleport(),
                 "effective_capabilities", effectiveCapabilities);
     }
@@ -694,19 +723,17 @@ public record MinecraftAiConfig(
     }
 
     /**
-     * Walking pace of controller-driven travel. {@code enabled}: the natural sprint/walk/sneak policy at all;
-     * {@code itemUseSlowdown}: the 0.2 movement scale while using an item; {@code movementExhaustion}: hunger from moving;
+     * Walking pace of controller-driven travel. {@code enabled}: the natural sprint/walk/sneak policy at all (the vanilla item-use
+     * slowdown and the hunger cost of moving are not switchable: a bot always pays them).
      * {@code routeSprintDistance} / {@code routeWalkDistance}: a route sprints from that far to its goal and walks below the
      * second one; {@code quietZoneCaution}: cap the pace in sculk/warden zones.
      */
     public record Pace(Boolean enabled,
-                       Boolean itemUseSlowdown,
-                       Boolean movementExhaustion,
                        double routeSprintDistance,
                        double routeWalkDistance,
                        Boolean quietZoneCaution) {
         public static Pace defaults() {
-            return new Pace(true, true, true, 8.0D, 4.5D, true);
+            return new Pace(true, 8.0D, 4.5D, true);
         }
 
         Pace withDefaults(Pace defaults) {
@@ -719,8 +746,6 @@ public record MinecraftAiConfig(
             }
             return new Pace(
                     boolOrDefault(enabled, defaults.enabled),
-                    boolOrDefault(itemUseSlowdown, defaults.itemUseSlowdown),
-                    boolOrDefault(movementExhaustion, defaults.movementExhaustion),
                     sprint,
                     walk,
                     boolOrDefault(quietZoneCaution, defaults.quietZoneCaution));
@@ -728,14 +753,6 @@ public record MinecraftAiConfig(
 
         public boolean paceEnabled() {
             return boolOrTrue(enabled, defaults().enabled);
-        }
-
-        public boolean itemUseSlowdownEnabled() {
-            return boolOrTrue(itemUseSlowdown, defaults().itemUseSlowdown);
-        }
-
-        public boolean movementExhaustionEnabled() {
-            return boolOrTrue(movementExhaustion, defaults().movementExhaustion);
         }
 
         public boolean quietZoneCautionEnabled() {
@@ -834,11 +851,10 @@ public record MinecraftAiConfig(
         }
     }
 
-    public record Pickup(double forceRadiusH, double forceRadiusV, double sweepRadius) {
+    /** Drops are collected the way a player does: by walking onto them. {@code sweepRadius}: how far the bot looks for a drop to walk to. */
+    public record Pickup(double sweepRadius) {
         Pickup withDefaults(Pickup defaults) {
             return new Pickup(
-                    positiveDoubleOrDefault(forceRadiusH, defaults.forceRadiusH),
-                    positiveDoubleOrDefault(forceRadiusV, defaults.forceRadiusV),
                     positiveDoubleOrDefault(sweepRadius, defaults.sweepRadius));
         }
     }

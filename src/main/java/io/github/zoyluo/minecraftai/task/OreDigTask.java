@@ -1079,7 +1079,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
 
         // Collection count: a fixed-baseline absolute increment (drops from ore just broken that then land in the inventory get counted in).
-        HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops, 3.0D, 3.0D);
         int total = Math.max(0, HarvestCore.countInventoryItems(bot, targetDrops) - invBaseline);
         boolean targetInventoryAdvanced = total > collected;
         if (total > collected) {
@@ -1219,7 +1218,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 if (st == BlockMiner.Status.DONE) {
                     bonusMined++;
                     noteProgress();
-                    HarvestCore.forcePickupNearbyAnyOf(bot, null, 7.0D, 4.0D);
                     BotLog.action(bot, "ore_dig_bonus", "pos", bonusOre.toShortString(),
                             "total", bonusMined + "/" + BONUS_CAP);
                     bonusOre = null;
@@ -1251,7 +1249,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 if (st == BlockMiner.Status.DONE) {
                     bonusMined++;
                     noteProgress();
-                    HarvestCore.forcePickupNearbyAnyOf(bot, null, 7.0D, 4.0D); // Pick up everything: the drop isn't in targetDrops
                     BotLog.action(bot, "ore_dig_bonus", "pos", bonusOre.toShortString(),
                             "total", bonusMined + "/" + BONUS_CAP);
                     bonusOre = null;
@@ -1661,7 +1658,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 finishTargetBreak(bot, active, activeTargetBreakInventory);
             }
         }
-        HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops, 3.0D, 3.0D);
         if (recoverPendingTargetDrop(bot)) {
             return;
         }
@@ -6027,11 +6023,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         @Override
         public int inventoryTotal() {
             return HarvestCore.totalInventoryCount(bot);
-        }
-
-        @Override
-        public void tryForcedPickup() {
-            HarvestCore.forcePickupNearbyAnyOf(bot, null, 3.0D, 3.0D);
         }
 
         @Override

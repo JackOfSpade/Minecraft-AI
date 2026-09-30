@@ -368,7 +368,6 @@ public final class MineValuablesTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearbyAnyOf(bot, currentTargetDrops);
         int collected = HarvestCore.countInventoryItems(bot, currentTargetDrops) - inventoryCountBeforeMining;
         if (collected > 0) {
             bot.getActionPack().stopAll();

@@ -79,10 +79,10 @@ Baritone bridge sprints whenever Baritone asks (with the old vanilla checks), no
 * No sprint at food 6 or lower (unless the player may fly), while sneaking, while using an item, while blind, without forward input
   (> 0.5), and none on a hard horizontal collision (`horizontalCollision && !minorHorizontalCollision`): a wall ends the sprint, a
   brush against a corner does not.
-* Input scale: 0.3 while sneaking, times 0.2 while using an item (`behaviour.pace.itemUseSlowdown`). A raised shield, a drawn bow or
+* Input scale: 0.3 while sneaking, times 0.2 while using an item (no switch: vanilla applies it unconditionally). A raised shield, a drawn bow or
   eating slows the walk to about 0.9 blocks/s.
 * Movement costs food: at the end of a bot's tick `ServerPlayer.checkMovementStatistics` is called with the tick's displacement
-  (not on a tick a teleport moved the bot, not while it is a passenger; `behaviour.pace.movementExhaustion`). It charges 0.1
+  (not on a tick a teleport moved the bot, not while it is a passenger; no switch: the cost is vanilla and unconditional). It charges 0.1
   exhaustion per sprinted metre (0.01 per metre swum) and awards the movement statistics, exactly as a move packet does for a
   player. Jump exhaustion is vanilla's own.
 
@@ -125,7 +125,7 @@ step, two clear cells ahead).
 
 ## Switches
 
-`behaviour.pace.enabled`, `itemUseSlowdown`, `movementExhaustion`, `routeSprintDistance` (8), `routeWalkDistance` (4.5),
+`behaviour.pace.enabled`, `routeSprintDistance` (8), `routeWalkDistance` (4.5),
 `quietZoneCaution`. See `docs/OPERATING_PROFILES.md`.
 
 ## Following a player (R4)

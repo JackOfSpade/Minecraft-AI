@@ -205,7 +205,6 @@ public final class FishTask extends AbstractTask {
 
     private void collect(AIPlayerEntity bot) {
         phaseTicks++;
-        HarvestCore.forcePickupNearby(bot, null);
         HarvestCore.chaseDrop(bot, null, 8.0D);
         if (phaseTicks < COLLECT_TICKS) {
             return;

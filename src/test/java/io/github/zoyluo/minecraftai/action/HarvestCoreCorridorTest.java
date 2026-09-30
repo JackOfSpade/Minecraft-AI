@@ -49,7 +49,7 @@ final class HarvestCoreCorridorTest {
         assertTrue(body.contains("continue;"), "an unsafe drop is skipped, the next one is tried");
 
         int corridor = source.indexOf("public static boolean isSafeWalkCorridor");
-        String check = source.substring(corridor, source.indexOf("public static int sweepPickup(", corridor));
+        String check = source.substring(corridor, source.indexOf("public static void sweepPickup(", corridor));
         assertTrue(check.contains("Standability.isDangerous(state)"), "fire / lava / cactus / magma fail the corridor");
         assertTrue(check.contains("getFluidState().isEmpty()"), "water and lava cells fail the corridor");
         assertTrue(check.contains("noCollision(bot, box.expandTowards(0.0D, -CORRIDOR_MAX_FALL"),

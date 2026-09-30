@@ -163,7 +163,7 @@ from the logs alone that those logs were actually broken and physically picked u
 reconstructed indirectly — `mine_complete` carried no fields at all, `GatherQuotaTask` logged
 individual pickup events but no per-unit gain record or end-of-task summary, inventory only showed
 up inside the periodic `diag_snapshot` line (truncated in practice), and privileged capability
-decisions (`FORCED_PICKUP`, `HIDDEN_BLOCK_SCAN`) were logged individually but never summarized per
+decisions (`HIDDEN_BLOCK_SCAN`, ...) were logged individually but never summarized per
 task. Per the self-improvement principle above, this was a genuine gap: the events below close it.
 Every one of them is observation only — none of it changes what a task actually counts, decides, or
 does; see the "Constraints" note against each event.
@@ -172,14 +172,13 @@ does; see the "Constraints" note against each event.
 |---|---|---|---|
 | ACTION | `mine_complete` | `MiningController` finishes breaking a block successfully (see `ActionPack.tickMining`) | `block` (registry id of the block, captured before the break), `pos`, `tool` (held item id, or `empty`), `ticks` (break duration) |
 | ACTION | `gather_unit` | `GatherQuotaTask`'s counted total for an accepted item increases | `item`, `delta`, `total`, `target`, `source` (`pickup` when attributable to a block this task broke, with that block's `pos` included; `unattributed` otherwise, e.g. a player handed the bot an item mid-task) |
-| ACTION | `gather_summary` | Exactly one line whenever a `GatherQuotaTask` ends, for any reason (complete, fail, abort, cancel) | `item`/family, `target`, `baseline` (accepted-item inventory count at task start), `final` (at task end), `gained` (sum of `gather_unit` deltas), `breaks` (blocks of the family this task itself broke), `pickups` (confirmed physical pickups), `pickup_misses`, `unattributed_gains`, `forced_pickups` (`FORCED_PICKUP` decisions allowed during this task — must be 0 in `strict_survival`), `capability_denials` (privileged decisions denied during this task), `elapsed_ticks`, `outcome`, `consistent` (see below) |
+| ACTION | `gather_summary` | Exactly one line whenever a `GatherQuotaTask` ends, for any reason (complete, fail, abort, cancel) | `item`/family, `target`, `baseline` (accepted-item inventory count at task start), `final` (at task end), `gained` (sum of `gather_unit` deltas), `breaks` (blocks of the family this task itself broke), `pickups` (confirmed physical pickups), `pickup_misses`, `unattributed_gains`, `capability_denials` (privileged decisions denied during this task), `elapsed_ticks`, `outcome`, `consistent` (see below) |
 | ACTION | `inventory_delta` | A bot's inventory differs from the previous sample, sampled at the same cadence as `diag_snapshot` (every ~2s, driven from the same per-tick call site — see `log/InventoryAudit.java`); only written when something actually changed | `task` (active task name), `viewer` (name of a player with this bot's inventory screen open, or `none`), `gained` (e.g. `minecraft:spruce_log+1`), `lost` (e.g. `minecraft:torch-1`); both are bounded to a handful of items with a `+N more` tail if more changed at once |
 
 `gather_summary`'s `consistent` field (`log/GatherConsistency.java`) is `true` only when
-`gained <= breaks * max_drops_per_broken_block + unattributed_gains && forced_pickups == 0` — i.e.
+`gained <= breaks * max_drops_per_broken_block + unattributed_gains` — i.e.
 every gained item can be explained by what the task actually broke (bounded by that item family's
-normal drop count per block — 1 for logs) plus whatever arrived unattributed, and the task never
-used a forced pickup. A `false` here is the sign to go dig further; it does not by itself prove
+normal drop count per block — 1 for logs) plus whatever arrived unattributed (a bot has no forced pickup: it collects drops by walking onto them, as a player does). A `false` here is the sign to go dig further; it does not by itself prove
 anything was faked (e.g. a player physically handing the bot logs is unattributed and legitimate,
 just outside what this task can attribute to its own mining).
 
@@ -194,9 +193,9 @@ this logic feeds back into `GatherQuotaTask`'s phase/`countSoFar`/`targetPos` de
 To confirm whether a "gather N `<item>`" request was legitimately fulfilled, read (for that bot,
 filtered to the request's scope — see "Design Goals" above) in this order:
 
-1. **`gather_summary`** — the one-line verdict. Check `consistent=true`, `forced_pickups=0`, and
+1. **`gather_summary`** — the one-line verdict. Check `consistent=true` and
    that `outcome` is what you expect (`complete` vs. a failure/cancel reason). If `consistent` is
-   `false` or `forced_pickups > 0`, treat the run as suspect and go to step 2.
+   `false`, treat the run as suspect and go to step 2.
 2. **`gather_unit`** — the per-gain ledger. Every line with `source=pickup` names the exact block
    position it came from; sum their `delta`s and compare against `gather_summary`'s `breaks` (each
    pickup should trace back to one of this task's own `mine_complete`/`exact_block_broken`
@@ -206,8 +205,8 @@ filtered to the request's scope — see "Design Goals" above) in this order:
    that actually produces the target item, and a plausible `ticks` (a suspiciously low tick count
    for a hard block is a sign of a modified client or a forced break).
 4. **`capability_decision`** (from `mode/CapabilityRuntime.java`) — for the request's scope, look
-   for any `capability=FORCED_PICKUP allowed=true` line; there should be none in `strict_survival`,
-   and `gather_summary`'s `forced_pickups` should already have flagged it.
+   for any `allowed=true` line; there should be none in `strict_survival`, and `gather_summary`'s
+   `capability_denials` counts the denied ones.
 5. **`inventory_delta`** — an independent cross-check: the bot's actual inventory changes over the
    same window should line up with what `gather_unit` reported gained, and `viewer` tells you
    whether a player had the inventory screen open at the time (relevant if items appeared that

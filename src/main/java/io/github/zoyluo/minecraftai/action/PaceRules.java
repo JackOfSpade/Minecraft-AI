@@ -38,10 +38,10 @@ public final class PaceRules {
                 && !hardCollision;
     }
 
-    /** The factor the movement input is multiplied by (1.0 when neither slowdown applies). */
-    public static float inputScale(boolean sneaking, boolean usingItem, boolean slowdownEnabled) {
+    /** The factor the movement input is multiplied by (1.0 when neither slowdown applies; vanilla applies both, there is no switch). */
+    public static float inputScale(boolean sneaking, boolean usingItem) {
         float scale = sneaking ? SNEAK_SCALE : 1.0F;
-        if (usingItem && slowdownEnabled) {
+        if (usingItem) {
             scale *= USE_ITEM_SCALE;
         }
         return scale;

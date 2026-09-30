@@ -92,13 +92,10 @@ public class AIPlayerEntity extends ServerPlayer {
      * statistics and charges the exhaustion of sprinting (0.1 per metre), swimming and so on; a bot has no client and so paid nothing
      * for running. This is that packet's tail, with the displacement of the tick. Jumping exhaustion is charged by vanilla itself
      * ({ jumpFromGround}), so it is not repeated. Not on a tick a teleport moved the bot, not while it is a passenger, not while
-     * it is dead. Switch: { behaviour.pace.movementExhaustion}.
+     * it is dead. Always on: no configuration switches it off.
      */
     private void chargeMovementExhaustion() {
         if (this.teleportedThisTick || this.isPassenger() || !this.isAlive() || this.isRemoved() || this.isSpectator()) {
-            return;
-        }
-        if (!io.github.zoyluo.minecraftai.MinecraftAiConfig.get().behaviour().paceOrDefaults().movementExhaustionEnabled()) {
             return;
         }
         double dx = this.getX() - this.tickFromX;

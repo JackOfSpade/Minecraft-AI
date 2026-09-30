@@ -12,7 +12,6 @@ We recommend explicitly writing the profile in `minecraftai.json`:
   "operatorCapabilities": {
     "hiddenBlockScan": false,
     "emergencyTeleport": false,
-    "forcedPickup": false,
     "manualTeleport": false
   }
 }
@@ -46,10 +45,9 @@ The only valid values are `strict_survival` and `operator`. Configuration is par
 |---|---:|---:|---:|
 | `hiddenBlockScan` | Deny | Allow | Deny |
 | `emergencyTeleport` | Deny | Allow | Deny |
-| `forcedPickup` | Deny | Allow | Deny |
 | `manualTeleport` | Deny | Allow | Deny |
 
-The four `operator` defaults are `true`, to preserve legacy behavior; they are four independent switches, not one master switch. For example, to allow only manual teleport:
+The three `operator` defaults are `true`, to preserve legacy behavior; they are three independent switches, not one master switch. For example, to allow only manual teleport:
 
 ```json
 {
@@ -57,17 +55,15 @@ The four `operator` defaults are `true`, to preserve legacy behavior; they are f
   "operatorCapabilities": {
     "hiddenBlockScan": false,
     "emergencyTeleport": false,
-    "forcedPickup": false,
     "manualTeleport": true
   }
 }
 ```
 
-### Meaning of the Four Capabilities
+### Meaning of the Three Capabilities
 
 - `hiddenBlockScan`: Allows bypassing strict's observability filtering to probe for resources. In strict mode, blocks must be within the configured radius, exposed, and hit by a line-of-sight raycast; entities must be within radius and visible.
 - `emergencyTeleport`: Allows hazard handling (the suffocation climb, the drowning rescue, dark-trap surfacing and gather surfacing) to perform a long-distance emergency teleport. In strict mode, the relevant code paths instead attempt normal actions and fail explicitly when they cannot be handled safely; the capability decision is made first, so nothing is scanned that the bot cannot see. No profile teleports a bot to correct its path: a route start that is not standable is left by a walked step (`WalkedStep`), a stalled hop or pillar jump is retried with inputs, and a bot inside a block is shoved, walked or dug out (`NavSafetyNet.escapeSuffocationByInputs`).
-- `forcedPickup`: Allows directly transferring nearby dropped items into the bot's inventory. Strict mode only uses the normal world pickup process.
 - `manualTeleport`: Allows initiating a manual teleport via the control panel/network action. When not in effect, the UI button is disabled, and the server still rejects the request again on its own.
 
 ## Strict Survival Semantics
@@ -75,7 +71,7 @@ The four `operator` defaults are `true`, to preserve legacy behavior; they are f
 `strict_survival` is not just about hiding UI buttons. The server-side capability gate re-checks before the action occurs:
 
 - Resource and entity scans are first filtered by proximity, exposure, and line of sight;
-- Emergency teleport, manual teleport, and forced pickup are prohibited;
+- Emergency teleport and manual teleport are prohibited;
 - Death recovery follows the lifecycle and respawns at the world spawn point, without using teleport capability to fake an in-place respawn;
 - Survival constraints are not bypassed via a forced time-skip or remote world mutation.
 
@@ -94,8 +90,6 @@ The `behaviour` section of `minecraftai.json` holds the companion behaviour swit
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `behaviour.pace.enabled` | `true` | The natural sprint/walk/sneak policy for controller-driven travel (a path or route walk). Off: the earlier always-as-asked behaviour. |
-| `behaviour.pace.itemUseSlowdown` | `true` | Movement scale 0.2 while a bot uses an item (eating, drawing a bow, blocking), as vanilla applies on the client. |
-| `behaviour.pace.movementExhaustion` | `true` | Moving costs hunger like a player's (`checkMovementStatistics`), and hunger stops sprinting at the vanilla threshold. |
 | `behaviour.pace.routeSprintDistance` | `8.0` | A route sprints while its goal is at least this far away (blocks). |
 | `behaviour.pace.routeWalkDistance` | `4.5` | A route walks once its goal is this close or closer; in between the pace is kept. |
 | `behaviour.pace.quietZoneCaution` | `true` | Cap the pace in quiet zones (sculk, an ancient city) so a bot does not wake a warden. |
@@ -113,6 +107,13 @@ The `behaviour` section of `minecraftai.json` holds the companion behaviour swit
 These switches only exist as configuration from this version on; the behaviours they name are switched on by the jobs that implement them, and until then a switch has no effect.
 
 Two records support these switches and are not configuration: `RecentDamage` (who hurt whom, in level game time, from Fabric's `AFTER_DAMAGE`) and `TeleportAudit`. `TeleportAudit` classifies every bot teleport as `LIFECYCLE` (spawn, respawn), `USER` (the panel's recall), `VANILLA` (portals, pearls), `PRIVILEGED` (the operator emergency rescues, which are capability-gated and refused in `strict_survival`), `TEST` (a GameTest fixture move) or `CORRECTION` (anything else: a path or position correction), logs it as `bot_teleport kind=... caller=Class#method dist=...` and keeps per-bot counters.
+
+### Removed switches
+
+A bot is bound by the same rules as a survival player, so the switches that could turn those rules off are gone. A key of an older `minecraftai.json` that names one of them is ignored, and the startup log carries one `config_removed_keys_ignored` line listing the keys found:
+
+- `behaviour.pace.itemUseSlowdown` and `behaviour.pace.movementExhaustion`: the 0.2 movement scale while using an item and the hunger cost of moving are always applied.
+- `operatorCapabilities.forcedPickup`, `pickup.forceRadiusH`, `pickup.forceRadiusV`: no profile can vacuum a drop into the inventory. A bot collects an item by walking onto it, inside vanilla's pickup range and after its pickup delay.
 
 ## Observability and Auditing
 
@@ -135,6 +136,6 @@ bash scripts/evidence_run.sh \
   --operator-capabilities all
 ```
 
-operator can also take a comma-separated subset, for example `--operator-capabilities manualTeleport`; `none` means all four are disabled. strict does not accept a parameter that enables an operator capability.
+operator can also take a comma-separated subset, for example `--operator-capabilities manualTeleport`; `none` means all three are disabled. strict does not accept a parameter that enables an operator capability.
 
 The strict/operator local diagnostics retained in the current working tree are both `7/7 PASS`, but because the working tree was not clean at runtime, the bundle is correctly marked `UNVERIFIED`. This result demonstrates that the harness and policy passed under this local state; it is not equivalent to a capability certification of a published commit.

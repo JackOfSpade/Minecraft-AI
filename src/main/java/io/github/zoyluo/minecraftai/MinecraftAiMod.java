@@ -57,7 +57,7 @@ public class MinecraftAiMod implements ModInitializer {
                 "llm_model", config.llm().model(),
                 "perception_radius", config.perception().radius(),
                 "nav_lookahead", config.nav().lookahead(),
-                "pickup_force_radius", config.pickup().forceRadiusH(),
+                "pickup_sweep_radius", config.pickup().sweepRadius(),
                 "behaviour", config.behaviourOrDefaults(),
                 "logging_enabled", config.logging().enabled());
         // Mining assist: optional "miningAssist" section of the same minecraftai.json (separate parse pass; never throws).

@@ -4,16 +4,15 @@ package io.github.zoyluo.minecraftai.mode;
 public record OperatorCapabilities(
         Boolean hiddenBlockScan,
         Boolean emergencyTeleport,
-        Boolean forcedPickup,
         Boolean manualTeleport
 ) {
     public static OperatorCapabilities defaults() {
         // Operator is the compatibility profile, so its defaults retain the existing enhanced behavior.
-        return new OperatorCapabilities(true, true, true, true);
+        return new OperatorCapabilities(true, true, true);
     }
 
     public static OperatorCapabilities none() {
-        return new OperatorCapabilities(false, false, false, false);
+        return new OperatorCapabilities(false, false, false);
     }
 
     public OperatorCapabilities withDefaults(OperatorCapabilities defaults) {
@@ -21,7 +20,6 @@ public record OperatorCapabilities(
         return new OperatorCapabilities(
                 booleanOrDefault(hiddenBlockScan, fallback.hiddenBlockScan),
                 booleanOrDefault(emergencyTeleport, fallback.emergencyTeleport),
-                booleanOrDefault(forcedPickup, fallback.forcedPickup),
                 booleanOrDefault(manualTeleport, fallback.manualTeleport));
     }
 
@@ -29,7 +27,6 @@ public record OperatorCapabilities(
         return switch (capability) {
             case HIDDEN_BLOCK_SCAN -> Boolean.TRUE.equals(hiddenBlockScan);
             case EMERGENCY_TELEPORT -> Boolean.TRUE.equals(emergencyTeleport);
-            case FORCED_PICKUP -> Boolean.TRUE.equals(forcedPickup);
             case MANUAL_TELEPORT -> Boolean.TRUE.equals(manualTeleport);
         };
     }

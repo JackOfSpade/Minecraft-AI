@@ -22,11 +22,10 @@ class CapabilityPolicyTest {
 
     @Test
     void operatorHonorsEachCapabilityFlagIndependently() {
-        OperatorCapabilities flags = new OperatorCapabilities(true, false, true, false);
+        OperatorCapabilities flags = new OperatorCapabilities(true, false, false);
 
         assertTrue(decide(flags, PrivilegedCapability.HIDDEN_BLOCK_SCAN).allowed());
         assertFalse(decide(flags, PrivilegedCapability.EMERGENCY_TELEPORT).allowed());
-        assertTrue(decide(flags, PrivilegedCapability.FORCED_PICKUP).allowed());
         assertFalse(decide(flags, PrivilegedCapability.MANUAL_TELEPORT).allowed());
     }
 
