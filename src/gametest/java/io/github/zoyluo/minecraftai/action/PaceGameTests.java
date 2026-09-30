@@ -410,6 +410,7 @@ public final class PaceGameTests {
     /**
      * The walked combat steps keep their own rules: under pressure they do not sprint (the enforcer leaves raw keys alone), they
      * arrive inside the unchanged step budget, and with a raised shield a one cell step still arrives (no double slowdown).
+     * A regression guard for the raw-key path (there is no {@code markControllerInput} caller in combat yet), not a pace decision test.
      */
     @GameTest(maxTicks = 200)
     public void combatStepUnderPressureDoesNotSprint(GameTestHelper context) {
@@ -444,6 +445,10 @@ public final class PaceGameTests {
                             plainTicks[0] = step[0].ticks();
                         } else {
                             // Same step, same budget: pressure changes nothing about a walked step.
+                            // REGRESSION GUARD for the raw-key path only: no combat step calls markControllerInput() yet, so the
+                            // enforcer leaves its keys alone and this relative assertion (pressure costs no extra ticks) is what
+                            // keeps it that way. It does not prove a pace decision for combat steps; when a step becomes a
+                            // controller-driven caller this test must be revisited (and the plain step re-measured).
                             require(context, step[0].ticks() <= plainTicks[0] + 1,
                                     "the step under pressure took " + step[0].ticks() + " ticks against " + plainTicks[0] + " without it");
                         }

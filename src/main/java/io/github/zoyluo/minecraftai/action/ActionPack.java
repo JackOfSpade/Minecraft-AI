@@ -85,7 +85,7 @@ public final class ActionPack {
     // What the enforcer wrote on the last controller-driven tick (the walkers scale their progress limits with the input scale).
     private float lastInputScale = 1.0F;
     private Gait lastPaceGait = Gait.SPRINT;
-    private double deadlineCredit;
+    private DeadlineCredit deadlineCredit = new DeadlineCredit(0);
     private double lastClockWeight = 1.0D;
 
     public ActionPack(AIPlayerEntity player) {
@@ -122,7 +122,7 @@ public final class ActionPack {
      * the two never write at once. Called by {@code BaritoneDriver} on the first tick it drives the bot.
      */
     public void yieldToBaritone() {
-        clearActivePathExecutor();
+        dropPathExecutor(); // keeps the route lease (requested after the route was started)
         stopMining();
         this.walkTo = null;
         stopMovement();
@@ -325,7 +325,8 @@ public final class ActionPack {
 
     /**
      * Records that a route ran a tick at {@code gait} (Baritone bridge and legacy enforcer): the route's deadline moves out by the
-     * part of the tick a slow gait does not count, so a bot that deliberately sneaks past a sculk sensor is not timed out for it.
+     * part of the tick a slow gait does not count, so a bot that deliberately sneaks past a sculk sensor is not timed out for it. The
+     * total credit of a route is capped ({@link DeadlineCredit}): a long SNEAK lease still meets its deadline when the bot is stuck.
      */
     public void notePaceTick(Gait gait) {
         this.lastPaceGait = gait;
@@ -333,10 +334,8 @@ public final class ActionPack {
         if (current == null || gait == Gait.SPRINT) {
             return;
         }
-        deadlineCredit += 1.0D - gait.clockWeight();
-        int whole = (int) deadlineCredit;
+        int whole = deadlineCredit.note(gait);
         if (whole > 0) {
-            deadlineCredit -= whole;
             current.setDeadlineTick(current.deadlineTick() + whole);
         }
     }
@@ -734,17 +733,19 @@ public final class ActionPack {
         }
         double dx = request.target().getX() + 0.5D - player.getX();
         double dz = request.target().getZ() + 0.5D - player.getZ();
-        request.setDeadlineTick(now + NavRouteRules.deadlineTicks(Math.sqrt(dx * dx + dz * dz)));
+        int deadlineBudget = NavRouteRules.deadlineTicks(Math.sqrt(dx * dx + dz * dz));
+        request.setDeadlineTick(now + deadlineBudget);
         if (previous != null && admit) {
             // A newer request took the bot over: the route it replaced is over and says so. (A deliberate re-goal refresh of the
             // same follow route, admit=false, is the same route and is not an ending.) The water bookkeeping belongs to the new one.
             finishRoute(NavOutcome.Status.CANCELLED, NavRouteRules.REPLACED, false);
         }
         route = request;
+        // The slow-pace credit of a deadline is capped by the budget that deadline first allowed (a fresh deadline, a fresh credit).
+        deadlineCredit = DeadlineCredit.forBudget(deadlineBudget);
         if (previous == null || admit) {
             // A new route (not a re-goal refresh of the follow route) ends the lease of the one before.
             clearRouteLease();
-            deadlineCredit = 0.0D;
         }
         if (identity != null) {
             lastPathRequest = identity;
@@ -838,7 +839,7 @@ public final class ActionPack {
             return;
         }
         route = null;
-        deadlineCredit = 0.0D;
+        deadlineCredit = new DeadlineCredit(0);
         if (releaseWater) {
             // A replacement route (releaseWater=false) has registered itself; only a route that really ended takes its lease with it.
             clearRouteLease();
@@ -1249,12 +1250,21 @@ public final class ActionPack {
         return false;
     }
 
+    /** Drops the legacy path executor and its request AND the route lease that went with it. */
     private void clearActivePathExecutor() {
+        dropPathExecutor();
+        clearRouteLease();
+    }
+
+    /**
+     * Drops the legacy path executor and its request but keeps the route lease: a lease is requested after a route is started, and
+     * Baritone taking the bot over ({@link #yieldToBaritone}) is the first tick of the route it belongs to, not its end.
+     */
+    private void dropPathExecutor() {
         if (pathExecutor != null) {
             pathExecutor.abort(this);
             pathExecutor = null;
         }
-        clearRouteLease();
         activePathGoal = null;
         activePathRequest = null;
     }

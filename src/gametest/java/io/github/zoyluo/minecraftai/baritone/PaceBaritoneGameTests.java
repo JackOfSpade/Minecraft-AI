@@ -303,6 +303,73 @@ public final class PaceBaritoneGameTests {
         });
     }
 
+    /**
+     * A SNEAK route lease requested right after {@code startSurfacePathTo} (before Baritone's first driven tick) must still be in force
+     * while Baritone drives: the bot sneaks on the flat ticks and never sprints. This is the test for the hand-over
+     * ({@code yieldToBaritone} on the first driven tick must keep the lease); the parkour and vine tests would pass with the lease lost.
+     */
+    @GameTest(maxTicks = 700)
+    public void sneakRouteLeaseHoldsAfterBaritoneTakesOver(GameTestHelper context) {
+        Course course = Course.build(context, "PaceBLeaseSneakGT", 6, -2, 24, 4, 5);
+        AIPlayerEntity bot = course.spawn(0, 0);
+        BlockPos goal = course.feet.offset(14, 0, 0);
+        ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
+        require(context, !started.isFailed() && bot.getActionPack().hasBaritoneRoute(), "the route was not started: " + started.reason());
+        bot.getActionPack().requestRoutePace(Gait.SNEAK, PaceOwner.WARDEN);
+        awaitLeasedFlatRoute(course, bot, goal, Gait.SNEAK);
+    }
+
+    /** The same for a WALK route lease: a long flat route that would sprint most of the way never sprints. */
+    @GameTest(maxTicks = 700)
+    public void walkRouteLeaseHoldsAfterBaritoneTakesOver(GameTestHelper context) {
+        Course course = Course.build(context, "PaceBLeaseWalkGT", 7, -2, 34, 4, 5);
+        AIPlayerEntity bot = course.spawn(0, 0);
+        BlockPos goal = course.feet.offset(28, 0, 0);
+        ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
+        require(context, !started.isFailed() && bot.getActionPack().hasBaritoneRoute(), "the route was not started: " + started.reason());
+        bot.getActionPack().requestRoutePace(Gait.WALK, PaceOwner.TASK);
+        awaitLeasedFlatRoute(course, bot, goal, Gait.WALK);
+    }
+
+    private static void awaitLeasedFlatRoute(Course course, AIPlayerEntity bot, BlockPos goal, Gait leased) {
+        GameTestHelper context = course.context;
+        Trip trip = new Trip(bot);
+        int[] leaseLost = {0};
+        int[] sneakMoving = {0};
+        boolean[] done = {false};
+        context.onEachTick(() -> {
+            if (done[0]) {
+                return;
+            }
+            trip.sample();
+            if (bot.getActionPack().hasBaritoneRoute() && bot.getActionPack().leasedGait() != leased) {
+                leaseLost[0]++;
+            }
+            if (trip.speed > 0.01D && bot.isShiftKeyDown()) {
+                sneakMoving[0]++;
+            }
+            if (trip.ticks > 2 && routeEnded(bot.getActionPack())) {
+                done[0] = true;
+                System.out.println("PACE lease_" + leased + " ticks=" + trip.ticks + " moving=" + trip.movingTicks + " sneakMoving=" + sneakMoving[0]
+                        + " sprint=" + trip.sprintTicks + " leaseLost=" + leaseLost[0] + " outcome=" + bot.getActionPack().lastRouteOutcome());
+                requireRouteSucceeded(context, bot.getActionPack());
+                require(context, course.distanceTo(goal) <= 1.6D, "not at the goal: " + bot.position());
+                require(context, leaseLost[0] == 0, "the " + leased + " route lease was gone on " + leaseLost[0] + " route ticks");
+                require(context, trip.sprintTicks == 0, "sprinted for " + trip.sprintTicks + " ticks under a " + leased + " route lease");
+                if (leased == Gait.SNEAK) {
+                    require(context, sneakMoving[0] >= trip.movingTicks * 0.8D,
+                            "sneaked on only " + sneakMoving[0] + " of " + trip.movingTicks + " moving ticks under a SNEAK route lease");
+                } else {
+                    require(context, sneakMoving[0] == 0, "sneaked for " + sneakMoving[0] + " ticks under a WALK route lease");
+                }
+                course.finish();
+            } else if (trip.ticks > 650) {
+                done[0] = true;
+                fail(context, "the route never ended: " + bot.position() + " outcome=" + bot.getActionPack().lastRouteOutcome());
+            }
+        });
+    }
+
     /** A gap of three blocks with the goal three blocks past it, under a WALK route lease: the run-up and the jump still sprint. */
     @GameTest(maxTicks = 500)
     public void parkourGapNearGoalUnderWalkPace(GameTestHelper context) {
@@ -313,7 +380,9 @@ public final class PaceBaritoneGameTests {
         ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
         require(context, !started.isFailed() && bot.getActionPack().hasBaritoneRoute(), "the route was not started: " + started.reason());
         bot.getActionPack().requestRoutePace(Gait.WALK, PaceOwner.TASK);
-        awaitJump(course, bot, goal, "gap of 3 at a walk pace", () -> { });
+        awaitJump(course, bot, goal, "gap of 3 at a walk pace",
+                () -> require(context, !bot.getActionPack().hasBaritoneRoute() || bot.getActionPack().leasedGait() == Gait.WALK,
+                        "the WALK route lease was lost while Baritone drove"));
     }
 
     /** A gap of two blocks under a SNEAK lease renewed every tick: the sneak is lifted for the jump and its run-up. */
@@ -394,6 +463,8 @@ public final class PaceBaritoneGameTests {
                 return;
             }
             trip.sample();
+            require(context, !bot.getActionPack().hasBaritoneRoute() || bot.getActionPack().leasedGait() == Gait.SNEAK,
+                    "the SNEAK route lease was lost while Baritone drove");
             if (bot.onClimbable() && bot.isShiftKeyDown()) {
                 sneakingOnVine[0]++;
             }
