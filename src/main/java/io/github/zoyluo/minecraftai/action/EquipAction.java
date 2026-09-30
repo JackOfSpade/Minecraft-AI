@@ -2,10 +2,15 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.task.AggroSense;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.tags.EntityTypeTags;
@@ -13,10 +18,12 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
@@ -89,6 +96,7 @@ public final class EquipAction {
     /** Drops the per-bot armor-log dedup state (called when the bot entity is removed) so the map cannot leak. */
     public static void forgetArmorLog(java.util.UUID botId) {
         LAST_ARMOR_LOGGED.remove(botId);
+        WEAPON_LATCH.remove(botId);
     }
 
     private record ArmorLogged(Item item, int tick) {
@@ -117,6 +125,256 @@ public final class EquipAction {
         OptionalInt slot = bestWeaponSlot(bot);
         slot.ifPresent(value -> InventoryAction.equipFromSlot(bot, value));
         return slot;
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------------
+    // Worst-first gear (behaviour.gear.worstFirst): the cheapest item that can still do the job, always. No escalation.
+    // ------------------------------------------------------------------------------------------------------------------------
+
+    /** A weapon is adequate against a target it kills in at most this many hits. */
+    private static final int ADEQUATE_MAX_HITS = 5;
+    /** A weapon must outlast the fight by this many uses. */
+    private static final int ADEQUATE_SPARE_USES = 2;
+    /** How long the weapon choice is kept while it stays adequate (no hotbar flicker between two targets). */
+    private static final int WEAPON_LATCH_TICKS = 40;
+    private static final double AGGRESSOR_NEAR_RANGE = 6.0D;
+
+    private record WeaponCandidate(int slot, ItemStack stack, double value, double score, int remaining) {
+    }
+
+    private record WeaponLatch(int slot, Item item, int count, int setHash, long until) {
+    }
+
+    private static final Map<UUID, WeaponLatch> WEAPON_LATCH = new ConcurrentHashMap<>();
+
+    private static List<WeaponCandidate> qualifiedWeapons(AIPlayerEntity bot) {
+        Inventory inventory = bot.getInventory();
+        List<WeaponCandidate> weapons = new ArrayList<>();
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
+            if (isQualifiedMeleeWeapon(stack)) {
+                weapons.add(new WeaponCandidate(slot, stack, GearValue.toolValue(stack), meleeScore(stack),
+                        remainingDurability(stack)));
+            }
+        }
+        return weapons;
+    }
+
+    /** The cheapest weapon: lowest value, then the higher melee score (a sword over the same-tier axe), then the more worn, then the lower slot. */
+    private static WeaponCandidate cheapest(List<WeaponCandidate> weapons) {
+        WeaponCandidate best = null;
+        for (WeaponCandidate candidate : weapons) {
+            if (best == null || cheaperWeapon(candidate, best)) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private static boolean cheaperWeapon(WeaponCandidate a, WeaponCandidate b) {
+        if (Math.abs(a.value() - b.value()) > 1.0E-9D) {
+            return a.value() < b.value();
+        }
+        if (Math.abs(a.score() - b.score()) > SCORE_EPSILON) {
+            return a.score() > b.score();
+        }
+        if (a.remaining() != b.remaining()) {
+            return a.remaining() < b.remaining();
+        }
+        return a.slot() < b.slot();
+    }
+
+    /**
+     * The worst-first weapon for {@code target}: among the qualified melee weapons (exactly those of {@link #bestWeaponSlot}) the one
+     * of the lowest {@link GearValue} that is ADEQUATE against it, the best DPS weapon when none is. Without a target, simply the
+     * cheapest qualified weapon.
+     *
+     * <p>Adequate = it kills the target in at most {@value #ADEQUATE_MAX_HITS} hits and has that many uses (plus a few) left. Per hit
+     * {@code (1 + ATTACK_DAMAGE + sharpness bonus) * (1 - min(20, visibleArmor) / 25 * 0.8)}, with the target's health the DEFAULT
+     * max health of its type and its armor the armor of the pieces it visibly wears: only what any observer knows, never the live
+     * health or attributes of the mob. There is no danger term: being hurt or outnumbered never changes the choice.
+     */
+    public static OptionalInt adequateWeaponSlot(AIPlayerEntity bot, LivingEntity target) {
+        List<WeaponCandidate> weapons = qualifiedWeapons(bot);
+        if (weapons.isEmpty()) {
+            return OptionalInt.empty();
+        }
+        if (target == null) {
+            return OptionalInt.of(cheapest(weapons).slot());
+        }
+        List<WeaponCandidate> adequate = adequateAgainst(weapons, target);
+        return adequate.isEmpty() ? bestWeaponSlot(bot) : OptionalInt.of(cheapest(adequate).slot());
+    }
+
+    private static List<WeaponCandidate> adequateAgainst(List<WeaponCandidate> weapons, LivingEntity target) {
+        double health = defaultMaxHealth(target.getType());
+        double armor = 0.0D;
+        for (EquipmentSlot slot : ARMOR_SLOTS) {
+            armor += GearValue.armorPointsOf(target.getItemBySlot(slot), slot);
+        }
+        double reduction = 1.0D - Math.min(20.0D, armor) / 25.0D * 0.8D;
+        List<WeaponCandidate> adequate = new ArrayList<>();
+        for (WeaponCandidate weapon : weapons) {
+            double perHit = (1.0D + attackDamage(weapon.stack()) + sharpnessBonus(weapon.stack())) * reduction;
+            if (perHit <= 0.0D) {
+                continue;
+            }
+            int hits = (int) Math.ceil(health / perHit);
+            if (hits <= ADEQUATE_MAX_HITS && (long) weapon.remaining() >= (long) hits + ADEQUATE_SPARE_USES) {
+                adequate.add(weapon);
+            }
+        }
+        return adequate;
+    }
+
+    /** The default MAX_HEALTH of the type (what any observer knows), 20 for a player, 0 for a type without attributes. */
+    private static double defaultMaxHealth(EntityType<?> type) {
+        if (type == EntityType.PLAYER) {
+            return 20.0D;
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            EntityType<? extends LivingEntity> living = (EntityType<? extends LivingEntity>) type;
+            return DefaultAttributes.hasSupplier(living)
+                    ? DefaultAttributes.getSupplier(living).getBaseValue(Attributes.MAX_HEALTH) : 0.0D;
+        } catch (RuntimeException exception) {
+            return 0.0D;
+        }
+    }
+
+    /**
+     * Equips the melee weapon for the fight at hand: the worst adequate one against the nearest observed aggressor within
+     * {@value #AGGRESSOR_NEAR_RANGE} blocks (else the strongest one; none: the cheapest qualified weapon). The choice is kept for
+     * {@value #WEAPON_LATCH_TICKS} ticks while the same stack is still in the same slot, the set of qualified weapons is unchanged
+     * and the kept weapon is still adequate; any inventory change ends it at once. With {@code behaviour.gear.worstFirst} off this
+     * is {@link #equipBestWeapon}.
+     */
+    public static OptionalInt equipWeaponForContext(AIPlayerEntity bot) {
+        if (!GearValue.worstFirstEnabled()) {
+            return equipBestWeapon(bot);
+        }
+        OptionalInt slot = contextWeaponSlot(bot);
+        slot.ifPresent(value -> InventoryAction.equipFromSlot(bot, value));
+        return slot;
+    }
+
+    private static OptionalInt contextWeaponSlot(AIPlayerEntity bot) {
+        List<WeaponCandidate> weapons = qualifiedWeapons(bot);
+        if (weapons.isEmpty()) {
+            return OptionalInt.empty();
+        }
+        LivingEntity target = contextTarget(bot);
+        List<WeaponCandidate> pool = weapons;
+        if (target != null) {
+            pool = adequateAgainst(weapons, target);
+            if (pool.isEmpty()) {
+                return bestWeaponSlot(bot);
+            }
+        }
+        long now = bot.level().getGameTime();
+        int setHash = 1;
+        for (WeaponCandidate weapon : weapons) {
+            setHash = 31 * setHash + java.util.Objects.hash(weapon.slot(), weapon.stack().getItem(), weapon.stack().getCount());
+        }
+        WeaponLatch latch = WEAPON_LATCH.get(bot.getUUID());
+        if (latch != null && now >= 0 && now < latch.until() && latch.setHash() == setHash) {
+            for (WeaponCandidate candidate : pool) {
+                if (candidate.slot() == latch.slot() && candidate.stack().is(latch.item())
+                        && candidate.stack().getCount() == latch.count()) {
+                    return OptionalInt.of(candidate.slot());
+                }
+            }
+        }
+        WeaponCandidate choice = cheapest(pool);
+        WEAPON_LATCH.put(bot.getUUID(), new WeaponLatch(choice.slot(), choice.stack().getItem(), choice.stack().getCount(),
+                setHash, now + WEAPON_LATCH_TICKS));
+        return OptionalInt.of(choice.slot());
+    }
+
+    /** The nearest aggressor within {@value #AGGRESSOR_NEAR_RANGE} blocks, else the one with the highest default max health, else null. */
+    private static LivingEntity contextTarget(AIPlayerEntity bot) {
+        AggroSense.Snapshot snapshot = AggroSense.snapshot(bot);
+        LivingEntity nearest = null;
+        double nearestDistance = AGGRESSOR_NEAR_RANGE * AGGRESSOR_NEAR_RANGE;
+        LivingEntity strongest = null;
+        double strongestHealth = -1.0D;
+        for (LivingEntity aggressor : snapshot.aggressors()) {
+            if (aggressor == null || !aggressor.isAlive()) {
+                continue;
+            }
+            double distance = aggressor.distanceToSqr(bot);
+            if (distance <= nearestDistance) {
+                nearest = aggressor;
+                nearestDistance = distance;
+            }
+            double health = defaultMaxHealth(aggressor.getType());
+            if (health > strongestHealth) {
+                strongest = aggressor;
+                strongestHealth = health;
+            }
+        }
+        return nearest != null ? nearest : strongest;
+    }
+
+    /**
+     * Worst-first armor, per slot: wears the cheapest real armor piece (armor points above zero, no Binding Curse, not nearly broken)
+     * of the inventory, so it fills an empty slot with the worst piece and swaps a worn piece DOWN to a cheaper one carried. A worn
+     * piece that is nearly broken is replaced by the next worst; a worn Binding Curse piece is never touched. Nothing is ever taken
+     * off without a replacement: the player controls what the bot wears by taking pieces out of its inventory. With
+     * {@code behaviour.gear.worstFirst} off this is {@link #equipBestArmor}. Explicit commands (equip_armor, armor-up before a
+     * descent) keep calling {@link #equipBestArmor}.
+     *
+     * @return how many slots changed
+     */
+    public static int autoEquipArmor(AIPlayerEntity bot) {
+        if (!GearValue.worstFirstEnabled()) {
+            return equipBestArmor(bot);
+        }
+        Inventory inventory = bot.getInventory();
+        int changed = 0;
+        for (EquipmentSlot slot : ARMOR_SLOTS) {
+            ItemStack worn = bot.getItemBySlot(slot);
+            if (!worn.isEmpty() && GearValue.hasBindingCurse(worn)) {
+                continue;
+            }
+            int bestSlot = -1;
+            double bestValue = 0.0D;
+            int bestRemaining = 0;
+            for (int index = 0; index < inventory.getNonEquipmentItems().size(); index++) {
+                ItemStack stack = inventory.getNonEquipmentItems().get(index);
+                if (stack.isEmpty() || bot.getEquipmentSlotForItem(stack) != slot || !isAutoWearable(stack, slot)) {
+                    continue;
+                }
+                double value = GearValue.armorValue(stack, slot);
+                int remaining = GearValue.remaining(stack);
+                if (bestSlot < 0 || GearValue.Core.compare(value, remaining, bestValue, bestRemaining) < 0) {
+                    bestSlot = index;
+                    bestValue = value;
+                    bestRemaining = remaining;
+                }
+            }
+            if (bestSlot < 0) {
+                continue;
+            }
+            if (isAutoWearable(worn, slot)
+                    && GearValue.Core.compare(GearValue.armorValue(worn, slot), GearValue.remaining(worn),
+                            bestValue, bestRemaining) <= 0) {
+                continue; // the worn piece is already the worst one that will do
+            }
+            ItemStack candidate = inventory.getNonEquipmentItems().get(bestSlot).copy();
+            inventory.getNonEquipmentItems().set(bestSlot, worn.copy());
+            bot.setItemSlot(slot, candidate);
+            inventory.setChanged();
+            changed++;
+            logArmorEquip(bot, slot, new Candidate(bestSlot, candidate, bestValue));
+        }
+        return changed;
+    }
+
+    /** Real armor for the slot: it gives armor points, is no Binding Curse piece and is not about to break. */
+    private static boolean isAutoWearable(ItemStack stack, EquipmentSlot slot) {
+        return !stack.isEmpty() && GearValue.armorPointsOf(stack, slot) > 0.0D && !GearValue.hasBindingCurse(stack)
+                && !GearValue.armorNearlyBroken(stack);
     }
 
     /**
@@ -226,12 +484,32 @@ public final class EquipAction {
             return OptionalInt.empty();
         }
         Inventory inventory = bot.getInventory();
+        boolean worstFirst = GearValue.worstFirstEnabled();
+        int chosen = -1;
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
-            if (inventory.getNonEquipmentItems().get(slot).is(Items.BOW)) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
+            if (!stack.is(Items.BOW)) {
+                continue;
+            }
+            if (!worstFirst) {
                 return OptionalInt.of(slot);
             }
+            // Worst-first: the cheapest bow that is not about to break (an enchanted one is kept for last).
+            if (chosen < 0 || cheaperBefore(stack, inventory.getNonEquipmentItems().get(chosen))) {
+                chosen = slot;
+            }
         }
-        return OptionalInt.empty();
+        return chosen < 0 ? OptionalInt.empty() : OptionalInt.of(chosen);
+    }
+
+    /** True when the bow or shield {@code a} goes before {@code b} worst-first: not nearly broken first, then the lower value, then the more worn. */
+    private static boolean cheaperBefore(ItemStack a, ItemStack b) {
+        boolean aBroken = a.isDamageableItem() && GearValue.remaining(a) <= 1;
+        boolean bBroken = b.isDamageableItem() && GearValue.remaining(b) <= 1;
+        if (aBroken != bBroken) {
+            return !aBroken;
+        }
+        return GearValue.Core.compare(GearValue.toolValue(a), GearValue.remaining(a), GearValue.toolValue(b), GearValue.remaining(b)) < 0;
     }
 
     /** Kept for callers which have no target-specific potion-effect context. */
@@ -281,9 +559,11 @@ public final class EquipAction {
     private static Optional<ArrowChoice> bestArrowChoice(AIPlayerEntity bot, LivingEntity target) {
         Inventory inventory = bot.getInventory();
         ArrowChoice best = null;
+        // Worst-first: plain arrows before tipped and spectral ones, as long as a plain one is carried.
+        boolean plainOnly = GearValue.worstFirstEnabled() && carriesPlainArrow(bot);
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
             ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (!isCompatibleBowArrow(stack)) {
+            if (!isCompatibleBowArrow(stack) || plainOnly && !stack.is(Items.ARROW)) {
                 continue;
             }
             ArrowChoice candidate = scoreArrow(slot, false, stack, target);
@@ -292,13 +572,23 @@ public final class EquipAction {
             }
         }
         ItemStack offhand = bot.getOffhandItem();
-        if (isCompatibleBowArrow(offhand)) {
+        if (isCompatibleBowArrow(offhand) && (!plainOnly || offhand.is(Items.ARROW))) {
             ArrowChoice candidate = scoreArrow(-1, true, offhand, target);
             if (isBetterArrow(candidate, best)) {
                 best = candidate;
             }
         }
         return Optional.ofNullable(best);
+    }
+
+    private static boolean carriesPlainArrow(AIPlayerEntity bot) {
+        Inventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).is(Items.ARROW)) {
+                return true;
+            }
+        }
+        return bot.getOffhandItem().is(Items.ARROW);
     }
 
     private static boolean isCompatibleBowArrow(ItemStack stack) {
@@ -389,11 +679,10 @@ public final class EquipAction {
             return true;
         }
         Inventory inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+        int shieldSlot = firstShieldSlot(inventory);
+        if (shieldSlot >= 0) {
+            int slot = shieldSlot;
             ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (!stack.is(Items.SHIELD)) {
-                continue;
-            }
             ItemStack oldOffhand = bot.getOffhandItem().copy();
             bot.setItemSlot(EquipmentSlot.OFFHAND, stack.copy());
             inventory.getNonEquipmentItems().set(slot, oldOffhand);
@@ -402,6 +691,28 @@ public final class EquipAction {
             return true;
         }
         return false;
+    }
+
+    /**
+     * The inventory slot of the shield to raise: the first one, or, worst-first, the cheapest one that is not about to break (an
+     * enchanted shield is kept for last), -1 for none.
+     */
+    private static int firstShieldSlot(Inventory inventory) {
+        boolean worstFirst = GearValue.worstFirstEnabled();
+        int chosen = -1;
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
+            if (!stack.is(Items.SHIELD)) {
+                continue;
+            }
+            if (!worstFirst) {
+                return slot;
+            }
+            if (chosen < 0 || cheaperBefore(stack, inventory.getNonEquipmentItems().get(chosen))) {
+                chosen = slot;
+            }
+        }
+        return chosen;
     }
 
     /**

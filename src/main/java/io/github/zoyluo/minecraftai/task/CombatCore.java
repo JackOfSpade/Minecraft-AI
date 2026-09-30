@@ -71,7 +71,7 @@ public final class CombatCore {
     }
 
     public static void equipMelee(AIPlayerEntity bot) {
-        EquipAction.equipBestArmor(bot);
+        EquipAction.autoEquipArmor(bot);
         ensureMeleeWeapon(bot);
     }
 
@@ -82,7 +82,7 @@ public final class CombatCore {
      * continue empty-handed.
      */
     public static void ensureMeleeWeapon(AIPlayerEntity bot) {
-        EquipAction.equipBestWeapon(bot);
+        EquipAction.equipWeaponForContext(bot);
     }
 
     /** Shared combat policy: projectile-capable mobs keep pressure while line of sight remains. */

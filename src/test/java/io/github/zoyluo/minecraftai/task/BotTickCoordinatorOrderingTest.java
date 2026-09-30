@@ -74,7 +74,7 @@ class BotTickCoordinatorOrderingTest {
         String backgroundBlock = source.substring(background, source.indexOf("IdleCoordinator.INSTANCE.tickBot(bot);", background));
         assertTrue(backgroundBlock.contains(
                 "if (!io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {\n"
-                        + "                    io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);\n"
+                        + "                    io.github.zoyluo.minecraftai.action.EquipAction.autoEquipArmor(bot);\n"
                         + "                }"));
         assertFalse(source.contains("= MiningAssistCoordinator"), "the call's result is never used");
         assertFalse(source.contains("if (MiningAssistCoordinator"), "the call never gates the tick");

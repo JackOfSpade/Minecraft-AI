@@ -91,6 +91,23 @@ public final class ToolSelector {
      * snapshot of an inventory (Baritone's cost model does, on a worker thread).
      */
     public static Choice choose(List<ItemStack> main, int currentSlot, ItemStack offhand, BlockState state, boolean swordsMine) {
+        return choose(main, currentSlot, offhand, state, swordsMine, GearValue.worstFirstEnabled());
+    }
+
+    /**
+     * As above with the gear order given: {@code worstFirst} picks, among the stacks that can do the job (drop the block's loot, or
+     * speed up a block that needs no tool), the one of the lowest {@link GearValue} (a wooden pickaxe before a stone one before an
+     * iron one; Silk Touch last; a more worn stack before a fresh one of the same value); {@code false} is the earlier best-first
+     * durability-preservation policy. Without any capable stack both fall back to the same scoring.
+     */
+    static Choice choose(List<ItemStack> main, int currentSlot, ItemStack offhand, BlockState state, boolean swordsMine,
+                         boolean worstFirst) {
+        if (worstFirst) {
+            Choice worst = worstCapableChoice(main, currentSlot, offhand, state, swordsMine);
+            if (worst != null) {
+                return worst;
+            }
+        }
         ItemStack currentStack = main.get(currentSlot);
         float currentScore = score(currentStack, state, swordsMine);
         if (!swordsMine && currentStack.is(ItemTags.SWORDS)) {
@@ -134,12 +151,68 @@ public final class ToolSelector {
         return new Choice(bestSlot, bestOffhand, bestStack, bestScore);
     }
 
+    /** A stack that can do the job, with what the worst-first order ranks it by. */
+    private record Capable(int slot, boolean offhand, ItemStack stack, boolean silk, double value, int remaining) {
+    }
+
+    private static boolean capableFor(ItemStack stack, BlockState state, boolean swordsMine) {
+        if (stack.isEmpty() || ItemStackUtil.isNearlyBroken(stack) || !swordsMine && stack.is(ItemTags.SWORDS)) {
+            return false;
+        }
+        return state.requiresCorrectToolForDrops() ? stack.isCorrectToolForDrops(state) : stack.getDestroySpeed(state) > 1.0F;
+    }
+
+    /** True when {@code a} goes before {@code b}: no Silk Touch first, then the lower value, then the more worn stack. */
+    private static boolean worseFirst(Capable a, Capable b) {
+        if (a.silk() != b.silk()) {
+            return !a.silk();
+        }
+        return GearValue.Core.compare(a.value(), a.remaining(), b.value(), b.remaining()) < 0;
+    }
 
     /**
-     * OreDig channel policy: use the lowest healthy pickaxe tier that can harvest the block, but
-     * never go below stone for ordinary rock. Thus stone/deepslate consume renewable stone picks,
-     * while diamond/redstone/gold automatically select iron and obsidian selects diamond. Other
-     * BlockMiner users keep {@link #equipBestTool} unchanged.
+     * The worst-first decision: the lowest-value stack that is correct for the block (drops its loot; for a block that needs no tool,
+     * one that mines it faster than a bare hand), never a nearly broken one, and never a sword when {@code swordsMine} is false.
+     * Null when no stack qualifies (a wrong-tier tool, or nothing faster than the hand): the caller then scores as before. Equal
+     * stacks keep the hand the bot already holds.
+     */
+    private static Choice worstCapableChoice(List<ItemStack> main, int currentSlot, ItemStack offhand, BlockState state,
+                                             boolean swordsMine) {
+        Capable best = null;
+        for (int slot = 0; slot < main.size(); slot++) {
+            ItemStack stack = main.get(slot);
+            if (!capableFor(stack, state, swordsMine)) {
+                continue;
+            }
+            Capable candidate = new Capable(slot, false, stack, GearValue.hasSilkTouch(stack), GearValue.toolValue(stack),
+                    GearValue.remaining(stack));
+            if (best == null || worseFirst(candidate, best)
+                    || !worseFirst(best, candidate) && candidate.slot() == currentSlot && best.slot() != currentSlot) {
+                best = candidate;
+            }
+        }
+        if (capableFor(offhand, state, swordsMine)) {
+            Capable candidate = new Capable(-1, true, offhand, GearValue.hasSilkTouch(offhand), GearValue.toolValue(offhand),
+                    GearValue.remaining(offhand));
+            if (best == null || worseFirst(candidate, best)) {
+                best = candidate;
+            }
+        }
+        if (best == null) {
+            return null;
+        }
+        float speed = best.stack().getDestroySpeed(state);
+        float score = state.requiresCorrectToolForDrops() ? 100.0F + Math.min(speed, 9.9F) * 0.1F : speed;
+        return new Choice(best.slot(), best.offhand(), best.stack(), score);
+    }
+
+
+    /**
+     * OreDig channel policy: use the lowest healthy pickaxe that can harvest the block. With {@code behaviour.gear.worstFirst}
+     * (the default) that is the lowest {@link GearValue} (a wooden or golden pick digs stone and coal, a stone pick iron ore, an
+     * iron pick diamond, obsidian selects diamond) with no stone floor: missions are worst-first too. With it off, the earlier
+     * policy applies: never below stone for ordinary rock, then the lowest tier and the most durable pick. Ordinary rock is never
+     * dug with an iron or diamond pick in either mode. Other BlockMiner users keep {@link #equipBestTool} unchanged.
      */
     public static Selection equipMiningChannelTool(AIPlayerEntity player, BlockState state) {
         if (!state.requiresCorrectToolForDrops()) {
@@ -147,12 +220,17 @@ public final class ToolSelector {
         }
         Inventory inventory = player.getInventory();
         int currentSlot = inventory.getSelectedSlot();
-        int minimumTier = channelMinimumTier(ToolTier.requiredPickaxeTier(state.getBlock()));
-        int maximumTier = channelMaximumTier(minimumTier, OreScan.isOreBlock(state.getBlock()));
+        // Worst-first: no stone floor either. A wooden (or golden) pickaxe may dig ordinary rock; the cap for ordinary rock (never an
+        // iron or diamond pick, that would silently consume the finite mission tool) is unchanged.
+        boolean worstFirst = GearValue.worstFirstEnabled();
+        int requiredTier = ToolTier.requiredPickaxeTier(state.getBlock());
+        int minimumTier = worstFirst ? requiredTier : channelMinimumTier(requiredTier);
+        int maximumTier = channelMaximumTier(channelMinimumTier(requiredTier), OreScan.isOreBlock(state.getBlock()));
         int bestSlot = -1;
         int bestOffhandSlot = -1;
         int bestTier = Integer.MAX_VALUE;
         int bestRemaining = -1;
+        ItemStack bestChannelStack = ItemStack.EMPTY;
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
             ItemStack stack = inventory.getNonEquipmentItems().get(slot);
             int tier = ToolTier.pickaxeTier(stack);
@@ -162,11 +240,12 @@ public final class ToolSelector {
             }
             int remaining = stack.isDamageableItem()
                     ? stack.getMaxDamage() - stack.getDamageValue() : Integer.MAX_VALUE;
-            if (tier < bestTier || (tier == bestTier && remaining > bestRemaining)) {
+            if (channelBetter(worstFirst, tier, remaining, stack, bestTier, bestRemaining, bestChannelStack)) {
                 bestTier = tier;
                 bestRemaining = remaining;
                 bestSlot = slot;
                 bestOffhandSlot = -1;
+                bestChannelStack = stack;
             }
         }
         ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
@@ -175,11 +254,12 @@ public final class ToolSelector {
                 && !ItemStackUtil.isNearlyBroken(offHandStack)) {
             int remaining = offHandStack.isDamageableItem()
                     ? offHandStack.getMaxDamage() - offHandStack.getDamageValue() : Integer.MAX_VALUE;
-            if (offHandTier < bestTier || (offHandTier == bestTier && remaining > bestRemaining)) {
+            if (channelBetter(worstFirst, offHandTier, remaining, offHandStack, bestTier, bestRemaining, bestChannelStack)) {
                 bestTier = offHandTier;
                 bestRemaining = remaining;
                 bestSlot = -1;
                 bestOffhandSlot = 0;
+                bestChannelStack = offHandStack;
             }
         }
         if (bestSlot < 0 && bestOffhandSlot < 0) {
@@ -208,6 +288,27 @@ public final class ToolSelector {
             return new Selection(true, hotbar, equipped, policyScore);
         }
         return new Selection(false, currentSlot, bestStack, policyScore);
+    }
+
+    /**
+     * Is the candidate pickaxe better for the channel than the best so far? Worst-first: no Silk Touch, then the lower
+     * {@link GearValue}, then the more worn one (the first candidate always wins). Best-first (the earlier policy): the lower tier,
+     * then the more durable one.
+     */
+    private static boolean channelBetter(boolean worstFirst, int tier, int remaining, ItemStack stack,
+                                         int bestTier, int bestRemaining, ItemStack bestStack) {
+        if (bestTier == Integer.MAX_VALUE) {
+            return true;
+        }
+        if (!worstFirst) {
+            return tier < bestTier || (tier == bestTier && remaining > bestRemaining);
+        }
+        boolean silk = GearValue.hasSilkTouch(stack);
+        boolean bestSilk = GearValue.hasSilkTouch(bestStack);
+        if (silk != bestSilk) {
+            return !silk;
+        }
+        return GearValue.Core.compare(GearValue.toolValue(stack), remaining, GearValue.toolValue(bestStack), bestRemaining) < 0;
     }
 
     static int channelMinimumTier(int requiredTier) {

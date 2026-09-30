@@ -33,11 +33,11 @@ public final class BotTickCoordinator {
                 continue;
             }
             if (!handled && runBackground) {
-                // Layer 3: also auto-equips better armor from the inventory during normal ticks. Paused while a
+                // Layer 3: also auto-equips armor (the worst adequate piece per slot, see GearValue) from the inventory during normal ticks. Paused while a
                 // player has the bot's inventory screen open: they are editing its equipment by hand, and the
                 // bot re-equipping under their cursor made it re-run (and re-log) every scan.
                 if (!io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {
-                    io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
+                    io.github.zoyluo.minecraftai.action.EquipAction.autoEquipArmor(bot);
                 }
                 if (!StorageJanitor.INSTANCE.tickBot(bot)) {
                     IdleCoordinator.INSTANCE.tickBot(bot);

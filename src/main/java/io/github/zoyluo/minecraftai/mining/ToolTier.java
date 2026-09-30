@@ -154,7 +154,9 @@ public final class ToolTier {
         if (item == Items.IRON_PICKAXE) {
             return IRON;
         }
-        if (item == Items.STONE_PICKAXE) {
+        // Copper harvests exactly what stone does: data/minecraft/tags/block/incorrect_for_copper_tool.json is identical to
+        // incorrect_for_stone_tool.json in the 1.21.11 jar (needs_diamond_tool and needs_iron_tool), so a copper pickaxe is a stone-tier one.
+        if (item == Items.STONE_PICKAXE || item == Items.COPPER_PICKAXE) {
             return STONE;
         }
         if (item == Items.WOODEN_PICKAXE || item == Items.GOLDEN_PICKAXE) {
