@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.FollowTask;
@@ -84,6 +85,25 @@ public final class NaturalMovementGameTests {
             world.setBlock(feet.offset(dx, dy, dz), block.defaultBlockState(), Block.UPDATE_ALL);
         }
 
+        /**
+         * The first route search of a fresh server JVM pays class loading and cold bytecode inside the pathfinder's 50 ms wall-clock
+         * budget (a first search was seen exploring one node in 59 ms and timing out), so a test that asks for its route on tick 0
+         * failed "pathfinding_failed: TIMEOUT". Warming both search modes once per JVM with a generous budget makes that first
+         * request behave like every later one. Results are cached per budget, so the tests' own 50 ms requests are not short-cut.
+         */
+        private static boolean pathfinderWarm;
+
+        private static void warmPathfinder(AIPlayerEntity bot, BlockPos where) {
+            if (pathfinderWarm) {
+                return;
+            }
+            pathfinderWarm = true;
+            ServerLevel level = bot.level();
+            BlockPos goal = where.east(3);
+            new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, false).findPath();
+            new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, true).findPath();
+        }
+
         /** A legacy-engine bot at {@code where}, full health and food, no fixture teleport counted against it. */
         AIPlayerEntity spawn(String name, BlockPos where) {
             AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
@@ -95,6 +115,7 @@ public final class NaturalMovementGameTests {
             bot.setHealth(bot.getMaxHealth());
             bot.getFoodData().setFoodLevel(20);
             bot.getFoodData().setSaturation(20.0F);
+            warmPathfinder(bot, where);
             Standability.clearCache();
             TeleportAudit.reset(bot);
             return bot;

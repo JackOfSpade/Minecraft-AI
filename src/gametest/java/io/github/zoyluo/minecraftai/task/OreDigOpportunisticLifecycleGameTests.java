@@ -628,6 +628,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         Progress p = new Progress();
         OreDigTask[] taskA = {null};
         OreDigTask[] taskB = {null};
+        int[] minedAt = {-1};
 
         context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
@@ -653,14 +654,23 @@ public final class OreDigOpportunisticLifecycleGameTests {
                 h.require(p.tick - p.assignedAt < 1900, "neither bot ever mined the shared vein");
                 return;
             }
-            // Give both engines time to finish their own settle/return so the claim is released either way.
-            if (p.tick - p.assignedAt < 1900 + 150) {
+            // Give both engines time to finish their own settle/return so the claim is released either way. The wait
+            // runs from the moment the vein was mined and ends as soon as the claim is free: both missions look for
+            // coal that does not exist, so each one is doomed to end "trapped" once its blind branch has eaten through
+            // the finite sealed room (about 1400 ticks in), and a fixed wait counted from the assignment raced that end.
+            if (minedAt[0] < 0) {
+                minedAt[0] = p.tick;
+            }
+            if (p.tick - minedAt[0] < 150) {
                 return;
             }
             int tick = MiningAssistRuntime.serverTick(botA);
             String dimensionKey = BotEdits.dimensionKey(room.world);
-            h.require(!OreClaims.heldByOther(dimensionKey, UUID.randomUUID(), ore.asLong(), tick),
-                    "the shared cell's claim was never released after the vein was settled");
+            if (OreClaims.heldByOther(dimensionKey, UUID.randomUUID(), ore.asLong(), tick)) {
+                h.require(p.tick - minedAt[0] < 150 + 600,
+                        "the shared cell's claim was never released after the vein was settled");
+                return;
+            }
             int total = InventoryAction.countItem(botA, Items.DIAMOND) + InventoryAction.countItem(botB, Items.DIAMOND);
             LOG.info("[detour-gametest] two_bots mined_by_a={} mined_by_b={} total_diamonds={}",
                     taskA[0].checkpoint().get("delivered"), taskB[0].checkpoint().get("delivered"), total);

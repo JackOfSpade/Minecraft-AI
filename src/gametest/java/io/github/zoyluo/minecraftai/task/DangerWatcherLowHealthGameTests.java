@@ -1384,13 +1384,18 @@ public final class DangerWatcherLowHealthGameTests {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatBackupWeaponGT", 2);
         int deathBaseline = deathCount(bot);
         BlockPos origin = bot.blockPosition().immutable();
-        ItemStack twoUseWoodenSword = new ItemStack(Items.WOODEN_SWORD);
-        twoUseWoodenSword.setDamageValue(twoUseWoodenSword.getMaxDamage() - 2);
-        InventoryAction.giveItem(bot, twoUseWoodenSword);
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
-        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD)
+        // Worst-first judges the fight target: a weapon with fewer than (hits + 2) uses left is never ADEQUATE, so against an
+        // ordinary zombie the fresh stone sword is right from the first swing and the two-use sword is never drawn. The
+        // fixture therefore fights an iron-armoured zombie that no sword here kills in five hits: nothing is adequate, the
+        // rule falls back to the best-damage weapon (the two-use stone sword), and it is that weapon which becomes
+        // ineligible mid-fight and must be replaced by the fresh wooden backup in the same attack boundary.
+        ItemStack twoUseStoneSword = new ItemStack(Items.STONE_SWORD);
+        twoUseStoneSword.setDamageValue(twoUseStoneSword.getMaxDamage() - 2);
+        InventoryAction.giveItem(bot, twoUseStoneSword);
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
+        require(context, bot.getMainHandItem().is(Items.STONE_SWORD)
                         && rawDurability(bot.getMainHandItem()) == 2,
-                "fixture did not hold the cheaper two-use weapon (worst-first: the wooden sword goes before the stone one)");
+                "fixture did not hold the stronger two-use weapon");
         for (int dx = -1; dx <= 2; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 context.getLevel().setBlock(origin.offset(dx, 2, dz),
@@ -1407,6 +1412,10 @@ public final class DangerWatcherLowHealthGameTests {
         }
         zombie.setPersistenceRequired();
         zombie.setNoAi(true);
+        zombie.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+        zombie.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+        zombie.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
+        zombie.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
         BlockPos hostileFeet = origin.east();
         zombie.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
@@ -1420,25 +1429,25 @@ public final class DangerWatcherLowHealthGameTests {
             require(context, bot.isAlive(), "bot died in the disabled-zombie weapon fixture");
             require(context, deathCount(bot) == deathBaseline,
                     "backup-weapon combat changed the bot death counter");
-            ItemStack retiredWoodenSword = bot.getInventory().getNonEquipmentItems().stream()
-                    .filter(stack -> stack.is(Items.WOODEN_SWORD))
+            ItemStack retiredStoneSword = bot.getInventory().getNonEquipmentItems().stream()
+                    .filter(stack -> stack.is(Items.STONE_SWORD))
                     .findFirst()
                     .orElse(ItemStack.EMPTY);
-            if (!retiredWoodenSword.isEmpty()
-                    && rawDurability(retiredWoodenSword) == 1) {
+            if (!retiredStoneSword.isEmpty()
+                    && rawDurability(retiredStoneSword) == 1) {
                 require(context, zombie.getHealth() < initialHealth,
                         "two-use weapon lost durability before this combat damaged its target"
                                 + " health=" + zombie.getHealth()
                                 + " initial=" + initialHealth);
                 ItemStack held = bot.getMainHandItem();
-                require(context, held.is(Items.STONE_SWORD)
+                require(context, held.is(Items.WOODEN_SWORD)
                                 && rawDurability(held) > 1,
                         "newly ineligible weapon was not atomically replaced by its backup"
                                 + " held=" + held.getItem()
                                 + " raw=" + rawDurability(held)
                                 + " selected=" + bot.getInventory().getSelectedSlot()
-                                + " stone_count="
-                                + InventoryAction.countItem(bot, Items.STONE_SWORD));
+                                + " wood_count="
+                                + InventoryAction.countItem(bot, Items.WOODEN_SWORD));
                 zombie.discard();
                 despawnAndComplete(context, bot);
             } else if (combat.state() == TaskState.FAILED
