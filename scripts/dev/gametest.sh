@@ -17,7 +17,7 @@
 # Concurrency:
 # - Never two runs in the same worktree (they share build/run/gameTest): a per-worktree flock enforces it.
 # - At most GT_SLOTS servers machine-wide (default 1; each needs about GT_HEAP + 1 GB of RAM). Raise it only when
-#   `free -g` shows the room.
+#   `free -g` shows the room. An ALL run takes every slot (it runs alone).
 # Env: GT_HEAP (default 2560m); GT_TIMEOUT (seconds per filter, default 1500; ALL gets 7200); GT_DAEMON=1 to use a Gradle
 # daemon (faster repeated runs, more resident memory).
 set -u
@@ -46,7 +46,20 @@ exec 8> "build/.gametest-worktree.lock"
 flock 8
 
 SLOT_FD=9
+# A normal run holds ONE of the GT_SLOTS slot locks. An ALL run holds EVERY slot, so no other server runs beside it: a
+# full-suite result is only meaningful when the machine is not shared with another server (CPU starvation flakes tests).
+# Both kinds take slots in index order, and an ALL run waits for each slot in turn, so the two cannot deadlock.
+ALL_FDS=()
 acquire_slot() {
+  if [ "$1" = ALL ]; then
+    ALL_FDS=()
+    for ((i = 0; i < SLOTS; i++)); do
+      exec {fd}> "/tmp/gametest.slot$i"
+      flock "$fd"
+      ALL_FDS+=("$fd")
+    done
+    return 0
+  fi
   while true; do
     for ((i = 0; i < SLOTS; i++)); do
       exec 9> "/tmp/gametest.slot$i"
@@ -56,7 +69,12 @@ acquire_slot() {
     sleep 5
   done
 }
-release_slot() { flock -u 9 2>/dev/null; exec 9>&- 2>/dev/null; }
+release_slot() {
+  local fd
+  for fd in "${ALL_FDS[@]:-}"; do [ -n "$fd" ] && { flock -u "$fd" 2>/dev/null; eval "exec $fd>&-" 2>/dev/null; }; done
+  ALL_FDS=()
+  flock -u 9 2>/dev/null; exec 9>&- 2>/dev/null
+}
 
 RUN_PID=""
 kill_run() {
@@ -91,7 +109,7 @@ run_watched() { # $1 = limit seconds, rest = command
 
 for F in "$@"; do
   L="$LOGDIR/$(echo "$F" | tr -c 'a-zA-Z0-9_\n' '_' | cut -c1-120)$([ $WRAP = 1 ] && echo _wrapper).log"
-  acquire_slot
+  acquire_slot "$F"
   if [ "$F" = ALL ]; then
     JAVA_TOOL_OPTIONS="-Xmx$HEAP" run_watched 7200 "${GRADLE[@]}" runGameTest "${XARGS[@]}"
   else
