@@ -205,7 +205,12 @@ hotbar slot, which cancels a crossbow charge, a bow draw and every attack. The v
 next to you that "reloads its crossbow half-way, stops, reloads again" and never fires. Pearls are used by nothing
 else in PvP BOT 0.0.15, so:
 
-* new loadouts **never contain ender pearls** (water buckets and cobwebs are still stocked as before);
+* new loadouts **never contain ender pearls**, and every combat-capable inhabitant gets **one water bucket** instead
+  (PvP BOT's bucket branch is a bounded ten-tick routine: water at the bot's feet, which removes the web, picked up
+  again on tick 5, the bot walking back for it if that failed; PvP BOT never refills, so nothing tops the bucket up
+  later; before this the bucket was a coin flip and webbed bots without one printed
+  `[COBWEB] No water bucket or ender pearl found!` to the console on every tick). Only newly rolled profiles get it;
+  a stored profile keeps what it has. Cobwebs are still stocked as before;
 * every inhabitant the addon manages is **swept for ender pearls**: right after it is restored and then about every
   5 seconds while it is online (so a picked-up pearl goes too). Only inhabitants are touched, never real players or
   other bots; nothing else in the inventory changes. The first removal per bot is logged once at INFO

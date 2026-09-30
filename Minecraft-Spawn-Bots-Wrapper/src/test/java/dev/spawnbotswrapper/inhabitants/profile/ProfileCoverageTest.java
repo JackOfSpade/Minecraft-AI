@@ -412,8 +412,9 @@ class ProfileCoverageTest {
         long shield = fullProfiles.stream().filter(p -> has(p, i -> i.equals(NS + "shield"))).count();
         assertShare("shield", shield, fullProfiles.size(), 0.45, 0.55);
 
+        // Every combat-capable inhabitant carries a water bucket (the cobweb escape); the coin flip only matters with combat off.
         long bucket = fullProfiles.stream().filter(p -> has(p, i -> i.equals(NS + "water_bucket"))).count();
-        assertShare("water bucket", bucket, fullProfiles.size(), 0.45, 0.55);
+        assertEquals(fullProfiles.size(), bucket, "water bucket: every profile of a combat-enabled world has one");
 
         long pieces = 0;
         long mending = 0;

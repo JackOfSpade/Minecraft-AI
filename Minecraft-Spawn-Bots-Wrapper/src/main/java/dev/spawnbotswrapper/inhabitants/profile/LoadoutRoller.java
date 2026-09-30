@@ -407,7 +407,15 @@ final class LoadoutRoller {
         // run out. Without pearls (and without a bucket) it simply fights from the web. Nothing else in PvP BOT
         // uses pearls, so leaving them out costs no behaviour. Inhabitants that already carry some have them
         // removed by the inventory sanitize step (ProfileApplier.removeEnderPearls).
-        if (r.flag("profile.sustain.waterBucket")) {
+        // Every combat-capable inhabitant carries ONE bucket: many of them end up in a cobweb (mineshafts, cave spiders,
+        // the player's own webs) and without a bucket or a pearl PvP BOT prints "[COBWEB] No water bucket or ender pearl
+        // found!" every tick and simply fights from the web. With a bucket it runs its bounded ten-tick escape: water is
+        // placed at its feet (which removes the web), picked up again on tick 5, and the bot walks back for it if that
+        // failed; PvP BOT never refills anything, so the bucket is not topped up later. The coin flip is still DRAWN so
+        // every later roll (and a deterministic world's next bots) is unchanged; it only decides for a bot whose
+        // world has combat switched off, where the bucket stays optional.
+        boolean rolledBucket = r.flag("profile.sustain.waterBucket");
+        if (rolledBucket || caps.combatEnabled()) {
             out.stock(BotProfile.ItemSpec.of(ItemIds.WATER_BUCKET), LoadoutBuilder.UTILITY);
         }
         // The draw that used to pick the pearl count is still consumed, so every later roll (vitals, behaviour,

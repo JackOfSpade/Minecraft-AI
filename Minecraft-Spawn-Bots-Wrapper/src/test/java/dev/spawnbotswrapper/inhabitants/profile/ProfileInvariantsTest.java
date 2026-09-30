@@ -475,6 +475,22 @@ class ProfileInvariantsTest {
         assertTrue(sawBoth, "with totemPriority on, some bot should still carry both");
     }
 
+    /**
+     * The cobweb escape needs a water bucket (PvP BOT never refills one, and pearls are never stocked), so every
+     * combat-capable inhabitant carries exactly one; with combat switched off globally nobody fights, and the old coin
+     * flip decides. The flip is still drawn, so switching combat off changes nothing else a profile rolls.
+     */
+    @Test
+    void everyCombatCapableInhabitantCarriesExactlyOneWaterBucket() {
+        for (BotProfile p : profiles(generate(600, allOn(), everythingOptions(), 21))) {
+            long buckets = specs(p).stream().filter(s -> (NS + "water_bucket").equals(s.item())).count();
+            assertEquals(1, buckets, "exactly one bucket");
+        }
+        long without = profiles(generate(600, allOnExcept("combatEnabled"), everythingOptions(), 21)).stream()
+                .filter(p -> specs(p).stream().noneMatch(s -> (NS + "water_bucket").equals(s.item()))).count();
+        assertTrue(without > 150 && without < 450, "with combat off the bucket is a coin flip again: " + without + " of 600 have none");
+    }
+
     @Test
     void everyCombatGearNeedsCombatEnabled() {
         assertGatedBy("combatEnabled", i -> isRanged(i) || i.equals(NS + "mace") || i.equals(NS + "wind_charge")
