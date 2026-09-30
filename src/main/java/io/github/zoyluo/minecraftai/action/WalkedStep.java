@@ -36,7 +36,7 @@ public final class WalkedStep {
         STEP_DOWN,
         /** Forward, and jump while the head is under water or the target is higher, to the adjacent water cell. */
         SWIM,
-        /** Sneak and walk to a point inside the cell, a little over the edge of the support (sneaking will not fall off it). */
+        /** Sneak and walk to a point a little over the edge of the support (sneaking will not fall off it): inside the bot's cell, or up to {@value WalkedStepRules#IN_CELL_MAX_OFFSET} block from the point it stands at, so a little into the next cell. */
         SNEAK_SHIFT,
         /** Walk back to a point inside the current cell, at most {@value WalkedStepRules#IN_CELL_MAX_OFFSET} block away. */
         RECENTER,
@@ -342,7 +342,9 @@ public final class WalkedStep {
                 return refusal(bot, cell, kind);
             }
             case RECENTER, SNEAK_SHIFT -> {
-                if (!here.equals(cell)) {
+                if (here.getY() != cell.getY() || Math.abs(here.getX() - cell.getX()) > 1 || Math.abs(here.getZ() - cell.getZ()) > 1) {
+                    // The point may lie a little over the edge of the bot's cell (a sneak shift to see the side face of its support) or in the
+                    // cell it stands next to (the walk back from there): the bot's cell and the point's cell are the same or neighbours.
                     return "not_in_cell";
                 }
                 if (Math.hypot(point.x - bot.getX(), point.z - bot.getZ()) > WalkedStepRules.IN_CELL_MAX_OFFSET) {

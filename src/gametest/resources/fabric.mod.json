@@ -37,6 +37,7 @@
       "io.github.zoyluo.minecraftai.task.EmergencyShelterAtomicRecoveryGameTests",
       "io.github.zoyluo.minecraftai.task.EmergencyShelterMaterialSchedulingGameTests",
       "io.github.zoyluo.minecraftai.task.EmergencyShelterRescueGameTests",
+      "io.github.zoyluo.minecraftai.task.ShelterNaturalMovementGameTests",
       "io.github.zoyluo.minecraftai.task.MiningTorchToolRestoreGameTests",
       "io.github.zoyluo.minecraftai.task.MiningHostileRecoveryGameTests",
       "io.github.zoyluo.minecraftai.task.UndergroundSafetyGameTests",

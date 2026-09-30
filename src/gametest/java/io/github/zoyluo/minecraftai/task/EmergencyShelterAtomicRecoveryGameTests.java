@@ -35,6 +35,10 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterS
 
 /** Physical regressions for the shelter's ordered build and sealed healing transaction. */
 public final class EmergencyShelterAtomicRecoveryGameTests {
+    /**
+     * R5: a bot that is off-centre at admission comes to rest at the middle of its cell by a walked step (real keys), never by a
+     * teleport, and no wall is sealed into its own body. (This used to assert an exact-centre teleport in the admission tick.)
+     */
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_moving_edge_anchor_settles_before_envelope_placement", maxTicks = 16000)
     public void movingEdgeAnchorSettlesBeforeEnvelopePlacement(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
@@ -49,15 +53,12 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                         && new net.minecraft.world.phys.AABB(feet.east())
                         .intersects(bot.getBoundingBox()),
                 "moving-edge fixture did not overlap the east wall cell");
+        io.github.zoyluo.minecraftai.entity.TeleportAudit.reset(bot);
 
         EmergencyShelterTask task = new EmergencyShelterTask();
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_shelter_anchor_settlement"));
-        require(context, Math.abs(bot.getX() - (feet.getX() + 0.5D)) < 1.0E-6D
-                        && Math.abs(bot.getZ() - (feet.getZ() + 0.5D)) < 1.0E-6D
-                        && bot.getDeltaMovement().lengthSqr() <= 1.0E-8D,
-                "shelter admission did not settle the moving edge pose");
 
         boolean[] eastWallSealed = {false};
         runLocked(context, () -> {
@@ -67,6 +68,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                         + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
+            require(context, io.github.zoyluo.minecraftai.entity.TeleportAudit.corrections(bot) == 0,
+                    "the settle teleported the bot (" + io.github.zoyluo.minecraftai.entity.TeleportAudit.lastCaller(bot) + ")");
             if (isSealed(context, feet.east()) && isSealed(context, feet.east().above())) {
                 eastWallSealed[0] = true;
             }
@@ -80,8 +83,13 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_build_time_edge_correction_places_wall_in_same_tick", maxTicks = 30)
-    public void buildTimeEdgeCorrectionPlacesWallInSameTick(GameTestHelper context) {
+    /**
+     * R5: a body that drifts into the next wall cell while the shelter is being built walks back to the middle of its cell (a few
+     * ticks of real keys, no teleport) and the wall is placed once the body is clear of it. (This used to assert an exact-centre
+     * teleport and the wall placed in the very same tick.)
+     */
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_build_time_edge_correction_walks_back_then_places_wall", maxTicks = 200)
+    public void buildTimeEdgeCorrectionWalksBackThenPlacesWall(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
         AIPlayerEntity bot = spawn(context, "ShelterBuildSettleGT", feet);
@@ -91,23 +99,35 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         task.start(bot);
         require(context, task.state() == TaskState.RUNNING,
                 "build-time settlement fixture failed shelter admission");
-        bot.teleportTo(context.getLevel(), feet.getX() + 0.5D, feet.getY(),
-                feet.getZ() + 0.22D, Set.of(), 0.0F, 0.0F, false);
-        bot.setOnGround(true);
-        bot.setDeltaMovement(Vec3.ZERO);
+        task.tick(bot); // at rest at the middle: the first wall (north, foot) is placed
         BlockPos northWall = feet.north();
-        require(context, new AABB(northWall).intersects(bot.getBoundingBox()),
-                "build-time settlement fixture did not overlap its first wall");
-
-        task.tick(bot);
-
-        require(context, Math.abs(bot.getX() - (feet.getX() + 0.5D)) < 1.0E-6D
-                        && Math.abs(bot.getZ() - (feet.getZ() + 0.5D)) < 1.0E-6D,
-                "build-time edge correction did not return to the exact anchor center");
-        require(context, isSealed(context, northWall),
-                "successful edge correction ended the tick before wall placement");
-        task.cancel(bot, "gametest_complete");
-        finish(context, bot, "ShelterBuildSettleGT");
+        require(context, isSealed(context, northWall), "the first wall was not placed at the middle of the cell");
+        // The body drifts 0.22 block east: it now overlaps the east wall cell that comes up next.
+        io.github.zoyluo.minecraftai.gametest.BotFixtureMoves.place(bot,
+                new Vec3(feet.getX() + 0.5D + 0.22D, feet.getY(), feet.getZ() + 0.5D));
+        bot.setOnGround(true);
+        io.github.zoyluo.minecraftai.entity.TeleportAudit.reset(bot);
+        int[] ticks = {0};
+        context.onEachTick(() -> {
+            ticks[0]++;
+            if (task.state() != TaskState.RUNNING) {
+                context.fail(Component.nullToEmpty("the shelter ended early as " + task.state() + ":" + task.failureReason()));
+                return;
+            }
+            task.tick(bot);
+            require(context, io.github.zoyluo.minecraftai.entity.TeleportAudit.corrections(bot) == 0,
+                    "the correction teleported the bot (" + io.github.zoyluo.minecraftai.entity.TeleportAudit.lastCaller(bot) + ")");
+            BlockPos eastWall = feet.east();
+            if (isSealed(context, eastWall)) {
+                require(context, !new AABB(eastWall).intersects(bot.getBoundingBox()),
+                        "the east wall was sealed into the bot's own body");
+                require(context, Math.abs(bot.getX() - (feet.getX() + 0.5D)) <= 0.21D,
+                        "the wall went up before the bot walked back to the middle: x=" + bot.getX());
+                task.cancel(bot, "gametest_complete");
+                finish(context, bot, "ShelterBuildSettleGT");
+            }
+            require(context, ticks[0] < 120, "the east wall was never placed: " + task.describe());
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_persistent_hostile_gets_one_strike_then_forces_physical_exit", maxTicks = 16000)

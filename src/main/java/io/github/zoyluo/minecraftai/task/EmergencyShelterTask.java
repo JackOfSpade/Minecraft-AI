@@ -5,11 +5,12 @@ import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -51,6 +52,29 @@ public final class EmergencyShelterTask extends AbstractTask {
      * shelter. Surface shelters use the pre-existing daylight counter for the same purpose.
      */
     private static final int MIN_HOLD_TICKS = 100;
+    /**
+     * The bot walks back to the middle of its cell when it stands farther than this from it (a wall cell starts at 0.2 block, the body is
+     * 0.3 block to each side; the walk stops within 0.2 of its point, and the slide after it is short).
+     */
+    private static final double SETTLE_OFFSET = 0.15D;
+    /** A bot that still slides faster than this (blocks per tick) has not come to rest. */
+    private static final double SETTLE_REST_SPEED = 0.03D;
+    /** Ticks a bot may take to come to rest at the anchor before the build starts anyway. */
+    private static final int SETTLE_REST_WAIT = 15;
+    /** Walked settle steps a shelter may spend: a bot that keeps sliding back into its wall cell is displaced, not settling. */
+    private static final int SETTLE_LIMIT = 12;
+    /** How far along its axis a bot sneaks toward a missing foundation: its eye passes the support edge and sees the side face. */
+    private static final double FOUNDATION_EDGE_OFFSET = 0.72D;
+    /** The eye must be this far past the edge of the support before the side face can be clicked (sneaking stops at 0.8 block). */
+    private static final double FOUNDATION_EDGE_MIN = 0.52D;
+    /** Longest single walked step of a shift or a return (a walked step never covers more than {@value WalkedStepRules#IN_CELL_MAX_OFFSET}). */
+    private static final double MOTION_HOP = 0.6D;
+    private static final int FOUNDATION_SHIFT_LIMIT = 4;
+    private static final int FOUNDATION_PLACE_TRIES = 4;
+    private static final int FOUNDATION_FAILURE_LIMIT = 3;
+    /** A jump is a bounded thing (about 12 ticks in the air): a bot that has not landed after this long is not in a jump. */
+    private static final int ROOF_JUMP_LIMIT = 40;
+    private static final int ROOF_JUMP_TRIES = 3;
     private static final String ENVIRONMENTAL_ESCAPE_REQUIRED =
             "shelter_environmental_escape_required";
     private static final Direction[] HORIZONTAL = {
@@ -67,6 +91,25 @@ public final class EmergencyShelterTask extends AbstractTask {
         HOLD,
         OPEN_EXIT,
         STEP_OUT
+    }
+
+    /** What the walked step in flight is for (the task never moves the bot itself: it presses keys and lets physics do the rest). */
+    private enum Motion {
+        NONE,
+        /** Walk back to the middle of the anchor cell. */
+        SETTLE,
+        /** Sneak toward the missing foundation until the eye is past the support edge. */
+        FOUNDATION_SHIFT,
+        /** Walk back from the edge to the middle of the anchor cell. */
+        FOUNDATION_RETURN,
+        /** Walk to the anchor cell after being displaced. */
+        ANCHOR_RETURN,
+        /** Walk out through the opened doorway. */
+        EGRESS
+    }
+
+    private enum FoundationStage {
+        NONE, SHIFTING, AT_EDGE, RETURNING
     }
 
     private record ShelterPlan(BlockPos egressFeet,
@@ -91,7 +134,22 @@ public final class EmergencyShelterTask extends AbstractTask {
     private BlockPos egressFeet;
     private BlockPos exitMiningTarget;
     private Direction lastDeferredForcedDirection;
+    /** A real jump for the roof support is in flight (the bot is in the air or about to be). */
     private boolean elevatedForRoofSupport;
+    private boolean roofJumpAirborneSeen;
+    private int roofJumpStartedElapsed;
+    private int roofJumpTries;
+    private Motion motion = Motion.NONE;
+    private int motionStartedElapsed;
+    private boolean initialSettlePending;
+    private int settleRestWait;
+    private int settleCount;
+    private FoundationStage foundationStage = FoundationStage.NONE;
+    private Direction foundationDirection;
+    private int foundationShifts;
+    private int foundationPlaceTries;
+    private int foundationFailures;
+    private String foundationFailure;
     private boolean surfaceShelter;
     private boolean forcePressureExit;
     private int consecutiveDaylightTicks;
@@ -197,6 +255,19 @@ public final class EmergencyShelterTask extends AbstractTask {
         rescueResolvedAnnounced = false;
         retreatGoal = null;
         cleanupDebtRegistered = false;
+        elevatedForRoofSupport = false;
+        roofJumpAirborneSeen = false;
+        roofJumpTries = 0;
+        motion = Motion.NONE;
+        initialSettlePending = false;
+        settleRestWait = 0;
+        settleCount = 0;
+        foundationStage = FoundationStage.NONE;
+        foundationDirection = null;
+        foundationShifts = 0;
+        foundationPlaceTries = 0;
+        foundationFailures = 0;
+        foundationFailure = null;
         if (initiatingThreat != null || rememberedThreatPos != null) {
             phase = Phase.RETREAT_TO_SAFE_ANCHOR;
             phaseStartedElapsed = 0;
@@ -215,13 +286,16 @@ public final class EmergencyShelterTask extends AbstractTask {
         BlockPos feet = bot.blockPosition();
         // A path/evade owner can stop with its BlockPos still equal to this cell while the body
         // box straddles an edge and retains horizontal velocity. Vanilla placement then rejects
-        // the adjacent wall because it would collide with the player itself. Establish the same
-        // stationary, centered pose a real client reports before beginning the fixed enclosure.
-        if (!isCenteredAnchorEntitySpaceClear(bot, feet)
-                || !FakePlayerMotion.returnToBlockCenter(bot, feet, "shelter_anchor_settle")) {
+        // the adjacent wall because it would collide with the player itself. The bot comes to rest at
+        // the middle of the cell the way a player does (a walked step back, then the slide dies out)
+        // before the first wall: see settleInitialPose. A middle that another entity occupies is
+        // refused here, as before.
+        if (!isCenteredAnchorEntitySpaceClear(bot, feet)) {
             failShelter(bot, "shelter_origin_not_centerable");
             return;
         }
+        initialSettlePending = true;
+        settleRestWait = 0;
         // Capture this before the shelter itself adds a roof. Nearby no-leaves terrain height
         // keeps a shallow canopy or overhang in the surface-night transaction while the Y floor
         // excludes an open deep mine that happens to have a vertical view of the sky.
@@ -249,6 +323,9 @@ public final class EmergencyShelterTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (handleEnvironmentalOwnershipConflict(bot)) {
+            return;
+        }
+        if (tickMotion(bot)) {
             return;
         }
         if (surfaceShelter && !bot.level().isBrightOutside()) {
@@ -404,10 +481,6 @@ public final class EmergencyShelterTask extends AbstractTask {
                     && placementBlockingHostile(bot, blockedTarget).isPresent()) {
                 rejectBlockedPlacementDirection(directionTo(blockedTarget));
             }
-            if (elevatedForRoofSupport) {
-                returnToShelterFeet(bot);
-                elevatedForRoofSupport = false;
-            }
             beginExit(bot, "shelter_timeout placed=" + placed + " remaining=" + targets.size());
             return;
         }
@@ -415,7 +488,16 @@ public final class EmergencyShelterTask extends AbstractTask {
             placeRoofSupportFromRaisedView(bot);
             return;
         }
-        if (!recoverAnchorOrRelease(bot)) {
+        // A foundation in progress has the bot a little over the edge of its cell, in the next cell: it is not displaced.
+        if (foundationStage == FoundationStage.NONE && !recoverAnchorOrRelease(bot)) {
+            return;
+        }
+        if (initialSettlePending && settleInitialPose(bot)) {
+            return;
+        }
+        if (foundationStage == FoundationStage.AT_EDGE
+                && (targets.isEmpty() || !isFoundation(targets.peek()) || isSealed(bot, targets.peek()))) {
+            startFoundationReturn(bot); // the foundation is no longer needed (or was sealed by someone else): back to the middle
             return;
         }
         // Only remove a target after the world proves it is sealed. The old unconditional poll
@@ -446,14 +528,15 @@ public final class EmergencyShelterTask extends AbstractTask {
             }
             if (target.equals(roofSupport)
                     && isSealed(bot, roofSupportBase)
-                    && FakePlayerMotion.jumpTo(bot, shelterFeet.above(), "shelter_roof_support_view")) {
-                elevatedForRoofSupport = true;
-                lastProgressTick = elapsed;
+                    && beginRoofSupportJump(bot)) {
                 return;
             }
             ActionResult result = isFoundation(target)
                     ? placeFoundationFromEdge(bot, target)
                     : BuildAction.placeBlockAt(bot, target);
+            if (result.isInProgress()) {
+                return; // a walked step of the foundation (or its landing pose) is in flight
+            }
             if (result.isSuccess() && isSealed(bot, target)) {
                 targets.poll();
                 rememberPlacement(bot, target);
@@ -469,6 +552,9 @@ public final class EmergencyShelterTask extends AbstractTask {
             break;
         }
         if (targets.isEmpty()) {
+            if (motion != Motion.NONE || foundationStage != FoundationStage.NONE) {
+                return; // the last placement was a foundation: the walk back to the middle of the cell finishes first
+            }
             if (!isEnvelopeSealed(bot)) {
                 beginExit(bot, "shelter_envelope_not_sealed");
                 return;
@@ -512,18 +598,201 @@ public final class EmergencyShelterTask extends AbstractTask {
                     "direction", blockedDirection);
             return true;
         }
-        if (!FakePlayerMotion.returnToBlockCenter(bot, shelterFeet,
-                "shelter_build_anchor_settle")) {
-            beginExit(bot, "shelter_anchor_recovery_failed");
-            return true;
-        }
-        if (new AABB(target).intersects(bot.getBoundingBox())) {
+        // The bot walks back to the middle of its cell (a few ticks of real keys, as a player would nudge
+        // itself) and the wall is placed once the body is clear of it: the next build tick re-checks.
+        // Re-centering restores the precondition for work; it is not durable build progress, so it is not
+        // credited to the no-progress clock (its own ticks are: see creditBuildClock).
+        if (settleCount >= SETTLE_LIMIT) {
             beginExit(bot, "shelter_anchor_still_blocks_wall");
             return true;
         }
-        // Re-centering restores the precondition for work; it is not durable build progress and
-        // must not extend the no-progress watchdog under repeated contact pressure.
+        settleCount++;
+        if (!startSettle(bot)) {
+            beginExit(bot, "shelter_anchor_recovery_failed");
+        }
+        return true;
+    }
+
+    /**
+     * Comes to rest at the middle of the anchor cell before the first wall, the way a player does (a walked step back when it stands
+     * off-centre, then the slide of its last step dies out). The build waits for it.
+     *
+     * @return true while this build tick belongs to the settle
+     */
+    private boolean settleInitialPose(AIPlayerEntity bot) {
+        Vec3 velocity = bot.getDeltaMovement();
+        double offset = offsetFromCenter(bot.position());
+        double predicted = offsetFromCenter(bot.position().add(velocity.x * 1.2D, 0.0D, velocity.z * 1.2D));
+        double speed = Math.hypot(velocity.x, velocity.z);
+        if (offset > SETTLE_OFFSET || (speed > SETTLE_REST_SPEED && predicted > SETTLE_OFFSET)) {
+            if (settleCount >= SETTLE_LIMIT) {
+                failShelter(bot, "shelter_origin_not_centerable");
+                return true;
+            }
+            settleCount++;
+            if (!startSettle(bot)) {
+                failShelter(bot, "shelter_origin_not_centerable");
+            }
+            return true;
+        }
+        if (speed > SETTLE_REST_SPEED && settleRestWait < SETTLE_REST_WAIT) {
+            settleRestWait++;
+            creditBuildClock(1);
+            return true;
+        }
+        initialSettlePending = false;
         return false;
+    }
+
+    private double offsetFromCenter(Vec3 position) {
+        return Math.max(Math.abs(position.x - (shelterFeet.getX() + 0.5D)),
+                Math.abs(position.z - (shelterFeet.getZ() + 0.5D)));
+    }
+
+    /** A walked step toward the middle of the anchor cell (at most one hop: the next build tick asks again). */
+    private boolean startSettle(AIPlayerEntity bot) {
+        return startMotion(bot, Motion.SETTLE,
+                WalkedStep.begin(bot, recenterPoint(bot), WalkedStep.Kind.RECENTER, "shelter_anchor_settle"));
+    }
+
+    /** The point a walk back to the middle of the anchor cell heads for: the middle itself, or a hop of {@value #MOTION_HOP} block toward it. */
+    private Vec3 recenterPoint(AIPlayerEntity bot) {
+        double centerX = shelterFeet.getX() + 0.5D;
+        double centerZ = shelterFeet.getZ() + 0.5D;
+        double dx = centerX - bot.getX();
+        double dz = centerZ - bot.getZ();
+        double distance = Math.hypot(dx, dz);
+        if (distance <= MOTION_HOP) {
+            return new Vec3(centerX, shelterFeet.getY(), centerZ);
+        }
+        return new Vec3(bot.getX() + dx / distance * MOTION_HOP, shelterFeet.getY(), bot.getZ() + dz / distance * MOTION_HOP);
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------------
+    // Walked steps: every move of the shelter is keys and physics (settling, the landing of a jump, the foundation edge, the way out)
+    // ------------------------------------------------------------------------------------------------------------------------
+
+    /** Hands the bot to a walked step; false when the step cannot even start (the caller keeps its own failure semantics). */
+    private boolean startMotion(AIPlayerEntity bot, Motion kind, WalkedStep step) {
+        var pack = bot.getActionPack();
+        if (step.kind() != WalkedStep.Kind.SNEAK_SHIFT && kind != Motion.FOUNDATION_RETURN) {
+            pack.setSneaking(false);
+        }
+        pack.runStep(step);
+        motion = kind;
+        motionStartedElapsed = elapsed;
+        return true;
+    }
+
+    /**
+     * Follows the walked step in flight. The step is ticked by the action pack every game tick; this only reads how it ended and
+     * decides what the build does next from the world (never from the step's word alone: another owner may have replaced it).
+     *
+     * @return true while the tick belongs to the walked step (in flight, or its ending was handled here)
+     */
+    private boolean tickMotion(AIPlayerEntity bot) {
+        if (motion == Motion.NONE) {
+            return false;
+        }
+        var pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            creditBuildClock(1);
+            return true;
+        }
+        Motion finished = motion;
+        motion = Motion.NONE;
+        WalkedStep.Result result = pack.stepResult();
+        if (result == null) {
+            // Cancelled from outside (a pause, a restart, another owner): nothing to finish, the phase re-derives from the world.
+            BotLog.action(bot, "shelter_walked_step_cancelled", "motion", finished);
+            onMotionEnded(bot, finished, false, "cancelled");
+            return false;
+        }
+        if (result.failed()) {
+            BotLog.action(bot, "shelter_walked_step_failed", "motion", finished, "why", result.reason());
+        }
+        return onMotionEnded(bot, finished, result.succeeded(), result.reason());
+    }
+
+    /** @return true when the ending consumed this tick */
+    private boolean onMotionEnded(AIPlayerEntity bot, Motion finished, boolean succeeded, String why) {
+        switch (finished) {
+            case SETTLE -> {
+                if (!succeeded && !"cancelled".equals(why)) {
+                    // The walk could not even start or ran out of time: the old failures of a re-centre that was refused.
+                    if (initialSettlePending) {
+                        failShelter(bot, "shelter_origin_not_centerable");
+                    } else {
+                        beginExit(bot, "shelter_anchor_recovery_failed");
+                    }
+                    return true;
+                }
+                // The build tick that follows decides: a body still overlapping its wall settles again (bounded) or fails there.
+                return false;
+            }
+            case FOUNDATION_SHIFT -> {
+                if (!succeeded) {
+                    foundationFailures++;
+                    foundationFailure = "foundation_edge_unreachable";
+                    foundationStage = FoundationStage.RETURNING;
+                    startFoundationReturn(bot);
+                    return true;
+                }
+                foundationStage = FoundationStage.AT_EDGE;
+                return false;
+            }
+            case FOUNDATION_RETURN -> {
+                if (!succeeded && !"cancelled".equals(why)) {
+                    foundationStage = FoundationStage.NONE;
+                    bot.getActionPack().setSneaking(false);
+                    beginExit(bot, "shelter_unsealable:foundation_edge_return_failed");
+                    return true;
+                }
+                if (offsetFromCenter(bot.position()) > SETTLE_OFFSET) {
+                    // A hop of a walked step is short: another one until the bot stands at the middle of its cell.
+                    if (settleCount++ >= SETTLE_LIMIT) {
+                        foundationStage = FoundationStage.NONE;
+                        bot.getActionPack().setSneaking(false);
+                        beginExit(bot, "shelter_unsealable:foundation_edge_return_failed");
+                        return true;
+                    }
+                    startFoundationReturn(bot);
+                    return true;
+                }
+                foundationStage = FoundationStage.NONE;
+                foundationShifts = 0;
+                foundationPlaceTries = 0;
+                bot.getActionPack().setSneaking(false);
+                return false;
+            }
+            case ANCHOR_RETURN, EGRESS -> {
+                return false;
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
+
+    /** Forgets the walked step in flight (its owner stopped the pack, which cancelled it) and the foundation attempt it belonged to. */
+    private void dropMotion() {
+        motion = Motion.NONE;
+        foundationStage = FoundationStage.NONE;
+        foundationFailure = null;
+        foundationShifts = 0;
+        foundationPlaceTries = 0;
+    }
+
+    /**
+     * Ticks spent walking, waiting for the slide to end or in the air of a jump are not build failures: the walked steps have their
+     * own time limits and the attempt counters above bound the loops, so the build clocks stand still meanwhile.
+     */
+    private void creditBuildClock(int ticks) {
+        if (phase != Phase.BUILD) {
+            return;
+        }
+        phaseStartedElapsed += ticks;
+        lastProgressTick = Math.min(elapsed, lastProgressTick + ticks);
     }
 
     /**
@@ -996,13 +1265,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             beginForcedPressureExit(bot);
             return;
         }
-        if (bot.blockPosition().equals(egressFeet)
-                || FakePlayerMotion.stepToStandable(bot, egressFeet, "shelter_owned_egress")) {
-            if (!bot.blockPosition().equals(egressFeet)) {
-                noteExitFailure("shelter_exit_pose_unverified");
-                phase = Phase.OPEN_EXIT;
-                return;
-            }
+        if (bot.blockPosition().equals(egressFeet)) {
             // The worker is physically outside before this artifact enters the cooperative
             // cleanup registry.  This ordering is what makes exact ownership safe even if another
             // nearby bot wins the cleanup claim on the next idle scan.
@@ -1014,33 +1277,103 @@ public final class EmergencyShelterTask extends AbstractTask {
             }
             return;
         }
-        phase = Phase.OPEN_EXIT;
+        // Out through the doorway on foot (a walked step onto the landing); a refused or failed step is the old refused
+        // step: back to opening the exit, which tries again until the exit clock forces one.
+        Standability.clearCache();
+        WalkedStep.Kind kind = WalkedStepRules.walkKindFor(egressFeet.getY() - bot.blockPosition().getY());
+        if (kind == null
+                || !Standability.isStandable(bot.level(), egressFeet)
+                || WalkedStep.refusal(bot, egressFeet, kind) != null) {
+            phase = Phase.OPEN_EXIT;
+            return;
+        }
+        startMotion(bot, Motion.EGRESS, WalkedStep.begin(bot, egressFeet, kind, "shelter_owned_egress"));
+    }
+
+    /**
+     * Jumps for the roof support: a real jump from the middle of the anchor cell, straight up (the head cell above the shelter is
+     * open until the roof exists), placing the support against the top of the north head wall while the eye is above it. The jump
+     * needs the two cells above the anchor free, as before. After {@value #ROOF_JUMP_TRIES} jumps without a placement the support is
+     * tried from the ground, which is what fails (and ends the build) when the support face cannot be seen.
+     *
+     * @return true when a jump was started (or is still owed a landing)
+     */
+    private boolean beginRoofSupportJump(AIPlayerEntity bot) {
+        if (roofJumpTries >= ROOF_JUMP_TRIES
+                || !bot.blockPosition().equals(shelterFeet)
+                || !WalkedStep.supported(bot)) {
+            return false;
+        }
+        var world = bot.level();
+        BlockPos head = shelterFeet.above();
+        for (BlockPos cell : new BlockPos[]{head, head.above()}) {
+            if (!world.getBlockState(cell).getCollisionShape(world, cell).isEmpty()
+                    || Standability.isDangerous(world.getBlockState(cell))) {
+                return false;
+            }
+        }
+        var pack = bot.getActionPack();
+        pack.stopMovement();
+        pack.jumpOnce();
+        elevatedForRoofSupport = true;
+        roofJumpAirborneSeen = false;
+        roofJumpStartedElapsed = elapsed;
+        roofJumpTries++;
+        lastProgressTick = elapsed;
+        BotLog.action(bot, "shelter_roof_support_jump", "anchor", shelterFeet, "try", roofJumpTries);
+        return true;
+    }
+
+    /** The bot stands on the anchor cell's floor again (after a jump). */
+    private boolean landedAtAnchor(AIPlayerEntity bot) {
+        return bot.blockPosition().equals(shelterFeet)
+                && bot.getY() <= shelterFeet.getY() + 0.05D
+                && WalkedStep.supported(bot);
     }
 
     private void placeRoofSupportFromRaisedView(AIPlayerEntity bot) {
+        creditBuildClock(1);
+        boolean airborne = bot.getY() > shelterFeet.getY() + 0.05D;
+        if (airborne) {
+            roofJumpAirborneSeen = true;
+        }
         if (isSealed(bot, roofSupport)) {
             if (!targets.isEmpty() && targets.peek().equals(roofSupport)) {
                 targets.poll();
             } else {
                 targets.remove(roofSupport);
             }
-            if (!returnToShelterFeet(bot)) {
-                beginExit(bot, "shelter_elevation_return_failed");
+            // The rest of the jump is the fall back onto the anchor: the roof is placed from the ground.
+            if (roofJumpAirborneSeen && landedAtAnchor(bot)) {
+                elevatedForRoofSupport = false;
+                lastProgressTick = elapsed;
                 return;
             }
-            elevatedForRoofSupport = false;
-            lastProgressTick = elapsed;
+            if (elapsed - roofJumpStartedElapsed > ROOF_JUMP_LIMIT) {
+                beginExit(bot, "shelter_elevation_return_failed");
+            }
             return;
+        }
+        if ((roofJumpAirborneSeen && !airborne && landedAtAnchor(bot))
+                || (!roofJumpAirborneSeen && elapsed - roofJumpStartedElapsed > 6)) {
+            // Landed (or never left the ground) without a placement: the build tick tries again, from the ground after the last jump.
+            elevatedForRoofSupport = false;
+            return;
+        }
+        if (elapsed - roofJumpStartedElapsed > ROOF_JUMP_LIMIT) {
+            beginExit(bot, "shelter_elevation_return_failed:timeout");
+            return;
+        }
+        if (!airborne) {
+            return; // the jump key is pressed; the body leaves the floor on the next physics tick
         }
         OptionalInt blockSlot = findShelterBlockSlot(bot);
         if (blockSlot.isEmpty()) {
-            returnToShelterFeet(bot);
             elevatedForRoofSupport = false;
             beginExit(bot, "missing shelter_block");
             return;
         }
         if (InventoryAction.equipFromSlot(bot, blockSlot.getAsInt()) < 0) {
-            returnToShelterFeet(bot);
             elevatedForRoofSupport = false;
             beginExit(bot, "cannot_equip_shelter_block");
             return;
@@ -1050,23 +1383,31 @@ public final class EmergencyShelterTask extends AbstractTask {
             rememberPlacement(bot, roofSupport);
             placed++;
             lastProgressTick = elapsed;
-            return; // next tick physically drop back before placing the center roof
+            // next ticks: the fall back onto the anchor, then the center roof from the ground
         }
-        if (!returnToShelterFeet(bot)) {
-            beginExit(bot, "shelter_elevation_return_failed:" + result.reason());
-            return;
-        }
-        elevatedForRoofSupport = false;
+        // A failed attempt is not final: the eye is still rising (or falling through the reachable band). Every tick of the flight tries.
     }
 
+    /**
+     * Walks back to the anchor cell after a displacement (a walked step, a few ticks; the caller times the whole recovery).
+     *
+     * @return true when the bot already stands on the anchor
+     */
     private boolean returnToShelterFeet(AIPlayerEntity bot) {
         if (bot.blockPosition().equals(shelterFeet)) {
             return true;
         }
+        if (motion == Motion.ANCHOR_RETURN) {
+            return false;
+        }
         Standability.clearCache();
-        return Standability.isStandable(bot.level(), shelterFeet)
-                && FakePlayerMotion.stepToStandable(
-                bot, shelterFeet, "shelter_roof_support_return");
+        WalkedStep.Kind kind = WalkedStepRules.walkKindFor(shelterFeet.getY() - bot.blockPosition().getY());
+        if (kind != null
+                && Standability.isStandable(bot.level(), shelterFeet)
+                && WalkedStep.refusal(bot, shelterFeet, kind) == null) {
+            startMotion(bot, Motion.ANCHOR_RETURN, WalkedStep.begin(bot, shelterFeet, kind, "shelter_anchor_return"));
+        }
+        return false;
     }
 
     /**
@@ -1169,7 +1510,24 @@ public final class EmergencyShelterTask extends AbstractTask {
                 + Math.abs(target.getZ() - shelterFeet.getZ()) == 1;
     }
 
+    /**
+     * Places the missing foundation block the way a player bridges off a ledge: sneaks toward the edge of its support until its eye is
+     * past it (sneaking will not walk it off), clicks the side face of the support, then walks back to the middle of the cell. Every
+     * phase is a walked step, so this answers {@code IN_PROGRESS} until the block is placed (success) or the attempts run out
+     * (a failed result with the old reasons).
+     */
     private ActionResult placeFoundationFromEdge(AIPlayerEntity bot, BlockPos target) {
+        if (foundationFailure != null) {
+            String failure = foundationFailure;
+            foundationFailure = null;
+            return ActionResult.failed(failure);
+        }
+        if (foundationStage == FoundationStage.AT_EDGE) {
+            return placeFoundationAtEdge(bot, target);
+        }
+        if (foundationStage != FoundationStage.NONE) {
+            return ActionResult.IN_PROGRESS;
+        }
         int dx = target.getX() - shelterFeet.getX();
         int dz = target.getZ() - shelterFeet.getZ();
         Direction direction = null;
@@ -1179,17 +1537,74 @@ public final class EmergencyShelterTask extends AbstractTask {
                 break;
             }
         }
+        BlockPos support = shelterFeet.below();
+        var world = bot.level();
         if (direction == null
-                || !FakePlayerMotion.shiftToSupportEdge(
-                        bot, shelterFeet, direction, "shelter_foundation")) {
+                || foundationFailures >= FOUNDATION_FAILURE_LIMIT
+                || !bot.blockPosition().equals(shelterFeet)
+                || !WalkedStep.supported(bot)
+                || world.getBlockState(support).getCollisionShape(world, support).isEmpty()) {
+            foundationFailures++;
+            if (foundationFailures >= FOUNDATION_FAILURE_LIMIT) {
+                beginExit(bot, "shelter_unsealable:foundation_edge_unreachable");
+            }
             return ActionResult.failed("foundation_edge_unreachable");
         }
-        ActionResult result = BuildAction.placeBlock(
-                bot, shelterFeet.below(), direction, InteractionHand.MAIN_HAND);
-        if (!FakePlayerMotion.returnToBlockCenter(bot, shelterFeet, "shelter_foundation")) {
-            return ActionResult.failed("foundation_edge_return_failed");
+        foundationDirection = direction;
+        foundationShifts = 0;
+        foundationPlaceTries = 0;
+        return shiftTowardFoundationEdge(bot);
+    }
+
+    /** One sneaking hop toward the edge (at most {@value #MOTION_HOP} block: a walked step covers no more). */
+    private ActionResult shiftTowardFoundationEdge(AIPlayerEntity bot) {
+        if (++foundationShifts > FOUNDATION_SHIFT_LIMIT) {
+            foundationFailures++;
+            foundationFailure = "foundation_edge_unreachable";
+            foundationStage = FoundationStage.RETURNING;
+            startFoundationReturn(bot);
+            return ActionResult.IN_PROGRESS;
         }
-        return result;
+        double reach = Math.min(FOUNDATION_EDGE_OFFSET, edgeOffset(bot) + MOTION_HOP);
+        Vec3 point = new Vec3(
+                shelterFeet.getX() + 0.5D + foundationDirection.getStepX() * reach,
+                shelterFeet.getY(),
+                shelterFeet.getZ() + 0.5D + foundationDirection.getStepZ() * reach);
+        foundationStage = FoundationStage.SHIFTING;
+        startMotion(bot, Motion.FOUNDATION_SHIFT,
+                WalkedStep.begin(bot, point, WalkedStep.Kind.SNEAK_SHIFT, "shelter_foundation"));
+        return ActionResult.IN_PROGRESS;
+    }
+
+    /** How far the bot's centre is past the middle of the anchor cell toward the foundation side. */
+    private double edgeOffset(AIPlayerEntity bot) {
+        return (bot.getX() - (shelterFeet.getX() + 0.5D)) * foundationDirection.getStepX()
+                + (bot.getZ() - (shelterFeet.getZ() + 0.5D)) * foundationDirection.getStepZ();
+    }
+
+    private ActionResult placeFoundationAtEdge(AIPlayerEntity bot, BlockPos target) {
+        if (edgeOffset(bot) < FOUNDATION_EDGE_MIN) {
+            return shiftTowardFoundationEdge(bot); // still inside the support's column of sight: another hop
+        }
+        ActionResult result = BuildAction.placeBlock(
+                bot, shelterFeet.below(), foundationDirection, InteractionHand.MAIN_HAND);
+        if (result.isSuccess() && isSealed(bot, target)) {
+            startFoundationReturn(bot);
+            return result;
+        }
+        if (++foundationPlaceTries < FOUNDATION_PLACE_TRIES) {
+            return ActionResult.IN_PROGRESS; // the pose settles a tick or two; try again from the edge
+        }
+        foundationFailures++;
+        startFoundationReturn(bot);
+        return result.isSuccess() ? ActionResult.failed("foundation_not_sealed") : result;
+    }
+
+    /** Walks back from the edge (sneaking, until the last hop) to the middle of the anchor cell. */
+    private void startFoundationReturn(AIPlayerEntity bot) {
+        foundationStage = FoundationStage.RETURNING;
+        startMotion(bot, Motion.FOUNDATION_RETURN,
+                WalkedStep.begin(bot, recenterPoint(bot), WalkedStep.Kind.RECENTER, "shelter_foundation_return"));
     }
 
     private void beginExit(AIPlayerEntity bot, String failure) {
@@ -1202,6 +1617,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             exitStartedElapsed = elapsed;
         }
         elevatedForRoofSupport = false;
+        dropMotion();
         exitMiningTarget = null;
         cancelHoldEating(bot, "shelter_hold_finished");
         exitMiner.cancel(bot);
@@ -1232,6 +1648,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         phase = Phase.OPEN_EXIT;
         phaseStartedElapsed = elapsed;
         elevatedForRoofSupport = false;
+        dropMotion();
         cancelHoldEating(bot, "shelter_pressure_timeout");
         bot.getActionPack().stopAll();
         BotLog.action(bot, "shelter_pressure_exit_forced",
@@ -1243,6 +1660,7 @@ public final class EmergencyShelterTask extends AbstractTask {
 
     private void returnToPressureHold(AIPlayerEntity bot, String reason) {
         phase = Phase.HOLD;
+        dropMotion();
         phaseStartedElapsed = elapsed;
         exitMiningTarget = null;
         exitMiner.cancel(bot);
@@ -1732,9 +2150,6 @@ public final class EmergencyShelterTask extends AbstractTask {
     protected void onAbort(AIPlayerEntity bot) {
         exitMiner.cancel(bot);
         cancelHoldEating(bot, "shelter_aborted");
-        if (elevatedForRoofSupport) {
-            returnToShelterFeet(bot);
-        }
         boolean exitDebtHandedOff = preserveOwnedExitDebt(bot);
         // A cancelled partial shell still deserves cleanup, but only after the bot is already
         // outside its anchor or a collision-free side proves that a worker cannot entomb it by
@@ -1777,6 +2192,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             exitStartedElapsed = elapsed;
         }
         elevatedForRoofSupport = false;
+        dropMotion();
         exitMiningTarget = null;
         cancelHoldEating(bot, cancelReason);
         exitMiner.cancel(bot);
