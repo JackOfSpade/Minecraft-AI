@@ -66,7 +66,7 @@ The four `operator` defaults are `true`, to preserve legacy behavior; they are f
 ### Meaning of the Four Capabilities
 
 - `hiddenBlockScan`: Allows bypassing strict's observability filtering to probe for resources. In strict mode, blocks must be within the configured radius, exposed, and hit by a line-of-sight raycast; entities must be within radius and visible.
-- `emergencyTeleport`: Allows hazard handling or navigation fallback to perform a long-distance emergency teleport. In strict mode, the relevant code paths instead attempt normal actions and fail explicitly when they cannot be handled safely.
+- `emergencyTeleport`: Allows hazard handling (the suffocation climb, the drowning rescue, dark-trap surfacing and gather surfacing) to perform a long-distance emergency teleport. In strict mode, the relevant code paths instead attempt normal actions and fail explicitly when they cannot be handled safely; the capability decision is made first, so nothing is scanned that the bot cannot see. No profile teleports a bot to correct its path: a route start that is not standable is left by a walked step (`WalkedStep`), a stalled hop or pillar jump is retried with inputs, and a bot inside a block is shoved, walked or dug out (`NavSafetyNet.escapeSuffocationByInputs`).
 - `forcedPickup`: Allows directly transferring nearby dropped items into the bot's inventory. Strict mode only uses the normal world pickup process.
 - `manualTeleport`: Allows initiating a manual teleport via the control panel/network action. When not in effect, the UI button is disabled, and the server still rejects the request again on its own.
 

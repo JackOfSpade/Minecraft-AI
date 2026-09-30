@@ -216,12 +216,17 @@ public final class NaturalMovementGameTests {
         int[] phase = {0};
         int[] mark = {0};
         int[] tick = {0};
+        StringBuilder trace = new StringBuilder();
         context.onEachTick(() -> {
             tick[0]++;
+            if (tick[0] % 40 == 1) {
+                trace.append(" t").append(tick[0]).append('=').append(bot.blockPosition().toShortString())
+                        .append(bot.getActionPack().isPathExecutorIdle() ? " idle" : " walking");
+            }
             switch (phase[0]) {
                 case 0 -> {
                     // The run-up reaches the base cell: a ceiling appears one block above the bot's head.
-                    if (bot.blockPosition().getX() >= 1) {
+                    if (bot.blockPosition().getX() >= arena.feet.getX() + 1) {
                         arena.world.setBlock(ceiling, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         Standability.clearCache();
                         phase[0] = 1;
@@ -257,7 +262,8 @@ public final class NaturalMovementGameTests {
                     }
                 }
             }
-            require(context, tick[0] < 680, "timed out in phase " + phase[0] + " at " + bot.blockPosition().toShortString());
+            require(context, tick[0] < 680, "timed out in phase " + phase[0] + " at " + bot.blockPosition().toShortString()
+                    + " start=" + arena.at(-1, 0, 0).toShortString() + " trace:" + trace);
         });
     }
 
@@ -475,5 +481,111 @@ public final class NaturalMovementGameTests {
                 "the refused request left the old route's lease in force: " + bot.getActionPack().leasedGait());
         require(context, bot.getActionPack().isPathExecutorIdle(), "the legacy route survived the hand-over");
         arena.finish(bot);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The other kinds of WalkedStep: recentre, sneak over an edge, drop off an edge, swim up a shaft
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /**
+     * RECENTER walks an off-centre bot back to the centre of its cell, SNEAK_SHIFT then sneaks it a little over the edge of a one-block
+     * support (sneaking keeps it from falling off the 0.45 block it goes past the centre), and STEP_DOWN walks off an edge onto the
+     * floor two blocks lower. All by keys, none by a teleport.
+     */
+    @GameTest(environment = "minecraftai-gametest:natural_movement_game_tests_walked_step_recentres_sneaks_over_an_edge_and_drops_off_one", maxTicks = 300)
+    public void walkedStepRecentresSneaksOverAnEdgeAndDropsOffOne(GameTestHelper context) {
+        Arena arena = Arena.build(context, 7, -3, 8, -3, 3);
+        // A one-block support at (0, 1) (top at feet level 2) standing alone: the floor below is the arena floor two blocks lower.
+        arena.set(0, 0, 0, Blocks.STONE);
+        arena.set(0, 1, 0, Blocks.STONE);
+        arena.set(0, 2, 0, Blocks.AIR);
+        BlockPos support = arena.at(0, 2, 0);
+        BlockPos floorCell = arena.at(1, 0, 0);
+        AIPlayerEntity bot = arena.spawn("WalkedKindsGT", support);
+        BotFixtureMoves.place(bot, new Vec3(support.getX() + 0.5D + 0.3D, support.getY(), support.getZ() + 0.5D));
+        bot.setOnGround(true);
+        TeleportAudit.reset(bot);
+        Vec3 centre = Vec3.atBottomCenterOf(support);
+        Vec3 edge = new Vec3(support.getX() + 0.5D + 0.45D, support.getY(), support.getZ() + 0.5D);
+        int[] phase = {0};
+        int[] ticks = {0};
+        bot.getActionPack().runStep(WalkedStep.begin(bot, centre, WalkedStep.Kind.RECENTER, "gametest_recenter"));
+        context.onEachTick(() -> {
+            ticks[0]++;
+            requireNoCorrections(context, bot, "walked step kinds, phase " + phase[0]);
+            require(context, ticks[0] < 290, "timed out in phase " + phase[0] + " at " + bot.position());
+            if (!bot.getActionPack().stepIdle()) {
+                return;
+            }
+            WalkedStep.Result result = bot.getActionPack().stepResult();
+            require(context, result != null && result.succeeded(),
+                    "phase " + phase[0] + " failed: " + (result == null ? "no result" : result.reason()));
+            switch (phase[0]) {
+                case 0 -> {
+                    require(context, Math.hypot(bot.getX() - centre.x, bot.getZ() - centre.z) <= 0.25D,
+                            "RECENTER ended away from the cell centre: " + bot.position());
+                    phase[0] = 1;
+                    bot.getActionPack().runStep(WalkedStep.begin(bot, edge, WalkedStep.Kind.SNEAK_SHIFT, "gametest_sneak_shift"));
+                }
+                case 1 -> {
+                    require(context, bot.blockPosition().equals(support) && bot.getY() >= support.getY() - 1.0E-6D,
+                            "SNEAK_SHIFT fell off the support: " + bot.position());
+                    require(context, Math.hypot(bot.getX() - edge.x, bot.getZ() - edge.z) <= 0.3D,
+                            "SNEAK_SHIFT ended away from the edge point: " + bot.position());
+                    require(context, bot.getActionPack().sneakRequested(), "SNEAK_SHIFT let go of the sneak key at the edge");
+                    phase[0] = 2;
+                    bot.getActionPack().stopMovement();
+                    bot.getActionPack().runStep(WalkedStep.begin(bot, floorCell, WalkedStep.Kind.STEP_DOWN, "gametest_drop"));
+                }
+                default -> {
+                    require(context, bot.blockPosition().equals(floorCell) && WalkedStep.supported(bot),
+                            "STEP_DOWN did not land on the floor cell: " + bot.blockPosition().toShortString());
+                    require(context, bot.getHealth() >= bot.getMaxHealth() - 0.01F, "the two-block drop cost health");
+                    arena.finish(bot);
+                }
+            }
+        });
+    }
+
+    /** SWIM presses forward and jump up a two-cell water shaft, one cell per step, and ends in the water cell it was given. */
+    @GameTest(environment = "minecraftai-gametest:natural_movement_game_tests_walked_step_swims_up_a_shaft", maxTicks = 200)
+    public void walkedStepSwimsUpAShaft(GameTestHelper context) {
+        Arena arena = Arena.build(context, 8, -3, 6, -3, 3);
+        // A water shaft at (2, 0..2, 0), walled by stone on every side, open at the top.
+        for (int dy = 0; dy <= 3; dy++) {
+            for (int dx = 1; dx <= 3; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    boolean shaft = dx == 2 && dz == 0 && dy <= 2;
+                    arena.set(dx, dy, dz, shaft ? Blocks.WATER : Blocks.STONE);
+                }
+            }
+        }
+        arena.set(2, 3, 0, Blocks.AIR);
+        BlockPos bottom = arena.at(2, 0, 0);
+        AIPlayerEntity bot = arena.spawn("WalkedSwimGT", bottom);
+        BlockPos[] cells = {arena.at(2, 1, 0), arena.at(2, 2, 0)};
+        TeleportAudit.reset(bot);
+        int[] step = {0};
+        int[] ticks = {0};
+        bot.getActionPack().runStep(WalkedStep.begin(bot, cells[0], WalkedStep.Kind.SWIM, "gametest_swim_1"));
+        context.onEachTick(() -> {
+            ticks[0]++;
+            requireNoCorrections(context, bot, "swim step " + (step[0] + 1));
+            require(context, ticks[0] < 190, "timed out at " + bot.position() + " step " + (step[0] + 1));
+            if (!bot.getActionPack().stepIdle()) {
+                return;
+            }
+            WalkedStep.Result result = bot.getActionPack().stepResult();
+            require(context, result != null && result.succeeded(),
+                    "swim step " + (step[0] + 1) + " failed: " + (result == null ? "no result" : result.reason()));
+            require(context, bot.blockPosition().equals(cells[step[0]]),
+                    "swim step " + (step[0] + 1) + " ended in " + bot.blockPosition().toShortString());
+            step[0]++;
+            if (step[0] == cells.length) {
+                arena.finish(bot);
+                return;
+            }
+            bot.getActionPack().runStep(WalkedStep.begin(bot, cells[step[0]], WalkedStep.Kind.SWIM, "gametest_swim_2"));
+        });
     }
 }

@@ -55,3 +55,25 @@ bots immune to them. Bots are survival-legal and must not cheat, so both are now
   the whole path.
 
 The GameTests report `BOTFALL|...` and `BOTKB|...` lines on stdout with the measured values.
+
+## No path-correction teleports (R5)
+
+A player never corrects its position by being moved, so a bot does not either (`TeleportAudit` counts every such move as a `CORRECTION`;
+the GameTests assert `TeleportAudit.corrections(bot) == 0`). What a teleport used to do, the movement keys do now:
+
+* **`WalkedStep`** (`action`): one in-flight step written as forward, jump and sneak inputs at the pace-enforced speed (kinds `FLAT`,
+  `STEP_UP`, `STEP_DOWN`, `SWIM`, `SNEAK_SHIFT`, `RECENTER`, `PUSH_OUT`). It validates on its first tick, re-proves its landing every tick and
+  never moves the bot itself; `ActionPack.runStep` runs one as a controller, `PathExecutor.prefixStep` as the first step of a route.
+* **Path start.** `ActionPack.snapPlayerToNearestStandable` only plans: a standable start is used as it is (a body that overlaps a wall
+  column walks off it), any other start is left by a walked step onto an adjacent standable cell (once per origin cell per 200 ticks,
+  `SnapRepeatGuard`) that the executor performs before its first node. The operator-profile long path-start relocation no longer exists.
+* **Stalled hop / pillar.** After the jump arc a stalled hop is diagnosed (headroom, landing, occupant); when a retry can help the bot
+  releases the keys, backs off a little and runs at the ledge again (at most twice), otherwise the node fails and the route is planned again
+  from where the bot stands. A pillar re-jumps up to three times. No rescue teleport, no rollback teleport.
+* **Suffocation.** `NavSafetyNet` decides `EMERGENCY_TELEPORT` first (operator only; nothing is scanned when it is denied) and otherwise
+  gets the bot out with inputs: a vanilla-client style shove out of the block (at most 0.1 block per tick toward the nearest free side), a
+  walked step onto an adjacent standable cell, or digging out the block at the head and then at the feet with the tool it has, at the real
+  break time and only where a view ray from its own eye reaches; else it logs `navsafe_suffocation_trapped`.
+* **What still moves a bot.** Spawn and respawn (`LIFECYCLE`), the panel recall (`USER`, gated by `manualTeleport`), vanilla teleports, and
+  the operator-profile emergency rescues (`PRIVILEGED`: suffocation climb, drowning, dark-trap and gather surfacing; never in strict
+  survival). The `FakePlayerMotion` primitives remain for the task conversions that are still to come.

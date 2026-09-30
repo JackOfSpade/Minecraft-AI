@@ -945,8 +945,10 @@ public final class UndergroundSafetyGameTests {
         require(context, !staleRoute.isFailed() && !bot.getActionPack().isPathExecutorIdle(),
                 "fixture did not open the route that must be retired after suffocation recovery");
         BlockPos blockedHead = start.above();
+        // A block that stays where it is: the exit now takes real ticks, and a gravel block over an open cell would fall away (or onto
+        // the bot) while it does. The falling-gravel burial itself is covered by NaturalMovementGameTests.
         context.getLevel().setBlock(
-                blockedHead, Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
+                blockedHead, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
@@ -988,7 +990,7 @@ public final class UndergroundSafetyGameTests {
                             + start.toShortString() + " -> " + after.toShortString());
             require(context, Standability.isStandable(context.getLevel(), after),
                     "physical suffocation exit was not standable: " + after.toShortString());
-            require(context, context.getLevel().getBlockState(blockedHead).is(Blocks.GRAVEL),
+            require(context, context.getLevel().getBlockState(blockedHead).is(Blocks.STONE),
                     "physical suffocation exit silently removed the obstruction");
             require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 4.0F,
                     "bot took more than two hearts before the adjacent suffocation exit: " + bot.getHealth());
