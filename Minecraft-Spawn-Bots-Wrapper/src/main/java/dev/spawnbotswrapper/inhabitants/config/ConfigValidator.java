@@ -107,6 +107,7 @@ public final class ConfigValidator {
         }
         validateTpsThrottle(c, w);
         validateCombatLog(c, w);
+        validateAggro(c, w);
 
         if (c.spawning == null) {
             c.spawning = new InhabitantsConfig.Spawning();
@@ -161,6 +162,20 @@ public final class ConfigValidator {
         }
         c.combatLog.coalesceTicks = clamp(w, "combatLog.coalesceTicks", c.combatLog.coalesceTicks, 1, 72000);
         c.combatLog.maxLinesPerMinute = clamp(w, "combatLog.maxLinesPerMinute", c.combatLog.maxLinesPerMinute, 1, 100000);
+    }
+
+    private static void validateAggro(InhabitantsConfig c, List<String> w) {
+        if (c.aggro == null) {
+            c.aggro = new InhabitantsConfig.Aggro();
+        }
+        InhabitantsConfig.Aggro a = c.aggro;
+        a.acquireRange = clamp(w, "aggro.acquireRange", a.acquireRange, 2.0, 64.0);
+        a.scanIntervalTicks = clamp(w, "aggro.scanIntervalTicks", a.scanIntervalTicks, 1, 40);
+        a.leashRange = clamp(w, "aggro.leashRange", a.leashRange, a.acquireRange, 128.0);
+        a.loseSightTicks = clamp(w, "aggro.loseSightTicks", a.loseSightTicks, 1, 72000);
+        a.returnArriveDistance = clamp(w, "aggro.returnArriveDistance", a.returnArriveDistance, 0.5, 16.0);
+        a.returnStuckTicks = clamp(w, "aggro.returnStuckTicks", a.returnStuckTicks, 1, 72000);
+        a.returnMaxTicks = clamp(w, "aggro.returnMaxTicks", a.returnMaxTicks, 1, 72000);
     }
 
     /** A '#tag' under 'structures' belongs in 'tags'; a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */

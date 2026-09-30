@@ -71,6 +71,8 @@ public final class InhabitantsConfig {
     public TpsThrottle tpsThrottle = new TpsThrottle();
     /** Rate-limited log lines about fights involving inhabitants (hits, kills, deaths); see {@link CombatLog}. */
     public CombatLog combatLog = new CombatLog();
+    /** How close a player must be before an inhabitant notices them, and when it gives up a chase; see {@link Aggro}. */
+    public Aggro aggro = new Aggro();
     /** Despawns inhabitants that have drifted far from every real player, and restores them later unchanged. */
     public Dormancy dormancy = new Dormancy();
     /** Holds newly-connecting players on their loading screen for a grace period after server start; see {@link Connection}. */
@@ -343,6 +345,41 @@ public final class InhabitantsConfig {
         public int coalesceTicks = 100;
         /** Hard cap on INFO combat lines per minute; lines beyond it are counted and reported once as "N suppressed". */
         public int maxLinesPerMinute = 30;
+    }
+
+    /**
+     * The aggro range and leash of the hostile inhabitants (see {@code AggroController}).
+     * <p>
+     * An inhabitant NOTICES a player only within {@link #acquireRange} blocks and in line of sight. Someone who
+     * hits it from any distance (up to PvP BOT's {@code maxTargetDistance}) is chased too. Every chase ends when the
+     * inhabitant is {@link #leashRange} blocks from where it began, or has not seen its target for
+     * {@link #loseSightTicks} ticks; it then drops the fight and, with {@link #returnToOrigin}, WALKS back to where
+     * it began (never a teleport).
+     * <p>
+     * Works together with PvP BOT's auto-target being OFF (then the addon does the noticing); while it is ON PvP BOT
+     * notices by itself and only the leash and the walk back apply. The addon says so once in the log.
+     */
+    public static final class Aggro {
+        /** Master switch. */
+        public boolean enabled = true;
+        /** Blocks within which an idle inhabitant notices a player. Range 2..64. */
+        public double acquireRange = 10.0;
+        /** A player is only noticed when the inhabitant has a line of sight to them (like a vanilla mob). */
+        public boolean requireLineOfSight = true;
+        /** Ticks between looks for a target for idle inhabitants (1..40). */
+        public int scanIntervalTicks = 5;
+        /** Blocks from where the fight began at which the chase is given up. Range acquireRange..128. */
+        public double leashRange = 32.0;
+        /** Consecutive ticks without a line of sight to the target after which the chase is given up (200 = 10 s). */
+        public int loseSightTicks = 200;
+        /** After giving up, walk back to where the fight began. */
+        public boolean returnToOrigin = true;
+        /** Blocks (horizontal) from the origin at which the walk back counts as arrived. */
+        public double returnArriveDistance = 1.5;
+        /** The walk back is abandoned when it gets less than a block closer over this many ticks. */
+        public int returnStuckTicks = 200;
+        /** The walk back is abandoned after this many ticks in any case. */
+        public int returnMaxTicks = 1200;
     }
 
     /**

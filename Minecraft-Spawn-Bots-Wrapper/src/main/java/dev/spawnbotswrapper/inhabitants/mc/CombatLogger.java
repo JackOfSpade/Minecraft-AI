@@ -28,6 +28,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -67,9 +68,17 @@ public final class CombatLogger {
     /** Only inhabitants within this many blocks of a real player are watched for the ranged loop. */
     static final double RANGED_WATCH_RADIUS = 32.0;
 
+    /** The aggro range's state for one bot (name) as text, appended to the damage-taken line. */
+    private volatile Function<String, String> aggroState = bot -> null;
+
     public CombatLogger(Supplier<ServerSession> session, Logger log) {
         this.session = session;
         this.log = log;
+    }
+
+    /** Lets the damage-taken diagnostic show whether the aggro range holds a forced target on the victim. */
+    public void aggroState(Function<String, String> aggroState) {
+        this.aggroState = aggroState;
     }
 
     /** Registers the two Fabric events; call once from the mod entrypoint. */
@@ -180,6 +189,10 @@ public final class CombatLogger {
         }
         Entity other = attackerEntity != null ? attackerEntity : nearestRealPlayer(bot, services, Double.MAX_VALUE);
         String snapshot = BotStateProbe.snapshot(bot, other, upstream(services, c.now)).format();
+        String aggro = aggroState.apply(c.victim.name());
+        if (aggro != null) {
+            snapshot = snapshot + " aggro[" + aggro + "]";
+        }
         log.info(DamageTakenLog.line(new DamageTakenLog.Taken(c.victim.name(), population,
                 c.attacker == null ? null : c.attacker.name(),
                 c.attacker == null ? null : c.attacker.kind().name().toLowerCase(Locale.ROOT), directCause,

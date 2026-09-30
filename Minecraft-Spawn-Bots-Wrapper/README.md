@@ -294,6 +294,36 @@ Combat: DuskRaven (inhabitant) died (fall)
   PvP BOT keeps its current target in internal state the adapter does not read, so the first hit line of a fight
   is the observable record of who engaged whom.
 
+### Aggro range, leash and walk back
+
+PvP BOT's own auto-target notices any player within 64 blocks, through walls. This addon replaces it (the settings
+policy turns PvP BOT's `autoTarget` off) with the rules below, applied to every inhabitant (`aggro` block in
+`pvpbot_inhabitants.json`):
+
+* **Noticing.** An idle inhabitant notices the nearest valid player within `acquireRange` (10) blocks **and** in line
+  of sight (`requireLineOfSight`), checked every `scanIntervalTicks` (5). "Valid" follows PvP BOT's own rules (not
+  creative/spectator unless `attackInvincible`, not a faction ally, other bots only with `targetOtherBots`). The
+  player is handed to PvP BOT as a forced target.
+* **Being hit.** Anyone who hits an inhabitant from any distance (up to PvP BOT's `maxTargetDistance`) is chased too
+  (PvP BOT's revenge memory), and so is a mob it decides to fight.
+* **Giving up.** Every chase ends when the inhabitant is more than `leashRange` (32) blocks (horizontally) from
+  where the engagement began, or has not seen its target for `loseSightTicks` (200 = 10 s) in a row, or the
+  target is gone (dead, logged out, another dimension, creative/spectator), or the bot changed dimension. PvP BOT's
+  target state is then cleared (`BotCombat.clearTarget`, which also wipes its revenge memory).
+* **Walking back.** With `returnToOrigin` the inhabitant then walks back to where the engagement began, using PvP BOT's
+  own look and move-toward calls every tick (never a teleport), and counts as arrived within `returnArriveDistance`
+  (1.5) blocks. The walk is abandoned (one debug line, the bot stays put) when the distance shrinks by less than a
+  block over `returnStuckTicks` (200) or it lasts `returnMaxTicks` (1200). While returning nothing new is noticed;
+  a new hit continues the ORIGINAL origin, so repeated hits cannot drag a bot ever farther from home.
+* **Somebody else's forced target** (a `/pvpbot` command) is only tracked: never leashed, cleared or walked back from.
+* **Inert mode.** While PvP BOT's `autoTarget` is on, PvP BOT notices by itself: nothing is noticed here (logged once
+  at INFO), but the leash and the walk back still apply. A `WARN` is logged when `leashRange + acquireRange` exceeds
+  PvP BOT's `maxTargetDistance`, since PvP BOT may then drop a target before the leash decides.
+* The walk back runs in a Fabric tick phase ordered after the default phase, so it is the last input written each tick,
+  after PvP BOT's own bot tick (idle wander, patrol movement). The state of a bot (`aggro[engaged Steve (acquired)
+  12.3 from origin, unseen 40t]`, `aggro[returning, 18.0 to origin]`) is appended to the "Combat taken" line; starts,
+  give-ups and returns are logged at debug (one INFO per bot per 10 s at most).
+
 ### Diagnostic lines: hits an inhabitant TAKES, and bow/crossbow loops
 
 Two further diagnostics (same `combatLog.enabled` switch, normal `latest.log`, no behaviour change of any bot)

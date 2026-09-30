@@ -3,9 +3,11 @@ package dev.spawnbotswrapper.inhabitants;
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotAdapter;
 import dev.spawnbotswrapper.inhabitants.command.InhabitantsCommand;
 import dev.spawnbotswrapper.inhabitants.config.ConfigIO;
+import dev.spawnbotswrapper.inhabitants.mc.AggroDriver;
 import dev.spawnbotswrapper.inhabitants.mc.CombatLogger;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
+import dev.spawnbotswrapper.inhabitants.mc.LateTickPhase;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
@@ -48,6 +50,8 @@ public final class InhabitantsMod implements ModInitializer {
     private volatile ServerSession session;
     private final McTpsGateway tps = new McTpsGateway();
     private final CombatLogger combat = new CombatLogger(() -> session, LOGGER);
+    /** The aggro range (inhabitants notice players within a short range, chase far); see AggroController. */
+    private final AggroDriver aggro = new AggroDriver(() -> session, LOGGER);
 
     @Override
     public void onInitialize() {
@@ -68,8 +72,11 @@ public final class InhabitantsMod implements ModInitializer {
             return current == null ? null : current.services();
         });
         combat.register();
+        combat.aggroState(aggro::describe);
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
+        // After PvP BOT's own bot tick (default phase), so the walk back is the last input written; see LateTickPhase.
+        LateTickPhase.register(ServerTickEvents.END_SERVER_TICK, this::onLateServerTick);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPED.register(this::onServerStopped);
         LOGGER.info("PvP BOT Inhabitants {} loaded (config: {})", version, config.file());
@@ -127,10 +134,18 @@ public final class InhabitantsMod implements ModInitializer {
         }
     }
 
+    private void onLateServerTick(MinecraftServer server) {
+        ServerSession current = session;
+        if (current != null && current.server() == server) {
+            shared.guard().run("aggro range", () -> aggro.tick(server));
+        }
+    }
+
     private void onServerStopping(MinecraftServer server) {
         ServerSession current = session;
         if (current != null && current.server() == server) {
             combat.flush(server.getTickCount());
+            aggro.reset();
             current.shutdown();
         }
     }
