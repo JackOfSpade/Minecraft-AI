@@ -1,0 +1,85 @@
+{
+  "description": "Golden vectors for the shared realistic-perception decision notice(observer, subject) -> SIGHT | HEARING | NONE. Both mods (Minecraft-AI CreaturePerception, wrapper combat/Perception) run every case and must agree. See docs/PERCEPTION.md.",
+  "version": 1,
+  "params": {
+    "enabled": true,
+    "frontHalfAngleDeg": 60,
+    "peripheralHalfAngleDeg": 100,
+    "peripheralFactor": 0.5,
+    "sneakFactor": 0.5,
+    "hearWalk": 4,
+    "hearSprint": 8,
+    "hearCombat": 12,
+    "hearNoisyMob": 8,
+    "hearPrimedCreeper": 16,
+    "hearWarden": 24,
+    "hearAnimal": 4,
+    "combatNoiseTicks": 10,
+    "awarenessTicks": 200
+  },
+  "caseFields": "baseRange (default 10) = the observer's base sight range; angleDeg = 3D angle between the observer's look vector and the direction to the subject (0 = straight ahead, 180 = directly behind); distance in blocks; subject = {sneaking, moving, sprinting, combatNoiseAge (ticks since swing/hurt/bow/eat/break/place; omitted = none), mob (NONE for a player or bot; NOISY, CREEPER, CREEPER_PRIMED, WARDEN, ANIMAL), visibility (default 1; vanilla invisibility/disguise factor with its own sneak factor divided out)}; occlusionClear (default true) = both eye and body-centre rays are blocked when false; paramsOverride replaces single params; expect = SIGHT | HEARING | NONE.",
+  "cases": [
+    { "name": "front standing 9.5", "angleDeg": 0, "distance": 9.5, "subject": {}, "expect": "SIGHT" },
+    { "name": "front standing 10.0 (edge is inside)", "angleDeg": 0, "distance": 10.0, "subject": {}, "expect": "SIGHT" },
+    { "name": "front standing 10.5", "angleDeg": 0, "distance": 10.5, "subject": {}, "expect": "NONE" },
+    { "name": "front cone edge 60 deg at 9.9", "angleDeg": 60, "distance": 9.9, "subject": {}, "expect": "SIGHT" },
+    { "name": "front walking 9.5 is seen, not just heard", "angleDeg": 10, "distance": 9.5, "subject": { "moving": true }, "expect": "SIGHT" },
+
+    { "name": "peripheral 70 deg standing 4.9", "angleDeg": 70, "distance": 4.9, "subject": {}, "expect": "SIGHT" },
+    { "name": "peripheral 70 deg standing 5.1", "angleDeg": 70, "distance": 5.1, "subject": {}, "expect": "NONE" },
+    { "name": "peripheral edge 100 deg standing 4.9", "angleDeg": 100, "distance": 4.9, "subject": {}, "expect": "SIGHT" },
+    { "name": "just behind the field 100.5 deg standing 4.9", "angleDeg": 100.5, "distance": 4.9, "subject": {}, "expect": "NONE" },
+    { "name": "peripheral walking 5.1 is out of sight and out of earshot", "angleDeg": 70, "distance": 5.1, "subject": { "moving": true }, "expect": "NONE" },
+
+    { "name": "behind 150 deg standing at 2", "angleDeg": 150, "distance": 2, "subject": {}, "expect": "NONE" },
+    { "name": "behind 150 deg walking at 2 is heard", "angleDeg": 150, "distance": 2, "subject": { "moving": true }, "expect": "HEARING" },
+    { "name": "behind 150 deg walking at 3.9 is heard", "angleDeg": 150, "distance": 3.9, "subject": { "moving": true }, "expect": "HEARING" },
+    { "name": "behind 150 deg walking at 4.1", "angleDeg": 150, "distance": 4.1, "subject": { "moving": true }, "expect": "NONE" },
+    { "name": "behind 150 deg sneaking at 2 is never noticed", "angleDeg": 150, "distance": 2, "subject": { "sneaking": true, "moving": true }, "expect": "NONE" },
+    { "name": "directly behind 180 deg sneaking at 0.5", "angleDeg": 180, "distance": 0.5, "subject": { "sneaking": true, "moving": true }, "expect": "NONE" },
+
+    { "name": "sneaking in front 4.9", "angleDeg": 0, "distance": 4.9, "subject": { "sneaking": true, "moving": true }, "expect": "SIGHT" },
+    { "name": "sneaking in front 5.1", "angleDeg": 0, "distance": 5.1, "subject": { "sneaking": true, "moving": true }, "expect": "NONE" },
+    { "name": "sneaking in front 6 (standing sneak)", "angleDeg": 0, "distance": 6, "subject": { "sneaking": true }, "expect": "NONE" },
+    { "name": "sneaking peripheral 70 deg at 2.4", "angleDeg": 70, "distance": 2.4, "subject": { "sneaking": true }, "expect": "SIGHT" },
+    { "name": "sneaking peripheral 70 deg at 2.6", "angleDeg": 70, "distance": 2.6, "subject": { "sneaking": true }, "expect": "NONE" },
+
+    { "name": "sprinting behind 7.9", "angleDeg": 150, "distance": 7.9, "subject": { "moving": true, "sprinting": true }, "expect": "HEARING" },
+    { "name": "sprinting behind 8.1", "angleDeg": 150, "distance": 8.1, "subject": { "moving": true, "sprinting": true }, "expect": "NONE" },
+    { "name": "sprinting behind 8.1 even with a big base range", "baseRange": 20, "angleDeg": 150, "distance": 8.1, "subject": { "moving": true, "sprinting": true }, "expect": "NONE" },
+    { "name": "sprint flag without movement is silent", "angleDeg": 150, "distance": 2, "subject": { "sprinting": true }, "expect": "NONE" },
+
+    { "name": "combat noise behind 9.9", "angleDeg": 150, "distance": 9.9, "subject": { "combatNoiseAge": 0 }, "expect": "HEARING" },
+    { "name": "combat noise behind 10.1 is capped at the base sight range", "angleDeg": 150, "distance": 10.1, "subject": { "combatNoiseAge": 0 }, "expect": "NONE" },
+    { "name": "combat noise behind 11.9 with base 20", "baseRange": 20, "angleDeg": 150, "distance": 11.9, "subject": { "combatNoiseAge": 0 }, "expect": "HEARING" },
+    { "name": "combat noise behind 12.1 with base 20", "baseRange": 20, "angleDeg": 150, "distance": 12.1, "subject": { "combatNoiseAge": 0 }, "expect": "NONE" },
+    { "name": "combat noise 9 ticks old is still heard", "angleDeg": 150, "distance": 5, "subject": { "combatNoiseAge": 9 }, "expect": "HEARING" },
+    { "name": "combat noise 10 ticks old is over", "angleDeg": 150, "distance": 5, "subject": { "combatNoiseAge": 10 }, "expect": "NONE" },
+    { "name": "a sneaking attacker is heard when it strikes", "baseRange": 20, "angleDeg": 150, "distance": 11.9, "subject": { "sneaking": true, "combatNoiseAge": 0 }, "expect": "HEARING" },
+
+    { "name": "invisible without armor in front 0.6", "angleDeg": 0, "distance": 0.6, "subject": { "visibility": 0.07 }, "expect": "SIGHT" },
+    { "name": "invisible without armor in front 0.8", "angleDeg": 0, "distance": 0.8, "subject": { "visibility": 0.07 }, "expect": "NONE" },
+    { "name": "invisible but walking behind at 3 is still heard", "angleDeg": 150, "distance": 3, "subject": { "visibility": 0.07, "moving": true }, "expect": "HEARING" },
+    { "name": "invisible and sneaking in front 0.3", "angleDeg": 0, "distance": 0.3, "subject": { "visibility": 0.07, "sneaking": true }, "expect": "SIGHT" },
+    { "name": "invisible and sneaking in front 0.4", "angleDeg": 0, "distance": 0.4, "subject": { "visibility": 0.07, "sneaking": true }, "expect": "NONE" },
+
+    { "name": "occluded in front at 5", "angleDeg": 0, "distance": 5, "subject": {}, "occlusionClear": false, "expect": "NONE" },
+    { "name": "hearing does not pass walls: walking behind at 2", "angleDeg": 150, "distance": 2, "subject": { "moving": true }, "occlusionClear": false, "expect": "NONE" },
+    { "name": "occluded combat noise behind at 5", "angleDeg": 150, "distance": 5, "subject": { "combatNoiseAge": 0 }, "occlusionClear": false, "expect": "NONE" },
+
+    { "name": "unprimed creeper walking behind at 2", "angleDeg": 150, "distance": 2, "subject": { "mob": "CREEPER", "moving": true }, "expect": "NONE" },
+    { "name": "primed creeper behind at 15", "baseRange": 32, "angleDeg": 150, "distance": 15, "subject": { "mob": "CREEPER_PRIMED" }, "expect": "HEARING" },
+    { "name": "primed creeper behind at 16.1", "baseRange": 32, "angleDeg": 150, "distance": 16.1, "subject": { "mob": "CREEPER_PRIMED" }, "expect": "NONE" },
+    { "name": "warden behind at 23", "baseRange": 32, "angleDeg": 150, "distance": 23, "subject": { "mob": "WARDEN" }, "expect": "HEARING" },
+    { "name": "warden behind at 24.1", "baseRange": 32, "angleDeg": 150, "distance": 24.1, "subject": { "mob": "WARDEN" }, "expect": "NONE" },
+    { "name": "noisy hostile behind at 7.9", "baseRange": 16, "angleDeg": 150, "distance": 7.9, "subject": { "mob": "NOISY" }, "expect": "HEARING" },
+    { "name": "noisy hostile behind at 8.1", "baseRange": 16, "angleDeg": 150, "distance": 8.1, "subject": { "mob": "NOISY" }, "expect": "NONE" },
+    { "name": "moving animal behind at 3.9", "angleDeg": 150, "distance": 3.9, "subject": { "mob": "ANIMAL", "moving": true }, "expect": "HEARING" },
+    { "name": "idle animal behind at 2", "angleDeg": 150, "distance": 2, "subject": { "mob": "ANIMAL" }, "expect": "NONE" },
+
+    { "name": "disabled: standing behind at 9 is seen (omnidirectional)", "paramsOverride": { "enabled": false }, "angleDeg": 150, "distance": 9, "subject": {}, "expect": "SIGHT" },
+    { "name": "disabled: sneaking in front at 9 is seen (sneaking does not matter)", "paramsOverride": { "enabled": false }, "angleDeg": 0, "distance": 9, "subject": { "sneaking": true }, "expect": "SIGHT" },
+    { "name": "disabled: beyond the range is not seen", "paramsOverride": { "enabled": false }, "angleDeg": 0, "distance": 10.5, "subject": {}, "expect": "NONE" },
+    { "name": "disabled: occluded is not seen", "paramsOverride": { "enabled": false }, "angleDeg": 0, "distance": 5, "subject": {}, "occlusionClear": false, "expect": "NONE" }
+  ]
+}
