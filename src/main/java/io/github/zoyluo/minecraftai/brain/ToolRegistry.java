@@ -739,13 +739,18 @@ public final class ToolRegistry {
             // bounded attack (AttackEntityTask: turn at human speed, strike when under the crosshair, give up after
             // AttackEntityTask.MAX_TICKS) and says so: the tool result is "started", never a claimed hit; how the attack ended is
             // the task's own result.
+            // A busy bot is asked BEFORE anything touches its head: InteractAction.attackEntity starts the turn toward the target, and
+            // a refused call must leave the bot exactly as it was. Starting the bounded attack would replace whatever the bot is doing
+            // (assign aborts the running task), so a busy bot only strikes what is already under its crosshair (no turn); otherwise it
+            // says so: a safety task (a fight, an evade, a shelter) is never interrupted and the request is not kept; a mission the
+            // player paused stays paused; any other running task is left alone ("stop" first, or wait). Only an idle bot, or one that
+            // is already in an attack of its own, turns and takes the new target.
+            String busy = attackBusyReason(bot);
+            if (busy != null && !io.github.zoyluo.minecraftai.action.HumanAim.isUnderCrosshair(bot, target.get())) {
+                return fail("busy: " + busy + "; the attack was not started");
+            }
             ActionResult first = InteractAction.attackEntity(bot, target.get());
             if (first.isFailed() && InteractAction.NOT_UNDER_CROSSHAIR.equals(first.reason())) {
-                // Starting the bounded attack would replace whatever the bot is doing (assign aborts the running task), so a bot that
-                // is busy says so: a safety task (a fight, an evade, a shelter) is never interrupted and the request is not kept; a
-                // mission the player paused stays paused; any other running task is left alone ("stop" first, or wait). Only an idle
-                // bot, or one that is already in an attack of its own, takes the new target.
-                String busy = attackBusyReason(bot);
                 if (busy != null) {
                     return fail("busy: " + busy + "; the attack was not started");
                 }

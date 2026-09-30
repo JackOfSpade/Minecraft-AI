@@ -126,7 +126,8 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision,
   HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance), objects and deliberate searches (kept
   omnidirectional: drops, boats, prey, breeding, milking, trading, the landmark evidence of the mining assist) and physical strike legality (kept).
-  The `attack_entity` command only considers creatures the bot has noticed (animals and villagers stay omnidirectional) and is refused with `busy` while another task runs (never replaces it).
+  The `attack_entity` command only considers creatures the bot has noticed (animals and villagers stay omnidirectional) and is refused with `busy` while another task runs (never replaces it, and a refused call does not turn the bot's head: a busy bot
+  only strikes what is already under its crosshair).
 * **Cost.** The scan is throttled (`CreatureSenses`): passive creatures (a mob that is neither an `Enemy` nor a `NeutralMob` and
   hunts nothing: animals, villagers, fish) are not scanned at all and answer the plain omnidirectional test on demand (the scope
   rule: animals and villagers keep omnidirectional observation); every other creature is read every second tick (alternating by

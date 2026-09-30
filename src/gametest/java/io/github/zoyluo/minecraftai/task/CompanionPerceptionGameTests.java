@@ -386,7 +386,11 @@ public final class CompanionPerceptionGameTests {
             JsonObject args = new JsonObject();
             args.addProperty("entity_type", "minecraft:cow");
             ToolDefinition tool = new ToolRegistry().get("attack_entity").orElseThrow();
+            float yaw = bot.getYRot();
+            float pitch = bot.getXRot();
             ToolDefinition.ToolResult result = tool.handler().invoke(bot, args);
+            f.require(bot.getYRot() == yaw && bot.getXRot() == pitch,
+                    "a refused attack call turned the bot's head: yaw " + yaw + " -> " + bot.getYRot() + ", pitch " + pitch + " -> " + bot.getXRot());
             f.require(result != null && !result.ok() && result.message().startsWith("busy: ")
                             && result.message().contains("holding_work"),
                     "a running mission must be reported as busy, not replaced: " + (result == null ? "null" : result.message()));
@@ -395,6 +399,7 @@ public final class CompanionPerceptionGameTests {
             HoldingTask safety = new HoldingTask();
             TaskManager.INSTANCE.assign(bot, safety, TaskOrigin.safety("gametest_attack_busy_safety"));
             result = tool.handler().invoke(bot, args);
+            f.require(bot.getYRot() == yaw && bot.getXRot() == pitch, "a refused attack call during a safety task turned the bot's head");
             f.require(result != null && !result.ok() && result.message().startsWith("busy: ")
                             && result.message().contains("safety task"),
                     "a safety task must be reported as busy: " + (result == null ? "null" : result.message()));

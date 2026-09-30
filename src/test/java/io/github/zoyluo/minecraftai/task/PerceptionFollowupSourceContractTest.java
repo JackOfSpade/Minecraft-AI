@@ -78,11 +78,14 @@ final class PerceptionFollowupSourceContractTest {
     void theAttackToolRefusesWithBusyInsteadOfReplacingARunningTask() throws IOException {
         String tool = read("brain/ToolRegistry.java");
         String body = between(tool, "register(\"attack_entity\"", "/** Why {@code attack_entity} cannot take the bot's hands right now");
-        int notYet = body.indexOf("InteractAction.NOT_UNDER_CROSSHAIR.equals(first.reason())");
         int busy = body.indexOf("attackBusyReason(bot)");
+        int crosshair = body.indexOf("HumanAim.isUnderCrosshair(bot, target.get())");
+        int strike = body.indexOf("InteractAction.attackEntity(bot, target.get())");
         int assign = body.indexOf("assignLlm(bot, attack)");
-        assertTrue(notYet >= 0 && busy > notYet && assign > busy && body.contains("return fail(\"busy: \" + busy"),
-                "after the first strike only asks for a turn, a busy bot is refused before the attack task is assigned");
+        assertTrue(busy >= 0 && crosshair > busy && strike > crosshair && assign > strike
+                        && body.contains("return fail(\"busy: \" + busy"),
+                "a busy bot is asked BEFORE the first strike (which starts the turn): it only strikes what is already under its crosshair,"
+                        + " otherwise it is refused without a turn, and never gets the attack task");
         String reason = between(tool, "private static String attackBusyReason(AIPlayerEntity bot)", "/** Terminal/mission-control commands");
         assertTrue(reason.contains("isActiveSafety(bot)") && reason.contains("this request is not kept")
                         && reason.contains("isUserPaused(bot)") && reason.contains("!(task instanceof AttackEntityTask)"),
