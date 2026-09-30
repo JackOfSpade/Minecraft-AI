@@ -36,8 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * MineTask. See {@code CraftTask#finishReclaim} for the canonical write-up of this bug class, first
  * found and fixed there.
  *
- * <p><b>Why the sneak is injected rather than awaited:</b> {@code FakePlayerMotion
- * .nudgeToward} only ever fires when the drop is grounded (it never fires on a still
+ * <p><b>Why the sneak is injected rather than awaited:</b> {@code InCellWalk.nudgeToward} only ever fires when the drop is grounded (it never fires on a still
  * -falling item) AND the bot is already standing in the exact resolved pickup cell. Empirically (see
  * this test's own git history), an ordinary single-block exposed-ore mine -- adjacent, diagonal, or
  * directly overhead -- always resolves via vanilla's own eager proximity pickup (checked every tick

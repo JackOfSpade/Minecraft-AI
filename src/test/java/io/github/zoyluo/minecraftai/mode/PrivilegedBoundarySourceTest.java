@@ -27,7 +27,6 @@ class PrivilegedBoundarySourceTest {
         Set<String> expected = Set.of(
                 "entity/AIPlayerEntity.java", // only the super delegation of the teleport overrides that end a fall (no teleport of its own)
                 "manager/AIPlayerManager.java",
-                "mode/FakePlayerMotion.java",
                 "network/MinecraftAiServerNetworking.java",
                 "task/DangerWatcher.java",
                 "task/GatherQuotaTask.java",
@@ -41,8 +40,7 @@ class PrivilegedBoundarySourceTest {
                 assertTrue(!entry.getValue().replace("super.teleportTo(", "").contains(".teleportTo("), "AIPlayerEntity only delegates to super");
                 continue;
             }
-            if (entry.getKey().equals("manager/AIPlayerManager.java")
-                    || entry.getKey().equals("mode/FakePlayerMotion.java")) {
+            if (entry.getKey().equals("manager/AIPlayerManager.java")) {
                 continue;
             }
             assertTrue(entry.getValue().contains("CapabilityRuntime"), entry.getKey());
@@ -61,13 +59,18 @@ class PrivilegedBoundarySourceTest {
                 "a valid start is used as it is, before any step is planned");
         assertFalse(actionPack.contains("EMERGENCY_TELEPORT") || actionPack.contains("CapabilityRuntime"),
                 "the path-start snap has no privileged relocation");
-        for (String primitive : new String[]{"stepTo(", "stepToStandable(", "jumpTo(", "returnToBlockCenter(", "swimStepTo("}) {
-            String call = "FakePlayerMotion." + primitive;
-            // descendInto (DigDown/Descend/OreDig, converted by their own jobs) is the one remaining caller of stepToStandable.
-            String pack = actionPack.replace("io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(", "");
-            assertFalse(pack.contains(call), "ActionPack must not call " + call);
-            assertFalse(read("pathfinding/PathExecutor.java").contains(call), "PathExecutor must not call " + call);
+        // The FakePlayerMotion teleport primitives and ActionPack.descendInto are deleted: nothing in production can call them.
+        String motion = read("mode/FakePlayerMotion.java");
+        assertFalse(motion.contains("teleportTo(") || motion.contains("setPos(") || motion.contains("snapTo("),
+                "FakePlayerMotion only reads (collision and occupant checks); it never moves a bot");
+        for (String removed : new String[]{"stepTo(", "stepToStandable(", "swimStepTo(", "jumpTo(", "shiftToSupportEdge(",
+                "returnToBlockCenter(", "nudgeWithinBlockToward("}) {
+            assertFalse(motion.contains("static boolean " + removed), "FakePlayerMotion." + removed + " is deleted");
         }
+        assertFalse(actionPack.contains("boolean descendInto("), "ActionPack.descendInto (the teleporting descent) is deleted");
+        assertFalse(actionPack.contains("tryPhysicalSnap("), "ActionPack.tryPhysicalSnap (the teleporting snap) is deleted");
+        assertFalse(read("pathfinding/PathExecutor.java").contains("FakePlayerMotion.step"),
+                "PathExecutor never calls a FakePlayerMotion move primitive");
     }
 
     @Test

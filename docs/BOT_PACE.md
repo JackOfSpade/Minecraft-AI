@@ -111,6 +111,22 @@ step, two clear cells ahead).
   while a Baritone route drives the bot; they no longer take the bot over and cancel the route the caller has just started. (Evade
   asks for its gait with a lease right after starting its route, see below.)
 
+## Walked steps and teleports (R5)
+
+No pace rule is bypassed by a teleport: the old correction teleports (path-start snap, stair and landing steps, retreat, recentre, pickup
+nudge) are gone in every profile, so every metre a bot covers is covered by its keys at the gait the pace layer allows. A `WalkedStep` (the
+input-driven replacement, see `docs/NAVIGATION_ENGINE.md`) is controller-driven: it calls `markControllerInput()` every tick, is capped at
+WALK (a swim step at SPRINT), and gets the vanilla rules (no sprint at food 6 or lower, sneak scaling, item-use slowdown) from the
+enforcer like any route, so a bot that recentres, hops a ledge or leaves a block moves at the speed a player has, and a sneak it holds
+(the shift over a support edge) is its own. A drop or descend step lifts a sneak for the walk off the edge, as above.
+
+`TeleportAudit` counts what is left: `LIFECYCLE` (spawn and respawn), `USER` (the panel's recall and to-bot buttons, `MANUAL_TELEPORT`),
+`PRIVILEGED` (the operator-profile emergency rescues: suffocation, drowning, dark-trap and gather surfacing; denied in strict survival) and
+`CORRECTION`, which must stay at 0. `NoCorrectionTeleportSourceTest` locks the allow-list in the source, and
+`NaturalMovementAcceptanceGameTests` runs a mixed 1200-tick follow session (walk, sneak, sprint, step-up, drop, pond, zombie) with zero
+corrections in both profiles and on both engines. A teleport also never charges movement food cost (see the vanilla rules above), which is
+one more reason a bot must not use one to cover ground.
+
 ## Quiet zones and wardens
 
 `QuietZone` is a per-bot cache: wardens every 5 ticks, the biome and the sculk scan every 20. Only observed facts are used.

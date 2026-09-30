@@ -125,6 +125,42 @@ pin the order.
   submerged Baritone-driven bot by the rescue; `BaritoneEngineWaterGameTests` shows the lease (a submerged swimmer crosses a channel
   with swimming-speed steps and no rescue) and the control (without it the safety net takes the bot over).
 
+## No correction teleports (R5)
+
+A bot never moves itself to fix its position, in any profile and on either engine. Where the old code teleported the bot onto the next
+cell (a path-start snap, a stair, a landing, a retreat, a recentre, a pickup nudge) it now presses the keys a player would.
+
+* **`WalkedStep`** (`action/WalkedStep.java`) is one in-flight, input-driven step: `FLAT`, `STEP_UP` (forward plus jump), `STEP_DOWN` and
+  `DROP` (walk off the edge or fall into the cell below, gravity lands it), `SWIM`, `SNEAK_SHIFT` (sneak a little over an edge to see the
+  side face of the support), `RECENTER` (walk back to a point inside the cell) and `PUSH_OUT` (the vanilla client's shove out of a
+  block, at most 0.1 block per tick). It writes forward, jump and sneak, aims, and lets vanilla physics move the bot at the speed a
+  player has: the pace enforcer applies the gait and the vanilla rules to its keys (`markControllerInput`, capped at WALK, SWIM at
+  SPRINT). The first tick validates the step (adjacency for the kind, a dry hazard-free standable landing, no block or entity in the
+  way; `WalkedStep.refusal` is the shared check) and every later tick re-proves the landing; a step that overruns its budget or leaves
+  its course fails with a reason and the owner decides what to do next. A step holds no state outside itself: a pause, a restart or a
+  hazard just `cancel`s it and the owner re-derives from `bot.blockPosition()`. `ActionPack.runStep`/`beginDescend`, `InCellWalk`
+  (`nudgeToward`, `recenter`, `beginEdgeShift`) and `PathExecutor` (the route's pre-step) are the callers.
+* **`FakePlayerMotion`** keeps only the read-only checks (`isBlockCollisionFree`, `landingOccupant`); its `stepTo`, `stepToStandable`,
+  `swimStepTo`, `jumpTo`, `shiftToSupportEdge`, `returnToBlockCenter` and `nudgeWithinBlockToward` primitives, `ActionPack.descendInto`
+  and `tryPhysicalSnap` are deleted. The path-start snap (`snapPlayerToNearestStandable`) plans a walked step or refuses; it never moves
+  the bot.
+* **`TeleportAudit`** (`entity/TeleportAudit.java`) classifies and counts every teleport of a bot (per bot, by the first mod frame of the
+  stack): `LIFECYCLE` (`AIPlayerManager`: spawn, respawn after death), `USER` (`MinecraftAiServerNetworking`: the panel's recall and
+  to-bot buttons, capability `MANUAL_TELEPORT`), `VANILLA` (portals, pearls), `PRIVILEGED` (the emergency rescues below), `TEST` (a GameTest
+  fixture move, `BotFixtureMoves`) and `CORRECTION` (anything else). `TeleportAudit.corrections(bot)` is the number every "no micro-teleport"
+  test asserts to be 0.
+* **The allow-list.** `NoCorrectionTeleportSourceTest` scans the production source: an entity relocation (`teleportTo`, `teleport`,
+  `moveTo`, `snapTo`, `setPos`, ...) may appear only in `AIPlayerEntity` (delegation to `super` after the audit), `AIPlayerManager`,
+  `MinecraftAiServerNetworking` and the four operator-profile EMERGENCY rescues (`TeleportAudit.PRIVILEGED_METHODS`):
+  `NavSafetyNet#escapeSuffocation`, `NavSafetyNet#emergencyTeleportToAir`, `DangerWatcher#escapeToSurface` and
+  `GatherQuotaTask#trySurface`. Each decides `EMERGENCY_TELEPORT` (operator profile only, **denied in strict survival**) before it reads a
+  single cell the bot may not see; in strict survival the same situations are left by walking, shoving, digging or swimming. The emergency
+  teleports therefore remain in the operator profile and nowhere else. `PrivilegedBoundarySourceTest` pins the capability side.
+* **Acceptance.** `NaturalMovementAcceptanceGameTests` runs a 1200-tick session (walk, sneak over a slab edge, sprint up a step, a
+  two-block drop, a pond swim, a zombie hitting the owner, the walk back) with `TeleportAudit.corrections(bot) == 0` and no privileged
+  teleport on every tick, no drowning or suffocation damage and the bot within four blocks of the owner at the end: strict survival and
+  operator profile, legacy engine and Baritone.
+
 ## Telemetry (per-bot logs, PATH category)
 
 * `nav_engine` on every ActionPack path/walk request: `engine` (used), `configured`, `kind` (`path_to`, `approach`, `swim_route`,
@@ -143,5 +179,7 @@ pin the order.
   arrival within 3 blocks, cancel, bot removal, sealed moat stays dry, dry bridge), `BaritoneEngineMoveGameTests` (the same for
   move-to, `stopAll`, removal, unreachable goal answer, dry bridge, config switch), `BaritoneEngineWaterGameTests` (swim lease and
   control, fallback when Baritone is unavailable, the legacy engine loads no Baritone class).
+* No correction teleports: unit `NoCorrectionTeleportSourceTest`, `PrivilegedBoundarySourceTest`, `TeleportAuditClassifierTest`; GameTests
+  `NaturalMovementAcceptanceGameTests` and the per-area `*NaturalMovementGameTests` / `NaturalSwimGameTests`.
 * Obstacle courses (legacy vs Baritone on identical geometry, results table and verdicts): `NavigationCourseGameTests`, see
   `docs/NAVIGATION_COURSES.md`.

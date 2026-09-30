@@ -1044,7 +1044,7 @@ public final class ActionPack {
     }
 
     /**
-     * The input-driven counterpart of {@link #descendInto}: a step that walks the bot down into the just-mined {@code cell}, to be run
+     * A step that walks the bot down into the just-mined {@code cell}, to be run
      * with {@link #runStep}. A cell diagonally below-adjacent is a {@link WalkedStep.Kind#STEP_DOWN} (walk off the edge and let gravity
      * land it); the cell directly below is a {@link WalkedStep.Kind#DROP} (no key: gravity lands it). Nothing moves the bot: the descent
      * has happened only when the step has verified the landing (the next tick or later, never in the tick that starts it). Null when
@@ -1064,26 +1064,6 @@ public final class ActionPack {
             return null;
         }
         return WalkedStep.begin(player, cell, kind, reason);
-    }
-
-    /**
-     * Actively sinks the bot down one cell into the given (already-air) block.
-     * Key point: the bot is a ServerPlayer, and the server side **does not run travel()**
-     * (a real player's movement/gravity is driven by the client, and a fake player has no
-     * client), so there is **no passive gravity** -- digging out the floor beneath it will not
-     * make it fall automatically. Shaft-digging-down tasks (DigDownTask /
-     * OreDigTask.digDownOneLayer) must actively drive the sink through this method, or the bot
-     * will stand there idling until the watchdog fails (observed in practice: dig_down with y
-     * constant the whole time, stuck at 200t no_progress -- this is the shared root cause).
-     * Idempotent: if the bot is already at or below that layer, it does not move. teleport clears
-     * fallDistance, so no fall damage is taken.
-     */
-    public boolean descendInto(BlockPos target) {
-        if (player.blockPosition().getY() <= target.getY()) {
-            return player.blockPosition().equals(target);
-        }
-        return io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                player, target, "descend_into");
     }
 
     public ActionResult startMining(BlockPos pos, Direction face) {

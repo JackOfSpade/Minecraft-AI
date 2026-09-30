@@ -459,16 +459,12 @@ public final class UndergroundSafetyGameTests {
                 Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "StandableStepGT", start);
-        require(context, !FakePlayerMotion.stepToStandable(bot, unsupported, "gametest_unsupported"),
-                "standable step entered an unsupported air cell");
-        // The walked step that replaces the teleporting primitive applies the same landing rules before it presses a key.
+        // A walked step applies the landing rules before it presses a key.
         require(context, io.github.zoyluo.minecraftai.action.WalkedStep.refusal(bot, unsupported,
                         io.github.zoyluo.minecraftai.action.WalkedStep.Kind.FLAT) != null,
                 "a walked step accepted an unsupported air cell as its landing");
         require(context, bot.blockPosition().equals(start),
                 "unsupported step moved the bot: " + bot.blockPosition().toShortString());
-        require(context, !FakePlayerMotion.stepToStandable(bot, water, "gametest_water"),
-                "standable step entered a water cell");
         require(context, io.github.zoyluo.minecraftai.action.WalkedStep.refusal(bot, water,
                         io.github.zoyluo.minecraftai.action.WalkedStep.Kind.FLAT) != null,
                 "a walked step accepted a water cell as its landing");
@@ -495,8 +491,6 @@ public final class UndergroundSafetyGameTests {
         require(context, context.getLevel().addFreshEntity(zombie),
                 "failed to spawn occupied landing fixture");
 
-        require(context, !FakePlayerMotion.stepToStandable(bot, occupied, "gametest_occupied"),
-                "fake-player step entered an entity-occupied landing");
         require(context, io.github.zoyluo.minecraftai.action.WalkedStep.refusal(bot, occupied,
                         io.github.zoyluo.minecraftai.action.WalkedStep.Kind.FLAT) != null,
                 "a walked step accepted an entity-occupied landing");

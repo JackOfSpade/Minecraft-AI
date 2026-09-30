@@ -560,8 +560,7 @@ public final class HarvestCore {
             // the observed entity pose. Remembered cells have no factual entity pose and stop at
             // their centre instead.
             if (!stand.equals(itemPos) || !requireExactRoute) {
-                io.github.zoyluo.minecraftai.mode.FakePlayerMotion.nudgeWithinBlockToward(
-                        bot, stand, target, "physical_drop_pickup");
+                InCellWalk.nudgeToward(bot, stand, target, "physical_drop_pickup");
             } else {
                 bot.getActionPack().stopMovement();
             }

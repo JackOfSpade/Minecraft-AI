@@ -157,7 +157,7 @@ public final class ActionPackPhysicalSnapGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void centerReturnRejectsLivingEntityOccupyingLanding(GameTestHelper context) {
+    public void centreWalkRejectsLivingEntityOccupyingLanding(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos anchor = context.absolutePos(new BlockPos(12, 3, 12));
         world.setBlock(anchor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
@@ -169,8 +169,7 @@ public final class ActionPackPhysicalSnapGameTests {
                         world.getServer(), name, world, Vec3.atBottomCenterOf(anchor),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, anchor.getX() + 0.95D, anchor.getY(),
-                anchor.getZ() + 0.95D, Set.of(), 0.0F, 0.0F, true);
+        BotFixtureMoves.place(bot, new Vec3(anchor.getX() + 0.95D, anchor.getY(), anchor.getZ() + 0.95D));
         Vec3 before = bot.position();
 
         var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
@@ -181,11 +180,15 @@ public final class ActionPackPhysicalSnapGameTests {
         require(context, !bot.getBoundingBox().intersects(cow.getBoundingBox()),
                 "fixture cow already overlapped the off-centre bot");
 
-        require(context, !FakePlayerMotion.returnToBlockCenter(
-                        bot, anchor, "gametest_occupied_center"),
-                "centre return entered a living entity");
+        // The walk back to the middle of the cell (the walked replacement of the deleted teleporting centre return) is refused
+        // on its first tick, before any key is pressed, because the cow occupies the landing.
+        WalkedStep recentre = WalkedStep.begin(bot, new Vec3(anchor.getX() + 0.5D, anchor.getY(), anchor.getZ() + 0.5D),
+                WalkedStep.Kind.RECENTER, "gametest_occupied_center");
+        WalkedStep.Result refused = recentre.tick();
+        require(context, refused.failed() && "entity_occupied".equals(recentre.failure()),
+                "the centre walk entered a living entity: " + refused + " / " + recentre.failure());
         require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
-                "rejected occupied centre return still moved the bot");
+                "rejected occupied centre walk still moved the bot");
         require(context, cow.isAlive(),
                 "rejected centre return removed the occupying entity");
 
