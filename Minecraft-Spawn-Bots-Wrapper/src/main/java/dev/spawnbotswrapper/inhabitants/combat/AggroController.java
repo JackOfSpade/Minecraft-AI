@@ -513,8 +513,10 @@ public final class AggroController {
         String forced = up.forcedTarget(name);
         Body body = world.bodyOf(t.entity());
         boolean player = body != null && body.isPlayer();
-        if (forced != null) {
+        boolean revengeForce = forced != null && t.revenge() && forced.equalsIgnoreCase(t.name());
+        if (forced != null && !revengeForce) {
             // A forced name that appears while nothing of ours is chasing is somebody else's (a command, another mod).
+            // (One that names the revenge target, PvP BOT's own wind-burst flow, is not: it is handled as the revenge.)
             BotState st = existing != null ? existing : state(name);
             beginHeld(now, bot, st, t, Kind.EXTERNAL, Cause.OTHER);
             log.debug("aggro: " + name + " fights " + t.name() + " on a forced target set by someone else; tracked only");
@@ -832,7 +834,11 @@ public final class AggroController {
                 st.hint = sound.pos();
                 st.hintTick = now;
             } else {
-                attention.put(name, new Attention(null, sound.pos(), now + LOOK_TICKS));
+                // Never replaces a live attention that carries a matched candidate (set by an earlier sound this tick).
+                Attention current = attention.get(name);
+                if (current == null || current.until() < now || current.candidate() == null) {
+                    attention.put(name, new Attention(null, sound.pos(), now + LOOK_TICKS));
+                }
             }
         }
     }
@@ -865,10 +871,12 @@ public final class AggroController {
                 || (p.enabled() ? bot.canSee(candidate) : bot.plainLineOfSight(candidate));
         AggroWorld.Senses me = p.enabled() ? bot.senses() : null;
         AggroWorld.Senses them = me == null ? null : candidate.senses();
-        double distance = bot.distanceTo(candidate);
         if (me == null || them == null) {
-            return Perception.read(p.disabled(), 0.0, distance, Perception.Subject.player(false), false, clear);
+            return Perception.read(p.disabled(), 0.0, bot.distanceTo(candidate), Perception.Subject.player(false), false, clear);
         }
+        // The perception distance is EYE TO EYE (as on the companion side and in docs/perception/vectors.json); the engage
+        // limit stays the distance between the two bodies (playersWithin, chasePlayer).
+        double distance = me.eye().distanceTo(them.eye());
         double theta = Perception.angleDeg(me.look().x(), me.look().y(), me.look().z(),
                 them.eye().x() - me.eye().x(), them.eye().y() - me.eye().y(), them.eye().z() - me.eye().z());
         return Perception.read(p, theta, distance, them.subject(), heardNear, clear);
@@ -895,7 +903,9 @@ public final class AggroController {
         }
         AggroWorld.Senses them = target.senses();
         Perception.Subject subject = them == null ? Perception.Subject.player(false) : them.subject();
-        return Perception.requiredSeconds(p, 0.0, bot.distanceTo(target), subject, !st.painLed);
+        AggroWorld.Senses me = bot.senses();
+        double distance = me != null && them != null ? me.eye().distanceTo(them.eye()) : bot.distanceTo(target);
+        return Perception.requiredSeconds(p, 0.0, distance, subject, !st.painLed);
     }
 
     /** Who the hunt is about: the target, or "whoever shot" for a hit from out of sight (the bot never learned who). */
@@ -992,8 +1002,9 @@ public final class AggroController {
         }
         Body target = world.bodyOf(st.entity);
         String bad = invalidTarget(bot, target);
-        if (bad != null && st.unseen == 0) {
-            // It was in view a tick ago: the bot saw it die, leave or vanish.
+        if (bad != null && st.unseen == 0 && (target == null || sees(bot, target, cfg))) {
+            // It was in view a tick ago AND is now (a body that still exists is judged by this tick's view, so one that dies
+            // the tick it steps behind cover is lost sight, not a seen death): the bot saw it die, leave or vanish.
             giveUps.merge(bad, 1L, Long::sum);
             up.clearTarget(name);
             beginReturn(now, bot, st, bad);

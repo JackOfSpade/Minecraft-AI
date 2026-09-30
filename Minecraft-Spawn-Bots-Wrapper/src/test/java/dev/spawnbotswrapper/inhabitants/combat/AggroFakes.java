@@ -400,6 +400,8 @@ final class AggroFakes {
                     Person p = world.online.get(name.toLowerCase());
                     if (p != null && p.alive && bot.distanceTo(p) <= settings.maxTargetDistance()) {
                         picked = p;
+                        // PvP BOT's wind-burst flow writes the attacker's name as the forced target: it is still the revenge target
+                        revenge = lastAttacker.get(bot.name) == p;
                     }
                 }
                 if (picked == null) {

@@ -340,6 +340,26 @@ class AggroControllerTest {
     }
 
     @Test
+    void aLaterUnmatchedSoundInTheSameTickDoesNotEraseTheMatchedCandidate() {
+        bot.look = new double[]{-1, 0};
+        steve.x = 3;
+        s.up.lookTurns = false;
+        int noticed = -1;
+        for (int i = 0; i < 60 && noticed < 0; i++) {
+            if (i % 4 == 0) {
+                s.sound(steve.x, steve.z); // matched: a visible player stands there
+                s.sound(-40, 30);          // unmatched, the same tick: only a place to look
+            }
+            s.run(1);
+            if (!s.up.callsOf("set").isEmpty()) {
+                noticed = i;
+            }
+        }
+        assertTrue(noticed > 0, "still noticed by hearing (angle factor 1) despite the second sound");
+        assertEquals(Perception.Sense.HEARING, noticedHow());
+    }
+
+    @Test
     void aSoundOnlyMakesAVisiblePlayerNearItTheSourceNotOnesFarAway() {
         bot.look = new double[]{-1, 0};
         steve.x = 30; // visible, but 27 blocks from the sound
@@ -489,6 +509,18 @@ class AggroControllerTest {
         s.run(1);
         assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"));
         assertEquals(Phase.RETURN, s.phase());
+    }
+
+    @Test
+    void aTargetThatDiesTheTickItStepsBehindCoverIsLostSightNotASeenDeath() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        bot.blind.add("Steve"); // it stepped behind cover ...
+        steve.alive = false;    // ... and died on the same tick: the bot cannot have seen that
+        s.run(1);
+        assertEquals(Phase.CHASE, s.phase(), "not an observed death: no immediate RETURN");
+        s.run(10);
+        assertEquals(Phase.PURSUE, s.phase(), "lost like any unseen target");
     }
 
     @Test
@@ -653,12 +685,35 @@ class AggroControllerTest {
     }
 
     @Test
-    void aProjectileFromBeyondTheEngageLimitIsNotEngaged() {
+    void aProjectileFromBeyondTheEngageLimitIsNeverEngagedOnlyInvestigatedAlongItsLine() {
+        // RULES 'Engagement': the hit gives a DIRECTION only. The bot may walk toward where the line ends (an investigation, at
+        // most the engage limit away from the bot), but it never engages (forced target, CHASE) a shooter it has not sighted
+        // or one it sights beyond 64 blocks.
         steve.x = 70;
         s.shot(steve, 1, 0);
-        s.run(200);
-        assertEquals(List.of(), s.up.callsOf("set"), "a shooter seen beyond 64 is never engaged");
-        assertNotEquals(Phase.CHASE, s.phase());
+        s.run(2);
+        assertEquals(Phase.PURSUE, s.phase(), "an investigation toward the shot is allowed");
+        assertEquals(List.of(), s.up.callsOf("set"), "but never an engagement");
+        assertEquals(64.0, bot.lastTrace[3], 1e-9, "the traced line is at most the engage limit long");
+        assertTrue(s.planner.goals.get(0).x() <= bot.x + 64.0 + 1e-9,
+                "it goes to a point within 64 blocks of where it was hit, not to the shooter at 70");
+        for (int i = 0; i < 200; i++) {
+            s.run(1);
+            assertNotEquals(Phase.CHASE, s.phase());
+        }
+        assertEquals(List.of(), s.up.callsOf("set"), "a shooter sighted beyond 64 is never engaged");
+    }
+
+    @Test
+    void aProjectileOfAnyShooterSendsTheBotAlongTheLineButNeverEngagesAnyone() {
+        // A mob's or an ally's arrow looks the same as a player's: the bot knows a direction, not an owner (no magic), so
+        // it investigates the same way, and never starts a CHASE or forces a target from the hit alone.
+        steve.x = 20;
+        bot.blind.add("Steve");
+        bot.hitQueue.add(AggroFakes.projectile(bot, 1, 0)); // no revenge target, no shooter information at all
+        s.run(2);
+        assertEquals(Phase.PURSUE, s.phase());
+        assertEquals(List.of(), s.up.callsOf("set"));
     }
 
     @Test
@@ -826,6 +881,18 @@ class AggroControllerTest {
         bot.blind.add("Alex");
         s.run(300);
         assertEquals(List.of(), s.up.callsOf("clear"), "an external target is never given up on");
+    }
+
+    @Test
+    void aForcedNameThatIsAlreadyThereWhenARevengeTargetStartsTheHuntIsNotExternal() {
+        // PvP BOT's own wind-burst flow wrote the attacker's name as the forced target before the hunt began
+        steve.x = 6;
+        s.up.forced.put("Warden7", "Steve");
+        s.hit(steve);
+        s.run(1);
+        assertEquals(Phase.CHASE, s.phase());
+        assertFalse(s.controller.describe("Warden7").contains("forced by someone else"), s.controller.describe("Warden7"));
+        assertTrue(s.controller.hasHome("Warden7"), "a hunt of ours has a home to return to (an external one has none)");
     }
 
     @Test

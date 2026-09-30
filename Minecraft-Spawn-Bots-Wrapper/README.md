@@ -614,9 +614,11 @@ once.
   pain); PvP BOT's instant revenge is cleared on the hit tick and its counter-hit is vetoed at damage level until then. A
   **projectile** (an arrow from a shooter the bot does not see): it knows only the direction it came from, the reverse of the
   projectile's velocity at impact. It turns to look along that line (the sight rules and the reaction time apply to whoever
-  it then sees: seen within 64 blocks, it chases after the reaction time; seen beyond 64, it does not engage) and, if it sees
-  nobody, PURSUES the point found by tracing back along the incoming line from the impact point to the first blocking
-  block (or 64 blocks), then searches. It never learns the shooter's position or identity. Hits are detected through the
+  it then sees: seen within 64 blocks, it chases after the reaction time; seen beyond 64, it does not engage) and PURSUES
+  (investigates) the point found by tracing back along the incoming line from the impact point to the first blocking
+  block (or 64 blocks), then searches. The hit alone never engages anyone: no forced target and no CHASE for a shooter the
+  bot has not sighted or one it sights beyond 64 blocks. It never learns the shooter's position or identity, so an arrow
+  of a mob or of an ally sends it along the line in just the same way (it cannot tell whose it was). Hits are detected through the
   damage taken (HeroBot fake players skip the Fabric damage event), never through PvP BOT's revenge memory, which names the
   attacker whether or not the bot could know (for players it is cleared at once).
 * **Mobs.** PvP BOT's native revenge still fights mobs (a forced target cannot name a specific mob): a mob fight is tracked,
@@ -647,7 +649,10 @@ to the level (so it is never in a chunk, never ticked, never spawned, saved or s
 and asked for a route with the follow range set to cover the goal; vanilla bounds the search (follow range x 16
 visited nodes) and knows walking, jumping up, dropping, swimming, doors, lava, fire and cactus. The bot follows the waypoints
 with PvP BOT's own look and move input; a route that makes no progress for `stuckTicks` is replanned, and route
-planning is limited to one plan per 20 ticks per bot and two per server tick overall. The interface exists so a
+planning is limited to one plan per 20 ticks per bot and two per server tick overall, and the search looks at spots within
+12 blocks of where the target was last known. These three numbers (plan interval, plans per tick, spot radius) are compute
+bounds of the search, not targeting rules: they never decide who a bot notices, when it engages or how far it follows (the
+only distance rule is the 64 block engage limit, judged from a sighting). The interface exists so a
 Baritone-backed planner (Minecraft-AI, when it is loaded) can be dropped in later without touching the state machine.
 
 ## Human aim (`aggro.aim`)

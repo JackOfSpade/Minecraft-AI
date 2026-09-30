@@ -121,7 +121,7 @@ final class SettingData {
                                 + "is 3.5): a bot switches to its melee weapon within twice this (5 blocks) and attacks within "
                                 + "it (2.5 blocks between the two centres, inside vanilla's 3.0 reach). While it is managed at "
                                 + "2.5, an entity_interaction_range above 2.5 on a bot (for example from a modded attribute) has "
-                                + "no effect on PvP BOT's attack path: the effective reach is min(attribute, 2.5)."),
+                                + "no effect on the attack-once path: there the effective reach is min(attribute, 2.5)."),
                 decimal("rangedMinRange", "ranged-min-range", 3.0, 20.0, 20.0).global(
                         "No per-bot proxy: numeric tuning. Archers park at about min to min+2 blocks (20 to 22 by "
                                 + "default), not at rangedOptimalRange; the loadout only decides who is an archer. The "

@@ -290,7 +290,12 @@ public final class AggroSmokeGameTests {
             }
             double home = horizontal(pos, s.home);
             // Home means: it went to where it last saw the player (at least 2 blocks from home) and only came back after the 10 s search.
-            if (home <= 1.5 && maxAway[0] >= 2.0 && now - clearedAt[0] >= 180) {
+            if (home <= 1.5 && maxAway[0] >= 2.0 && now - clearedAt[0] < 170) {
+                // The 10 s search is not optional: a bot that went out and was back home this early skipped it.
+                s.end();
+                s.rig.fail("back at home only " + (now - clearedAt[0]) + " ticks after the chase was lost (the 10 s search "
+                        + "must come first); farthest " + maxAway[0] + "; " + s.status());
+            } else if (home <= 1.5 && maxAway[0] >= 2.0 && now - clearedAt[0] >= 180) {
                 List<String> lines = s.capture.containing("aggro");
                 Rig.LOG.info("[home] back within {} of home {} ticks after clearing; max per-tick step {}; farthest {}; log {}",
                         String.format(Locale.ROOT, "%.2f", home), now - clearedAt[0], maxStep[0], maxAway[0], lines);

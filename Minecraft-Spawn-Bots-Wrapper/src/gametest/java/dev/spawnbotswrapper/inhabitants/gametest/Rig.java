@@ -647,7 +647,6 @@ final class Rig {
         return applied;
     }
 
-    /** One line of the bot's state for the run log. */
     /** What the aggro perception reads off the test player: stance, movement and noise, for failure messages. */
     String aggroSubjectTrace() {
         return "player[shift=" + target.isShiftKeyDown() + " discrete=" + target.isDiscrete() + " crouching=" + target.isCrouching()
@@ -657,6 +656,7 @@ final class Rig {
                 + target.gameMode.getGameModeForPlayer() + "] status=" + InhabitantsMod.aggroDescribe(botName);
     }
 
+    /** One line of the bot's state for the run log. */
     String trace() {
         Inventory inv = bot.getInventory();
         ItemStack main = bot.getMainHandItem();
