@@ -46,6 +46,9 @@ public final class InhabitantsMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     private static final String CONFIG_FILE = MOD_ID + ".json";
 
+    /** The running entrypoint; only read by {@link #servicesOf}. */
+    private static volatile InhabitantsMod instance;
+
     private ServerSession.Shared shared;
     private volatile ServerSession session;
     private final McTpsGateway tps = new McTpsGateway();
@@ -55,6 +58,7 @@ public final class InhabitantsMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        instance = this;
         ConfigHolder config = new ConfigHolder(FabricLoader.getInstance().getConfigDir().resolve(CONFIG_FILE));
         logConfigLoad(config, config.loadInitial());
 
@@ -80,6 +84,17 @@ public final class InhabitantsMod implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPED.register(this::onServerStopped);
         LOGGER.info("PvP BOT Inhabitants {} loaded (config: {})", version, config.file());
+    }
+
+    /**
+     * The command services of the session running on {@code server}, or null before its first tick has initialised
+     * them. A seam for the real-server GameTests (they drive the population engine like an operator would); nothing
+     * in the addon itself calls it.
+     */
+    public static dev.spawnbotswrapper.inhabitants.command.CommandServices servicesOf(MinecraftServer server) {
+        InhabitantsMod mod = instance;
+        ServerSession current = mod == null ? null : mod.session;
+        return current != null && current.server() == server ? current.services() : null;
     }
 
     private static void logConfigLoad(ConfigHolder holder, ConfigIO.LoadResult result) {

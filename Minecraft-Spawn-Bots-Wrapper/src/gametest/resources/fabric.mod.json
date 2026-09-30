@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "pvpbot-inhabitants-gametest",
+  "version": "1.0.0",
+  "name": "PvP BOT Inhabitants GameTests",
+  "description": "Real-server GameTests of the wrapper with PvP BOT and HeroBot loaded as runtime mods.",
+  "environment": "server",
+  "mixins": [
+    "pvpbot-inhabitants-gametest.mixins.json"
+  ],
+  "entrypoints": {
+    "main": [
+      "dev.spawnbotswrapper.inhabitants.gametest.HarnessMod"
+    ],
+    "fabric-gametest": [
+      "dev.spawnbotswrapper.inhabitants.gametest.RangedCombatGameTests"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.11",
+    "fabric-api": "*",
+    "pvpbot_inhabitants": "*",
+    "pvp_bot": "*",
+    "herobot": "*"
+  }
+}

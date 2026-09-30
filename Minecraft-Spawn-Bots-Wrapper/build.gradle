@@ -27,6 +27,110 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Real-server GameTest harness (src/gametest). The tests need PvP BOT and HeroBot as RUNTIME mods, so they can
+// only run when a directory holding their release jars exists: -PupstreamModsDir=<dir> (default
+// C:\mcw\_tools\deploycheck\mods). The jars are copied into the run directory's mods/ and remapped by Fabric Loader
+// like in a real profile; they are never a compile-time input, and nothing here changes the published jar. When
+// the directory or either jar is absent, runGameTest is skipped with a message, so a plain build and the unit
+// tests are unaffected. Start it through C:\mcw\_tools\gt_wrapper.sh (it serialises servers machine-wide).
+// ---------------------------------------------------------------------------------------------------------------
+fabricApi {
+    configureTests {
+        createSourceSet.set(true)
+        modId.set('pvpbot-inhabitants-gametest')
+        enableGameTests.set(true)
+        enableClientGameTests.set(false)
+    }
+}
+
+def upstreamModsDir = new File(providers.gradleProperty('upstreamModsDir').orElse('C:\\mcw\\_tools\\deploycheck\\mods').get())
+def upstreamJars = { String prefix ->
+    upstreamModsDir.isDirectory()
+            ? (upstreamModsDir.listFiles({ f -> f.isFile() && f.name.toLowerCase().startsWith(prefix) && f.name.toLowerCase().endsWith('.jar') } as FileFilter) ?: new File[0]).sort { it.name }
+            : new File[0]
+}
+def upstreamAvailable = upstreamJars('pvp_bot').length > 0 && upstreamJars('herobot').length > 0
+
+loom.runs.named('gameTest') {
+    property 'fabric-api.gametest.report-file',
+            file('build/test-results/gametest/TEST-pvpbot-inhabitants-gametest.xml').absolutePath
+}
+
+def prepareGameTestRun = tasks.register('prepareGameTestRun') {
+    group = 'verification'
+    description = 'Creates a clean headless GameTest run directory with PvP BOT and HeroBot as runtime mods.'
+    outputs.upToDateWhen { false }
+    onlyIf { upstreamAvailable }
+
+    doLast {
+        def runDir = file('build/run/gameTest')
+        delete runDir
+        runDir.mkdirs()
+        new File(runDir, 'eula.txt').setText('eula=true\n', 'UTF-8')
+        new File(runDir, 'server.properties').setText(
+                'online-mode=false\nlevel-name=world\nlevel-seed=0\n', 'UTF-8')
+        def modsDir = new File(runDir, 'mods')
+        modsDir.mkdirs()
+        (upstreamJars('pvp_bot') + upstreamJars('herobot')).each { File jar ->
+            java.nio.file.Files.copy(jar.toPath(), new File(modsDir, jar.name).toPath())
+            logger.lifecycle("upstream mod: ${jar.name}")
+        }
+
+        // PvP BOT uploads bot names and counts over plain HTTP unless told not to: never from a test run.
+        def pvpbotConfig = new File(runDir, 'config/pvpbot')
+        pvpbotConfig.mkdirs()
+        new File(pvpbotConfig, 'stats_config.json').setText('{\n  "send_anonymous_statistics": false\n}\n', 'UTF-8')
+        // PvP BOT's per-world settings of the GameTest world ("Test Level"): the values the real profile runs with
+        // (short ranges, auto target on, players targeted), EXCEPT autoEquipWeapon, which stays at PvP BOT's own default
+        // (true) on purpose: this addon's pvpbotSettings policy is what has to turn it off (it is what cancels every
+        // bow and crossbow draw), and the harness proves that it does.
+        // attackInvincible is on only because GameTest mock players report isCreative() = true, which PvP BOT never targets.
+        def worldSettings = new File(pvpbotConfig, 'worlds/Test Level')
+        worldSettings.mkdirs()
+        new File(worldSettings, 'settings.json').setText('''{
+  "autoEquipWeapon": true,
+  "checkInterval": 20,
+  "autoTargetEnabled": true,
+  "targetPlayers": true,
+  "attackInvincible": true,
+  "maxTargetDistance": 10.0,
+  "meleeRange": 3.5,
+  "rangedMinRange": 6.0,
+  "rangedOptimalRange": 8.0,
+  "rangedMaxRange": 10.0,
+  "bowMinDrawTime": 40,
+  "totemPriority": true,
+  "autoShieldEnabled": true,
+  "shieldHoldTicks": 60,
+  "retreatEnabled": true,
+  "factionsEnabled": true
+}
+''', 'UTF-8')
+        // The addon's own config: natural structure population is off (nothing matches "include"), so the only
+        // inhabitants are the ones a test asks the engine for; no waiting periods, no throttles, no random loadouts.
+        new File(runDir, 'config').mkdirs()
+        new File(runDir, 'config/pvpbot_inhabitants.json').setText('''{
+  "include": ["gametest:none"],
+  "processing": { "restoreSettleTicks": 0, "initialDelayTicks": 0, "spawnIntervalTicks": 0, "maxLiveBots": 8 },
+  "profiles": { "randomize": false, "behaviorVariation": false, "attributeVariation": false },
+  "tpsThrottle": { "enabled": false },
+  "dormancy": { "enabled": false }
+}
+''', 'UTF-8')
+    }
+}
+
+tasks.named('runGameTest') {
+    dependsOn prepareGameTestRun
+    onlyIf {
+        if (!upstreamAvailable) {
+            logger.lifecycle("runGameTest skipped: no PvP BOT / HeroBot jars in ${upstreamModsDir} (pass -PupstreamModsDir=<dir>)")
+        }
+        upstreamAvailable
+    }
+}
+
 processResources {
     inputs.property "version", project.version
     filteringCharset "UTF-8"
