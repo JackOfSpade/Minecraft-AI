@@ -310,7 +310,7 @@ public final class SurfaceWaterRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_does_not_retry_safety_rejected_landing", maxTicks = 100)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_does_not_retry_safety_rejected_landing", maxTicks = 220)
     public void descendDoesNotRetrySafetyRejectedLanding(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(8, 6, -56));
@@ -340,43 +340,49 @@ public final class SurfaceWaterRecoveryGameTests {
 
         DescendToYTask task = new DescendToYTask(start.getY() - 1);
         task.start(bot);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(rejected),
-                "fixture did not exercise the initial north landing");
+        String rejectedText = rejected.getX() + "," + rejected.getY() + "," + rejected.getZ();
+        // The two stair steps are walked (11 game ticks each plus the tick that settles them).
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 60, "fixture did not exercise the initial north landing",
+                        () -> rejectedText.equals(task.checkpoint().get("pending_landing_target"))),
+                () -> {
+                    require(context, bot.blockPosition().equals(rejected),
+                            "fixture did not exercise the initial north landing");
 
-        // Reproduce the production ordering explicitly: a dynamic footing change makes the just
-        // accepted landing unsafe, SafetyNet returns the bot to its origin, then TaskManager gets
-        // the next tick before SafetyNet can release rescue ownership.
-        world.setBlock(rejected.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        Standability.clearCache();
-        NavSafetyNet.INSTANCE.requestWaterRescue(bot);
-        BotFixtureMoves.place(bot, start);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(start),
-                "Descend immediately retried the SafetyNet-rejected landing");
-        require(context, NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
-                "task incorrectly cleared SafetyNet ownership");
+                    // Reproduce the production ordering explicitly: a dynamic footing change makes the just
+                    // accepted landing unsafe, SafetyNet returns the bot to its origin, then TaskManager gets
+                    // the next tick before SafetyNet can release rescue ownership.
+                    world.setBlock(rejected.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                    Standability.clearCache();
+                    NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+                    BotFixtureMoves.place(bot, start);
+                    task.tick(bot);
+                    require(context, bot.blockPosition().equals(start),
+                            "Descend immediately retried the SafetyNet-rejected landing");
+                    require(context, NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
+                            "task incorrectly cleared SafetyNet ownership");
 
-        require(context, !NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
-                "dry origin should release rescue without another movement");
-        require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
-                "SafetyNet did not release rescue at the dry origin");
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(alternate),
-                "Descend did not rotate to the safe alternate landing: "
-                        + bot.blockPosition().toShortString());
-        task.tick(bot);
-        require(context, task.state() == TaskState.COMPLETED,
-                "Descend did not complete from the alternate dry landing: "
-                        + task.state() + ":" + task.failureReason());
-        require(context, Standability.isStandable(world, alternate),
-                "alternate handoff is not physically standable");
+                    require(context, !NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
+                            "dry origin should release rescue without another movement");
+                    require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
+                            "SafetyNet did not release rescue at the dry origin");
+                    return true;
+                },
+                DescendTickStages.tickUntil(context, task, bot, 60, "Descend did not rotate to the safe alternate landing",
+                        () -> bot.blockPosition().equals(alternate)),
+                DescendTickStages.tickUntil(context, task, bot, 30, "Descend did not complete from the alternate dry landing",
+                        () -> task.state() == TaskState.COMPLETED),
+                () -> {
+                    require(context, Standability.isStandable(world, alternate),
+                            "alternate handoff is not physically standable");
 
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
+                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                    context.succeed();
+                    return true;
+                });
     }
 
-    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_relocates_from_a_shoreline_dead_star_before_mutating", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_relocates_from_a_shoreline_dead_star_before_mutating", maxTicks = 200)
     public void descendRelocatesFromAShorelineDeadStarBeforeMutating(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(8, 6, -50));
@@ -415,56 +421,63 @@ public final class SurfaceWaterRecoveryGameTests {
 
         DescendToYTask task = new DescendToYTask(start.getY() - 1);
         task.start(bot);
-        task.tick(bot);
-        require(context, task.state() == TaskState.RUNNING,
-                "fresh-entry relocation ended Descend: "
-                        + task.state() + ":" + task.failureReason());
-        require(context, bot.blockPosition().equals(staging),
-                "Descend did not take the safe diagonal staging step: "
-                        + bot.blockPosition().toShortString());
-        require(context, InventoryAction.countItem(bot, Items.TORCH) == torchesBefore,
-                "Descend mutated inventory before completing fresh-entry relocation");
-        require(context, world.getBlockState(start).isAir()
-                        && world.getBlockState(staging).isAir()
-                        && world.getBlockState(landing).isAir()
-                        && world.getBlockState(start.below()).is(Blocks.SAND)
-                        && world.getBlockState(staging.below()).is(Blocks.SAND)
-                        && world.getBlockState(landing.below()).is(Blocks.STONE),
-                "Descend mutated shoreline blocks before relocation");
-
-        Map<String, String> checkpoint = task.checkpoint();
-        require(context, DescendToYTask.inspectCheckpoint(checkpoint).isPresent(),
-                "relocated Descend did not publish a valid checkpoint");
-        task.cancel(bot, "gametest_restart_after_entry_relocation");
-        DescendToYTask restored = new DescendToYTask(start.getY() - 1, checkpoint);
-        restored.start(bot);
+        DescendToYTask[] restoredTask = new DescendToYTask[1];
         int[] restoredTicks = {0};
-        context.failIfEver(() -> {
-            if (restored.state() == TaskState.RUNNING) {
-                restored.tick(bot);
-                restoredTicks[0]++;
-            }
-            if (restored.state() == TaskState.RUNNING && restoredTicks[0] < 6) {
-                return;
-            }
-            require(context, restored.state() == TaskState.COMPLETED,
-                    "restarted Descend did not complete from the relocated staging: "
-                            + restored.state() + ":" + restored.failureReason());
-            require(context, restoredTicks[0] >= 2,
-                    "restart proof did not cross two physical server ticks");
-            require(context, bot.blockPosition().equals(landing),
-                    "restarted Descend did not use the checkpointed WEST stair: "
-                            + bot.blockPosition().toShortString());
-            require(context, world.getBlockState(start.below()).is(Blocks.SAND)
-                            && world.getBlockState(start.below(2)).is(Blocks.STONE)
-                            && world.getBlockState(staging.below()).is(Blocks.SAND)
-                            && world.getBlockState(staging.below(2)).is(Blocks.STONE)
-                            && world.getBlockState(landing.below()).is(Blocks.STONE),
-                    "restarted Descend damaged verified supports");
+        // The diagonal staging step (6 game ticks) and the WEST stair step after the restart (11 game ticks) are walked, each with the
+        // tick that settles it.
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 60, "Descend did not take the safe diagonal staging step",
+                        () -> bot.blockPosition().equals(staging) && bot.getActionPack().stepIdle()
+                                && "3".equals(task.checkpoint().get("stair_direction"))),
+                () -> {
+                    require(context, task.state() == TaskState.RUNNING,
+                            "fresh-entry relocation ended Descend: "
+                                    + task.state() + ":" + task.failureReason());
+                    require(context, bot.blockPosition().equals(staging),
+                            "Descend did not take the safe diagonal staging step: "
+                                    + bot.blockPosition().toShortString());
+                    require(context, InventoryAction.countItem(bot, Items.TORCH) == torchesBefore,
+                            "Descend mutated inventory before completing fresh-entry relocation");
+                    require(context, world.getBlockState(start).isAir()
+                                    && world.getBlockState(staging).isAir()
+                                    && world.getBlockState(landing).isAir()
+                                    && world.getBlockState(start.below()).is(Blocks.SAND)
+                                    && world.getBlockState(staging.below()).is(Blocks.SAND)
+                                    && world.getBlockState(landing.below()).is(Blocks.STONE),
+                            "Descend mutated shoreline blocks before relocation");
 
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
+                    Map<String, String> checkpoint = task.checkpoint();
+                    require(context, DescendToYTask.inspectCheckpoint(checkpoint).isPresent(),
+                            "relocated Descend did not publish a valid checkpoint");
+                    task.cancel(bot, "gametest_restart_after_entry_relocation");
+                    DescendToYTask restored = new DescendToYTask(start.getY() - 1, checkpoint);
+                    restored.start(bot);
+                    restoredTask[0] = restored;
+                    return true;
+                },
+                DescendTickStages.tickUntil(context, () -> restoredTask[0], bot, 80,
+                        "restarted Descend did not complete from the relocated staging",
+                        () -> {
+                            restoredTicks[0]++;
+                            return restoredTask[0].state() == TaskState.COMPLETED;
+                        }),
+                () -> {
+                    require(context, restoredTicks[0] >= 2,
+                            "restart proof did not cross two physical server ticks");
+                    require(context, bot.blockPosition().equals(landing),
+                            "restarted Descend did not use the checkpointed WEST stair: "
+                                    + bot.blockPosition().toShortString());
+                    require(context, world.getBlockState(start.below()).is(Blocks.SAND)
+                                    && world.getBlockState(start.below(2)).is(Blocks.STONE)
+                                    && world.getBlockState(staging.below()).is(Blocks.SAND)
+                                    && world.getBlockState(staging.below(2)).is(Blocks.STONE)
+                                    && world.getBlockState(landing.below()).is(Blocks.STONE),
+                            "restarted Descend damaged verified supports");
+
+                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                    context.succeed();
+                    return true;
+                });
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_fresh_entry_relocation_cannot_cut_a_diagonal_corner", maxTicks = 40)
@@ -524,7 +537,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.succeed();
     }
 
-    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_never_mines_the_water_seal_it_just_placed", maxTicks = 120)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_never_mines_the_water_seal_it_just_placed", maxTicks = 200)
     public void descendNeverMinesTheWaterSealItJustPlaced(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(8, 6, -68));
@@ -568,21 +581,26 @@ public final class SurfaceWaterRecoveryGameTests {
         // The old loop selected NORTH again, mined this cobblestone, let water refill it and
         // repeated until all portable blocks were gone.  The sealed direction must instead stay
         // rejected while Descend rotates to EAST.
-        for (int i = 0; i < 12 && task.state() == TaskState.RUNNING; i++) {
-            task.tick(bot);
-            require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
-                    "Descend mined its own water seal on tick " + i);
-            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == blocksAfterSeal,
-                    "Descend consumed another block after sealing one ingress");
-        }
-        require(context, task.state() == TaskState.COMPLETED,
-                "Descend did not finish through the alternate dry stair: "
-                        + task.state() + ":" + task.failureReason());
-        require(context, bot.blockPosition().equals(alternate),
-                "Descend failed to rotate away from the sealed north stair");
+        // The stair step onto the alternate is walked (11 game ticks plus the tick that settles it).
+        int[] ticks = {0};
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 60, "Descend did not finish through the alternate dry stair",
+                        () -> {
+                            require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
+                                    "Descend mined its own water seal on tick " + ticks[0]);
+                            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == blocksAfterSeal,
+                                    "Descend consumed another block after sealing one ingress");
+                            ticks[0]++;
+                            return task.state() == TaskState.COMPLETED;
+                        }),
+                () -> {
+                    require(context, bot.blockPosition().equals(alternate),
+                            "Descend failed to rotate away from the sealed north stair");
 
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
+                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                    context.succeed();
+                    return true;
+                });
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_horizontal_fallback_never_mines_its_owned_water_seal", maxTicks = 60)

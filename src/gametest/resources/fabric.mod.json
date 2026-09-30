@@ -32,6 +32,7 @@
       "io.github.zoyluo.minecraftai.task.DescendCheckpointGameTests",
       "io.github.zoyluo.minecraftai.task.DigDownReturnGameTests",
       "io.github.zoyluo.minecraftai.task.DigDownNaturalMovementGameTests",
+      "io.github.zoyluo.minecraftai.task.DescendNaturalMovementGameTests",
       "io.github.zoyluo.minecraftai.task.CreeperDefenseGameTests",
       "io.github.zoyluo.minecraftai.task.CombatHardeningGameTests",
       "io.github.zoyluo.minecraftai.task.RangedWeaponGameTests",

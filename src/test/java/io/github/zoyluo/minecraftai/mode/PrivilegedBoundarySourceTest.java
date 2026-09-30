@@ -117,6 +117,27 @@ class PrivilegedBoundarySourceTest {
     }
 
     @Test
+    void descendToYMovesByWalkedStepsNeverByTeleportPrimitives() throws IOException {
+        // R5: the stair steps, the flat landings, the climb-overs, the lateral detours, the retreat out of a reoccupied body cell and
+        // the sneak-bridge lean of DescendToYTask are input-driven WalkedSteps whose landing is verified on a later tick.
+        String descend = read("task/DescendToYTask.java");
+        assertFalse(descend.contains("FakePlayerMotion"), "DescendToYTask must not use a FakePlayerMotion primitive");
+        assertFalse(descend.contains(".descendInto("), "DescendToYTask must not use the teleporting descendInto");
+        assertFalse(descend.contains("teleportTo("), "DescendToYTask must not teleport");
+        assertTrue(descend.contains("beginDescend(") && descend.contains("InCellWalk.beginEdgeShift("),
+                "DescendToYTask moves by walked steps");
+        int launch = descend.indexOf("private void launchStep(");
+        int settle = descend.indexOf("private void settleStep(");
+        int pending = descend.indexOf("pendingLandingTarget = target;", settle);
+        assertTrue(launch >= 0 && settle > launch && pending > settle,
+                "the pending landing is recorded from the verified landing in settleStep, never in the tick that launches a step");
+        String launchBody = descend.substring(launch, settle);
+        assertFalse(launchBody.contains("pendingLanding") || launchBody.contains("traversedDetourEdges")
+                        || launchBody.contains("lateralDetours"),
+                "launching a step changes neither the landing history nor the detour debt");
+    }
+
+    @Test
     void digDownRelocationUsesObservedFailureInsteadOfHiddenColumnScan() throws IOException {
         String digDown = read("task/DigDownTask.java");
         assertFalse(digDown.contains("dryColumn("),

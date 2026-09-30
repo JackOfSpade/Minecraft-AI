@@ -3,9 +3,12 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InCellWalk;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -13,13 +16,13 @@ import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
@@ -46,7 +49,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * dist gets stuck -> no_progress", hanging for 11 minutes. This task pulls "descend to the ore
  * layer" out as its own responsibility: it uses the shared {@link BlockMiner} to continuously mine
  * straight down at its feet (not subject to any rate limit); when the bot has no passive gravity it
- * actively descends via descendInto; it hard-stops on lava and passes through water (same as
+ * descends by walking (WalkedStep: the step off the stair edge, the gravity drop into the cell it just mined; the landing is published once it is verified); it hard-stops on lava and passes through water (same as
  * DigDownTask), digging all the way down to targetY. Once at the layer, GoalExecutor takes over
  * with MINE_ORE (ore is now close by on the horizontal plane).
  *
@@ -98,6 +101,66 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private BlockPos pendingLandingOrigin;
     private BlockPos pendingLandingTarget;
     private int pendingLandingDirection = -1;
+    /** Why a walked step runs (see {@link #launchStep}). */
+    private enum StepPurpose {
+        /** The diagonal stair step down into the cell just mined. */
+        STAIR,
+        /** A same-level or one-up lateral hop (the flat landing, the climb-over, a detour around an obstruction). */
+        LATERAL,
+        /** The walk out of a body cell that was reoccupied after a landing, back onto the previous landing. */
+        RETREAT,
+        /** The one diagonal step before the descent starts, onto a cell with an observed safe stair. */
+        ENTRY_RELOCATION,
+        /** The walk from a leaned pose (over the edge of the support) back onto the cell that supports it. */
+        LEAN_RECOVERY
+    }
+
+    /** The stages of the sneak-bridge that places one floor block: lean over the edge, place, walk back to the middle of the cell. */
+    private enum EdgeStage {
+        SHIFTING,
+        RETURNING
+    }
+
+    private static final class EdgePlacement {
+        final BlockPos origin;
+        final BlockPos landing;
+        final BlockPos support;
+        final Direction direction;
+        final String item;
+        WalkedStep step;
+        EdgeStage stage = EdgeStage.SHIFTING;
+        String placeFailure;
+
+        EdgePlacement(BlockPos origin, BlockPos landing, BlockPos support, Direction direction, String item, WalkedStep step) {
+            this.origin = origin.immutable();
+            this.landing = landing.immutable();
+            this.support = support.immutable();
+            this.direction = direction;
+            this.item = item;
+            this.step = step;
+        }
+    }
+
+    /** Ticks a bot that lost a step in the air is given to land before its pose is used anyway (a fall is a few ticks). */
+    private static final int UNSETTLED_LIMIT = 100;
+
+    // The walked step in flight and what it is for. Never persisted: a checkpoint holds the settled landing history, not a step; a
+    // pause, a restart or a hazard abort cancels the step and the stair is re-derived from bot.blockPosition().
+    private StepPurpose stepPurpose;
+    private WalkedStep step;
+    private BlockPos stepOrigin;
+    private BlockPos stepTarget;
+    private int stepDirIndex = -1;
+    private BlockPos stepBlocked;
+    private String stepBlockedName;
+    private String stepReason;
+    private EdgePlacement edge;
+    // Steps that failed in this task instance: never retried (the flat landing, detour and relocation choosers skip them).
+    private final Set<DetourEdge> failedStepEdges = new HashSet<>();
+    // Set when a step was abandoned or failed: the bot may be in the air between two cells, so nothing is decided from its pose
+    // until it stands on something again.
+    private boolean poseUnsettled;
+    private int unsettledTicks;
     private BlockPos rejectedLandingOrigin;
     private int rejectedLandingDirections;
     // Falling sand/gravel is scheduled after the task tick that opened the stair. Keep the last
@@ -378,7 +441,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
 
             // NavSafetyNet's transient controller is not part of the Mission checkpoint. If the
-            // server stopped after descendInto but before the landing was accepted, an entity back
+            // server stopped after the stair step but before the landing was accepted, an entity back
             // at the origin cannot safely retry that same edge. Preserve the physical debt by
             // rejecting the direction; a bot already at the target is validated by onTick.
             BlockPos feet = bot.blockPosition();
@@ -388,6 +451,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 pendingLandingTarget = null;
                 pendingLandingDirection = -1;
                 rejectLandingDirection(feet, interruptedDirection);
+            }
+            // A restored bot may be mid-air (a step was in flight when the process stopped): nothing is decided from its pose until it
+            // stands on something, then the stair is re-derived from where it is.
+            if (!WalkedStep.supported(bot) && !bot.isInWater()) {
+                poseUnsettled = true;
+                unsettledTicks = 0;
             }
         }
         // Armor-up bonus: before descending into a dangerous deep layer, proactively equip the
@@ -406,10 +475,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         miner.cancel(bot);
         blockedBodyRecoveryTarget = null;
         bot.getActionPack().stopAll();
+        abandonStep(bot);
     }
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
+        // A walked step in flight is cancelled (keys released); the stair is re-derived from where the bot stands when it resumes.
+        abandonStep(bot);
         // A safety task can interrupt in the same server tick that Descend physically reached a
         // dry landing. Accept that factual landing before shelter/combat is allowed to move the
         // bot away; otherwise the resumed task compares the new safety position with a stale
@@ -426,8 +498,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // DangerWatcher calls this immediately before pauseFor(). Settle the landing first, then
         // record the threat rejection against the new factual origin. onPause() will subsequently
         // no-op and therefore preserve this newly recorded rejection.
+        boolean stairStep = stepPurpose == StepPurpose.STAIR;
+        BlockPos stairOrigin = stepOrigin;
+        abandonStep(bot);
         settlePendingLandingAtCurrentPose(bot);
-        BlockPos origin = bot.blockPosition();
+        // A stair step that was cut short leaves the bot between two cells: the rejection belongs to the cell the step began in.
+        BlockPos origin = stairStep && stairOrigin != null ? stairOrigin : bot.blockPosition();
         miner.cancel(bot);
         rejectLandingDirection(origin, stairDirIndex);
         BotLog.danger(bot, "descend_threat_direction_rejected",
@@ -444,6 +520,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
         ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
+        if (holdForStep(bot, world)) {
+            return; // a walked step is in flight (or its bot is still landing): the stair changes only when the landing is verified
+        }
+        feet = bot.blockPosition();
         // Vanilla falling-block updates run after task decisions. A stair that was clear when the
         // bot entered it can therefore become occupied before the next task tick. Resolve the
         // current collision first; continuing to mine the next stair leaves the bot suffocating,
@@ -596,7 +676,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (solid != null && solid.equals(next) && isObservedDryStandable(bot, world, ahead)
                 && !feet.equals(selfCarvedAheadAt)
                 && lateralDetours < MAX_LATERAL
-                && !traversedDetourEdges.contains(flatLandingEdge)) {
+                && !traversedDetourEdges.contains(flatLandingEdge)
+                && !failedStepEdges.contains(flatLandingEdge)
+                && WalkedStep.refusal(bot, ahead, WalkedStep.Kind.FLAT) == null) {
             // `ahead`/`ahead.up()` are already open and `ahead` itself is a fully observed, dry,
             // safely supported landing at the CURRENT height -- only the riser one level further
             // down (`next`) is solid. A real player standing here sees ordinary flat ground
@@ -619,15 +701,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // literally every level, forever trading a level of real descent for a same-height
             // sideways hop until the lateral budget ran out -- never the honest reactive detour this
             // shortcut exists for.
-            if (FakePlayerMotion.stepToStandable(bot, ahead, "descend_flat_landing")) {
-                if (!traversedDetourEdges.add(flatLandingEdge)) {
-                    throw new IllegalStateException("detour edge replay escaped preflight");
-                }
-                lateralDetours++;
-                detourHeadingIndex = stairDirIndex;
-                markStarted(bot, feet);
-                return;
-            }
+            // A walked step onto the flat landing: the detour edge is recorded when the landing is verified (settleStep).
+            miner.cancel(bot);
+            launchStep(bot, WalkedStep.begin(bot, ahead, WalkedStep.Kind.FLAT, "descend_flat_landing"),
+                    StepPurpose.LATERAL, feet, ahead, stairDirIndex, "descend_flat_landing");
+            return;
         }
         BlockPos climbTarget = ahead.above();
         DetourEdge climbEdge = new DetourEdge(feet, climbTarget);
@@ -636,7 +714,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 && !Standability.isDangerous(world.getBlockState(ahead))
                 && isObservedDryPassableColumn(bot, world, ahead.above())
                 && lateralDetours < MAX_LATERAL
-                && !traversedDetourEdges.contains(climbEdge)) {
+                && !traversedDetourEdges.contains(climbEdge)
+                && !failedStepEdges.contains(climbEdge)
+                && WalkedStep.refusal(bot, climbTarget, WalkedStep.Kind.STEP_UP) == null) {
             // `ahead` is solid and would have to be mined to make any progress this direction at
             // all, but the landing one level further down (`next`) is not a CONFIRMED-safe
             // support -- isViableDescentDirection only allowed this attempt because that deeper
@@ -649,20 +729,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // of digging through it; take that zero-risk step instead. This is itself a lateral
             // hop (dy == 1, exactly tryLateralDetour's own upper-retreat shape), so it shares that
             // same budget and no-replay bookkeeping.
-            if (FakePlayerMotion.jumpTo(bot, climbTarget, "descend_climb_over")) {
-                if (!traversedDetourEdges.add(climbEdge)) {
-                    throw new IllegalStateException("detour edge replay escaped preflight");
-                }
-                lateralDetours++;
-                detourHeadingIndex = stairDirIndex;
-                // Durably reject the exact reverse stair from the new landing so a restart cannot
-                // immediately descend back down into the cell just escaped -- mirrors the lateral
-                // detour's own upper-retreat bookkeeping (tryLateralDetour, dy == 1).
-                rejectLandingDirection(climbTarget,
-                        (stairDirIndex + HORIZONTAL.length / 2) % HORIZONTAL.length);
-                markStarted(bot, feet);
-                return;
-            }
+            // A hop onto it (forward and jump). The detour edge and the rejection of the exact reverse stair from the new landing (so
+            // a restart cannot descend back into the cell just escaped, mirroring the lateral detour's upper-retreat bookkeeping) are
+            // recorded when the landing is verified (settleStep).
+            miner.cancel(bot);
+            launchStep(bot, WalkedStep.begin(bot, climbTarget, WalkedStep.Kind.STEP_UP, "descend_climb_over"),
+                    StepPurpose.LATERAL, feet, climbTarget, stairDirIndex, "descend_climb_over");
+            return;
         }
         if (solid != null) {
             // Tool gate (same as DigDownTask): fail immediately with a typed reason when no
@@ -686,20 +759,20 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             markStarted(bot, feet);
             return;
         }
-        // Body space is now clear -> step diagonally down onto the next stair step (the bot has no passive gravity, so it still needs to actively move one cell; the diagonal move approximates stepping down one stair).
+        // Body space is now clear -> walk diagonally down onto the next stair step (off the edge of the tread; gravity lands it).
         BlockPos origin = feet.immutable();
-        boolean descended = bot.getActionPack().descendInto(next);
-        if (descended && bot.blockPosition().equals(next)) {
-            pendingLandingOrigin = origin;
-            pendingLandingTarget = next.immutable();
-            pendingLandingDirection = stairDirIndex;
-        } else {
+        WalkedStep descent = bot.getActionPack().beginDescend(next, "descend_stair");
+        if (descent == null) {
             rejectLandingDirection(origin, stairDirIndex);
             rotateStair(bot, world, origin);
             BotLog.action(bot, "descend_landing_rejected",
                     "from", origin.toShortString(), "target", next.toShortString());
+            markStarted(bot, feet);
+            return;
         }
-        markStarted(bot, feet);
+        // The bot walks off the edge of its tread and gravity lands it on the next one. The landing joins the pending-landing
+        // record only when the step has verified it (settleStep), never in the tick that starts the step.
+        launchStep(bot, descent, StepPurpose.STAIR, origin, next, stairDirIndex, "descend_stair");
     }
 
     /**
@@ -754,26 +827,15 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
         BlockState obstruction = world.getBlockState(blocked);
         BlockPos retreat = findRecentPhysicalRetreat(world, feet);
-        if (retreat != null && physicallyRetreat(bot, feet, retreat)) {
-            markStarted(bot, feet);
+        WalkedStep.Kind retreatKind = retreat == null ? null : WalkedStepRules.walkKindFor(retreat.getY() - feet.getY());
+        if (retreat != null && retreatKind != null && WalkedStep.refusal(bot, retreat, retreatKind) == null) {
+            // The bot walks (or hops) back onto the landing it came from; the bookkeeping of the retreat happens when the landing is
+            // verified (settleStep). A step that cannot start (the head room of a hop is the blocked cell itself) falls through to mining.
             miner.cancel(bot);
-            boolean rolledBackDetour = rollbackCollapsedDetourEdge(bot, retreat, feet);
-            blockedBodyRecoveryTarget = rolledBackDetour ? blocked.immutable() : null;
-            if (!rolledBackDetour) {
-                rejectCollapsedEdge(retreat, feet);
-            }
-            pendingLandingOrigin = null;
-            pendingLandingTarget = null;
-            pendingLandingDirection = -1;
-            latestSafeLanding = retreat.immutable();
-            previousSafeLanding = null;
-            lastProgressTick = totalBudget();
-            BotLog.danger(bot, "descend_blocked_body_retreat",
-                    "from", feet.toShortString(),
-                    "to", retreat.toShortString(),
-                    "blocked", blocked.toShortString(),
-                    "block", BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()),
-                    "detour_rolled_back", rolledBackDetour);
+            stepBlocked = blocked.immutable();
+            stepBlockedName = String.valueOf(BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()));
+            launchStep(bot, WalkedStep.begin(bot, retreat, retreatKind, "descend_blocked_body_retreat"),
+                    StepPurpose.RETREAT, feet, retreat, -1, "descend_blocked_body_retreat");
             return true;
         }
 
@@ -834,7 +896,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         for (BlockPos candidate : new BlockPos[]{
                 detourOrigin, pendingLandingOrigin, previousSafeLanding, latestSafeLanding}) {
             if (candidate == null || candidate.equals(feet)
-                    || !isPhysicalRetreatStep(feet, candidate)) {
+                    || !isPhysicalRetreatStep(feet, candidate)
+                    || failedStepEdges.contains(new DetourEdge(feet, candidate))) {
                 continue;
             }
             Standability.clearCache();
@@ -843,15 +906,6 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
         }
         return null;
-    }
-
-    private static boolean physicallyRetreat(AIPlayerEntity bot, BlockPos from, BlockPos to) {
-        int dy = to.getY() - from.getY();
-        return dy == 1
-                ? io.github.zoyluo.minecraftai.mode.FakePlayerMotion.jumpTo(
-                        bot, to, "descend_blocked_body_retreat")
-                : io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                        bot, to, "descend_blocked_body_retreat");
     }
 
     private void rejectCollapsedEdge(BlockPos retreat, BlockPos buried) {
@@ -1065,6 +1119,212 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     /**
+     * Hands a walked step to the pack. The bot is moved by its keys only: the landing is verified on a later tick (see
+     * {@link #settleStep}) and the pending landing, the detour edges and the checkpoint change only then, never in the tick that
+     * starts the step.
+     */
+    private void launchStep(AIPlayerEntity bot, WalkedStep walked, StepPurpose purpose,
+                            BlockPos origin, BlockPos target, int dirIndex, String reason) {
+        step = walked;
+        stepPurpose = purpose;
+        stepOrigin = origin.immutable();
+        stepTarget = target.immutable();
+        stepDirIndex = dirIndex;
+        stepReason = reason;
+        if (purpose == StepPurpose.STAIR) {
+            markStarted(bot, origin);
+        }
+        bot.getActionPack().runStep(walked);
+    }
+
+    private void clearStepFields() {
+        stepPurpose = null;
+        step = null;
+        stepOrigin = null;
+        stepTarget = null;
+        stepDirIndex = -1;
+        stepBlocked = null;
+        stepBlockedName = null;
+        stepReason = null;
+    }
+
+    /**
+     * Forgets a step (or a sneak-bridge) the pack no longer runs: a pause, an abort, a hazard or a restart cancelled it and its keys are
+     * released. The bot may be between two cells, so nothing is decided from its pose until it stands on something again; the stair is
+     * then re-derived from where it is (the bot is never moved to fit a recorded landing).
+     */
+    private void abandonStep(AIPlayerEntity bot) {
+        if (stepPurpose == null && edge == null) {
+            return;
+        }
+        // Only a step of this task is cancelled: one that is still in flight is the pack's own step; another controller's step is left alone.
+        WalkedStep inFlight = edge != null ? edge.step : step;
+        if (inFlight != null && !inFlight.ended()) {
+            bot.getActionPack().cancelStep();
+        }
+        clearStepFields();
+        edge = null;
+        poseUnsettled = true;
+        unsettledTicks = 0;
+    }
+
+    /** True while the bot must be left alone: a step is in flight (or was just settled), or it is still falling after one was lost. */
+    private boolean holdForStep(AIPlayerEntity bot, ServerLevel world) {
+        if (edge != null || stepPurpose != null) {
+            if (stepPurpose != StepPurpose.RETREAT && firstBodyCollision(world, bot.blockPosition()) != null) {
+                // A block fell into the body cell under the step: the blocked-body recovery decides, not the step.
+                abandonStep(bot);
+                return false;
+            }
+            if (edge != null) {
+                tickEdgePlacement(bot, world);
+            } else if (step.ended()) {
+                // The step object knows how it ended (another controller that takes the pack cancels it: no outcome), whatever step
+                // the pack runs now.
+                settleStep(bot, world);
+            }
+            return true;
+        }
+        if (poseUnsettled) {
+            if (WalkedStep.supported(bot) || bot.isInWater() || ++unsettledTicks > UNSETTLED_LIMIT) {
+                poseUnsettled = false;
+            } else {
+                return true;
+            }
+        }
+        return tryLeanRecovery(bot, world);
+    }
+
+    /**
+     * A step ended: the landing it verified is the only thing that changes the stair history; a failed step is re-derived from the
+     * pose (its edge is never tried again by this task).
+     */
+    private void settleStep(AIPlayerEntity bot, ServerLevel world) {
+        StepPurpose purpose = stepPurpose;
+        BlockPos origin = stepOrigin;
+        BlockPos target = stepTarget;
+        int dirIndex = stepDirIndex;
+        String reason = stepReason;
+        BlockPos blocked = stepBlocked;
+        String blockedName = stepBlockedName;
+        WalkedStep.Result result = step.outcome();
+        clearStepFields();
+        BlockPos feet = bot.blockPosition();
+        boolean landed = result != null && result.succeeded() && feet.equals(target);
+        if (!landed) {
+            poseUnsettled = true;
+            unsettledTicks = 0;
+            BotLog.action(bot, "descend_step_failed", "purpose", purpose, "reason", reason,
+                    "from", origin.toShortString(), "at", feet.toShortString(),
+                    "why", result == null ? "cancelled" : result.failed() ? result.reason() : "not_at_target");
+            if (result == null) {
+                return; // cancelled from outside (a safety task took the pack): the same step may be tried again
+            }
+            if (purpose == StepPurpose.STAIR) {
+                if (feet.equals(origin)) {
+                    rejectLandingDirection(origin, dirIndex);
+                    rotateStair(bot, world, origin);
+                    BotLog.action(bot, "descend_landing_rejected",
+                            "from", origin.toShortString(), "target", target.toShortString());
+                }
+            } else {
+                failedStepEdges.add(new DetourEdge(origin, target));
+            }
+            return;
+        }
+        lastProgressTick = totalBudget();
+        switch (purpose) {
+            case STAIR -> {
+                pendingLandingOrigin = origin;
+                pendingLandingTarget = target;
+                pendingLandingDirection = dirIndex;
+            }
+            case LATERAL -> {
+                traversedDetourEdges.add(new DetourEdge(origin, target));
+                markStarted(bot, origin);
+                lateralDetours++;
+                detourHeadingIndex = dirIndex;
+                boolean up = target.getY() > origin.getY();
+                if (up) {
+                    // The upper landing is a bounded retreat, not a fresh descent origin. Keep the exact reverse stair rejected across
+                    // the next tick and checkpoint restart; otherwise Descend immediately drops into the lower cell it just escaped
+                    // and clears the detour history when that landing settles.
+                    rejectLandingDirection(target, (dirIndex + HORIZONTAL.length / 2) % HORIZONTAL.length);
+                }
+                if ("descend_lava_detour".equals(reason)) {
+                    BotLog.action(bot, "descend_lava_detour",
+                            "dir", HORIZONTAL[dirIndex].getSerializedName(),
+                            "at_y", target.getY(),
+                            "up", up ? 1 : 0,
+                            "used", lateralDetours,
+                            "budget", MAX_LATERAL);
+                }
+            }
+            case RETREAT -> {
+                markStarted(bot, origin);
+                miner.cancel(bot);
+                boolean rolledBackDetour = rollbackCollapsedDetourEdge(bot, target, origin);
+                blockedBodyRecoveryTarget = rolledBackDetour && blocked != null ? blocked : null;
+                if (!rolledBackDetour) {
+                    rejectCollapsedEdge(target, origin);
+                }
+                pendingLandingOrigin = null;
+                pendingLandingTarget = null;
+                pendingLandingDirection = -1;
+                latestSafeLanding = target;
+                previousSafeLanding = null;
+                BotLog.danger(bot, "descend_blocked_body_retreat",
+                        "from", origin.toShortString(),
+                        "to", target.toShortString(),
+                        "blocked", blocked == null ? "unknown" : blocked.toShortString(),
+                        "block", blockedName == null ? "unknown" : blockedName,
+                        "detour_rolled_back", rolledBackDetour);
+            }
+            case ENTRY_RELOCATION -> {
+                stairDirIndex = dirIndex;
+                clearRejectedLandingDirections();
+                markStarted(bot, origin);
+                BotLog.action(bot, "descend_entry_relocated",
+                        "from", origin.toShortString(),
+                        "to", target.toShortString(),
+                        "stair_direction", HORIZONTAL[dirIndex].getSerializedName());
+            }
+            case LEAN_RECOVERY -> BotLog.action(bot, "descend_lean_recovered",
+                    "from", origin.toShortString(), "to", target.toShortString());
+        }
+    }
+
+    /**
+     * A bot that stands (supported) over the edge of its support with its own cell empty underneath (the sneak-bridge lean was cut
+     * short by a pause or a restart) walks back onto the neighbouring cell whose floor holds it. Never moves the bot itself.
+     */
+    private boolean tryLeanRecovery(AIPlayerEntity bot, ServerLevel world) {
+        BlockPos feet = bot.blockPosition();
+        if (bot.isInWater() || !WalkedStep.supported(bot) || Math.abs(bot.getY() - feet.getY()) > 1.0E-3D) {
+            return false;
+        }
+        BlockPos floor = feet.below();
+        if (!world.getBlockState(floor).getCollisionShape(world, floor).isEmpty()
+                || !world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()) {
+            return false;
+        }
+        for (Direction direction : HORIZONTAL) {
+            BlockPos neighbour = feet.relative(direction);
+            BlockPos neighbourFloor = neighbour.below();
+            if (world.getBlockState(neighbourFloor).getCollisionShape(world, neighbourFloor).isEmpty()
+                    || !isDryStandable(world, neighbour)
+                    || failedStepEdges.contains(new DetourEdge(feet, neighbour))
+                    || WalkedStep.refusal(bot, neighbour, WalkedStep.Kind.FLAT) != null) {
+                continue;
+            }
+            launchStep(bot, WalkedStep.begin(bot, neighbour, WalkedStep.Kind.FLAT, "descend_lean_recovery"),
+                    StepPurpose.LEAN_RECOVERY, feet, neighbour, -1, "descend_lean_recovery");
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Takes at most one same-level diagonal step before the descent transaction starts.
      *
      * <p>The relocation is intentionally derived from current observable geometry rather than a
@@ -1097,18 +1357,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             if (safeDirection < 0) {
                 continue;
             }
-            miner.cancel(bot);
-            if (!FakePlayerMotion.stepToStandable(bot, candidate,
-                    "descend_fresh_entry_relocation")) {
+            if (failedStepEdges.contains(new DetourEdge(feet, candidate))
+                    || WalkedStep.refusal(bot, candidate, WalkedStep.Kind.FLAT) != null) {
                 continue;
             }
-            stairDirIndex = safeDirection;
-            clearRejectedLandingDirections();
-            markStarted(bot, feet);
-            BotLog.action(bot, "descend_entry_relocated",
-                    "from", feet.toShortString(),
-                    "to", candidate.toShortString(),
-                    "stair_direction", HORIZONTAL[safeDirection].getSerializedName());
+            // One walked diagonal step; the relocation is recorded (started latched, stair direction) when the landing is verified.
+            miner.cancel(bot);
+            launchStep(bot, WalkedStep.begin(bot, candidate, WalkedStep.Kind.FLAT, "descend_fresh_entry_relocation"),
+                    StepPurpose.ENTRY_RELOCATION, feet, candidate, safeDirection, "descend_fresh_entry_relocation");
             return true;
         }
         return false;
@@ -1212,7 +1468,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 BlockPos side = base.relative(dir);
                 BlockPos support = side.below();
                 DetourEdge edge = new DetourEdge(feet, side);
-                if (traversedDetourEdges.contains(edge)) {
+                if (traversedDetourEdges.contains(edge) || failedStepEdges.contains(edge)) {
                     continue;
                 }
                 // Strict-survival detours may only inspect the exact body/support envelope the bot
@@ -1270,35 +1526,15 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     return true; // currently mining the path to the side column (counts as progress this tick)
                 }
                 // The side column is now clear (foot and head cells both empty) -> move over via adjacent physical movement (possibly retreating up one level), then continue descending in the new column on the next tick.
-                miner.cancel(bot);
-                boolean moved = dy == 0
-                        ? io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
-                                bot, side, "descend_lava_detour")
-                        : io.github.zoyluo.minecraftai.mode.FakePlayerMotion.jumpTo(
-                                bot, side, "descend_lava_detour");
-                if (!moved) {
+                WalkedStep.Kind kind = dy == 0 ? WalkedStep.Kind.FLAT : WalkedStep.Kind.STEP_UP;
+                if (WalkedStep.refusal(bot, side, kind) != null) {
                     continue;
                 }
-                if (!traversedDetourEdges.add(edge)) {
-                    throw new IllegalStateException("detour edge replay escaped preflight");
-                }
-                markStarted(bot, feet);
-                lateralDetours++;
-                detourHeadingIndex = directionIndex;
-                if (dy == 1) {
-                    // The upper landing is a bounded retreat, not a fresh descent origin. Keep the
-                    // exact reverse stair rejected across the next tick and checkpoint restart;
-                    // otherwise Descend immediately drops into the lower cell it just escaped and
-                    // clears the detour history when that landing settles.
-                    rejectLandingDirection(
-                            side, (directionIndex + HORIZONTAL.length / 2) % HORIZONTAL.length);
-                }
-                BotLog.action(bot, "descend_lava_detour",
-                        "dir", dir.getSerializedName(),
-                        "at_y", side.getY(),
-                        "up", dy,
-                        "used", lateralDetours,
-                        "budget", MAX_LATERAL);
+                // One walked step (a walk, or a hop up one level); the edge, the budget and the rejection of the exact reverse stair after
+                // an upper retreat are recorded when the landing is verified (settleStep).
+                miner.cancel(bot);
+                launchStep(bot, WalkedStep.begin(bot, side, kind, "descend_lava_detour"),
+                        StepPurpose.LATERAL, feet, side, directionIndex, "descend_lava_detour");
                 return true;
             }
         }
@@ -1360,8 +1596,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             bot.setOnGround(true);
         }
         Direction direction = HORIZONTAL[directionIndex];
-        if (!FakePlayerMotion.shiftToSupportEdge(
-                bot, origin, direction, "descend_detour_support")) {
+        // The lean is a walked step (sneak, forward toward a point over the edge of the support); the placement happens when it has
+        // ended, and the walk back to the middle of the cell after it (tickEdgePlacement). The next task ticks are held until then.
+        WalkedStep lean = InCellWalk.beginEdgeShift(bot, origin, direction, "descend_detour_support");
+        if (lean == null) {
             BotLog.action(bot, "descend_detour_support_failed",
                     "origin", origin.toShortString(),
                     "landing", landing.toShortString(),
@@ -1369,57 +1607,99 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     "reason", "support_edge_unreachable");
             return false;
         }
-        ActionResult placed = ActionResult.failed("placement_not_attempted");
-        boolean returned;
-        try {
-            placed = BuildAction.placeBlock(
-                    bot, origin.below(), direction, InteractionHand.MAIN_HAND);
-        } finally {
-            returned = FakePlayerMotion.returnToBlockCenter(
-                    bot, origin, "descend_detour_support");
+        edge = new EdgePlacement(origin, landing, support, direction, item, lean);
+        return true;
+    }
+
+    /**
+     * Carries the sneak-bridge on (always holds the tick): lean over the edge, place the floor block against the side face of the
+     * support, walk back to the middle of the cell, then check the world receipt. A pause or restart in between cancels the step and
+     * the pose is re-derived afterwards ({@link #holdForStep}).
+     */
+    private void tickEdgePlacement(AIPlayerEntity bot, ServerLevel world) {
+        EdgePlacement current = edge;
+        if (!current.step.ended()) {
+            return;
         }
-        if (!returned) {
-            fail("descend_detour_support_return_failed origin=" + origin.toShortString());
+        WalkedStep.Result result = current.step.outcome();
+        DetourEdge detour = new DetourEdge(current.origin, current.landing);
+        if (current.stage == EdgeStage.SHIFTING) {
+            if (result == null || !result.succeeded()) {
+                edge = null;
+                bot.getActionPack().stopMovement();
+                poseUnsettled = true;
+                unsettledTicks = 0;
+                if (result != null && !"not_supported".equals(result.reason())) {
+                    failedStepEdges.add(detour);
+                    BotLog.action(bot, "descend_detour_support_failed",
+                            "origin", current.origin.toShortString(),
+                            "landing", current.landing.toShortString(),
+                            "support", current.support.toShortString(),
+                            "reason", "support_edge_unreachable");
+                }
+                return;
+            }
+            ActionResult placed = ActionResult.failed("placement_not_attempted");
+            try {
+                placed = BuildAction.placeBlock(
+                        bot, current.origin.below(), current.direction, InteractionHand.MAIN_HAND);
+            } finally {
+                current.placeFailure = placed.isFailed() ? placed.reason() : null;
+                current.step = InCellWalk.beginEdgeReturn(bot, current.origin, "descend_detour_support");
+                current.stage = EdgeStage.RETURNING;
+            }
+            return;
+        }
+        edge = null;
+        bot.getActionPack().stopMovement();
+        if (result == null) {
+            // Cancelled (a pause, a restart, another controller took the pack): the lean is walked back by holdForStep.
+            poseUnsettled = true;
+            unsettledTicks = 0;
+            return;
+        }
+        if (!result.succeeded()) {
+            fail("descend_detour_support_return_failed origin=" + current.origin.toShortString());
             BotLog.action(bot, "descend_detour_support_failed",
-                    "origin", origin.toShortString(),
-                    "landing", landing.toShortString(),
-                    "support", support.toShortString(),
+                    "origin", current.origin.toShortString(),
+                    "landing", current.landing.toShortString(),
+                    "support", current.support.toShortString(),
                     "reason", "support_edge_return_failed");
-            return true;
+            return;
         }
-        if (placed.isFailed()) {
+        if (current.placeFailure != null) {
+            failedStepEdges.add(detour);
             BotLog.action(bot, "descend_detour_support_failed",
-                    "origin", origin.toShortString(),
-                    "landing", landing.toShortString(),
-                    "support", support.toShortString(),
-                    "reason", placed.reason());
-            return false;
+                    "origin", current.origin.toShortString(),
+                    "landing", current.landing.toShortString(),
+                    "support", current.support.toShortString(),
+                    "reason", current.placeFailure);
+            return;
         }
 
         Standability.clearCache();
-        BlockState receipt = world.getBlockState(support);
+        BlockState receipt = world.getBlockState(current.support);
         if (!receipt.getFluidState().isEmpty()
-                || receipt.getCollisionShape(world, support).isEmpty()
+                || receipt.getCollisionShape(world, current.support).isEmpty()
                 || Standability.isDangerous(receipt)) {
             fail("descend_no_safe_landing support_receipt_invalid="
-                    + support.toShortString());
+                    + current.support.toShortString());
             BotLog.action(bot, "descend_detour_support_failed",
-                    "origin", origin.toShortString(),
-                    "landing", landing.toShortString(),
-                    "support", support.toShortString(),
+                    "origin", current.origin.toShortString(),
+                    "landing", current.landing.toShortString(),
+                    "support", current.support.toShortString(),
                     "reason", "invalid_world_receipt");
-            return true;
+            return;
         }
 
-        markStarted(bot, origin);
+        markStarted(bot, current.origin);
         lastProgressTick = totalBudget();
         BotLog.action(bot, "descend_detour_support_placed",
-                "origin", origin.toShortString(),
-                "landing", landing.toShortString(),
-                "support", support.toShortString(),
-                "item", item,
+                "origin", current.origin.toShortString(),
+                "landing", current.landing.toShortString(),
+                "support", current.support.toShortString(),
+                "item", current.item,
                 "stone_like_reserve", MiningBudget.EMERGENCY_STONE_LIKE);
-        return true;
     }
 
     /** Reads only visible neighbours; hidden cells never become implicit lava-scan authority. */
@@ -1602,7 +1882,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * observable right now (natural open terrain, a previously mined cavity, or a nearby exposed
      * pocket — never a peek through solid rock). Cells still hidden behind unmined rock report
      * UNKNOWN and never block progress; mining ahead legitimately exposes them, and the
-     * {@code descendInto}/{@code stepToStandable} landing check below reacts the instant that
+     * walked-step landing check (WalkedStep.refusal) below reacts the instant that
      * happens by rejecting the direction and rotating away.
      */
     private boolean isViableDescentDirection(AIPlayerEntity bot,

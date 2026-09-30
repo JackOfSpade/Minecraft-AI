@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
@@ -506,7 +507,8 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "OccupiedStepGT");
     }
 
-    @GameTest(maxTicks = 20)
+    // The flat step onto the safe cell is walked: 6 game ticks plus the tick that settles it.
+    @GameTest(maxTicks = 80)
     public void descendLateralDetourRejectsUnsupportedAirShaft(GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(4, 8, 20));
         clearVolume(context, start, 4);
@@ -522,26 +524,26 @@ public final class UndergroundSafetyGameTests {
         // NORTH's own unsupported shaft is observably empty all the way down, so it is rejected
         // outright on the first tick exactly as before. EAST's deeper landing is hidden behind its
         // own solid floor tile, so rotateStair now needs one tick just to pick EAST (a real player
-        // cannot yet know what's under a floor they have not stood on); a second tick recognizes
-        // that floor is already an observed, dry, standable landing and takes the flat step onto
+        // cannot yet know what's under a floor they have not stood on); the next recognizes
+        // that floor is already an observed, dry, standable landing and walks onto
         // it without ever mining through it.
-        for (int i = 0; i < 5 && task.state() == TaskState.RUNNING
-                && !bot.blockPosition().equals(safeEast); i++) {
-            task.tick(bot);
-        }
-
-        require(context, task.state() == TaskState.RUNNING,
-                "descend detour ended unexpectedly: " + task.state() + ":" + task.failureReason());
-        require(context, bot.blockPosition().equals(safeEast),
-                "descend detour did not skip the unsupported north shaft: "
-                        + start.toShortString() + " -> " + bot.blockPosition().toShortString());
-        require(context, bot.blockPosition().getY() >= start.getY() - 1,
-                "descend detour fell below its verified landing");
-        task.cancel(bot, "gametest_complete");
-        finish(context, bot, "DescendDetourGT");
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 60,
+                        "descend detour did not skip the unsupported north shaft: " + start.toShortString() + " -> the east cell",
+                        () -> bot.blockPosition().equals(safeEast) && bot.getActionPack().stepIdle()),
+                () -> {
+                    require(context, task.state() == TaskState.RUNNING,
+                            "descend detour ended unexpectedly: " + task.state() + ":" + task.failureReason());
+                    require(context, bot.blockPosition().getY() >= start.getY() - 1,
+                            "descend detour fell below its verified landing");
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, bot, "DescendDetourGT");
+                    return true;
+                });
     }
 
-    @GameTest(maxTicks = 20)
+    // Two flat steps are walked (6 game ticks each plus the tick that settles them).
+    @GameTest(maxTicks = 100)
     public void descendLateralDetourKeepsHeadingInsteadOfReversingInTwoCellLoop(
             GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(12, 8, 20));
@@ -556,31 +558,30 @@ public final class UndergroundSafetyGameTests {
         AIPlayerEntity bot = spawn(context, "DescendHeadingGT", start);
         DescendToYTask task = new DescendToYTask(start.getY() - 5);
         task.start(bot);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(north),
-                "first lateral move did not enter the north corridor: "
-                        + start.toShortString() + " -> " + bot.blockPosition().toShortString());
-
-        // From `north`, continuing NORTH is observably a real unsupported drop (rejected outright).
-        // WEST's own deeper landing is hidden behind its solid floor tile, so -- exactly like the
-        // flat-landing rim case -- one tick is spent just rotating onto WEST (rotateStair now tries
-        // the sideways options before ever reversing back toward `start`) and a second recognizes
-        // that floor is already open, dry and standable and steps onto it without mining.
-        for (int i = 0; i < 5 && task.state() == TaskState.RUNNING
-                && !bot.blockPosition().equals(westExit); i++) {
-            task.tick(bot);
-        }
-        require(context, task.state() == TaskState.RUNNING,
-                "heading-aware detour ended unexpectedly: "
-                        + task.state() + ":" + task.failureReason());
-        require(context, bot.blockPosition().equals(westExit),
-                "detour reversed south instead of trying the west exit: "
-                        + north.toShortString() + " -> " + bot.blockPosition().toShortString());
-        task.cancel(bot, "gametest_complete");
-        finish(context, bot, "DescendHeadingGT");
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 40,
+                        "first lateral move did not enter the north corridor: " + start.toShortString() + " -> the north cell",
+                        () -> bot.blockPosition().equals(north) && bot.getActionPack().stepIdle()),
+                // From `north`, continuing NORTH is observably a real unsupported drop (rejected outright).
+                // WEST's own deeper landing is hidden behind its solid floor tile, so -- exactly like the
+                // flat-landing rim case -- one tick is spent just rotating onto WEST (rotateStair now tries
+                // the sideways options before ever reversing back toward `start`) and the next recognizes
+                // that floor is already open, dry and standable and walks onto it without mining.
+                DescendTickStages.tickUntil(context, task, bot, 40,
+                        "detour reversed south instead of trying the west exit: " + north.toShortString() + " -> the west exit",
+                        () -> bot.blockPosition().equals(westExit) && bot.getActionPack().stepIdle()),
+                () -> {
+                    require(context, task.state() == TaskState.RUNNING,
+                            "heading-aware detour ended unexpectedly: "
+                                    + task.state() + ":" + task.failureReason());
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, bot, "DescendHeadingGT");
+                    return true;
+                });
     }
 
-    @GameTest(maxTicks = 20)
+    // Two flat steps are walked (6 game ticks each plus the tick that settles them).
+    @GameTest(maxTicks = 100)
     public void descendLateralDetourNeverReplaysATraversedDirectedEdge(GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(18, 8, 20));
         clearVolume(context, start, 4);
@@ -593,47 +594,74 @@ public final class UndergroundSafetyGameTests {
         AIPlayerEntity bot = spawn(context, "DescendEdgeLoopGT", start);
         DescendToYTask task = new DescendToYTask(start.getY() - 5);
         task.start(bot);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(north),
-                "fixture did not traverse A->B: " + bot.blockPosition().toShortString());
+        Map<String, String>[] afterBacktrack = new Map[1];
+        DescendToYTask[] restoredTask = new DescendToYTask[1];
+        int[] restoredTicks = {0};
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 40,
+                        "fixture did not traverse A->B: " + start.toShortString() + " -> the north cell",
+                        () -> bot.blockPosition().equals(north) && bot.getActionPack().stepIdle()
+                                && "1".equals(task.checkpoint().get("lateral_detours"))),
+                // From `north`, continuing NORTH is an observable, confirmed unsupported drop (rejected
+                // outright). EAST/WEST are equally open dead air. SOUTH's own deeper landing is hidden
+                // behind `start`'s floor tile, so -- exactly like the other rim/heading fixtures -- one
+                // tick is spent only rotating onto SOUTH before the next physically retraces the one
+                // necessary B->A backtrack via the flat-landing step.
+                DescendTickStages.tickUntil(context, task, bot, 40,
+                        "fixture did not permit the one necessary B->A backtrack",
+                        () -> bot.blockPosition().equals(start) && bot.getActionPack().stepIdle()
+                                && "2".equals(task.checkpoint().get("lateral_detours"))),
+                () -> {
+                    require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(start),
+                            "fixture did not permit the one necessary B->A backtrack: "
+                                    + task.state() + ":" + task.failureReason()
+                                    + " at=" + bot.blockPosition().toShortString());
+                    afterBacktrack[0] = task.checkpoint();
+                    require(context, "2".equals(afterBacktrack[0].get("lateral_detours"))
+                                    && afterBacktrack[0].getOrDefault("traversed_detour_edges", "")
+                                    .split(";", -1).length == 2,
+                            "directed detour edges were not durably recorded: " + afterBacktrack[0]);
 
-        // From `north`, continuing NORTH is an observable, confirmed unsupported drop (rejected
-        // outright). EAST/WEST are equally open dead air. SOUTH's own deeper landing is hidden
-        // behind `start`'s floor tile, so -- exactly like the other rim/heading fixtures -- one
-        // tick is spent only rotating onto SOUTH before a second physically retraces the one
-        // necessary B->A backtrack via the flat-landing step.
-        for (int i = 0; i < 5 && task.state() == TaskState.RUNNING
-                && !bot.blockPosition().equals(start); i++) {
-            task.tick(bot);
-        }
-        require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(start),
-                "fixture did not permit the one necessary B->A backtrack: "
-                        + task.state() + ":" + task.failureReason()
-                        + " at=" + bot.blockPosition().toShortString());
-        Map<String, String> afterBacktrack = task.checkpoint();
-        require(context, "2".equals(afterBacktrack.get("lateral_detours"))
-                        && afterBacktrack.getOrDefault("traversed_detour_edges", "")
-                        .split(";", -1).length == 2,
-                "directed detour edges were not durably recorded: " + afterBacktrack);
-
-        task.cancel(bot, "gametest_restart");
-        DescendToYTask restored = new DescendToYTask(start.getY() - 5, afterBacktrack);
-        restored.start(bot);
-        restored.tick(bot);
-        require(context, restored.state() == TaskState.FAILED
-                        && restored.failureReason().startsWith("descend_no_safe_landing"),
-                "restored two-cell detour did not fail closed after exhausting fresh edges: "
-                        + restored.state() + ":" + restored.failureReason());
-        require(context, bot.blockPosition().equals(start),
-                "restored Descend replayed A->B after A->B->A: "
-                        + bot.blockPosition().toShortString());
-        require(context, "2".equals(restored.checkpoint().get("lateral_detours")),
-                "restored two-cell loop consumed the full lateral budget: "
-                        + restored.checkpoint());
-        finish(context, bot, "DescendEdgeLoopGT");
+                    task.cancel(bot, "gametest_restart");
+                    DescendToYTask restored = new DescendToYTask(start.getY() - 5, afterBacktrack[0]);
+                    restored.start(bot);
+                    restoredTask[0] = restored;
+                    return true;
+                },
+                // The walked step ends as soon as the bot is in the cell, wherever in it (the old teleporting step centred it), and from
+                // the edge of the cell the south landing is hidden behind the floor tile, so the restored task needs a tick to reject
+                // that direction before the last fresh edge is gone: it fails closed within a few ticks.
+                () -> {
+                    DescendToYTask restored = restoredTask[0];
+                    if (restored.state() == TaskState.RUNNING) {
+                        require(context, ++restoredTicks[0] <= 10, "restored Descend did not fail closed within 10 ticks: "
+                                + restored.checkpoint());
+                        restored.tick(bot);
+                    }
+                    return restored.state() != TaskState.RUNNING;
+                },
+                () -> {
+                    DescendToYTask restored = restoredTask[0];
+                    require(context, restored.state() == TaskState.FAILED
+                                    && restored.failureReason().startsWith("descend_no_safe_landing"),
+                            "restored two-cell detour did not fail closed after exhausting fresh edges: "
+                                    + restored.state() + ":" + restored.failureReason());
+                    require(context, bot.blockPosition().equals(start),
+                            "restored Descend replayed A->B after A->B->A: "
+                                    + bot.blockPosition().toShortString());
+                    require(context, "2".equals(restored.checkpoint().get("lateral_detours")),
+                            "restored two-cell loop consumed the full lateral budget: "
+                                    + restored.checkpoint());
+                    require(context, TeleportAudit.corrections(bot) == 0,
+                            "the bot was teleported: " + TeleportAudit.lastCaller(bot));
+                    finish(context, bot, "DescendEdgeLoopGT");
+                    return true;
+                });
     }
 
-    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_descend_rolls_back_collapsed_same_level_detour_and_retries_from_origin", maxTicks = 180)
+    // The flat detour, the flat retreat out of the gravel and the flat retry are each walked (6 game ticks plus the settle tick),
+    // and the gravel that reoccupied the detour is broken with a shovel before the retry.
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_descend_rolls_back_collapsed_same_level_detour_and_retries_from_origin", maxTicks = 320)
     public void descendRollsBackCollapsedSameLevelDetourAndRetriesFromOrigin(
             GameTestHelper context) {
         BlockPos origin = context.absolutePos(new BlockPos(24, 10, 20));
@@ -648,52 +676,61 @@ public final class UndergroundSafetyGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SHOVEL));
         DescendToYTask task = new DescendToYTask(origin.getY() - 5);
         task.start(bot);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(detour),
-                "fixture did not issue its same-level detour: " + bot.blockPosition());
-        require(context, "1".equals(task.checkpoint().get("lateral_detours")),
-                "issued detour was not recorded: " + task.checkpoint());
-
-        float healthBefore = bot.getHealth();
-        context.getLevel().setBlock(detour,
-                Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
-        Standability.clearCache();
-        task.tick(bot);
-
-        require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(origin),
-                "collapsed detour did not physically retreat to its factual origin: "
-                        + task.state() + ":" + task.failureReason()
-                        + " at=" + bot.blockPosition().toShortString());
-        Map<String, String> rolledBack = task.checkpoint();
-        require(context, "0".equals(rolledBack.get("lateral_detours"))
-                        && rolledBack.getOrDefault("traversed_detour_edges", "").isEmpty(),
-                "collapsed detour retained uncommitted graph debt: " + rolledBack);
-        require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                "detour rollback lost health before retreat");
-
-        context.failIfEver(() -> {
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(bot);
-            }
-            require(context, task.state() != TaskState.FAILED,
-                    "detour retry failed after rollback: " + task.failureReason());
-            if (!bot.blockPosition().equals(detour)) {
-                return;
-            }
-            Map<String, String> retried = task.checkpoint();
-            require(context, "1".equals(retried.get("lateral_detours"))
-                            && !retried.getOrDefault("traversed_detour_edges", "").isEmpty(),
-                    "cleared detour was not retried transactionally: " + retried);
-            require(context, context.getLevel().getBlockState(detour).isAir(),
-                    "retry entered the detour before physically clearing gravel");
-            require(context, bot.getHealth() == healthBefore,
-                    "bot lost health while clearing and retrying the detour");
-            task.cancel(bot, "gametest_complete");
-            finish(context, bot, "DescendDetourRollbackGT");
-        });
+        float[] healthBefore = {0.0F};
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 40,
+                        "fixture did not issue its same-level detour",
+                        () -> bot.blockPosition().equals(detour) && bot.getActionPack().stepIdle()
+                                && "1".equals(task.checkpoint().get("lateral_detours"))),
+                () -> {
+                    require(context, "1".equals(task.checkpoint().get("lateral_detours")),
+                            "issued detour was not recorded: " + task.checkpoint());
+                    healthBefore[0] = bot.getHealth();
+                    context.getLevel().setBlock(detour,
+                            Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
+                    Standability.clearCache();
+                    return true;
+                },
+                DescendTickStages.tickUntil(context, task, bot, 40,
+                        "collapsed detour did not physically retreat to its factual origin",
+                        () -> bot.blockPosition().equals(origin) && bot.getActionPack().stepIdle()
+                                && "0".equals(task.checkpoint().get("lateral_detours"))),
+                () -> {
+                    require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(origin),
+                            "collapsed detour did not physically retreat to its factual origin: "
+                                    + task.state() + ":" + task.failureReason()
+                                    + " at=" + bot.blockPosition().toShortString());
+                    Map<String, String> rolledBack = task.checkpoint();
+                    require(context, "0".equals(rolledBack.get("lateral_detours"))
+                                    && rolledBack.getOrDefault("traversed_detour_edges", "").isEmpty(),
+                            "collapsed detour retained uncommitted graph debt: " + rolledBack);
+                    require(context, bot.isAlive() && bot.getHealth() == healthBefore[0],
+                            "detour rollback lost health before retreat");
+                    return true;
+                },
+                DescendTickStages.tickUntil(context, task, bot, 200,
+                        "detour retry did not enter the cleared detour",
+                        () -> bot.blockPosition().equals(detour) && bot.getActionPack().stepIdle()
+                                && "1".equals(task.checkpoint().get("lateral_detours"))),
+                () -> {
+                    require(context, task.state() != TaskState.FAILED,
+                            "detour retry failed after rollback: " + task.failureReason());
+                    Map<String, String> retried = task.checkpoint();
+                    require(context, "1".equals(retried.get("lateral_detours"))
+                                    && !retried.getOrDefault("traversed_detour_edges", "").isEmpty(),
+                            "cleared detour was not retried transactionally: " + retried);
+                    require(context, context.getLevel().getBlockState(detour).isAir(),
+                            "retry entered the detour before physically clearing gravel");
+                    require(context, bot.getHealth() == healthBefore[0],
+                            "bot lost health while clearing and retrying the detour");
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, bot, "DescendDetourRollbackGT");
+                    return true;
+                });
     }
 
-    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_descend_restored_upper_detour_retreats_down_to_persisted_origin", maxTicks = 80)
+    // The hop up to the upper detour and the retreat down out of the gravel are walked (a few game ticks each plus the settle tick).
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_descend_restored_upper_detour_retreats_down_to_persisted_origin", maxTicks = 160)
     public void descendRestoredUpperDetourRetreatsDownToPersistedOrigin(
             GameTestHelper context) {
         BlockPos origin = context.absolutePos(new BlockPos(30, 9, 20));
@@ -709,42 +746,57 @@ public final class UndergroundSafetyGameTests {
         AIPlayerEntity bot = spawn(context, "DescendUpperRollbackGT", origin);
         DescendToYTask first = new DescendToYTask(origin.getY() - 5);
         first.start(bot);
-        first.tick(bot);
-        require(context, bot.blockPosition().equals(upperDetour),
-                "fixture did not issue the upper detour: " + bot.blockPosition());
-        Map<String, String> checkpoint = first.checkpoint();
-        require(context, "1".equals(checkpoint.get("lateral_detours"))
-                        && !checkpoint.getOrDefault("traversed_detour_edges", "").isEmpty(),
-                "upper detour checkpoint did not retain its edge: " + checkpoint);
-        first.cancel(bot, "gametest_restart");
+        float[] healthBefore = {0.0F};
+        DescendToYTask[] restoredTask = new DescendToYTask[1];
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, first, bot, 60,
+                        "fixture did not issue the upper detour",
+                        () -> bot.blockPosition().equals(upperDetour) && bot.getActionPack().stepIdle()
+                                && "1".equals(first.checkpoint().get("lateral_detours"))),
+                () -> {
+                    Map<String, String> checkpoint = first.checkpoint();
+                    require(context, "1".equals(checkpoint.get("lateral_detours"))
+                                    && !checkpoint.getOrDefault("traversed_detour_edges", "").isEmpty(),
+                            "upper detour checkpoint did not retain its edge: " + checkpoint);
+                    first.cancel(bot, "gametest_restart");
 
-        context.getLevel().setBlock(upperDetour,
-                Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
-        Standability.clearCache();
-        float healthBefore = bot.getHealth();
-        DescendToYTask restored = new DescendToYTask(origin.getY() - 5, checkpoint);
-        restored.start(bot);
-        restored.tick(bot);
+                    context.getLevel().setBlock(upperDetour,
+                            Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
+                    Standability.clearCache();
+                    healthBefore[0] = bot.getHealth();
+                    DescendToYTask restored = new DescendToYTask(origin.getY() - 5, checkpoint);
+                    restored.start(bot);
+                    restoredTask[0] = restored;
+                    return true;
+                },
+                DescendTickStages.tickUntil(context, () -> restoredTask[0], bot, 60,
+                        "restored upper detour did not take the exact diagonal-down retreat",
+                        () -> bot.blockPosition().equals(origin) && bot.getActionPack().stepIdle()
+                                && "0".equals(restoredTask[0].checkpoint().get("lateral_detours"))),
+                () -> {
+                    DescendToYTask restored = restoredTask[0];
+                    require(context, restored.state() == TaskState.RUNNING
+                                    && bot.blockPosition().equals(origin),
+                            "restored upper detour did not take the exact diagonal-down retreat: "
+                                    + restored.state() + ":" + restored.failureReason()
+                                    + " at=" + bot.blockPosition().toShortString());
+                    Map<String, String> rolledBack = restored.checkpoint();
+                    require(context, "0".equals(rolledBack.get("lateral_detours"))
+                                    && rolledBack.getOrDefault("traversed_detour_edges", "").isEmpty(),
+                            "restored upper collapse retained graph debt: " + rolledBack);
+                    require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
+                            "restored physical retreat incorrectly delegated to NavSafetyNet");
+                    require(context, bot.isAlive() && bot.getHealth() == healthBefore[0],
+                            "restored upper retreat lost health");
 
-        require(context, restored.state() == TaskState.RUNNING
-                        && bot.blockPosition().equals(origin),
-                "restored upper detour did not take the exact diagonal-down retreat: "
-                        + restored.state() + ":" + restored.failureReason()
-                        + " at=" + bot.blockPosition().toShortString());
-        Map<String, String> rolledBack = restored.checkpoint();
-        require(context, "0".equals(rolledBack.get("lateral_detours"))
-                        && rolledBack.getOrDefault("traversed_detour_edges", "").isEmpty(),
-                "restored upper collapse retained graph debt: " + rolledBack);
-        require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
-                "restored physical retreat incorrectly delegated to NavSafetyNet");
-        require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                "restored upper retreat lost health");
-
-        restored.cancel(bot, "gametest_complete");
-        finish(context, bot, "DescendUpperRollbackGT");
+                    restored.cancel(bot, "gametest_complete");
+                    finish(context, bot, "DescendUpperRollbackGT");
+                    return true;
+                });
     }
 
-    @GameTest(maxTicks = 60)
+    // The 23 flat steps of the rim and the two lower landings are walked: 6 game ticks per flat step plus the tick that settles it.
+    @GameTest(maxTicks = 320)
     public void descendLateralBudgetResetsOnlyAfterAConfirmedLowerLanding(GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(4, 12, 20));
         List<BlockPos> upperCorridor = new ArrayList<>();
@@ -775,27 +827,33 @@ public final class UndergroundSafetyGameTests {
         AIPlayerEntity bot = spawn(context, "DescBudgetGT", start);
         DescendToYTask task = new DescendToYTask(targetLanding.getY());
         task.start(bot);
-        int maxSameLayerDebt = 0;
-        for (int tick = 0; tick < 55 && task.state() == TaskState.RUNNING; tick++) {
-            task.tick(bot);
-            maxSameLayerDebt = Math.max(maxSameLayerDebt,
-                    Integer.parseInt(task.checkpoint().get("lateral_detours")));
-        }
-
-        require(context, task.state() == TaskState.COMPLETED,
-                "cross-layer detour budget did not complete: "
-                        + task.state() + ":" + task.failureReason()
-                        + " at=" + bot.blockPosition().toShortString());
-        require(context, bot.blockPosition().equals(targetLanding),
-                "cross-layer detour ended at the wrong landing: expected="
-                        + targetLanding.toShortString() + " actual=" + bot.blockPosition().toShortString());
-        require(context, maxSameLayerDebt == 23,
-                "long cave-roof fixture did not cross its 23-edge supported rim: max_debt="
-                        + maxSameLayerDebt);
-        require(context, "0".equals(task.checkpoint().get("lateral_detours"))
-                        && "".equals(task.checkpoint().get("traversed_detour_edges")),
-                "confirmed lower landing retained stale detour history: " + task.checkpoint());
-        finish(context, bot, "DescBudgetGT");
+        int[] maxSameLayerDebt = {0};
+        DescendTickStages.run(context,
+                () -> {
+                    if (task.state() == TaskState.RUNNING) {
+                        task.tick(bot);
+                        maxSameLayerDebt[0] = Math.max(maxSameLayerDebt[0],
+                                Integer.parseInt(task.checkpoint().get("lateral_detours")));
+                    }
+                    return task.state() != TaskState.RUNNING;
+                },
+                () -> {
+                    require(context, task.state() == TaskState.COMPLETED,
+                            "cross-layer detour budget did not complete: "
+                                    + task.state() + ":" + task.failureReason()
+                                    + " at=" + bot.blockPosition().toShortString());
+                    require(context, bot.blockPosition().equals(targetLanding),
+                            "cross-layer detour ended at the wrong landing: expected="
+                                    + targetLanding.toShortString() + " actual=" + bot.blockPosition().toShortString());
+                    require(context, maxSameLayerDebt[0] == 23,
+                            "long cave-roof fixture did not cross its 23-edge supported rim: max_debt="
+                                    + maxSameLayerDebt[0]);
+                    require(context, "0".equals(task.checkpoint().get("lateral_detours"))
+                                    && "".equals(task.checkpoint().get("traversed_detour_edges")),
+                            "confirmed lower landing retained stale detour history: " + task.checkpoint());
+                    finish(context, bot, "DescBudgetGT");
+                    return true;
+                });
     }
 
     @GameTest(maxTicks = 20)
@@ -1008,8 +1066,14 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
-    public void descendPhysicallyRetreatsWhenGravelReoccupiesItsHeadInStrictSurvival(
+    /**
+     * Gravel reoccupies the head cell of a bot that stands on the landing of its first stair. The way back up the stair is a hop, and
+     * a body cannot rise through the block that took its head room, so no walked retreat exists; strict survival forbids the
+     * emergency teleport that used to lift the bot out. Descend clears the gravel with its shovel while it stands there: it neither
+     * moves nor loses health, and never teleports.
+     */
+    @GameTest(maxTicks = 160)
+    public void descendMinesTheGravelThatReoccupiesItsHeadWhenNoHopFitsInStrictSurvival(
             GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(20, 12, 12));
         clearVolume(context, start, 4);
@@ -1023,12 +1087,11 @@ public final class UndergroundSafetyGameTests {
             context.getLevel().setBlock(landing.above(),
                     Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        // Keep the following north stair solid so the second task tick confirms the first landing
-        // without immediately descending a second level. Its own top face must stay solid too --
-        // an already-open top would let Descend's honest climb-over shortcut clear this exact
-        // obstacle in a single free step (a real player climbs a chest-high block with open
-        // headroom instead of mining through it), which is correct behavior but would move the bot
-        // on this very tick instead of leaving it holding the confirmed landing this fixture needs.
+        // Keep the following north stair solid so the task confirms the first landing without immediately descending a second
+        // level. Its own top face must stay solid too -- an already-open top would let Descend's honest climb-over shortcut clear
+        // this exact obstacle in a single free step (a real player climbs a chest-high block with open headroom instead of
+        // mining through it), which is correct behavior but would move the bot instead of leaving it holding the confirmed
+        // landing this fixture needs.
         context.getLevel().setBlock(buriedLanding.north(),
                 Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         context.getLevel().setBlock(buriedLanding.north().above(),
@@ -1037,9 +1100,10 @@ public final class UndergroundSafetyGameTests {
                 Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "DescendGravelGT", start);
-        // The descend tool gate typed-fails a pickless stair dig; this fixture tests gravel
-        // retreat physics, so provision the ordinary descent pick like a real mission would.
+        // The descend tool gate typed-fails a pickless stair dig; this fixture tests the gravel collapse, so provision the ordinary
+        // descent pick like a real mission would, and a shovel for the gravel.
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SHOVEL));
         bot.setHealth(bot.getMaxHealth());
         bot.setOnGround(true);
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
@@ -1050,60 +1114,48 @@ public final class UndergroundSafetyGameTests {
 
         DescendToYTask task = new DescendToYTask(start.getY() - 2);
         task.start(bot);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(buriedLanding),
-                "fixture did not enter its first factual stair: "
-                        + start.toShortString() + " -> " + bot.blockPosition().toShortString());
-        task.tick(bot);
-        require(context, task.state() == TaskState.RUNNING
-                        && bot.blockPosition().equals(buriedLanding),
-                "fixture did not hold the confirmed landing before collapse: "
-                        + task.state() + ":" + task.failureReason());
-
         BlockPos reoccupiedHead = buriedLanding.above();
-        context.getLevel().setBlock(reoccupiedHead,
-                Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
-        Standability.clearCache();
-        require(context, !context.getLevel().getBlockState(reoccupiedHead)
-                        .getCollisionShape(context.getLevel(), reoccupiedHead).isEmpty(),
-                "gravel fixture did not reoccupy the bot's head cell");
-        float healthBefore = bot.getHealth();
-        BlockPos before = bot.blockPosition().immutable();
-
-        task.tick(bot);
-
-        BlockPos after = bot.blockPosition();
-        int dx = Math.abs(after.getX() - before.getX());
-        int dy = Math.abs(after.getY() - before.getY());
-        int dz = Math.abs(after.getZ() - before.getZ());
-        int changedAxes = (dx == 0 ? 0 : 1) + (dy == 0 ? 0 : 1) + (dz == 0 ? 0 : 1);
-        require(context, after.equals(start),
-                "descend did not retreat to its previous factual landing: "
-                        + before.toShortString() + " -> " + after.toShortString());
-        require(context, dx <= 1 && dy <= 1 && dz <= 1 && changedAxes == 2,
-                "blocked-body recovery used a non-adjacent movement: " + before + " -> " + after);
-        require(context, context.getLevel().getBlockState(reoccupiedHead).is(Blocks.GRAVEL),
-                "retreat fixture was silently cleared instead of exited physically");
-        require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                "bot took suffocation damage before physical retreat");
-        require(context, task.state() == TaskState.RUNNING,
-                "descend ended during recoverable gravel collapse: "
-                        + task.state() + ":" + task.failureReason());
-        require(context, bot.getActionPack().isMiningIdle(),
-                "blocked-body retreat left the abandoned stair miner active");
-
-        // The collapsed NORTH edge is durable for this origin. One tick rotates, the next enters
-        // the prepared EAST stair; blindly retrying NORTH would bury the bot again.
-        task.tick(bot);
-        task.tick(bot);
-        require(context, bot.blockPosition().equals(alternateLanding),
-                "descend retried the collapsed edge instead of rotating to the safe stair: "
-                        + bot.blockPosition().toShortString());
-        require(context, bot.isAlive() && bot.getHealth() == healthBefore,
-                "bot lost health after rotating away from the collapsed stair");
-
-        task.cancel(bot, "gametest_complete");
-        finish(context, bot, "DescendGravelGT");
+        float[] healthBefore = {0.0F};
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 60, "fixture did not enter its first factual stair",
+                        () -> bot.blockPosition().equals(buriedLanding) && bot.getActionPack().stepIdle()
+                                && !"none".equals(task.checkpoint().get("pending_landing_target"))),
+                // The next task tick confirms the landing (the pending landing is cleared) and starts mining the solid north stair.
+                DescendTickStages.tickUntil(context, task, bot, 10, "fixture did not hold the confirmed landing before collapse",
+                        () -> "none".equals(task.checkpoint().get("pending_landing_target"))),
+                () -> {
+                    require(context, task.state() == TaskState.RUNNING
+                                    && bot.blockPosition().equals(buriedLanding),
+                            "fixture did not hold the confirmed landing before collapse: "
+                                    + task.state() + ":" + task.failureReason());
+                    context.getLevel().setBlock(reoccupiedHead,
+                            Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
+                    Standability.clearCache();
+                    require(context, !context.getLevel().getBlockState(reoccupiedHead)
+                                    .getCollisionShape(context.getLevel(), reoccupiedHead).isEmpty(),
+                            "gravel fixture did not reoccupy the bot's head cell");
+                    healthBefore[0] = bot.getHealth();
+                    return true;
+                },
+                DescendTickStages.tickUntil(context, task, bot, 100, "descend did not clear the gravel on its head",
+                        () -> {
+                            require(context, bot.blockPosition().equals(buriedLanding),
+                                    "blocked-body recovery moved the bot out of the gravel without a walkable retreat: "
+                                            + buriedLanding.toShortString() + " -> " + bot.blockPosition().toShortString());
+                            require(context, bot.isAlive() && bot.getHealth() == healthBefore[0],
+                                    "bot took suffocation damage before the gravel was cleared");
+                            return context.getLevel().getBlockState(reoccupiedHead).isAir();
+                        }),
+                () -> {
+                    require(context, task.state() == TaskState.RUNNING,
+                            "descend ended during recoverable gravel collapse: "
+                                    + task.state() + ":" + task.failureReason());
+                    require(context, bot.blockPosition().equals(buriedLanding),
+                            "descend left its landing while clearing the gravel: " + bot.blockPosition().toShortString());
+                    task.cancel(bot, "gametest_complete");
+                    finish(context, bot, "DescendGravelGT");
+                    return true;
+                });
     }
 
     @GameTest(maxTicks = 40)
