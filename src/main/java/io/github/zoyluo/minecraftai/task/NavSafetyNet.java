@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
@@ -33,8 +35,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * - It runs after TaskManager.tickAll (task-driven ActionPack) (see the tick order in
  *   MinecraftAiMod), so it can override the task's movement input on a dangerous tick, and the
  *   task's input takes effect normally again once the danger is resolved.
- * - Does not kill the task; the fake player has no client-side travel, so returning to shore in
- *   water must use verified, cell-by-cell physical movement.
+ * - Does not kill the task. Returning to shore in water is done the way a player does it: cell by cell
+ *   with {@link WalkedStep}s (forward and jump keys, real swim physics at about two blocks per second),
+ *   never by moving the bot (R5: no micro-teleports). A step runs over several ticks; the crisis
+ *   machine plans the next one when it has ended.
  */
 public final class NavSafetyNet {
     public static final NavSafetyNet INSTANCE = new NavSafetyNet();
@@ -94,8 +98,8 @@ public final class NavSafetyNet {
     //   Standability.clearCache() below still runs unconditionally every tick for every *other*
     //   standability read this method makes), so an unbounded cache could hand back a route through
     //   a cell that is no longer actually passable. A short, bounded staleness window keeps that
-    //   risk negligible without paying the full scan cost every tick: FakePlayerMotion.stepToStandable
-    //   and swimStepTo both re-verify the specific destination cell's *current* state before moving
+    //   risk negligible without paying the full scan cost every tick: WalkedStep.refusal
+    //   (the check every walked step starts with) re-verifies the specific destination cell's *current* state before moving
     //   and simply refuse the step (returning false, falling through to the remaining fallbacks
     //   below) if the cached route's next cell turned out to no longer be valid -- so a stale route
     //   can never move the bot into now-unsafe terrain, only delay noticing a shape change by at
@@ -133,6 +137,7 @@ public final class NavSafetyNet {
         waterEscapeCache.remove(id);
         breathableStandableCache.remove(id);
         suffocationEscapes.remove(id);
+        rescueSteps.remove(id);
     }
 
     public void clearAll() {
@@ -144,6 +149,7 @@ public final class NavSafetyNet {
         waterEscapeCache.clear();
         breathableStandableCache.clear();
         suffocationEscapes.clear();
+        rescueSteps.clear();
     }
 
     /**
@@ -306,6 +312,20 @@ public final class NavSafetyNet {
                     return true;
                 }
             }
+            // A rescue step in flight carries on by itself: nothing is re-planned until it has ended. A step somebody else
+            // left running is dropped, the rescue owns the bot.
+            if (rescueStepInFlight(bot)) {
+                throttledLog(server, bot, "navsafe_water_step", feet);
+                return true;
+            }
+            // A step that ends on the bank is done at the cell's edge, with the body still partly over the water: the last bit is a
+            // walk to the middle of the dry cell (the release above needs the body out of the water), not a new escape from a cell that
+            // is already dry.
+            if (bot.isInWater() && isDryStandableCell(world, feet) && WalkedStep.supported(bot)
+                    && beginRescueRecenter(bot, feet)) {
+                throttledLog(server, bot, "navsafe_water_step", feet);
+                return true;
+            }
             // First prove a physically connected water route. The old Euclidean-only shore
             // choice could select a dry cell directly behind a wall and then reject every first
             // step because it temporarily increased straight-line distance. In a flooded cave
@@ -313,12 +333,7 @@ public final class NavSafetyNet {
             WaterEscapeStep escape = cachedFindPhysicalWaterEscape(bot, world, feet, now);
             if (escape != null) {
                 waterRescueShore.put(bot.getUUID(), escape.shore().immutable());
-                boolean dryLanding = isDryStandableCell(world, escape.next());
-                boolean moved = dryLanding
-                        ? FakePlayerMotion.stepToStandable(
-                                bot, escape.next(), "navsafe_water_rescue")
-                        : FakePlayerMotion.swimStepTo(bot, escape.next(), "navsafe_water_rescue");
-                if (moved) {
+                if (beginRescueStep(bot, escape.next(), "navsafe_water_rescue")) {
                     throttledLog(server, bot, "navsafe_water_step", feet);
                     return true;
                 }
@@ -341,9 +356,7 @@ public final class NavSafetyNet {
             }
             if (shore != null) {
                 waterRescueShore.put(bot.getUUID(), shore.immutable());
-                // Server-side fake players do not execute client-authored travel, so merely setting
-                // forward/jump leaves them motionless. Advance one validated adjacent swim/shore
-                // cell per tick; this is ordinary local movement, not privileged teleportation.
+                // Advance one validated adjacent swim/shore cell by real inputs (a walked step): ordinary movement.
                 if (physicalStepTowardShore(bot, world, feet, shore)) {
                     throttledLog(server, bot, "navsafe_water_step", feet);
                     return true;
@@ -463,9 +476,64 @@ public final class NavSafetyNet {
                 && Standability.isStandable(world, candidate);
     }
 
-    private static boolean physicalStepTowardAir(AIPlayerEntity bot,
-                                                  ServerLevel world,
-                                                  BlockPos feet) {
+    /**
+     * The kind of {@link WalkedStep} that takes the bot from its cell onto the adjacent {@code cell}: a swim for a water cell, a walk,
+     * hop or drop for a dry landing (null when no walk covers the height difference). Shared by the rescue and the swim follower.
+     */
+    static WalkedStep.Kind stepKindTo(AIPlayerEntity bot, BlockPos cell) {
+        if (isDryStandableCell(bot.level(), cell)) {
+            return WalkedStepRules.walkKindFor(cell.getY() - bot.blockPosition().getY());
+        }
+        return WalkedStep.Kind.SWIM;
+    }
+
+    /** Bots whose action pack is running a step this net started (the water rescue). */
+    private final java.util.Set<UUID> rescueSteps = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Whether a rescue step is still running. Otherwise a step that somebody else left running is dropped: from here on the rescue
+     * owns the bot's keys.
+     */
+    private boolean rescueStepInFlight(AIPlayerEntity bot) {
+        var pack = bot.getActionPack();
+        if (rescueSteps.contains(bot.getUUID())) {
+            if (!pack.stepIdle()) {
+                return true;
+            }
+            rescueSteps.remove(bot.getUUID());
+            return false;
+        }
+        if (!pack.stepIdle()) {
+            pack.cancelStep();
+        }
+        return false;
+    }
+
+    /** Starts a walk to the middle of the bot's own dry cell (its body is still partly over the water); false when it is refused. */
+    private boolean beginRescueRecenter(AIPlayerEntity bot, BlockPos feet) {
+        net.minecraft.world.phys.Vec3 middle = net.minecraft.world.phys.Vec3.atBottomCenterOf(feet);
+        if (Math.hypot(middle.x - bot.getX(), middle.z - bot.getZ()) < WalkedStepRules.POINT_TOLERANCE) {
+            return false;
+        }
+        bot.getActionPack().runStep(WalkedStep.begin(bot, middle, WalkedStep.Kind.RECENTER, "navsafe_water_rescue"));
+        rescueSteps.add(bot.getUUID());
+        return true;
+    }
+
+    /** Starts a rescue step onto {@code cell} (never moves the bot itself); false when the step is refused. */
+    private boolean beginRescueStep(AIPlayerEntity bot, BlockPos cell, String reason) {
+        WalkedStep.Kind kind = stepKindTo(bot, cell);
+        if (kind == null || WalkedStep.refusal(bot, cell, kind) != null) {
+            return false;
+        }
+        bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason));
+        rescueSteps.add(bot.getUUID());
+        return true;
+    }
+
+    private boolean physicalStepTowardAir(AIPlayerEntity bot,
+                                          ServerLevel world,
+                                          BlockPos feet) {
         if (!isWaterSwimCell(world, feet)) {
             return false;
         }
@@ -477,7 +545,7 @@ public final class NavSafetyNet {
         if (!isWaterSwimCell(world, above)) {
             return false;
         }
-        return FakePlayerMotion.swimStepTo(bot, above, "navsafe_water_surface");
+        return beginRescueStep(bot, above, "navsafe_water_surface");
     }
 
     private record WaterEscapeStep(BlockPos next, BlockPos shore) {
@@ -678,10 +746,10 @@ public final class NavSafetyNet {
         return Optional.ofNullable(best);
     }
 
-    private static boolean physicalStepTowardShore(AIPlayerEntity bot,
-                                                   ServerLevel world,
-                                                   BlockPos feet,
-                                                   BlockPos shore) {
+    private boolean physicalStepTowardShore(AIPlayerEntity bot,
+                                            ServerLevel world,
+                                            BlockPos feet,
+                                            BlockPos shore) {
         double currentDistance = feet.distSqr(shore);
         java.util.List<BlockPos> candidates = new java.util.ArrayList<>();
         for (int dy : new int[]{1, 0, -1}) {
@@ -717,12 +785,7 @@ public final class NavSafetyNet {
         }
         candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.distSqr(shore)));
         for (BlockPos candidate : candidates) {
-            boolean waterCell = world.getFluidState(candidate).is(FluidTags.WATER)
-                    || world.getFluidState(candidate.above()).is(FluidTags.WATER);
-            boolean moved = waterCell
-                    ? FakePlayerMotion.swimStepTo(bot, candidate, "navsafe_water_rescue")
-                    : FakePlayerMotion.stepToStandable(bot, candidate, "navsafe_water_rescue");
-            if (moved) {
+            if (beginRescueStep(bot, candidate, "navsafe_water_rescue")) {
                 return true;
             }
         }

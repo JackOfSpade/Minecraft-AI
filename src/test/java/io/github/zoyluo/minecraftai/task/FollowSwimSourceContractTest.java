@@ -73,7 +73,7 @@ final class FollowSwimSourceContractTest {
         String recovery = read("task/FollowStuckRecovery.java");
         String dig = read("task/FollowDigOut.java");
 
-        int adjacent = recovery.indexOf("\"follow_recovery_step\"");
+        int adjacent = recovery.indexOf("beginStep(bot, current, best)");
         int start = recovery.indexOf("digOut.start(bot, target)");
         assertTrue(adjacent >= 0 && start > adjacent,
                 "dig-out must only be tried after every adjacent verified step failed");

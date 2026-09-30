@@ -104,7 +104,15 @@ final class FollowRecoverySourceContractTest {
         assertTrue(repayer.contains("!shelterExitDebt.matchesDimension(bot)"));
         assertTrue(repayer.contains("shelterExitDebt.ownsCurrentPlacement(bot, obstruction)"));
         assertTrue(repayer.contains("shelterExitMiner.begin(bot, obstruction)"));
-        assertTrue(repayer.contains("FakePlayerMotion.stepToStandable(bot, egress, \"follow_shelter_exit\")"));
+        assertTrue(repayer.contains("WalkedStep.begin(bot, egress, kind, \"follow_shelter_exit\")"),
+                "the doorway is walked through with real inputs");
+        assertFalse(repayer.contains("FakePlayerMotion"), "the shelter exit never teleports the bot");
+        assertTrue(read("task/FollowStuckRecovery.java").contains("WalkedStep.begin(bot, best, kind, \"follow_recovery_step\")")
+                        && !read("task/FollowStuckRecovery.java").contains("FakePlayerMotion"),
+                "the stuck-recovery step is a walked step, not a teleport");
+        assertTrue(read("task/FollowDigOut.java").contains("WalkedStep.begin(bot, ahead, kind, \"follow_dig_step\")")
+                        && !read("task/FollowDigOut.java").contains("FakePlayerMotion.step"),
+                "the dig-out walks into each opened cell");
     }
 
     private static String read(String relative) throws IOException {

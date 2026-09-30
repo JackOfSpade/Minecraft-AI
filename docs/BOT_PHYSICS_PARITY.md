@@ -74,6 +74,14 @@ the GameTests assert `TeleportAudit.corrections(bot) == 0`). What a teleport use
   gets the bot out with inputs: a vanilla-client style shove out of the block (at most 0.1 block per tick toward the nearest free side), a
   walked step onto an adjacent standable cell, or digging out the block at the head and then at the feet with the tool it has, at the real
   break time and only where a view ray from its own eye reaches; else it logs `navsafe_suffocation_trapped`.
+* **Water.** A bot swims by inputs: `SWIM` steps hold the forward key and the depth a swimmer holds (jump while the feet are in the lower part of
+  the cell, let go to sink), and a dive adds the downward push a client applies while shift is held in water (`goDownInWater`, 0.04 per
+  tick; the server-side bot has no client code that would). Measured (`NaturalSwimGameTests.legacyInputsSwimAndSurface`): about 2.6 blocks per
+  second across a pool and about 0.11 block per tick up. `FollowSwimming` (entering the water, greedy and routed swim steps, the way up)
+  and the `NavSafetyNet` water rescue run one step at a time and re-plan when it ends; the follower drops a step in flight as soon as its
+  lungs call for the way up (`FollowOxygen.SURFACE_FLOOR_AIR` is 200, the ascent estimate 0.1 block per tick). The drowning rescue takes
+  over at 120 air. `FollowStuckRecovery`'s adjacent step, `FollowDigOut`'s walk into each opened cell and `ShelterExitDebtRepayer`'s walk
+  out of the doorway are walked steps too.
 * **What still moves a bot.** Spawn and respawn (`LIFECYCLE`), the panel recall (`USER`, gated by `manualTeleport`), vanilla teleports, and
   the operator-profile emergency rescues (`PRIVILEGED`: suffocation climb, drowning, dark-trap and gather surfacing; never in strict
   survival). The `FakePlayerMotion` primitives remain for the task conversions that are still to come.

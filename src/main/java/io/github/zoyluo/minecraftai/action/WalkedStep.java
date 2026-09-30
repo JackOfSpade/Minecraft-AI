@@ -241,7 +241,7 @@ public final class WalkedStep {
             if (refused != null) {
                 return fail(refused);
             }
-            budget = WalkedStepRules.timeoutBudget(Math.hypot(point.x - position.x, point.z - position.z)
+            budget = WalkedStepRules.timeoutBudget(kind, Math.hypot(point.x - position.x, point.z - position.z)
                     + Math.abs(cell.getY() - bot.blockPosition().getY()));
             BotLog.action(bot, "walked_step_begin", "kind", kind, "reason", reason,
                     "from", bot.blockPosition().toShortString(), "to", point);
@@ -282,15 +282,24 @@ public final class WalkedStep {
         if (distance > 0.05D) {
             LookAction.lookHorizontallyAt(bot, new Vec3(point.x, bot.getY(), point.z));
         }
-        pack.setForward(WalkedStepRules.brakes(kind) ? (float) Math.min(1.0D, 0.4D + distance * 2.0D) : 1.0F);
+        // A swim straight up or down (the target is over the bot) has nothing to walk toward: the forward key would only drift it off its column.
+        boolean overhead = kind == Kind.SWIM && distance < WalkedStepRules.SWIM_OVERHEAD_DISTANCE;
+        pack.setForward(overhead ? 0.0F : WalkedStepRules.brakes(kind) ? (float) Math.min(1.0D, 0.4D + distance * 2.0D) : 1.0F);
         pack.setStrafing(0.0F);
         if (kind == Kind.SNEAK_SHIFT) {
             pack.setSneaking(true);
         } else if (kind != Kind.SWIM) {
             pack.setSprinting(false);
         }
+        if (kind == Kind.SWIM && cell.getY() < bot.blockPosition().getY() && bot.isInWater()) {
+            // A player dives by holding shift: the client adds a downward push of 0.04 per tick (LocalPlayer.aiStep -> goDownInWater); a
+            // clientless bot has no such client code, so the swim step applies the same push. Without it a sinking body only falls at
+            // about half a block per second.
+            Vec3 velocity = bot.getDeltaMovement();
+            bot.setDeltaMovement(velocity.x, velocity.y - WalkedStepRules.SWIM_DIVE_PUSH, velocity.z);
+        }
         boolean grounded = supported(bot);
-        boolean jump = WalkedStepRules.jumpNow(kind, grounded, bot.getY(), cell.getY(), bot.isUnderWater());
+        boolean jump = WalkedStepRules.jumpNow(kind, grounded, bot.getY(), cell.getY(), bot.isUnderWater(), bot.isInWater());
         if (kind == Kind.STEP_UP) {
             if (jump) {
                 pack.jumpOnce();

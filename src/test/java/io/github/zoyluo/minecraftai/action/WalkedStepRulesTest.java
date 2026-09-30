@@ -126,6 +126,29 @@ class WalkedStepRulesTest {
         assertFalse(WalkedStepRules.jumpNow(Kind.FLAT, true, 4.0D, 5, false));
         assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, true), "the head is under water: keep afloat");
         assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 3.0D, 4, false), "the target is higher");
-        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, false));
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, false), "feet in the lower part of the cell: hold the depth");
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.6D, 4, false), "feet high in the cell: no need to jump");
+    }
+
+    @Test
+    void aSwimmerHoldsItsDepthAndSinksToALowerCell() {
+        // Level: jump only while the feet are in the lower part of the cell (no bobbing up out of it, no sinking below it).
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 4, true));
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.5D, 4, true));
+        // Down: the target is a cell lower, the jump key stays up and gravity does the diving.
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 3, true));
+        // Up: keep jumping until the feet are in the target cell.
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.9D, 5, true));
+        // Afloat against a bank: the hop onto it holds jump although nothing is under the feet.
+        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, false, true));
+        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, false, false));
+    }
+
+    @Test
+    void aSwimStepIsGivenLongerThanAWalkBecauseASwimmerIsSlower() {
+        assertEquals(WalkedStepRules.timeoutBudget(2.0D), WalkedStepRules.timeoutBudget(Kind.FLAT, 2.0D));
+        assertEquals(WalkedStepRules.timeoutBudget(2.0D) * WalkedStepRules.SWIM_BUDGET_FACTOR,
+                WalkedStepRules.timeoutBudget(Kind.SWIM, 2.0D));
+        assertTrue(WalkedStepRules.timeoutBudget(Kind.SWIM, 1.0D) >= 40.0D, "one block of swimming is about ten ticks: at least a few times that");
     }
 }

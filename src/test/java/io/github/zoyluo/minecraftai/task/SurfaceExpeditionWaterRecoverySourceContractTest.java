@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks gathering and hunting to one shared, physical water-recovery handoff. */
@@ -20,10 +21,17 @@ class SurfaceExpeditionWaterRecoverySourceContractTest {
 
         assertTrue(safety.contains("public void requestWaterRescue(AIPlayerEntity bot)"));
         assertTrue(safety.contains("public boolean isWaterRescueActive(AIPlayerEntity bot)"));
-        assertTrue(safety.contains("FakePlayerMotion.swimStepTo("),
-                "wet rescue cells need an adjacent physical swim step; inputs alone do not travel");
-        assertTrue(safety.contains("FakePlayerMotion.stepToStandable("),
-                "the final dry rescue cell must be a supported physical landing");
+        // R5: real swim physics carries the bot by the forward and jump keys (BaritoneInputPhysicsProbeGameTests.waterAndSwimming and
+        // NaturalSwimGameTests.legacyInputsSwimAndSurface measured about two blocks per second), so the rescue walks and swims
+        // WalkedSteps and never calls a FakePlayerMotion teleport primitive.
+        assertTrue(safety.contains("WalkedStep.Kind.SWIM"),
+                "wet rescue cells are reached by an adjacent swim step (forward and jump keys)");
+        assertTrue(safety.contains("WalkedStep.begin(bot, cell, kind, reason)")
+                        && safety.contains("WalkedStepRules.walkKindFor("),
+                "the final dry rescue cell is a walked landing (step up, level or drop)");
+        for (String primitive : new String[]{"stepTo(", "stepToStandable(", "swimStepTo(", "jumpTo(", "returnToBlockCenter("}) {
+            assertFalse(safety.contains("FakePlayerMotion." + primitive), "the water rescue must not call FakePlayerMotion." + primitive);
+        }
         assertTrue(gather.contains("if (waitForDryGround(bot))"));
         assertTrue(hunt.contains("if (waitForDryGround(bot))"));
         assertTrue(gather.contains("NavSafetyNet.INSTANCE.requestWaterRescue(bot)"));

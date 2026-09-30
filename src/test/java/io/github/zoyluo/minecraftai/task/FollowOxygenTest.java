@@ -21,7 +21,7 @@ final class FollowOxygenTest {
     @Test
     void fullLungsAtAModestDepthAreNotAReasonToSurface() {
         assertFalse(FollowOxygen.shouldSurface(MAX_AIR, 1.0D, 10.0D));
-        assertFalse(FollowOxygen.shouldSurface(200, 1.0D, 10.0D));
+        assertFalse(FollowOxygen.shouldSurface(FollowOxygen.SURFACE_FLOOR_AIR + 10, 1.0D, 10.0D));
     }
 
     @Test
@@ -33,11 +33,11 @@ final class FollowOxygenTest {
 
     @Test
     void deeperMeansEarlierBecauseTheWayUpTakesLonger() {
-        // 40 blocks at 0.25 blocks/tick is 160 ticks, times 1.5 plus a 40 tick margin: 280 ticks.
-        assertTrue(FollowOxygen.shouldSurface(280, 1.0D, 40.0D));
-        assertFalse(FollowOxygen.shouldSurface(281, 1.0D, 40.0D));
-        assertTrue(FollowOxygen.shouldSurface(200, 1.0D, 40.0D));
-        assertFalse(FollowOxygen.shouldSurface(200, 1.0D, 20.0D));
+        // 12 blocks at 0.1 blocks/tick (a real swimmer's climb) is 120 ticks, times 1.5 plus a 40 tick margin: 220 ticks.
+        assertTrue(FollowOxygen.shouldSurface(220, 1.0D, 12.0D));
+        assertFalse(FollowOxygen.shouldSurface(221, 1.0D, 12.0D));
+        assertTrue(FollowOxygen.shouldSurface(250, 1.0D, 20.0D));
+        assertFalse(FollowOxygen.shouldSurface(250, 1.0D, 12.0D));
     }
 
     @Test
@@ -71,7 +71,8 @@ final class FollowOxygenTest {
     @Test
     void resumeLevelClearsTheWorstCaseSurfaceTriggerForADiveOfUsualDepth() {
         // Otherwise the bot would resume and immediately want to surface again.
-        assertFalse(FollowOxygen.shouldSurface((int) (MAX_AIR * FollowOxygen.RESUME_FRACTION), 1.0D, 20.0D));
+        // Real swimming climbs about a tenth of a block per tick, so a usual dive is about ten blocks deep.
+        assertFalse(FollowOxygen.shouldSurface((int) (MAX_AIR * FollowOxygen.RESUME_FRACTION), 1.0D, 10.0D));
     }
 
     @Test

@@ -1,11 +1,12 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -73,6 +74,8 @@ final class FollowStuckRecovery {
     private double recoveryStartDistance = Double.NaN;
     private boolean forceRepathPending;
     private final FollowDigOut digOut = new FollowDigOut();
+    /** A recovery step is running on the bot's action pack (it is a real walk, hop or drop over several ticks). */
+    private boolean stepOwned;
 
     /** True while a dig-out owns the bot (it is breaking blocks toward the player). */
     boolean isDigging() {
@@ -81,6 +84,10 @@ final class FollowStuckRecovery {
 
     void reset(AIPlayerEntity bot, int nowTick) {
         digOut.cancel(bot);
+        if (stepOwned) {
+            bot.getActionPack().cancelStep();
+            stepOwned = false;
+        }
         lastPos = bot.blockPosition().immutable();
         recoveryStartDistance = Double.NaN;
         forceRepathPending = false;
@@ -111,6 +118,14 @@ final class FollowStuckRecovery {
             lastPos = bot.blockPosition().immutable();
             forceRepathPending = true;
             return false;
+        }
+        if (stepOwned) {
+            if (!bot.getActionPack().stepIdle()) {
+                // A step is deliberate progress in flight: the stall clock does not count these ticks, and the next window is not opened
+                // until the step has ended.
+                return true;
+            }
+            stepOwned = false;
         }
         boolean wasRecovering = clock.isRecovering();
         boolean targetCloser = wasRecovering
@@ -173,8 +188,8 @@ final class FollowStuckRecovery {
      * past the caller's own personal-space floor here would defeat FollowTask's STOP_DISTANCE
      * the moment recovery ever fires), nearest improvement first, and steps onto the first one
      * that isn't blocked (by geometry or, e.g., the followed player standing in the way --
-     * {@link FakePlayerMotion#stepToStandable} rejects and reports either case without moving the
-     * bot). Finding nothing safe to do this tick is not an error: the caller just retries later,
+     * {@link WalkedStep#refusal} rejects either case before any key is pressed). The step is a
+     * real walk, hop or drop over several ticks (never a teleport). Finding nothing safe to do this tick is not an error: the caller just retries later,
      * which is exactly "wait a moment" for a landing that is only momentarily occupied -- and, on
      * the {@code RecoveryClock}'s next alternate window, a fresh replan is tried instead.
      */
@@ -205,7 +220,7 @@ final class FollowStuckRecovery {
                 }
             }
         }
-        if (best != null && FakePlayerMotion.stepToStandable(bot, best, "follow_recovery_step")) {
+        if (best != null && beginStep(bot, current, best)) {
             return;
         }
         // LAST recovery step before "I am stuck": no adjacent verified step got any closer (or the
@@ -215,5 +230,20 @@ final class FollowStuckRecovery {
         if (digOut.start(bot, target)) {
             digOut.tick(bot);
         }
+    }
+
+    /**
+     * Starts a real walk, hop or drop onto the adjacent standable {@code best} (the bot's keys are pressed, it is never moved). The
+     * step is refused, and nothing happens, when something is in the way (a block, or the followed player standing in the gap): the
+     * caller tries again shortly, or the next window forces a replan.
+     */
+    private boolean beginStep(AIPlayerEntity bot, BlockPos current, BlockPos best) {
+        WalkedStep.Kind kind = WalkedStepRules.walkKindFor(best.getY() - current.getY());
+        if (kind == null || WalkedStep.refusal(bot, best, kind) != null) {
+            return false;
+        }
+        bot.getActionPack().runStep(WalkedStep.begin(bot, best, kind, "follow_recovery_step"));
+        stepOwned = true;
+        return true;
     }
 }

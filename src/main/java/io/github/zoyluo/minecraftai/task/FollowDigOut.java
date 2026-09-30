@@ -2,10 +2,11 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.DigNav;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.NeighborEnumerator;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
@@ -56,8 +57,8 @@ import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
  * above it for the falling-block check -- all within two blocks of the bot, i.e. what it stands in and stands
  * next to (the same local physical knowledge the pathfinder's own {@code Standability} and the dig-enterable
  * test use). (2) The reads either make the dig REFUSE (a fluid, a hazard, a missing floor, a suspended falling
- * block) or confirm a one-cell step that {@code FakePlayerMotion.stepToStandable} then re-verifies against the
- * live world; none of them selects a target. The one read that does choose what to break -- the
+ * block) or confirm a one-cell step that {@code WalkedStep} then re-verifies against the
+ * live world, on every tick of the walk; none of them selects a target. The one read that does choose what to break -- the
  * block itself -- is gated by {@code ObservableWorldQuery.canObserveBlock} (shape-aware: the collision shape, or the
  * selection outline for a block that has none) in {@link #plan}. Fluid is
  * refused on every side, so a dig-out can never open a wall into water either.
@@ -72,6 +73,9 @@ final class FollowDigOut {
     private int advanced;
     private int ticks;
     private int stepFailures;
+    /** The walk into the cell just opened is running (a real walked step over several ticks) and the cell it ends in. */
+    private boolean stepping;
+    private BlockPos stepCell;
 
     boolean isActive() {
         return active;
@@ -104,6 +108,7 @@ final class FollowDigOut {
                     advanced = 0;
                     ticks = 0;
                     stepFailures = 0;
+                    stepping = false;
                     BotLog.action(bot, "follow_dig_out_started",
                             "pos", LogFields.pos(feet), "dir", candidate.getSerializedName());
                     return true;
@@ -121,6 +126,9 @@ final class FollowDigOut {
         ActionPack pack = bot.getActionPack();
         if (++ticks > MAX_TICKS) {
             return finish(bot, "timeout");
+        }
+        if (stepping) {
+            return tickStep(bot, pack);
         }
         if (!pack.isMiningIdle()) {
             return true;
@@ -152,13 +160,32 @@ final class FollowDigOut {
                 || DigNav.adjacentHazardFluid(bot, ahead.above())) {
             return finish(bot, "step_unsafe");
         }
-        if (!FakePlayerMotion.stepToStandable(bot, ahead, "follow_dig_step")) {
+        WalkedStep.Kind kind = WalkedStepRules.walkKindFor(ahead.getY() - bot.blockPosition().getY());
+        if (kind == null || WalkedStep.refusal(bot, ahead, kind) != null) {
             // Momentarily occupied (the followed player standing in the gap): try again shortly.
+            return ++stepFailures >= MAX_STEP_FAILURES ? finish(bot, "step_blocked") : true;
+        }
+        // The bot walks into the opened cell with its own keys (never placed there); the walk runs over the next ticks.
+        bot.getActionPack().runStep(WalkedStep.begin(bot, ahead, kind, "follow_dig_step"));
+        stepping = true;
+        stepCell = ahead.immutable();
+        return true;
+    }
+
+    /** One tick with the walk into the opened cell in flight: it carries on by itself; when it has ended the dig-out goes on or ends. */
+    private boolean tickStep(AIPlayerEntity bot, ActionPack pack) {
+        if (!pack.stepIdle()) {
+            return true;
+        }
+        stepping = false;
+        WalkedStep.Result result = pack.stepResult();
+        if (result == null || !result.succeeded()) {
             return ++stepFailures >= MAX_STEP_FAILURES ? finish(bot, "step_blocked") : true;
         }
         advanced++;
         stepFailures = 0;
-        BlockPos next = ahead.relative(direction);
+        ServerLevel world = bot.level();
+        BlockPos next = stepCell.relative(direction);
         if (advanced >= MAX_CELLS || (isOpen(world, next) && isOpen(world, next.above()))) {
             return finish(bot, "through");
         }
@@ -166,6 +193,10 @@ final class FollowDigOut {
     }
 
     private boolean finish(AIPlayerEntity bot, String reason) {
+        if (stepping) {
+            bot.getActionPack().cancelStep();
+            stepping = false;
+        }
         if (active) {
             bot.getActionPack().stopMining();
             BotLog.action(bot, "follow_dig_out_finished", "reason", reason, "cells", advanced,

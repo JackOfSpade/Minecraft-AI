@@ -22,10 +22,14 @@ package io.github.zoyluo.minecraftai.task;
 final class FollowOxygen {
     /** Air at or below which {@code NavSafetyNet}'s drowning rescue owns the bot (its lease ends). */
     static final int RESCUE_AIR = NavSafetyNet.AIR_SURFACE_THRESHOLD;
-    /** Follow always turns up at least this early, so it is never the rescue that has to. */
-    static final int SURFACE_FLOOR_AIR = RESCUE_AIR + 30;
-    /** Deliberately slower than a real swimmer, so the ascent estimate errs on the safe side. */
-    static final double ASCENT_BLOCKS_PER_TICK = 0.25D;
+    /**
+     * Follow always turns up at least this early, so it is never the rescue that has to. A bot swims by real inputs now (about
+     * 0.11 blocks per tick up, measured by NaturalSwimGameTests.legacyInputsSwimAndSurface), so a way up from a few blocks down takes
+     * a few seconds: 80 units of air (four seconds) above the rescue level.
+     */
+    static final int SURFACE_FLOOR_AIR = RESCUE_AIR + 80;
+    /** A little slower than the measured real swim-up speed (about 0.11 blocks per tick), so the ascent estimate errs on the safe side. */
+    static final double ASCENT_BLOCKS_PER_TICK = 0.1D;
     static final double SAFETY_FACTOR = 1.5D;
     static final int MARGIN_TICKS = 40;
     /** Fraction of full air that ends a "went up for breath" phase. */

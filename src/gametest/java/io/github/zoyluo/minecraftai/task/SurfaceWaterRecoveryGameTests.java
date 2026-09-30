@@ -2,8 +2,9 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
+import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
@@ -62,7 +63,7 @@ public final class SurfaceWaterRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_connected_shore_beats_an_unneeded_vertical_air_stroke", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_connected_shore_beats_an_unneeded_vertical_air_stroke", maxTicks = 160)
     public void connectedShoreBeatsAnUnneededVerticalAirStroke(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(8, 8, -106));
@@ -79,13 +80,16 @@ public final class SurfaceWaterRecoveryGameTests {
                 }
             }
         }
+        // The bot now needs real time to swim to the landing. Water beside an open air cell flows into it, so the landing would stop being
+        // dry within a few ticks: these placements schedule no fluid tick, update no neighbour and no shape, keeping the shaft as built.
+        int still = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SKIP_ON_PLACE;
         for (int dy = -1; dy <= 2; dy++) {
-            world.setBlock(start.above(dy), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(start.above(dy), Blocks.WATER.defaultBlockState(), still);
         }
         BlockPos lowerShore = start.below().east();
-        world.setBlock(lowerShore, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(lowerShore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(lowerShore.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(lowerShore, Blocks.AIR.defaultBlockState(), still);
+        world.setBlock(lowerShore.above(), Blocks.AIR.defaultBlockState(), still);
+        world.setBlock(lowerShore.below(), Blocks.STONE.defaultBlockState(), still);
         Standability.clearCache();
 
         String name = "WaterMonotonicAscentGT";
@@ -96,47 +100,63 @@ public final class SurfaceWaterRecoveryGameTests {
         bot.teleportTo(world, start.getX() + 0.5D, start.getY() + 0.125D,
                 start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
         bot.setAirSupply(300);
+        TeleportAudit.reset(bot);
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
 
-        require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
-                "water rescue did not take control");
-        require(context, bot.blockPosition().equals(lowerShore),
-                "water rescue ignored the connected lower-shore route: "
-                        + bot.blockPosition().toShortString());
-        require(context, bot.isAlive() && bot.getHealth() == bot.getMaxHealth(),
-                "monotonic ascent lost health");
-
-        NavSafetyNet.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
+        // The rescue swims and walks by real inputs (a few ticks per cell, no teleport): with the connected lower shore proved it goes
+        // down and out, and never takes the vertical air stroke first (the feet stay in the lower cells of the shaft).
+        context.failIfEver(() -> {
+            require(context, bot.getY() < start.getY() + 1.0D,
+                    "water rescue took the vertical air stroke before the connected lower shore: y=" + bot.getY());
+            require(context, bot.isAlive() && bot.getHealth() == bot.getMaxHealth(),
+                    "monotonic ascent lost health");
+            if (!bot.blockPosition().equals(lowerShore) || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
+                return;
+            }
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "water rescue teleported the bot: " + TeleportAudit.lastCaller(bot));
+            NavSafetyNet.INSTANCE.clear(bot);
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_emergency_vertical_step_requires_low_air", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_emergency_vertical_step_requires_low_air", maxTicks = 120)
     public void emergencyVerticalStepRequiresLowAir(GameTestHelper context) {
         WaterShaftFixture fixture = sealedWaterShaftFixture(context, -126);
         AIPlayerEntity bot = fixture.bot();
         bot.setAirSupply(300);
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
 
+        TeleportAudit.reset(bot);
+
         require(context, NavSafetyNet.INSTANCE.tickBot(context.getLevel().getServer(), bot),
                 "full-air rescue did not take control");
-        require(context, bot.blockPosition().equals(fixture.lower()),
+        require(context, bot.getActionPack().stepIdle() && bot.blockPosition().equals(fixture.lower()),
                 "full-air rescue used the emergency vertical step: "
                         + bot.blockPosition().toShortString());
         bot.setAirSupply(100);
 
         require(context, NavSafetyNet.INSTANCE.tickBot(context.getLevel().getServer(), bot),
                 "low-air rescue did not take control");
-        require(context, bot.blockPosition().equals(fixture.lower().above()),
-                "low-air rescue failed to take the physical upward water step: "
+        require(context, !bot.getActionPack().stepIdle(),
+                "low-air rescue failed to start the physical upward water step: "
                         + bot.blockPosition().toShortString());
 
-        NavSafetyNet.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), fixture.name());
-        context.succeed();
+        // The upward step is a real swim (jump key) up the shaft: no teleport.
+        context.failIfEver(() -> {
+            if (!bot.blockPosition().equals(fixture.lower().above())) {
+                return;
+            }
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "low-air rescue teleported the bot: " + TeleportAudit.lastCaller(bot));
+            NavSafetyNet.INSTANCE.clear(bot);
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), fixture.name());
+            context.succeed();
+        });
     }
 
-    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_rescue_routes_around_a_wall_even_when_the_first_step_moves_away_from_shore", maxTicks = 160)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_rescue_routes_around_a_wall_even_when_the_first_step_moves_away_from_shore", maxTicks = 320)
     public void rescueRoutesAroundAWallEvenWhenTheFirstStepMovesAwayFromShore(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(8, 5, -38));
@@ -162,6 +182,13 @@ public final class SurfaceWaterRecoveryGameTests {
             world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
             world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
+        // A real hop out of the water needs headroom (a jump lifts the head 1.25 blocks; the old teleport needed none): open the
+        // cells above the ceiling over every route cell and over the landing.
+        for (BlockPos cell : waterRoute) {
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        world.setBlock(start.north(2).above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.north(2).above(3), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         // Keep only the initial eye cell submerged. A waterlogged plant supplies real water
         // without turning the whole upper route into spreading sources that would flood the dry
         // endpoint before the rescue reaches it.
@@ -179,6 +206,7 @@ public final class SurfaceWaterRecoveryGameTests {
         bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setAirSupply(260);
+        TeleportAudit.reset(bot);
         AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
         AtomicBoolean sawRequiredDetour = new AtomicBoolean();
 
@@ -204,6 +232,8 @@ public final class SurfaceWaterRecoveryGameTests {
                     "rescue reached the blocked shore without taking the physical EAST detour");
             require(context, bot.isAlive() && bot.getHealth() == bot.getMaxHealth(),
                     "rescue lost health before reaching the dry landing");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "rescue teleported the bot: " + TeleportAudit.lastCaller(bot));
             AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
             context.succeed();
         });
@@ -320,8 +350,7 @@ public final class SurfaceWaterRecoveryGameTests {
         world.setBlock(rejected.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
-        require(context, FakePlayerMotion.stepTo(bot, start, "gametest_rejected_landing_return"),
-                "fixture could not return the bot to the dry landing origin");
+        BotFixtureMoves.place(bot, start);
         task.tick(bot);
         require(context, bot.blockPosition().equals(start),
                 "Descend immediately retried the SafetyNet-rejected landing");

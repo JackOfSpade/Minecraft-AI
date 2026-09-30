@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,12 +26,14 @@ import net.minecraft.world.effect.MobEffects;
  *
  * <ul>
  *   <li><b>Entering.</b> A bot on land walks to the nearest reachable, observable water edge (plain
- *       adjacent water is enough -- no boat launch-site pairing) and steps in with the same
- *       collision-validated one-cell primitive the safety net uses. The edge search is throttled
- *       and its result reused while it stays valid.</li>
- *   <li><b>Swimming.</b> Verified one-cell swim steps toward the player, greedy first and a bounded
- *       water BFS ({@link SwimRoute}) when a greedy step is blocked. Following a diver goes down
- *       with them.</li>
+ *       adjacent water is enough -- no boat launch-site pairing) and walks in with a {@link WalkedStep}
+ *       (real movement keys, never a teleport). The edge search is throttled and its result reused
+ *       while it stays valid.</li>
+ *   <li><b>Swimming.</b> One-cell {@link WalkedStep} swim steps toward the player (forward and jump keys,
+ *       at the speed a swimmer has), greedy first and a bounded water BFS ({@link SwimRoute}) when a
+ *       greedy step is blocked. Following a diver goes down with them. A step runs over several ticks
+ *       and this class does nothing else with the bot until it has ended (or the drowning rescue
+ *       takes over).</li>
  *   <li><b>Oxygen.</b> Follow owns the ascent while its {@link NavSafetyNet} lease is valid: it
  *       measures the bot's real air loss ({@link FollowOxygen.LossEstimator}) and turns up for
  *       breath early enough (see {@link FollowOxygen#shouldSurface}); it stays up until the lungs are
@@ -88,6 +90,11 @@ final class FollowSwimming {
     private double airRouteBlocks = Double.POSITIVE_INFINITY;
     private int nextAirRouteTick;
 
+    /** A walked step this class started is (or was, until its end is noticed) running on the bot's action pack. */
+    private boolean stepOwned;
+    /** The water edge the running step enters through, so a failed entry marks the shore as bad. */
+    private Entry stepEdge;
+
     void reset() {
         loss.reset();
         ascending = false;
@@ -104,6 +111,17 @@ final class FollowSwimming {
         exitFailedUntilTick = 0;
         airRouteBlocks = Double.POSITIVE_INFINITY;
         nextAirRouteTick = 0;
+        stepOwned = false;
+        stepEdge = null;
+    }
+
+    /** Lets go of a step this class has in flight (a pause, an abort, a change of mode): its keys are released. */
+    void cancelStep(AIPlayerEntity bot) {
+        if (stepOwned) {
+            bot.getActionPack().cancelStep();
+        }
+        stepOwned = false;
+        stepEdge = null;
     }
 
     boolean isWaiting() {
@@ -135,6 +153,9 @@ final class FollowSwimming {
     boolean follow(AIPlayerEntity bot, ServerPlayer target, int elapsed, double stopDistance) {
         ServerLevel world = bot.level();
         observeAir(bot, world);
+        if (stepHoldsTheTick(bot, world, elapsed)) {
+            return waiting;
+        }
         if (!isSwimCell(world, bot.blockPosition())) {
             waiting = enterWater(bot, target, elapsed, stopDistance);
             return waiting;
@@ -279,8 +300,7 @@ final class FollowSwimming {
     /** One step toward air: straight up when the column is open, else along a water route to it. */
     private boolean ascendStep(AIPlayerEntity bot, ServerLevel world, int elapsed) {
         BlockPos above = bot.blockPosition().above();
-        if (isSafeSwimCell(world, above)
-                && FakePlayerMotion.swimStepTo(bot, above, "follow_swim_surface")) {
+        if (isSafeSwimCell(world, above) && beginStep(bot, above, "follow_swim_surface")) {
             clearRoute();
             return true;
         }
@@ -312,7 +332,7 @@ final class FollowSwimming {
                 .filter(candidate -> isSafeSwimCell(world, candidate))
                 .filter(candidate -> candidate.distSqr(goal) + 0.01D < before)
                 .sorted(Comparator.comparingDouble(candidate -> candidate.distSqr(goal)))
-                .anyMatch(candidate -> FakePlayerMotion.swimStepTo(bot, candidate, "follow_swim"));
+                .anyMatch(candidate -> beginStep(bot, candidate, "follow_swim"));
     }
 
     /** A greedy step is blocked (an island, a wall): follow a bounded water route around it. */
@@ -339,6 +359,9 @@ final class FollowSwimming {
     boolean exitWaterForLand(AIPlayerEntity bot, ServerPlayer target, int elapsed, double standoff) {
         ServerLevel world = bot.level();
         observeAir(bot, world);
+        if (stepHoldsTheTick(bot, world, elapsed)) {
+            return true;
+        }
         if (!needsWaterExit(bot, target, standoff)) {
             // Dry, or wading through shallows that land follow can handle itself (its pathfinder, stop
             // distance and stuck recovery): nothing here may run a water search for it.
@@ -407,8 +430,10 @@ final class FollowSwimming {
         if (canStepInto(bot.blockPosition(), edge.water())) {
             NavSafetyNet.INSTANCE.renewFollowSwim(bot);
             bot.getActionPack().stopAll();
-            boolean moved = FakePlayerMotion.swimStepTo(bot, edge.water(), "follow_swim_enter");
-            if (!moved) {
+            boolean moved = beginStep(bot, edge.water(), "follow_swim_enter");
+            if (moved) {
+                stepEdge = edge;
+            } else {
                 markBad(edge);
             }
             return !moved;
@@ -562,7 +587,6 @@ final class FollowSwimming {
         if (route == null) {
             return false;
         }
-        ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
         int index = route.indexOf(feet);
         if (index < 0 && !feet.equals(routeStart)) {
@@ -575,13 +599,94 @@ final class FollowSwimming {
             return false;
         }
         BlockPos cell = route.get(next);
-        boolean moved = NavSafetyNet.isDryStandableCell(world, cell)
-                ? FakePlayerMotion.stepToStandable(bot, cell, reason)
-                : FakePlayerMotion.swimStepTo(bot, cell, reason);
+        boolean moved = beginStep(bot, cell, reason);
         if (!moved && ++routeFailures >= 3) {
             clearRoute();
         }
         return moved;
+    }
+
+    // ---- walked steps ------------------------------------------------------------------------
+
+    /**
+     * Starts a walked step onto {@code cell} (a swim step for a water cell, a walk, hop or drop for a dry landing) unless the step
+     * is refused (a block or an entity in the way, a hazard, not adjacent). The bot is never moved: only its keys are pressed.
+     *
+     * @return whether the step was started
+     */
+    private boolean beginStep(AIPlayerEntity bot, BlockPos cell, String reason) {
+        WalkedStep.Kind kind = NavSafetyNet.stepKindTo(bot, cell);
+        if (kind == null || WalkedStep.refusal(bot, cell, kind) != null) {
+            return false;
+        }
+        bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason));
+        stepOwned = true;
+        return true;
+    }
+
+    /**
+     * Whether a step this class started is still running. When it has just ended, its outcome is taken in: a failed entry marks its
+     * shore bad and a failed route step counts against the route (three drop it), as a refused step used to.
+     */
+    private boolean stepInFlight(AIPlayerEntity bot) {
+        if (!stepOwned) {
+            return false;
+        }
+        var pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            return true;
+        }
+        stepOwned = false;
+        WalkedStep.Result result = pack.stepResult();
+        if (result != null && result.failed()) {
+            if (stepEdge != null) {
+                markBad(stepEdge);
+            } else if (route != null && ++routeFailures >= 3) {
+                clearRoute();
+            }
+        }
+        stepEdge = null;
+        return false;
+    }
+
+    /**
+     * Whether a step in flight takes this tick: it carries on by itself unless the drowning rescue takes the bot over (then 
+     * {@code waiting} is set) or the lungs call for the way up right now, which is decided every tick, not only between steps (a step
+     * down through deep water takes seconds): the step is dropped and the tick carries on with the ordinary swim logic.
+     */
+    private boolean stepHoldsTheTick(AIPlayerEntity bot, ServerLevel world, int elapsed) {
+        if (!stepInFlight(bot)) {
+            return false;
+        }
+        if (holdStep(bot)) {
+            waiting = true;
+            return true;
+        }
+        if (!ascending && bot.isUnderWater()
+                && FollowOxygen.shouldSurface(bot.getAirSupply(), lossRate(bot), blocksToAir(bot, world, elapsed))) {
+            cancelStep(bot);
+            return false;
+        }
+        waiting = false;
+        return true;
+    }
+
+    /**
+     * One tick with a step in flight: it carries on by itself (the bot is not touched), the swim lease is kept, and a bot whose air
+     * has fallen to the rescue level is let go so that the drowning rescue owns it from this tick.
+     *
+     * @return true when the bot deliberately made no progress (it was handed to the rescue)
+     */
+    private boolean holdStep(AIPlayerEntity bot) {
+        if (bot.isUnderWater() && bot.getAirSupply() <= FollowOxygen.RESCUE_AIR) {
+            cancelStep(bot);
+            NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+            bot.getActionPack().stopMovement();
+            clearRoute();
+            return true;
+        }
+        NavSafetyNet.INSTANCE.renewFollowSwim(bot);
+        return false;
     }
 
     private void clearRoute() {

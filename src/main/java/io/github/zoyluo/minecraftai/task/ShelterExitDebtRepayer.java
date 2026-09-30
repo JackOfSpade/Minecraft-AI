@@ -1,9 +1,10 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.HashSet;
 import java.util.Set;
@@ -23,6 +24,8 @@ final class ShelterExitDebtRepayer {
     private EmergencyShelterTask.ExitDebt shelterExitDebt;
     private BlockPos activeShelterEgress;
     private boolean waiting;
+    /** The walk out through the doorway is running (a real walked step over several ticks). */
+    private boolean stepping;
 
     /** Adopts (or clears) any exit debt outstanding for the bot at the start of a follow task. */
     void reset(AIPlayerEntity bot) {
@@ -31,10 +34,15 @@ final class ShelterExitDebtRepayer {
         shelterExitDebt = EmergencyShelterTask.pendingExitDebt(bot).orElse(null);
         activeShelterEgress = null;
         waiting = false;
+        stepping = false;
     }
 
     void cancel(AIPlayerEntity bot) {
         shelterExitMiner.cancel(bot);
+        if (stepping) {
+            bot.getActionPack().cancelStep();
+            stepping = false;
+        }
     }
 
     /**
@@ -46,6 +54,9 @@ final class ShelterExitDebtRepayer {
     boolean repay(AIPlayerEntity bot, ServerPlayer target, int elapsed) {
         if (shelterExitDebt == null) {
             return false;
+        }
+        if (stepping) {
+            return tickWalkOut(bot);
         }
         if (!shelterExitDebt.matchesDimension(bot)
                 || !bot.blockPosition().equals(shelterExitDebt.anchor())) {
@@ -84,16 +95,42 @@ final class ShelterExitDebtRepayer {
             return true;
         }
         Standability.clearCache();
-        if (!Standability.isStandable(bot.level(), egress)
-                || !FakePlayerMotion.stepToStandable(bot, egress, "follow_shelter_exit")) {
+        WalkedStep.Kind kind = WalkedStepRules.walkKindFor(egress.getY() - bot.blockPosition().getY());
+        if (!Standability.isStandable(bot.level(), egress) || kind == null
+                || WalkedStep.refusal(bot, egress, kind) != null) {
             rejectedShelterEgress.add(egress);
             activeShelterEgress = null;
             waiting = true;
             return true;
         }
-        // The body is now physically outside a cancelled shell.  Promote only this exact owned
-        // state proof to low-priority cleanup before forgetting the doorway debt; no player-built
-        // blocks can enter the registry.
+        // The bot walks out through the opened doorway with its own keys (never placed there); the walk runs over the next ticks.
+        bot.getActionPack().runStep(WalkedStep.begin(bot, egress, kind, "follow_shelter_exit"));
+        stepping = true;
+        waiting = true;
+        return true;
+    }
+
+    /**
+     * One tick with the walk out in flight. It carries on by itself; when it has ended in the doorway cell the body is physically
+     * outside the cancelled shell: only this exact owned state proof is promoted to low-priority cleanup before the doorway debt is
+     * forgotten (no player-built blocks can enter the registry). A failed walk rejects that doorway and tries another.
+     */
+    private boolean tickWalkOut(AIPlayerEntity bot) {
+        var pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            waiting = true;
+            return true;
+        }
+        stepping = false;
+        WalkedStep.Result result = pack.stepResult();
+        if (result == null || !result.succeeded()) {
+            if (activeShelterEgress != null) {
+                rejectedShelterEgress.add(activeShelterEgress);
+            }
+            activeShelterEgress = null;
+            waiting = true;
+            return true;
+        }
         EmergencyShelterTask.promoteExitDebtForCleanup(bot, shelterExitDebt);
         finish(bot);
         waiting = false;

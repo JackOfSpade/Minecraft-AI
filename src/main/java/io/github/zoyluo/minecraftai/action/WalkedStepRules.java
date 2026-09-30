@@ -129,11 +129,36 @@ public final class WalkedStepRules {
         return new float[]{(float) (-Math.sin(yaw) * ux + Math.cos(yaw) * uz), (float) (Math.cos(yaw) * ux + Math.sin(yaw) * uz)};
     }
 
-    /** A step-up needs the jump key only while the bot is still below the target floor and standing on something. */
+    /** A swimmer holds the feet this far above the floor of the cell it swims through (jump below it, sink above it). */
+    public static final double SWIM_HOLD_DEPTH = 0.3D;
+    /** Swimming covers a block at about a third of the walking pace (about 2 blocks per second): a swim step is given longer. */
+    public static final double SWIM_BUDGET_FACTOR = 2.5D;
+    /** The downward push a diving swimmer gets per tick (vanilla LivingEntity.goDownInWater, which the client applies while shift is held in water). */
+    public static final double SWIM_DIVE_PUSH = 0.04D;
+    /** A swim step whose target is this close (horizontally) to the bot has nothing to walk toward: it only holds jump (up) or lets go (down). */
+    public static final double SWIM_OVERHEAD_DISTANCE = 0.3D;
+
+    /** {@link #timeoutBudget(double)} for the kind of step (a swim step is given {@value #SWIM_BUDGET_FACTOR} times as long). */
+    public static double timeoutBudget(WalkedStep.Kind kind, double blocks) {
+        return timeoutBudget(blocks) * (kind == WalkedStep.Kind.SWIM ? SWIM_BUDGET_FACTOR : 1.0D);
+    }
+
+    /**
+     * Whether the jump key is down. A step-up presses it only while the bot is still below the target floor and standing on something
+     * (or afloat: a swimmer pushing against a bank is lifted onto it by holding jump). A swim step holds the depth a swimmer holds:
+     * jump while the feet are in the lower part of the target cell (a step up to a higher cell keeps jumping until it is there), and
+     * let go to sink toward a lower one, so a level swim neither bobs up out of its cell nor sinks below it.
+     */
     public static boolean jumpNow(WalkedStep.Kind kind, boolean grounded, double feetY, int targetY, boolean headUnderwater) {
+        return jumpNow(kind, grounded, feetY, targetY, headUnderwater, false);
+    }
+
+    /** {@link #jumpNow(WalkedStep.Kind, boolean, double, int, boolean)} for a bot that may be afloat ({@code inWater}). */
+    public static boolean jumpNow(WalkedStep.Kind kind, boolean grounded, double feetY, int targetY, boolean headUnderwater,
+                                  boolean inWater) {
         return switch (kind) {
-            case STEP_UP -> grounded && feetY < targetY - 0.05D;
-            case SWIM -> headUnderwater || feetY < targetY - 0.05D;
+            case STEP_UP -> (grounded || inWater) && feetY < targetY - 0.05D;
+            case SWIM -> feetY < targetY + SWIM_HOLD_DEPTH;
             default -> false;
         };
     }

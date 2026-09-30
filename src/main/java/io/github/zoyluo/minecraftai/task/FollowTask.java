@@ -275,6 +275,7 @@ public final class FollowTask extends AbstractTask {
         if (targetInBoat) {
             escort.disengage();
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+            swimming.cancelStep(bot);
             suspendLandRecovery(bot);
             dropBaritoneRoute(bot);
             followBoat(bot, target);
@@ -848,6 +849,7 @@ public final class FollowTask extends AbstractTask {
         escort.disengage();
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
+        swimming.cancelStep(bot);
         swimming.reset();
         shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
@@ -871,6 +873,7 @@ public final class FollowTask extends AbstractTask {
         lastTarget = null;
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
+        swimming.cancelStep(bot);
         swimming.reset();
         shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {

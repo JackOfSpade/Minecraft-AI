@@ -41,7 +41,10 @@ final class BoatFollowSourceContractTest {
         assertTrue(follow.contains("BoatFollowTask.automatic(targetName, abandonedBoats)"));
         assertTrue(follow.contains("followSwimming(bot, target)"));
         String swim = read("task/FollowSwimming.java");
-        assertTrue(swim.contains("FakePlayerMotion.swimStepTo(bot, candidate, \"follow_swim\")"));
+        assertTrue(swim.contains("beginStep(bot, candidate, \"follow_swim\")")
+                        && swim.contains("WalkedStep.begin(bot, cell, kind, reason)"),
+                "swim follow swims WalkedSteps (real inputs, reason follow_swim), it never teleports the bot");
+        assertFalse(swim.contains("FakePlayerMotion"), "swim follow never calls a FakePlayerMotion teleport primitive");
         assertFalse(swim.contains("BoatLaunchTask") || swim.contains("BoatFollowTask") || swim.contains("findLaunchSite"),
                 "swim follow enters at a plain water edge: no boat launch, no launch-site pairing");
         int swimming = follow.indexOf("private void followSwimming");
