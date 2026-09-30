@@ -70,6 +70,10 @@ public final class BuildAction {
      */
     private static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face,
                                            InteractionHand hand, boolean deferInteractive) {
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
+            return ActionResult.failed("hands_busy");
+        }
         double reach = player.blockInteractionRange();
         double sampleRange = exactPlacementSampleRange(
                 MinecraftAiConfig.get().perception().radius(), reach);
@@ -204,6 +208,10 @@ public final class BuildAction {
      * changes the cell above it).
      */
     public static ActionResult useItemOnFace(AIPlayerEntity player, BlockPos pos, Direction face, InteractionHand hand) {
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
+            return ActionResult.failed("hands_busy");
+        }
         ItemStack stack = player.getItemInHand(hand);
         if (stack.isEmpty()) {
             return ActionResult.failed("empty_hand");
@@ -239,6 +247,10 @@ public final class BuildAction {
      * {@code gameMode.useItemOn} is called with that exact hit (bone meal on a growing crop).
      */
     public static ActionResult useItemOnCell(AIPlayerEntity player, BlockPos pos, InteractionHand hand) {
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
+            return ActionResult.failed("hands_busy");
+        }
         ItemStack stack = player.getItemInHand(hand);
         if (stack.isEmpty()) {
             return ActionResult.failed("empty_hand");

@@ -206,8 +206,10 @@ public final class GuardTask extends AbstractTask {
             return;
         }
         CombatCore.lookAt(bot, target);
+        // Raw strafe keys: the vanilla use-item slowdown is applied here, as LocalPlayer applies it to a player's keys.
         bot.getActionPack().setStrafing(CombatCore.safeStrafeInput(
-                bot, elapsed % 40 < 20 ? 0.45F : -0.45F));
+                bot, elapsed % 40 < 20 ? 0.45F : -0.45F)
+                * io.github.zoyluo.minecraftai.action.PaceRules.inputScale(false, bot.isUsingItem()));
         repositionTicks--;
         if (repositionTicks <= 0) {
             bot.getActionPack().stopMovement();

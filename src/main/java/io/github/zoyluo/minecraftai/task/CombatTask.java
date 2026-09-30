@@ -242,6 +242,7 @@ public final class CombatTask extends AbstractTask {
     private void tickCombat(AIPlayerEntity bot) {
         if (elapsed > 2400) {
             finishRangedLoadout(bot);
+            ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
             fail("combat_timeout");
             return;
         }
@@ -329,6 +330,16 @@ public final class CombatTask extends AbstractTask {
     boolean isRangedExchange() {
         return rangedLoadout != null || phase == Phase.RANGED || phase == Phase.COVER_BUILD
                 || phase == Phase.COVER_HIDE || phase == Phase.COVER_PEEK;
+    }
+
+    /** True while the fight's own melee rhythm holds the shield up (the BLOCK phase between the bot's swings). */
+    boolean holdsItsShield() {
+        return phase == Phase.BLOCK && state == TaskState.RUNNING;
+    }
+
+    /** True while the fight is healing (HEAL: eating between bites counts for the shield's hand policy). */
+    boolean healing() {
+        return phase == Phase.HEAL && state == TaskState.RUNNING;
     }
 
     /**

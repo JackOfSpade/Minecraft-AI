@@ -47,11 +47,6 @@ public final class ShieldRules {
         return Math.toDegrees(Math.acos(Math.max(-1.0D, Math.min(1.0D, dot))));
     }
 
-    /** True when a source at {@code offsetDeg} from the head direction is inside the vanilla arc. */
-    public static boolean inArc(double offsetDeg, double halfArcDeg) {
-        return offsetDeg <= halfArcDeg;
-    }
-
     /** Degrees the head must still turn to bring a source at {@code offsetDeg} inside the arc with the margin ({@code 0} when it already is). */
     public static double degreesToTurn(double offsetDeg, double halfArcDeg) {
         return Math.max(0.0D, offsetDeg - Math.max(0.0D, halfArcDeg - ARC_MARGIN_DEG));
@@ -82,11 +77,6 @@ public final class ShieldRules {
     }
 
     // ------------------------------------------------------------------ the time a block needs
-
-    /** Ticks still to wait before a shield raised {@code ticksUsing} ticks ago blocks (0 once {@code block_delay_seconds} has passed). */
-    public static int blockDelayRemaining(int blockDelayTicks, int ticksUsing) {
-        return Math.max(0, blockDelayTicks - Math.max(0, ticksUsing));
-    }
 
     /**
      * True when a block started now can be ACTIVE (turned into the arc, block delay passed) before a hit that lands in

@@ -352,6 +352,11 @@ public final class CreeperDefenseTask extends AbstractTask {
                 && EquipAction.hasShield(bot);
     }
 
+    /** True while the shield phase holds the shield up (see {@code ShieldGuard}: a task's raise is its own only in that phase). */
+    boolean holdsItsShield() {
+        return phase == Phase.SHIELD && state == TaskState.RUNNING;
+    }
+
     private void beginShield(AIPlayerEntity bot) {
         bot.getActionPack().stopAll();
         if (!EquipAction.equipShieldOffhand(bot)) {

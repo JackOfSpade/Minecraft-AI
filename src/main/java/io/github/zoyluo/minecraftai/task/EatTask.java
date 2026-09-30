@@ -107,6 +107,11 @@ public final class EatTask extends AbstractTask {
             complete();
             return;
         }
+        if (ShieldGuard.usingShield(bot)) {
+            // The shield guard blocks a lethal hit (the only one it takes the hand from an eating pass for): the pass waits, spending
+            // no budget, and its watchdog never cancels the shield's use as a stuck bite.
+            return;
+        }
         itemElapsed++;
         if (itemElapsed > PER_ITEM_TIMEOUT_TICKS) {
             finishOnTimeoutOrFailure("eat_timeout");

@@ -11,7 +11,6 @@ import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
@@ -29,7 +28,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.entity.monster.Guardian;
 import net.minecraft.world.entity.monster.Witch;
 import net.minecraft.world.entity.monster.illager.Pillager;
 import net.minecraft.world.entity.monster.illager.Vindicator;
@@ -93,8 +91,10 @@ public final class ShieldBlockingGameTests {
                 arena.require(bot.getHealth() >= 20.0F, "the bot was hurt before the shot: " + bot.getHealth());
                 if (bot.isBlocking()) {
                     arena.require(CreatureSenses.INSTANCE.noticed(bot, skeleton), "the shield came up for a skeleton the bot had not noticed");
-                    arena.require(CombatTask.nearbyDrawingShooter(bot) == skeleton || ShieldGuard.usingShield(bot),
-                            "the raise was not a reaction to the drawing shooter");
+                    ShieldGuard.RaiseCause cause = ShieldGuard.lastRaise(bot);
+                    arena.require(ShieldGuard.holdsShield(bot) && cause != null && cause.reason().equals("shooter_draw")
+                                    && cause.sourceId() == skeleton.getId(),
+                            "the raise was not the guard's pre-emptive answer to the drawing skeleton: " + cause);
                     firedAt[0] = now;
                     shot[0] = arena.shoot(skeleton, skeleton.getEyePosition(), bot.getEyePosition(), ARROW_SPEED);
                 } else if (now > 160) {
@@ -505,8 +505,14 @@ public final class ShieldBlockingGameTests {
         });
     }
 
-    // ------------------------------------------------------------------ h: a follower blocks while it keeps following, slowly
+    // ------------------------------------------------------------------ h: a follower blocks an arrow in flight and keeps following
 
+    /**
+     * RULES: a follower sprints after its player while hostiles are aggroed, so in follow mode the shield is raised only for what is
+     * already in flight at it (a hold of a few ticks), never pre-emptively against a shooter drawing at it. The follower passes a
+     * skeleton that keeps its bow drawn at it: no raise for the draw; then the skeleton's arrow is blocked with a short raise, during
+     * which the follower keeps pushing forward at the vanilla item-use pace (no sprint), and after which it follows at full pace again.
+     */
     @GameTest(environment = ENV + "follower_blocks_an_arrow_at_the_slowed_pace_and_keeps_following", maxTicks = 360)
     public void followerBlocksAnArrowAtTheSlowedPaceAndKeepsFollowing(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 40, 10);
@@ -530,20 +536,20 @@ public final class ShieldBlockingGameTests {
         skeleton.setNoAi(true);
         skeleton.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
         skeleton.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
-        f.add(skeleton, 6.0D, 2.0D);
+        f.add(skeleton, 10.0D, 2.0D);
         skeleton.setYRot(90.0F);
         skeleton.setYHeadRot(90.0F);
         skeleton.setYBodyRot(90.0F);
         skeleton.startUsingItem(InteractionHand.MAIN_HAND);
         FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_shield_follow");
         int[] tick = {0};
-        int[] blockedSince = {-1};
-        int[] windowStart = {-1};
-        int[] shieldTicks = {0};
-        int[] pushingTicks = {0};
-        boolean[] fired = {false};
-        double[] xAtWindow = {0.0D};
-        double[] maxSpeed = {0.0D};
+        int[] noticedAt = {-1};
+        int[] firedAt = {-1};
+        int[] wornAt = {-1};
+        int[] loweredAt = {-1};
+        int[] heldTicks = {0};
+        Arrow[] arrow = {null};
+        double[] maxSpeedAfter = {0.0D};
         Vec3[] last = {bot.position()};
         context.onEachTick(() -> {
             int now = ++tick[0];
@@ -554,52 +560,122 @@ public final class ShieldBlockingGameTests {
             Vec3 here = bot.position();
             double speed = Math.hypot(here.x - last[0].x, here.z - last[0].z);
             last[0] = here;
-            if (!fired[0] && !skeleton.isUsingItem()) {
+            if (!skeleton.isUsingItem()) {
                 skeleton.startUsingItem(InteractionHand.MAIN_HAND); // the fixture skeleton has no AI: it keeps its bow drawn
             }
-            if (blockedSince[0] < 0) {
-                if (ShieldGuard.usingShield(bot) && bot.isBlocking()) {
-                    blockedSince[0] = now;
-                    f.require(CreatureSenses.INSTANCE.noticed(bot, skeleton), "the shield went up for a skeleton the bot had not noticed");
-                    fired[0] = true;
-                    Arrow arrow = new Arrow(f.level, skeleton, new ItemStack(Items.ARROW), null);
-                    Vec3 aim = aimFor(arrow.position(), bot.getEyePosition(), ARROW_SPEED);
-                    arrow.shoot(aim.x, aim.y, aim.z, ARROW_SPEED, 0.0F);
-                    f.level.addFreshEntity(arrow);
-                } else if (now > 200) {
-                    f.require(false, "the follower never blocked for the skeleton: noticed=" + CreatureSenses.INSTANCE.noticed(bot, skeleton)
-                            + " draw=" + skeleton.getTicksUsingItem() + " skeleton_ticks=" + skeleton.tickCount);
+            if (firedAt[0] < 0) {
+                f.require(!ShieldGuard.usingShield(bot),
+                        "the follower held its shield up against a drawing shooter (follow mode sprints: in-flight blocks only)");
+                if (noticedAt[0] < 0 && CreatureSenses.INSTANCE.noticed(bot, skeleton)) {
+                    noticedAt[0] = now;
                 }
-                return;
-            }
-            // The arrow lands (and, blocked, still knocks the bot back: vanilla), the knock dies away, then the bot is measured for
-            // thirty ticks while the skeleton keeps its bow drawn at it (so the shield stays up: until the shot lands or the draw
-            // stops): it must go on following (its walker keeps pushing forward), at the slowed pace.
-            if (windowStart[0] < 0) {
-                if (now >= blockedSince[0] + 22) {
-                    f.require(bot.getOffhandItem().getDamageValue() > 0, "the arrow never wore the shield: hp=" + bot.getHealth());
-                    f.require(bot.getHealth() >= 20.0F, "the arrow hurt the follower through the shield: " + bot.getHealth());
-                    windowStart[0] = now;
-                    xAtWindow[0] = here.x;
+                if (noticedAt[0] >= 0 && now >= noticedAt[0] + 5) {
+                    f.require(CombatTask.nearbyDrawingShooter(bot) == skeleton, "fixture: the skeleton is not drawing at the follower");
+                    firedAt[0] = now;
+                    arrow[0] = new Arrow(f.level, skeleton, new ItemStack(Items.ARROW), null);
+                    Vec3 aim = aimFor(arrow[0].position(), bot.getEyePosition(), ARROW_SPEED);
+                    arrow[0].shoot(aim.x, aim.y, aim.z, ARROW_SPEED, 0.0F);
+                    f.level.addFreshEntity(arrow[0]);
+                } else if (now > 200) {
+                    f.require(false, "fixture: the follower never noticed the skeleton: draw=" + skeleton.getTicksUsingItem());
                 }
                 return;
             }
             if (ShieldGuard.usingShield(bot)) {
-                shieldTicks[0]++;
+                heldTicks[0]++;
+                ShieldGuard.RaiseCause cause = ShieldGuard.lastRaise(bot);
+                f.require(ShieldGuard.holdsShield(bot) && cause != null && cause.reason().equals("incoming_projectile")
+                                && cause.sourceId() == arrow[0].getId(),
+                        "the shield was up, but not for the arrow in flight: " + cause);
+                f.require(!bot.isSprinting(), "the follower sprinted with the shield up");
+                f.require(bot.zza > 0.05F && bot.zza <= 0.21F,
+                        "with the shield up the follower's forward key is not the vanilla item-use pace: zza=" + bot.zza);
             }
-            if (bot.zza > 0.05F) {
-                pushingTicks[0]++;
+            if (wornAt[0] < 0) {
+                if (bot.getOffhandItem().getDamageValue() > 0) {
+                    f.require(bot.getHealth() >= 20.0F, "the arrow hurt the follower through the shield: " + bot.getHealth());
+                    f.require(heldTicks[0] > 0, "the arrow wore the shield without the follower ever holding it up");
+                    wornAt[0] = now;
+                } else if (now > firedAt[0] + 30) {
+                    f.require(false, "the arrow was never blocked: hp=" + bot.getHealth() + " held=" + heldTicks[0]);
+                }
+                return;
             }
-            if (now > windowStart[0] + 1) {
-                maxSpeed[0] = Math.max(maxSpeed[0], speed);
+            if (loweredAt[0] < 0) {
+                if (!ShieldGuard.usingShield(bot)) {
+                    loweredAt[0] = now;
+                } else {
+                    f.require(now <= wornAt[0] + 10, "the follower kept its shield up after the arrow was blocked (a short hold only)");
+                }
+                return;
             }
-            if (now >= windowStart[0] + 30) {
-                f.require(shieldTicks[0] >= 20, "the shield was not held while the skeleton kept aiming: " + shieldTicks[0] + " of 30 ticks");
-                f.require(pushingTicks[0] >= 20, "the follower did not keep following while it blocked: walked forward on " + pushingTicks[0]
-                        + " of 30 ticks (moved " + (bot.getX() - xAtWindow[0]) + ")");
-                f.require(bot.getX() - xAtWindow[0] > 0.5D, "the follower did not move on while it blocked: " + (bot.getX() - xAtWindow[0]));
-                f.require(maxSpeed[0] <= 0.09D, "the follower moved at " + maxSpeed[0] + " blocks per tick with the shield up (vanilla: about 0.04)");
+            maxSpeedAfter[0] = Math.max(maxSpeedAfter[0], speed);
+            if (now >= loweredAt[0] + 30) {
+                f.require(maxSpeedAfter[0] > 0.2D, "the follower did not get back to its full pace after the block: " + maxSpeedAfter[0]);
                 f.finish();
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ m: a task shield never outlives its task
+
+    /**
+     * A combat task that ends while its melee rhythm holds the shield up (here: a combat timeout during BLOCK) leaves nothing up: the
+     * shield comes down, the follow it paused resumes, and the follower moves at its full pace again.
+     */
+    @GameTest(environment = ENV + "combat_ending_in_its_block_phase_leaves_no_shield_up_and_the_follow_resumes", maxTicks = 400)
+    public void combatEndingInItsBlockPhaseLeavesNoShieldUpAndTheFollowResumes(GameTestHelper context) {
+        Standby s = new Standby(context, "ShieldStaleGT");
+        s.armed();
+        Husk husk = EntityType.HUSK.create(s.f.level, EntitySpawnReason.COMMAND);
+        s.require(husk != null, "failed to create the husk");
+        husk.setPersistenceRequired();
+        husk.setNoAi(true);
+        husk.getAttribute(Attributes.MAX_HEALTH).setBaseValue(200.0D);
+        husk.setHealth(200.0F);
+        husk.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(1.0D);
+        s.f.add(husk, -6.0D, 2.0D);
+        int[] tick = {0};
+        CombatTask[] fight = {null};
+        int[] endedAt = {-1};
+        int[] resumedAt = {-1};
+        context.onEachTick(() -> {
+            int now = ++tick[0];
+            s.require(s.bot.isAlive(), "the bot died");
+            if (fight[0] == null) {
+                if (now == 10) {
+                    TaskManager.INSTANCE.pauseFor(s.bot, "gametest_fight");
+                    fight[0] = CombatTask.defensive(husk, 6.0F, s.bot.blockPosition().immutable());
+                    TaskManager.INSTANCE.assign(s.bot, fight[0], TaskOrigin.safety("gametest_shield_stale"));
+                }
+                return;
+            }
+            if (endedAt[0] < 0) {
+                if (fight[0].holdsItsShield() && ShieldGuard.usingShield(s.bot) && !ShieldGuard.holdsShield(s.bot)) {
+                    // The fight ends with its own shield up (what a combat_timeout in the BLOCK phase does), the husk gone.
+                    fight[0].fail("combat_timeout");
+                    husk.discard();
+                    endedAt[0] = now;
+                } else if (now > 250) {
+                    s.fail("fixture: the fight never raised its shield between swings: " + fight[0].describe());
+                }
+                return;
+            }
+            if (now >= endedAt[0] + 3) {
+                s.require(!s.bot.isUsingItem(), "the shield the ended fight raised is still up " + (now - endedAt[0]) + " ticks later");
+            }
+            if (resumedAt[0] < 0) {
+                if (TaskManager.INSTANCE.getActive(s.bot).orElse(null) == s.follow) {
+                    resumedAt[0] = now;
+                } else if (now > endedAt[0] + 100) {
+                    s.fail("the paused follow never resumed: active=" + TaskManager.INSTANCE.getActive(s.bot).map(Task::name));
+                }
+                return;
+            }
+            if (now >= resumedAt[0] + 20) {
+                s.require(s.follow.state() == TaskState.RUNNING, "the resumed follow is not running: " + s.follow.state());
+                s.require(!s.bot.isUsingItem(), "the resumed follower carries a raised shield");
+                s.finish();
             }
         });
     }
@@ -617,11 +693,11 @@ public final class ShieldBlockingGameTests {
         bot.getInventory().setSelectedSlot(0);
         bot.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
         s.require(bot.getMainHandItem().is(Items.BOW), "fixture: the bow is not in the main hand");
-        // A skeleton the follower faces draws at it: the pre-emptive raise needs the use key, which the bow would take first (vanilla
-        // tries MAIN_HAND before OFF_HAND), so the hotbar goes to the sword before the shield comes up.
+        // A skeleton the follower watches shoots at it (follow mode blocks what is in flight, RULES): the raise needs the use key,
+        // which the bow would take first (vanilla tries MAIN_HAND before OFF_HAND), so the hotbar goes to the sword (one tick), then the
+        // shield comes up, both before the arrow arrives.
         Skeleton skeleton = s.shooter(EntityType.SKELETON, new ItemStack(Items.BOW));
         skeleton.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
-        skeleton.startUsingItem(InteractionHand.MAIN_HAND);
         int[] tick = {0};
         boolean[] switched = {false};
         boolean[] shieldUp = {false};
@@ -630,9 +706,6 @@ public final class ShieldBlockingGameTests {
             int now = ++tick[0];
             s.require(bot.isAlive(), "the bot died");
             s.requireFollowing();
-            if (firedAt[0] < 0 && !skeleton.isUsingItem()) {
-                skeleton.startUsingItem(InteractionHand.MAIN_HAND); // the fixture skeleton has no AI: it keeps its bow drawn
-            }
             s.require(!(bot.isUsingItem() && bot.getUseItem().is(Items.BOW)),
                     "the bow was drawn instead of the shield going up (vanilla's use order takes the main hand first)");
             if (!bot.getMainHandItem().is(Items.BOW)) {
@@ -644,72 +717,22 @@ public final class ShieldBlockingGameTests {
                         "the shield went up with " + bot.getMainHandItem().getItem() + " in the main hand, before the hotbar change");
             }
             if (firedAt[0] < 0) {
-                if (bot.isBlocking()) {
-                    s.require(CreatureSenses.INSTANCE.noticed(bot, skeleton), "the shield went up for a skeleton the bot had not noticed");
+                s.require(!ShieldGuard.usingShield(bot), "the shield went up before anything was shot");
+                if (s.noticedAndStill(skeleton)) {
                     firedAt[0] = now;
                     s.shoot(skeleton, null);
                 } else if (now > 200) {
-                    s.fail("the shield never came up: switched=" + switched[0] + " main=" + bot.getMainHandItem().getItem() + " "
-                            + s.describeNotice(skeleton));
+                    s.fail("fixture: the follower never noticed the skeleton: " + s.describeNotice(skeleton));
                 }
                 return;
             }
             if (bot.getOffhandItem().getDamageValue() > 0) {
+                s.require(shieldUp[0] && switched[0], "the arrow wore the shield without the switch and the raise being seen");
                 s.require(bot.getHealth() >= 20.0F, "the arrow hurt the bot: " + bot.getHealth());
                 s.finish();
             } else if (now > firedAt[0] + 30) {
                 s.fail("the arrow was never blocked: switched=" + switched[0] + " shield_up=" + shieldUp[0] + " hp=" + bot.getHealth()
                         + " main=" + bot.getMainHandItem().getItem());
-            }
-        });
-    }
-
-    // ------------------------------------------------------------------ k: a guardian's beam is blocked for its mob_attack part
-
-    @GameTest(environment = ENV + "guardian_beam_is_blocked_for_its_bite_and_only_the_magic_part_hurts", maxTicks = 400)
-    public void guardianBeamIsBlockedForItsBiteAndOnlyTheMagicPartHurts(GameTestHelper context) {
-        Standby s = new Standby(context, "ShieldBeamGT");
-        s.armed();
-        // A guardian in a pool the follower looks across (the pool one block deep, the follower and its player on a two-high platform, so
-        // the beam and the view clear the pool's rim). Its beam charges on the bot; the shield comes up; the beam's indirect_magic part
-        // still hurts (unblockable), its mob_attack part is blocked (vanilla Guardian.GuardianAttackGoal: magic, then doHurtTarget).
-        Guardian guardian = s.guardianInPool();
-        int[] tick = {0};
-        int[] beamAt = {-1};
-        boolean[] raisedDuringBeam = {false};
-        float[] hpBefore = {20.0F};
-        context.onEachTick(() -> {
-            int now = ++tick[0];
-            s.require(s.bot.isAlive(), "the bot died");
-            s.requireFollowing();
-            if (beamAt[0] < 0) {
-                if (guardian.getTarget() != s.bot && s.noticedAndStill(guardian)) {
-                    guardian.setTarget(s.bot); // the beam is for the bot, not for the player it follows
-                }
-                if (guardian.hasActiveAttackTarget() && guardian.getActiveAttackTarget() == s.bot) {
-                    beamAt[0] = now;
-                    hpBefore[0] = s.bot.getHealth();
-                } else if (now > 200) {
-                    s.fail("fixture: the guardian never locked its beam on the bot: " + s.describeNotice(guardian)
-                            + " target=" + guardian.getTarget() + " guardian=" + guardian.position());
-                }
-                return;
-            }
-            if (s.bot.getOffhandItem().getDamageValue() <= 0 && s.bot.getHealth() >= hpBefore[0]
-                    && guardian.hasActiveAttackTarget() && ShieldGuard.holdsShield(s.bot) && s.bot.isBlocking()) {
-                s.require(ShieldGuard.guardianBeamOn(s.bot) == guardian, "the shield was up during the beam, but not for it");
-                raisedDuringBeam[0] = true;
-            }
-            if (s.bot.getOffhandItem().getDamageValue() > 0 || s.bot.getHealth() < hpBefore[0]) {
-                // The beam fired (its two hits land in the same tick): the shield wore for the bite, only the magic part hurt.
-                s.require(raisedDuringBeam[0], "the beam fired before the shield blocked");
-                s.require(s.bot.getOffhandItem().getDamageValue() > 0, "the bite was not blocked (no wear): hp " + hpBefore[0]
-                        + " -> " + s.bot.getHealth());
-                float lost = hpBefore[0] - s.bot.getHealth();
-                s.require(lost <= 3.0F, "more than the beam's magic part got through the shield: " + lost);
-                s.finish();
-            } else if (now > beamAt[0] + 120) {
-                s.fail("the beam never fired: hp=" + s.bot.getHealth() + " beam=" + guardian.hasActiveAttackTarget());
             }
         });
     }
@@ -795,33 +818,6 @@ public final class ShieldBlockingGameTests {
             arrow.shoot(aim.x, aim.y, aim.z, ARROW_SPEED, 0.0F);
             f.level.addFreshEntity(arrow);
             return arrow;
-        }
-
-        /**
-         * A guardian in a 5x5 pool one block deep, its centre twelve blocks east of the bot; the bot and its player lifted onto a
-         * two-high stone platform where they stand (so the beam and the view clear the pool's rim).
-         */
-        Guardian guardianInPool() {
-            for (int dx = -9; dx <= -2; dx++) {
-                for (int dz = -4; dz <= 3; dz++) {
-                    f.arena.fill(dx, dz, Blocks.STONE, 0, 1);
-                }
-            }
-            for (int dx = 4; dx <= 8; dx++) {
-                for (int dz = -2; dz <= 2; dz++) {
-                    f.arena.set(dx, -1, dz, Blocks.WATER);
-                }
-            }
-            double y = f.arena.origin.getY() + 2;
-            bot.teleportTo(f.level, bot.getX(), y, bot.getZ(), Set.of(), bot.getYRot(), bot.getXRot(), true);
-            player.teleportTo(f.level, player.getX(), y, player.getZ(), Set.of(), player.getYRot(), player.getXRot(), true);
-            Guardian guardian = EntityType.GUARDIAN.create(f.level, EntitySpawnReason.COMMAND);
-            require(guardian != null, "failed to create the guardian");
-            guardian.setPersistenceRequired();
-            guardian.snapTo(f.x(6.0D), f.arena.origin.getY() - 1, f.z(0.0D), 90.0F, 0.0F);
-            f.level.addFreshEntity(guardian);
-            GameTestCleanup.whenFinished(context, guardian::discard);
-            return guardian;
         }
 
         void requireFollowing() {

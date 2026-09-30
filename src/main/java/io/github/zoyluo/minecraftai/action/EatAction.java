@@ -13,6 +13,10 @@ public final class EatAction {
 
     /** {@code safeOnly}: never eat harmful food (rotten flesh, spider eye, ...) even as a last resort. */
     public static ActionResult startEating(AIPlayerEntity player, boolean safeOnly) {
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            // The use key holds the shield up (vanilla: one item in use at a time): the bite waits, it never drops the shield.
+            return ActionResult.failed("hands_busy");
+        }
         int slot = safeOnly ? InventoryAction.findSafeFoodSlot(player) : InventoryAction.findFoodSlot(player);
         if (slot < 0) {
             return ActionResult.failed("no_food");

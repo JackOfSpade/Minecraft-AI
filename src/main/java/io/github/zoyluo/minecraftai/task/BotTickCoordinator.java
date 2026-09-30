@@ -47,8 +47,8 @@ public final class BotTickCoordinator {
             // Mining assist (shadow sensing): never consumes the tick, never throws, one static check when off.
             MiningAssistCoordinator.INSTANCE.tickBot(server, bot, handled);
             // The reactive shield owner (see ShieldGuard): what the bot has noticed that a shield can stop, from every task, and a
-            // shield it raised that nothing threatens any more. The tasks of this tick read its state; it never consumes the tick
-            // and never throws.
+            // shield it raised that nothing threatens any more. TaskManager.tickAll ran before this coordinator, so the tasks read its
+            // state on the next tick; it never consumes the tick and never throws.
             ShieldGuard.INSTANCE.tickBot(server, bot);
             if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {
                 continue;

@@ -36,8 +36,6 @@ class ShieldRulesTest {
         // Behind (180): 110 degrees to reach the 70 degree line.
         assertEquals(110.0D, ShieldRules.degreesToTurn(180.0D, 90.0D), 1.0E-9D);
         assertEquals(10.0D, ShieldRules.degreesToTurn(80.0D, 90.0D), 1.0E-9D);
-        assertTrue(ShieldRules.inArc(90.0D, 90.0D));
-        assertFalse(ShieldRules.inArc(90.5D, 90.0D));
     }
 
     @Test
@@ -102,15 +100,6 @@ class ShieldRulesTest {
     }
 
     // ------------------------------------------------------------------ the time a block needs
-
-    @Test
-    void theBlockDelayRunsDownWhileTheShieldIsUp() {
-        assertEquals(5, ShieldRules.blockDelayRemaining(5, 0));
-        assertEquals(2, ShieldRules.blockDelayRemaining(5, 3));
-        assertEquals(0, ShieldRules.blockDelayRemaining(5, 5));
-        assertEquals(0, ShieldRules.blockDelayRemaining(5, 40));
-        assertEquals(5, ShieldRules.blockDelayRemaining(5, -3));
-    }
 
     @Test
     void aRaiseThatCannotBeActiveInTimeIsNotStarted() {

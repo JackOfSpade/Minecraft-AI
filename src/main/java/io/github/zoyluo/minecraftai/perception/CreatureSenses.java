@@ -576,8 +576,8 @@ public final class CreatureSenses {
     /**
      * True when {@code bot} is aware of {@code projectile} (an arrow or trident in flight): the shot was HEARD (the vanilla
      * {@code PROJECTILE_SHOOT} vibration, its source near where the projectile has come from), or the projectile itself is in view
-     * (inside the peripheral view field with a clear line). There is no reaction time for an object flying at the bot: it is a flinch,
-     * not a recognition. With perception off: today's omnidirectional test.
+     * (inside the peripheral view field with a clear line). This is SENSING it; acting on it takes the reaction time of a first
+     * sighting unless its shooter is being tracked (docs/SHIELD_USE.md). With perception off: today's omnidirectional test.
      */
     public boolean noticedProjectile(AIPlayerEntity bot, Entity projectile) {
         if (!enabled()) {
@@ -610,6 +610,28 @@ public final class CreatureSenses {
         Vec3 look = bot.getViewVector(1.0F);
         double theta = CreaturePerception.angleDeg(look.x, look.y, look.z, toward.x, toward.y, toward.z);
         return theta <= params.peripheralHalfAngleDeg() && clearLine(bot, projectile);
+    }
+
+    /**
+     * True when {@code bot} heard the shot of {@code projectile} (the {@code PROJECTILE_SHOOT} vibration, the same match as
+     * {@link #noticedProjectile}) and has a clear line to it: the hearing rule turns the bot to it (angle factor 1). False with
+     * perception off.
+     */
+    public boolean heardProjectileShot(AIPlayerEntity bot, Entity projectile) {
+        if (!enabled()) {
+            return false;
+        }
+        BotState s = bots.get(bot.getUUID());
+        if (s == null || s.bot != bot) {
+            return false;
+        }
+        double reach = 4.0D + 3.2D * Math.max(0, projectile.tickCount);
+        for (Shot shot : s.shots) {
+            if (shot.pos().distanceTo(projectile.position()) <= reach) {
+                return clearLine(bot, projectile);
+            }
+        }
+        return false;
     }
 
     private static boolean clearLine(AIPlayerEntity bot, Entity projectile) {

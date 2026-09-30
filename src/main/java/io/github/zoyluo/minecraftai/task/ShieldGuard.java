@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.HumanAim;
 import io.github.zoyluo.minecraftai.action.InteractAction;
-import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.OffhandPolicy;
 import io.github.zoyluo.minecraftai.action.RangedWeapon;
 import io.github.zoyluo.minecraftai.action.ShieldBlockability;
@@ -72,6 +72,10 @@ import net.minecraft.world.phys.Vec3;
  *       front ({@link ShieldBlockability#GUARDIAN_BEAM_NOTE}); the shield is held until the beam lets go.</li>
  *   <li>A noticed creeper whose fuse is lit and late: the explosion is blockable like any hit.</li>
  * </ul>
+ * <p>Following or escorting (a {@link FollowTask}), only what is already in flight at the bot is blocked (a hold of a few ticks): the
+ * follower sprints after its player while hostiles are aggroed (RULES), so no pre-emptive hold. An escape ({@link EvadeTask}: a
+ * warden flight, a retreat) sprints and owns the hands.
+ *
  * Never reacted to: thrown splash and lingering potions, experience bottles, snowballs, eggs, ender pearls, a warden's sonic boom,
  * Piercing arrows, evoker fangs, dragon fireballs and breath clouds, lightning, fire, lava and every other damage of
  * {@code #bypasses_shield}; a projectile from behind that nobody heard or saw.
@@ -108,8 +112,15 @@ public final class ShieldGuard {
     static final int SHOOTER_DRAW_TICKS = 12;
     /** Head-aim tolerance: the shooter must face the bot within roughly twenty degrees. */
     static final double SHOOTER_AIM_DOT = 0.94D;
-    /** How far a noticed shooter or guardian is looked for: what the bot can notice at all (the perception radius decides, see {@code CreatureSenses}). */
-    private static final double SCAN_RANGE = 24.0D;
+    /**
+     * How far a drawing shooter or a guardian beam is looked for: exactly as far as the bot can notice a creature at all, its profile
+     * observation radius ({@code perception.radius}, {@code CreatureSenses}). No distance of its own: a shorter one would be an invented
+     * limit (a shooter drawing at the bot from farther is as real a threat), a longer one only costs a wider query.
+     */
+    private static double scanRange() {
+        MinecraftAiConfig config = MinecraftAiConfig.get();
+        return Math.max(1, config == null ? 16 : config.perception().radius());
+    }
     /** Raise the shield a little ahead of CreeperDefenseTask's own late-fuse wall threshold. */
     static final float CREEPER_FUSE_THRESHOLD = 0.35F;
     static final double CREEPER_FUSE_RANGE = 10.0D;
@@ -152,13 +163,18 @@ public final class ShieldGuard {
         }
     }
 
-    private record Threat(Kind kind, Vec3 facePoint, double halfArcDeg, double ticksToImpact, float damage, String source) {
+    private record Threat(Kind kind, Vec3 facePoint, double halfArcDeg, double ticksToImpact, float damage, String source, int sourceId) {
+    }
+
+    /** Why the reactive owner last raised the shield, and for which entity (a seam for the tests). */
+    record RaiseCause(String reason, int sourceId) {
     }
 
     private static final class State {
         Owner owner = Owner.NONE;
         long retryAt;
         String lastRefusal;
+        RaiseCause lastRaise;
         /** The continuous exposure of each sensed projectile (entity id): the reaction time of a first sighting. */
         final ExposureTracker<Integer> projectiles = new ExposureTracker<>();
     }
@@ -173,6 +189,12 @@ public final class ShieldGuard {
     }
 
     // ------------------------------------------------------------------ queries for the tasks
+
+    /** Why the reactive owner last raised the bot's shield ({@code null} before the first raise): a seam for the tests. */
+    static RaiseCause lastRaise(AIPlayerEntity bot) {
+        State state = INSTANCE.states.get(bot);
+        return state == null ? null : state.lastRaise;
+    }
 
     /** True while the reactive owner has the shield up (the tasks skip whatever needs the hands: mining, striking). */
     public boolean holding(AIPlayerEntity bot) {
@@ -368,7 +390,14 @@ public final class ShieldGuard {
                 || item instanceof net.minecraft.world.item.BucketItem
                 || item instanceof net.minecraft.world.item.MapItem
                 || item instanceof net.minecraft.world.item.EmptyMapItem
-                || item instanceof net.minecraft.world.item.FireworkRocketItem;
+                || item instanceof net.minecraft.world.item.FireworkRocketItem
+                || item instanceof net.minecraft.world.item.EnderEyeItem
+                || item instanceof net.minecraft.world.item.WritableBookItem
+                || item instanceof net.minecraft.world.item.WrittenBookItem
+                || item instanceof net.minecraft.world.item.KnowledgeBookItem
+                || item instanceof net.minecraft.world.item.BoatItem
+                || item instanceof net.minecraft.world.item.PlaceOnWaterBlockItem
+                || item instanceof net.minecraft.world.item.BundleItem;
     }
 
     /**
@@ -376,12 +405,24 @@ public final class ShieldGuard {
      * fight), then any other plain hotbar item, then an empty slot. True when the main hand no longer takes the use.
      */
     private static boolean switchMainHandAway(AIPlayerEntity bot) {
-        CombatCore.ensureMeleeWeapon(bot);
-        if (!ShieldRules.mainHandConsumesUse(classifyMainHand(bot, bot.getMainHandItem()))) {
-            BotLog.action(bot, "shield_hotbar_switch", "to", bot.getMainHandItem().getItem());
+        // A hotbar change only (slots 0-8, one key press): the best melee weapon ON the hotbar, never one fetched from the backpack.
+        Inventory inventory = bot.getInventory();
+        int weapon = -1;
+        for (int slot = 0; slot <= 8; slot++) {
+            ItemStack candidate = inventory.getNonEquipmentItems().get(slot);
+            if (EquipAction.isQualifiedMeleeWeapon(candidate)
+                    && !ShieldRules.mainHandConsumesUse(classifyMainHand(bot, candidate))
+                    && (weapon < 0 || EquipAction.attackDamage(candidate)
+                    > EquipAction.attackDamage(inventory.getNonEquipmentItems().get(weapon)))) {
+                weapon = slot;
+            }
+        }
+        if (weapon >= 0) {
+            inventory.setSelectedSlot(weapon);
+            inventory.setChanged();
+            BotLog.action(bot, "shield_hotbar_switch", "to", inventory.getNonEquipmentItems().get(weapon).getItem());
             return true;
         }
-        Inventory inventory = bot.getInventory();
         int empty = -1;
         for (int slot = 0; slot <= 8; slot++) {
             ItemStack candidate = inventory.getNonEquipmentItems().get(slot);
@@ -392,7 +433,8 @@ public final class ShieldGuard {
                 continue;
             }
             if (!ShieldRules.mainHandConsumesUse(classifyMainHand(bot, candidate))) {
-                InventoryAction.equipFromSlot(bot, slot);
+                inventory.setSelectedSlot(slot);
+                inventory.setChanged();
                 BotLog.action(bot, "shield_hotbar_switch", "to", candidate.getItem());
                 return true;
             }
@@ -406,10 +448,14 @@ public final class ShieldGuard {
         return false;
     }
 
-    /** What the bot is using right now, for the hand policy. */
-    static UseKind classifyUse(AIPlayerEntity bot) {
+    /**
+     * What the bot is using right now, for the hand policy. Eating counts from the moment a task means to eat, not only while a bite is
+     * in progress: an eating pass ({@link EatTask}) or the combat task's heal ({@link CombatTask#healing}) between two bites is
+     * {@link UseKind#CONSUMING} too, so a hit that only hurts never takes the hand from the heal.
+     */
+    static UseKind classifyUse(AIPlayerEntity bot, Task active) {
         if (!bot.isUsingItem()) {
-            return UseKind.NONE;
+            return active instanceof EatTask || active instanceof CombatTask combat && combat.healing() ? UseKind.CONSUMING : UseKind.NONE;
         }
         ItemStack used = bot.getUseItem();
         if (ShieldBlockability.isShield(used)) {
@@ -434,6 +480,11 @@ public final class ShieldGuard {
         try {
             tick(bot);
         } catch (RuntimeException exception) {
+            // Never leave a shield this owner raised behind: it would slow the bot and stop its mining and swings for ever.
+            State state = states.get(bot);
+            if (state != null && state.owner != Owner.NONE && usingShield(bot)) {
+                bot.stopUsingItem();
+            }
             states.remove(bot);
             BotLog.error(bot, "shield_guard_failed", exception);
         }
@@ -447,18 +498,48 @@ public final class ShieldGuard {
         State state = stateOf(bot);
         long now = level.getGameTime();
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+        releaseStaleTaskShield(bot, state, active);
         if (handsOwnedByTask(active)) {
             state.projectiles.clear();
             releaseIfOwned(bot, state, "task_owns_hands");
             return;
         }
         ItemStack shield = shieldStack(bot);
-        Threat threat = shield.isEmpty() ? null : assess(bot, level, shield, state, now, active);
+        boolean up = usingShield(bot);
+        if (!up && (shield.isEmpty() || now < state.retryAt || bot.getCooldowns().isOnCooldown(shield))) {
+            // Nothing to raise now (no shield, a refused raise waiting its retry, a shield an axe disabled): no assessment, no turn.
+            state.projectiles.clear();
+            releaseIfOwned(bot, state, "threat_over");
+            return;
+        }
+        Threat threat = assess(bot, level, shield, state, now, active);
         if (threat == null) {
             releaseIfOwned(bot, state, "threat_over");
             return;
         }
-        engage(bot, state, threat, now);
+        engage(bot, state, threat, now, active);
+    }
+
+    /**
+     * A shield a task raised for its own use (the combat task's melee rhythm, the creeper defence's shield phase) is that task's only
+     * while the task is in the phase that holds it. A task that ended (a combat timeout in the BLOCK phase), was paused or replaced left
+     * it up: it comes down here, whatever task the bot resumed, so a follower does not crawl at the item-use pace and a miner is not
+     * kept from breaking for ever.
+     */
+    private static void releaseStaleTaskShield(AIPlayerEntity bot, State state, Task active) {
+        if (state.owner != Owner.TASK) {
+            return;
+        }
+        boolean held = active instanceof CombatTask combat && combat.holdsItsShield()
+                || active instanceof CreeperDefenseTask creeper && creeper.holdsItsShield();
+        if (!held) {
+            if (usingShield(bot)) {
+                bot.releaseUsingItem();
+                BotLog.action(bot, "task_shield_lowered", "reason", "owner_task_left_its_shield_phase",
+                        "active", active == null ? "none" : active.name());
+            }
+            state.owner = Owner.NONE;
+        }
     }
 
     /**
@@ -469,6 +550,10 @@ public final class ShieldGuard {
         State state = states.get(bot);
         if (state != null) {
             state.projectiles.clear();
+            if (state.owner == Owner.TASK && usingShield(bot)) {
+                bot.releaseUsingItem();
+                state.owner = Owner.NONE;
+            }
             releaseIfOwned(bot, state, reason);
         }
     }
@@ -481,7 +566,10 @@ public final class ShieldGuard {
         if (task instanceof CombatTask combat) {
             return combat.isRangedExchange();
         }
-        return task instanceof EmergencyShelterTask
+        // An escape (EvadeTask: a warden flight, a retreat) sprints: RULES, "always sprint while hostiles are aggroed" and "sprint away
+        // while the warden hunts". A raised shield would stop the sprint.
+        return task instanceof EvadeTask
+                || task instanceof EmergencyShelterTask
                 || task instanceof MiningBarricadeTask
                 || task instanceof CreeperDefenseTask
                 || task instanceof LavaEscapeTask
@@ -530,9 +618,15 @@ public final class ShieldGuard {
             Vec3 at = projectile.position();
             if (raised || canBeActiveInTime(bot, at, inc.ticksToClosestApproach(), delay, arc)) {
                 return new Threat(Kind.PROJECTILE, at, arc, inc.ticksToClosestApproach(), ShieldBlockability.estimatedDamage(projectile),
-                        BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString());
+                        BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString(), projectile.getId());
             }
             logRefusalOnce(bot, state, "projectile_too_late");
+        }
+        if (active instanceof FollowTask) {
+            // Following or escorting, the bot sprints after its player while hostiles are aggroed (RULES, follow and escort pace): it
+            // blocks what is ALREADY in flight at it (a hold of a few ticks), never a pre-emptive hold against a drawing shooter, a
+            // charging beam or a fuse (the danger watcher takes a follower off the follow for a creeper).
+            return null;
         }
         // 2. A late creeper fuse (the creeper defence task has its own shield phase).
         if (!(active instanceof CreeperDefenseTask)) {
@@ -541,7 +635,7 @@ public final class ShieldGuard {
                 DamageSource blast = level.damageSources().explosion(creeper, creeper);
                 double arc = ShieldBlockability.halfArcDeg(component, blast);
                 if (ShieldBlockability.blocks(shield, blast) && canFace(bot, state, creeper.position(), arc)) {
-                    return new Threat(Kind.CREEPER, creeper.position(), arc, Double.NaN, 12.0F, "creeper");
+                    return new Threat(Kind.CREEPER, creeper.position(), arc, Double.NaN, 12.0F, "creeper", creeper.getId());
                 }
             }
         }
@@ -553,7 +647,7 @@ public final class ShieldGuard {
             if (ShieldBlockability.blocks(shield, bite) && canFace(bot, state, guardian.position(), arc)) {
                 return new Threat(Kind.GUARDIAN_BEAM, guardian.position(), arc, Double.NaN,
                         (float) guardian.getAttributeValue(Attributes.ATTACK_DAMAGE) + 1.0F,
-                        BuiltInRegistries.ENTITY_TYPE.getKey(guardian.getType()).toString());
+                        BuiltInRegistries.ENTITY_TYPE.getKey(guardian.getType()).toString(), guardian.getId());
             }
         }
         // 4. A shooter drawing (or holding a loaded crossbow) at the bot: held until the shot lands or the draw stops.
@@ -563,7 +657,7 @@ public final class ShieldGuard {
             double arc = ShieldBlockability.halfArcDeg(component, arrow);
             if (canFace(bot, state, shooter.getEyePosition(), arc)) {
                 return new Threat(Kind.SHOOTER, shooter.getEyePosition(), arc, Double.NaN, 6.0F,
-                        BuiltInRegistries.ENTITY_TYPE.getKey(shooter.getType()).toString());
+                        BuiltInRegistries.ENTITY_TYPE.getKey(shooter.getType()).toString(), shooter.getId());
             }
         }
         return null;
@@ -593,8 +687,8 @@ public final class ShieldGuard {
 
     /**
      * May the bot act on {@code projectile} yet ({@link ShieldRules#reacted})? Anticipated when its shooter is a creature the bot is
-     * tracking; otherwise the reaction time of the shared formula for the projectile's current distance and angle (in the view field:
-     * the angle factor of sight; out of it, so only its shot was heard: the hearing rule's factor 1), over its continuous exposure.
+     * tracking; otherwise the reaction time of the shared formula for the projectile's current distance and angle (its shot heard: the
+     * hearing rule's angle factor 1; only seen: the angle factor of sight), over its continuous exposure.
      */
     private static boolean reactedTo(AIPlayerEntity bot, Projectile projectile, long exposedTicks) {
         boolean on = CreatureSenses.enabled();
@@ -609,7 +703,8 @@ public final class ShieldGuard {
         Vec3 toward = projectile.position().subtract(eye);
         Vec3 look = bot.getViewVector(1.0F);
         double theta = CreaturePerception.angleDeg(look.x, look.y, look.z, toward.x, toward.y, toward.z);
-        double angleForReaction = theta <= params.peripheralHalfAngleDeg() ? theta : 0.0D;
+        // A heard shot turned the bot to it (the hearing rule: angle factor 1), in view or not; a projectile only seen keeps its angle.
+        double angleForReaction = CreatureSenses.INSTANCE.heardProjectileShot(bot, projectile) ? 0.0D : theta;
         double required = CreaturePerception.requiredSeconds(params, angleForReaction, toward.length(),
                 CreaturePerception.Subject.of(false), false);
         return ShieldRules.reacted(true, false, CreaturePerception.exposureSeconds(exposedTicks), required);
@@ -646,8 +741,8 @@ public final class ShieldGuard {
         }
     }
 
-    private void engage(AIPlayerEntity bot, State state, Threat threat, long now) {
-        UseKind use = classifyUse(bot);
+    private void engage(AIPlayerEntity bot, State state, Threat threat, long now, Task active) {
+        UseKind use = classifyUse(bot, active);
         float health = bot.getHealth() + bot.getAbsorptionAmount();
         boolean lethal = ShieldRules.lethal(threat.damage(), health);
         if (!ShieldRules.mayInterrupt(use, lethal)) {
@@ -662,7 +757,7 @@ public final class ShieldGuard {
         if (now < state.retryAt) {
             return;
         }
-        if (use != UseKind.NONE && use != UseKind.SHIELD) {
+        if (use != UseKind.NONE && use != UseKind.SHIELD && bot.isUsingItem()) {
             // Cancel, never release: a drawn bow must not fire, food not be finished; only a lethal hit gets this far.
             bot.stopUsingItem();
         }
@@ -670,6 +765,7 @@ public final class ShieldGuard {
         switch (result) {
             case RAISED -> {
                 state.lastRefusal = null;
+                state.lastRaise = new RaiseCause(threat.kind().reason, threat.sourceId());
                 BotLog.action(bot, "reactive_shield_raised",
                         "reason", threat.kind().reason,
                         "source", threat.source(),
@@ -704,8 +800,8 @@ public final class ShieldGuard {
         return bot.level().getEntitiesOfClass(Creeper.class,
                         bot.getBoundingBox().inflate(CREEPER_FUSE_RANGE),
                         creeper -> creeper.isAlive()
-                                && ObservableWorldQuery.canNoticeCreature(bot, creeper)
-                                && creeper.getSwelling(1.0F) >= CREEPER_FUSE_THRESHOLD)
+                                && creeper.getSwelling(1.0F) >= CREEPER_FUSE_THRESHOLD
+                                && ObservableWorldQuery.canNoticeCreature(bot, creeper))
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .orElse(null);
@@ -724,7 +820,7 @@ public final class ShieldGuard {
     private static Guardian guardianBeamOn(AIPlayerEntity bot, Task active) {
         CombatTask combat = active instanceof CombatTask c ? c : null;
         return bot.level().getEntitiesOfClass(Guardian.class,
-                        bot.getBoundingBox().inflate(SCAN_RANGE),
+                        bot.getBoundingBox().inflate(scanRange()),
                         guardian -> guardian.isAlive()
                                 && guardian.hasActiveAttackTarget()
                                 && guardian.getActiveAttackTarget() == bot
@@ -749,12 +845,12 @@ public final class ShieldGuard {
     private static LivingEntity drawingShooterAt(AIPlayerEntity bot, Task active) {
         CombatTask combat = active instanceof CombatTask c ? c : null;
         return bot.level().getEntitiesOfClass(LivingEntity.class,
-                        bot.getBoundingBox().inflate(SCAN_RANGE),
+                        bot.getBoundingBox().inflate(scanRange()),
                         shooter -> shooter != bot
                                 && shooter.isAlive()
+                                && isDrawingBowAt(shooter, bot)
                                 && CombatCore.hostileTo(bot, shooter)
                                 && ObservableWorldQuery.canNoticeCreature(bot, shooter)
-                                && isDrawingBowAt(shooter, bot)
                                 && (combat == null || !combat.meleeRhythmAgainst(bot, shooter)))
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceToSqr))

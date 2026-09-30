@@ -9,6 +9,8 @@ import net.minecraft.world.phys.Vec3;
 public final class InteractAction {
     /** The refusal reason of a legal strike whose target is not (yet) under the bot's crosshair. */
     public static final String NOT_UNDER_CROSSHAIR = "not_under_crosshair";
+    /** The refusal of a strike while an item is in use (a raised shield, a drawn bow, food): the client drops the attack click. */
+    public static final String HANDS_BUSY = "hands_busy";
 
     private InteractAction() {
     }
@@ -34,7 +36,7 @@ public final class InteractAction {
         if (player.isUsingItem()) {
             // A player cannot attack while the use key is down (a raised shield, a drawn bow, food): the client drops the click
             // (Minecraft.handleKeybinds). A raised shield is lowered by its owner first (CombatCore.strikeIfReady), never here.
-            return ActionResult.failed("hands_busy");
+            return ActionResult.failed(HANDS_BUSY);
         }
         String refusal = StrikeLegality.strikeRefusal(player, target);
         if (refusal != null) {

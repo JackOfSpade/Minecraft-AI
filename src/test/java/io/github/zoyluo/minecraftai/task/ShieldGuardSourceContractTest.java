@@ -34,7 +34,7 @@ class ShieldGuardSourceContractTest {
         int guard = coordinator.indexOf("ShieldGuard.INSTANCE.tickBot(server, bot);");
         int goals = coordinator.indexOf("GoalExecutor.INSTANCE.tickBot(server, bot)");
         assertTrue(scan > 0 && guard > scan && goals > guard,
-                "the guard decides after the danger scan and before the tasks of the tick read its state");
+                "the guard decides after the danger scan and before the mission executor; the tasks (ticked earlier) read it next tick");
         assertTrue(coordinator.indexOf("ShieldGuard.INSTANCE.tickBot(", guard + 1) < 0, "exactly one call site");
     }
 
@@ -119,5 +119,51 @@ class ShieldGuardSourceContractTest {
                         && guard.contains("task instanceof EmergencyShelterTask"),
                 "the tasks that own the hands are left alone");
         assertFalse(guard.contains("LookAction.lookAt("), "the head never turns instantly");
+    }
+
+    @Test
+    void aTaskShieldNeverOutlivesTheTaskPhaseThatRaisedIt() throws IOException {
+        String guard = read("task/ShieldGuard.java");
+        int tick = guard.indexOf("private void tick(AIPlayerEntity bot)");
+        String body = guard.substring(tick, guard.indexOf("public void standDown(", tick));
+        assertTrue(body.indexOf("releaseStaleTaskShield(bot, state, active);") > 0
+                        && body.indexOf("releaseStaleTaskShield(bot, state, active);") < body.indexOf("handsOwnedByTask(active)"),
+                "every tick, before anything else, a task shield whose task left its shield phase comes down");
+        assertTrue(guard.contains("combat.holdsItsShield()") && guard.contains("creeper.holdsItsShield()"));
+        String combat = read("task/CombatTask.java");
+        assertTrue(combat.contains("return phase == Phase.BLOCK && state == TaskState.RUNNING;"), "only the BLOCK phase holds it");
+        int timeout = combat.indexOf("fail(\"combat_timeout\");");
+        assertTrue(combat.lastIndexOf("ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);", timeout) > combat.lastIndexOf("elapsed > 2400", timeout),
+                "a combat timeout lowers its own shield");
+    }
+
+    @Test
+    void followingAndEscapingKeepTheSprintTheRulesAsk() throws IOException {
+        String guard = read("task/ShieldGuard.java");
+        int follow = guard.indexOf("if (active instanceof FollowTask) {");
+        assertTrue(follow > guard.indexOf("// 1. What is in flight") && follow < guard.indexOf("// 2. A late creeper fuse"),
+                "a follower blocks only what is already in flight, never a pre-emptive hold");
+        int owned = guard.indexOf("private static boolean handsOwnedByTask(Task task)");
+        assertTrue(guard.substring(owned, guard.indexOf("private void releaseIfOwned(", owned)).contains("task instanceof EvadeTask"),
+                "an escape (a warden flight) owns the hands");
+    }
+
+    @Test
+    void theShieldNeverDropsBehindTheBacksOfEatingPlacingOrTheHotbar() throws IOException {
+        String guard = read("task/ShieldGuard.java");
+        assertTrue(guard.contains("active instanceof EatTask || active instanceof CombatTask combat && combat.healing() ? UseKind.CONSUMING"),
+                "a pending heal counts as eating for the hand policy");
+        assertTrue(read("action/EatAction.java").contains("ShieldGuard.usingShield(player)"), "a bite never replaces the raised shield");
+        String eat = read("task/EatTask.java");
+        assertTrue(eat.indexOf("ShieldGuard.usingShield(bot)") > 0 && eat.indexOf("ShieldGuard.usingShield(bot)") < eat.indexOf("itemElapsed++;"),
+                "the eating pass waits (no budget, no watchdog) while the shield is up");
+        String build = read("action/BuildAction.java");
+        assertTrue(build.split("ShieldGuard.usingShield\\(player\\)", -1).length - 1 >= 3, "no block placed nor item used on a block with the shield up");
+        int sw = guard.indexOf("private static boolean switchMainHandAway(");
+        String swBody = guard.substring(sw, guard.indexOf("static UseKind classifyUse(", sw));
+        assertFalse(swBody.contains("ensureMeleeWeapon") || swBody.contains("equipFromSlot"), "a hotbar change only, never the backpack");
+        assertTrue(read("task/GuardTask.java").contains("PaceRules.inputScale(false, bot.isUsingItem())"), "the guard's raw strafe is slowed too");
+        String attack = read("task/AttackEntityTask.java");
+        assertTrue(attack.indexOf("InteractAction.HANDS_BUSY.equals(lastRefusal)") > 0, "an attack command waits for the hands");
     }
 }

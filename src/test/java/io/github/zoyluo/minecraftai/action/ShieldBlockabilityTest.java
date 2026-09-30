@@ -78,6 +78,11 @@ class ShieldBlockabilityTest {
                 "shulker_bullet", "llama_spit", "wind_charge", "breeze_wind_charge", "firework_rocket")) {
             assertTrue(blockableProjectile(type, true, 0), type + " is blockable");
         }
+        // A wither skull without a living owner hits with plain magic, 5 (WitherSkull.onHitEntity): unblockable.
+        assertEquals(Optional.of(new ShieldBlockability.Hit("magic", 5.0F)), ShieldBlockability.Table.hit("wither_skull", false));
+        assertFalse(blockableProjectile("wither_skull", false, 0));
+        // A firework rocket without explosions (or not shot at an angle) deals nothing: a zero hit is never blockable.
+        assertFalse(ShieldBlockability.blockable(Optional.of(new ShieldBlockability.Hit("fireworks", 0.0F)), BYPASSES_SHIELD::contains, 0));
         // An ownerless ghast fireball is vanilla's unattributed_fireball: still blockable.
         assertEquals(Optional.of("unattributed_fireball"), ShieldBlockability.Table.hitDamageType("fireball", false));
         assertTrue(blockableProjectile("fireball", false, 0));

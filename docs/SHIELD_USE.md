@@ -30,6 +30,8 @@ delay `block_delay_seconds` (0.25 s = 5 ticks for a shield).
 | Piercing arrows and bolts | `arrow` with `pierceLevel > 0` | no |
 | snowballs, eggs, ender pearls | `thrown` of ZERO damage to a player (a snowball hurts only blazes) | nothing to block |
 | thrown splash and lingering potions, evoker fangs | `indirect_magic` | no |
+| a wither skull with no living owner | `magic` (5) | no |
+| a firework rocket without explosions, or not shot at an angle (going up, boosting an elytra) | no hit (0) | nothing to block |
 | experience bottles, area effect clouds, eyes of ender | no hit | never reacted to |
 | warden sonic boom | `sonic_boom` | no |
 | dragon fireballs (no hit of their own) and dragon breath clouds | `dragon_breath`, the Harming effect | no |
@@ -59,6 +61,15 @@ failing test.
 * **A creeper** with a late, lit fuse (the creeper defence task has its own shield phase through the same raise).
 * **Melee**: the combat task's rhythm (below).
 
+**Following, escorting and escaping keep the sprint (RULES win over the spec).** RULES say a follower or escort always sprints while
+hostiles are aggroed, and a bot sprints away from a hunting warden. So a `FollowTask` blocks only projectiles ALREADY IN FLIGHT at it
+(a hold of a few ticks: raised, blocked, lowered, and it sprints on); it makes no pre-emptive hold against a drawing or loaded shooter,
+a charging guardian beam or a fuse (the danger watcher takes a follower off the follow for a creeper). An `EvadeTask` (a warden flight,
+a retreat) owns the hands: no shield at all.
+
+A drawing shooter or a guardian is looked for exactly as far as the bot can notice a creature at all, its profile observation radius
+(`perception.radius`): no distance limit of the shield's own.
+
 ## Timing
 
 A raise is started only when it can be active before the hit: the turn into the front arc (at the human aim speed), the hotbar change
@@ -85,14 +96,22 @@ reaches it while it keeps sprinting after its player (R4), so it does not stop t
 * `ShieldGuard.raise` tries MAIN_HAND and then OFF_HAND through `gameMode.useItem`, as the client does. A main-hand item that would
   take the use (a bow with ammunition, a loaded or loadable crossbow, food the bot can eat, a usable trident, a spear, armour to swap, a
   throwable, a bucket, ...; each case mirrors the item's own `use`) makes the bot change its hotbar first to its melee weapon, another
-  plain item or an empty slot: one tick, and vanilla's own attack-strength reset of a changed main-hand item.
+  plain item or an empty slot, on the HOTBAR only (slots 0-8, one key press; nothing is fetched from the backpack): one tick, and
+  vanilla's own attack-strength reset of a changed main-hand item.
 * While a shield is up: no mining (`ActionPack.tickBreak` waits), no attacking (`InteractAction.attackEntity` refuses `hands_busy`
   while any item is in use), `ActionPack.stopAll` does not drop the reactive owner's shield, and every movement is slowed like a
-  player's: controller-driven keys by the pace enforcer (`PaceRules`, the vanilla 0.2 item-use factor, no sprint), the combat task's raw
-  strafe keys by the same factor. So a follower keeps following and a fighter keeps approaching or strafing, only slower.
+  player's: controller-driven keys by the pace enforcer (`PaceRules`, the vanilla 0.2 item-use factor, no sprint), the combat and guard
+  tasks' raw strafe keys by the same factor. So a follower keeps following and a fighter keeps approaching or strafing, only slower.
 * What a block may interrupt (`ShieldRules.mayInterrupt`): nothing in use or the shield itself, yes. **Eating in progress, a drawn
   bow or crossbow and any other use are finished, not cancelled, for a hit that only hurts; they are cancelled only for a hit that
-  would be lethal** (a sensible player keeps chewing at low health because the food is the heal).
+  would be lethal** (a sensible player keeps chewing at low health because the food is the heal). An eating pass (`EatTask`) or the
+  combat task's heal counts as eating between two bites too; while a lethal hit has the shield up, the eating pass waits (no budget
+  spent, its watchdog never cancels the shield) and a bite never starts (`EatAction` refuses `hands_busy`).
+* No block is placed and no item used on a block while the shield is up (`BuildAction` refuses `hands_busy`): the client drops every
+  other use click while the use key is down. An attack command (`AttackEntityTask`) waits for the hands like it waits for the aim.
+* A shield a task raised for itself (the combat task's BLOCK phase, the creeper defence's SHIELD phase) is that task's only while it is
+  in that phase: whatever ended, paused or replaced the task (a combat timeout in BLOCK included), the guard lowers it on its next tick,
+  so a resumed follower or miner is never left at the item-use pace or unable to break.
 * **A ranged exchange** of the combat task (its bow or crossbow out, drawn or loaded) keeps shooting: its arrow took the offhand (the
   shield went into the arrow's slot), a block would need the inventory, which no player opens mid-exchange, and the answer to a shooter
   is the return shot. The emergency tasks that build or escape (shelter, barricade, creeper defence, lava, fire, powder snow) own the

@@ -16,10 +16,13 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.bee.Bee;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.BlocksAttacks;
+import net.minecraft.world.item.component.Fireworks;
 
 /**
  * Whether the damage an incoming projectile or melee attacker would deal is BLOCKABLE by the item in the bot's offhand: the question a
@@ -97,7 +100,8 @@ public final class ShieldBlockability {
         /**
          * The direct hit of an entity of this type, or empty when it deals no hit at all (an experience bottle, an area effect cloud,
          * an eye of ender, a fishing bobber, ...) or is unknown (never reacted to). {@code ownerKnown} matters for the ghast and blaze
-         * fireballs only: vanilla's {@code DamageSources.fireball} is {@code unattributed_fireball} without an owner.
+         * fireballs (vanilla's {@code DamageSources.fireball} is {@code unattributed_fireball} without an owner) and the wither skull
+         * (without a living owner its hit is {@code magic}, 5).
          */
         public static Optional<Hit> hit(String entityTypePath, boolean ownerKnown) {
             Hit hit = HIT.get(entityTypePath);
@@ -106,6 +110,10 @@ public final class ShieldBlockability {
             }
             if ("fireball".equals(hit.damageType()) && !ownerKnown) {
                 return Optional.of(new Hit("unattributed_fireball", hit.damage()));
+            }
+            if ("wither_skull".equals(hit.damageType()) && !ownerKnown) {
+                // WitherSkull.onHitEntity: without a living owner the hit is plain magic, 5 (unblockable).
+                return Optional.of(new Hit("magic", 5.0F));
             }
             return Optional.of(hit);
         }
@@ -201,10 +209,24 @@ public final class ShieldBlockability {
     private static Optional<Hit> hitOf(Entity projectile) {
         Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType());
         Entity owner = projectile instanceof Projectile p ? p.getOwner() : null;
+        if (projectile instanceof FireworkRocketEntity rocket && !rocketHurts(rocket)) {
+            return Optional.of(new Hit("fireworks", 0.0F));
+        }
         if ("minecraft".equals(id.getNamespace())) {
-            return Table.hit(id.getPath(), owner != null);
+            boolean ownerKnown = projectile instanceof WitherSkull ? owner instanceof LivingEntity : owner != null;
+            return Table.hit(id.getPath(), ownerKnown);
         }
         return projectile instanceof AbstractArrow ? Optional.of(new Hit("arrow", 6.0F)) : Optional.empty();
+    }
+
+    /**
+     * FireworkRocketEntity.dealExplosionDamage: a rocket hurts only through its explosions (5 + 2 per explosion near its blast), read off
+     * its item (the rocket a client renders); one without explosions deals 0. Only a rocket shot at an angle (from a crossbow) flies at
+     * someone: one going straight up or boosting an elytra flier (attached to it) is not a shot.
+     */
+    private static boolean rocketHurts(FireworkRocketEntity rocket) {
+        Fireworks fireworks = rocket.getItem().get(DataComponents.FIREWORKS);
+        return rocket.isShotAtAngle() && fireworks != null && !fireworks.explosions().isEmpty();
     }
 
     /** True when {@code shield} would stop the damage {@code projectile} deals on a front hit (see the class comment). */

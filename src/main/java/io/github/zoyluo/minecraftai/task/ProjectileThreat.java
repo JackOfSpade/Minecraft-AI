@@ -6,7 +6,6 @@ import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -34,12 +33,6 @@ public final class ProjectileThreat {
     public record Incoming(Projectile projectile, double ticksToClosestApproach) {
     }
 
-    /** The soonest blockable, sensed projectile heading for the bot, judged against {@code shield} (the offhand item that would block). */
-    public static Optional<Incoming> mostImminent(AIPlayerEntity bot, ItemStack shield) {
-        List<Incoming> all = incoming(bot, shield);
-        return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0));
-    }
-
     /**
      * Every blockable projectile the bot senses ({@link CreatureSenses#noticedProjectile}: seen in flight or its shot heard) that is on
      * a course passing close to its eyes, soonest first. Whether the bot may ACT on one yet (the reaction time of a first sighting) is
@@ -49,19 +42,21 @@ public final class ProjectileThreat {
         if (!(bot.level() instanceof ServerLevel level) || !ShieldBlockability.isShield(shield)) {
             return List.of();
         }
+        // Cheapest first: something that moves (an arrow stuck in the ground does not), not the bot's own, a hit the shield would stop,
+        // on a course at the bot; the perception rays last.
         List<Projectile> candidates = level.getEntitiesOfClass(
                 Projectile.class,
                 bot.getBoundingBox().inflate(SCAN_RANGE),
                 projectile -> projectile.isAlive()
+                        && velocityOf(projectile).lengthSqr() >= 1.0E-6D
                         && notOwnedByBot(bot, projectile)
-                        && CreatureSenses.INSTANCE.noticedProjectile(bot, projectile)
                         && ShieldBlockability.projectileBlockable(level, shield, projectile));
         List<Incoming> result = new ArrayList<>();
         for (Projectile projectile : candidates) {
             double gravity = projectile.getGravity();
             Double ticks = ticksToClosestApproach(
                     projectile.position().subtract(bot.getEyePosition()), velocityOf(projectile), gravity, gravity == 0.0D ? 1.0D : 0.99D);
-            if (ticks != null) {
+            if (ticks != null && CreatureSenses.INSTANCE.noticedProjectile(bot, projectile)) {
                 result.add(new Incoming(projectile, ticks));
             }
         }

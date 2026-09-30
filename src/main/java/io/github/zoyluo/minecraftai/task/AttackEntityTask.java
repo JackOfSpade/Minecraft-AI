@@ -68,6 +68,10 @@ public final class AttackEntityTask extends AbstractTask {
             return;
         }
         lastRefusal = result.reason() == null ? "" : result.reason();
+        if (InteractAction.HANDS_BUSY.equals(lastRefusal)) {
+            // An item in use (the shield up against a noticed threat): the swing waits, like the aim does (the task's timeout bounds it).
+            return;
+        }
         if (!InteractAction.NOT_UNDER_CROSSHAIR.equals(lastRefusal)) {
             fail(lastRefusal);
             return;
