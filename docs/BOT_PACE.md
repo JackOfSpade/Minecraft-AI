@@ -124,7 +124,8 @@ enforcer like any route, so a bot that recentres, hops a ledge or leaves a block
 `PRIVILEGED` (the operator-profile emergency rescues: suffocation, drowning, dark-trap and gather surfacing; denied in strict survival) and
 `CORRECTION`, which must stay at 0. `NoCorrectionTeleportSourceTest` locks the allow-list in the source, and
 `NaturalMovementAcceptanceGameTests` runs a mixed 1200-tick follow session (walk, sneak, sprint, step-up, drop, pond, zombie) with zero
-corrections in both profiles and on both engines. A teleport also never charges movement food cost (see the vanilla rules above), which is
+corrections in strict survival on both engines (the operator profile is covered by the source lock above and by
+`ActionPackSuppressedSnapGameTests`). A teleport also never charges movement food cost (see the vanilla rules above), which is
 one more reason a bot must not use one to cover ground.
 
 ## Quiet zones and wardens

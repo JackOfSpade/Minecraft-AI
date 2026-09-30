@@ -158,8 +158,9 @@ cell (a path-start snap, a stair, a landing, a retreat, a recentre, a pickup nud
   teleports therefore remain in the operator profile and nowhere else. `PrivilegedBoundarySourceTest` pins the capability side.
 * **Acceptance.** `NaturalMovementAcceptanceGameTests` runs a 1200-tick session (walk, sneak over a slab edge, sprint up a step, a
   two-block drop, a pond swim, a zombie hitting the owner, the walk back) with `TeleportAudit.corrections(bot) == 0` and no privileged
-  teleport on every tick, no drowning or suffocation damage and the bot within four blocks of the owner at the end: strict survival and
-  operator profile, legacy engine and Baritone.
+  teleport on every tick, no drowning or suffocation damage and the bot within four blocks of the owner at the end: strict survival, on
+  both engines (legacy and Baritone). The operator profile is not run there (it is one JVM-wide config value); it is covered by the
+  `NoCorrectionTeleportSourceTest` source lock and by `ActionPackSuppressedSnapGameTests`.
 
 ## Telemetry (per-bot logs, PATH category)
 

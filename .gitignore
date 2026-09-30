@@ -93,3 +93,9 @@ reports/baselines/.index.*
 # GameTest harness outputs (C:\mcw\_tools\gt_filter.sh)
 gt_results*.txt
 gt_logs/
+# worktree debris of GameTest / evidence runs (run output is never committed)
+gt_*.out
+gt_all_run.txt
+round*.out
+run*.out
+sweep.out
