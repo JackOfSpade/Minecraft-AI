@@ -193,6 +193,26 @@ final class MinecraftAiConfigBehaviourTest {
     }
 
     @Test
+    void theDurabilityWarningSectionParsesMergesAndKeepsOldGearConfigsLoading() {
+        // An old file with only worstFirst: the warning section is the default (on, 10 percent).
+        MinecraftAiConfig.Gear old = parse("{\"behaviour\":{\"gear\":{\"worstFirst\":false}}}").behaviour().gearOrDefaults();
+        assertFalse(old.worstFirstEnabled());
+        assertTrue(old.durabilityWarningsOrDefaults().enabledOn());
+        assertEquals(10.0D, old.durabilityWarningsOrDefaults().thresholdOrDefault());
+        // The new section, in full and partial.
+        MinecraftAiConfig.Gear full = parse(
+                "{\"behaviour\":{\"gear\":{\"durabilityWarnings\":{\"enabled\":false,\"thresholdPercent\":15}}}}").behaviour().gearOrDefaults();
+        assertTrue(full.worstFirstEnabled());
+        assertFalse(full.durabilityWarningsOrDefaults().enabledOn());
+        assertEquals(15.0D, full.durabilityWarningsOrDefaults().thresholdOrDefault());
+        MinecraftAiConfig.Gear partial = parse(
+                "{\"behaviour\":{\"gear\":{\"durabilityWarnings\":{\"thresholdPercent\":5}}}}").behaviour().gearOrDefaults();
+        assertTrue(partial.durabilityWarningsOrDefaults().enabledOn());
+        assertEquals(5.0D, partial.durabilityWarningsOrDefaults().thresholdOrDefault());
+        assertEquals(MinecraftAiConfig.Behaviour.defaults().gearOrDefaults(), parse("{}").behaviour().gearOrDefaults());
+    }
+
+    @Test
     void theAimSectionKeepsAGoodRateAndDefaultsABadOne() {
         assertEquals(720.0D, parse("{\"behaviour\":{\"combat\":{\"aim\":{\"maxTurnDegPerSec\":720.0}}}}")
                 .behaviour().combatOrDefaults().aimOrDefaults().maxTurnDegPerSec());

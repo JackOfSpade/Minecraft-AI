@@ -74,6 +74,7 @@ public final class CombatCore {
     public static void equipMelee(AIPlayerEntity bot) {
         EquipAction.autoEquipArmor(bot);
         ensureMeleeWeapon(bot);
+        io.github.zoyluo.minecraftai.action.OffhandPolicy.apply(bot); // the best shield, else a totem (a shield or totem may just have been lost)
     }
 
     /**

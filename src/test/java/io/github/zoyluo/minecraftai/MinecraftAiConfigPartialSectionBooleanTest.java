@@ -77,6 +77,16 @@ final class MinecraftAiConfigPartialSectionBooleanTest {
     }
 
     @Test
+    void anOldMiningSectionWithTheRetiredToolDurabilityFloorStillLoads() {
+        // A worn pickaxe never ends a tunnel any more (use it until it breaks); the key is ignored, the rest of the section is kept.
+        MinecraftAiConfig.Mining mining = parse(
+                "{\"mining\":{\"returnWhenFreeSlots\":4,\"toolDurabilityFloor\":0.25,\"placeTorches\":false}}").mining();
+
+        assertTrue(mining.returnWhenFreeSlots() == 4);
+        assertFalse(mining.placeTorches());
+    }
+
+    @Test
     void explicitFalsePlaceTorchesIsHonoured() {
         MinecraftAiConfig.Mining mining = parse("{\"mining\":{\"placeTorches\":false}}").mining();
 

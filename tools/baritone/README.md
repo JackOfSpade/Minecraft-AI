@@ -304,7 +304,7 @@ told apart from outside).
 ## Tools
 
 A break made by Baritone is priced and executed with the mod's own tool policy (`ToolSelector`), not with Baritone's auto-tool
-(which takes the fastest tool of the hotbar and spends an iron or diamond pickaxe on stone). The policy is WORST-FIRST (`behaviour.gear.worstFirst`, default on; `GearValue`): among the stacks that can do the job it picks the lowest value, so a wooden pickaxe digs stone before a stone one, iron ore takes the stone (or copper) pickaxe, diamond ore the iron one; enchantments add value (an Efficiency V diamond pickaxe is still kept for last), Silk Touch goes last, a more worn stack goes before a fresh one of the same value, and a nearly broken tool is never used. With `worstFirst=false` the earlier policy applies (the cheapest renewable tier, stone before wood):
+(which takes the fastest tool of the hotbar and spends an iron or diamond pickaxe on stone). The policy is WORST-FIRST (`behaviour.gear.worstFirst`, default on; `GearValue`): among the stacks that can do the job it picks the lowest value, so a wooden pickaxe digs stone before a stone one, iron ore takes the stone (or copper) pickaxe, diamond ore the iron one; enchantments add value (an Efficiency V diamond pickaxe is still kept for last), Silk Touch goes last, a more worn stack goes before a fresh one of the same value, and a worn tool is used until it breaks (then the next worst takes over). With `worstFirst=false` the earlier policy applies (the cheapest renewable tier, stone before wood):
 
 * `BaritoneSettings`: `assumeExternalAutoTool=true` (Baritone never touches the selected slot; `autoTool` stays on because the cost
   model keys on it), `useSwordToMine=false`, `itemSaver=true`.

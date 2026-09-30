@@ -63,7 +63,7 @@ This page lists where the mod used to differ and what a bot does now. The tests 
 
 ## Not done (feature gap, not parity)
 
-Bots never drink or throw potions, use totems of undying, ender pearls, crossbows, tridents or milk to cure effects, and cannot craft
-arrows or bows. Natural entry points: `EquipAction` (the bow and arrow selection), `CombatTask` (the draw and release of a bow, the
+Bots never drink or throw potions, use ender pearls, tridents or milk to cure effects, and cannot craft arrows or bows. (A totem of
+undying is not used actively: `OffhandPolicy` keeps the best shield, else a totem, in the offhand, and a held totem pops through vanilla.) Natural entry points: `EquipAction` (the bow and arrow selection), `CombatTask` (the draw and release of a bow, the
 threat handling), `EatAction` and `SurvivalGuard` for consumables, `BuildAction.useItemOnHit` and `ServerPlayerController.useItem` for
 the use of an item, `RecipeRegistry` (arrows, bows and crossbows are missing from the handwritten table; the runtime index covers them).

@@ -90,7 +90,6 @@ public final class StripMineTask extends AbstractTask {
     private BlockPos currentMiningBlock;
     private BlockPos currentVeinBlock;
     private boolean miningStarted;
-    private boolean returningForFinalStop;
     private int tunnelBlocksMined;
     private int veinBlocksMined;
     private int distanceCompleted;
@@ -223,7 +222,6 @@ public final class StripMineTask extends AbstractTask {
         currentMiningBlock = null;
         currentVeinBlock = null;
         miningStarted = false;
-        returningForFinalStop = false;
         descentStepsPlanned = 0;
     }
 
@@ -517,8 +515,7 @@ public final class StripMineTask extends AbstractTask {
         // Slot identity is not stable once a torch is equipped (mirrors
         // MineValuablesTask.maybePlaceTorch): restore the active mining tool now, using the
         // upcoming tunnel step (or the just-completed one if the plan is drained) as a reasonable
-        // proxy target, rather than leaving the torch equipped through shouldReturn()'s very next
-        // durability check.
+        // proxy target, rather than leaving the torch equipped while the next tunnel block is mined.
         Step upcoming = steps.peekFirst();
         BlockPos toolTarget = upcoming != null ? upcoming.stand() : currentStep != null ? currentStep.stand() : null;
         if (toolTarget != null) {
@@ -554,24 +551,18 @@ public final class StripMineTask extends AbstractTask {
             note = "inventory_near_full";
             return true;
         }
-        ItemStack selected = bot.getMainHandItem();
-        if (selected.isDamageableItem()
-                && selected.getMaxDamage() > 0
-                && selected.getMaxDamage() - selected.getDamageValue() <= selected.getMaxDamage() * mining.toolDurabilityFloor()) {
-            note = "tool_durability_low";
-            return true;
-        }
+        // A worn pickaxe never ends the tunnel: it is used until it breaks, then the next tool takes over (or the block miner reports
+        // the missing tool). The owner gets a chat warning below 10 percent instead (DurabilityWarnings), never an interruption.
         return false;
     }
 
     private void beginReturn(AIPlayerEntity bot) {
         // Why the bot broke off tunneling for a depot round-trip is only known here, this tick --
-        // by the time a subsequent RETURN/RETURN_TO_WORK step fails, the trigger (full inventory vs.
-        // dying tool) would otherwise leave no trace behind the generic path-failure reason.
+        // by the time a subsequent RETURN/RETURN_TO_WORK step fails, the trigger (the near-full
+        // inventory) would otherwise leave no trace behind the generic path-failure reason.
         BotLog.action(bot, "strip_mine_return", "reason", note, "distance", distanceCompleted,
                 "tunnel_blocks", tunnelBlocksMined, "vein_blocks", veinBlocksMined);
         returnStand = bot.blockPosition().immutable();
-        returningForFinalStop = "tool_durability_low".equals(note);
         if (activeDepotChest == null) {
             phase = Phase.DONE;
             return;
@@ -612,10 +603,6 @@ public final class StripMineTask extends AbstractTask {
         }
         ContainerAction.TransferResult result = ContainerAction.deposit(bot, activeDepotChest, container, depositFilter(), 64);
         if (result.movedAny()) {
-            return;
-        }
-        if (returningForFinalStop) {
-            phase = Phase.DONE;
             return;
         }
         phase = Phase.RETURN_TO_WORK;

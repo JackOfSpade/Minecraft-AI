@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * The mod's tool policy as Baritone's cost model sees it. A bot breaks with the tool {@link ToolSelector} equips when a break
  * starts ({@code ServerPlayerController#clickBlock}): the worst tool (lowest {@code GearValue}) that can harvest the block, the worst faster-than-hand
- * tool for soft blocks, never a sword, never a nearly broken tool. Upstream's cost model instead prices every break with
+ * tool for soft blocks, never a sword; a worn tool is used until it breaks. Upstream's cost model instead prices every break with
  * the fastest tool on the hotbar (an iron pickaxe on stone), so a break would run longer than planned and a movement could time
  * out. This class answers "which stack will break this block" from the same pure chooser, on a private copy of the inventory that
  * is taken on the server thread when a cost model is created and read by the search on its worker thread.

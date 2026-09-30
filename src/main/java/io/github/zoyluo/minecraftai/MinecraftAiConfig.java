@@ -249,7 +249,7 @@ public record MinecraftAiConfig(
                 new Survival(14, 6),
                 new Combat(10, 2),
                 new Night(true, 8),
-                new Mining(2, 0.10D, true),
+                new Mining(2, true),
                 new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue(), BaritoneCaps.defaults()),
                 new Pickup(8.0D),
@@ -540,11 +540,14 @@ public record MinecraftAiConfig(
                 mining, goal, nav, pickup, conversation, new Storage(64, 16, 3, 24, true));
     }
 
-    public record Mining(int returnWhenFreeSlots, double toolDurabilityFloor, Boolean placeTorches) {
+    /**
+     * Strip mining. The earlier {@code toolDurabilityFloor} key is gone (a worn pickaxe never ends a tunnel: tools are used until they
+     * break); a config file that still has it loads fine, the key is ignored.
+     */
+    public record Mining(int returnWhenFreeSlots, Boolean placeTorches) {
         Mining withDefaults(Mining defaults) {
             return new Mining(
                     positiveOrDefault(returnWhenFreeSlots, defaults.returnWhenFreeSlots),
-                    toolDurabilityFloor > 0.0D ? toolDurabilityFloor : defaults.toolDurabilityFloor,
                     boolOrDefault(placeTorches, defaults.placeTorches));
         }
     }
@@ -960,20 +963,59 @@ public record MinecraftAiConfig(
     }
 
     /**
-     * Gear choice. {@code worstFirst}: tools, weapons and armour are always the cheapest item that can still do the job
-     * (enchantments add value); the player controls it by taking items out of the bot's inventory. There is no escalation.
+     * Gear choice. {@code worstFirst} applies to TOOLS only (pickaxe, shovel, hoe, shears, fishing rod, an axe that chops): a tool is
+     * the cheapest one that can still do the job (enchantments add value), used until it breaks, then the next worst takes over.
+     * NON-TOOLS (melee weapons, bows, crossbows, shields, armour, elytra) are always best-first and are replaced by the next best
+     * one when they break; that has no switch. The player controls both by taking items out of the bot's inventory.
+     * {@code durabilityWarnings}: the companion tells its owner in chat, once per item, when an eligible item drops below
+     * {@code thresholdPercent} of its durability. Chat only, it never interrupts anything.
      */
-    public record Gear(Boolean worstFirst) {
+    public record Gear(Boolean worstFirst, DurabilityWarnings durabilityWarnings) {
+        public Gear(Boolean worstFirst) {
+            this(worstFirst, null);
+        }
+
         public static Gear defaults() {
-            return new Gear(true);
+            return new Gear(true, DurabilityWarnings.defaults());
         }
 
         Gear withDefaults(Gear defaults) {
-            return new Gear(boolOrDefault(worstFirst, defaults.worstFirst));
+            return new Gear(boolOrDefault(worstFirst, defaults.worstFirst),
+                    durabilityWarnings == null ? defaults.durabilityWarningsOrDefaults()
+                            : durabilityWarnings.withDefaults(defaults.durabilityWarningsOrDefaults()));
         }
 
+        /** Tools are used worst-first (the only thing this switch decides). */
         public boolean worstFirstEnabled() {
             return boolOrTrue(worstFirst, defaults().worstFirst);
+        }
+
+        /** The durability warning section; never null. */
+        public DurabilityWarnings durabilityWarningsOrDefaults() {
+            return durabilityWarnings == null ? DurabilityWarnings.defaults() : durabilityWarnings;
+        }
+    }
+
+    /** Chat warning for nearly broken gear: {@code enabled}, and the remaining-durability percentage it is given below of. */
+    public record DurabilityWarnings(Boolean enabled, Double thresholdPercent) {
+        public static final double DEFAULT_THRESHOLD_PERCENT = 10.0D;
+
+        public static DurabilityWarnings defaults() {
+            return new DurabilityWarnings(true, DEFAULT_THRESHOLD_PERCENT);
+        }
+
+        DurabilityWarnings withDefaults(DurabilityWarnings defaults) {
+            return new DurabilityWarnings(boolOrDefault(enabled, defaults.enabled), thresholdOrDefault());
+        }
+
+        public boolean enabledOn() {
+            return boolOrTrue(enabled, Boolean.TRUE);
+        }
+
+        /** A finite value in (0, 100], else the default 10. */
+        public double thresholdOrDefault() {
+            return thresholdPercent != null && Double.isFinite(thresholdPercent) && thresholdPercent > 0.0D && thresholdPercent <= 100.0D
+                    ? thresholdPercent : DEFAULT_THRESHOLD_PERCENT;
         }
     }
 

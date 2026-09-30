@@ -356,28 +356,38 @@ public final class RangedWeaponGameTests {
     // ------------------------------------------------------------------ weapon choice
 
     /**
-     * Worst-first between a bow and a crossbow (the same GearValue ordering as every other gear): with both able to fire, the
-     * cheaper one is chosen and an enchanted one is kept for last, whichever kind it is; a weapon that cannot do the job (no
-     * ammunition for it, or about to break) yields to the other.
+     * Best-first between a bow and a crossbow (both are non-tools): with both able to fire, the better one by GearValue is chosen
+     * (enchantments count), whichever kind it is; a weapon that cannot do the job (no ammunition for it) yields to the other. Wear
+     * never does: the chosen weapon is used until it breaks, then the next best one takes over.
      */
-    @GameTest(environment = ENV + "worst_first_chooses_between_a_bow_and_a_crossbow", maxTicks = 40)
-    public void worstFirstChoosesBetweenABowAndACrossbow(GameTestHelper context) {
+    @GameTest(environment = ENV + "best_first_chooses_between_a_bow_and_a_crossbow", maxTicks = 40)
+    public void bestFirstChoosesBetweenABowAndACrossbow(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "GearRangedGT", 260, -4, 4, null);
         Zombie zombie = spawnZombie(context, bot.blockPosition().east(8), true);
 
-        // 1. A plain bow beats a Quick Charge III crossbow (both adequate: the enchanted one goes last).
+        // 1. A Quick Charge III crossbow beats a plain bow.
         setKit(bot, new ItemStack(Items.BOW), enchanted(context, Items.CROSSBOW, Enchantments.QUICK_CHARGE, 3),
                 new ItemStack(Items.ARROW, 8));
-        require(context, chosen(bot, zombie).is(Items.BOW), "a plain bow lost to an enchanted crossbow: " + chosen(bot, zombie));
-        // 2. A plain crossbow beats a Power V bow.
+        require(context, chosen(bot, zombie).is(Items.CROSSBOW), "a Quick Charge III crossbow lost to a plain bow: " + chosen(bot, zombie));
+        // 2. A Power V bow beats a plain crossbow.
         setKit(bot, enchanted(context, Items.BOW, Enchantments.POWER, 5), new ItemStack(Items.CROSSBOW),
                 new ItemStack(Items.ARROW, 8));
-        require(context, chosen(bot, zombie).is(Items.CROSSBOW), "a plain crossbow lost to a Power V bow: " + chosen(bot, zombie));
-        // 3. A bow about to break gives way to a plain crossbow (it cannot do the job for long).
-        ItemStack worn = new ItemStack(Items.BOW);
+        require(context, chosen(bot, zombie).is(Items.BOW), "a Power V bow lost to a plain crossbow: " + chosen(bot, zombie));
+        // 3. The best weapon is used until it breaks, however worn: a Power V bow at one use left still goes before a plain
+        // crossbow; once it is broken (gone) the crossbow, the next best, takes over.
+        ItemStack worn = enchanted(context, Items.BOW, Enchantments.POWER, 5);
         worn.setDamageValue(worn.getMaxDamage() - 1);
         setKit(bot, worn, new ItemStack(Items.CROSSBOW), new ItemStack(Items.ARROW, 8));
-        require(context, chosen(bot, zombie).is(Items.CROSSBOW), "a bow at one use left was chosen: " + chosen(bot, zombie));
+        require(context, chosen(bot, zombie).is(Items.BOW), "a Power V bow at one use left was skipped: " + chosen(bot, zombie));
+        setKit(bot, new ItemStack(Items.CROSSBOW), new ItemStack(Items.ARROW, 8));
+        require(context, chosen(bot, zombie).is(Items.CROSSBOW), "the crossbow did not take over from the broken bow: " + chosen(bot, zombie));
+        // 3b. Of two equal weapons the more worn goes first (it is used up, never set aside for the fresh one).
+        ItemStack wornPlain = new ItemStack(Items.BOW);
+        int wornDamage = wornPlain.getMaxDamage() - 1; // read before the kit takes the stack (a stack that was handed over is emptied)
+        wornPlain.setDamageValue(wornDamage);
+        setKit(bot, new ItemStack(Items.BOW), wornPlain, new ItemStack(Items.ARROW, 8));
+        require(context, chosen(bot, zombie).getDamageValue() == wornDamage,
+                "a fresh bow was used before the equal but worn one: " + chosen(bot, zombie).getDamageValue());
         // 4. No arrows at all: a bow cannot fire, a loaded crossbow can (its shot needs no ammunition).
         ItemStack loaded = new ItemStack(Items.CROSSBOW);
         loaded.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(new ItemStack(Items.ARROW)));

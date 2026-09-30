@@ -20,21 +20,17 @@ import java.util.Locale;
  * drop item the host cannot name) needs {@code max(reserve, }{@value #UNKNOWN_DROP_MIN_EMPTY_SLOTS}{@code )}
  * empty slots ({@link #unknownDropOk}).
  *
- * <h2>Tool wear (design 4.6 step 7)</h2>
- * The channel tool that {@code ToolSelector.equipMiningChannelTool} returns must have at least
- * {@code max(24 + 2 * plannedMembers, ceil(0.15 * maxDamage))} uses left ({@link #durabilityOk}).
+ * <h2>Tool wear (use it until it breaks)</h2>
+ * The channel tool that {@code ToolSelector.equipMiningChannelTool} returns only has to be able to FINISH the detour: at least
+ * {@code plannedMembers + 1} uses left ({@link #durabilityOk}), one per planned break plus the target. A worn tool is never a
+ * reason to skip the detour (the earlier design 4.6 step 7 reserve of 24 + 2 per member or 15 percent is gone: a player would
+ * still do the detour and use the tool until it breaks).
  */
 public final class InventoryHeadroom {
     /** Every ore drop stacks to 64. */
     public static final int STACK_SIZE = 64;
     /** An unknown drop needs at least this many empty slots regardless of a smaller reserve. */
     public static final int UNKNOWN_DROP_MIN_EMPTY_SLOTS = 3;
-    /** Design 4.6 step 7: flat part of the durability reserve. */
-    public static final int WEAR_BASE = 24;
-    /** Design 4.6 step 7: extra uses reserved per planned member. */
-    public static final int WEAR_PER_MEMBER = 2;
-    /** Design 4.6 step 7: fraction of the tool's maximum durability that must remain. */
-    public static final double WEAR_FRACTION = 0.15D;
 
     private static final String DEEPSLATE_PREFIX = "deepslate_";
 
@@ -108,19 +104,16 @@ public final class InventoryHeadroom {
     }
 
     /**
-     * True when the tool has enough uses left: {@code remaining >= max(WEAR_BASE + WEAR_PER_MEMBER *
-     * plannedMembers, ceil(WEAR_FRACTION * maxDamage))}. {@code maxDamage <= 0} (an unbreakable or non-damageable
-     * tool) is always fine. {@code remaining} is {@code maxDamage - damage}.
+     * True when the tool can finish the detour: {@code remaining >= plannedMembers + 1} (a use per planned break plus the
+     * target). Wear alone never refuses a detour: a tool with 30 uses left is as good as a fresh one for it.
+     * {@code maxDamage <= 0} (an unbreakable or non-damageable tool) is always fine. {@code remaining} is
+     * {@code maxDamage - damage}.
      */
     public static boolean durabilityOk(int remainingDurability, int maxDamage, int plannedMembers) {
         if (maxDamage <= 0) {
             return true;
         }
-        int members = Math.max(0, plannedMembers);
-        int flat = WEAR_BASE + WEAR_PER_MEMBER * members;
-        int fraction = (int) Math.ceil(WEAR_FRACTION * maxDamage);
-        int need = Math.max(flat, fraction);
-        return remainingDurability >= need;
+        return remainingDurability >= Math.max(0, plannedMembers) + 1;
     }
 
     private static String normalize(String registryPath) {

@@ -67,15 +67,20 @@ class BotTickCoordinatorOrderingTest {
                 "            if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {\n"
                         + "                continue;\n"
                         + "            }\n"));
-        // The background block still auto-equips armor and ticks the idle coordinator; the armor step is
-        // additionally paused while a player has the bot's inventory screen open (it edits by hand).
+        // The equipment pass (armor, then the offhand) runs on the background cadence BEFORE the mission executor, which owns the tick for
+        // a whole mission; it is paused while a player has the bot's inventory screen open (it edits by hand).
+        int equipment = source.indexOf("            if (!handled && runBackground\n"
+                + "                    && !io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {\n");
+        assertTrue(equipment > 0, "the equipment pass exists and is gated by the inventory screen");
+        int goalExecutor = source.indexOf("GoalExecutor.INSTANCE.tickBot(server, bot)");
+        assertTrue(equipment < goalExecutor, "the equipment pass runs before the mission executor");
+        String equipmentBlock = source.substring(equipment, goalExecutor);
+        assertTrue(equipmentBlock.contains("io.github.zoyluo.minecraftai.action.EquipAction.autoEquipArmor(bot);"));
+        assertTrue(equipmentBlock.contains("io.github.zoyluo.minecraftai.action.OffhandPolicy.apply(bot);"));
+        // The background block still ticks the idle coordinator.
         int background = source.indexOf("            if (!handled && runBackground) {\n");
-        assertTrue(background > 0, "the background block exists");
-        String backgroundBlock = source.substring(background, source.indexOf("IdleCoordinator.INSTANCE.tickBot(bot);", background));
-        assertTrue(backgroundBlock.contains(
-                "if (!io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {\n"
-                        + "                    io.github.zoyluo.minecraftai.action.EquipAction.autoEquipArmor(bot);\n"
-                        + "                }"));
+        assertTrue(background > goalExecutor, "the background block exists");
+        assertTrue(source.indexOf("IdleCoordinator.INSTANCE.tickBot(bot);", background) > background);
         assertFalse(source.contains("= MiningAssistCoordinator"), "the call's result is never used");
         assertFalse(source.contains("if (MiningAssistCoordinator"), "the call never gates the tick");
     }

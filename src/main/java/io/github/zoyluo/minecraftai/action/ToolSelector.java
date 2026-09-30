@@ -87,7 +87,7 @@ public final class ToolSelector {
     /**
      * The pure part of {@link #equipBestTool}: which stack breaks {@code state} best, by the mod's tool policy (a tool that can
      * harvest the block beats one that cannot, the cheapest renewable tier among those that can, an empty hand or a non-melee
-     * stack for blocks that need no tool, a nearly broken tool never). Reads the stacks only, so a caller may run it on a
+     * stack for blocks that need no tool; wear never counts: a tool is used until it breaks). Reads the stacks only, so a caller may run it on a
      * snapshot of an inventory (Baritone's cost model does, on a worker thread).
      */
     public static Choice choose(List<ItemStack> main, int currentSlot, ItemStack offhand, BlockState state, boolean swordsMine) {
@@ -156,7 +156,7 @@ public final class ToolSelector {
     }
 
     private static boolean capableFor(ItemStack stack, BlockState state, boolean swordsMine) {
-        if (stack.isEmpty() || ItemStackUtil.isNearlyBroken(stack) || !swordsMine && stack.is(ItemTags.SWORDS)) {
+        if (stack.isEmpty() || !swordsMine && stack.is(ItemTags.SWORDS)) {
             return false;
         }
         return state.requiresCorrectToolForDrops() ? stack.isCorrectToolForDrops(state) : stack.getDestroySpeed(state) > 1.0F;
@@ -172,7 +172,7 @@ public final class ToolSelector {
 
     /**
      * The worst-first decision: the lowest-value stack that is correct for the block (drops its loot; for a block that needs no tool,
-     * one that mines it faster than a bare hand), never a nearly broken one, and never a sword when {@code swordsMine} is false.
+     * one that mines it faster than a bare hand), worn or not, and never a sword when {@code swordsMine} is false.
      * Null when no stack qualifies (a wrong-tier tool, or nothing faster than the hand): the caller then scores as before. Equal
      * stacks keep the hand the bot already holds.
      */
@@ -208,7 +208,7 @@ public final class ToolSelector {
 
 
     /**
-     * OreDig channel policy: use the lowest healthy pickaxe that can harvest the block. With {@code behaviour.gear.worstFirst}
+     * OreDig channel policy: use the lowest pickaxe that can harvest the block (one with a single use left is left out only here: the channel serves exact break/pickup/return transactions, and ToolTier reports a raw-one pick as no pick; elsewhere a worn tool is used until it breaks). With {@code behaviour.gear.worstFirst}
      * (the default) that is the lowest {@link GearValue} (a wooden or golden pick digs stone and coal, a stone pick iron ore, an
      * iron pick diamond, obsidian selects diamond) with no stone floor: missions are worst-first too. With it off, the earlier
      * policy applies: never below stone for ordinary rock, then the lowest tier and the most durable pick. Ordinary rock is never
@@ -371,9 +371,6 @@ public final class ToolSelector {
             return state.requiresCorrectToolForDrops() ? 0.001F : 1.0F;
         }
         float speed = stack.getDestroySpeed(state);
-        if (ItemStackUtil.isNearlyBroken(stack)) {
-            return 0.001F; // About to break -> don't use it, to avoid it breaking mid-swing
-        }
         // Blocks that don't require a tool (dirt/sand/gravel/logs, etc.): keep the original behavior, pick the fastest tool (shovel/axe are fastest); unaffected.
         if (!state.requiresCorrectToolForDrops()) {
             return speed;

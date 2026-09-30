@@ -710,9 +710,9 @@ public final class DangerWatcher {
         ItemStack mainHand = bot.getMainHandItem();
         Optional<Task> paused = active.isEmpty()
                 ? TaskManager.INSTANCE.peekPaused(bot) : Optional.empty();
-        // These mining tasks own an exact break/pickup/return transaction. The generic ten-percent
-        // threshold is intentionally much wider (a diamond pick at raw 33 is already below it),
-        // while ToolTier deliberately reports a raw-one pick as NONE. Resolve ownership separately
+        // These mining tasks own an exact break/pickup/return transaction. Even the raw-one
+        // threshold of the generic resupply is reported by ToolTier as NONE for a raw-one pick,
+        // so the owner settles it itself. Resolve ownership separately
         // from the held slot: combat may leave a sword selected when the miner resumes. The owner
         // must first settle an already-legal break, then either yield at its service boundary or
         // report its own typed durability failure before opening a new one. DigDown additionally
@@ -1493,14 +1493,10 @@ public final class DangerWatcher {
     }
 
     private static boolean isNearlyBroken(ItemStack stack) {
-        if (stack.isEmpty() || !stack.isDamageableItem()) {
-            return false;
-        }
-        int max = stack.getMaxDamage();
-        if (max <= 0) {
-            return false;
-        }
-        return max - stack.getDamageValue() <= max * 0.10D;
+        // Use it until it breaks: wear alone never starts a resupply (the old rule fired below 10 percent of the maximum, which swapped
+        // a worn tool for a fresher one and interrupted the work; the owner gets a chat warning instead, see DurabilityWarnings). Only a
+        // stack with a single use left counts, the same threshold ToolTier and ToolSelector use to treat a pick as already gone.
+        return !stack.isEmpty() && io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(stack);
     }
 
     /** Natural regeneration only runs at food >= 18 (vanilla FoodData). */

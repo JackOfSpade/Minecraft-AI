@@ -34,10 +34,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Worst-first gear on a real server: a bot always uses the cheapest tool, weapon and armor that can still do the job (wooden pickaxe
- * on stone, stone pickaxe on iron ore, iron pickaxe on diamond ore, leather armor over diamond armor), enchantments add value, and
- * nothing escalates: a bot in danger keeps its worst adequate sword and armor. The player controls it by taking items out of the
- * bot's inventory.
+ * The gear rule on a real server. TOOLS are used worst-first (wooden pickaxe on stone, stone pickaxe on iron ore, iron pickaxe on
+ * diamond ore) until they break, then the next worst takes over. NON-TOOLS (melee weapons, bows, crossbows, shields, armor, elytra)
+ * are used best-first until they break, then the next best is equipped automatically (next best helmet, shield, bow, sword). Wear
+ * never sets an item aside, danger never changes the choice, and the player controls it by taking items out of the bot's inventory.
  */
 public final class GearWorstFirstGameTests {
     private static final String ENV = "minecraftai-gametest:gear_worst_first_game_tests_";
@@ -60,17 +60,23 @@ public final class GearWorstFirstGameTests {
         ToolSelector.equipMiningChannelTool(bot, STONE);
         require(context, bot.getMainHandItem().is(Items.WOODEN_PICKAXE),
                 "the mission channel kept its stone floor: " + bot.getMainHandItem().getItem());
-        // Nearly broken wood is skipped: stone is next.
+        // A worn wooden pickaxe is used until it breaks: wear never sends the bot to the next tier (also at its last use)...
         ItemStack worn = bot.getInventory().getItem(3);
+        worn.setDamageValue(worn.getMaxDamage() - 3);
+        bot.getInventory().setSelectedSlot(8);
+        ToolSelector.equipBestTool(bot, STONE);
+        require(context, bot.getMainHandItem().is(Items.WOODEN_PICKAXE),
+                "a worn wooden pickaxe was skipped: " + bot.getMainHandItem().getItem());
         worn.setDamageValue(worn.getMaxDamage() - 1);
         bot.getInventory().setSelectedSlot(8);
         ToolSelector.equipBestTool(bot, STONE);
-        require(context, bot.getMainHandItem().is(Items.STONE_PICKAXE),
-                "a nearly broken wooden pickaxe was not skipped: " + bot.getMainHandItem().getItem());
+        require(context, bot.getMainHandItem().is(Items.WOODEN_PICKAXE),
+                "a wooden pickaxe at its last use was skipped: " + bot.getMainHandItem().getItem());
+        // ...except in the mission channel, whose exact break/pickup/return transactions keep the final use in reserve.
         bot.getInventory().setSelectedSlot(8);
         ToolSelector.equipMiningChannelTool(bot, STONE);
         require(context, bot.getMainHandItem().is(Items.STONE_PICKAXE),
-                "the mission channel used the nearly broken wooden pickaxe: " + bot.getMainHandItem().getItem());
+                "the mission channel used the wooden pickaxe at its last use: " + bot.getMainHandItem().getItem());
         // The earlier best-first policy is one switch away, and still prefers the stone pick.
         List<ItemStack> main = new ArrayList<>(bot.getInventory().getNonEquipmentItems());
         main.set(3, new ItemStack(Items.WOODEN_PICKAXE));
@@ -205,68 +211,133 @@ public final class GearWorstFirstGameTests {
         finish(context, bot);
     }
 
+    /** Tools are used worst-first until they break, then the next worst takes over (wooden, then stone, then iron). */
+    @GameTest(environment = ENV + "tool_breaks_then_the_next_worst_takes_over", maxTicks = 40)
+    public void toolBreaksThenTheNextWorstTakesOver(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearToolBreakGT");
+        ItemStack lastUse = new ItemStack(Items.WOODEN_PICKAXE);
+        lastUse.setDamageValue(lastUse.getMaxDamage() - 1);
+        fill(bot, new ItemStack(Items.IRON_PICKAXE), new ItemStack(Items.STONE_PICKAXE), lastUse);
+        ToolSelector.equipBestTool(bot, STONE);
+        require(context, bot.getMainHandItem().is(Items.WOODEN_PICKAXE) && bot.getMainHandItem().getDamageValue() == lastUse.getDamageValue(),
+                "the wooden pickaxe at its last use was not the chosen tool: " + bot.getMainHandItem());
+        breakHeld(bot, EquipmentSlot.MAINHAND);
+        require(context, bot.getMainHandItem().isEmpty(), "the wooden pickaxe did not break");
+        ToolSelector.equipBestTool(bot, STONE);
+        require(context, bot.getMainHandItem().is(Items.STONE_PICKAXE),
+                "after the wooden pickaxe broke the next worst (stone) did not take over: " + bot.getMainHandItem().getItem());
+        // The same again for the stone pickaxe: iron is next.
+        bot.getMainHandItem().setDamageValue(bot.getMainHandItem().getMaxDamage() - 1);
+        breakHeld(bot, EquipmentSlot.MAINHAND);
+        ToolSelector.equipBestTool(bot, STONE);
+        require(context, bot.getMainHandItem().is(Items.IRON_PICKAXE),
+                "after the stone pickaxe broke the iron one did not take over: " + bot.getMainHandItem().getItem());
+        finish(context, bot);
+    }
+
     // ---------------------------------------------------------------------------------------------------------- armor
 
-    @GameTest(environment = ENV + "armor_fills_empty_slot_with_worst_piece", maxTicks = 40)
-    public void armorFillsEmptySlotWithWorstPiece(GameTestHelper context) {
+    @GameTest(environment = ENV + "armor_fills_empty_slot_with_best_piece", maxTicks = 40)
+    public void armorFillsEmptySlotWithBestPiece(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearArmorFillGT");
         clearGear(bot);
+        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_HELMET));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_HELMET));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HELMET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_HELMET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
         int changed = EquipAction.autoEquipArmor(bot);
         require(context, changed == 2, "expected two slots to be filled, got " + changed);
-        require(context, bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.LEATHER_HELMET),
-                "the head slot was not filled with the leather cap: " + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
-        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.IRON_CHESTPLATE),
-                "the chest slot was not filled with the iron chestplate (worst of iron and diamond): "
+        require(context, bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.DIAMOND_HELMET),
+                "the head slot was not filled with the diamond helmet: " + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
+                "the chest slot was not filled with the diamond chestplate (best of iron and diamond): "
                         + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
-        require(context, InventoryAction.countItem(bot, Items.DIAMOND_HELMET) == 1 && InventoryAction.countItem(bot, Items.IRON_HELMET) == 1
-                        && InventoryAction.countItem(bot, Items.DIAMOND_CHESTPLATE) == 1 && InventoryAction.countItem(bot, Items.LEATHER_HELMET) == 0,
+        require(context, InventoryAction.countItem(bot, Items.LEATHER_HELMET) == 1 && InventoryAction.countItem(bot, Items.IRON_HELMET) == 1
+                        && InventoryAction.countItem(bot, Items.IRON_CHESTPLATE) == 1 && InventoryAction.countItem(bot, Items.DIAMOND_HELMET) == 0,
                 "the armor pieces were lost or duplicated");
         require(context, EquipAction.autoEquipArmor(bot) == 0, "a second pass changed something (the choice is not stable)");
-        // Enchantments add value: a Protection IV leather chestplate (3 + 4) is worth more than a plain iron one (6).
+        // Enchantments add value: a Protection IV leather chestplate (3 + 4 = 7) is worth more than a plain iron one (6).
         clearGear(bot);
-        InventoryAction.giveItem(bot, enchanted(context, Items.LEATHER_CHESTPLATE, Enchantments.PROTECTION, 4));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, enchanted(context, Items.LEATHER_CHESTPLATE, Enchantments.PROTECTION, 4));
         EquipAction.autoEquipArmor(bot);
-        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.IRON_CHESTPLATE),
-                "the Protection IV leather chestplate was worn before the plain iron one: " + bot.getItemBySlot(EquipmentSlot.CHEST));
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.LEATHER_CHESTPLATE) && bot.getItemBySlot(EquipmentSlot.CHEST).isEnchanted(),
+                "the plain iron chestplate was worn before the Protection IV leather one: " + bot.getItemBySlot(EquipmentSlot.CHEST));
         finish(context, bot);
     }
 
-    @GameTest(environment = ENV + "auto_worn_diamond_is_swapped_down_to_leather", maxTicks = 40)
-    public void autoWornDiamondIsSwappedDownToLeather(GameTestHelper context) {
-        AIPlayerEntity bot = spawnPlatform(context, "GearSwapDownGT");
+    @GameTest(environment = ENV + "worn_leather_is_swapped_up_to_diamond", maxTicks = 40)
+    public void wornLeatherIsSwappedUpToDiamond(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearSwapUpGT");
         clearGear(bot);
-        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.DIAMOND_CHESTPLATE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_CHESTPLATE));
+        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
         int changed = EquipAction.autoEquipArmor(bot);
-        require(context, changed == 1 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.LEATHER_CHESTPLATE),
-                "the worn diamond chestplate was not swapped down to leather: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
-        require(context, InventoryAction.countItem(bot, Items.DIAMOND_CHESTPLATE) == 1,
-                "the diamond chestplate was lost in the swap");
+        require(context, changed == 1 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
+                "the worn leather chestplate was not swapped up to diamond: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
+        require(context, InventoryAction.countItem(bot, Items.LEATHER_CHESTPLATE) == 1, "the leather chestplate was lost in the swap");
         finish(context, bot);
     }
 
-    /** No provenance and no exceptions: taking the worse pieces out of the bot's inventory keeps the diamond on; putting one in swaps down. */
+    /** No provenance and no exceptions: a worse piece put in keeps the worn one on; the player takes pieces out to control it. */
     @GameTest(environment = ENV + "player_controls_armor_by_taking_items_out", maxTicks = 40)
     public void playerControlsArmorByTakingItemsOut(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearPlayerControlGT");
         clearGear(bot);
-        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.DIAMOND_CHESTPLATE));
-        bot.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
-        require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE)
-                        && bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.DIAMOND_HELMET),
-                "with nothing worse carried, the worn diamond pieces were taken off");
-        // Even a diamond chestplate put on by hand is swapped down as soon as something worse is carried.
-        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_CHESTPLATE));
+        require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.IRON_CHESTPLATE),
+                "a carried worse piece replaced the worn iron chestplate");
+        // A better piece put into the inventory is worn at once.
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
         EquipAction.autoEquipArmor(bot);
-        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.IRON_CHESTPLATE)
-                        && bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.DIAMOND_HELMET),
-                "the carried iron chestplate was not worn: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
+                "the carried diamond chestplate was not worn: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
+        // The player takes the diamond one off the bot (the chest slot is empty): the best that is left goes on.
+        bot.setItemSlot(EquipmentSlot.CHEST, ItemStack.EMPTY);
+        EquipAction.autoEquipArmor(bot);
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.IRON_CHESTPLATE),
+                "an empty chest slot was not refilled with the best carried piece: " + bot.getItemBySlot(EquipmentSlot.CHEST));
+        finish(context, bot);
+    }
+
+    /** A worn piece is worn until it breaks; the moment it does, the next best piece for that slot is put on (helmet, then elytra). */
+    @GameTest(environment = ENV + "armor_is_worn_until_it_breaks_then_the_next_best_is_worn", maxTicks = 40)
+    public void armorIsWornUntilItBreaksThenTheNextBestIsWorn(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearArmorBreakGT");
+        clearGear(bot);
+        ItemStack tired = new ItemStack(Items.DIAMOND_HELMET);
+        tired.setDamageValue(tired.getMaxDamage() - 2);
+        bot.setItemSlot(EquipmentSlot.HEAD, tired);
+        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_HELMET));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HELMET));
+        require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.DIAMOND_HELMET),
+                "a nearly broken diamond helmet was replaced before it broke: " + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
+        breakHeld(bot, EquipmentSlot.HEAD);
+        breakHeld(bot, EquipmentSlot.HEAD);
+        require(context, bot.getItemBySlot(EquipmentSlot.HEAD).isEmpty(), "the diamond helmet did not break");
+        require(context, EquipAction.autoEquipArmor(bot) == 1 && bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.IRON_HELMET),
+                "after the diamond helmet broke the next best (iron) helmet was not worn: " + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
+        // Through the combat entry point too (it runs the same pass at every boundary).
+        ItemStack lastUse = bot.getItemBySlot(EquipmentSlot.HEAD);
+        lastUse.setDamageValue(lastUse.getMaxDamage() - 1);
+        breakHeld(bot, EquipmentSlot.HEAD);
+        CombatCore.equipMelee(bot);
+        require(context, bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.LEATHER_HELMET),
+                "after the iron helmet broke the leather one was not worn: " + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
+        // A worn elytra is never swapped for a carried chestplate; when it breaks the best chestplate goes on.
+        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
+        require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.ELYTRA),
+                "a worn elytra was swapped for a chestplate");
+        bot.getItemBySlot(EquipmentSlot.CHEST).setDamageValue(bot.getItemBySlot(EquipmentSlot.CHEST).getMaxDamage() - 1);
+        breakHeld(bot, EquipmentSlot.CHEST);
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).isEmpty(), "the elytra did not break");
+        EquipAction.autoEquipArmor(bot);
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
+                "after the elytra broke the best chestplate was not worn: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
         finish(context, bot);
     }
 
@@ -274,28 +345,33 @@ public final class GearWorstFirstGameTests {
     public void wornPieceEdgeCases(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearArmorEdgeGT");
         clearGear(bot);
-        // A nearly broken worn piece is replaced by the next worst, not by the best.
-        ItemStack tired = new ItemStack(Items.LEATHER_CHESTPLATE);
+        // A nearly broken best piece stays on (worn until it breaks); a nearly broken piece in the inventory is still put on.
+        ItemStack tired = new ItemStack(Items.DIAMOND_CHESTPLATE);
         tired.setDamageValue(tired.getMaxDamage() - 2);
         bot.setItemSlot(EquipmentSlot.CHEST, tired);
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_CHESTPLATE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
         EquipAction.autoEquipArmor(bot);
-        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.IRON_CHESTPLATE),
-                "a nearly broken leather chestplate was not replaced by the next worst piece: "
-                        + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
-        // A nearly broken piece is never put on.
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
+                "a nearly broken diamond chestplate was replaced by a carried one: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
         clearGear(bot);
         ItemStack tiredIron = new ItemStack(Items.IRON_CHESTPLATE);
         tiredIron.setDamageValue(tiredIron.getMaxDamage() - 1);
         InventoryAction.giveItem(bot, tiredIron);
-        require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.CHEST).isEmpty(),
-                "a nearly broken chestplate was put on");
+        require(context, EquipAction.autoEquipArmor(bot) == 1 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.IRON_CHESTPLATE),
+                "a nearly broken chestplate was not put on");
+        // Of two equal pieces the worn one stays (no churn), whichever is more worn.
+        clearGear(bot);
+        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+        ItemStack wornIron = new ItemStack(Items.IRON_CHESTPLATE);
+        wornIron.setDamageValue(50);
+        InventoryAction.giveItem(bot, wornIron);
+        require(context, EquipAction.autoEquipArmor(bot) == 0, "an equal piece replaced the worn one");
         // A worn Binding Curse piece cannot be taken off.
         clearGear(bot);
-        bot.setItemSlot(EquipmentSlot.CHEST, enchanted(context, Items.DIAMOND_CHESTPLATE, Enchantments.BINDING_CURSE, 1));
-        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_CHESTPLATE));
-        require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
+        bot.setItemSlot(EquipmentSlot.CHEST, enchanted(context, Items.LEATHER_CHESTPLATE, Enchantments.BINDING_CURSE, 1));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
+        require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.LEATHER_CHESTPLATE),
                 "a Binding Curse piece was swapped out");
         // A Binding Curse piece in the inventory is never put on.
         clearGear(bot);
@@ -309,10 +385,10 @@ public final class GearWorstFirstGameTests {
         require(context, EquipAction.autoEquipArmor(bot) == 0 && bot.getItemBySlot(EquipmentSlot.CHEST).isEmpty()
                         && bot.getItemBySlot(EquipmentSlot.HEAD).isEmpty(),
                 "an elytra or a carved pumpkin was worn as armor");
-        // The explicit command stays best-first.
+        // The explicit command is best-first too, in the same order.
         clearGear(bot);
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
         EquipAction.equipBestArmor(bot);
         require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
                 "equipBestArmor (the equip_armor command) is no longer best-first");
@@ -321,41 +397,57 @@ public final class GearWorstFirstGameTests {
 
     // ---------------------------------------------------------------------------------------------------------- weapons
 
-    @GameTest(environment = ENV + "weapon_is_wooden_sword_against_zombie", maxTicks = 40)
-    public void weaponIsWoodenSwordAgainstZombie(GameTestHelper context) {
+    /** Melee weapons are best-first: the diamond sword is drawn, used until it breaks (however worn), then the iron one, then stone. */
+    @GameTest(environment = ENV + "weapon_is_best_sword_and_next_best_on_break", maxTicks = 40)
+    public void weaponIsBestSwordAndNextBestOnBreak(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearZombieGT");
         Zombie zombie = spawnZombie(context, bot, 2);
-        fill(bot, new ItemStack(Items.DIAMOND_SWORD), new ItemStack(Items.IRON_SWORD), new ItemStack(Items.STONE_SWORD),
-                new ItemStack(Items.WOODEN_SWORD));
-        OptionalInt slot = EquipAction.adequateWeaponSlot(bot, zombie);
-        require(context, slot.isPresent() && bot.getInventory().getItem(slot.getAsInt()).is(Items.WOODEN_SWORD),
-                "the worst adequate sword against a zombie is the wooden one: " + slot);
-        // Through the context entry point (no aggressor known: the cheapest weapon).
+        ItemStack diamond = new ItemStack(Items.DIAMOND_SWORD);
+        diamond.setDamageValue(diamond.getMaxDamage() - 2);
+        fill(bot, new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.STONE_SWORD), diamond, new ItemStack(Items.IRON_SWORD));
+        CombatCore.ensureMeleeWeapon(bot, zombie);
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
+                "the best sword against a zombie is the diamond one (a two-use sword is not set aside): " + bot.getMainHandItem().getItem());
+        // Through the context entry point (no target known) it is the same.
         CombatCore.equipMelee(bot);
-        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD), "held " + bot.getMainHandItem().getItem());
-        // A wooden sword that is nearly used up is not adequate: the stone one goes before the diamond one.
-        ItemStack tired = new ItemStack(Items.WOODEN_SWORD);
-        tired.setDamageValue(tired.getMaxDamage() - 3);
-        bot.getInventory().setItem(3, tired);
-        slot = EquipAction.adequateWeaponSlot(bot, zombie);
-        require(context, slot.isPresent() && bot.getInventory().getItem(slot.getAsInt()).is(Items.STONE_SWORD),
-                "a wooden sword with 3 uses left was still adequate against a zombie: " + slot);
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD), "held " + bot.getMainHandItem().getItem());
+        // A hit spends a use: still the diamond sword at its last use...
+        bot.getMainHandItem().hurtAndBreak(1, bot, EquipmentSlot.MAINHAND);
+        CombatCore.ensureMeleeWeapon(bot, zombie);
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD) && bot.getMainHandItem().getDamageValue() == diamond.getMaxDamage() - 1,
+                "the diamond sword at its last use was set aside: " + bot.getMainHandItem());
+        // ...and the attack boundary after it broke draws the next best (iron), then stone, then wood.
+        breakHeld(bot, EquipmentSlot.MAINHAND);
+        require(context, bot.getMainHandItem().isEmpty(), "the diamond sword did not break");
+        CombatCore.ensureMeleeWeapon(bot, zombie);
+        require(context, bot.getMainHandItem().is(Items.IRON_SWORD),
+                "after the diamond sword broke the next best (iron) was not drawn: " + bot.getMainHandItem().getItem());
+        bot.getMainHandItem().setDamageValue(bot.getMainHandItem().getMaxDamage() - 1);
+        breakHeld(bot, EquipmentSlot.MAINHAND);
+        CombatCore.ensureMeleeWeapon(bot, zombie);
+        require(context, bot.getMainHandItem().is(Items.STONE_SWORD),
+                "after the iron sword broke the stone sword was not drawn: " + bot.getMainHandItem().getItem());
+        bot.getMainHandItem().setDamageValue(bot.getMainHandItem().getMaxDamage() - 1);
+        breakHeld(bot, EquipmentSlot.MAINHAND);
+        CombatCore.ensureMeleeWeapon(bot, zombie);
+        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD),
+                "after the stone sword broke the wooden sword was not drawn: " + bot.getMainHandItem().getItem());
         zombie.discard();
         finish(context, bot);
     }
 
-    /** The opposite of escalation: hurt, at 1.5 hearts and outnumbered, the bot keeps its worst adequate sword and armor. */
-    @GameTest(environment = ENV + "danger_still_uses_worst_adequate_gear", maxTicks = 40)
-    public void dangerStillUsesWorstAdequateGear(GameTestHelper context) {
+    /** Danger never changes the choice: hurt, at 1.5 hearts and outnumbered, the bot uses its best sword and armor (no escalation either way). */
+    @GameTest(environment = ENV + "danger_still_uses_best_gear", maxTicks = 40)
+    public void dangerStillUsesBestGear(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearDangerGT");
         clearGear(bot);
         Zombie first = spawnZombie(context, bot, 2);
         Zombie second = spawnZombie(context, bot, 3);
-        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.DIAMOND_CHESTPLATE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.LEATHER_CHESTPLATE));
+        bot.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SWORD));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD));
-        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
         var world = context.getLevel();
         bot.hurtServer(world, world.damageSources().mobAttack(first), 2.0F);
         bot.invulnerableTime = 0;
@@ -365,10 +457,10 @@ public final class GearWorstFirstGameTests {
         require(context, snapshot.pressure() && snapshot.aggressorCount() >= 1,
                 "the zombies did not count as aggressors, so this fixture would prove nothing: " + snapshot);
         CombatCore.equipMelee(bot);
-        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD),
-                "in danger the bot escalated to " + bot.getMainHandItem().getItem());
-        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.LEATHER_CHESTPLATE),
-                "in danger the bot kept or wore " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
+                "in danger the bot did not use its best sword: " + bot.getMainHandItem().getItem());
+        require(context, bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.DIAMOND_CHESTPLATE),
+                "in danger the bot did not wear its best chestplate: " + bot.getItemBySlot(EquipmentSlot.CHEST).getItem());
         first.discard();
         second.discard();
         finish(context, bot);
@@ -386,9 +478,9 @@ public final class GearWorstFirstGameTests {
         context.getLevel().addFreshEntity(ravager);
         fill(bot, new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.STONE_SWORD), new ItemStack(Items.DIAMOND_SWORD),
                 new ItemStack(Items.IRON_SWORD));
-        OptionalInt slot = EquipAction.adequateWeaponSlot(bot, ravager);
-        require(context, slot.isPresent() && bot.getInventory().getItem(slot.getAsInt()).is(Items.DIAMOND_SWORD),
-                "no sword is adequate against a 100 health ravager: the best one (diamond) was expected, got " + slot);
+        OptionalInt slot = EquipAction.equipWeaponForContext(bot, ravager);
+        require(context, slot.isPresent() && bot.getMainHandItem().is(Items.DIAMOND_SWORD),
+                "the best sword (diamond) against a 100 health ravager was expected, got " + bot.getMainHandItem().getItem());
         ravager.discard();
         finish(context, bot);
     }
@@ -414,16 +506,16 @@ public final class GearWorstFirstGameTests {
         CombatCore.equipMelee(bot);
         require(context, bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.ZOMBIE_HEAD) && bot.getItemBySlot(EquipmentSlot.CHEST).is(Items.ELYTRA),
                 "a worn mob head or elytra was swapped by the combat armor pass: " + bot.getItemBySlot(EquipmentSlot.HEAD).getItem());
-        // Control: a slot with nothing worn still gets the worst piece.
+        // Control: a slot with nothing worn still gets the best piece.
         bot.setItemSlot(EquipmentSlot.HEAD, ItemStack.EMPTY);
         EquipAction.autoEquipArmor(bot);
         require(context, bot.getItemBySlot(EquipmentSlot.HEAD).is(Items.LEATHER_HELMET), "an empty head slot was not filled");
         finish(context, bot);
     }
 
-    /** G2: a target the bot was told to attack, not yet flagged aggressive, still gets an adequate weapon (not a wooden sword). */
-    @GameTest(environment = ENV + "explicit_attack_target_gets_an_adequate_weapon", maxTicks = 40)
-    public void explicitAttackTargetGetsAnAdequateWeapon(GameTestHelper context) {
+    /** A target the bot was told to attack, not yet flagged aggressive, gets the best weapon like any other target. */
+    @GameTest(environment = ENV + "explicit_attack_target_gets_the_best_weapon", maxTicks = 40)
+    public void explicitAttackTargetGetsTheBestWeapon(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearExplicitTargetGT");
         Ravager ravager = EntityType.RAVAGER.create(context.getLevel(), EntitySpawnReason.COMMAND);
         require(context, ravager != null, "no ravager");
@@ -437,36 +529,176 @@ public final class GearWorstFirstGameTests {
                 new ItemStack(Items.IRON_SWORD));
         CombatCore.ensureMeleeWeapon(bot, ravager);
         require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
-                "against an unflagged ravager the bot picked " + bot.getMainHandItem().getItem() + " instead of the adequate diamond sword");
+                "against an unflagged ravager the bot picked " + bot.getMainHandItem().getItem() + " instead of the diamond sword");
         ravager.discard();
-        // Control: an explicit zombie target keeps the cheapest sword (the inventory order changed, so no latch applies).
+        // An explicit zombie target gets the best sword as well (no per-target downgrade any more).
         Zombie zombie = spawnZombie(context, bot, 2);
         zombie.setAggressive(false);
         fill(bot, new ItemStack(Items.IRON_SWORD), new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.DIAMOND_SWORD),
                 new ItemStack(Items.STONE_SWORD));
         CombatCore.ensureMeleeWeapon(bot, zombie);
-        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD),
-                "against an unflagged zombie the bot picked " + bot.getMainHandItem().getItem() + " instead of the wooden sword");
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
+                "against an unflagged zombie the bot picked " + bot.getMainHandItem().getItem() + " instead of the diamond sword");
         zombie.discard();
         finish(context, bot);
     }
 
-    @GameTest(environment = ENV + "weapon_latch_invalidated_by_inventory_swap", maxTicks = 40)
-    public void weaponLatchInvalidatedByInventorySwap(GameTestHelper context) {
-        AIPlayerEntity bot = spawnPlatform(context, "GearLatchGT");
+    @GameTest(environment = ENV + "best_weapon_follows_inventory_changes", maxTicks = 40)
+    public void bestWeaponFollowsInventoryChanges(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearFollowGT");
         fill(bot, new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.IRON_SWORD));
         EquipAction.equipWeaponForContext(bot);
-        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD), "held " + bot.getMainHandItem().getItem());
-        // The stack in the latched slot changes (same tick): the choice must follow at once.
-        bot.getInventory().setItem(0, new ItemStack(Items.DIAMOND_SWORD));
+        require(context, bot.getMainHandItem().is(Items.IRON_SWORD), "held " + bot.getMainHandItem().getItem());
+        // A better sword arrives: the choice follows at once.
+        bot.getInventory().setItem(4, new ItemStack(Items.DIAMOND_SWORD));
+        EquipAction.equipWeaponForContext(bot);
+        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
+                "the diamond sword that arrived was not drawn: " + bot.getMainHandItem().getItem());
+        // The player takes it out again: back to the next best.
+        bot.getInventory().setItem(4, ItemStack.EMPTY);
         EquipAction.equipWeaponForContext(bot);
         require(context, bot.getMainHandItem().is(Items.IRON_SWORD),
-                "a stale latch kept " + bot.getMainHandItem().getItem() + " after the inventory changed");
-        // And again when the wooden sword comes back in another slot.
-        bot.getInventory().setItem(4, new ItemStack(Items.WOODEN_SWORD));
-        EquipAction.equipWeaponForContext(bot);
-        require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD),
-                "a stale latch kept " + bot.getMainHandItem().getItem() + " after a cheaper sword arrived");
+                "after the diamond sword was taken out the next best was not drawn: " + bot.getMainHandItem().getItem());
+        finish(context, bot);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------- shield
+
+    /** Shields are best-first; the enchanted one is raised, and when it breaks the plain one takes its place in the offhand. */
+    @GameTest(environment = ENV + "shield_is_best_first_and_the_next_best_on_break", maxTicks = 40)
+    public void shieldIsBestFirstAndTheNextBestOnBreak(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearShieldGT");
+        clearGear(bot);
+        InventoryAction.giveItem(bot, new ItemStack(Items.SHIELD));
+        InventoryAction.giveItem(bot, enchanted(context, Items.SHIELD, Enchantments.UNBREAKING, 3));
+        require(context, EquipAction.equipShieldOffhand(bot) && bot.getOffhandItem().is(Items.SHIELD) && bot.getOffhandItem().isEnchanted(),
+                "the Unbreaking III shield was not the one raised: " + bot.getOffhandItem());
+        // A worn shield at its last use is still the one held (no swap away because of wear)...
+        bot.getOffhandItem().setDamageValue(bot.getOffhandItem().getMaxDamage() - 1);
+        require(context, EquipAction.equipShieldOffhand(bot) && bot.getOffhandItem().isEnchanted(),
+                "a shield at its last use was swapped away: " + bot.getOffhandItem());
+        // ...and once it broke the plain one replaces it in the offhand.
+        breakHeldAll(bot);
+        require(context, bot.getOffhandItem().isEmpty(), "the shield did not break");
+        require(context, EquipAction.equipShieldOffhand(bot) && bot.getOffhandItem().is(Items.SHIELD) && !bot.getOffhandItem().isEnchanted(),
+                "after the shield broke the next best shield was not raised: " + bot.getOffhandItem());
+        // A better shield that turns up does not replace the held one: it is used until it breaks.
+        InventoryAction.giveItem(bot, enchanted(context, Items.SHIELD, Enchantments.UNBREAKING, 2));
+        EquipAction.equipShieldOffhand(bot);
+        require(context, !bot.getOffhandItem().isEnchanted(), "a held shield was swapped for a carried one: " + bot.getOffhandItem());
+        finish(context, bot);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------- offhand policy (O1)
+
+    /**
+     * The offhand ladder: the best shield, else a totem, else nothing, and a broken or used-up item is replaced by the best of the
+     * same kind first (2 shields then 2 totems).
+     */
+    @GameTest(environment = ENV + "offhand_ladder_shield_then_totem_then_next_totem", maxTicks = 40)
+    public void offhandLadderShieldThenTotemThenNextTotem(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearOffhandLadderGT");
+        clearGear(bot);
+        InventoryAction.giveItem(bot, new ItemStack(Items.TOTEM_OF_UNDYING));
+        InventoryAction.giveItem(bot, new ItemStack(Items.SHIELD));
+        InventoryAction.giveItem(bot, new ItemStack(Items.TOTEM_OF_UNDYING));
+        InventoryAction.giveItem(bot, enchanted(context, Items.SHIELD, Enchantments.UNBREAKING, 3));
+        require(context, OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.SHIELD) && bot.getOffhandItem().isEnchanted(),
+                "the best shield was not put in the offhand (a shield outranks a totem): " + bot.getOffhandItem());
+        require(context, !OffhandPolicy.apply(bot), "a second pass changed the offhand (the choice is not stable)");
+        require(context, InventoryAction.countItem(bot, Items.SHIELD) == 2 && InventoryAction.countItem(bot, Items.TOTEM_OF_UNDYING) == 2,
+                "an item was lost or duplicated");
+        // The shield breaks: the next shield, not a totem.
+        bot.getOffhandItem().setDamageValue(bot.getOffhandItem().getMaxDamage() - 1);
+        require(context, !OffhandPolicy.apply(bot) && bot.getOffhandItem().isEnchanted(), "a shield at its last use was swapped away");
+        breakHeldAll(bot);
+        require(context, bot.getOffhandItem().isEmpty(), "the shield did not break");
+        require(context, OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.SHIELD) && !bot.getOffhandItem().isEnchanted(),
+                "after the shield broke the next shield was not equipped: " + bot.getOffhandItem());
+        // The last shield breaks: a totem.
+        breakHeldAll(bot);
+        require(context, OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.TOTEM_OF_UNDYING),
+                "after the last shield broke a totem was not equipped: " + bot.getOffhandItem());
+        // The totem pops: the next totem.
+        bot.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+        require(context, OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.TOTEM_OF_UNDYING)
+                        && InventoryAction.countItem(bot, Items.TOTEM_OF_UNDYING) == 1,
+                "after the first totem popped the next totem was not equipped: " + bot.getOffhandItem());
+        // The last totem pops: nothing.
+        bot.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+        require(context, !OffhandPolicy.apply(bot) && bot.getOffhandItem().isEmpty(), "an item came from nowhere: " + bot.getOffhandItem());
+        finish(context, bot);
+    }
+
+    /** A totem held only for lack of a shield gives way to a shield that turns up; any other offhand item is left alone. */
+    @GameTest(environment = ENV + "offhand_totem_gives_way_to_a_shield_and_other_items_stay", maxTicks = 40)
+    public void offhandTotemGivesWayToAShieldAndOtherItemsStay(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearOffhandTotemGT");
+        clearGear(bot);
+        bot.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.TOTEM_OF_UNDYING));
+        require(context, !OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.TOTEM_OF_UNDYING), "a lone totem was moved");
+        InventoryAction.giveItem(bot, new ItemStack(Items.SHIELD));
+        require(context, OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.SHIELD)
+                        && InventoryAction.countItem(bot, Items.TOTEM_OF_UNDYING) == 1,
+                "the totem did not give way to the shield (or was lost): " + bot.getOffhandItem());
+        // A torch in the offhand is left alone, shield or not.
+        bot.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.TORCH, 8));
+        require(context, !OffhandPolicy.apply(bot) && bot.getOffhandItem().is(Items.TORCH), "an unmanaged offhand item was replaced");
+        finish(context, bot);
+    }
+
+    /** Through the real tick: a bot that carries a shield and a totem wears the shield in the offhand without being asked, and the totem after it. */
+    @GameTest(environment = ENV + "offhand_is_filled_by_the_background_pass", maxTicks = 60)
+    public void offhandIsFilledByTheBackgroundPass(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearOffhandTickGT");
+        clearGear(bot);
+        InventoryAction.giveItem(bot, new ItemStack(Items.TOTEM_OF_UNDYING));
+        InventoryAction.giveItem(bot, new ItemStack(Items.SHIELD));
+        context.runAfterDelay(10, () -> {
+            try {
+                require(context, bot.getOffhandItem().is(Items.SHIELD), "the background pass did not equip the shield: " + bot.getOffhandItem());
+                breakHeldAll(bot);
+            } catch (RuntimeException e) {
+                finish(context, bot);
+                throw e;
+            }
+            context.runAfterDelay(10, () -> {
+                require(context, bot.getOffhandItem().is(Items.TOTEM_OF_UNDYING),
+                        "after the shield broke the background pass did not equip the totem: " + bot.getOffhandItem());
+                finish(context, bot);
+            });
+        });
+    }
+
+    private static void breakHeldAll(AIPlayerEntity bot) {
+        while (!bot.getOffhandItem().isEmpty()) {
+            breakHeld(bot, EquipmentSlot.OFFHAND);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------- ranged: next best on break
+
+    /** The best bow is held until it breaks, and the next best ranged weapon (a crossbow) is chosen the moment it is gone. */
+    @GameTest(environment = ENV + "ranged_weapon_breaks_then_the_next_best_is_chosen", maxTicks = 40)
+    public void rangedWeaponBreaksThenTheNextBestIsChosen(GameTestHelper context) {
+        AIPlayerEntity bot = spawnPlatform(context, "GearRangedBreakGT");
+        clearGear(bot);
+        ItemStack power = enchanted(context, Items.BOW, Enchantments.POWER, 5);
+        power.setDamageValue(power.getMaxDamage() - 1);
+        InventoryAction.giveItem(bot, power);
+        InventoryAction.giveItem(bot, new ItemStack(Items.CROSSBOW));
+        InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
+        InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 8));
+        Optional<EquipAction.RangedLoadout> loadout = EquipAction.equipBestRangedLoadout(bot, null);
+        require(context, loadout.isPresent() && bot.getMainHandItem().is(Items.BOW) && bot.getMainHandItem().isEnchanted(),
+                "the Power V bow at its last use was not the chosen ranged weapon: " + bot.getMainHandItem());
+        breakHeld(bot, EquipmentSlot.MAINHAND);
+        require(context, bot.getMainHandItem().isEmpty(), "the bow did not break");
+        loadout.ifPresent(lease -> lease.restore(bot));
+        OptionalInt next = EquipAction.bestRangedSlot(bot, null);
+        require(context, next.isPresent() && !bot.getInventory().getItem(next.getAsInt()).isEmpty()
+                        && !bot.getInventory().getItem(next.getAsInt()).isEnchanted(),
+                "no next best ranged weapon after the bow broke: " + next);
         finish(context, bot);
     }
 
@@ -504,6 +736,11 @@ public final class GearWorstFirstGameTests {
         }
         bot.getInventory().setItem(8, new ItemStack(Items.DIRT, 4));
         bot.getInventory().setSelectedSlot(8);
+    }
+
+    /** One use of the item in {@code slot}, as a hit or a block break spends it: at its last use it breaks (its stack becomes empty). */
+    private static void breakHeld(AIPlayerEntity bot, EquipmentSlot slot) {
+        bot.getItemBySlot(slot).hurtAndBreak(1, bot, slot);
     }
 
     private static void clearGear(AIPlayerEntity bot) {

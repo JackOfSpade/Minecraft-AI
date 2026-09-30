@@ -737,9 +737,7 @@ public final class GoalPlanner {
                 // reservation was reverted; deep-dive survival now relies on reactive measures
                 // (self-rescue into lava/mud, burying near death, placing torches -- only pay the cost
                 // when actually in danger). Equipping armor on descent
-                // (DescendToYTask.onStart equipBestArmor) is kept: zero cost, but it is a one-off since gear is worst-first: the
-                // next background armor pass swaps a worn better piece down to the cheapest one carried, so it only matters when nothing
-                // worse is in the inventory.
+                // (DescendToYTask.onStart equipBestArmor) is kept: zero cost, and the background armor pass is best-first too.
             }
             if (ordinaryChannelMission
                     && !ensureFreshOrdinaryChannelKit(budget, depth + 1, visiting)) {

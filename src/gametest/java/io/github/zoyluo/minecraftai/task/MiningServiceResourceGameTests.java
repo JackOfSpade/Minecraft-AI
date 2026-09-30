@@ -1154,8 +1154,12 @@ public final class MiningServiceResourceGameTests {
             }
             require(context, InventoryAction.countItem(bot, Items.DIAMOND) == 1,
                     "next OreDig batch did not physically collect its target");
-            require(context, unusableCheapPickaxes(bot) == 1,
-                    "service lost the preserved exhausted iron pickaxe after mining resumed");
+            // The service preserved the exhausted iron pickaxe (asserted above, at its completion). Tools are used until they break,
+            // worst-first with the more worn of two equal ones first: the diamond is mined with the exhausted pickaxe, whose single
+            // use left breaks on it (nothing was lost by the service), and the healthy iron pickaxe is the one that remains.
+            require(context, unusableCheapPickaxes(bot) == 0 && InventoryAction.countItem(bot, Items.IRON_PICKAXE) == 1,
+                    "the next ore batch did not use up exactly the exhausted iron pickaxe: exhausted left="
+                            + unusableCheapPickaxes(bot) + " iron pickaxes=" + InventoryAction.countItem(bot, Items.IRON_PICKAXE));
             require(context, InventoryAction.countItem(bot, Items.DIRT) == 0
                             && InventoryAction.countItem(bot, Items.GRAVEL) == 0
                             && InventoryAction.countItem(bot, Items.SAND) == 0,

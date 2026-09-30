@@ -182,7 +182,7 @@ public final class ToolRegistry {
         register("inventory", "Get the bot's current inventory", objectSchema().build(), (bot, args) ->
                 ok(InventoryAction.summarize(bot).toString()));
 
-        register("equip_best_tool", "Equip the least valuable tool that can properly mine a block type and keep its drops (worst-first: a wooden pickaxe before a stone one for stone)", objectSchema()
+        register("equip_best_tool", "Equip the least valuable tool that can properly mine a block type and keep its drops (tools are worst-first and used until they break: a wooden pickaxe before a stone one for stone, then the next worst takes over)", objectSchema()
                 .property("block", stringSchema("block id, for example minecraft:stone"))
                 .required("block")
                 .build(), (bot, args) -> {
@@ -568,7 +568,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("equip_armor", "Equip the best armor pieces from inventory and select the best weapon. One-off: the automatic gear choice is worst-first and puts the cheapest adequate armor and weapon back on the next tick, so this does not keep the best gear on (take the worse pieces out of the bot's inventory to keep the best ones worn)", objectSchema().build(), (bot, args) -> {
+        register("equip_armor", "Equip the best armor pieces from inventory and select the best weapon. The automatic choice for armor, weapons, shields and bows is best-first too (used until they break, then the next best is equipped), so this simply does it now; only tools are chosen worst-first", objectSchema().build(), (bot, args) -> {
             int equipped = EquipAction.equipBestArmor(bot);
             EquipAction.equipBestWeapon(bot);
             return ok("equipped_armor_pieces: " + equipped);

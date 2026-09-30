@@ -84,21 +84,22 @@ class InventoryHeadroomTest {
     // ---- durabilityOk ----
 
     @Test
-    void durabilityOkDiamondPickBoundary() {
+    void aWornToolIsNeverRefusedOnlyOneThatCannotFinishTheDetour() {
+        // Use it until it breaks: a diamond pick at 38 or 10 uses left still does a one-member detour...
         assertTrue(InventoryHeadroom.durabilityOk(38, 250, 1));
-        assertFalse(InventoryHeadroom.durabilityOk(37, 250, 1));
-    }
-
-    @Test
-    void durabilityOkStonePickBoundary() {
+        assertTrue(InventoryHeadroom.durabilityOk(10, 250, 1));
+        // ...a stone pick with 26 or 5 uses left too...
         assertTrue(InventoryHeadroom.durabilityOk(26, 131, 1));
-        assertFalse(InventoryHeadroom.durabilityOk(25, 131, 1));
+        assertTrue(InventoryHeadroom.durabilityOk(5, 131, 1));
+        // ...and only a tool that would break before the last planned break is refused (members + 1 uses are needed).
+        assertTrue(InventoryHeadroom.durabilityOk(2, 250, 1));
+        assertFalse(InventoryHeadroom.durabilityOk(1, 250, 1));
     }
 
     @Test
     void durabilityOkScalesWithPlannedMembers() {
-        assertTrue(InventoryHeadroom.durabilityOk(48, 131, 12));
-        assertFalse(InventoryHeadroom.durabilityOk(47, 131, 12));
+        assertTrue(InventoryHeadroom.durabilityOk(13, 131, 12));
+        assertFalse(InventoryHeadroom.durabilityOk(12, 131, 12));
     }
 
     @Test

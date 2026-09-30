@@ -245,14 +245,14 @@ public final class DangerWatcherLowHealthGameTests {
         BlockPos origin = bot.blockPosition().immutable();
 
         ItemStack nearlyBroken = new ItemStack(Items.WOODEN_PICKAXE);
-        nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 2);
+        nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 1);
         InventoryAction.giveItem(bot, nearlyBroken);
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE));
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_PLANKS, 3));
         InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 2));
         require(context, bot.getMainHandItem().is(Items.WOODEN_PICKAXE)
-                        && rawDurability(bot.getMainHandItem()) == 2,
-                "fixture did not hold the nearly-broken wooden pick");
+                        && rawDurability(bot.getMainHandItem()) == 1,
+                "fixture did not hold the raw-one wooden pick (the generic resupply starts at a single use left, wear alone never starts it)");
 
         DigDownTask owner = new DigDownTask(Blocks.STONE, 3);
         TaskManager.INSTANCE.assign(bot, owner,
@@ -429,8 +429,8 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_equal_damage_weapon_selection_prefers_remaining_durability", maxTicks = 20)
-    public void equalDamageWeaponSelectionPrefersRemainingDurability(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_equal_damage_weapon_selection_uses_the_more_worn_until_it_breaks", maxTicks = 20)
+    public void equalDamageWeaponSelectionUsesTheMoreWornUntilItBreaks(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatDurabilityGT", 2);
         ItemStack nearlyBroken = new ItemStack(Items.WOODEN_SWORD);
         nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 1);
@@ -442,10 +442,10 @@ public final class DangerWatcherLowHealthGameTests {
 
         CombatCore.equipMelee(bot);
 
+        // Use it until it breaks: of two equal weapons the more worn one is used up first, never set aside for the fresh one.
         require(context, bot.getMainHandItem().is(Items.WOODEN_SWORD)
-                        && rawDurability(bot.getMainHandItem())
-                        == bot.getMainHandItem().getMaxDamage(),
-                "equal-damage selection retained the lower-durability weapon");
+                        && rawDurability(bot.getMainHandItem()) == 1,
+                "equal-damage selection put the lower-durability weapon aside instead of using it until it breaks");
         despawnAndComplete(context, bot);
     }
 
@@ -534,19 +534,24 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_final_use_sword_cannot_authorize_combat", maxTicks = 40)
-    public void finalUseSwordCannotAuthorizeCombat(GameTestHelper context) {
-        AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseSwordNoCombatGT", 2);
+    /**
+     * Use it until it breaks: a sword with a single use left is still the chosen weapon (an earlier rule refused to fight with it and
+     * evaded, which is wear setting a weapon aside). The bot is armed, so the watcher enters defensive combat; the combat owner
+     * selects the physical successor at the boundary where the last use is spent (see the backup-weapon test).
+     */
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_final_use_sword_is_used_until_it_breaks_and_authorizes_combat", maxTicks = 40)
+    public void finalUseSwordIsUsedUntilItBreaksAndAuthorizesCombat(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseSwordCombatGT", 2);
         BlockPos origin = bot.blockPosition().immutable();
         ItemStack finalUseSword = new ItemStack(Items.STONE_SWORD);
         finalUseSword.setDamageValue(finalUseSword.getMaxDamage() - 1);
         InventoryAction.giveItem(bot, finalUseSword);
-        require(context, EquipAction.bestWeaponSlot(bot).isEmpty(),
-                "raw-1 sword was admitted as a defensive melee weapon");
+        require(context, EquipAction.bestWeaponSlot(bot).isPresent(),
+                "raw-1 sword was not admitted as a melee weapon (wear must never set a weapon aside)");
 
         HoldingTask work = new HoldingTask();
         TaskManager.INSTANCE.assign(bot, work,
-                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_final_use_sword_no_combat"));
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_final_use_sword_combat"));
         Zombie zombie = EntityType.ZOMBIE.create(context.getLevel(), EntitySpawnReason.COMMAND);
         if (zombie == null) {
             despawnAndComplete(context, bot);
@@ -565,24 +570,24 @@ public final class DangerWatcherLowHealthGameTests {
         DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
-        require(context, active instanceof EvadeTask,
-                "raw-1 sword entered "
-                        + (active == null ? "idle" : active.name()) + " instead of Evade");
+        require(context, active instanceof CombatTask,
+                "an armed bot (raw-1 sword) entered "
+                        + (active == null ? "idle" : active.name()) + " instead of combat");
         require(context, work.state() == TaskState.PAUSED,
-                "raw-1 sword Evade did not preserve interrupted work");
+                "raw-1 sword combat did not preserve interrupted work");
         zombie.discard();
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_final_use_axe_is_not_a_qualified_melee_weapon", maxTicks = 20)
-    public void finalUseAxeIsNotAQualifiedMeleeWeapon(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:danger_watcher_low_health_game_tests_final_use_axe_is_still_a_qualified_melee_weapon", maxTicks = 20)
+    public void finalUseAxeIsStillAQualifiedMeleeWeapon(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseAxeNoCombatGT", 2);
         ItemStack finalUseAxe = new ItemStack(Items.STONE_AXE);
         finalUseAxe.setDamageValue(finalUseAxe.getMaxDamage() - 1);
         InventoryAction.giveItem(bot, finalUseAxe);
 
-        require(context, EquipAction.bestWeaponSlot(bot).isEmpty(),
-                "raw-1 axe was admitted as a defensive melee weapon");
+        require(context, EquipAction.bestWeaponSlot(bot).isPresent(),
+                "raw-1 axe was not admitted as a melee weapon (wear must never set a weapon aside)");
         despawnAndComplete(context, bot);
     }
 
@@ -1384,18 +1389,15 @@ public final class DangerWatcherLowHealthGameTests {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatBackupWeaponGT", 2);
         int deathBaseline = deathCount(bot);
         BlockPos origin = bot.blockPosition().immutable();
-        // Worst-first judges the fight target: a weapon with fewer than (hits + 2) uses left is never ADEQUATE, so against an
-        // ordinary zombie the fresh stone sword is right from the first swing and the two-use sword is never drawn. The
-        // fixture therefore fights an iron-armoured zombie that no sword here kills in five hits: nothing is adequate, the
-        // rule falls back to the best-damage weapon (the two-use stone sword), and it is that weapon which becomes
-        // ineligible mid-fight and must be replaced by the fresh wooden backup in the same attack boundary.
+        // Non-tools are used best-first and until they break: the nearly broken stone sword (two uses left) is the BEST weapon
+        // here, so it is drawn first and swung until its last use is spent; the fresh wooden sword is only its backup.
         ItemStack twoUseStoneSword = new ItemStack(Items.STONE_SWORD);
         twoUseStoneSword.setDamageValue(twoUseStoneSword.getMaxDamage() - 2);
         InventoryAction.giveItem(bot, twoUseStoneSword);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
         require(context, bot.getMainHandItem().is(Items.STONE_SWORD)
                         && rawDurability(bot.getMainHandItem()) == 2,
-                "fixture did not hold the stronger two-use weapon");
+                "fixture did not hold the best (stone) weapon with two uses left");
         for (int dx = -1; dx <= 2; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 context.getLevel().setBlock(origin.offset(dx, 2, dz),
@@ -1412,15 +1414,12 @@ public final class DangerWatcherLowHealthGameTests {
         }
         zombie.setPersistenceRequired();
         zombie.setNoAi(true);
-        zombie.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
-        zombie.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
-        zombie.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
-        zombie.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
         BlockPos hostileFeet = origin.east();
         zombie.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(zombie);
         float initialHealth = zombie.getHealth();
+        java.util.concurrent.atomic.AtomicBoolean usedAtLastUse = new java.util.concurrent.atomic.AtomicBoolean();
 
         CombatTask combat = CombatTask.defensive(zombie, 6.0F, origin);
         TaskManager.INSTANCE.assign(bot, combat,
@@ -1429,20 +1428,26 @@ public final class DangerWatcherLowHealthGameTests {
             require(context, bot.isAlive(), "bot died in the disabled-zombie weapon fixture");
             require(context, deathCount(bot) == deathBaseline,
                     "backup-weapon combat changed the bot death counter");
-            ItemStack retiredStoneSword = bot.getInventory().getNonEquipmentItems().stream()
+            ItemStack stoneSword = bot.getInventory().getNonEquipmentItems().stream()
                     .filter(stack -> stack.is(Items.STONE_SWORD))
                     .findFirst()
                     .orElse(ItemStack.EMPTY);
-            if (!retiredStoneSword.isEmpty()
-                    && rawDurability(retiredStoneSword) == 1) {
+            if (!stoneSword.isEmpty() && rawDurability(stoneSword) == 1) {
+                // One use left: the sword is still the chosen weapon (wear never sets it aside for the fresh backup).
                 require(context, zombie.getHealth() < initialHealth,
                         "two-use weapon lost durability before this combat damaged its target"
                                 + " health=" + zombie.getHealth()
                                 + " initial=" + initialHealth);
+                require(context, bot.getMainHandItem().is(Items.STONE_SWORD),
+                        "the nearly broken best weapon was swapped away before it broke, held="
+                                + bot.getMainHandItem().getItem() + " raw=" + rawDurability(bot.getMainHandItem()));
+                usedAtLastUse.set(true);
+            } else if (stoneSword.isEmpty() && usedAtLastUse.get()) {
+                // The stone sword broke on its last use: the backup must already be in hand in the same boundary.
                 ItemStack held = bot.getMainHandItem();
                 require(context, held.is(Items.WOODEN_SWORD)
                                 && rawDurability(held) > 1,
-                        "newly ineligible weapon was not atomically replaced by its backup"
+                        "the broken weapon was not atomically replaced by its backup"
                                 + " held=" + held.getItem()
                                 + " raw=" + rawDurability(held)
                                 + " selected=" + bot.getInventory().getSelectedSlot()

@@ -13,25 +13,27 @@ import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 /**
- * How valuable a piece of gear is, so that bots can use the CHEAPEST item that still does the job first ("worst-first"): a
- * wooden pickaxe before a stone one, a leather cap before a diamond one. Lower value goes first; at equal value the more worn
- * item goes first (see {@link Core#compare}). Enchantments add value, so an enchanted item is kept for last.
+ * How valuable a piece of gear is. TOOLS use the CHEAPEST item that still does the job first ("worst-first"): a wooden pickaxe before
+ * a stone one. Lower value goes first; at equal value the more worn item goes first (see {@link Core#compare}). NON-TOOLS (melee
+ * weapons, bows, crossbows, shields, armor, elytra) use the BEST item first (see {@link Core#compareBestFirst}; at equal value the more
+ * worn goes first as well). Enchantments add value, so an enchanted tool is kept for last and an enchanted weapon or piece goes first.
+ * Either way an item is used until it actually breaks, and its successor (the next worst tool, the next best non-tool) takes over.
  *
  * <p>Pure: it reads item stacks only (no world, no player), because {@link ToolSelector#choose} also runs on Baritone's search
- * thread over copied stacks. The one piece of shared state it may read is the {@code behaviour.gear.worstFirst} switch through
- * {@link #worstFirstEnabled()}, an immutable config record behind a volatile reference (see {@link MinecraftAiConfig#get()}), so a
- * read from another thread sees a complete, current value. The numbers live in {@link Core}, which needs
+ * thread over copied stacks. The one piece of shared state it may read is the {@code behaviour.gear.worstFirst} switch (tools only)
+ * through {@link #worstFirstEnabled()}, an immutable config record behind a volatile reference (see {@link MinecraftAiConfig#get()}),
+ * so a read from another thread sees a complete, current value. The numbers live in {@link Core}, which needs
  * no Minecraft bootstrap and is unit tested on its own.
  *
- * <p>There is no escalation of any kind: the same value order applies in danger, in missions and in dangerous places. The player
- * controls what a bot wears and wields by taking items out of its inventory. {@code behaviour.gear.worstFirst=false} restores the
- * best-first behaviour of earlier versions.
+ * <p>There is no escalation of any kind: the same order applies in danger, in missions and in dangerous places. The player
+ * controls what a bot wears and wields by taking items out of its inventory. {@code behaviour.gear.worstFirst=false} makes tools
+ * best-first as well, as in earlier versions.
  */
 public final class GearValue {
     private GearValue() {
     }
 
-    /** True unless {@code behaviour.gear.worstFirst} is switched off. */
+    /** True unless {@code behaviour.gear.worstFirst} (tools only) is switched off. */
     public static boolean worstFirstEnabled() {
         MinecraftAiConfig config = MinecraftAiConfig.get();
         return config == null || config.behaviour() == null || config.behaviour().gearOrDefaults().worstFirstEnabled();
@@ -131,15 +133,18 @@ public final class GearValue {
             return armor + 0.25D * toughness + 2.0D * knockbackResistance + Math.max(0, protectionLevels);
         }
 
-        /** An armor piece is nearly broken when at most max(3, 5% of its maximum durability) uses remain. */
-        public static boolean armorNearlyBroken(int remaining, int maxDurability) {
-            return maxDurability > 0 && remaining <= Math.max(3, (int) Math.ceil(maxDurability * 0.05D));
-        }
-
         /** Orders by value (lower first), then by remaining durability (more worn first). Negative: {@code a} goes first. */
         public static int compare(double valueA, int remainingA, double valueB, int remainingB) {
             if (Math.abs(valueA - valueB) > EPSILON) {
                 return valueA < valueB ? -1 : 1;
+            }
+            return Integer.compare(remainingA, remainingB);
+        }
+
+        /** Best-first order for non-tools: higher value first, then the more worn (used up first). Negative: {@code a} goes first. */
+        public static int compareBestFirst(double valueA, int remainingA, double valueB, int remainingB) {
+            if (Math.abs(valueA - valueB) > EPSILON) {
+                return valueA > valueB ? -1 : 1;
             }
             return Integer.compare(remainingA, remainingB);
         }
@@ -191,10 +196,6 @@ public final class GearValue {
     /** Remaining uses; a huge number for an item that cannot be damaged. */
     public static int remaining(ItemStack stack) {
         return stack.isDamageableItem() ? Math.max(0, stack.getMaxDamage() - stack.getDamageValue()) : Integer.MAX_VALUE;
-    }
-
-    public static boolean armorNearlyBroken(ItemStack stack) {
-        return stack.isDamageableItem() && Core.armorNearlyBroken(remaining(stack), stack.getMaxDamage());
     }
 
     private static String path(ItemStack stack) {

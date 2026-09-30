@@ -41,28 +41,48 @@ final class ReviewNitsSourceContractTest {
                 "the worn-item guard must come before any swap");
     }
 
-    // G2
+    // G2 (now: the melee weapon is the best one and is used until it breaks; there is no adequacy rule and no durability term)
 
     @Test
-    void combatPassesItsTargetToTheWeaponAdequacyCheck() throws IOException {
+    void combatPassesItsTargetToTheWeaponChoiceAndItIsBestFirst() throws IOException {
         String core = read("task/CombatCore.java");
         assertTrue(core.contains("public static void ensureMeleeWeapon(AIPlayerEntity bot, LivingEntity target)")
                 && core.contains("EquipAction.equipWeaponForContext(bot, target);"));
         String task = read("task/CombatTask.java");
         assertFalse(task.contains("ensureMeleeWeapon(bot);"), "CombatTask must give ensureMeleeWeapon its target");
         String equip = read("action/EquipAction.java");
-        assertTrue(equip.contains("explicitTarget != null && explicitTarget.isAlive() && explicitTarget != bot\n                ? explicitTarget : contextTarget(bot)"),
-                "an explicit live target beats the aggressor context");
+        assertTrue(equip.contains("public static OptionalInt equipWeaponForContext(AIPlayerEntity bot, LivingEntity explicitTarget) {\n        return equipBestWeapon(bot);"),
+                "the target-aware entry point is the best weapon: the strongest sword is adequate against everything a weaker one is");
+        assertFalse(equip.contains("ADEQUATE_SPARE_USES") || equip.contains("adequateAgainst"),
+                "the weapon adequacy rule (with its spare-uses term) is gone: a two-use sword is used against a zombie");
     }
 
     // G3
 
     @Test
-    void theExplicitBestFirstEntryPointsDocumentThatTheBackgroundPassUndoesThem() throws IOException {
-        assertTrue(read("brain/ToolRegistry.java").contains("the automatic gear choice is worst-first"),
-                "the equip_armor tool description must say it is a one-off");
-        assertTrue(read("goal/GoalPlanner.java").contains("it is a one-off since gear is worst-first"));
-        assertTrue(read("task/DescendToYTask.java").contains("This is an explicit best-first call and a"));
+    void theExplicitBestFirstEntryPointsSayTheAutomaticChoiceIsBestFirstToo() throws IOException {
+        assertTrue(read("brain/ToolRegistry.java").contains("The automatic choice for armor, weapons, shields and bows is best-first too"),
+                "the equip_armor tool description must say what the automatic choice is");
+        assertTrue(read("goal/GoalPlanner.java").contains("the background armor pass is best-first too"));
+        assertTrue(read("task/DescendToYTask.java").contains("Armor is a non-tool, so it is best-first everywhere"));
+    }
+
+    // Use it until it breaks: no task or resupply ends or skips work because a tool is merely worn
+
+    @Test
+    void wearAloneNeverEndsATunnelOrDisqualifiesAResupplyTool() throws IOException {
+        String strip = read("task/StripMineTask.java");
+        assertFalse(strip.contains("getDamageValue") || strip.contains("toolDurabilityFloor") || strip.contains("tool_durability_low"),
+                "a worn pickaxe must not end a strip-mine tunnel: it is used until it breaks (the owner gets a chat warning)");
+        String resupply = read("task/ResupplyTask.java");
+        assertFalse(resupply.contains("LOW_DURABILITY_FRACTION"),
+                "the ten-percent floor that refused a worn replacement tool is gone");
+        assertTrue(resupply.contains("!io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(stack)"),
+                "only a stack with a single use left is refused as a replacement tool");
+        String watcher = read("task/DangerWatcher.java");
+        assertTrue(between(watcher, "private static boolean isNearlyBroken(ItemStack stack)", "Natural regeneration")
+                        .contains("ItemStackUtil.isNearlyBroken(stack)"),
+                "the generic tool resupply starts at a single use left, never at a wear percentage");
     }
 
     // G4

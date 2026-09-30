@@ -20,7 +20,6 @@ import net.minecraft.world.item.Items;
 public final class ResupplyTask extends AbstractTask {
     private static final int BASE_RADIUS = 8;
     private static final double REACH_SQUARED = 20.25D;
-    private static final double LOW_DURABILITY_FRACTION = 0.10D;
 
     public enum Need {
         TOOL,
@@ -398,15 +397,17 @@ public final class ResupplyTask extends AbstractTask {
         if (requestedItem == null) {
             return false;
         }
+        // Tools are used worst-first and until they break: of several stacks of the requested item the MORE worn usable one goes in
+        // hand (it is used up first, never set aside for a fresh one); only a stack with a single use left counts as already gone.
         int bestSlot = -1;
-        int bestRemaining = -1;
+        int bestRemaining = Integer.MAX_VALUE;
         for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
             ItemStack stack = bot.getInventory().getNonEquipmentItems().get(slot);
             if (!stack.is(requestedItem) || !isUsable(stack)) {
                 continue;
             }
             int remaining = stack.isDamageableItem() ? stack.getMaxDamage() - stack.getDamageValue() : Integer.MAX_VALUE;
-            if (remaining > bestRemaining) {
+            if (bestSlot < 0 || remaining < bestRemaining) {
                 bestRemaining = remaining;
                 bestSlot = slot;
             }
@@ -445,18 +446,12 @@ public final class ResupplyTask extends AbstractTask {
         return null;
     }
 
+    /**
+     * A stack that can replace the tool that triggered this resupply: anything but a stack with a single use left (the threshold that
+     * starts a tool resupply, see {@code DangerWatcher}). Wear alone never disqualifies a tool: use it until it breaks.
+     */
     private static boolean isUsable(ItemStack stack) {
-        if (stack.isEmpty()) {
-            return false;
-        }
-        if (!stack.isDamageableItem()) {
-            return true;
-        }
-        int max = stack.getMaxDamage();
-        if (max <= 0) {
-            return true;
-        }
-        return stack.getMaxDamage() - stack.getDamageValue() > max * LOW_DURABILITY_FRACTION;
+        return !stack.isEmpty() && !io.github.zoyluo.minecraftai.util.ItemStackUtil.isNearlyBroken(stack);
     }
 
 }
