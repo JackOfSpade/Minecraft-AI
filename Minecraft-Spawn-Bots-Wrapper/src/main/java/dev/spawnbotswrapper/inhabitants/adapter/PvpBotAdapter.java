@@ -81,6 +81,8 @@ public final class PvpBotAdapter implements PvpBotOperations {
 
     private final PvpBotCombatControl targetControl;
     private final ListedNamesCache listedCache = new ListedNamesCache();
+    /** Names (see {@link NameRules#key}) of the bots this adapter is removing right now: a death event for one is not a real death. */
+    private final Set<String> removing = new java.util.HashSet<>();
     private final SpawnTracker spawns;
     private final PatrolManager patrols;
     private WeakReference<MinecraftServer> lastServer = new WeakReference<>(null);
@@ -658,6 +660,36 @@ public final class PvpBotAdapter implements PvpBotOperations {
                 return false;
             }
             String exact = botNameFor(server, entity.getScoreboardName());
+            String removingKey = NameRules.key(name);
+            removing.add(removingKey);
+            try {
+                return removeWithoutDeath(server, p, entity, exact, name);
+            } finally {
+                removing.remove(removingKey);
+            }
+        } catch (Throwable t) {
+            log.failure("removing a bot", t);
+            return false;
+        }
+    }
+
+    /**
+     * Removal is not a death. The bot is emptied (inventory, armor, offhand, ender chest, experience) and leaves the way a
+     * player leaves ({@link BotRemoval}), so nothing drops and nothing dies; only then PvP BOT's own removal runs, to
+     * forget the bot: its {@code clear} and {@code kill} sub-commands find no player any more. If the bot cannot be made to
+     * leave, that removal kills it as before -- but it is already empty then, so it still drops nothing.
+     */
+    private boolean removeWithoutDeath(MinecraftServer server, Probed p, ServerPlayer entity, String exact, String name) {
+        try {
+            BotRemoval.empty(entity);
+            if (!BotRemoval.disconnect(server, entity)) {
+                log.failure("removing a bot", new IllegalStateException(
+                        "'" + name + "' is still online after it was disconnected; PvP BOT's removal will be used"));
+            }
+        } catch (Throwable t) {
+            log.failure("emptying and disconnecting a bot", t);
+        }
+        try {
             CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
             CommandDispatcher<CommandSourceStack> dispatcher = server.getCommands().getDispatcher();
             // PvP BOT's own removal internally runs "clear <name>" with a FRESH, non-silent source of its own
@@ -688,6 +720,11 @@ public final class PvpBotAdapter implements PvpBotOperations {
             log.failure("removing a bot", t);
             return false;
         }
+    }
+
+    @Override
+    public boolean isRemoving(String name) {
+        return name != null && removing.contains(NameRules.key(name));
     }
 
     // ================================================================ per-bot behaviour (PvP BOT paths)

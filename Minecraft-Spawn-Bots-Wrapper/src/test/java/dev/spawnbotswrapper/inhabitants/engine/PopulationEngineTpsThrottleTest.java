@@ -43,7 +43,7 @@ class PopulationEngineTpsThrottleTest {
         StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
         rig.engine.submit(s);
         rig.run(10);
-        List<BotRecord> bots = rig.record(s.key()).bots;
+        List<BotRecord> bots = new java.util.ArrayList<>(rig.record(s.key()).bots); // the record loses the shed ones
         assertEquals(3, bots.size());
 
         // Closest survives; the two farthest are shed.
@@ -62,10 +62,36 @@ class PopulationEngineTpsThrottleTest {
         assertFalse(rig.bots.online.contains(FakeBots.key(bots.get(1).name)));
         assertFalse(rig.bots.online.contains(FakeBots.key(bots.get(2).name)));
 
-        // A TPS despawn is permanent, exactly like death: never DORMANT, and the record is left SPAWNED
-        // (nothing here is ever expected to come back on its own).
-        assertEquals(BotState.SPAWNED, bots.get(1).state);
-        assertEquals(BotState.SPAWNED, bots.get(2).state);
+        // Shedding is not a death and takes nothing from the world: these two were never seen by a player, so they are
+        // deleted (no record is kept and their slots are vacant), and nothing is counted as a death.
+        StructureRecord record = rig.record(s.key());
+        assertEquals(1, record.bots.size(), "the shed unseen bots leave no record");
+        assertEquals(bots.get(0).name, record.bots.get(0).name);
+        assertEquals(0, record.deadCount(), "shedding is not a death");
+        assertEquals(2, record.vacantSlots());
+    }
+
+    @Test
+    void aSeenBotIsPutToSleepByTheTpsGovernorNotDeleted() {
+        Rig rig = new Rig();
+        rig.cfg.tpsThrottle.checkIntervalTicks = 5;
+        rig.cfg.tpsThrottle.despawnBatchSize = 3;
+        rig.tps.millis = 30.0;
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        rig.engine.submit(s);
+        rig.run(10);
+        List<BotRecord> bots = rig.record(s.key()).bots;
+        BotRecord seen = bots.get(1);
+        seen.seen = true;
+        for (BotRecord b : bots) {
+            rig.bots.distanceToPlayer.put(FakeBots.key(b.name), 500.0);
+        }
+        rig.tps.millis = 150.0;
+        rig.runUntil(() -> rig.bots.removes.size() >= 3, 20);
+        assertEquals(BotState.DORMANT, seen.state, "a seen bot is never permanently removed by shedding: it sleeps with its state");
+        assertFalse(seen.removing);
+        assertEquals(1, rig.record(s.key()).bots.size(), "the two unseen ones are deleted");
+        assertEquals(0, rig.record(s.key()).deadCount());
     }
 
     /**

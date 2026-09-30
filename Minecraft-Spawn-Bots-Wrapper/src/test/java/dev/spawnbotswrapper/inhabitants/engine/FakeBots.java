@@ -69,6 +69,20 @@ final class FakeBots implements BotGateway {
     /** What enforceVanilla(name) reports, by lower-case name; the fake keeps answering the same. */
     final Map<String, StateFixes> vanillaFixes = new HashMap<>();
     final List<String> enforceCalls = new ArrayList<>();
+    /** Where the real players are (the input of the nearest-first allocation); empty keeps the allocation idle. */
+    final List<PlayerPos> players = new ArrayList<>();
+    double relevanceRadius = 192.0;
+    /** Lower-case names of bots that count as engaged with a player. */
+    final Set<String> engaged = new HashSet<>();
+    /** Lower-case names of bots a player currently sees. */
+    final Set<String> visibleToHuman = new HashSet<>();
+    /** Where each live bot stands, by lower-case name; a name that is not here answers null. */
+    final Map<String, PlayerPos> positions = new HashMap<>();
+    /** Everything the engine did to the bot side, in order: snapshot:, position:, remove:, wake:, request:. */
+    final List<String> events = new ArrayList<>();
+    /** Called at the very start of remove(name), before the bot leaves: what is durable then is what a crash there would keep. */
+    java.util.function.Consumer<String> beforeRemove = n -> {
+    };
     boolean throwSnapshot;
     boolean throwWake;
     final List<String> pearlStripCalls = new ArrayList<>();
@@ -211,6 +225,7 @@ final class FakeBots implements BotGateway {
         }
         if (n >= readyAfterByName.getOrDefault(key(req.name()), readyAfterPolls)) {
             online.add(key(req.name()));
+            positions.put(key(req.name()), new PlayerPos(req.dimensionId(), req.x(), req.y(), req.z(), req.yaw()));
             return new SpawnPoll.Ready(uuidOf(req.name()));
         }
         return new SpawnPoll.Pending();
@@ -239,6 +254,32 @@ final class FakeBots implements BotGateway {
     }
 
     @Override
+    public List<PlayerPos> realPlayers() {
+        return List.copyOf(players);
+    }
+
+    @Override
+    public double relevanceRadiusBlocks() {
+        return relevanceRadius;
+    }
+
+    @Override
+    public boolean isEngaged(String botName) {
+        return engaged.contains(key(botName));
+    }
+
+    @Override
+    public boolean seenByHuman(String botName) {
+        return online.contains(key(botName)) && visibleToHuman.contains(key(botName));
+    }
+
+    @Override
+    public PlayerPos position(String botName) {
+        events.add("position:" + botName);
+        return online.contains(key(botName)) ? positions.get(key(botName)) : null;
+    }
+
+    @Override
     public double distanceToNearestPlayer(String botName) {
         if (throwDistance) {
             throw new IllegalStateException("injected distanceToNearestPlayer failure");
@@ -259,6 +300,8 @@ final class FakeBots implements BotGateway {
         if (throwRemove) {
             throw new IllegalStateException("injected remove failure");
         }
+        beforeRemove.accept(botName);
+        events.add("remove:" + botName);
         removes.add(botName);
         online.remove(key(botName));
         return true;
@@ -283,6 +326,7 @@ final class FakeBots implements BotGateway {
     @Override
     public BotSnapshot snapshot(String botName) {
         snapshotCalls.add(botName);
+        events.add("snapshot:" + botName);
         if (throwSnapshot) {
             throw new IllegalStateException("injected snapshot failure");
         }
@@ -295,6 +339,7 @@ final class FakeBots implements BotGateway {
             throw new IllegalStateException("injected wake failure");
         }
         wakes.add(new Woke(botName, profile, snapshot));
+        events.add("wake:" + botName);
         online.add(key(botName));
         return applyResult;
     }

@@ -49,6 +49,14 @@ public record IntBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ)
         return dx * dx + dz * dz;
     }
 
+    /** Squared 3D distance from a point to the closest point of this box (0 if inside; like {@link #horizontalDistanceSq} the box reaches to max+1). */
+    public double distanceSq(double x, double y, double z) {
+        double dx = Math.max(Math.max(minX - x, 0), x - (maxX + 1));
+        double dy = Math.max(Math.max(minY - y, 0), y - (maxY + 1));
+        double dz = Math.max(Math.max(minZ - z, 0), z - (maxZ + 1));
+        return dx * dx + dy * dy + dz * dz;
+    }
+
     /** Smallest box containing both. */
     public IntBox union(IntBox o) {
         return new IntBox(Math.min(minX, o.minX), Math.min(minY, o.minY), Math.min(minZ, o.minZ),

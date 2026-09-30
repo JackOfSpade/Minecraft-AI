@@ -23,7 +23,13 @@ public enum BotState {
     SPAWNED,
     /** Gave up on this bot (no position / spawn refused too often). Terminal. */
     FAILED,
-    /** Was SPAWNED, despawned for being far from every real player for a while; remembered exactly, restored
-     * (not re-rolled) the next time its structure is near a real player again. */
-    DORMANT
+    /** A SEEN bot put to sleep because its structure left the allocation (or the server was overloaded); remembered
+     * exactly (state, inventory, position), woken (not re-rolled) when its structure is allocated again. */
+    DORMANT,
+    /**
+     * Killed while alive (by a player, a mob, a fall, the void, anything): a real vanilla death that dropped what it
+     * carried. Terminal and permanent: the slot is never refilled. The record only keeps the name and the index, so a
+     * structure yields at most its planned number of bots' worth of kills over the world's lifetime.
+     */
+    DEAD
 }

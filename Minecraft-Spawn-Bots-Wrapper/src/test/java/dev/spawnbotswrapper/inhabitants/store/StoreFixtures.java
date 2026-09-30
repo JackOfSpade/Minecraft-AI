@@ -159,6 +159,11 @@ final class StoreFixtures {
         assertEquals(e.profileVersion, a.profileVersion, who + " profileVersion");
         assertEquals(e.profileApplied, a.profileApplied, who + " profileApplied");
         assertEquals(e.snapshot, a.snapshot, who + " snapshot");
+        assertEquals(e.seen, a.seen, who + " seen");
+        assertEquals(e.firstSeenMillis, a.firstSeenMillis, who + " firstSeenMillis");
+        assertEquals(e.lastSeenMillis, a.lastSeenMillis, who + " lastSeenMillis");
+        assertEquals(e.dimension, a.dimension, who + " dimension");
+        assertEquals(e.removing, a.removing, who + " removing");
     }
 
     static String read(Path file) throws IOException {

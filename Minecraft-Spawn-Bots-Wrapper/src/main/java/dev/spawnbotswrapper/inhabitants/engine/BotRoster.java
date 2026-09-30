@@ -62,6 +62,8 @@ final class BotRoster {
         long nextVanillaSweep;
         boolean gameModeLogged;
         boolean modifiersLogged;
+        /** Tick at which it became a live inhabitant of this session (spawned, woken or first tracked). */
+        long since;
 
         Tracked(StructureKey structure, BotRecord bot) {
             this.structure = structure;
@@ -69,6 +71,7 @@ final class BotRoster {
         }
     }
 
+    private Retirer retirer;
     private final EngineContext ctx;
     private final List<Tracked> entries = new ArrayList<>();
     private final Map<String, Tracked> byName = new HashMap<>();
@@ -79,6 +82,28 @@ final class BotRoster {
 
     BotRoster(EngineContext ctx) {
         this.ctx = ctx;
+    }
+
+    /** The one place that ends an inhabitant; set once by the engine, right after construction. */
+    void setRetirer(Retirer retirer) {
+        this.retirer = retirer;
+    }
+
+    /** Tick at which the inhabitant became live in this session, or -1 when it is not tracked live. */
+    long onlineSince(BotRecord bot) {
+        Tracked t = byName.get(EngineContext.lower(bot.name));
+        return t != null && t.online ? t.since : -1;
+    }
+
+    /** How many inhabitants of the structure are believed online. */
+    int liveCount(StructureKey structure) {
+        int n = 0;
+        for (Tracked t : entries) {
+            if (t.online && t.structure.equals(structure)) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /** Loads the SPAWNED bots of every non-abandoned record once. Retried next tick if the store throws. */
@@ -104,6 +129,7 @@ final class BotRoster {
             setOnline(existing, true);
             existing.restored = true;
             existing.offlineSince = -1;
+            existing.since = ctx.now();
             existing.forgotten = false;
             offlineWatch.remove(existing);
             return;
@@ -117,6 +143,7 @@ final class BotRoster {
             return;
         }
         Tracked t = new Tracked(structure, bot);
+        t.since = ctx.now();
         t.online = freshlySpawned;
         t.restored = freshlySpawned;
         if (freshlySpawned) {
@@ -434,6 +461,7 @@ final class BotRoster {
             return;
         }
         long confirm = Math.max(1, EngineContext.processing(cfg).goneConfirmTicks);
+        List<Tracked> gone = null;
         for (Iterator<Tracked> it = offlineWatch.iterator(); it.hasNext(); ) {
             Tracked t = it.next();
             if (now - t.offlineSince < confirm) {
@@ -448,6 +476,15 @@ final class BotRoster {
             }
             t.forgotten = true;
             t.offlineSince = -1;
+            if (retirer != null && t.bot.state == BotState.SPAWNED) {
+                // Offline for good and not taken out by this addon (every removal of ours untracks first): it died. Its
+                // upstream leftovers are released by the death itself.
+                if (gone == null) {
+                    gone = new ArrayList<>();
+                }
+                gone.add(t);
+                continue;
+            }
             try {
                 ctx.bots.forget(t.bot.name);
                 ctx.debug(cfg, "Inhabitant {} has been offline for {} ticks; released its upstream state", t.bot.name, confirm);
@@ -455,6 +492,11 @@ final class BotRoster {
                 throw e;
             } catch (Throwable e) {
                 ctx.log.error("forget", t.bot.name, e);
+            }
+        }
+        if (gone != null) {
+            for (Tracked t : gone) {
+                retirer.died(t.structure, t.bot, "it was gone for " + confirm + " ticks");
             }
         }
     }

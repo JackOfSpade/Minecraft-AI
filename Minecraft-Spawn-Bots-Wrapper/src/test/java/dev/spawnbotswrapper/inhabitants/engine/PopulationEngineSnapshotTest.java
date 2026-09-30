@@ -45,8 +45,10 @@ class PopulationEngineSnapshotTest {
         return rig.record(s.key());
     }
 
+    /** Far from every player, and SEEN by one before (only a seen bot is kept asleep; an unseen one is deleted). */
     private static void makeFar(Rig rig, List<BotRecord> bots) {
         for (BotRecord b : bots) {
+            b.seen = true;
             rig.bots.distanceToPlayer.put(FakeBots.key(b.name), 500.0);
         }
     }

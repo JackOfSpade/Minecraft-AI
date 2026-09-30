@@ -341,11 +341,11 @@ class PopulationFileTest {
 
     @Test
     void aNewerDataVersionIsTooNewWhateverElseItContains() {
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":4,\"structures\":{}}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":4,\"structures\":\"a new kind of thing\"}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":4}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":4,\"structures\":{\"" + K1 + "\":{\"status\":\"BRAND_NEW\"}}}").outcome());
-        assertEquals(TOO_NEW, parse(doc("\"" + K1 + "\":{\"dataVersion\":4}")).outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":5,\"structures\":{}}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":5,\"structures\":\"a new kind of thing\"}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":5}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":5,\"structures\":{\"" + K1 + "\":{\"status\":\"BRAND_NEW\"}}}").outcome());
+        assertEquals(TOO_NEW, parse(doc("\"" + K1 + "\":{\"dataVersion\":5}")).outcome());
     }
 
     // ---------------------------------------------------------------- dataVersion 3: every inhabitant fights

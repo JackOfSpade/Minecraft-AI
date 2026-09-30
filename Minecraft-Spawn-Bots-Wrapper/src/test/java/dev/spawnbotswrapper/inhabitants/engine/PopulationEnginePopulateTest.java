@@ -403,6 +403,7 @@ class PopulationEnginePopulateTest {
         assertEquals(3, rig.bots.requests.size(), "all three are requested before anything times out");
         String late = r.bots.get(0).name;
 
+        rig.bots.throwRemove = true; // the governor may not take the adopted bot out again: this test is about adoption only
         rig.tps.millis = 150.0; // above degradedMillis: the TPS governor now hard-blocks every new spawn
         rig.run((int) rig.cfg.processing.appearTimeoutTicks + 10);
         r = rig.record(s.key());
@@ -762,7 +763,8 @@ class PopulationEnginePopulateTest {
         rig.run(500);
         assertEquals(requests, rig.bots.requests.size(), "killed inhabitants are never replaced");
         assertEquals(StructureStatus.POPULATED, rig.record(s.key()).status);
-        assertEquals(3, rig.record(s.key()).spawnedCount());
+        assertEquals(0, rig.record(s.key()).spawnedCount(), "they are dead, not alive");
+        assertEquals(3, rig.record(s.key()).deadCount(), "a bot that is gone for good died: its slot is spent for ever");
     }
 
     @Test

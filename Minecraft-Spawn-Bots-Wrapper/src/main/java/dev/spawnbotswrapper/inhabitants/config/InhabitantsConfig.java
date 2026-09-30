@@ -77,6 +77,8 @@ public final class InhabitantsConfig {
     public Aggro aggro = new Aggro();
     /** Despawns inhabitants that have drifted far from every real player, and restores them later unchanged. */
     public Dormancy dormancy = new Dormancy();
+    /** Nearest-first population: which structures get the live bots, and how fast bots come and go around the players. */
+    public Allocation allocation = new Allocation();
     /** Holds newly-connecting players on their loading screen for a grace period after server start; see {@link Connection}. */
     public Connection connection = new Connection();
     /**
@@ -543,6 +545,40 @@ public final class InhabitantsConfig {
         public int delayTicks = 1200;
         /** Ticks between distance scans. */
         public int scanIntervalTicks = 100;
+    }
+
+    /**
+     * Nearest-first dynamic fill. The structure nearest to any real player (3D distance to its bounding box, so a trial
+     * chamber 90 blocks below is farther than a village 60 blocks away on the surface) gets its full fill target first
+     * (the size logic: {@code processing.blocksPerBot}), then the next nearest gets the rest of {@code processing.maxLiveBots},
+     * and so on. As soon as the order changes the allocation is recomputed: bots of structures that dropped out go away
+     * (a bot a player has SEEN sleeps with its whole state, an unseen one is deleted and its slot is free for a fresh roll),
+     * bots of structures that came in are woken or rolled. Deaths are never refilled.
+     * <p>
+     * Only structures within the players' relevance area (the server simulation distance plus {@code relevanceExtraChunks}
+     * chunks, at most {@code dormancy.distanceBlocks} while dormancy is enabled) can host bots. Every value here has a sane
+     * bound (see {@code ConfigValidator}). When {@code enabled} is false, or no real player is online, population is first
+     * come, first served and {@link Dormancy} sleeps far bots, as before.
+     */
+    public static final class Allocation {
+        public boolean enabled = true;
+        /** Ticks between two allocation passes (at most one per this many ticks). */
+        public int intervalTicks = 20;
+        /** The order is recomputed only when a real player moved at least this far (blocks) since the last pass, or on an event. */
+        public double moveThresholdBlocks = 4.0;
+        /** A structure must be this much (blocks) nearer than one that is already allocated to displace it. */
+        public double hysteresisBlocks = 8.0;
+        /** A bot is not removed within this many ticks of being spawned or woken, unless the room is needed for a structure {@link #dwellOverrideBlocks} nearer. */
+        public int dwellTicks = 400;
+        public double dwellOverrideBlocks = 32.0;
+        /** A structure that drops out of the allocation keeps its live bots this many ticks before they are removed. */
+        public int graceTicks = 200;
+        /** Chunks added to the server simulation distance to get the relevance area of a player. */
+        public int relevanceExtraChunks = 2;
+        /** Ticks between two looks at whether a player sees an unseen bot. */
+        public int seenCheckTicks = 10;
+        /** Half-angle of the view cone (degrees) a bot must be inside to count as seen: generous, so wide field-of-view settings are covered. */
+        public double seenHalfAngleDeg = 70.0;
     }
 
     public static final class Spawning {

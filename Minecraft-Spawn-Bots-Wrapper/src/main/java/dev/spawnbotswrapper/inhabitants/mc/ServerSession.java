@@ -50,6 +50,8 @@ public final class ServerSession {
     private PopulationStore store;
     private PopulationEngine engine;
     private CommandServices services;
+    /** Whether the aggro controller has a bot in an engagement; set by the entrypoint, read by the bot gateway. */
+    private volatile java.util.function.Predicate<String> aggroEngaged = name -> false;
 
     public ServerSession(MinecraftServer server, Shared shared) {
         this.server = server;
@@ -59,6 +61,29 @@ public final class ServerSession {
 
     public MinecraftServer server() {
         return server;
+    }
+
+    public void aggroEngaged(java.util.function.Predicate<String> engaged) {
+        this.aggroEngaged = engaged == null ? name -> false : engaged;
+    }
+
+    /**
+     * A living entity died. When it is an inhabitant that this addon is NOT removing (removal is not a death), the
+     * structure it belongs to loses that slot for good. Server thread; a no-op for anything else.
+     */
+    public void onLivingDeath(net.minecraft.world.entity.LivingEntity entity) {
+        if (engine == null || !(entity instanceof net.minecraft.server.level.ServerPlayer player)) {
+            return;
+        }
+        PvpBotOperations adapter = shared.adapter();
+        if (!adapter.isBotEntity(player)) {
+            return;
+        }
+        String name = player.getScoreboardName();
+        if (adapter.isRemoving(name)) {
+            return;
+        }
+        engine.onBotDeath(name);
     }
 
     /** The command services, or null until the first tick has initialised the session (or if that failed). */
@@ -201,6 +226,7 @@ public final class ServerSession {
         ProfileApplier applier = new ProfileApplier(adapter::isBotEntity,
                 () -> DisabledEnchantments.parse(shared.config().get().profiles.disabledEnchantments));
         McBotGateway bots = new McBotGateway(access, adapter, applier, shared.config());
+        bots.setAggroEngaged(name -> aggroEngaged.test(name));
         engine = new PopulationEngine(
                 shared.config(),
                 store,

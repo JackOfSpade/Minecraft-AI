@@ -33,4 +33,10 @@ public final class McWorldGateway implements WorldGateway {
         ServerLevel world = access.world(dimensionId);
         return world == null ? null : probes.apply(world);
     }
+
+    @Override
+    public dev.spawnbotswrapper.inhabitants.spawn.SpawnSafety.Verdict standing(String dimensionId, double x, double y, double z) {
+        BlockProbe probe = probe(dimensionId);
+        return dev.spawnbotswrapper.inhabitants.spawn.SpawnSafety.check(probe, x, y, z, false);
+    }
 }

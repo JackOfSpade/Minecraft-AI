@@ -7,7 +7,15 @@ import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
 
+import dev.spawnbotswrapper.inhabitants.spawn.SpawnSafety;
+import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
+import dev.spawnbotswrapper.inhabitants.util.SplitMix64;
+
+import dev.spawnbotswrapper.inhabitants.util.StableHash;
+
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -22,6 +30,8 @@ import java.util.UUID;
  * attempt.
  */
 final class DormancyRestorer {
+    /** Sub-stream of a bot's seed used to place it again when it cannot wake where it went to sleep. */
+    private static final long WAKE_STREAM = 0x3A4EL;
     private final EngineContext ctx;
     private final BotRoster roster;
     /** The fresh-spawn in-flight map, read-only here: a bot in it is never also restored as dormant. */
@@ -34,30 +44,74 @@ final class DormancyRestorer {
         this.freshInFlight = freshInFlight;
     }
 
+    /** Wakes in flight (they use live slots until they are up). */
+    int inFlightCount() {
+        return dormantInFlight.size();
+    }
+
+    /** Wakes in flight for one structure. */
+    int inFlightFor(StructureKey key) {
+        int n = 0;
+        for (SpawnJob j : dormantInFlight.values()) {
+            if (j.structure().equals(key)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     /** Drops everything in-flight for a forgotten structure (admin reset). */
     void forget(StructureKey key) {
         dormantInFlight.values().removeIf(j -> j.structure().equals(key));
     }
 
-    /**
-     * Re-requests every DORMANT bot of this structure at its exact remembered position; on success its exact
-     * remembered profile is re-applied (never regenerated). Deliberately outside the {@link PendingStructure} /
-     * write-ahead machinery that a fresh roll needs: nothing here is durable mid-flight, because a restore is
-     * safely retriable (the next time this structure's chunk loads) rather than something that must never
-     * happen twice, so a crash mid-restore just leaves the bot DORMANT for another attempt.
-     */
-    void restoreDormant(StructureKey key, StructureRecord rec, long now) {
+
+    /** True when this structure has a bot asleep that may be woken now. */
+    static boolean hasSleepers(StructureRecord rec) {
         for (BotRecord b : rec.bots) {
-            if (b.state != BotState.DORMANT || b.name == null) {
-                continue;
+            if (b.state == BotState.DORMANT && b.name != null && !b.removing) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Wakes up to {@code limit} sleeping bots of this structure, SEEN ones first (they are the ones a player is waiting
+     * for), each at its saved position when a bot can stand there, otherwise placed again by the structure's own spawn
+     * logic (needs {@code snapshot}; without one the bot keeps sleeping until the structure is detected again). The bot
+     * keeps its name, its identity and its saved state (the wake writes the snapshot onto the fresh, empty fake player;
+     * nothing is dressed from the profile). Deliberately outside the {@link PendingStructure} / write-ahead machinery a
+     * fresh roll needs: nothing here is durable mid-flight, because a wake is safely retriable rather than something that
+     * must never happen twice, so a crash mid-wake just leaves the bot DORMANT for another attempt.
+     *
+     * @return how many wakes were started
+     */
+    int restoreDormant(StructureKey key, StructureRecord rec, long now, int limit, StructureSnapshot snapshot) {
+        List<BotRecord> sleepers = new ArrayList<>();
+        for (BotRecord b : rec.bots) {
+            if (b.state == BotState.DORMANT && b.name != null && !b.removing) {
+                sleepers.add(b);
+            }
+        }
+        sleepers.sort(Comparator.comparing((BotRecord b) -> !b.seen).thenComparingInt(b -> b.index));
+        int started = 0;
+        for (BotRecord b : sleepers) {
+            if (started >= limit) {
+                break;
             }
             String lower = EngineContext.lower(b.name);
             if (dormantInFlight.containsKey(lower) || freshInFlight.containsKey(lower)) {
                 continue;
             }
+            String dimension = b.dimension != null ? b.dimension : key.dimension();
+            SpawnPlanner.Position at = wakePosition(key, dimension, b, snapshot);
+            if (at == null) {
+                continue; // no safe place known yet: it keeps sleeping and is tried again on the next pass
+            }
             BotGateway.SpawnHandle handle;
             try {
-                handle = ctx.bots.requestSpawn(new BotGateway.SpawnRequest(key.dimension(), b.name, b.x, b.y, b.z, b.yaw));
+                handle = ctx.bots.requestSpawn(new BotGateway.SpawnRequest(dimension, b.name, at.x(), at.y(), at.z(), at.yaw()));
                 if (handle == null) {
                     throw new IllegalStateException("the bot gateway returned no spawn handle");
                 }
@@ -65,9 +119,56 @@ final class DormancyRestorer {
                 throw e;
             } catch (Throwable t) {
                 ctx.log.error("restoreDormant", b.name, t);
-                continue; // stays DORMANT; retried the next time this structure's chunk loads
+                continue; // stays DORMANT; retried on the next pass
             }
+            b.x = at.x();
+            b.y = at.y();
+            b.z = at.z();
+            b.yaw = at.yaw();
             dormantInFlight.put(lower, new SpawnJob(key, b.index, b.name, handle, now));
+            started++;
+        }
+        return started;
+    }
+
+    /**
+     * Where a sleeper wakes: its saved position when a bot can stand there ({@code standing} says SAFE, or cannot tell);
+     * otherwise a fresh position from the structure's own spawn logic; null when there is none to be had right now.
+     */
+    private SpawnPlanner.Position wakePosition(StructureKey key, String dimension, BotRecord b, StructureSnapshot snapshot) {
+        SpawnPlanner.Position saved = new SpawnPlanner.Position(b.x, b.y, b.z, b.yaw);
+        SpawnSafety.Verdict verdict;
+        try {
+            verdict = ctx.world.standing(dimension, b.x, b.y, b.z);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            ctx.log.error("standing", b.name, t);
+            verdict = SpawnSafety.Verdict.UNKNOWN;
+        }
+        if (verdict == null || verdict != SpawnSafety.Verdict.UNSAFE) {
+            return saved;
+        }
+        if (snapshot == null || !dimension.equals(key.dimension())) {
+            return null;
+        }
+        try {
+            var probe = ctx.world.probe(dimension);
+            if (probe == null) {
+                return null;
+            }
+            SpawnPlanner.PositionResult found = ctx.planner.findPositions(snapshot, probe, 1, List.of(),
+                    new SplitMix64(StableHash.combine(b.seed, WAKE_STREAM)));
+            if (found == null || found.positions().isEmpty()) {
+                return null;
+            }
+            ctx.info("Inhabitant {} cannot stand where it went to sleep any more; it wakes at a fresh spot of {}", b.name, key);
+            return found.positions().get(0);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            ctx.log.error("wakePosition", b.name, t);
+            return null;
         }
     }
 

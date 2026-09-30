@@ -56,12 +56,52 @@ public interface BotGateway {
     double distanceToNearestPlayer(String botName);
 
     /**
+     * Where every real player (not a PvP BOT or addon bot) is right now: the input of the nearest-first allocation. Empty
+     * when nobody is online or it cannot be told; the allocation then stays idle and population is first come, first served.
+     */
+    default List<PlayerPos> realPlayers() {
+        return List.of();
+    }
+
+    /** How far from a real player (blocks) a structure can host bots at all: the server simulation distance plus two chunks. */
+    default double relevanceRadiusBlocks() {
+        return 192.0;
+    }
+
+    /**
+     * True when the bot is engaged with a player (aggro engagement, or PvP BOT has a real player as its target) -- or when
+     * that cannot be told: an engaged bot is never removed until it disengages.
+     */
+    default boolean isEngaged(String botName) {
+        return false;
+    }
+
+    /**
+     * True when a real player sees this bot right now: the bot's eye or body lies inside the player's view cone, nothing
+     * blocks the view (the same eye-to-eye and eye-to-body rays as Perception) and it is within vanilla sight range. An
+     * invisible bot is never seen. Cheap when no player is near.
+     */
+    default boolean seenByHuman(String botName) {
+        return false;
+    }
+
+    /** Where a live bot stands (dimension, position, facing), or null when it is not online. */
+    default PlayerPos position(String botName) {
+        return null;
+    }
+
+    /**
      * Releases per-bot upstream state the addon created (path, follower, ...) for a bot that is gone.
      * Idempotent; safe for names that never existed.
      */
     void forget(String botName);
 
-    /** Admin: remove an addon-owned bot through PvP BOT. Returns whether a removal was issued. */
+    /**
+     * Takes an addon-owned bot out of the world WITHOUT killing it: it drops nothing (inventory, armor, offhand, ender chest
+     * and experience are emptied first), no death happens (no death message, statistics, advancements or XP orbs) and PvP
+     * BOT forgets it like after its own removal. Returns whether a removal was issued. This is the only way the addon
+     * ends a bot it decided to remove; a real death is never caused by it.
+     */
     boolean remove(String botName);
 
     /**
@@ -126,6 +166,13 @@ public interface BotGateway {
     List<String> stripDisabledEnchantments(String botName);
 
     // ------------------------------------------------------------------ value types
+
+    /** A position in a dimension ({@code namespace:path}, the form {@code StructureKey} uses) and where it faces. */
+    record PlayerPos(String dimension, double x, double y, double z, float yaw) {
+        public PlayerPos(String dimension, double x, double y, double z) {
+            this(dimension, x, y, z, 0.0f);
+        }
+    }
 
     record SpawnRequest(String dimensionId, String name, double x, double y, double z, float yaw) {
     }

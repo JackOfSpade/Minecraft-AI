@@ -16,7 +16,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** The always-on, reversible mechanism described on {@link dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig.Dormancy}. */
 class PopulationEngineDormancyTest {
 
+    /** Every inhabitant SEEN by a player: the ones the legacy distance rule puts to sleep (an unseen one is deleted instead). */
     private static Rig freshlyPopulated(StructureSnapshot s, double distanceBlocks, int delayTicks, int scanIntervalTicks) {
+        Rig rig = freshlyPopulatedUnseen(s, distanceBlocks, delayTicks, scanIntervalTicks);
+        for (BotRecord b : rig.record(s.key()).bots) {
+            b.seen = true;
+        }
+        return rig;
+    }
+
+    private static Rig freshlyPopulatedUnseen(StructureSnapshot s, double distanceBlocks, int delayTicks, int scanIntervalTicks) {
         Rig rig = new Rig();
         rig.cfg.dormancy.distanceBlocks = distanceBlocks;
         rig.cfg.dormancy.delayTicks = delayTicks;
@@ -68,6 +77,24 @@ class PopulationEngineDormancyTest {
             assertFalse(rig.bots.online.contains(FakeBots.key(b.name)), "the entity must actually be gone");
             // Remembered exactly: nothing here erases its earlier position or profile.
             assertTrue(b.x != 0 || b.y != 0 || b.z != 0);
+        }
+    }
+
+    @Test
+    void anUnseenBotThatIsFarForTheDelayIsDeletedNotKept() {
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        Rig rig = freshlyPopulatedUnseen(s, 100.0, 20, 5);
+        List<String> names = Rig.names(rig.record(s.key()));
+        for (String n : names) {
+            rig.bots.distanceToPlayer.put(FakeBots.key(n), 500.0);
+        }
+        rig.run(60);
+        assertEquals(0, rig.record(s.key()).bots.size(), "no record, no snapshot, no profile is kept for a bot nobody saw");
+        assertEquals(3, rig.bots.removes.size());
+        assertEquals(0, rig.record(s.key()).deadCount(), "removal is not a death");
+        assertEquals(3, rig.record(s.key()).vacantSlots());
+        for (String n : names) {
+            assertTrue(rig.store.findBot(n).isEmpty());
         }
     }
 

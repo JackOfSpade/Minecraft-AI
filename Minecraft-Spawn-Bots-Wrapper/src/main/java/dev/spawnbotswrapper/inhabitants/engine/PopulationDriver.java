@@ -61,6 +61,7 @@ final class PopulationDriver {
     private final EngineContext ctx;
     private final BotRoster roster;
     private final TpsGovernor tpsGovernor;
+    private AllocationView allocation = AllocationView.INACTIVE;
     private final Map<StructureKey, PendingStructure> pending = new LinkedHashMap<>();
     /** By lower-case bot name: also what guarantees one bot is never requested twice concurrently. */
     private final Map<String, SpawnJob> inFlight = new LinkedHashMap<>();
@@ -78,6 +79,21 @@ final class PopulationDriver {
     }
 
     // ------------------------------------------------------------------ queue
+
+    void setAllocation(AllocationView allocation) {
+        this.allocation = allocation == null ? AllocationView.INACTIVE : allocation;
+    }
+
+    /** Spawns and wakes in flight for one structure. */
+    int inFlightFor(StructureKey key) {
+        int n = dormancyRestorer.inFlightFor(key);
+        for (SpawnJob j : inFlight.values()) {
+            if (j.structure().equals(key)) {
+                n++;
+            }
+        }
+        return n;
+    }
 
     boolean isQueued(StructureKey key) {
         return pending.containsKey(key);
@@ -175,8 +191,8 @@ final class PopulationDriver {
     // ------------------------------------------------------------------ restoring a dormant bot
 
     /** See {@link DormancyRestorer#restoreDormant}: the whole cluster now lives there (wrapperA-r4). */
-    void restoreDormant(StructureKey key, StructureRecord rec, long now) {
-        dormancyRestorer.restoreDormant(key, rec, now);
+    int restoreDormant(StructureKey key, StructureRecord rec, long now, int limit, StructureSnapshot snapshot) {
+        return dormancyRestorer.restoreDormant(key, rec, now, limit, snapshot);
     }
 
     /** See {@link DormancyRestorer#pollDormant}. */
@@ -200,7 +216,7 @@ final class PopulationDriver {
         budget.bots = now - lastSpawnTick >= Math.max(0, pr.spawnIntervalTicks) ? Math.max(1, pr.maxBotsPerTick) : 0;
         budget.searches = Math.max(1, pr.maxStructuresPerTick);
 
-        for (PendingStructure p : pending.values()) {
+        for (PendingStructure p : driveOrder()) {
             if (p.done || !p.awake(now, pr.initialDelayTicks)) {
                 continue;
             }
@@ -213,6 +229,25 @@ final class PopulationDriver {
             }
         }
         sweep();
+    }
+
+    /**
+     * The structures to look at this tick. Without the allocation: all of them, in the order they were queued. With it:
+     * only those that may start a bot now, nearest first, so the nearest structure gets the free slots.
+     */
+    private List<PendingStructure> driveOrder() {
+        if (!allocation.active()) {
+            return new ArrayList<>(pending.values());
+        }
+        // Only the structures the allocation gave bots to are looked at (a handful), never the whole backlog of pending ones.
+        List<PendingStructure> order = new ArrayList<>();
+        for (StructureKey key : allocation.allowedInOrder()) {
+            PendingStructure p = pending.get(key);
+            if (p != null && !p.done) {
+                order.add(p);
+            }
+        }
+        return order;
     }
 
     private void driveOne(PendingStructure p, InhabitantsConfig.Processing pr, InhabitantsConfig cfg, long now, Budget budget) {
@@ -241,6 +276,18 @@ final class PopulationDriver {
         if (budget.bots <= 0 || capacityLeft(pr) <= 0) {
             return; // paced or capped: the structure just stays pending, it is never re-rolled or dropped
         }
+        // Nearest-first population: the structure may only have as many bots as the allocation gave it (its live ones and
+        // the ones on their way count); the planned bots beyond that wait for the next allocation, they are not dropped.
+        int slots = Integer.MAX_VALUE;
+        if (allocation.active()) {
+            slots = allocation.allowed(p.key) - roster.liveCount(p.key) - inFlightFor(p.key);
+            if (slots <= 0) {
+                return;
+            }
+            if (slots < planned.size()) {
+                planned = new ArrayList<>(planned.subList(0, slots));
+            }
+        }
 
         if (!p.assigned.isEmpty() && now - p.assignedAtTick > ASSIGNMENT_TTL_TICKS) {
             p.assigned.clear();
@@ -263,10 +310,13 @@ final class PopulationDriver {
             if (b.state != BotState.PLANNED || !p.assigned.containsKey(b.index)) {
                 continue;
             }
-            if (budget.bots <= 0 || capacityLeft(pr) <= 0) {
+            if (budget.bots <= 0 || capacityLeft(pr) <= 0 || slots <= 0) {
                 break;
             }
             requestBot(p, rec, b, cfg, now, budget);
+            if (b.state == BotState.REQUESTED || b.state == BotState.SPAWNED) {
+                slots--;
+            }
         }
     }
 
@@ -282,7 +332,7 @@ final class PopulationDriver {
         if (pr.maxLiveBots <= 0) {
             return Integer.MAX_VALUE;
         }
-        return Math.max(0, pr.maxLiveBots - roster.online() - inFlight.size());
+        return Math.max(0, pr.maxLiveBots - roster.online() - inFlight.size() - dormancyRestorer.inFlightCount());
     }
 
     /** Same as above, for callers (the roll itself) that only have the whole config in hand. */
@@ -666,9 +716,9 @@ final class PopulationDriver {
         }
         int spawned = rec.spawnedCount();
         String reasons = failureReasons(rec);
-        if (spawned > 0) {
+        if (spawned > 0 || rec.deadCount() > 0) {
             rec.status = StructureStatus.POPULATED;
-            int failed = rec.bots.size() - spawned;
+            int failed = rec.failedCount();
             rec.note = failed > 0 ? truncate(failed + " of " + rec.bots.size() + " planned inhabitants could not be placed: " + reasons) : null;
         } else {
             rec.status = StructureStatus.GAVE_UP;

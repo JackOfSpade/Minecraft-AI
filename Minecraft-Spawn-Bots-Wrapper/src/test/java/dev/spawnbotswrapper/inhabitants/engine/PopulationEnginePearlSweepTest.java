@@ -57,6 +57,7 @@ class PopulationEnginePearlSweepTest {
     @Test
     void anOfflineInhabitantIsNotSweptAndAReturnIsSweptAgain() {
         Rig rig = new Rig();
+        rig.cfg.processing.goneConfirmTicks = 100_000; // merely offline for a while (a relog), not gone for good
         StructureRecord r = populate(rig, Rig.village(0, 0));
         String name = r.bots.get(0).name;
         rig.run(BotRoster.SCAN_PERIOD_TICKS + 2);

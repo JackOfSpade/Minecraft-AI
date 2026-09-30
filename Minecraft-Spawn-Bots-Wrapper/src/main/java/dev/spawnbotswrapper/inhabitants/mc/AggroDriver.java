@@ -138,6 +138,12 @@ public final class AggroDriver {
         return p == null ? null : new double[]{p.x(), p.y(), p.z()};
     }
 
+    /** True while the aggro controller has this bot in an engagement with a player. */
+    public boolean engaged(String botName) {
+        AggroController c = controller;
+        return c != null && c.isEngaged(botName);
+    }
+
     private static AggroController.Config configOf(CommandServices services) {
         InhabitantsConfig cfg = services.config().get();
         InhabitantsConfig.Aggro a = cfg == null || cfg.aggro == null ? new InhabitantsConfig.Aggro() : cfg.aggro;

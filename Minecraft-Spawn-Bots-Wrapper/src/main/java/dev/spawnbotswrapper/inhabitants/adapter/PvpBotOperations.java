@@ -185,8 +185,17 @@ public interface PvpBotOperations {
     /** True when the entity is a HeroBot bot player (class-name check; no compile-time dependency). */
     boolean isBotEntity(ServerPlayer player);
 
-    /** Removes an addon-owned bot through PvP BOT. Refuses names that are not online bots. */
+    /**
+     * Removes an addon-owned bot WITHOUT killing it: emptied first (inventory, armor, offhand, ender chest, experience), it
+     * leaves like a player who logs out, and PvP BOT then forgets it. Nothing drops, nothing dies. Refuses names that are
+     * not online bots.
+     */
     boolean removeBot(MinecraftServer server, String name);
+
+    /** True while this adapter is removing the bot: a death event for it is then not a real death. */
+    default boolean isRemoving(String name) {
+        return false;
+    }
 
     // ---------------------------------------------------------------- per-bot behaviour (PvP BOT paths)
 

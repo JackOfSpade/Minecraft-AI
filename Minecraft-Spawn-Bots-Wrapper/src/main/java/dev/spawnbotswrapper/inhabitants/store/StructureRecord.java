@@ -17,9 +17,12 @@ public final class StructureRecord {
      *   <li>2: {@code rollDetailsKept} exists (older records are backfilled on load);</li>
      *   <li>3: every inhabitant is a fighter. {@code profile.behavior.combatant} is legacy and ignored; records
      *       below 3 have their pacifist profiles rewritten to fighters on load (see {@code PopulationFile}).</li>
+     *   <li>4: population by allocation. A bot may be SEEN (persistent), only seen bots are kept when they leave the world
+     *       (asleep), unseen ones are deleted without a record; a real death is a DEAD record. Records below 4 have
+     *       their dormant, never-seen bots released on load (their slots are free again).</li>
      * </ul>
      */
-    public static final int CURRENT_DATA_VERSION = 3;
+    public static final int CURRENT_DATA_VERSION = 4;
 
     public int dataVersion = CURRENT_DATA_VERSION;
     public StructureStatus status = StructureStatus.OCCUPIED_PENDING;
@@ -54,6 +57,13 @@ public final class StructureRecord {
 
     public List<BotRecord> bots = new ArrayList<>();
 
+    /**
+     * The index the next FRESH bot of this structure gets (its name and seed derive from it); 0 while unset, and never
+     * lower than one past the highest index in {@link #bots}. Indices are never reused: a slot refilled after an unseen
+     * bot was deleted gets a new index, so it is a different bot (name, loadout) than the one that was deleted.
+     */
+    public int nextBotIndex;
+
     public StructureRecord() {
     }
 
@@ -69,7 +79,8 @@ public final class StructureRecord {
      */
     public boolean allBotsResolved() {
         for (BotRecord b : bots) {
-            if (b.state != BotState.SPAWNED && b.state != BotState.FAILED && b.state != BotState.DORMANT) {
+            if (b.state != BotState.SPAWNED && b.state != BotState.FAILED && b.state != BotState.DORMANT
+                    && b.state != BotState.DEAD) {
                 return false;
             }
         }
@@ -81,6 +92,85 @@ public final class StructureRecord {
         int n = 0;
         for (BotRecord b : bots) {
             if (b.state == BotState.SPAWNED || b.state == BotState.DORMANT) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** True when a bot of this structure was ever placed alive: it is live or asleep now, or it died. */
+    public boolean everPlaced() {
+        return spawnedCount() > 0 || deadCount() > 0;
+    }
+
+    // ------------------------------------------------------------------ the fill arithmetic (no loot farm)
+
+    /**
+     * D: the bots of this structure that died while alive, from any cause. Only ever grows; a death is never a free slot.
+     */
+    public int deadCount() {
+        return count(BotState.DEAD);
+    }
+
+    /** Bots that could never be placed (no valid position, spawn refused): their slot is spent as well. */
+    public int failedCount() {
+        return count(BotState.FAILED);
+    }
+
+    /** SEEN bots that are alive: awake, asleep, or being brought back. They are kept for good (until they die). */
+    public int seenAliveCount() {
+        int n = 0;
+        for (BotRecord b : bots) {
+            if (b.seen && (b.state == BotState.SPAWNED || b.state == BotState.DORMANT || b.state == BotState.REQUESTED)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** Bots that occupy a slot right now, alive or about to be: planned, being requested, live or asleep. */
+    public int occupiedSlots() {
+        int n = 0;
+        for (BotRecord b : bots) {
+            if (b.state == BotState.PLANNED || b.state == BotState.REQUESTED || b.state == BotState.SPAWNED
+                    || b.state == BotState.DORMANT) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * The most bots this structure can still have at once: N - D - failed. N ({@link #plannedBots}) is rolled once and
+     * never re-rolled, so a structure yields at most N bots' worth of kills over the world's lifetime.
+     */
+    public int fillTarget() {
+        return Math.max(0, plannedBots - deadCount() - failedCount());
+    }
+
+    /**
+     * Free slots: {@code N - D - failed - occupied}. Right after unseen bots were deleted this is
+     * {@code N - D - seenAlive} (the seen ones are the only bots left); a killed bot is never here, so a death never
+     * frees a slot.
+     */
+    public int vacantSlots() {
+        return Math.max(0, fillTarget() - occupiedSlots());
+    }
+
+    /** Reserves and returns the index for a fresh bot (see {@link #nextBotIndex}). */
+    public int allocateBotIndex() {
+        int next = Math.max(nextBotIndex, 0);
+        for (BotRecord b : bots) {
+            next = Math.max(next, b.index + 1);
+        }
+        nextBotIndex = next + 1;
+        return next;
+    }
+
+    private int count(BotState state) {
+        int n = 0;
+        for (BotRecord b : bots) {
+            if (b.state == state) {
                 n++;
             }
         }

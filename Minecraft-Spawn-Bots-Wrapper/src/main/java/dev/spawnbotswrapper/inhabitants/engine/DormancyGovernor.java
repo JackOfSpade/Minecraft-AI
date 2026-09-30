@@ -2,8 +2,6 @@ package dev.spawnbotswrapper.inhabitants.engine;
 
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
-import dev.spawnbotswrapper.inhabitants.store.BotSnapshot;
-import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 
 import java.util.HashMap;
@@ -12,21 +10,28 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * See the doc on {@link InhabitantsConfig.Dormancy}: periodically despawns inhabitants that have stayed far
- * from every real player for a while, remembering them exactly so {@link PopulationDriver#restoreDormant}
- * brings them back unchanged the next time their structure is near a real player again. Always on (unlike
- * {@link TpsGovernor}, which only reacts to server load) and always reversible.
+ * The pre-allocation distance rule, kept as the FALLBACK: see the doc on {@link InhabitantsConfig.Dormancy}. It runs only
+ * while the nearest-first {@link AllocationGovernor} is not (switched off with {@code allocation.enabled}, or no real player
+ * is known), because the allocation replaces it: its relevance area (the players' simulation distance plus a margin, at
+ * most {@code dormancy.distanceBlocks}) does the same job structure by structure, without the two fighting over the same
+ * bots.
+ * <p>
+ * Periodically removes inhabitants that have stayed far from every real player for a while, through {@link Retirer}: a bot
+ * a player has SEEN goes to sleep with its whole state and wakes when its structure is near a real player again, an unseen
+ * one is deleted (its slot is vacant). Never a death, never a drop.
  */
 final class DormancyGovernor {
     private final EngineContext ctx;
     private final BotRoster roster;
+    private final Retirer retirer;
     /** Lower-case bot name -> tick first seen beyond the dormancy distance, continuously. */
     private final Map<String, Long> farSince = new HashMap<>();
     private long nextScanTick = PendingStructure.NEVER;
 
-    DormancyGovernor(EngineContext ctx, BotRoster roster) {
+    DormancyGovernor(EngineContext ctx, BotRoster roster, Retirer retirer) {
         this.ctx = ctx;
         this.roster = roster;
+        this.retirer = retirer;
     }
 
     void tick(long now, InhabitantsConfig cfg) {
@@ -58,29 +63,9 @@ final class DormancyGovernor {
                 farSince.put(key, now);
             } else if (now - since >= Math.max(0, d.delayTicks)) {
                 farSince.remove(key);
-                goDormant(bot, cfg);
+                retirer.retire(e.getKey(), bot, Retirer.Reason.DORMANCY, cfg);
             }
         }
         farSince.keySet().retainAll(stillOnline);
-    }
-
-    private void goDormant(BotRecord bot, InhabitantsConfig cfg) {
-        // What the bot carries and how it is doing goes into its record BEFORE it is removed (removing it empties its
-        // inventory), so it wakes with exactly that: arrows fired stay fired, gear stays worn, wounds stay wounds. A bot
-        // that has not been restored yet after a restart is not snapshotted: its live state is not its own yet.
-        if (roster.isRestored(bot)) {
-            BotSnapshot snapshot = ctx.snapshot(bot.name);
-            if (snapshot != null) {
-                bot.snapshot = snapshot;
-            } else if (bot.snapshot == null) {
-                ctx.info("Inhabitant {} went dormant without a saved state (its state could not be read); it will be dressed "
-                        + "from its profile when it wakes", bot.name);
-            }
-        }
-        ctx.discard(bot.name);
-        bot.state = BotState.DORMANT;
-        ctx.store.markDirty();
-        roster.untrackOne(bot);
-        ctx.debug(cfg, "Inhabitant {} went dormant: far from every real player", bot.name);
     }
 }

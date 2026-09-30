@@ -106,6 +106,7 @@ public final class ConfigValidator {
         if (c.startupCommands == null) {
             c.startupCommands = new ArrayList<>();
         }
+        validateAllocation(c, w);
         validateTpsThrottle(c, w);
         validateCombatLog(c, w);
         validateCombat(c);
@@ -126,6 +127,28 @@ public final class ConfigValidator {
         s.minBotSeparation = clamp(w, "spawning.minBotSeparation", s.minBotSeparation, 0.0, 64.0);
         s.namePrefix = sanitizePrefix(s.namePrefix, w);
         return w;
+    }
+
+    private static void validateAllocation(InhabitantsConfig c, List<String> w) {
+        if (c.allocation == null) {
+            c.allocation = new InhabitantsConfig.Allocation();
+        }
+        if (c.dormancy == null) {
+            c.dormancy = new InhabitantsConfig.Dormancy();
+        }
+        InhabitantsConfig.Allocation a = c.allocation;
+        a.intervalTicks = clamp(w, "allocation.intervalTicks", a.intervalTicks, 1, 1200);
+        a.moveThresholdBlocks = clamp(w, "allocation.moveThresholdBlocks", a.moveThresholdBlocks, 0.0, 64.0);
+        a.hysteresisBlocks = clamp(w, "allocation.hysteresisBlocks", a.hysteresisBlocks, 0.0, 64.0);
+        a.dwellTicks = clamp(w, "allocation.dwellTicks", a.dwellTicks, 0, 72000);
+        a.dwellOverrideBlocks = clamp(w, "allocation.dwellOverrideBlocks", a.dwellOverrideBlocks, 0.0, 512.0);
+        a.graceTicks = clamp(w, "allocation.graceTicks", a.graceTicks, 0, 72000);
+        a.relevanceExtraChunks = clamp(w, "allocation.relevanceExtraChunks", a.relevanceExtraChunks, 0, 16);
+        a.seenCheckTicks = clamp(w, "allocation.seenCheckTicks", a.seenCheckTicks, 1, 200);
+        a.seenHalfAngleDeg = clamp(w, "allocation.seenHalfAngleDeg", a.seenHalfAngleDeg, 5.0, 180.0);
+        c.dormancy.distanceBlocks = clamp(w, "dormancy.distanceBlocks", c.dormancy.distanceBlocks, 16.0, 4096.0);
+        c.dormancy.delayTicks = clamp(w, "dormancy.delayTicks", c.dormancy.delayTicks, 0, 1728000);
+        c.dormancy.scanIntervalTicks = clamp(w, "dormancy.scanIntervalTicks", c.dormancy.scanIntervalTicks, 1, 72000);
     }
 
     private static void validateTpsThrottle(InhabitantsConfig c, List<String> w) {

@@ -1,6 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.mc;
 
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
+import dev.spawnbotswrapper.inhabitants.combat.SeenGeometry;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.engine.BotGateway;
 import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
@@ -270,6 +271,115 @@ public final class McBotGateway implements BotGateway {
         }
     }
 
+
+    // ------------------------------------------------------------------ nearest-first population: who is where, who sees whom
+
+    /** Set once by the session: whether the aggro controller has the bot in an engagement with a player. */
+    private volatile java.util.function.Predicate<String> aggroEngaged = n -> false;
+
+    public void setAggroEngaged(java.util.function.Predicate<String> aggroEngaged) {
+        this.aggroEngaged = aggroEngaged == null ? n -> false : aggroEngaged;
+    }
+
+    /** A real player: not a PvP BOT / HeroBot bot and not a Minecraft-AI fake player. */
+    private boolean isHuman(ServerPlayer p) {
+        if (p == null || adapter.isBotEntity(p)) {
+            return false;
+        }
+        String cls = p.getClass().getName();
+        return !cls.startsWith("io.github.zoyluo.minecraftai.");
+    }
+
+    private static String dimensionOf(ServerPlayer p) {
+        return p.level().dimension().identifier().toString();
+    }
+
+    @Override
+    public List<PlayerPos> realPlayers() {
+        try {
+            List<PlayerPos> out = new ArrayList<>();
+            for (ServerPlayer p : access.server().getPlayerList().getPlayers()) {
+                if (isHuman(p) && !p.isRemoved()) {
+                    out.add(new PlayerPos(dimensionOf(p), p.getX(), p.getY(), p.getZ(), p.getYRot()));
+                }
+            }
+            return out;
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    @Override
+    public double relevanceRadiusBlocks() {
+        try {
+            return access.server().getPlayerList().getSimulationDistance() * 16.0;
+        } catch (RuntimeException e) {
+            return 192.0;
+        }
+    }
+
+    @Override
+    public boolean isEngaged(String botName) {
+        try {
+            if (aggroEngaged.test(botName)) {
+                return true;
+            }
+            Optional<PvpBotOperations.CombatView> view = adapter.combatView(botName);
+            return view.isPresent() && view.get().target() instanceof ServerPlayer target && isHuman(target);
+        } catch (RuntimeException e) {
+            return true; // cannot tell: the safe answer is "do not remove it"
+        }
+    }
+
+    @Override
+    public boolean seenByHuman(String botName) {
+        try {
+            Optional<ServerPlayer> found = findBot(botName);
+            if (found.isEmpty()) {
+                return false;
+            }
+            ServerPlayer bot = found.get();
+            if (bot.isInvisible() || bot.isRemoved()) {
+                return false;
+            }
+            double halfAngle = config.get().allocation == null ? 70.0 : config.get().allocation.seenHalfAngleDeg;
+            Vec3 botEye = bot.getEyePosition();
+            Vec3 botBody = bot.position().add(0.0, bot.getBbHeight() * 0.5, 0.0);
+            double[] be = {botEye.x, botEye.y, botEye.z};
+            double[] bb = {botBody.x, botBody.y, botBody.z};
+            for (ServerPlayer p : access.server().getPlayerList().getPlayers()) {
+                if (!isHuman(p) || p.isRemoved() || !p.isAlive() || p.level() != bot.level()) {
+                    continue;
+                }
+                if (p.distanceToSqr(bot) > SeenGeometry.MAX_RANGE * SeenGeometry.MAX_RANGE) {
+                    continue;
+                }
+                Vec3 eye = p.getEyePosition();
+                Vec3 look = p.getViewVector(1.0F);
+                if (SeenGeometry.sees(new double[]{eye.x, eye.y, eye.z}, new double[]{look.x, look.y, look.z}, be, bb,
+                        halfAngle, false, () -> AggroDriver.hasClearView(p, bot))) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    @Override
+    public PlayerPos position(String botName) {
+        try {
+            Optional<ServerPlayer> found = findBot(botName);
+            if (found.isEmpty()) {
+                return null;
+            }
+            ServerPlayer bot = found.get();
+            return new PlayerPos(dimensionOf(bot), bot.getX(), bot.getY(), bot.getZ(), bot.getYRot());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
     @Override
     public void forget(String botName) {
         pendingPearls.remove(key(botName));

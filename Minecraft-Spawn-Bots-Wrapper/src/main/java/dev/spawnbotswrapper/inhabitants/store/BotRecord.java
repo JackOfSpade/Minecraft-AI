@@ -47,6 +47,28 @@ public final class BotRecord {
      */
     public BotSnapshot snapshot;
 
+    /**
+     * True once a real player has SEEN this bot (in the player's view cone, unobstructed). Persistent: it survives chunk
+     * unloads, sleep and restarts and is never cleared while the bot lives. A seen bot is never removed for good by
+     * anything but its own death; it goes to sleep (state DORMANT, its saved state kept) instead. An unseen bot is
+     * ephemeral: when it has to go it is deleted, no record kept, and its slot is free for a fresh roll.
+     */
+    public boolean seen;
+    /** Wall-clock millis of the first and of the latest sighting (informational); 0 while never seen. */
+    public long firstSeenMillis;
+    public long lastSeenMillis;
+    /**
+     * Dimension the saved position {@link #x}/{@link #y}/{@link #z} is in when it is not the structure's own (a bot
+     * that walked through a portal); null otherwise.
+     */
+    public String dimension;
+    /**
+     * True from the moment a sleep of this (seen) bot was recorded until its entity is really gone. A record found
+     * DORMANT with this flag after a crash and a live entity is finished (cleared and removed) on the next start, so the
+     * store never holds both a live bot and a restorable copy of what it carries.
+     */
+    public boolean removing;
+
     public BotRecord() {
     }
 

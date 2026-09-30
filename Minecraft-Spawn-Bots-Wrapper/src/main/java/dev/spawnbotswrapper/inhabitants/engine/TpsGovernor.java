@@ -33,14 +33,16 @@ import java.util.Map;
 final class TpsGovernor {
     private final EngineContext ctx;
     private final BotRoster roster;
+    private final Retirer retirer;
     private final TpsGateway tps;
     private final TickHealth health = new TickHealth();
     private long nextCheckTick = PendingStructure.NEVER;
     private int consecutiveShedChecks;
 
-    TpsGovernor(EngineContext ctx, BotRoster roster, TpsGateway tps) {
+    TpsGovernor(EngineContext ctx, BotRoster roster, Retirer retirer, TpsGateway tps) {
         this.ctx = ctx;
         this.roster = roster;
+        this.retirer = retirer;
         this.tps = tps;
     }
 
@@ -107,7 +109,7 @@ final class TpsGovernor {
         return Double.isNaN(v) ? "n/a" : String.format(Locale.ROOT, "%.1f", v);
     }
 
-    private record Ranked(BotRecord bot, double distance) {
+    private record Ranked(StructureKey key, BotRecord bot, double distance) {
     }
 
     private void shed(InhabitantsConfig.TpsThrottle t, double avgMillis) {
@@ -120,20 +122,27 @@ final class TpsGovernor {
         }
         List<Ranked> ranked = new ArrayList<>(online.size());
         for (Map.Entry<StructureKey, BotRecord> e : online) {
-            ranked.add(new Ranked(e.getValue(), ctx.distanceToNearestPlayer(e.getValue().name)));
+            ranked.add(new Ranked(e.getKey(), e.getValue(), ctx.distanceToNearestPlayer(e.getValue().name)));
         }
         // Farthest first; an unknown distance (-1, e.g. no real player online) sorts last, i.e. is kept
         // preferentially over one we know for certain is far away.
         ranked.sort((a, b) -> Double.compare(b.distance, a.distance));
         StringBuilder names = new StringBuilder();
-        for (int i = 0; i < toRemove; i++) {
-            BotRecord bot = ranked.get(i).bot;
-            ctx.discard(bot.name);
-            roster.untrackOne(bot);
-            names.append(i == 0 ? "" : ", ").append(bot.name);
+        InhabitantsConfig cfg = ctx.config();
+        int shed = 0;
+        for (int i = 0; i < ranked.size() && shed < toRemove; i++) {
+            Ranked r = ranked.get(i);
+            // Shedding is not a death and takes nothing from the world: a bot a player has seen sleeps with its whole state
+            // (it wakes when its structure is allocated again), one nobody saw is deleted and its slot is free for a fresh roll.
+            Retirer.Result result = retirer.retire(r.key, r.bot, Retirer.Reason.TPS, cfg);
+            if (result == Retirer.Result.KEPT) {
+                continue;
+            }
+            names.append(shed == 0 ? "" : ", ").append(r.bot.name).append(result == Retirer.Result.SLEPT ? " (asleep)" : "");
+            shed++;
         }
         ctx.info("TPS governor: shed {} of {} inhabitant(s) [{}] -- degraded, smoothed tick time {} ms is above the enter "
-                        + "level {} ms (shed round {})", toRemove, currentLive, names, ms(avgMillis),
+                        + "level {} ms (shed round {}); seen bots sleep, unseen ones are deleted, nothing drops", shed, currentLive, names, ms(avgMillis),
                 ms(health.enterLevel(t)), consecutiveShedChecks);
     }
 }

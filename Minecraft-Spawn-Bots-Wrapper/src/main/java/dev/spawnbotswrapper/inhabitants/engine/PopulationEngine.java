@@ -60,15 +60,21 @@ public final class PopulationEngine implements EngineControl {
 
     private final EngineContext ctx;
     private final BotRoster roster;
+    private final Retirer retirer;
     private final TpsGovernor tpsGovernor;
     private final DormancyGovernor dormancyGovernor;
     private final PopulationDriver driver;
+    private final AllocationGovernor allocation;
+    private final SeenTracker seenTracker;
+    /** The last snapshot of every structure whose start chunk was seen this session (spawn positions need its geometry). */
+    private final Map<StructureKey, StructureSnapshot> known = new LinkedHashMap<>();
     private final LongSupplier seedSource;
     private final PopulationView view;
     private final long createdAtTick;
     /** Detected, not yet rolled; drained a few per tick so a burst of chunk loads cannot spike one tick. */
     private final Map<StructureKey, StructureSnapshot> rollQueue = new LinkedHashMap<>();
     private boolean settledSeen;
+    private boolean interruptedSleepsFinished;
     private boolean shutDown;
 
     public PopulationEngine(Supplier<InhabitantsConfig> config, PopulationStorage store, BotGateway bots,
@@ -98,9 +104,14 @@ public final class PopulationEngine implements EngineControl {
                 Objects.requireNonNull(planner, "planner"));
         this.seedSource = Objects.requireNonNull(seedSource, "seedSource");
         this.roster = new BotRoster(ctx);
-        this.tpsGovernor = new TpsGovernor(ctx, roster, Objects.requireNonNull(tps, "tps"));
-        this.dormancyGovernor = new DormancyGovernor(ctx, roster);
+        this.retirer = new Retirer(ctx, roster);
+        this.roster.setRetirer(retirer);
+        this.tpsGovernor = new TpsGovernor(ctx, roster, retirer, Objects.requireNonNull(tps, "tps"));
         this.driver = new PopulationDriver(ctx, roster, tpsGovernor);
+        this.allocation = new AllocationGovernor(ctx, roster, driver, retirer, tpsGovernor, known);
+        this.driver.setAllocation(allocation);
+        this.dormancyGovernor = new DormancyGovernor(ctx, roster, retirer);
+        this.seenTracker = new SeenTracker(ctx, roster, allocation);
         this.view = new ReadOnlyView(store);
         this.createdAtTick = clock.tick();
     }
@@ -125,10 +136,14 @@ public final class PopulationEngine implements EngineControl {
             return;
         }
         StructureKey key = snapshot.key();
+        StructureRecord known0 = ctx.store.find(key).orElse(null);
+        if (known0 != null && known0.status != StructureStatus.ABANDONED && isAllowedHere(cfg, snapshot)) {
+            remember(snapshot); // the geometry a fresh bot needs to be placed; the allocation asks for it
+        }
         if (rollQueue.containsKey(key) || driver.isQueued(key)) {
             return;
         }
-        StructureRecord existing = ctx.store.find(key).orElse(null);
+        StructureRecord existing = known0;
         if (existing != null) {
             // A structure rolled occupied whose population was interrupted (restart, live-bot cap) resumes when
             // its snapshot is supplied again. The "only newly generated" filter must not apply here: after a
@@ -136,11 +151,15 @@ public final class PopulationEngine implements EngineControl {
             if (existing.status == StructureStatus.OCCUPIED_PENDING && isAllowedHere(cfg, snapshot)) {
                 driver.enqueue(snapshot, false, ctx.now());
             }
-            // A settled (even POPULATED) structure can still have DORMANT bots -- put to sleep for being far
-            // from every real player, never re-rolled -- that are restored exactly as they were now that a
-            // real player is near again.
+            // A settled (even POPULATED) structure can still have DORMANT bots -- SEEN bots put to sleep, never re-rolled --
+            // that are woken exactly as they were. With the nearest-first allocation running it decides when (this
+            // structure just became known); without it (no player known, or switched off) they wake at once, as before.
             if (isAllowedHere(cfg, snapshot) && hasDormantBots(existing)) {
-                driver.restoreDormant(key, existing, ctx.now());
+                if (allocation.active()) {
+                    allocation.markDirty();
+                } else {
+                    driver.restoreDormant(key, existing, ctx.now(), Integer.MAX_VALUE, snapshot);
+                }
             }
             return;
         }
@@ -162,6 +181,21 @@ public final class PopulationEngine implements EngineControl {
         StructureKey key = snapshot.key();
         return RuleResolver.isDimensionEligible(cfg, key.dimension())
                 && RuleResolver.isEligible(cfg, key.structureId(), snapshot.tagIds());
+    }
+
+    /** Upper bound of the remembered geometry (one snapshot per structure ever seen this session near a record). */
+    private static final int MAX_KNOWN = 20_000;
+
+    private void remember(StructureSnapshot snapshot) {
+        StructureSnapshot before = known.put(snapshot.key(), snapshot);
+        if (before == null) {
+            allocation.markDirty();
+            if (known.size() > MAX_KNOWN) {
+                Iterator<StructureKey> it = known.keySet().iterator();
+                it.next();
+                it.remove(); // the oldest goes; it is remembered again the next time its chunk loads
+            }
+        }
     }
 
     private static boolean hasDormantBots(StructureRecord rec) {
@@ -206,10 +240,19 @@ public final class PopulationEngine implements EngineControl {
                     settledSeen = true;
                     ctx.guard("roster", () -> roster.refreshAll(now));
                 }
+                if (!interruptedSleepsFinished) {
+                    interruptedSleepsFinished = true;
+                    ctx.guard("finish-sleeps", () -> retirer.finishInterrupted(cfg));
+                }
                 ctx.guard("drive", () -> driver.drive(now, cfg));
                 ctx.guard("reconcile", () -> roster.tick(now, cfg));
                 ctx.guard("tps-governor", () -> tpsGovernor.tick(now, cfg));
-                ctx.guard("dormancy", () -> dormancyGovernor.tick(now, cfg));
+                ctx.guard("seen", () -> seenTracker.tick(now, cfg));
+                ctx.guard("allocation", () -> allocation.tick(now, cfg));
+                if (!allocation.active()) {
+                    // The pre-allocation rule, kept as the fallback while the allocation is off or no player is known.
+                    ctx.guard("dormancy", () -> dormancyGovernor.tick(now, cfg));
+                }
             }
         }
         ctx.saveIfDue(now, cfg);
@@ -279,7 +322,9 @@ public final class PopulationEngine implements EngineControl {
         // up: a full population cap should read as "this place happens to be empty," not as an invisible,
         // ever-growing backlog. An explicit admin force (ROLL is the only "natural" mode) still works --
         // asking for one specific structure is asking to cut the queue, not to respect it.
-        boolean capacityFull = mode == ForceMode.ROLL && driver.capacityLeft(cfg) <= 0;
+        // With the nearest-first allocation running there is no such thing as "full": a structure found while the budget is
+        // used up stays occupied and gets its bots when it is (or becomes) the nearest one, taking the slots of farther bots.
+        boolean capacityFull = mode == ForceMode.ROLL && driver.capacityLeft(cfg) <= 0 && !allocation.active();
         StructureRoll roll = StructureRoll.of(rule, structureSeed, structureVolume, blocksPerBot,
                 capacityFull ? ForceMode.ABANDONED : mode,
                 deterministic ? "DETERMINISTIC" : "RANDOM");
@@ -301,6 +346,8 @@ public final class PopulationEngine implements EngineControl {
         ctx.store.put(key, rec);
         ctx.counters.rolled++;
         if (roll.occupied()) {
+            remember(snapshot);
+            allocation.structureAdded(key, snapshot.bounds());
             driver.enqueue(snapshot, immediate, ctx.now());
         }
         ctx.debug(cfg, "Rolled {}: {} (roll {} vs chance {} [{}], {} bot(s) of a size-capped max {} from {} blocks"
@@ -335,6 +382,33 @@ public final class PopulationEngine implements EngineControl {
         // Nothing derived from the config is cached between ticks, so there is nothing to invalidate; a fixed
         // config should however get to report a still-failing port again instead of staying throttled.
         ctx.log.clear();
+    }
+
+    /**
+     * An inhabitant died (any cause: a player, a mob, a fall, the void). Called by the death event of the server; a bot
+     * that this addon is removing right now does not die (removal is not a death), so such a call is ignored. A real death
+     * makes the record DEAD for good: the bot dropped what it carried like any player, its slot is never refilled.
+     * Server thread.
+     */
+    public void onBotDeath(String botName) {
+        if (botName == null || shutDown) {
+            return;
+        }
+        ctx.guard("death", () -> {
+            if (retirer.isRemoving(botName)) {
+                return;
+            }
+            PopulationView.BotLocation where = ctx.store.findBot(botName).orElse(null);
+            if (where == null) {
+                return;
+            }
+            BotRecord bot = where.bot();
+            if (bot.state != BotState.SPAWNED && bot.state != BotState.REQUESTED) {
+                return; // asleep, planned or already dead: nothing alive died
+            }
+            retirer.died(where.structure(), bot, "killed");
+            allocation.markDirty();
+        });
     }
 
     /** Flushes persistence; call on server stop. */
@@ -433,6 +507,8 @@ public final class PopulationEngine implements EngineControl {
             rollQueue.remove(key);
             driver.abandon(key);
             roster.untrack(key);
+            known.remove(key);
+            allocation.structureRemoved(key);
             if (removeBots) {
                 for (BotRecord b : rec.bots) {
                     if (b.name == null) {

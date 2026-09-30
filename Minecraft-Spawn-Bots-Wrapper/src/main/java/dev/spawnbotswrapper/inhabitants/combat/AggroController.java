@@ -1441,6 +1441,15 @@ public final class AggroController {
         return s != null && s.home != null;
     }
 
+    /**
+     * True while the bot is engaged with a hunt target: reacting, chasing, pursuing the last known position or searching.
+     * Walking back home ({@link Phase#RETURN}) is not engaged. The population allocator never removes an engaged bot.
+     */
+    public boolean isEngaged(String botName) {
+        Phase p = phaseOf(botName);
+        return p == Phase.REACT || p == Phase.CHASE || p == Phase.PURSUE || p == Phase.SEARCH;
+    }
+
     /** The home anchor of {@code botName}, or null. */
     public Pos homeOf(String botName) {
         BotState s = states.get(botName);

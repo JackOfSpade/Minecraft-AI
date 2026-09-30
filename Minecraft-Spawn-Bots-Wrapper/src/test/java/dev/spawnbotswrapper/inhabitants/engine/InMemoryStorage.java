@@ -46,6 +46,9 @@ final class InMemoryStorage implements PopulationStorage {
     int writes;
     int flushCalls;
     int puts;
+    /** Called every time state is copied to "disk" (after the copy), to observe what is durable at that moment. */
+    Runnable onWrite = () -> {
+    };
 
     InMemoryStorage() {
         this(true);
@@ -112,6 +115,7 @@ final class InMemoryStorage implements PopulationStorage {
         c.rolledAtMillis = r.rolledAtMillis;
         c.note = r.note;
         c.bounds = r.bounds == null ? null : r.bounds.clone();
+        c.nextBotIndex = r.nextBotIndex;
         for (BotRecord b : r.bots) {
             BotRecord n = new BotRecord(b.index, b.name, b.seed);
             n.uuid = b.uuid;
@@ -127,6 +131,11 @@ final class InMemoryStorage implements PopulationStorage {
             n.profileVersion = b.profileVersion;
             n.profileApplied = b.profileApplied;
             n.snapshot = b.snapshot;
+            n.seen = b.seen;
+            n.firstSeenMillis = b.firstSeenMillis;
+            n.lastSeenMillis = b.lastSeenMillis;
+            n.dimension = b.dimension;
+            n.removing = b.removing;
             c.bots.add(n);
         }
         return c;
@@ -240,6 +249,7 @@ final class InMemoryStorage implements PopulationStorage {
         }
         disk = snapshot;
         diskDecks = decks.exportSnapshots();
+        onWrite.run();
     }
 
     // ------------------------------------------------------------------ PopulationView

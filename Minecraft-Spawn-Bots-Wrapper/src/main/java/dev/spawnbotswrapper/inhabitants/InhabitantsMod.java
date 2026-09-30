@@ -20,6 +20,7 @@ import dev.spawnbotswrapper.inhabitants.mc.StructureDetector;
 import dev.spawnbotswrapper.inhabitants.mc.StructureSnapshotBuilder;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
@@ -89,6 +90,13 @@ public final class InhabitantsMod implements ModInitializer {
         combat.aggroState(aggro::describe);
         combat.meleeVetoState(meleeLegality::describe);
         meleeLegality.register();
+        // A real death (any cause) of an inhabitant spends its structure slot for good; removal by this addon is never a death.
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+            ServerSession current = session;
+            if (current != null) {
+                shared.guard().run("inhabitant death", () -> current.onLivingDeath(entity));
+            }
+        });
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
         // After PvP BOT's own bot tick (default phase), so the walk back is the last input written and the crossbow
@@ -184,6 +192,7 @@ public final class InhabitantsMod implements ModInitializer {
 
     private void onServerStarted(MinecraftServer server) {
         session = new ServerSession(server, shared);
+        session.aggroEngaged(aggro::engaged);
         if (shared.config().get().hideLocatorBar) {
             shared.guard().run("hide locator bar", () ->
                     server.overworld().getGameRules().set(GameRules.LOCATOR_BAR, false, server));

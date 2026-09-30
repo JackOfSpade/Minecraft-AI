@@ -257,7 +257,7 @@ final class PopulationFile {
     private static Map<StructureKey, StructureRecord> readStructures(JsonReader in, List<String> warnings,
                                                                      int headerVersion) throws IOException {
         Map<StructureKey, StructureRecord> out = new LinkedHashMap<>();
-        int migratedBots = 0;
+        int[] migration = new int[2]; // [0] pacifists made fighters, [1] unseen stored bots released
         in.beginObject();
         while (in.hasNext()) {
             String keyText = in.nextName();
@@ -266,15 +266,19 @@ final class PopulationFile {
             if (key == null) {
                 throw new MalformedJsonException("unparseable structure key \"" + abbreviate(keyText) + "\"");
             }
-            migratedBots += normalise(key, record, warnings, headerVersion);
+            normalise(key, record, warnings, headerVersion, migration);
             if (out.putIfAbsent(key, record) != null) {
                 throw new MalformedJsonException("duplicate structure key \"" + abbreviate(keyText) + "\"");
             }
         }
         in.endObject();
-        if (migratedBots > 0) {
-            warnings.add("data migration to version " + StructureRecord.CURRENT_DATA_VERSION + ": " + migratedBots
+        if (migration[0] > 0) {
+            warnings.add("data migration to version 3: " + migration[0]
                     + " inhabitant profile(s) that were pacifists are now fighters (every inhabitant fights)");
+        }
+        if (migration[1] > 0) {
+            warnings.add("data migration to version " + StructureRecord.CURRENT_DATA_VERSION + ": " + migration[1]
+                    + " unseen stored bots released (a bot no player ever saw is not kept while asleep; its slot is free again)");
         }
         return out;
     }
@@ -283,8 +287,8 @@ final class PopulationFile {
      * Repairs what Gson leaves null (explicit JSON nulls) and rejects what cannot be repaired without
      * guessing. Fields that are simply absent were already defaulted by the record classes' constructors.
      */
-    private static int normalise(StructureKey key, StructureRecord record, List<String> warnings,
-                                 int headerVersion) throws IOException {
+    private static void normalise(StructureKey key, StructureRecord record, List<String> warnings,
+                                  int headerVersion, int[] migration) throws IOException {
         if (record == null) {
             throw new MalformedJsonException("structure " + key + " has no record");
         }
@@ -300,6 +304,7 @@ final class PopulationFile {
         }
         // A record that does not state its own version is judged by the file's header (written before the records).
         boolean migrateFighters = record.dataVersion < 3 || headerVersion < 3;
+        boolean migrateSeen = record.dataVersion < 4 || headerVersion < 4;
         record.dataVersion = StructureRecord.CURRENT_DATA_VERSION;
         if (record.status == null) {
             throw new MalformedJsonException("structure " + key + " has an unknown status");
@@ -308,13 +313,25 @@ final class PopulationFile {
             record.bots = new ArrayList<>();
         }
         record.bots.removeIf(Objects::isNull);
-        int migrated = 0;
+        int maxIndex = -1;
         for (BotRecord bot : record.bots) {
+            maxIndex = Math.max(maxIndex, bot.index);
+        }
+        record.nextBotIndex = Math.max(record.nextBotIndex, maxIndex + 1);
+        for (java.util.Iterator<BotRecord> it = record.bots.iterator(); it.hasNext(); ) {
+            BotRecord bot = it.next();
             if (bot.state == null) {
                 throw new MalformedJsonException("a bot of structure " + key + " has an unknown state");
             }
             if (bot.name == null) {
                 warnings.add("a bot of structure " + key + " has no name; it cannot be found by name");
+            }
+            if (migrateSeen && bot.state == BotState.DORMANT && !bot.seen) {
+                // dataVersion 4: only a bot a player has seen is kept while it is away. Every older sleeper is treated as
+                // unseen: its stored state and profile go, its slot is free again (deaths already recorded stay recorded).
+                it.remove();
+                migration[1]++;
+                continue;
             }
             if (bot.snapshot != null) {
                 bot.snapshot.normalised();
@@ -324,10 +341,9 @@ final class PopulationFile {
             // the next time the bot's patrol is (re)assigned, which happens on every restore.
             if (migrateFighters && bot.profile != null && bot.profile.isLegacyPacifist()) {
                 bot.profile = bot.profile.asFighter();
-                migrated++;
+                migration[0]++;
             }
         }
-        return migrated;
     }
 
     /** Streams the document to {@code file} and fsyncs it. The caller moves it into place. */

@@ -22,6 +22,7 @@ final class EngineContext {
     private static final InhabitantsConfig.Processing FALLBACK_PROCESSING = new InhabitantsConfig.Processing();
     private static final InhabitantsConfig.TpsThrottle FALLBACK_TPS_THROTTLE = new InhabitantsConfig.TpsThrottle();
     private static final InhabitantsConfig.Dormancy FALLBACK_DORMANCY = new InhabitantsConfig.Dormancy();
+    private static final InhabitantsConfig.Allocation FALLBACK_ALLOCATION = new InhabitantsConfig.Allocation();
     private static final String FALLBACK_PREFIX = "Inh";
 
     final Supplier<InhabitantsConfig> configSource;
@@ -70,6 +71,10 @@ final class EngineContext {
 
     static InhabitantsConfig.Dormancy dormancy(InhabitantsConfig cfg) {
         return cfg.dormancy != null ? cfg.dormancy : FALLBACK_DORMANCY;
+    }
+
+    static InhabitantsConfig.Allocation allocation(InhabitantsConfig cfg) {
+        return cfg.allocation != null ? cfg.allocation : FALLBACK_ALLOCATION;
     }
 
     static boolean isDeterministic(InhabitantsConfig cfg) {
@@ -231,6 +236,68 @@ final class EngineContext {
         } catch (Throwable t) {
             log.error("enforceVanilla", String.valueOf(name), t);
             return BotGateway.StateFixes.NONE;
+        }
+    }
+
+    /** Where every real player is; empty when unknown (or when the gateway threw). */
+    java.util.List<BotGateway.PlayerPos> realPlayers() {
+        try {
+            java.util.List<BotGateway.PlayerPos> players = bots.realPlayers();
+            return players == null ? java.util.List.of() : players;
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("realPlayers", String.valueOf(t), t);
+            return java.util.List.of();
+        }
+    }
+
+    /** How far from a real player a structure can host bots (blocks). */
+    double relevanceRadiusBlocks() {
+        try {
+            double r = bots.relevanceRadiusBlocks();
+            return Double.isFinite(r) && r > 0 ? r : 192.0;
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("relevanceRadiusBlocks", String.valueOf(t), t);
+            return 192.0;
+        }
+    }
+
+    /** True when the bot is engaged with a player, or when that cannot be told (then it is never removed). */
+    boolean engaged(String name) {
+        try {
+            return bots.isEngaged(name);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("isEngaged", String.valueOf(name), t);
+            return true;
+        }
+    }
+
+    /** Whether a real player sees the bot right now; false when unknown. */
+    boolean seenByHuman(String name) {
+        try {
+            return bots.seenByHuman(name);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("seenByHuman", String.valueOf(name), t);
+            return false;
+        }
+    }
+
+    /** Where a live bot stands; null when unknown. */
+    BotGateway.PlayerPos position(String name) {
+        try {
+            return bots.position(name);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("position", String.valueOf(name), t);
+            return null;
         }
     }
 

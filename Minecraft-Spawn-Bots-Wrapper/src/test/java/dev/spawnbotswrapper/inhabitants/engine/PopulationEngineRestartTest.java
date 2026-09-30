@@ -252,7 +252,8 @@ class PopulationEngineRestartTest {
 
         assertEquals(requests, rig.bots.requests.size(), "an inhabitant is never respawned");
         assertEquals(StructureStatus.POPULATED, rig.record(s.key()).status);
-        assertEquals(3, rig.record(s.key()).spawnedCount());
+        assertEquals(0, rig.record(s.key()).spawnedCount(), "gone for good: they died");
+        assertEquals(3, rig.record(s.key()).deadCount());
         assertEquals(0, rig.engine.stats().structuresRolled());
         assertEquals(0, rig.engine.stats().liveBots());
     }
@@ -276,11 +277,12 @@ class PopulationEngineRestartTest {
         assertEquals(List.of(dead), rig.bots.forgets, "exactly once");
         assertEquals(requests, rig.bots.requests.size(), "never respawned");
         assertEquals(StructureStatus.POPULATED, rig.record(s.key()).status, "the structure is not touched");
-        assertEquals(BotState.SPAWNED, rig.record(s.key()).bots.get(0).state, "the record keeps what happened");
+        assertEquals(BotState.DEAD, rig.record(s.key()).bots.get(0).state, "a bot that is gone for good died: the record keeps that");
+        assertEquals(1, rig.record(s.key()).deadCount());
     }
 
     @Test
-    void aGoneBotThatComesBackIsRestoredAgainAndCanBeForgottenAgain() {
+    void aBotThatWasGoneForGoodIsDeadAndIsNotManagedAgainIfSomethingWithItsNameShowsUp() {
         Rig rig = new Rig();
         StructureSnapshot s = Rig.village(0, 0);
         StructureRecord r = populate(rig, s);
@@ -291,18 +293,13 @@ class PopulationEngineRestartTest {
         rig.run(260);
         assertEquals(1, rig.bots.forgets.size());
         assertEquals(0, rig.bots.restores.size(), "a fresh spawn is already dressed and following its path");
+        assertEquals(BotState.DEAD, r.bots.get(1).state, "gone for good means dead: the slot is spent");
 
         rig.bots.bringOnline(name);
         rig.run(BotRoster.SCAN_PERIOD_TICKS + 5);
-        assertEquals(1, rig.bots.restores.size());
-        assertEquals(name, rig.bots.restores.get(0).name());
-        assertEquals(r.bots.get(1).profile, rig.bots.restores.get(0).profile());
-
+        assertEquals(0, rig.bots.restores.size(), "a dead bot is not restored or tracked again");
         rig.run(500);
-        assertEquals(1, rig.bots.restores.size(), "once per return");
-        rig.bots.kill(name);
-        rig.run(300);
-        assertEquals(2, rig.bots.forgets.size(), "a second disappearance is a second episode");
+        assertEquals(1, rig.bots.forgets.size(), "and released exactly once");
     }
 
     @Test

@@ -91,6 +91,7 @@ final class ProfileReport {
             case SPAWNED -> good("SPAWNED");
             case FAILED -> bad("FAILED");
             case DORMANT -> warn("DORMANT");
+            case DEAD -> bad("DEAD");
         };
     }
 }
