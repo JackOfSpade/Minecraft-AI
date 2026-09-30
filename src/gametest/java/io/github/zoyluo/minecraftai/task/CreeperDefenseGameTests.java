@@ -114,7 +114,7 @@ public final class CreeperDefenseGameTests {
         buildOccludingWall(context, origin.east(), 1);
         require(context, !ObservableWorldQuery.canObserveEntity(bot, near),
                 "near Creeper remained observable through the memory occluder");
-        Creeper far = spawnDisabledCreeper(context, origin.west(8));
+        Creeper far = spawnDisabledCreeper(context, origin.west(5));
         require(context, ObservableWorldQuery.canObserveEntity(bot, far)
                         && !far.isIgnited() && far.getSwellDir() <= 0,
                 "far replacement fixture was not a visible unarmed Creeper");
@@ -123,8 +123,7 @@ public final class CreeperDefenseGameTests {
         // walked on would change which creeper is nearer), so the bot stays where the fixture put it and looks at the far creeper.
         Vec3 pinned = bot.position();
         PerceptionFixtures.everyTick(context, () -> {
-            bot.teleportTo(context.getLevel(), pinned.x, pinned.y, pinned.z, Set.of(), bot.getYRot(), bot.getXRot(), true);
-            bot.setDeltaMovement(Vec3.ZERO);
+            io.github.zoyluo.minecraftai.gametest.BotFixtureMoves.place(bot, pinned); // a fixture move (TEST), never a correction
             PerceptionFixtures.faceToward(bot, far);
         });
         PerceptionFixtures.afterNoticed(context, bot, List.of(far), since2 -> {
