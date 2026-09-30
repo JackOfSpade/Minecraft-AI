@@ -302,6 +302,18 @@ final class Rig {
         return false;
     }
 
+    /**
+     * Forces the target player on the inhabitant through the same PvP BOT call the aggro controller uses. For tests whose
+     * subject needs a bot that HAS a target it cannot see (PvP BOT's own auto-target is managed OFF, and the aggro
+     * controller only acquires what the bot can see).
+     */
+    void forceTarget() {
+        CommandServices services = InhabitantsMod.servicesOf(server);
+        if (services != null && services.adapter() != null && target != null) {
+            services.adapter().targetControl().setTarget(botName, target.getName().getString());
+        }
+    }
+
     /** Logs {@link #trace} once every {@code every} ticks of the observation. */
     void traceEvery(int every, long sinceDressing, String tag) {
         if (sinceDressing % every == 0) {

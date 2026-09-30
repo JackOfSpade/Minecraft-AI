@@ -143,6 +143,9 @@ public final class RangedCombatGameTests {
                 return;
             }
             long since = context.getTick() - dressedAt[0];
+            if (Upstream.target(rig.botName).equals("none")) {
+                rig.forceTarget();
+            }
             rig.traceEvery(20, since, "wall");
             wasLoaded[0] |= net.minecraft.world.item.CrossbowItem.isCharged(rig.bot.getMainHandItem());
             int shots = HarnessMod.shotsBy(rig.bot.getUUID()).size();
