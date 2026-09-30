@@ -11,6 +11,7 @@ import io.github.zoyluo.minecraftai.action.RangedWeapon;
 import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
+import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import java.lang.reflect.Field;
@@ -269,7 +270,7 @@ public final class RangedWeaponGameTests {
      */
     @GameTest(environment = ENV + "no_crossbow_shot_while_the_owner_stands_in_the_line_of_fire", maxTicks = 320)
     public void noCrossbowShotWhileTheOwnerStandsInTheLineOfFire(GameTestHelper context) {
-        ServerPlayer owner = context.makeMockServerPlayerInLevel();
+        ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendXbowGT", 248, -4, 16, owner.getUUID());
         var world = context.getLevel();
         BlockPos origin = bot.blockPosition().immutable();
@@ -318,7 +319,7 @@ public final class RangedWeaponGameTests {
      */
     @GameTest(environment = ENV + "multishot_volley_is_not_fired_with_the_owner_on_a_side_arrow_line", maxTicks = 200)
     public void multishotVolleyIsNotFiredWithTheOwnerOnASideArrowLine(GameTestHelper context) {
-        ServerPlayer owner = context.makeMockServerPlayerInLevel();
+        ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendMultishotGT", 254, -4, 16, owner.getUUID());
         var world = context.getLevel();
         BlockPos origin = bot.blockPosition().immutable();

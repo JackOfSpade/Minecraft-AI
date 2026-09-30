@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.brain.ToolDefinition;
 import io.github.zoyluo.minecraftai.brain.ToolRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import java.util.List;
@@ -348,7 +349,7 @@ public final class CombatHardeningGameTests {
     @GameTest(environment = ENV + "bot_never_targets_its_owner_or_another_bot", maxTicks = 40)
     public void botNeverTargetsItsOwnerOrAnotherBot(GameTestHelper context) {
         var world = context.getLevel();
-        ServerPlayer owner = context.makeMockServerPlayerInLevel();
+        ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnPlatform(context, "FriendlyFireGT", 74, owner.getUUID());
         BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
@@ -840,7 +841,7 @@ public final class CombatHardeningGameTests {
      */
     @GameTest(environment = ENV + "friendly_owner_on_the_line_of_fire_gives_the_bow_up_without_a_shot", maxTicks = 320)
     public void friendlyOwnerOnTheLineOfFireGivesTheBowUpWithoutAShot(GameTestHelper context) {
-        ServerPlayer owner = context.makeMockServerPlayerInLevel();
+        ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendLineGT", 170, -4, 16, owner.getUUID());
         var world = context.getLevel();
         BlockPos origin = bot.blockPosition().immutable();
@@ -904,7 +905,7 @@ public final class CombatHardeningGameTests {
      */
     @GameTest(environment = ENV + "friendly_owner_on_the_peek_line_gives_the_bow_up_without_a_shot", maxTicks = 900)
     public void friendlyOwnerOnThePeekLineGivesTheBowUpWithoutAShot(GameTestHelper context) {
-        ServerPlayer owner = context.makeMockServerPlayerInLevel();
+        ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendPeekGT", 182, -4, 16, owner.getUUID());
         var world = context.getLevel();
         BlockPos origin = bot.blockPosition().immutable();
