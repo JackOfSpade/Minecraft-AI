@@ -353,7 +353,9 @@ public final class MiningCheckpointMissionGameTests {
                     // Keep coal's target-harvest tools healthy and exhaust only the ordinary stone
                     // branch channel. This must enter GoalExecutor's bounded channel resupply, not
                     // the unrelated generic target-tool recovery path.
-                    exhaustStonePickaxes(bot);
+                    // Worst-first: the wooden picks that the planner budgets for the coal target now dig the ordinary
+                    // branch rock as well (no stone floor), so the channel pool that has to run out is stone AND wood.
+                    exhaustOrdinaryChannelPickaxes(bot);
                     int ironSlot = InventoryAction.findItem(bot, Items.IRON_PICKAXE)
                             .orElseThrow(() -> new IllegalStateException(
                                     "fixture has no healthy target pickaxe"));
@@ -6314,6 +6316,17 @@ public final class MiningCheckpointMissionGameTests {
                         java.util.stream.Stream.of(bot.getItemBySlot(EquipmentSlot.OFFHAND)))
                 .filter(stack -> !stack.isEmpty()
                         && stack.is(net.minecraft.tags.ItemTags.PICKAXES))
+                .forEach(stack -> stack.setDamageValue(stack.getMaxDamage() - 1));
+        bot.getInventory().setChanged();
+    }
+
+    /** The ordinary rock channel under worst-first gear: every stone and wooden pickaxe is one use from breaking (iron stays healthy). */
+    private static void exhaustOrdinaryChannelPickaxes(AIPlayerEntity bot) {
+        exhaustStonePickaxes(bot);
+        java.util.stream.Stream.concat(
+                        bot.getInventory().getNonEquipmentItems().stream(),
+                        java.util.stream.Stream.of(bot.getItemBySlot(EquipmentSlot.OFFHAND)))
+                .filter(stack -> stack.is(Items.WOODEN_PICKAXE))
                 .forEach(stack -> stack.setDamageValue(stack.getMaxDamage() - 1));
         bot.getInventory().setChanged();
     }
