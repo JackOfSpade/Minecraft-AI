@@ -1405,7 +1405,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // returned false or there is no visible drop): it must never pull the bot away from a chased drop.
         if (!chasingVisibleDrop && pickupOrigin != null
                 && bot.getActionPack().isPathExecutorIdle()
-                && bot.getActionPack().isWalkToIdle()) {
+                && bot.getActionPack().isWalkToIdle() && bot.getActionPack().stepIdle()) {
             // The sweep starts with that walk and, when the drop is still not in reach (it came to rest
             // a cell or two away, hidden behind standing blocks), keeps walking the standable cells
             // around the break cell instead of nudging in one spot until the window expires.
