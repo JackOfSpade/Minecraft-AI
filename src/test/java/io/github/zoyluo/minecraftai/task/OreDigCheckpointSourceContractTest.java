@@ -296,13 +296,13 @@ class OreDigCheckpointSourceContractTest {
                 "ore.getY() - feet.getY() > MAX_TARGET_BREAK_DY", rememberedRoute);
         int typedAbandon = source.indexOf(
                 "\"overhead_drop_catch_unproven\"", highColumn);
-        int approachPath = source.indexOf("startDigPathTo(", typedAbandon);
+        int approachPath = source.indexOf("startSurfacePathTo(workPose)", typedAbandon);
         assertTrue(approachPathIdle > approach && approachWalkIdle > approachPathIdle
                         && workPose > approachWalkIdle && missingPose > workPose
                         && rememberedRoute > missingPose && highColumn > rememberedRoute
                         && typedAbandon > highColumn
                         && approachPath > typedAbandon,
-                "high overhead ore must use a live/remembered side pose or be released intact");
+                "high overhead ore must use a live/remembered non-destructive side route or be released intact");
 
         int commitGate = source.indexOf("private boolean passesTargetDropCommitGate");
         int poseGate = source.indexOf("if (!hasRecoverableTargetBreakPose(bot, ore))", commitGate);
@@ -496,6 +496,33 @@ class OreDigCheckpointSourceContractTest {
                 "a visible moving target drop must advance the durable recovery coordinate");
         assertTrue(source.contains("ore_dig_drop_unrecovered:"),
                 "drop loss must fail closed instead of silently consuming the finite ore field");
+
+        int unknownOwner = source.indexOf("if (targetState == OreScan.Observation.UNKNOWN)");
+        int observedGone = source.indexOf("if (targetState == OreScan.Observation.OBSERVED_GONE)", unknownOwner);
+        int fluidSeal = source.indexOf("private FluidSealStep sealAdjacentFluidBeforeMining");
+        int veinSection = source.indexOf("// ── Vein mode", fluidSeal);
+        assertTrue(unknownOwner >= 0 && observedGone > unknownOwner && fluidSeal >= 0 && veinSection > fluidSeal,
+                "target-owned route boundaries must remain discoverable for the ledger guard");
+        assertFalse(source.substring(unknownOwner, observedGone).contains("startDigPathTo("),
+                "an unknown finite target may not be traversed by a generic DIG_THROUGH route");
+        assertFalse(source.substring(fluidSeal, veinSection).contains("startDigPathTo("),
+                "fluid-seal closing may not DIG_THROUGH the finite target above its approach cell");
+
+        int faceRestore = source.indexOf("private void returnToSavedFace");
+        int advanceVeinMethod = source.indexOf("private boolean advanceVein", faceRestore);
+        int supportRelocation = source.indexOf("private boolean moveOffSupport");
+        int stepToward = source.indexOf("private static BlockPos stepToward", supportRelocation);
+        assertTrue(faceRestore >= 0 && advanceVeinMethod > faceRestore
+                        && supportRelocation >= 0 && stepToward > supportRelocation,
+                "restored and support-relocation target routes must remain discoverable");
+        String restore = source.substring(faceRestore, advanceVeinMethod);
+        String supportMove = source.substring(supportRelocation, stepToward);
+        assertTrue(restore.contains("boolean finiteTargetOwner")
+                        && restore.contains("? bot.getActionPack().startSurfacePathTo(lastFace)")
+                        && restore.contains("if (!finiteTargetOwner && path.isFailed())"),
+                "restoring a preserved finite owner must be surface-only before ordinary digging is allowed");
+        assertTrue(supportMove.contains("startSurfacePathTo(candidate)"),
+                "moving off a finite target support must use a non-destructive adjacent route");
     }
 
     @Test
@@ -525,6 +552,14 @@ class OreDigCheckpointSourceContractTest {
                 "a newly visible replacement must invalidate the old break finalization");
 
         BlockPos breakPos = new BlockPos(3, 12, -4);
+        assertTrue(OreDigTask.activeBreakStillMining(breakPos, breakPos, false, false),
+                "the matching non-idle controller is the ordinary pre-break target owner");
+        assertFalse(OreDigTask.activeBreakStillMining(breakPos, breakPos, true, false),
+                "a stale BlockMiner target after the action pack committed its break must not hide a replacement");
+        assertFalse(OreDigTask.activeBreakStillMining(breakPos, breakPos, false, true),
+                "a confirmed break must never regain pre-break ownership from a later controller");
+        assertFalse(OreDigTask.activeBreakStillMining(breakPos, breakPos.above(), false, false),
+                "an unrelated live miner must not preserve the old target ledger");
         OreDigCheckpoint checkpoint = new OreDigCheckpoint(
                 OreDigCheckpoint.CHECKPOINT_SCHEMA, 1, true, 0, 0, false,
                 MiningBudget.RARE_BATCH_TORCH_LIMIT, 0, 0,
@@ -555,14 +590,17 @@ class OreDigCheckpointSourceContractTest {
         int quota = source.indexOf("if (!veinMode && collected >= targetCount)", settlement);
         int capacity = source.indexOf("if (HarvestCore.isInventoryFull(bot))", quota);
         int helper = source.indexOf("private boolean settleObservedActiveBreakBeforeTerminalChecks");
+        int liveMiner = source.indexOf("activeBreakStillMining(active, miner.target(), bot.getActionPack().isMiningIdle(),", helper);
+        int cancelReplacementMiner = source.indexOf("miner.cancel(bot)", liveMiner);
         int presentInvalidation = source.indexOf("clearActiveTargetBreak(active)", helper);
         int decision = source.indexOf("activeBreakNeedsSettlement(observed, activeTargetBreakConfirmedGone)",
                 presentInvalidation);
         int finish = source.indexOf("finishTargetBreak(bot, active, activeTargetBreakInventory)", decision);
         assertTrue(settlement > tick && quota > settlement && capacity > quota
-                        && helper > capacity && presentInvalidation > helper
+                        && helper > capacity && liveMiner > helper && presentInvalidation > liveMiner
+                        && cancelReplacementMiner > liveMiner && cancelReplacementMiner < presentInvalidation
                         && decision > presentInvalidation && finish > decision,
-                "settlement must run before quota/capacity and retry the factual break through UNKNOWN");
+                "settlement must preserve only a live target miner, invalidate stale replacement mining, then run before quota/capacity and retry the factual break through UNKNOWN");
         assertTrue(checkpointSource.contains("private static final int PREVIOUS_CHECKPOINT_SCHEMA = 4")
                         && checkpointSource.contains("active_break_confirmed_gone")
                         && checkpointSource.contains("taskSchema == CHECKPOINT_SCHEMA")

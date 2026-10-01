@@ -60,9 +60,11 @@ class OreDigAssistSourceContractTest {
         assertEquals(1, count(source, "BlockPos found = nearestOre(bot, world)"));
         assertEquals(1, count(source, "miner.begin(bot, pos, true)"));
         assertEquals(10, count(source, "failMissingMiningChannelTool(bot)"));
-        assertEquals(3, count(source, "startPathTo("));
-        assertEquals(4, count(source, "startDigPathTo("));
-        assertEquals(9, count(source, "digTowardStep"));
+        // Finite target owners now route only through surface paths or one-cell guarded digging;
+        // the remaining generic path calls are non-target strip/face recovery work.
+        assertEquals(2, count(source, "startPathTo("));
+        assertEquals(1, count(source, "startDigPathTo("));
+        assertEquals(10, count(source, "digTowardStep"));
         assertEquals(2, count(source, "if (restoringFace)"), "no new if (restoringFace) may be added");
         // The three service derivations and the schema-4 compatibility constructor each end with
         // the bare "rememberedHighWorkPoses)" field. The compatibility constructor deliberately
