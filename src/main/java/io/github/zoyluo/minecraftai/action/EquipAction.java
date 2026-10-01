@@ -506,12 +506,12 @@ public final class EquipAction {
 
     /** True when the bot carries a shield, raised or not: in the offhand or anywhere in the inventory. */
     public static boolean hasShield(AIPlayerEntity bot) {
-        if (bot.getOffhandItem().is(Items.SHIELD)) {
+        if (ShieldBlockability.isShield(bot.getOffhandItem())) {
             return true;
         }
         Inventory inventory = bot.getInventory();
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
-            if (inventory.getNonEquipmentItems().get(slot).is(Items.SHIELD)) {
+            if (ShieldBlockability.isShield(inventory.getNonEquipmentItems().get(slot))) {
                 return true;
             }
         }
@@ -525,7 +525,7 @@ public final class EquipAction {
      * with a shield, else a totem, is {@link OffhandPolicy}.
      */
     public static boolean equipShieldOffhand(AIPlayerEntity bot) {
-        if (bot.getOffhandItem().is(Items.SHIELD)) {
+        if (ShieldBlockability.isShield(bot.getOffhandItem())) {
             return true;
         }
         Inventory inventory = bot.getInventory();
@@ -548,7 +548,7 @@ public final class EquipAction {
         int chosen = -1;
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
             ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (!stack.is(Items.SHIELD)) {
+            if (!ShieldBlockability.isShield(stack)) {
                 continue;
             }
             if (chosen < 0 || betterBefore(stack, inventory.getNonEquipmentItems().get(chosen))) {

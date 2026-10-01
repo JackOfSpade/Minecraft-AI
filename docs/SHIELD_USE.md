@@ -43,9 +43,14 @@ failing test.
 
 ## What it reacts to (noticed, never magic)
 
-* **An incoming projectile** the bot senses (seen in flight inside its view field with a clear line, or its shot heard through the
-  vanilla vibration `PROJECTILE_SHOOT` with a clear line to the projectile) that is blockable and on a hit course. The course is
-  predicted with the vanilla arrow recurrence (drag 0.99, gravity 0.05): an arrow launched on its arc is judged by where it will be.
+* **An incoming projectile** the bot senses: any blockable projectile seen in flight inside its view field with a clear line, plus an
+  exact vanilla arrow, spectral arrow, trident, or llama spit whose `PROJECTILE_SHOOT` vibration matches both its back-projected
+  ballistic event block and the vibration's original travel time. Hearing alone never associates fireballs, wither skulls, shulker
+  bullets, rockets, wind charges, or modded subclasses: their source or future target is not information the bot has. The course uses
+  the appropriate observable vanilla motion: ordinary ballistic drag/gravity only for those exact arrow/spit types; the public current
+  acceleration and inertia for ghast/blaze fireballs and wither skulls; and exact linear wind-charge motion. Homing shulker bullets,
+  rockets, snowballs, eggs, and unknown modded motion use a short-horizon ray of the current visible velocity, recomputed every tick
+  rather than invented from a hidden target or subclass state.
 * **The reaction.** A projectile from a shooter the bot is already tracking (a creature it has noticed) was anticipated: the bot watched
   the release and reacts at once. Anything else is a first sighting and waits the human reaction time of the shared formula
   (`(0.5 + 1.5 d / 64) s x angle factor`, for the projectile's distance and angle; a shot only heard counts with angle factor 1), in
@@ -56,16 +61,23 @@ failing test.
   bot. The pre-emptive raise of a player in PvP, held until the shot lands or the draw stops. When that shooter is the combat target
   within striking reach, the combat task's melee rhythm owns the shield instead (below), so a shooter in melee range is struck between
   blocks rather than blocked for ever.
-* **A guardian beam** locked on the bot (the beam a client draws from its first tick): the shield is held until the beam lets go; the
-  bite is blocked from the front, the magic part still hurts.
-* **A creeper** with a late, lit fuse (the creeper defence task has its own shield phase through the same raise).
+* **A registered vanilla guardian or elder guardian beam** locked on the bot (the beam a client draws from its first tick): the shield
+  is held until the beam lets go; the bite is blocked from the front, the magic part still hurts.
+* **A registered vanilla creeper** with a late, lit fuse (the creeper defence task has its own shield phase through the same raise), or
+  a visibly observed registered vanilla primed TNT entity inside its real eight-block damage envelope. TNT first waits the same human visible-object reaction time,
+  then uses its synced fuse and the same turn/hotbar/block-delay budget; the actual vanilla explosion source and `TNT_EXPLODES` rule
+  decide whether there is anything to block. A hidden fuse is never read through a wall, and custom private saved explosion power is not
+  guessed. A modded Java subclass is not evidence that it has vanilla fuse, radius, or beam mechanics, so those specialised models
+  decline it rather than guessing.
 * **Melee**: the combat task's rhythm (below).
 
-**Following, escorting and escaping keep the sprint (RULES win over the spec).** RULES say a follower or escort always sprints while
-hostiles are aggroed, and a bot sprints away from a hunting warden. So a `FollowTask` blocks only projectiles ALREADY IN FLIGHT at it
-(a hold of a few ticks: raised, blocked, lowered, and it sprints on); it makes no pre-emptive hold against a drawing or loaded shooter,
-a charging guardian beam or a fuse (the danger watcher takes a follower off the follow for a creeper). An `EvadeTask` (a warden flight,
-a retreat) owns the hands: no shield at all.
+**Following, escorting, escaping and combat retreating keep the sprint (RULES win over the spec).** RULES say a follower or escort
+always sprints while hostiles are aggroed, a bot sprints away from a hunting warden, and `CombatRegroupTask` plus `CombatTask.RETREAT`
+are fighting retreats. `FollowTask`, `EvadeTask`, `CombatRegroupTask` and a retreating `CombatTask` block only projectiles ALREADY IN
+FLIGHT at them (a hold of a few ticks: raised, blocked, lowered, and sprint resumes); none makes a pre-emptive hold against a drawing or
+loaded shooter, a charging guardian beam or a fuse (the danger watcher takes a follower off the follow for a creeper). A retreat's
+occasional clearance counterstrike likewise does not create a between-swings shield rhythm, because preserving that sprint is the
+explicit rule.
 
 A drawing shooter or a guardian is looked for exactly as far as the bot can notice a creature at all, its profile observation radius
 (`perception.radius`): no distance limit of the shield's own.
@@ -80,7 +92,7 @@ The head turns only as far as the arc needs (the arc less a 20 degree margin). A
 looking where it walks; while a walker steers the head (a route, a walk, a step) a source outside the arc cannot be turned to, so no
 raise is made for it (a player walking forward blocks what comes from the front half; turning round to walk backwards is not modelled).
 
-## Melee rhythm (CombatTask)
+## Melee rhythm (CombatTask and GuardTask)
 
 Right after its own swing the bot raises the shield and holds it through the attack cooldown, standing its ground and facing the
 target at the human turn speed; when the weapon is ready AND the target is under the crosshair within vanilla reach the shield comes
@@ -88,8 +100,9 @@ down, and the swing follows on the next tick (`ShieldRules.meleeStep`; a player 
 the attack click of the tick the use key is released). A raise is skipped when it could not be active before the next swing. An axe hit
 or a warden disables the shield through vanilla's item cooldown (`Weapon.disableBlockingForSeconds`, five seconds for an axe): no raise
 and no attempt until it is over (`ShieldGuard.raise` returns before calling the use path), the fight goes on. Companions never fight
-wardens, and the sonic boom is not blockable anyway. The rhythm is the combat task's; a follower in follow mode only knocks back what
-reaches it while it keeps sprinting after its player (R4), so it does not stop to block melee.
+wardens, and the sonic boom is not blockable anyway. Combat and guard share this rhythm; hunt's fixed prey set contains only
+non-attacking animals, so it never raises a shield against an animal that cannot make a melee hit. A follower in follow mode only
+knocks back what reaches it while it keeps sprinting after its player (R4), so it does not stop to block melee.
 
 ## The use path and the hands
 
@@ -107,16 +120,19 @@ reaches it while it keeps sprinting after its player (R4), so it does not stop t
   would be lethal** (a sensible player keeps chewing at low health because the food is the heal). An eating pass (`EatTask`) or the
   combat task's heal counts as eating between two bites too; while a lethal hit has the shield up, the eating pass waits (no budget
   spent, its watchdog never cancels the shield) and a bite never starts (`EatAction` refuses `hands_busy`).
-* No block is placed and no item used on a block while the shield is up (`BuildAction` refuses `hands_busy`): the client drops every
-  other use click while the use key is down. An attack command (`AttackEntityTask`) waits for the hands like it waits for the aim.
-* A shield a task raised for itself (the combat task's BLOCK phase, the creeper defence's SHIELD phase) is that task's only while it is
-  in that phase: whatever ended, paused or replaced the task (a combat timeout in BLOCK included), the guard lowers it on its next tick,
-  so a resumed follower or miner is never left at the item-use pace or unable to break.
+* No block is placed and no item used on a block while the shield is up. `BuildAction` reports that as a temporary
+  `ActionResult.IN_PROGRESS`, not a placement failure: stateful callers keep the same physical target, retry it after the shield
+  lowers, and pause their own retry/watchdog clocks meanwhile. The client drops every other use click while the use key is down.
+  An attack command (`AttackEntityTask`) waits for the hands like it waits for the aim.
+* A shield a task raised for itself (the combat BLOCK phase, guard's STRIKE phase, or the creeper-defence SHIELD phase) is that task's
+  only while it is in that phase: whatever ended, paused or replaced the task (a combat timeout in BLOCK included), the guard lowers it
+  on its next tick, so a resumed follower or miner is never left at the item-use pace or unable to break.
 * **A ranged exchange** of the combat task (its bow or crossbow out, drawn or loaded) keeps shooting: its arrow took the offhand (the
   shield went into the arrow's slot), a block would need the inventory, which no player opens mid-exchange, and the answer to a shooter
-  is the return shot. The emergency tasks that build or escape (shelter, barricade, creeper defence, lava, fire, powder snow) own the
-  hands too.
+  is the return shot. The emergency tasks that build (shelter, barricade, creeper defence, lava, fire, powder snow) own the hands too.
 
-The offhand content is the equipment rule's (`action/OffhandPolicy`): the best carried shield goes into an empty offhand or in place of
-a totem held only for want of a shield; any other offhand item (the arrow of a ranged loadout, a torch) stays, and then there is no
-shield to raise.
+The offhand content is the equipment rule's (`action/OffhandPolicy`): the best carried item with vanilla's `BLOCKS_ATTACKS` component
+goes into an empty offhand or in place of a totem held only for want of one; any other offhand item (the arrow of a ranged loadout, a
+torch) stays, and then there is no shield to raise. This is a narrow post-`du` reconciliation, not a second offhand policy: it keeps
+`du`'s selection/ownership rules but classifies a shield by the vanilla component rather than the `Items.SHIELD` item identity, so a
+modded blockable item follows the same vanilla combat path.

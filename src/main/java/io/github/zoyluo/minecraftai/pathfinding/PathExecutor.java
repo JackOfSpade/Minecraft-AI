@@ -188,6 +188,14 @@ public final class PathExecutor {
         if (!result.isInProgress()) {
             return result;
         }
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(pack.player())) {
+            // A reactive shield legitimately owns use and often leaves the player stationary.
+            // Do not turn that bounded handoff into a path stuck/replan debt; this covers both
+            // pillar and bridge placements as well as any other in-progress path subaction.
+            stuckTicks = 0;
+            lastPos = pack.player().position();
+            return ActionResult.IN_PROGRESS;
+        }
         Node progressNode = activeWalkTargetIndex >= index && activeWalkTargetIndex < path.size()
                 ? path.get(activeWalkTargetIndex)
                 : next;
@@ -515,6 +523,12 @@ public final class PathExecutor {
         BlockPos placeSlot = next.pos().below(); // current feet position; the support block goes here
         if (player.getBlockY() >= next.pos().getY() && WalkedStep.supported(player)) {
             return commitAdvance(pack, index + 1);
+        }
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            // Do not burn the physical jump/replan budget while a reactive shield owns the use key.
+            // The exact pillar node remains pending and is retried after the real threat window ends.
+            pack.setJumping(false);
+            return ActionResult.IN_PROGRESS;
         }
         int slot = findPlaceableBlock(player, protectedStoneLikeReserve);
         if (slot < 0) {

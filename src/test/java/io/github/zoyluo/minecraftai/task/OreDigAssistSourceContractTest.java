@@ -64,13 +64,10 @@ class OreDigAssistSourceContractTest {
         assertEquals(4, count(source, "startDigPathTo("));
         assertEquals(9, count(source, "digTowardStep"));
         assertEquals(2, count(source, "if (restoringFace)"), "no new if (restoringFace) may be added");
-        // The three duplicated 23-field checkpoint rebuilds that used to read
-        // "restored.rememberedHighWorkPoses()" directly were folded into OreDigCheckpoint's
-        // withResourceEpoch/withTorchPlacements/withInventoryServiceUsed derivation helpers; each
-        // still preserves the field once, ending its own constructor call with the bare
-        // "rememberedHighWorkPoses)" (single close-paren -- decode's own
-        // "Optional.of(new OreDigCheckpoint(...))" ends with a double close-paren and is excluded).
-        assertEquals(3, count(source, "rememberedHighWorkPoses);")
+        // The three service derivations and the schema-4 compatibility constructor each end with
+        // the bare "rememberedHighWorkPoses)" field. The compatibility constructor deliberately
+        // supplies no schema-5 break fact; the three current-schema derivations preserve it.
+        assertEquals(4, count(source, "rememberedHighWorkPoses);")
                 + count(checkpointSource, "rememberedHighWorkPoses);"));
         assertEquals(1, count(source, "|| !veinQueue.isEmpty() || bonusOre != null"),
                 "the pinned boolean-or literal must stay on one line, unduplicated");

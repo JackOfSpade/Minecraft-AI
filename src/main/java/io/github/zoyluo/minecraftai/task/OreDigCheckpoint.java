@@ -32,8 +32,10 @@ record OreDigCheckpoint(int taskSchema,
                         int pendingPickupGainBudget,
                         BlockPos activeBreakPos,
                         int activeBreakInventory,
+                        boolean activeBreakConfirmedGone,
                         Map<BlockPos, BlockPos> rememberedHighWorkPoses) {
-    static final int CHECKPOINT_SCHEMA = 4;
+    static final int CHECKPOINT_SCHEMA = 5;
+    private static final int PREVIOUS_CHECKPOINT_SCHEMA = 4;
     private static final int MISSION_CHECKPOINT_SCHEMA = 3;
     private static final int RESOURCE_EPOCH_CHECKPOINT_SCHEMA = 2;
     private static final int LEGACY_CHECKPOINT_SCHEMA = 1;
@@ -104,12 +106,16 @@ record OreDigCheckpoint(int taskSchema,
             withMissionKeys(RESOURCE_REQUIRED_KEYS);
     private static final Set<String> MISSION_ALLOWED_KEYS =
             withPickupLastSeenKey(withMissionKeys(RESOURCE_ALLOWED_KEYS));
-    private static final Set<String> REQUIRED_KEYS =
+    private static final Set<String> PREVIOUS_REQUIRED_KEYS =
             withDeliveredKey(MISSION_REQUIRED_KEYS);
-    private static final Set<String> ALLOWED_KEYS =
+    private static final Set<String> PREVIOUS_ALLOWED_KEYS =
             withRememberedHighWorkPosesKey(
                     withControlledStripRearKey(
                             withBoundaryRerouteKey(withDeliveredKey(MISSION_ALLOWED_KEYS))));
+    private static final Set<String> REQUIRED_KEYS =
+            withActiveBreakConfirmedGoneKey(PREVIOUS_REQUIRED_KEYS);
+    private static final Set<String> ALLOWED_KEYS =
+            withActiveBreakConfirmedGoneKey(PREVIOUS_ALLOWED_KEYS);
 
     OreDigCheckpoint {
         controlledStripRear = controlledStripRear == null
@@ -132,6 +138,38 @@ record OreDigCheckpoint(int taskSchema,
             }
             rememberedHighWorkPoses = Map.copyOf(immutable);
         }
+    }
+
+    /** Compatibility constructor for schema-4 callers that already supplied remembered poses. */
+    OreDigCheckpoint(int taskSchema,
+                     int targetCount,
+                     boolean batchOpen,
+                     int delivered,
+                     int rareMissionTarget,
+                     boolean inventoryServiceUsed,
+                     int torchLimit,
+                     int torchPlacements,
+                     int resourceEpoch,
+                     MiningCursor cursor,
+                     String oreFingerprint,
+                     int budgetUsed,
+                     int lastProgressBudget,
+                     BlockPos controlledStripRear,
+                     BlockPos boundaryRerouteOrigin,
+                     BlockPos pendingPickupPos,
+                     BlockPos pendingPickupLastSeenPos,
+                     int pendingPickupInventory,
+                     int pendingPickupStartedBudget,
+                     int pendingPickupGainBudget,
+                     BlockPos activeBreakPos,
+                     int activeBreakInventory,
+                     Map<BlockPos, BlockPos> rememberedHighWorkPoses) {
+        this(taskSchema, targetCount, batchOpen, delivered, rareMissionTarget,
+                inventoryServiceUsed, torchLimit, torchPlacements, resourceEpoch, cursor,
+                oreFingerprint, budgetUsed, lastProgressBudget, controlledStripRear,
+                boundaryRerouteOrigin, pendingPickupPos, pendingPickupLastSeenPos,
+                pendingPickupInventory, pendingPickupStartedBudget, pendingPickupGainBudget,
+                activeBreakPos, activeBreakInventory, false, rememberedHighWorkPoses);
     }
 
     /** Compatibility constructor for deterministic fixtures created before the optional key. */
@@ -162,7 +200,7 @@ record OreDigCheckpoint(int taskSchema,
                 oreFingerprint, budgetUsed, lastProgressBudget, controlledStripRear,
                 boundaryRerouteOrigin, pendingPickupPos, pendingPickupLastSeenPos,
                 pendingPickupInventory, pendingPickupStartedBudget, pendingPickupGainBudget,
-                activeBreakPos, activeBreakInventory, Map.of());
+                activeBreakPos, activeBreakInventory, false, Map.of());
     }
 
     /** Derives a copy with only {@link #resourceEpoch} replaced; every other field is kept. */
@@ -173,6 +211,7 @@ record OreDigCheckpoint(int taskSchema,
                 controlledStripRear, boundaryRerouteOrigin, pendingPickupPos,
                 pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
                 pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
+                activeBreakConfirmedGone,
                 rememberedHighWorkPoses);
     }
 
@@ -184,6 +223,7 @@ record OreDigCheckpoint(int taskSchema,
                 controlledStripRear, boundaryRerouteOrigin, pendingPickupPos,
                 pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
                 pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
+                activeBreakConfirmedGone,
                 rememberedHighWorkPoses);
     }
 
@@ -198,6 +238,7 @@ record OreDigCheckpoint(int taskSchema,
                 controlledStripRear, boundaryRerouteOrigin, pendingPickupPos,
                 pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
                 pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
+                activeBreakConfirmedGone,
                 rememberedHighWorkPoses);
     }
 
@@ -219,6 +260,9 @@ record OreDigCheckpoint(int taskSchema,
         values.put("pending_pickup_started_budget", String.valueOf(pendingPickupStartedBudget));
         values.put("pickup_gain_budget", String.valueOf(pendingPickupGainBudget));
         values.put("active_break_inventory", String.valueOf(activeBreakInventory));
+        if (taskSchema == CHECKPOINT_SCHEMA) {
+            values.put("active_break_confirmed_gone", String.valueOf(activeBreakConfirmedGone));
+        }
         if (controlledStripRear != null) {
             values.put("controlled_strip_rear",
                     encodeCheckpointPos(controlledStripRear));
@@ -261,6 +305,7 @@ record OreDigCheckpoint(int taskSchema,
                 case LEGACY_CHECKPOINT_SCHEMA -> LEGACY_REQUIRED_KEYS;
                 case RESOURCE_EPOCH_CHECKPOINT_SCHEMA -> RESOURCE_REQUIRED_KEYS;
                 case MISSION_CHECKPOINT_SCHEMA -> MISSION_REQUIRED_KEYS;
+                case PREVIOUS_CHECKPOINT_SCHEMA -> PREVIOUS_REQUIRED_KEYS;
                 case CHECKPOINT_SCHEMA -> REQUIRED_KEYS;
                 default -> Set.of();
             };
@@ -268,6 +313,7 @@ record OreDigCheckpoint(int taskSchema,
                 case LEGACY_CHECKPOINT_SCHEMA -> LEGACY_ALLOWED_KEYS;
                 case RESOURCE_EPOCH_CHECKPOINT_SCHEMA -> RESOURCE_ALLOWED_KEYS;
                 case MISSION_CHECKPOINT_SCHEMA -> MISSION_ALLOWED_KEYS;
+                case PREVIOUS_CHECKPOINT_SCHEMA -> PREVIOUS_ALLOWED_KEYS;
                 case CHECKPOINT_SCHEMA -> ALLOWED_KEYS;
                 default -> Set.of();
             };
@@ -277,7 +323,7 @@ record OreDigCheckpoint(int taskSchema,
             }
             int targetCount = requiredInt(values, "target_count");
             boolean batchOpen = strictBoolean(values, "batch_open");
-            int delivered = taskSchema == CHECKPOINT_SCHEMA
+            int delivered = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
                     ? requiredInt(values, "delivered") : 0;
             int rareMissionTarget;
             boolean inventoryServiceUsed;
@@ -312,9 +358,9 @@ record OreDigCheckpoint(int taskSchema,
             int stepsLeft = requiredInt(values, "steps_left");
             int legLength = requiredInt(values, "leg_length");
             int batches = requiredInt(values, "batches");
-            BlockPos controlledStripRear = taskSchema == CHECKPOINT_SCHEMA
+            BlockPos controlledStripRear = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
                     ? optionalPos(values, "controlled_strip_rear") : null;
-            BlockPos boundaryRerouteOrigin = taskSchema == CHECKPOINT_SCHEMA
+            BlockPos boundaryRerouteOrigin = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
                     ? optionalPos(values, "boundary_reroute_origin") : null;
             BlockPos pending = optionalPos(values, "pending_pickup_pos");
             BlockPos pendingLastSeen = taskSchema >= MISSION_CHECKPOINT_SCHEMA
@@ -329,8 +375,10 @@ record OreDigCheckpoint(int taskSchema,
             int pendingGain = requiredInt(values, "pickup_gain_budget");
             BlockPos activeBreak = optionalPos(values, "active_break_pos");
             int activeBreakInventory = requiredInt(values, "active_break_inventory");
+            boolean activeBreakConfirmedGone = taskSchema == CHECKPOINT_SCHEMA
+                    && strictBoolean(values, "active_break_confirmed_gone");
             Map<BlockPos, BlockPos> rememberedHighWorkPoses =
-                    taskSchema == CHECKPOINT_SCHEMA
+                    taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
                             ? decodeRememberedHighWorkPoses(
                             values.get("remembered_high_work_poses")).orElseThrow()
                             : Map.of();
@@ -360,7 +408,7 @@ record OreDigCheckpoint(int taskSchema,
                     && Math.abs((long) pendingLastSeen.getZ() - pending.getZ())
                     <= OreDigTask.TARGET_DROP_LAST_SEEN_RANGE);
             boolean activePair = (activeBreak == null)
-                    ? activeBreakInventory == -1
+                    ? activeBreakInventory == -1 && !activeBreakConfirmedGone
                     : activeBreakInventory >= 0 && activeBreakInventory <= 4096;
             boolean rememberedHighWorkPoseShape = rememberedHighWorkPoses.size() <= OreDigTask.VEIN_CAP
                     && (batchOpen || rememberedHighWorkPoses.isEmpty())
@@ -398,6 +446,7 @@ record OreDigCheckpoint(int taskSchema,
                     ? OreDigTask.rareMissionResourceEpochCapacity(rareMissionTarget)
                     : MiningBudget.RARE_RESOURCE_EPOCHS_PER_BATCH;
             if (taskSchema != CHECKPOINT_SCHEMA
+                    && taskSchema != PREVIOUS_CHECKPOINT_SCHEMA
                     && taskSchema != MISSION_CHECKPOINT_SCHEMA
                     && taskSchema != RESOURCE_EPOCH_CHECKPOINT_SCHEMA
                     && taskSchema != LEGACY_CHECKPOINT_SCHEMA
@@ -419,7 +468,7 @@ record OreDigCheckpoint(int taskSchema,
                     || !deliveredShape
                     // Schemas 1-3 never recorded how much an open batch already delivered to
                     // inventory. Assuming zero would duplicate coal/iron as well as rare output.
-                    || taskSchema < CHECKPOINT_SCHEMA && batchOpen
+                    || taskSchema < PREVIOUS_CHECKPOINT_SCHEMA && batchOpen
                     || !rareExpedition && (torchPlacements != 0 || resourceEpoch != 0)
                     || !batchOpen && (torchPlacements != 0 || resourceEpoch != 0
                     || inventoryServiceUsed)) {
@@ -435,6 +484,7 @@ record OreDigCheckpoint(int taskSchema,
                     pending, pendingLastSeen,
                     pendingInventory,
                     pendingStarted, pendingGain, activeBreak, activeBreakInventory,
+                    activeBreakConfirmedGone,
                     rememberedHighWorkPoses));
         } catch (RuntimeException exception) {
             return Optional.empty();
@@ -483,6 +533,12 @@ record OreDigCheckpoint(int taskSchema,
     private static Set<String> withRememberedHighWorkPosesKey(Set<String> base) {
         Set<String> keys = new java.util.HashSet<>(base);
         keys.add("remembered_high_work_poses");
+        return Set.copyOf(keys);
+    }
+
+    private static Set<String> withActiveBreakConfirmedGoneKey(Set<String> base) {
+        Set<String> keys = new java.util.HashSet<>(base);
+        keys.add("active_break_confirmed_gone");
         return Set.copyOf(keys);
     }
 

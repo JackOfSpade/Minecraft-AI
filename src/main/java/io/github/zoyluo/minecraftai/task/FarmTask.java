@@ -355,6 +355,9 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         ActionResult result = FarmAction.till(bot, current.ground());
+        if (result.isInProgress()) {
+            return;
+        }
         if (result.isFailed()) {
             note = result.reason();
             markFailed(current.ground());
@@ -382,6 +385,9 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         ActionResult result = FarmAction.plant(bot, current.ground(), seed, crop);
+        if (result.isInProgress()) {
+            return;
+        }
         if (result.isFailed()) {
             note = result.reason();
             markFailed(current.ground());
@@ -549,22 +555,29 @@ public final class FarmTask extends AbstractTask {
         if (dropsLeft) {
             note = "pickup_budget_spent";
         }
-        replantHarvestedCell(bot);
+        if (!replantHarvestedCell(bot)) {
+            return;
+        }
         phase = Phase.NEXT;
     }
 
-    private void replantHarvestedCell(AIPlayerEntity bot) {
+    /** @return false when a reactive shield temporarily owns the use key and this phase must wait. */
+    private boolean replantHarvestedCell(AIPlayerEntity bot) {
         if (harvestOnly) {
-            return;
+            return true;
         }
         if (InventoryAction.countItem(bot, seed) <= 0) {
             note = "replant_skipped:missing " + seed + " x1";
-            return;
+            return true;
         }
         ActionResult plantResult = FarmAction.plant(bot, current.ground(), seed, crop);
+        if (plantResult.isInProgress()) {
+            return false;
+        }
         if (plantResult.isFailed()) {
             note = "replant_failed:" + plantResult.reason();
         }
+        return true;
     }
 
     /** Observed, still-growing crops of this task's crop within the area (a snapshot for the waiting loop). */
@@ -621,8 +634,11 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         bot.getActionPack().stopMovement();
-        lastBoneMeal = elapsed;
         ActionResult result = FarmAction.boneMeal(bot, target);
+        if (result.isInProgress()) {
+            return;
+        }
+        lastBoneMeal = elapsed;
         if (result.isFailed()) {
             note = result.reason();
             immatureCrops.remove(target); // not clickable from here: leave it to the natural wait

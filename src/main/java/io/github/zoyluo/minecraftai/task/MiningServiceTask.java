@@ -850,6 +850,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return;
         }
         ActionResult placed = BuildAction.placeBlockAt(bot, depot);
+        if (placed.isInProgress()) {
+            // A reactive shield temporarily owns use. Retain this exact depot transaction and
+            // avoid turning its wait into a generic service no-progress failure.
+            noteProgress();
+            return;
+        }
         if (placed.isFailed()) {
             fail("mining_service_mission_depot_place_failed:" + placed.reason());
             return;
@@ -1418,6 +1424,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 return;
             }
             ActionResult placed = BuildAction.placeBlockAt(bot, target);
+            if (placed.isInProgress()) {
+                // A short reactive guard must not exhaust the bounded disposal-settle budget or
+                // relabel an unopened pocket as a terminal placement failure.
+                pocketPhaseStartedBudget = totalBudget();
+                return;
+            }
             if (placed.isFailed() || !isSolidSeal(bot, target)) {
                 if (pocketPhaseAge() > POCKET_SETTLE_LIMIT) {
                     failPocketSealRecovery(

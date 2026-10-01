@@ -41,6 +41,9 @@ public final class FarmAction {
         InventoryAction.equipFromSlot(bot, hoeSlot.getAsInt());
         BlockState before = world.getBlockState(ground);
         ActionResult used = BuildAction.useItemOnFace(bot, ground, Direction.UP, InteractionHand.MAIN_HAND);
+        if (used.isInProgress()) {
+            return ActionResult.IN_PROGRESS;
+        }
         if (used.isFailed()) {
             return ActionResult.failed("till_" + used.reason());
         }
@@ -69,6 +72,9 @@ public final class FarmAction {
         }
         InventoryAction.equipFromSlot(bot, slot.getAsInt());
         ActionResult used = BuildAction.useItemOnFace(bot, farmland, Direction.UP, InteractionHand.MAIN_HAND);
+        if (used.isInProgress()) {
+            return ActionResult.IN_PROGRESS;
+        }
         if (used.isFailed()) {
             return ActionResult.failed("plant_" + used.reason());
         }
@@ -124,6 +130,9 @@ public final class FarmAction {
         BlockState before = world.getBlockState(cropPos);
         int countBefore = InventoryAction.countItem(bot, Items.BONE_MEAL);
         ActionResult used = BuildAction.useItemOnCell(bot, cropPos, InteractionHand.MAIN_HAND);
+        if (used.isInProgress()) {
+            return ActionResult.IN_PROGRESS;
+        }
         if (used.isFailed()) {
             return ActionResult.failed("bone_meal_" + used.reason());
         }

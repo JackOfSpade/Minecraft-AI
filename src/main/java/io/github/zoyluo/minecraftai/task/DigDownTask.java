@@ -1332,6 +1332,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         bot.getActionPack().stopAll();
         InventoryAction.equipFromSlot(bot, slot.getAsInt());
         ActionResult placed = BuildAction.placeBlockAt(bot, support);
+        if (placed.isInProgress()) {
+            // The reactive shield has the use key; keep the exact return waypoint and its
+            // bounded lease alive until this physical support repair can be retried.
+            resetReturnProgressLease(bot.blockPosition());
+            return true;
+        }
         if (placed.isFailed()) {
             return false;
         }
@@ -1499,7 +1505,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return false;
         }
         InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
-        if (BuildAction.placeBlockAt(bot, pos).isFailed()) {
+        ActionResult sealed = BuildAction.placeBlockAt(bot, pos);
+        if (sealed.isInProgress()) {
+            noteWorkProgress();
+            return true;
+        }
+        if (sealed.isFailed()) {
             return false;
         }
         // A BlockMiner started before this tick may still own exactly the fluid cell that has now
@@ -1558,7 +1569,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return false;
         }
         InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
-        if (BuildAction.placeBlockAt(bot, hole).isFailed()) {
+        ActionResult sealed = BuildAction.placeBlockAt(bot, hole);
+        if (sealed.isInProgress()) {
+            noteWorkProgress();
+            return true;
+        }
+        if (sealed.isFailed()) {
             return false;
         }
         var sealState = world.getBlockState(hole);

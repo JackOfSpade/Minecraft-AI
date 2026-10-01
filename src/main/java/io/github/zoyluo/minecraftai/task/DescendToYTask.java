@@ -1638,15 +1638,17 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 }
                 return;
             }
-            ActionResult placed = ActionResult.failed("placement_not_attempted");
-            try {
-                placed = BuildAction.placeBlock(
-                        bot, current.origin.below(), current.direction, InteractionHand.MAIN_HAND);
-            } finally {
-                current.placeFailure = placed.isFailed() ? placed.reason() : null;
-                current.step = InCellWalk.beginEdgeReturn(bot, current.origin, "descend_detour_support");
-                current.stage = EdgeStage.RETURNING;
+            ActionResult placed = BuildAction.placeBlock(
+                    bot, current.origin.below(), current.direction, InteractionHand.MAIN_HAND);
+            if (placed.isInProgress()) {
+                // Keep the exact edge transaction and descent watchdog alive while a reactive
+                // shield owns use; no edge state advances until the real placement succeeds.
+                lastProgressTick = totalBudget();
+                return;
             }
+            current.placeFailure = placed.isFailed() ? placed.reason() : null;
+            current.step = InCellWalk.beginEdgeReturn(bot, current.origin, "descend_detour_support");
+            current.stage = EdgeStage.RETURNING;
             return;
         }
         edge = null;
@@ -1772,7 +1774,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return false;
         }
         InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
-        if (BuildAction.placeBlockAt(bot, pos).isFailed()) {
+        ActionResult sealed = BuildAction.placeBlockAt(bot, pos);
+        if (sealed.isInProgress()) {
+            lastProgressTick = totalBudget();
+            return true;
+        }
+        if (sealed.isFailed()) {
             return false;
         }
         BlockState sealState = world.getBlockState(pos);
@@ -1815,7 +1822,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return false;
         }
         InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
-        if (BuildAction.placeBlockAt(bot, hole).isFailed()) {
+        ActionResult sealed = BuildAction.placeBlockAt(bot, hole);
+        if (sealed.isInProgress()) {
+            lastProgressTick = totalBudget();
+            return true;
+        }
+        if (sealed.isFailed()) {
             return false;
         }
         BlockState sealState = world.getBlockState(hole);
@@ -2012,7 +2024,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         var torchSlot = InventoryAction.findItem(bot, net.minecraft.world.item.Items.TORCH);
         if (torchSlot.isPresent()) {
             InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
-            if (!BuildAction.placeBlockAt(bot, feet).isFailed()) {
+            ActionResult placed = BuildAction.placeBlockAt(bot, feet);
+            if (placed.isSuccess()) {
                 lastTorchY = feet.getY();
                 markStarted(bot, feet);
                 BotLog.action(bot, "descend_torch", "pos", feet.toShortString());

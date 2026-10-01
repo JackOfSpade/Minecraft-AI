@@ -1067,6 +1067,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     private void strike(AIPlayerEntity bot) {
+        // Hunt's fixed prey are passive, so it never owns a task shield. It still yields cleanly to the one reactive owner when a
+        // different noticed projectile demands the use hand and aim.
+        if (ShieldGuard.holdsShield(bot)) {
+            return;
+        }
         if (resolveUnavailableTarget(bot)) {
             return;
         }

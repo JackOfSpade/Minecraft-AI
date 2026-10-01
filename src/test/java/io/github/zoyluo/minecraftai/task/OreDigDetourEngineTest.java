@@ -411,6 +411,40 @@ class OreDigDetourEngineTest {
     }
 
     @Test
+    void aDeferredReactiveShieldSealWaitsWithoutSpendingTheSealOrPostbreakBudget() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos seed = new BlockPos(1, 40, 0);
+        BlockPos wet = seed.below();
+        final int waitingTicks = 400; // exceeds the default 360t post-break detour lease
+        java.util.ArrayDeque<DetourHost.FluidProbe> fluid = new java.util.ArrayDeque<>();
+        fluid.add(DetourHost.FluidProbe.CLEAR); // pre-swing gate
+        for (int i = 0; i <= waitingTicks; i++) {
+            fluid.add(new DetourHost.FluidProbe(wet, false));
+        }
+        host.fluidScript.put(seed, fluid);
+        host.sealResult = DetourHost.SealResult.WAITING;
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.start(host, selectionFor(host, seed, "diamond_ore"));
+
+        for (int i = 0; i < 2_000 && host.countCalls("seal:") < waitingTicks; i++) {
+            host.tickClock();
+            assertFalse(engine.tick(host).kind() == OreDigDetourEngine.Kind.FINISHED,
+                    "a deferred hand must not abort the detour");
+        }
+        assertEquals(waitingTicks, host.countCalls("seal:"),
+                "every shield-held tick retries the same observed fluid without advancing phases");
+        assertEquals(0, engine.seals(), "a shield-held attempt is not a physical seal");
+        assertEquals(DetourPhase.POSTBREAK, engine.phase());
+        assertTrue(host.countCalls("beat") >= waitingTicks,
+                "the shield-held wait refreshes the outer OreDig heartbeat as well as the local timer");
+
+        host.sealResult = DetourHost.SealResult.SEALED;
+        OreDigDetourEngine.Result result = runToFinish(host, engine);
+        assertEquals("done", result.reason());
+        assertEquals(1, engine.seals(), "the same observed fluid is sealed only after the hand is free");
+    }
+
+    @Test
     void unknownFluidNeighbourAddsMinedCellToNoStep() {
         FakeDetourHost host = new FakeDetourHost();
         BlockPos seed = new BlockPos(1, 40, 0);

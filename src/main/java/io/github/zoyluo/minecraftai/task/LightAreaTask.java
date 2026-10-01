@@ -199,6 +199,9 @@ public final class LightAreaTask extends AbstractTask {
             return;
         }
         ActionResult result = BuildAction.placeBlockAt(bot, target);
+        if (result.isInProgress()) {
+            return;
+        }
         if (result.isSuccess()) {
             placed++;
             placedTorches.add(target);

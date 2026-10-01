@@ -194,6 +194,9 @@ public final class CraftTask extends AbstractTask {
             bot.setOnGround(true);
         }
         ActionResult result = BuildAction.placeBlockAt(bot, placePos);
+        if (result.isInProgress()) {
+            return;
+        }
         if (result.isFailed()) {
             fail("place_crafting_table_failed: " + result.reason());
             return;

@@ -7,12 +7,17 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
@@ -28,17 +33,20 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.Guardian;
 import net.minecraft.world.entity.monster.Witch;
 import net.minecraft.world.entity.monster.illager.Pillager;
 import net.minecraft.world.entity.monster.illager.Vindicator;
 import net.minecraft.world.entity.monster.skeleton.Skeleton;
 import net.minecraft.world.entity.monster.zombie.Husk;
+import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.projectile.arrow.Arrow;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownSplashPotion;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.item.alchemy.Potions;
+import net.minecraft.world.item.component.BlocksAttacks;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
@@ -64,6 +72,55 @@ public final class ShieldBlockingGameTests {
     private static final int AHEAD = 24;
     /** A skeleton arrow's launch speed, blocks per tick. */
     private static final float ARROW_SPEED = 1.6F;
+
+    /** A real registry-backed stack proves shield identity comes from vanilla's component, not Items.SHIELD. */
+    @GameTest(environment = ENV + "component_backed_stack_is_recognized_as_shield", maxTicks = 20)
+    public void componentBackedStackIsRecognizedAsShield(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        ItemStack componentShield = new ItemStack(Items.STICK);
+        BlocksAttacks vanillaShieldComponent = new ItemStack(Items.SHIELD).get(DataComponents.BLOCKS_ATTACKS);
+
+        arena.require(!componentShield.is(Items.SHIELD), "fixture accidentally used Items.SHIELD");
+        arena.require(vanillaShieldComponent != null, "vanilla shield did not expose BLOCKS_ATTACKS");
+        componentShield.set(DataComponents.BLOCKS_ATTACKS, vanillaShieldComponent);
+        arena.require(ShieldBlockability.isShield(componentShield),
+                "a non-shield item with BLOCKS_ATTACKS was not recognized as a shield");
+        arena.require(vanillaShieldComponent.equals(ShieldBlockability.component(componentShield)),
+                "component-backed shield did not retain vanilla block parameters");
+        arena.finish();
+    }
+
+    /** World-backed codec proof: factual break completion survives schema 5, while schema 4 cannot invent it. */
+    @GameTest(environment = ENV + "confirmed_gone_checkpoint_round_trips_across_schema5_and_schema4", maxTicks = 20)
+    public void confirmedGoneCheckpointRoundTripsAcrossSchema5AndSchema4(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        Set<Block> ores = Set.of(Blocks.IRON_ORE);
+        BlockPos breakPos = arena.feet.offset(3, 1, -4);
+        OreDigCheckpoint checkpoint = new OreDigCheckpoint(
+                OreDigCheckpoint.CHECKPOINT_SCHEMA, 1, true, 0, 0, false,
+                MiningBudget.RARE_BATCH_TORCH_LIMIT, 0, 0,
+                MiningCursor.initial(arena.feet, OreDigTask.STRIP_SEGMENT),
+                OreDigTask.oreFingerprint(ores), 0, 0, null, null, null, null, -1, -1, -1,
+                breakPos, 0, true, Map.of());
+        arena.require("true".equals(checkpoint.encode().get("active_break_confirmed_gone")),
+                "schema-5 checkpoint did not encode the factual completed-break flag");
+        OreDigCheckpoint restored = OreDigCheckpoint.decode(checkpoint.encode(), ores).orElse(null);
+        arena.require(restored != null && restored.activeBreakConfirmedGone(),
+                "schema-5 checkpoint did not restore the factual completed-break flag");
+
+        OreDigCheckpoint schemaFour = new OreDigCheckpoint(
+                4, 1, true, 0, 0, false,
+                MiningBudget.RARE_BATCH_TORCH_LIMIT, 0, 0,
+                MiningCursor.initial(arena.feet, OreDigTask.STRIP_SEGMENT),
+                OreDigTask.oreFingerprint(ores), 0, 0, null, null, null, null, -1, -1, -1,
+                breakPos, 0, false, Map.of());
+        arena.require(!schemaFour.encode().containsKey("active_break_confirmed_gone"),
+                "schema-4 encoder emitted a schema-5 key");
+        OreDigCheckpoint restoredSchemaFour = OreDigCheckpoint.decode(schemaFour.encode(), ores).orElse(null);
+        arena.require(restoredSchemaFour != null && !restoredSchemaFour.activeBreakConfirmedGone(),
+                "schema-4 checkpoint invented a factual completed-break flag");
+        arena.finish();
+    }
 
     // ------------------------------------------------------------------ a: a noticed skeleton, pre-emptive raise, blocked arrow
 
@@ -284,7 +341,83 @@ public final class ShieldBlockingGameTests {
         });
     }
 
-    // ------------------------------------------------------------------ j: an arrow seen in flight from a shooter nobody noticed yet
+    // ------------------------------------------------------------------ j: a slow, high behind arrow is heard through BotEars before it reaches the shield
+
+    /**
+     * A real Arrow launched from behind on a long physical arc gives vanilla's vibration system time to deliver its
+     * {@code PROJECTILE_SHOOT} event. {@link CreatureSenses#heardProjectileShot} is only true after BotEars records the delivered
+     * current-vibration travel time and the Arrow's back-projected launch matches that delivered source block; it is therefore the
+     * direct live proof of delivery and association, not a source or trajectory-math shortcut.
+     */
+    @GameTest(environment = ENV + "behind_arrow_projectile_shoot_vibration_is_associated_and_raises_shield", maxTicks = 220)
+    public void behindArrowProjectileShootVibrationIsAssociatedAndRaisesShield(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("ShieldHeardArrowGT", 0, 0);
+        bot.getInventory().clearContent();
+        bot.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+        bot.getAttribute(Attributes.MAX_HEALTH).setBaseValue(100.0D);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(17);
+        bot.getFoodData().setSaturation(0.0F);
+        arena.hold(bot);
+        // The 30-tick high arc rises above the standard arena headroom before descending on the bot, so clear only its visible corridor.
+        arena.clearAir(-1, 1, -4, 1, 12);
+        int[] tick = {0};
+        int[] launchedAt = {-1};
+        int[] heardAt = {-1};
+        Arrow[] arrow = {null};
+        boolean[] sawIncomingRaise = {false};
+        double[] closestApproach = {Double.MAX_VALUE};
+        context.onEachTick(() -> {
+            int now = ++tick[0];
+            arena.require(bot.isAlive(), "the bot died before the heard-arrow proof completed");
+            if (arrow[0] == null) {
+                if (now < 8) {
+                    return;
+                }
+                arena.require(CreatureSenses.INSTANCE.listenerLevel(bot).orElse(null) == arena.level,
+                        "fixture: BotEars was not registered before the behind shot");
+                Vec3 from = new Vec3(arena.x(0), arena.feet.getY() + 1.5D, arena.z(-3));
+                arrow[0] = arena.shoot(from, arcingVelocity(from, bot.getEyePosition(), 30));
+                launchedAt[0] = now;
+                arena.require(!CreatureSenses.INSTANCE.legacyProjectileAnswers(bot),
+                        "fixture: the behind-arrow proof fell back to legacy projectile answers");
+                arena.require(!CreatureSenses.INSTANCE.noticedProjectile(bot, arrow[0]),
+                        "the behind arrow was treated as seen before its vibration could arrive");
+                return;
+            }
+            closestApproach[0] = Math.min(closestApproach[0], arrow[0].position().distanceTo(bot.getEyePosition()));
+            boolean heard = CreatureSenses.INSTANCE.heardProjectileShot(bot, arrow[0]);
+            if (heard && heardAt[0] < 0) {
+                arena.require(now - launchedAt[0] >= 2,
+                        "the behind shot was associated without physical vibration travel: launched=" + launchedAt[0] + " heard=" + now);
+                arena.require(arrow[0].getZ() < bot.getZ(),
+                        "the arrow had already crossed in front before BotEars associated its PROJECTILE_SHOOT event");
+                heardAt[0] = now;
+            }
+            if (heardAt[0] < 0) {
+                arena.require(!CreatureSenses.INSTANCE.noticedProjectile(bot, arrow[0]),
+                        "the behind arrow became visible instead of waiting for its PROJECTILE_SHOOT vibration");
+            }
+            if (heardAt[0] >= 0 && ShieldGuard.holdsShield(bot) && bot.isBlocking()) {
+                ShieldGuard.RaiseCause cause = ShieldGuard.lastRaise(bot);
+                arena.require(cause != null && cause.reason().equals("incoming_projectile") && cause.sourceId() == arrow[0].getId(),
+                        "the shield raise after the heard shot was not for this incoming arrow: " + cause);
+                sawIncomingRaise[0] = true;
+            }
+            if (now >= launchedAt[0] + 45) {
+                arena.require(heardAt[0] >= 0, "BotEars never associated the behind arrow's PROJECTILE_SHOOT vibration");
+                arena.require(sawIncomingRaise[0], "the heard behind arrow never received an active incoming_projectile shield raise");
+                arena.require(closestApproach[0] <= 1.5D,
+                        "fixture: the physical arrow never reached the bot's interception corridor: closest=" + closestApproach[0]);
+                arena.require(bot.getHealth() >= bot.getMaxHealth(),
+                        "the heard behind arrow hurt the bot through its shield: " + bot.getHealth());
+                arena.finish();
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ k: an arrow seen in flight from a shooter nobody noticed yet
 
     @GameTest(environment = ENV + "arrow_from_a_shooter_not_yet_noticed_is_seen_too_late_and_hits", maxTicks = 220)
     public void arrowFromAShooterNotYetNoticedIsSeenTooLateAndHits(GameTestHelper context) {
@@ -338,6 +471,8 @@ public final class ShieldBlockingGameTests {
         Arena arena = new Arena(context);
         AIPlayerEntity bot = arena.bot("ShieldMeleeGT", 0, 0);
         arena.armed(bot);
+        bot.getAttribute(Attributes.MAX_HEALTH).setBaseValue(100.0D);
+        bot.setHealth(bot.getMaxHealth());
         Husk husk = arena.husk(0, 5);
         husk.getAttribute(Attributes.MAX_HEALTH).setBaseValue(40.0D);
         husk.setHealth(40.0F);
@@ -348,18 +483,36 @@ public final class ShieldBlockingGameTests {
         CombatTask fight = CombatTask.defensive(husk, 6.0F, bot.blockPosition().immutable());
         TaskManager.INSTANCE.assign(bot, fight, TaskOrigin.safety("gametest_shield_melee"));
         int[] tick = {0};
+        boolean[] actualBlockWasUp = {false};
+        float[] healthAtActualBlockStart = {bot.getHealth()};
+        int[] lastShieldDamage = {bot.getOffhandItem().getDamageValue()};
         boolean[] blockPhaseWithShieldUp = {false};
+        boolean[] blockedHuskHitDuringActualBlock = {false};
         context.onEachTick(() -> {
             int now = ++tick[0];
-            bot.setHealth(bot.getMaxHealth()); // what is under test is the shield's rhythm, not whether the bot survives unblocked hits
             arena.require(bot.isAlive(), "the bot died: hp=" + bot.getHealth() + " " + fight.describe());
-            if (fight.describe().contains("phase=BLOCK") && ShieldGuard.usingShield(bot)) {
-                blockPhaseWithShieldUp[0] = true;
+            boolean actualBlock = fight.describe().contains("phase=BLOCK")
+                    && ShieldGuard.usingShield(bot)
+                    && bot.isBlocking()
+                    && bot.getTicksUsingItem() >= ShieldGuard.blockDelayTicks(bot);
+            if (actualBlock && !actualBlockWasUp[0]) {
+                healthAtActualBlockStart[0] = bot.getHealth();
             }
+            if (actualBlock) {
+                blockPhaseWithShieldUp[0] = true;
+                arena.require(bot.getHealth() >= healthAtActualBlockStart[0],
+                        "the husk hurt the bot during CombatTask's active block interval: "
+                                + healthAtActualBlockStart[0] + " -> " + bot.getHealth());
+                if (bot.getOffhandItem().getDamageValue() > lastShieldDamage[0]) {
+                    blockedHuskHitDuringActualBlock[0] = true;
+                }
+            }
+            actualBlockWasUp[0] = actualBlock;
+            lastShieldDamage[0] = bot.getOffhandItem().getDamageValue();
             if (!husk.isAlive()) {
-                arena.require(bot.getOffhandItem().getDamageValue() > 0,
-                        "no husk hit was ever blocked (the shield has no wear): hp=" + bot.getHealth());
-                arena.require(blockPhaseWithShieldUp[0], "the shield was never up between the bot's own swings");
+                arena.require(blockedHuskHitDuringActualBlock[0],
+                        "no real husk hit was blocked during an active block interval: wear=" + bot.getOffhandItem().getDamageValue());
+                arena.require(blockPhaseWithShieldUp[0], "the shield never reached an active block between the bot's own swings");
                 arena.finish();
             } else if (now > 440) {
                 arena.fail("the husk was not killed: hp=" + husk.getHealth() + " " + fight.describe());
@@ -367,7 +520,82 @@ public final class ShieldBlockingGameTests {
         });
     }
 
-    // ------------------------------------------------------------------ f: an axe disables the shield; the bot fights on without re-raise spam
+    // ------------------------------------------------------------------ f: GuardTask owns the same melee shield rhythm without being replaced
+
+    /**
+     * A real persistent guard (rather than a one-shot CombatTask) acquires the husk, takes its own legal swing, holds the task-owned
+     * shield while its cooldown refills, blocks a real husk attack, and lowers only long enough for its second legal swing. The
+     * watcher must leave that active GuardTask in place throughout the exchange.
+     */
+    @GameTest(environment = ENV + "guard_task_blocks_husk_between_its_own_swings_without_being_replaced", maxTicks = 520)
+    public void guardTaskBlocksHuskBetweenItsOwnSwingsWithoutBeingReplaced(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("ShieldGuardTaskGT", 0, 0);
+        arena.armed(bot);
+        bot.getAttribute(Attributes.MAX_HEALTH).setBaseValue(100.0D);
+        bot.setHealth(bot.getMaxHealth());
+        Husk husk = arena.husk(0, 5);
+        husk.getAttribute(Attributes.MAX_HEALTH).setBaseValue(80.0D);
+        husk.setHealth(80.0F);
+        husk.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(1.0D);
+        husk.getAttribute(Attributes.ATTACK_DAMAGE).setBaseValue(8.0D);
+        husk.setTarget(bot);
+        GuardTask guard = GuardTask.point(bot.blockPosition().immutable());
+        TaskManager.INSTANCE.assign(bot, guard, TaskOrigin.safety("gametest_guard_shield_rhythm"));
+        int[] tick = {0};
+        int[] strikes = {0};
+        float[] lastHuskHealth = {husk.getHealth()};
+        int[] lastShieldDamage = {bot.getOffhandItem().getDamageValue()};
+        boolean[] taskShieldWasActivelyBlocking = {false};
+        float[] healthAtTaskBlockStart = {bot.getHealth()};
+        boolean[] taskShieldAfterFirstStrike = {false};
+        boolean[] blockedHuskHit = {false};
+        context.onEachTick(() -> {
+            int now = ++tick[0];
+            arena.require(bot.isAlive(), "the guard bot died");
+            arena.require(TaskManager.INSTANCE.getActive(bot).orElse(null) == guard,
+                    "DangerWatcher replaced the active GuardTask mid-defense: active="
+                            + TaskManager.INSTANCE.getActive(bot).map(Task::name));
+            if (husk.getHealth() < lastHuskHealth[0]) {
+                strikes[0]++;
+            }
+            lastHuskHealth[0] = husk.getHealth();
+            boolean taskShieldNow = guard.holdsItsShield(bot)
+                    && ShieldGuard.usingShield(bot)
+                    && !ShieldGuard.holdsShield(bot)
+                    && bot.isBlocking()
+                    && bot.getTicksUsingItem() >= ShieldGuard.blockDelayTicks(bot);
+            if (taskShieldNow && !taskShieldWasActivelyBlocking[0]) {
+                healthAtTaskBlockStart[0] = bot.getHealth();
+            }
+            if (strikes[0] >= 1 && taskShieldNow) {
+                arena.require(bot.getHealth() >= healthAtTaskBlockStart[0],
+                        "the husk hurt the bot during GuardTask's raised shield interval: "
+                                + healthAtTaskBlockStart[0] + " -> " + bot.getHealth());
+                taskShieldAfterFirstStrike[0] = true;
+            }
+            if (taskShieldNow && bot.getOffhandItem().getDamageValue() > lastShieldDamage[0]) {
+                blockedHuskHit[0] = true;
+            }
+            taskShieldWasActivelyBlocking[0] = taskShieldNow;
+            lastShieldDamage[0] = bot.getOffhandItem().getDamageValue();
+            if (strikes[0] >= 2) {
+                arena.require(taskShieldAfterFirstStrike[0],
+                        "the GuardTask never held its own shield after its first real strike: " + guard.describe());
+                arena.require(blockedHuskHit[0],
+                        "no real husk hit wore the task-owned shield: wear=" + bot.getOffhandItem().getDamageValue());
+                arena.finish();
+            } else if (now > 480) {
+                arena.fail("the guard exchange did not reach a second strike: strikes=" + strikes[0]
+                        + " shield_after_first=" + taskShieldAfterFirstStrike[0]
+                        + " shield_wear=" + bot.getOffhandItem().getDamageValue()
+                        + " bot_hp=" + bot.getHealth()
+                        + " guard=" + guard.describe() + " husk_hp=" + husk.getHealth());
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ g: an axe disables the shield; the bot fights on without re-raise spam
 
     @GameTest(environment = ENV + "axe_vindicator_disables_the_shield_and_the_companion_fights_on_without_re_raise_spam", maxTicks = 700)
     public void axeVindicatorDisablesTheShieldAndTheCompanionFightsOnWithoutReRaiseSpam(GameTestHelper context) {
@@ -737,6 +965,144 @@ public final class ShieldBlockingGameTests {
         });
     }
 
+    // ------------------------------------------------------------------ n: a guardian beam keeps its magic component but blocks its mob attack
+
+    /**
+     * A real, AI-driven guardian charging its beam on a stationary survivor in an open one-block-deep pool. The beam's direct
+     * {@code mob_attack} component must wear the shield, while its unavoidable magic component still takes a small amount of health.
+     * No manual damage is applied: the guardian's ordinary attack goal delivers both parts.
+     */
+    @GameTest(environment = ENV + "guardian_beam_blocks_mob_attack_while_magic_still_hurts", maxTicks = 420)
+    public void guardianBeamBlocksMobAttackWhileMagicStillHurts(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("ShieldGuardianBeamGT", 0, 0);
+        arena.armed(bot);
+        arena.hold(bot);
+        // Seventeen food stays below vanilla's natural-regeneration threshold without triggering the critical-resupply scheduler.
+        bot.getFoodData().setFoodLevel(17);
+        bot.getFoodData().setSaturation(0.0F);
+        Guardian guardian = arena.guardianInOpenPool(0, 12);
+        guardian.setTarget(bot);
+        int[] tick = {0};
+        int[] beamAt = {-1};
+        int[] wearBefore = {0};
+        float[] healthBefore = {0.0F};
+        boolean[] sawGuardianRaise = {false};
+        boolean[] shieldWorn = {false};
+        context.onEachTick(() -> {
+            int now = ++tick[0];
+            arena.require(bot.isAlive(), "the guardian killed the bot before the beam proof completed");
+            if (beamAt[0] < 0) {
+                if (guardian.hasActiveAttackTarget() && guardian.getActiveAttackTarget() == bot) {
+                    beamAt[0] = now;
+                    wearBefore[0] = bot.getOffhandItem().getDamageValue();
+                    healthBefore[0] = bot.getHealth();
+                } else if (now > 220) {
+                    arena.fail("fixture: the guardian never locked its real beam on the bot: target=" + guardian.getTarget()
+                            + " guardian=" + guardian.position() + " bot=" + bot.position());
+                }
+                return;
+            }
+            if (guardian.hasActiveAttackTarget() && guardian.getActiveAttackTarget() == bot
+                    && ShieldGuard.holdsShield(bot) && bot.isBlocking()) {
+                ShieldGuard.RaiseCause cause = ShieldGuard.lastRaise(bot);
+                arena.require(cause != null && cause.reason().equals("guardian_beam") && cause.sourceId() == guardian.getId(),
+                        "the shield came up during the guardian beam for the wrong cause: " + cause);
+                sawGuardianRaise[0] = true;
+            }
+            shieldWorn[0] |= bot.getOffhandItem().getDamageValue() > wearBefore[0];
+            float lost = healthBefore[0] - bot.getHealth();
+            if (shieldWorn[0] && lost > 0.0F) {
+                arena.require(sawGuardianRaise[0], "the guardian beam fired before its guardian_beam shield raise was observed");
+                // Vanilla GuardianAttackGoal first applies indirect magic, then doHurtTarget. The former is not blockable; the latter
+                // is. Normal loses at most one health point here and hard at most three, so the cross-difficulty proof uses the hard cap.
+                arena.require(lost <= 3.0F,
+                        "the guardian's blockable mob-attack part got through the shield: health lost=" + lost);
+                arena.finish();
+            } else if (now > beamAt[0] + 140) {
+                arena.fail("the active guardian beam never produced both its magic damage and shield wear: hp=" + healthBefore[0]
+                        + " -> " + bot.getHealth() + " wear=" + wearBefore[0] + " -> " + bot.getOffhandItem().getDamageValue()
+                        + " raised=" + sawGuardianRaise[0] + " active_beam=" + guardian.hasActiveAttackTarget());
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ o: a visible PrimedTnt gets the real reactive shield response
+
+    /**
+     * Two identical, enclosed blast cells make the real explosion comparison stable: a visibly primed TNT entity has its ordinary
+     * vanilla fuse, while only one stationary survivor has a shield. The shielded survivor must react with the TNT-specific reason,
+     * actually wear the shield, and take less blast damage than the otherwise identical unshielded control.
+     */
+    @GameTest(environment = ENV + "visible_primed_tnt_raises_and_reduces_blast_damage_against_an_unshielded_control", maxTicks = 220)
+    public void visiblePrimedTntRaisesAndReducesBlastDamageAgainstAnUnshieldedControl(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity shielded = arena.bot("ShieldPrimedTntGT", 0, 0);
+        AIPlayerEntity bare = arena.bot("BarePrimedTntGT", 12, 0);
+        for (int room : new int[]{0, 12}) {
+            arena.sealedRoom(room);
+        }
+        for (AIPlayerEntity bot : List.of(shielded, bare)) {
+            bot.getInventory().clearContent();
+            bot.getAttribute(Attributes.MAX_HEALTH).setBaseValue(100.0D);
+            bot.setHealth(bot.getMaxHealth());
+            // Below the vanilla regeneration threshold, above the emergency hunger threshold.
+            bot.getFoodData().setFoodLevel(17);
+            bot.getFoodData().setSaturation(0.0F);
+            arena.hold(bot);
+        }
+        shielded.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+        // Both TNTs are inside their cells and within the default vanilla blast reach. Eighty ticks leaves room for normal sighting,
+        // reaction, facing, and the shield's vanilla block delay; no test code deals damage or forces a shield raise.
+        PrimedTnt shieldedTnt = arena.primedTnt(3, 1, 80);
+        PrimedTnt bareTnt = arena.primedTnt(15, 1, 80);
+        int[] tick = {0};
+        int[] explosionsSettled = {0};
+        int[] shieldWearBefore = {shielded.getOffhandItem().getDamageValue()};
+        boolean[] sawPrimedTntRaise = {false};
+        context.onEachTick(() -> {
+            int now = ++tick[0];
+            arena.require(shielded.isAlive() && bare.isAlive(), "a TNT fixture bot died before the damage comparison");
+            if (shieldedTnt.isAlive() && ShieldGuard.holdsShield(shielded) && shielded.isBlocking()) {
+                ShieldGuard.RaiseCause cause = ShieldGuard.lastRaise(shielded);
+                arena.require(cause != null && cause.reason().equals("primed_tnt") && cause.sourceId() == shieldedTnt.getId(),
+                        "the shield came up for the visible TNT with the wrong reactive cause: " + cause);
+                sawPrimedTntRaise[0] = true;
+            }
+            if (!shieldedTnt.isAlive() && !bareTnt.isAlive()) {
+                if (++explosionsSettled[0] >= 3) {
+                    float shieldedDamage = shielded.getMaxHealth() - shielded.getHealth();
+                    float bareDamage = bare.getMaxHealth() - bare.getHealth();
+                    arena.require(sawPrimedTntRaise[0], "the shield never actively raised for visible primed TNT");
+                    arena.require(shielded.getOffhandItem().getDamageValue() > shieldWearBefore[0],
+                            "the real TNT blast did not wear the raised shield");
+                    arena.require(bareDamage > 0.0F, "fixture: the unshielded control took no TNT blast damage");
+                    arena.require(shieldedDamage < bareDamage,
+                            "the primed-TNT shield response did not reduce damage: shielded=" + shieldedDamage + " unshielded=" + bareDamage);
+                    arena.finish();
+                }
+            } else if (now > 150) {
+                arena.fail("the PrimedTnt fixtures did not both explode: shielded_fuse=" + shieldedTnt.getFuse()
+                        + " bare_fuse=" + bareTnt.getFuse() + " raised=" + sawPrimedTntRaise[0]);
+            }
+        });
+    }
+
+    /**
+     * The exact initial velocity for an ordinary vanilla Arrow to travel from {@code from} to {@code to} in the requested number of
+     * physical ticks. This deliberately uses the same drag/gravity recurrence as {@link ProjectileBallistics}, so its high arc is a
+     * real in-flight projectile rather than a delayed manual hit.
+     */
+    private static Vec3 arcingVelocity(Vec3 from, Vec3 to, int flightTicks) {
+        int ticks = Math.max(1, flightTicks);
+        double dragSum = (1.0D - Math.pow(ProjectileBallistics.DRAG, ticks)) / (1.0D - ProjectileBallistics.DRAG);
+        double gravityShift = ProjectileBallistics.GRAVITY / (1.0D - ProjectileBallistics.DRAG);
+        Vec3 delta = to.subtract(from);
+        return new Vec3(delta.x / dragSum,
+                (delta.y + gravityShift * ticks) / dragSum - gravityShift,
+                delta.z / dragSum);
+    }
+
     /** The direction to launch an arrow at {@code speed} so that it reaches {@code to} from {@code from} despite gravity and drag. */
     private static Vec3 aimFor(Vec3 from, Vec3 to, float speed) {
         Vec3 delta = to.subtract(from);
@@ -949,6 +1315,38 @@ public final class ShieldBlockingGameTests {
             return add(husk, dx, dz, 180.0F);
         }
 
+        /** A real guardian in an open 5x5, one-block-deep water pool centred at the requested arena offset. */
+        Guardian guardianInOpenPool(int centerDx, int centerDz) {
+            for (int dx = centerDx - 2; dx <= centerDx + 2; dx++) {
+                for (int dz = centerDz - 2; dz <= centerDz + 2; dz++) {
+                    level.setBlock(feet.offset(dx, 0, dz), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+            Guardian guardian = EntityType.GUARDIAN.create(level, EntitySpawnReason.COMMAND);
+            require(guardian != null, "failed to create the guardian");
+            guardian.setPersistenceRequired();
+            return add(guardian, centerDx, centerDz, 180.0F);
+        }
+
+        /** Clears a small test-only flight corridor above the normal arena headroom. */
+        void clearAir(int minDx, int maxDx, int minDz, int maxDz, int maxDy) {
+            for (int dx = minDx; dx <= maxDx; dx++) {
+                for (int dz = minDz; dz <= maxDz; dz++) {
+                    for (int dy = 0; dy <= maxDy; dy++) {
+                        level.setBlock(feet.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                    }
+                }
+            }
+        }
+
+        /** A real TNT entity with its normal explosion behavior and a deliberately long enough exposed fuse. */
+        PrimedTnt primedTnt(int dx, int dz, int fuseTicks) {
+            PrimedTnt tnt = EntityType.TNT.create(level, EntitySpawnReason.COMMAND);
+            require(tnt != null, "failed to create PrimedTnt");
+            tnt.setFuse(fuseTicks);
+            return add(tnt, dx, dz, 0.0F);
+        }
+
         /** An arrow from {@code from} at {@code to} at {@code speed} blocks per tick, owned by {@code owner} (or by nobody). */
         Arrow shoot(LivingEntity owner, Vec3 from, Vec3 to, float speed) {
             Arrow arrow = owner == null
@@ -959,6 +1357,15 @@ public final class ShieldBlockingGameTests {
             }
             Vec3 aim = aimFor(from, to, speed);
             arrow.shoot(aim.x, aim.y, aim.z, speed, 0.0F);
+            level.addFreshEntity(arrow);
+            entities.add(arrow);
+            return arrow;
+        }
+
+        /** A real Arrow with an explicitly calculated ordinary vanilla launch velocity. */
+        Arrow shoot(Vec3 from, Vec3 velocity) {
+            Arrow arrow = new Arrow(level, from.x, from.y, from.z, new ItemStack(Items.ARROW), null);
+            arrow.shoot(velocity.x, velocity.y, velocity.z, (float) velocity.length(), 0.0F);
             level.addFreshEntity(arrow);
             entities.add(arrow);
             return arrow;

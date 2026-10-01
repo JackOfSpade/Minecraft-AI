@@ -24,9 +24,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.NeutralMob;
@@ -71,13 +74,15 @@ public final class CreatureSenses {
     public static final int ATTENTION_TICKS = 30;
     /** A creature in clear view within this many blocks of a heard sound is where the sound came from. */
     public static final double HEARD_MATCH = 4.0D;
+    /** A projectile vibration is delivered as one source block, so its reconstructed event point must lie in that block (plus rounding). */
+    static final double HEARD_PROJECTILE_EVENT_EPSILON = 0.25D;
     /** How far a warden is watched (the quiet-zone scan range), beyond the observation radius of everything else. */
     public static final double WARDEN_SIGHT_RANGE = 24.0D;
     /** Ticks an idle bot keeps its head turned toward a sound or a blow it could not place. */
     static final int LOOK_TICKS = 25;
     /** Ticks a hint stays worth investigating. */
     static final int HINT_TICKS = 100;
-    /** Ticks a heard shot can still explain an arrow in flight. */
+    /** Ticks a heard shot can still explain an ordinary ballistic flight. */
     static final int SHOT_MEMORY_TICKS = 60;
     /** How far a blow from a non-projectile source can be felt as coming from its attacker: melee reach plus slack. */
     static final double FELT_MELEE_RANGE = 8.0D;
@@ -98,7 +103,7 @@ public final class CreatureSenses {
         long since;
     }
 
-    private record Shot(Vec3 pos, long tick) {
+    private record Shot(BlockPos block, long tick, int travelTicks) {
     }
 
     private static final class BotState {
@@ -210,7 +215,8 @@ public final class CreatureSenses {
     /** The scan reads a creature that is not yet being watched every this-many ticks (see {@link #tickBot}). */
     public static final int SCAN_CADENCE_TICKS = 2;
 
-    private static int observationRadius() {
+    /** The configured visual observation radius, shared by every perception consumer (never a shield-specific range). */
+    public static int observationRadius() {
         MinecraftAiConfig config = MinecraftAiConfig.get();
         return Math.max(1, config == null ? 16 : config.perception().radius());
     }
@@ -340,7 +346,7 @@ public final class CreatureSenses {
         // view is a place to investigate.
         for (BotEars.Sound sound : sounds) {
             if (sound.shot()) {
-                s.shots.addLast(new Shot(sound.pos(), now));
+                s.shots.addLast(new Shot(sound.block(), now, sound.travelTicks()));
             }
             LivingEntity match = null;
             double best = HEARD_MATCH * HEARD_MATCH;
@@ -596,10 +602,10 @@ public final class CreatureSenses {
         }
         Params params = config().params();
         BotState s = bots.get(bot.getUUID());
-        if (s != null && s.bot == bot) {
-            double reach = 4.0D + 3.2D * Math.max(0, projectile.tickCount);
+        Vec3 estimatedLaunch = backProjectedHearingLaunch(projectile);
+        if (estimatedLaunch != null && s != null && s.bot == bot) {
             for (Shot shot : s.shots) {
-                if (shot.pos().distanceTo(projectile.position()) <= reach) {
+                if (heardShotMatches(bot, shot, projectile, estimatedLaunch)) {
                     // A shot that was heard counts from any direction (hearing adds awareness from behind), but only with a clear
                     // line to the projectile: an arrow on the far side of a wall is a sound, not something to raise a shield at.
                     return clearLine(bot, projectile);
@@ -618,6 +624,14 @@ public final class CreatureSenses {
      * threw. Then acting on a projectile takes no first-sighting reaction either (the shield guard asks this, not {@link #enabled}).
      */
     public boolean legacyProjectileAnswers(AIPlayerEntity bot) {
+        return legacyObservationAnswers(bot);
+    }
+
+    /**
+     * Whether visual-object questions use the legacy immediate answer: perception is off, the strict capability permits hidden scans,
+     * or this bot's scan has just failed open. Projectiles and visible non-creature hazards (for example primed TNT) share this policy.
+     */
+    public boolean legacyObservationAnswers(AIPlayerEntity bot) {
         return !enabled()
                 || CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "observable_entity_query").allowed()
                 || scanFailedRecently(bot);
@@ -636,13 +650,117 @@ public final class CreatureSenses {
         if (s == null || s.bot != bot) {
             return false;
         }
-        double reach = 4.0D + 3.2D * Math.max(0, projectile.tickCount);
+        Vec3 estimatedLaunch = backProjectedHearingLaunch(projectile);
+        if (estimatedLaunch == null) {
+            return false;
+        }
         for (Shot shot : s.shots) {
-            if (shot.pos().distanceTo(projectile.position()) <= reach) {
+            if (heardShotMatches(bot, shot, projectile, estimatedLaunch)) {
                 return clearLine(bot, projectile);
             }
         }
         return false;
+    }
+
+    /**
+     * Does a heard {@code PROJECTILE_SHOOT} source describe this flight? The vibration gives the launch location, not a licence to
+     * associate every later projectile near it. The event was received after vanilla's physical vibration travel: its flight age must
+     * agree with that exact travel delay and its reconstructed event point must lie in the delivered source block. This deliberately
+     * prefers a missed hearing match to a false awareness match: the latter would make a bot block an unrelated, unseen shot.
+     *
+     * <p>Only exact vanilla entity types whose standard, observable recurrence is known are reconstructed here: arrows, spectral
+     * arrows, and tridents emit after their first air step, and llama spit emits before its first step; both then use
+     * {@code position += velocity; velocity *= 0.99; velocity.y -= gravity}. Hurting projectiles such as ghast/blaze fireballs and
+     * wither skulls accelerate from a hidden direction field; shulker bullets home; rockets and wind charges have their own motion.
+     * They still count when seen in flight or anticipated from a tracked shooter, but hearing alone never makes an incorrect physics
+     * guess about them.</p>
+     */
+    private boolean heardShotMatches(AIPlayerEntity bot, Shot shot, Entity projectile, Vec3 estimatedLaunch) {
+        return couldHaveHeardShotDuringFlight(bot.level().getGameTime(), shot.tick(), projectile.tickCount, shot.travelTicks())
+                && matchesHeardShot(shot.block(), estimatedLaunch);
+    }
+
+    /** The exact physical age window of a vibration received at {@code heardAt}; isolated for the hearing association tests. */
+    static boolean couldHaveHeardShotDuringFlight(long now, long heardAt, int projectileAgeTicks, int travelTicks) {
+        long elapsedSinceReceipt = now - heardAt;
+        if (elapsedSinceReceipt < 0L || travelTicks < 0) {
+            return false;
+        }
+        long age = Math.max(0, projectileAgeTicks);
+        // The first projectile tick emitted the event. The one-tick tolerance is the entity/vibration listener ordering boundary.
+        long expectedAge = 1L + travelTicks + elapsedSinceReceipt;
+        return Math.abs(age - expectedAge) <= 1L;
+    }
+
+    /** Reconstructs an ordinary projectile-shot event point once per query, or declines a projectile whose motion is not observable. */
+    private static Vec3 backProjectedHearingLaunch(Entity projectile) {
+        if (projectile.isInWater() || projectile.isInLava() || projectile.noPhysics) {
+            return null;
+        }
+        EntityType<?> type = projectile.getType();
+        if (!hasVanillaHearingBallisticCourse(type)) {
+            return null;
+        }
+        if (type != EntityType.LLAMA_SPIT) {
+            // PersistentProjectileEntity invokes ProjectileEntity.tick after its first move, so PROJECTILE_SHOOT is at p1, not p0.
+            return backProjectedBallisticLaunch(projectile.position(), projectile.getDeltaMovement(),
+                    Math.max(0, projectile.tickCount - 1), projectile.getGravity());
+        }
+        // LlamaSpit invokes ProjectileEntity.tick before it moves, so PROJECTILE_SHOOT is at p0.
+        return backProjectedBallisticLaunch(projectile.position(), projectile.getDeltaMovement(), projectile.tickCount,
+                projectile.getGravity());
+    }
+
+    /** Exact registered entity-type gate for the hearing-only recurrence; modded subclasses may change their future motion. */
+    static boolean hasVanillaHearingBallisticCourse(EntityType<?> type) {
+        if (type == null) {
+            return false;
+        }
+        var key = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+        return key != null && hasVanillaHearingBallisticCourse(key.toString());
+    }
+
+    /** Registry-free seam for the exact vanilla identifiers used by the hearing-only association. */
+    static boolean hasVanillaHearingBallisticCourse(String entityTypeId) {
+        return "minecraft:arrow".equals(entityTypeId) || "minecraft:spectral_arrow".equals(entityTypeId)
+                || "minecraft:trident".equals(entityTypeId) || "minecraft:llama_spit".equals(entityTypeId);
+    }
+
+    /**
+     * O(1) inverse of vanilla's ordinary projectile recurrence {@code position += velocity; velocity *= 0.99;
+     * velocity.y -= gravity}. Computing the geometric sums once avoids replaying every age tick for every remembered sound.
+     * Returns null only once the floating-point inverse is no longer representable; a visible projectile remains usable then.
+     */
+    static Vec3 backProjectedBallisticLaunch(Vec3 projectilePosition, Vec3 projectileVelocity, int projectileAgeTicks,
+                                             double gravity) {
+        int age = Math.max(0, projectileAgeTicks);
+        if (age == 0) {
+            return projectilePosition;
+        }
+        double drag = 0.99D;
+        double dragPower = Math.pow(drag, age);
+        if (!Double.isFinite(dragPower) || dragPower <= 0.0D) {
+            return null;
+        }
+        double geometricSum = (1.0D - dragPower) / (1.0D - drag);
+        double initialX = projectileVelocity.x / dragPower;
+        double initialY = (projectileVelocity.y + gravity * geometricSum) / dragPower;
+        double initialZ = projectileVelocity.z / dragPower;
+        double verticalGravityDistance = gravity * (age - geometricSum) / (1.0D - drag);
+        Vec3 displacement = new Vec3(initialX * geometricSum,
+                initialY * geometricSum - verticalGravityDistance,
+                initialZ * geometricSum);
+        return projectilePosition.subtract(displacement);
+    }
+
+    /** The spatial half of heard-shot association, after the actual projectile event position has been reconstructed once. */
+    static boolean matchesHeardShot(BlockPos sourceBlock, Vec3 estimatedEventPosition) {
+        return estimatedEventPosition.x >= sourceBlock.getX() - HEARD_PROJECTILE_EVENT_EPSILON
+                && estimatedEventPosition.x <= sourceBlock.getX() + 1.0D + HEARD_PROJECTILE_EVENT_EPSILON
+                && estimatedEventPosition.y >= sourceBlock.getY() - HEARD_PROJECTILE_EVENT_EPSILON
+                && estimatedEventPosition.y <= sourceBlock.getY() + 1.0D + HEARD_PROJECTILE_EVENT_EPSILON
+                && estimatedEventPosition.z >= sourceBlock.getZ() - HEARD_PROJECTILE_EVENT_EPSILON
+                && estimatedEventPosition.z <= sourceBlock.getZ() + 1.0D + HEARD_PROJECTILE_EVENT_EPSILON;
     }
 
     private static boolean clearLine(AIPlayerEntity bot, Entity projectile) {

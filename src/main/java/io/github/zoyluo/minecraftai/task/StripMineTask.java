@@ -508,6 +508,9 @@ public final class StripMineTask extends AbstractTask {
         Optional<BlockPos> torchPos = torchPosition(bot);
         if (torchPos.isPresent()) {
             ActionResult result = BuildAction.placeBlockAt(bot, torchPos.get());
+            if (result.isInProgress()) {
+                return;
+            }
             if (result.isFailed()) {
                 note = "torch_failed:" + result.reason();
             }

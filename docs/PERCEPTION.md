@@ -107,18 +107,28 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   the Warden's; vanilla decides sneaking, wool and travel time). A sound whose source is a creature in clear view within 4 blocks
   is where it came from: the bot is "turned to it" for 30 ticks (sight without the cone, the reaction time still applies).
   A sound with nobody in view is an INVESTIGATE hint (`CreatureSenses.hint`; an idle bot, one with no task and no action in
-  progress, turns to look; a bot busy with a step, a dig or a route keeps its head on its work). A bot does not hear its own steps
-  and blows, nor an item it dropped itself. NO MAGIC: only the position of the sound is used. Listeners are removed on despawn, death, level change, when perception is switched off and
-  when the server stops (`CreatureSenses.listenerCount()` is the test seam).
+   progress, turns to look; a bot busy with a step, a dig or a route keeps its head on its work). A bot does not hear its own steps
+   and blows, nor an item it dropped itself. NO MAGIC: the listener retains only the emitted event's delivered source block and kind;
+   for a shot it also retains vanilla's original vibration travel time from the currently delivered `VibrationInfo`, never its source
+   entity or projectile owner. Listeners are removed on despawn, death, level change, when perception is switched off and when the
+   server stops (`CreatureSenses.listenerCount()` is the test seam).
 * **Blows.** A melee blow makes its (adjacent) striker known at once (`RecentDamage` attribution). A projectile from an unseen
   shooter gives only the direction it came from (the reverse of its velocity at impact, traced back to the first block): a
   hint, never the shooter.
-* **Projectiles.** A projectile in flight (an arrow, a trident, a fireball, ...) is sensed if its shot was heard (the vanilla
-  `PROJECTILE_SHOOT` vibration, near where the projectile has come from, and with a clear line to the projectile) or the
-  projectile itself is in view (inside the view field, clear line). Acting on it follows the same reaction rule as a creature
-  (`docs/SHIELD_USE.md`): a projectile from a shooter the bot is tracking was anticipated and is answered at once; any other is a first
-  sighting and waits the reaction time of the formula (angle factor 1 when only its shot was heard), so a shot from a shooter nobody
-  noticed normally just hits, and a shot from behind that nobody heard or saw always does.
+* **Projectiles.** A projectile in flight is sensed when it is itself in view (inside the view field, clear line). Heard-shot awareness
+  is deliberately narrower: only an exact vanilla arrow, spectral arrow, trident, or llama spit can additionally be matched when its
+  observable ballistic motion back-projects to the delivered `PROJECTILE_SHOOT` source block and its age agrees with that vibration's
+  original travel time; it must still have a clear line to the projectile. Fireballs, wither skulls, shulker bullets, rockets, wind
+  charges, and modded subclasses are never associated from hearing alone, because their unseen future course or target is not knowledge
+  the bot has. Acting on a sensed projectile follows the same reaction rule as a creature (`docs/SHIELD_USE.md`): a projectile from a
+  shooter the bot is tracking was anticipated and is answered at once; any other is a first sighting and waits the reaction time of the
+  formula (angle factor 1 when only its ordinary ballistic shot was heard), so a shot from a shooter nobody noticed normally just hits,
+  and a shot from behind that nobody heard or saw always does.
+* **Strict-survival decision.** `HIDDEN_BLOCK_SCAN` remains an explicit operator capability, not a companion-survival shortcut. When it
+  is explicitly granted, the documented legacy observation answer is allowed; under strict survival it is denied and projectile
+  awareness uses only sight/cone/line-of-sight or the vibration facts above. `scanFailedRecently` is the separate one-tick fail-open
+  safety net for an actual perception-scan exception: it uses the old line-of-sight answer so a broken scan does not blind the bot; it
+  neither grants a hidden scan nor turns a heard event into knowledge of a hidden shooter or future trajectory.
 * **The owner's sight** still nominates: `SharedVision.seenByBotOrOwner` is "the bot noticed it, or its owner sees it" (foreign
   bots only), and `HostileBotIntent` only samples the intent of a foreign bot that someone on the protected side has noticed.
 * **Config** `behaviour.perception`: `enabled` (default true; false = today's omnidirectional line of sight exactly, no listener),

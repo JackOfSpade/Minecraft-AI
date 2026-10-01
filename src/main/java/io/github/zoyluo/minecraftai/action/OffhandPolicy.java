@@ -63,7 +63,7 @@ public final class OffhandPolicy {
         Inventory inventory = bot.getInventory();
         ItemStack offhand = bot.getOffhandItem();
         Core.Held held = offhand.isEmpty() ? Core.Held.EMPTY
-                : offhand.is(Items.SHIELD) ? Core.Held.SHIELD
+                : ShieldBlockability.isShield(offhand) ? Core.Held.SHIELD
                 : offhand.is(Items.TOTEM_OF_UNDYING) ? Core.Held.TOTEM : Core.Held.OTHER;
         if (held == Core.Held.SHIELD || held == Core.Held.OTHER) {
             return false;

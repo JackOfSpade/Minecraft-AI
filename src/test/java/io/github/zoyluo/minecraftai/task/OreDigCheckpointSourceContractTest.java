@@ -1,11 +1,18 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.OreScan;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
+import net.minecraft.core.BlockPos;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -319,12 +326,12 @@ class OreDigCheckpointSourceContractTest {
         assertTrue(nearest >= 0 && observable > nearest && targetState > observable
                         && capture > targetState,
                 "all visible scan targets must publish a high side pose before nearest selection");
-        int finishBreak = source.indexOf("private void finishTargetBreak");
-        int newlyExposedScan = source.indexOf("nearestOre(bot, bot.level())", finishBreak);
-        int stabilize = source.indexOf("stabilizeBrokenTargetDrop(bot, pos)", newlyExposedScan);
-        assertTrue(finishBreak >= 0 && newlyExposedScan > finishBreak
-                        && stabilize > newlyExposedScan,
-                "a lower break must capture newly exposed high poses before pickup movement");
+        int finishBreak = source.indexOf("private boolean finishTargetBreak");
+        int stabilize = source.indexOf("stabilizeBrokenTargetDrop(bot, pos)", finishBreak);
+        int newlyExposedScan = source.indexOf("nearestOre(bot, bot.level())", stabilize);
+        int pickup = source.indexOf("beginPendingTargetDrop(bot, pos, safeBaseline)", newlyExposedScan);
+        assertTrue(finishBreak >= 0 && stabilize > finishBreak && newlyExposedScan > stabilize && pickup > newlyExposedScan,
+                "a lower break must capture newly exposed high poses after support stabilizes but before pickup movement");
 
         int helper = source.indexOf("private boolean tryRememberedHighWorkPoseRoute");
         int lookup = source.indexOf("rememberedHighWorkPose(bot, world, ore)", helper);
@@ -346,16 +353,23 @@ class OreDigCheckpointSourceContractTest {
                 "isExactHighWorkPose(entry.getKey(), entry.getValue())", decode);
         int boundedShape = checkpointSource.indexOf(
                 "isRememberedHighWorkPoseNearFace(face, entry.getKey())", exactShape);
-        // Each derivation helper (withResourceEpoch/withTorchPlacements/withInventoryServiceUsed)
-        // rebuilds the record from its own fields, ending its constructor call with the bare
-        // "rememberedHighWorkPoses)" field reference (single close-paren; decode's own
-        // "Optional.of(new OreDigCheckpoint(...))" call ends with a double close-paren and is
-        // excluded), so this still counts exactly the transforms that must preserve pose facts.
-        int transformCopies = checkpointSource.split(
-                "rememberedHighWorkPoses\\);", -1).length - 1;
+        String normalizedCheckpoint = checkpointSource.replace("\r\n", "\n");
+        int resourceEpoch = normalizedCheckpoint.indexOf("OreDigCheckpoint withResourceEpoch");
+        int torchPlacements = normalizedCheckpoint.indexOf("OreDigCheckpoint withTorchPlacements", resourceEpoch);
+        int inventoryService = normalizedCheckpoint.indexOf("OreDigCheckpoint withInventoryServiceUsed", torchPlacements);
+        int encode = normalizedCheckpoint.indexOf("Map<String, String> encode", inventoryService);
+        String preservedBreakAndPoseFacts = "activeBreakConfirmedGone,\n                rememberedHighWorkPoses);";
+        // Check each derivation method separately. The compatibility constructor intentionally
+        // supplies a false value for old schema callers, so a global constructor-call count
+        // would no longer prove that all service transforms preserve the factual break state.
+        boolean transformsPreserveFacts = resourceEpoch >= 0 && torchPlacements > resourceEpoch
+                && inventoryService > torchPlacements && encode > inventoryService
+                && normalizedCheckpoint.substring(resourceEpoch, torchPlacements).contains(preservedBreakAndPoseFacts)
+                && normalizedCheckpoint.substring(torchPlacements, inventoryService).contains(preservedBreakAndPoseFacts)
+                && normalizedCheckpoint.substring(inventoryService, encode).contains(preservedBreakAndPoseFacts);
         assertTrue(codecKey >= 0 && decode > codecKey && exactShape > decode
-                        && boundedShape > exactShape && transformCopies == 3,
-                "checkpoint codec and all service transforms must preserve bounded pose facts");
+                        && boundedShape > exactShape && transformsPreserveFacts,
+                "checkpoint codec and all service transforms must preserve bounded pose and break facts");
     }
 
     @Test
@@ -494,6 +508,70 @@ class OreDigCheckpointSourceContractTest {
         int planner = executor.indexOf("GoalPlanner.GoalPlan fresh", handler);
         assertTrue(handler >= 0 && terminal > handler && planner > terminal,
                 "an exhausted physical pickup debt must fail with its factual coordinate before replanning");
+    }
+
+    @Test
+    void confirmedBreakKeepsItsDeferredSupportAcrossLostSightAndCheckpoint() throws IOException {
+        // This is the state transition behind the regression: BlockMiner.DONE establishes the
+        // fact, a reactive shield temporarily defers support placement, then the formerly open
+        // cell can become UNKNOWN before quota/capacity checks run on the next task tick.
+        assertTrue(OreDigTask.activeBreakNeedsSettlement(OreScan.Observation.UNKNOWN, true),
+                "a factual completed break must remain settleable after it becomes unobservable");
+        assertFalse(OreDigTask.activeBreakNeedsSettlement(OreScan.Observation.UNKNOWN, false),
+                "UNKNOWN alone must never manufacture a completed break");
+        assertTrue(OreDigTask.activeBreakNeedsSettlement(OreScan.Observation.OBSERVED_GONE, false),
+                "an ordinary observed-GONE result is a fresh factual break witness");
+        assertFalse(OreDigTask.activeBreakNeedsSettlement(OreScan.Observation.OBSERVED_PRESENT, true),
+                "a newly visible replacement must invalidate the old break finalization");
+
+        BlockPos breakPos = new BlockPos(3, 12, -4);
+        OreDigCheckpoint checkpoint = new OreDigCheckpoint(
+                OreDigCheckpoint.CHECKPOINT_SCHEMA, 1, true, 0, 0, false,
+                MiningBudget.RARE_BATCH_TORCH_LIMIT, 0, 0,
+                MiningCursor.initial(BlockPos.ZERO, OreDigTask.STRIP_SEGMENT),
+                "registry-free-fixture", 0, 0, null, null, null, null, -1, -1, -1,
+                breakPos, 0, true, Map.of());
+        assertTrue(checkpoint.activeBreakConfirmedGone());
+        assertEquals("true", checkpoint.encode().get("active_break_confirmed_gone"),
+                "the finite exact-break fact must survive a checkpoint while support is deferred");
+        assertTrue(checkpoint.withResourceEpoch(0).activeBreakConfirmedGone(),
+                "checkpoint service transforms must preserve the deferred-break fact");
+
+        OreDigCheckpoint schemaFour = new OreDigCheckpoint(
+                4, 1, true, 0, 0, false,
+                MiningBudget.RARE_BATCH_TORCH_LIMIT, 0, 0,
+                MiningCursor.initial(BlockPos.ZERO, OreDigTask.STRIP_SEGMENT),
+                "registry-free-fixture", 0, 0, null, null, null, null, -1, -1, -1,
+                breakPos, 0, false, Map.of());
+        assertFalse(schemaFour.encode().containsKey("active_break_confirmed_gone"),
+                "a legacy schema-4 encoder must retain its exact allowed key set");
+
+        String source = Files.readString(SOURCE);
+        String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
+        String codecGameTest = Files.readString(Path.of(
+                "src/gametest/java/io/github/zoyluo/minecraftai/task/ShieldBlockingGameTests.java"));
+        int tick = source.indexOf("protected void onTick");
+        int settlement = source.indexOf("settleObservedActiveBreakBeforeTerminalChecks(bot)", tick);
+        int quota = source.indexOf("if (!veinMode && collected >= targetCount)", settlement);
+        int capacity = source.indexOf("if (HarvestCore.isInventoryFull(bot))", quota);
+        int helper = source.indexOf("private boolean settleObservedActiveBreakBeforeTerminalChecks");
+        int presentInvalidation = source.indexOf("clearActiveTargetBreak(active)", helper);
+        int decision = source.indexOf("activeBreakNeedsSettlement(observed, activeTargetBreakConfirmedGone)",
+                presentInvalidation);
+        int finish = source.indexOf("finishTargetBreak(bot, active, activeTargetBreakInventory)", decision);
+        assertTrue(settlement > tick && quota > settlement && capacity > quota
+                        && helper > capacity && presentInvalidation > helper
+                        && decision > presentInvalidation && finish > decision,
+                "settlement must run before quota/capacity and retry the factual break through UNKNOWN");
+        assertTrue(checkpointSource.contains("private static final int PREVIOUS_CHECKPOINT_SCHEMA = 4")
+                        && checkpointSource.contains("active_break_confirmed_gone")
+                        && checkpointSource.contains("taskSchema == CHECKPOINT_SCHEMA")
+                        && checkpointSource.contains("boolean activeBreakConfirmedGone = taskSchema == CHECKPOINT_SCHEMA")
+                        && checkpointSource.contains("activeBreakInventory == -1 && !activeBreakConfirmedGone")
+                        && codecGameTest.contains("confirmedGoneCheckpointRoundTripsAcrossSchema5AndSchema4")
+                        && codecGameTest.contains("OreDigCheckpoint.decode(checkpoint.encode(), ores)")
+                        && codecGameTest.contains("OreDigCheckpoint.decode(schemaFour.encode(), ores)"),
+                "schema-4 checkpoints must decode as unconfirmed while schema-5 pairs the fact with an owner");
     }
 
     @Test

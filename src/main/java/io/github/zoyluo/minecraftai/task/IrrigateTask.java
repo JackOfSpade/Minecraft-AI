@@ -146,6 +146,9 @@ public final class IrrigateTask extends AbstractTask {
                     return;
                 }
                 ActionResult placed = BuildAction.placeBlockAt(bot, cell.below());
+                if (placed.isInProgress()) {
+                    return;
+                }
                 if (placed.isFailed()) {
                     fail("irrigate_floor_place_failed:" + placed.reason());
                     return;

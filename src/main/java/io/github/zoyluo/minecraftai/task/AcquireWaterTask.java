@@ -872,6 +872,9 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             bot.setOnGround(true);
         }
         ActionResult result = BuildAction.placeBlockAt(bot, support);
+        if (result.isInProgress()) {
+            return;
+        }
         if (result.isFailed()) {
             failedAscentSupports.add(support.immutable());
             ascentTarget = null;
@@ -970,6 +973,9 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             }
             ActionResult placed = BuildAction.placeBlock(
                     bot, current.anchor.below(), current.direction, InteractionHand.MAIN_HAND);
+            if (placed.isInProgress()) {
+                return;
+            }
             current.placeFailure = placed.isFailed() ? placed.reason() : null;
             current.step = InCellWalk.beginEdgeReturn(bot, current.anchor, "acquire_water_ascent_foundation");
             current.stage = EdgeStage.RETURNING;

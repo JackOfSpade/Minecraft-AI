@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ShieldBlockabilityTest {
     private static final Set<String> BYPASSES_SHIELD = tag("bypasses_shield");
+    private static final Path SOURCE = Path.of(
+            "src/main/java/io/github/zoyluo/minecraftai/action/ShieldBlockability.java");
 
     /** The set of damage type paths a tag holds, nested tags expanded, read from the vanilla jar on the classpath. */
     private static Set<String> tag(String name) {
@@ -54,6 +58,18 @@ class ShieldBlockabilityTest {
 
     private static boolean blockableDamage(String damageType) {
         return ShieldBlockability.blockableDamageType(damageType, BYPASSES_SHIELD::contains);
+    }
+
+    @Test
+    void aNonShieldItemWithBlocksAttacksIsRecognizedAsAShield() throws IOException {
+        // Ordinary JUnit intentionally does not bootstrap Minecraft's mapped registries. The
+        // registry-backed ItemStack assertion lives in ShieldBlockingGameTests; this unit
+        // contract pins the production predicate that it exercises.
+        String source = Files.readString(SOURCE);
+        assertTrue(source.contains("stack.get(DataComponents.BLOCKS_ATTACKS) != null"),
+                "the vanilla BLOCKS_ATTACKS component defines a shield");
+        assertFalse(source.contains("stack.is(Items.SHIELD)"),
+                "shield identity must never be restricted to Items.SHIELD");
     }
 
     @Test

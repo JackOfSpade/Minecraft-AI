@@ -81,7 +81,7 @@ class ShieldRulesTest {
         double side = CreaturePerception.requiredSeconds(params, 60.0D, 15.0D, CreaturePerception.Subject.of(false), false);
         assertEquals(arrowRequired * (1.0D + 30.0D / 70.0D), side, 1.0E-9D);
         // A ghast fireball first seen at 40 blocks needs 1.4375 s (29 ticks). It leaves the ghast at 0.1 blocks per tick and speeds up
-        // (AbstractHurtingProjectile: position += v, then v = (v + 0.1 * direction) * 0.95), so it takes far longer than an arrow:
+        // (AbstractHurtingProjectile: v = (v + 0.1 * direction) * 0.95, then position += v), so it takes far longer than an arrow:
         // after the reaction the block delay still fits before it arrives, so it is blocked.
         double fireballRequired = CreaturePerception.requiredSeconds(params, 0.0D, 40.0D, CreaturePerception.Subject.of(false), false);
         assertEquals(1.4375D, fireballRequired, 1.0E-9D);
@@ -90,8 +90,8 @@ class ShieldRulesTest {
         double speed = 0.1D;
         int fireballFlight = 0;
         while (travelled < 40.0D) {
-            travelled += speed;
             speed = (speed + 0.1D) * 0.95D;
+            travelled += speed;
             fireballFlight++;
         }
         assertTrue(fireballFlight > fireballReact + 5 + ShieldRules.HIT_SLACK_TICKS,

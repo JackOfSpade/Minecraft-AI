@@ -72,7 +72,9 @@ public final class BuildAction {
                                            InteractionHand hand, boolean deferInteractive) {
         if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
             // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
-            return ActionResult.failed("hands_busy");
+            // This is a temporary ownership handoff, not a placement refusal. Stateful callers must keep their
+            // target and retry after the reactive guard lowers the shield.
+            return ActionResult.IN_PROGRESS;
         }
         double reach = player.blockInteractionRange();
         double sampleRange = exactPlacementSampleRange(
@@ -150,9 +152,14 @@ public final class BuildAction {
      * door or a gate) hands over its own hit and ends here too. It does not aim, check reach or swing: the caller owns those.
      */
     public static Use useItemOnHit(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand) {
+        BlockPos destination = hit.getBlockPos().relative(hit.getDirection());
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            // Baritone and other already-aimed callers have no ActionResult channel. PASS faithfully says
+            // the click was not sent while the reactive shield owns the use key.
+            return new Use(net.minecraft.world.InteractionResult.PASS, false, destination);
+        }
         ItemStack stack = player.getItemInHand(hand);
         var item = stack.getItem();
-        BlockPos destination = hit.getBlockPos().relative(hit.getDirection());
         if (isProtectedArea(player, hit.getBlockPos())) {
             return new Use(net.minecraft.world.InteractionResult.FAIL, false, destination);
         }
@@ -210,7 +217,7 @@ public final class BuildAction {
     public static ActionResult useItemOnFace(AIPlayerEntity player, BlockPos pos, Direction face, InteractionHand hand) {
         if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
             // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
-            return ActionResult.failed("hands_busy");
+            return ActionResult.IN_PROGRESS;
         }
         ItemStack stack = player.getItemInHand(hand);
         if (stack.isEmpty()) {
@@ -249,7 +256,7 @@ public final class BuildAction {
     public static ActionResult useItemOnCell(AIPlayerEntity player, BlockPos pos, InteractionHand hand) {
         if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
             // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
-            return ActionResult.failed("hands_busy");
+            return ActionResult.IN_PROGRESS;
         }
         ItemStack stack = player.getItemInHand(hand);
         if (stack.isEmpty()) {
@@ -289,6 +296,12 @@ public final class BuildAction {
     }
 
     public static ActionResult placeBlockAt(AIPlayerEntity player, BlockPos pos) {
+        // Do this before probing supports: all placement candidates are deferred as one action while
+        // the reactive shield owns the use key. In particular, do not aggregate a transient busy
+        // result into the misleading no_adjacent_block failure below.
+        if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
+            return ActionResult.IN_PROGRESS;
+        }
         ActionResult lastFailure = ActionResult.failed("no_adjacent_block");
         // Do not pre-filter supports through canObserveBlock's six face-center rays. A support
         // can expose only a clickable edge. placeBlock provides the strict observation proof by

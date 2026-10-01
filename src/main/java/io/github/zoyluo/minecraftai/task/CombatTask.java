@@ -350,7 +350,12 @@ public final class CombatTask extends AbstractTask {
     boolean meleeRhythmAgainst(AIPlayerEntity bot, LivingEntity entity) {
         return entity != null && entity == target && target.isAlive()
                 && (phase == Phase.STRIKE || phase == Phase.BLOCK || phase == Phase.REPOSITION)
-                && bot.distanceTo(target) <= CombatCore.ATTACK_RANGE + 1.0F;
+                && ShieldGuard.meleeShieldEligible(bot, target);
+    }
+
+    /** A fighting retreat preserves its sprint; any incidental counterstrike is not a stand-and-block melee exchange. */
+    boolean retreating() {
+        return state == TaskState.RUNNING && phase == Phase.RETREAT;
     }
 
     /** A noticed hostile shooter that visibly has its ranged weapon up at the bot: see {@link ShieldGuard#drawingShooterAt}. */
@@ -603,10 +608,17 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire(bot);
             return;
         }
+        // The task owns a block only while the bot itself still perceives a close attacker and this particular shield can stop its
+        // vanilla melee source. Do not keep a shield up from owner-only information or against a hit that cannot be blocked.
+        if (!ShieldGuard.meleeShieldEligible(bot, target)) {
+            ShieldGuard.lower(bot);
+            phase = Phase.STRIKE;
+            return;
+        }
         CombatCore.lookAt(bot, target);
         bot.getActionPack().stopMovement();
         blockTicks--;
-        if (blockTicks <= 0 || bot.distanceTo(target) > CombatCore.ATTACK_RANGE + 1.5F) {
+        if (blockTicks <= 0) {
             ShieldGuard.lower(bot);
             phase = Phase.STRIKE;
             return;
@@ -1029,6 +1041,11 @@ public final class CombatTask extends AbstractTask {
     }
 
     private void buildPeekabooCover(AIPlayerEntity bot) {
+        // Tasks tick before ShieldGuard lowers a prior reactive hold. Do not turn that one-tick
+        // ownership handoff into a failed cover column or consume the finite build retries.
+        if (ShieldGuard.usingShield(bot)) {
+            return;
+        }
         if (target == null || !target.isAlive()) {
             kills++;
             finishOrAcquire(bot);
@@ -1335,10 +1352,7 @@ public final class CombatTask extends AbstractTask {
      * condition: a competent player blocks between swings at full health too.
      */
     private boolean shouldBlock(AIPlayerEntity bot) {
-        return target != null
-                && target.isAlive()
-                && bot.distanceTo(target) <= CombatCore.ATTACK_RANGE + 1.0F
-                && ShieldGuard.shieldUsable(bot);
+        return ShieldGuard.meleeShieldEligible(bot, target);
     }
 
     private void beginBlock(AIPlayerEntity bot) {

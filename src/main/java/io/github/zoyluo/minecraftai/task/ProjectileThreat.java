@@ -6,9 +6,13 @@ import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.hurtingprojectile.AbstractHurtingProjectile;
+import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
@@ -20,7 +24,6 @@ import net.minecraft.world.phys.Vec3;
  * is deliberately no reaction to projectiles the bot itself just fired.
  */
 public final class ProjectileThreat {
-    private static final double SCAN_RANGE = 24.0D;
     /** Generous body/shield interception radius; vanilla hit detection is a similar-order box. */
     private static final double INTERCEPT_RADIUS = 1.25D;
     private static final double INTERCEPT_RADIUS_SQUARED = INTERCEPT_RADIUS * INTERCEPT_RADIUS;
@@ -46,16 +49,16 @@ public final class ProjectileThreat {
         // on a course at the bot; the perception rays last.
         List<Projectile> candidates = level.getEntitiesOfClass(
                 Projectile.class,
-                bot.getBoundingBox().inflate(SCAN_RANGE),
+                // Query exactly as far as a companion can notice a projectile. A shorter shield-only range would make a slow
+                // fireball observed across the configured profile disappear until it happened to cross an invented boundary.
+                bot.getBoundingBox().inflate(CreatureSenses.observationRadius()),
                 projectile -> projectile.isAlive()
                         && velocityOf(projectile).lengthSqr() >= 1.0E-6D
                         && notOwnedByBot(bot, projectile)
                         && ShieldBlockability.projectileBlockable(level, shield, projectile));
         List<Incoming> result = new ArrayList<>();
         for (Projectile projectile : candidates) {
-            double gravity = projectile.getGravity();
-            Double ticks = ticksToClosestApproach(
-                    projectile.position().subtract(bot.getEyePosition()), velocityOf(projectile), gravity, gravity == 0.0D ? 1.0D : 0.99D);
+            Double ticks = ticksToClosestApproach(projectile, projectile.position().subtract(bot.getEyePosition()), velocityOf(projectile));
             if (ticks != null && CreatureSenses.INSTANCE.noticedProjectile(bot, projectile)) {
                 result.add(new Incoming(projectile, ticks));
             }
@@ -65,15 +68,84 @@ public final class ProjectileThreat {
     }
 
     /**
-     * How the projectile really moves per tick: its last displacement (an arrow stuck in a block has none, however stale its
-     * {@code deltaMovement} is), or the launch velocity on the tick it was created.
+     * The next usable movement vector: a nonzero last displacement proves the projectile is still in flight, while current
+     * {@code deltaMovement} is what vanilla will use on its next tick. For example AbstractArrow moves by {@code v_old} and then stores
+     * {@code v_next = 0.99 * v_old - gravity}; replaying the observed displacement from the new position would be one full tick stale.
+     * A stuck arrow has no last displacement and is rejected even if it retains stale delta movement; a just-created projectile may use
+     * its launch vector before it has moved once.
      */
     static Vec3 velocityOf(Entity projectile) {
         Vec3 moved = projectile.position().subtract(projectile.xo, projectile.yo, projectile.zo);
-        if (moved.lengthSqr() > 1.0E-6D) {
-            return moved;
+        return forecastVelocity(moved, projectile.getDeltaMovement(), projectile.tickCount);
+    }
+
+    /** Pure form of {@link #velocityOf(Entity)}, isolated so the arrow next-step boundary cannot regress unnoticed. */
+    static Vec3 forecastVelocity(Vec3 lastDisplacement, Vec3 currentDelta, int tickCount) {
+        if (lastDisplacement.lengthSqr() > 1.0E-6D) {
+            return currentDelta.lengthSqr() > 1.0E-6D ? currentDelta : Vec3.ZERO;
         }
-        return projectile.tickCount <= 1 ? projectile.getDeltaMovement() : Vec3.ZERO;
+        return tickCount <= 1 && currentDelta.lengthSqr() > 1.0E-6D ? currentDelta : Vec3.ZERO;
+    }
+
+    /**
+     * Chooses the actual observable vanilla recurrence for the next part of this projectile's course. Each curved model is opted in
+     * by its exact vanilla entity type: a modded subtype may change drag, gravity, or targeting, so it receives only the observed
+     * current-velocity ray and is reconsidered next tick. Hurting projectiles are not straight, zero-gravity arrows: before every
+     * move, ghast/blaze fireballs and wither skulls add their current-direction acceleration and then apply inertia. Their direction
+     * is the visible current velocity, and accelerationPower is public vanilla entity state, so no target/owner information is
+     * inferred here.
+     */
+    private static Double ticksToClosestApproach(Projectile projectile, Vec3 relativePosition, Vec3 velocityPerTick) {
+        if (projectile instanceof AbstractHurtingProjectile hurting && hasVanillaHurtingCourse(projectile.getType())) {
+            // AbstractHurtingProjectile applies inertia BEFORE the next move, so deltaMovement (not last displacement) starts this
+            // forecast. Its direction and acceleration are public current state; we recompute every tick after any collision/deflection.
+            return ticksToClosestApproachAccelerating(relativePosition, projectile.getDeltaMovement(), hurting.accelerationPower,
+                    hurtingInertia(hurting));
+        }
+        if (hasVanillaBallisticCourse(projectile.getType())) {
+            double gravity = projectile.getGravity();
+            return ticksToClosestApproach(relativePosition, velocityPerTick, gravity, gravity == 0.0D ? 1.0D : 0.99D);
+        }
+        if (projectile instanceof AbstractHurtingProjectile || projectile.getType() == EntityType.SHULKER_BULLET
+                || projectile.getType() == EntityType.FIREWORK_ROCKET) {
+            // A modded hurting projectile can override protected inertia, a shulker bullet steers from a private target, and a rocket
+            // has its own powered flight. Do not invent those unseen future inputs: use only the current observed ray and refresh it
+            // next tick. The known vanilla fireball/skull/wind-charge path above remains exact.
+            return ticksToClosestApproach(relativePosition, velocityPerTick);
+        }
+        return ticksToClosestApproach(relativePosition, velocityPerTick);
+    }
+
+    /** Only the current vanilla blockable hurting-projectile classes have a verified inertia contract; unknown mod subclasses do not. */
+    private static boolean hasVanillaHurtingCourse(EntityType<?> type) {
+        return type == EntityType.SMALL_FIREBALL || type == EntityType.FIREBALL || type == EntityType.WITHER_SKULL
+                || type == EntityType.WIND_CHARGE || type == EntityType.BREEZE_WIND_CHARGE;
+    }
+
+    /** Exact vanilla registered types whose public gravity and 0.99 inertia are the observed flight contract. */
+    static boolean hasVanillaBallisticCourse(EntityType<?> type) {
+        if (type == null) {
+            return false;
+        }
+        var key = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+        return key != null && hasVanillaBallisticCourse(key.toString());
+    }
+
+    /** Registry-free seam for the exact vanilla identifiers used by {@link #hasVanillaBallisticCourse(EntityType)}. */
+    static boolean hasVanillaBallisticCourse(String entityTypeId) {
+        return "minecraft:arrow".equals(entityTypeId) || "minecraft:spectral_arrow".equals(entityTypeId)
+                || "minecraft:trident".equals(entityTypeId) || "minecraft:llama_spit".equals(entityTypeId);
+    }
+
+    /** The public class state behind AbstractHurtingProjectile.applyInertia: water, dangerous wither skulls, then the 0.95 default. */
+    private static double hurtingInertia(AbstractHurtingProjectile projectile) {
+        if (projectile.getType() == EntityType.WIND_CHARGE || projectile.getType() == EntityType.BREEZE_WIND_CHARGE) {
+            return 1.0F;
+        }
+        if (projectile.isInWater()) {
+            return 0.8F;
+        }
+        return projectile instanceof WitherSkull skull && skull.isDangerous() ? 0.73F : 0.95F;
     }
 
     /**
@@ -129,6 +201,42 @@ public final class ProjectileThreat {
             velocity = new Vec3(velocity.x * drag, velocity.y * drag - gravity, velocity.z * drag);
         }
         return bestDistanceSquared <= INTERCEPT_RADIUS_SQUARED ? Double.valueOf(bestTime) : null;
+    }
+
+    /**
+     * Exact visible-state step for {@link AbstractHurtingProjectile}: {@code velocity = (velocity + normalize(velocity) *
+     * accelerationPower) * inertia; position += velocity}. This is deliberately separate from ordinary zero-gravity projectiles such
+     * as wind charges, whose straight-line recurrence is correct.
+     */
+    static Double ticksToClosestApproachAccelerating(Vec3 relativePosition, Vec3 velocityPerTick, double accelerationPower,
+                                                     double inertia) {
+        if (velocityPerTick.lengthSqr() < 1.0E-6D || !Double.isFinite(accelerationPower) || !Double.isFinite(inertia)) {
+            return null;
+        }
+        Vec3 position = relativePosition;
+        Vec3 velocity = velocityPerTick;
+        double bestDistanceSquared = Double.MAX_VALUE;
+        double bestTime = -1.0D;
+        for (int tick = 0; tick < LEAD_TICKS; tick++) {
+            velocity = acceleratingNextVelocity(velocity, accelerationPower, inertia);
+            Vec3 next = position.add(velocity);
+            Vec3 segment = next.subtract(position);
+            double length = segment.lengthSqr();
+            double along = length < 1.0E-12D ? 0.0D : Math.max(0.0D, Math.min(1.0D, -position.dot(segment) / length));
+            Vec3 closest = position.add(segment.scale(along));
+            double distanceSquared = closest.lengthSqr();
+            if (distanceSquared < bestDistanceSquared) {
+                bestDistanceSquared = distanceSquared;
+                bestTime = tick + along;
+            }
+            position = next;
+        }
+        return bestDistanceSquared <= INTERCEPT_RADIUS_SQUARED ? Double.valueOf(bestTime) : null;
+    }
+
+    /** One exact {@link AbstractHurtingProjectile#tick()} inertia update, kept package-visible for its vanilla-order unit test. */
+    static Vec3 acceleratingNextVelocity(Vec3 velocity, double accelerationPower, double inertia) {
+        return velocity.add(velocity.normalize().scale(accelerationPower)).scale(inertia);
     }
 
     private static boolean notOwnedByBot(AIPlayerEntity bot, Projectile projectile) {

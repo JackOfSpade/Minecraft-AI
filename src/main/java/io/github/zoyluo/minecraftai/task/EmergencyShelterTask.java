@@ -539,6 +539,11 @@ public final class EmergencyShelterTask extends AbstractTask {
                     ? placeFoundationFromEdge(bot, target)
                     : BuildAction.placeBlockAt(bot, target);
             if (result.isInProgress()) {
+                if (ShieldGuard.usingShield(bot)) {
+                    // The reactive owner has the only use key. Preserve this exact BUILD target
+                    // without spending its bounded construction/no-progress window.
+                    creditBuildClock(1);
+                }
                 return; // a walked step of the foundation (or its landing pose) is in flight
             }
             if (result.isSuccess() && isSealed(bot, target)) {
@@ -1231,6 +1236,12 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         BlockPos observationPort = egressFeet.above().immutable();
         ActionResult result = BuildAction.placeBlockAt(bot, observationPort);
+        if (result.isInProgress()) {
+            // Keep the observation port physically closed while the shield owns use. A temporary
+            // handoff must not age a pressured exit into the forced-open escape branch.
+            creditExitClock(1);
+            return true;
+        }
         if (!result.isSuccess() || !isSealed(bot, observationPort)) {
             return true;
         }
@@ -1619,6 +1630,9 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         ActionResult result = BuildAction.placeBlock(
                 bot, shelterFeet.below(), foundationDirection, InteractionHand.MAIN_HAND);
+        if (result.isInProgress()) {
+            return result;
+        }
         if (result.isSuccess() && isSealed(bot, target)) {
             startFoundationReturn(bot);
             return result;
@@ -1750,6 +1764,13 @@ public final class EmergencyShelterTask extends AbstractTask {
 
     private int exitAge() {
         return exitStartedElapsed < 0 ? 0 : Math.max(0, elapsed - exitStartedElapsed);
+    }
+
+    /** Freezes the bounded pressured-exit clock for a real temporary hand-ownership handoff. */
+    private void creditExitClock(int ticks) {
+        if (exitStartedElapsed >= 0 && ticks > 0) {
+            exitStartedElapsed += ticks;
+        }
     }
 
     private boolean handleEnvironmentalOwnershipConflict(AIPlayerEntity bot) {

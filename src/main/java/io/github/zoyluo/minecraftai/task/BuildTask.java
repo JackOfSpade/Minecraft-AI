@@ -271,6 +271,10 @@ public final class BuildTask extends AbstractTask {
             placeDelayTicks = 2;
             return;
         }
+        if (result.isInProgress()) {
+            flattenTargetTick = elapsed;
+            return;
+        }
         retryTicks++;
         BlockPos stand = nearbyStand(bot, pos);
         if (stand != null && bot.getActionPack().isPathExecutorIdle()) {
@@ -340,6 +344,11 @@ public final class BuildTask extends AbstractTask {
             nextIndex++;
             retryTicks = 0;
             placeDelayTicks = 2;
+            return;
+        }
+        if (result.isInProgress()) {
+            // Keep the same work target and its timeout alive until the reactive guard releases the hand.
+            buildTargetTick = elapsed;
             return;
         }
         retryTicks++;

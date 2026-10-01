@@ -601,6 +601,13 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private void tickCoreBuild(AIPlayerEntity bot, RiskSelection risk) {
+        if (ShieldGuard.usingShield(bot)) {
+            // TaskManager runs before ShieldGuard's release pass, so a newly assigned emergency
+            // wall can inherit one reactive-held tick. Preserve the wall deadline and retry the
+            // exact core block instead of treating that handoff as a placement failure.
+            wallStartedElapsed++;
+            return;
+        }
         if (elapsed - wallStartedElapsed > WALL_BUILD_LIMIT) {
             fallbackToEscape(bot, risk, "creeper_wall_core_timeout");
             return;
@@ -613,6 +620,12 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private void placeNextCoreBlock(AIPlayerEntity bot, RiskSelection risk) {
+        if (ShieldGuard.usingShield(bot)) {
+            // beginWall can call here outside tickCoreBuild on the assignment tick, before the
+            // next ShieldGuard pass lowers a prior reactive hold. Preserve the same deadline there.
+            wallStartedElapsed++;
+            return;
+        }
         if (coreTargets.isEmpty()) {
             enterBarrierHold(bot);
             return;
@@ -650,6 +663,10 @@ public final class CreeperDefenseTask extends AbstractTask {
 
     private void tickBarrierHold(AIPlayerEntity bot, RiskSelection risk) {
         bot.getActionPack().stopAll();
+        if (ShieldGuard.usingShield(bot)) {
+            barrierHeldElapsed++;
+            return;
+        }
         if (!maintainedCoreBarrier(bot)) {
             fallbackToEscape(bot, risk, "creeper_wall_barrier_lost");
             return;

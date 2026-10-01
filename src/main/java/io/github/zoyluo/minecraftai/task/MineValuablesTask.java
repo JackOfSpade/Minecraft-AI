@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
@@ -439,7 +440,8 @@ public final class MineValuablesTask extends AbstractTask {
         var torchSlot = InventoryAction.findItem(bot, Items.TORCH);
         if (torchSlot.isPresent()) {
             InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
-            if (!BuildAction.placeBlockAt(bot, feet).isFailed()) {
+            ActionResult placed = BuildAction.placeBlockAt(bot, feet);
+            if (placed.isSuccess()) {
                 BotLog.action(bot, "mine_valuables_torch", "pos", feet.toShortString());
             }
         }

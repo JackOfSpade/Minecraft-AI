@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.action.OffhandPolicy;
 import io.github.zoyluo.minecraftai.action.RangedWeapon;
 import io.github.zoyluo.minecraftai.action.ShieldBlockability;
 import io.github.zoyluo.minecraftai.action.ShieldRules;
+import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.action.ShieldRules.MainHandKind;
 import io.github.zoyluo.minecraftai.action.ShieldRules.UseKind;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -29,13 +30,17 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Difficulty;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.ElderGuardian;
 import net.minecraft.world.entity.monster.Guardian;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -47,6 +52,8 @@ import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.item.component.BlocksAttacks;
 import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.level.Explosion;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -70,11 +77,13 @@ import net.minecraft.world.phys.Vec3;
  *       the combat task's melee rhythm owns the shield instead (it comes down for each swing and goes back up between them).</li>
  *   <li>A noticed guardian or elder guardian whose beam is locked on the bot: the beam's {@code mob_attack} part is blocked from the
  *       front ({@link ShieldBlockability#GUARDIAN_BEAM_NOTE}); the shield is held until the beam lets go.</li>
- *   <li>A noticed creeper whose fuse is lit and late: the explosion is blockable like any hit.</li>
+ *   <li>A noticed creeper whose fuse is lit and late, or a visibly primed TNT entity within its real blast envelope: the explosion is
+ *       blockable like any hit. TNT's synced fuse is timed against the human turn, hotbar and block-delay budget; an obscured TNT or
+ *       one that is already too late is not magically answered.</li>
  * </ul>
- * <p>Following or escorting (a {@link FollowTask}), only what is already in flight at the bot is blocked (a hold of a few ticks): the
- * follower sprints after its player while hostiles are aggroed (RULES), so no pre-emptive hold. An escape ({@link EvadeTask}: a
- * warden flight, a retreat) sprints and owns the hands.
+ * <p>Following, escorting, escaping, combat regrouping or a combat-task retreat, only what is already in flight at the bot is blocked
+ * (a hold of a few ticks): the bot normally sprints while hostiles are aggroed (RULES), so there is no pre-emptive hold. The brief
+ * vanilla-slowed block ends as soon as the projectile threat ends and sprinting resumes.
  *
  * Never reacted to: thrown splash and lingering potions, experience bottles, snowballs, eggs, ender pearls, a warden's sonic boom,
  * Piercing arrows, evoker fangs, dragon fireballs and breath clouds, lightning, fire, lava and every other damage of
@@ -102,8 +111,8 @@ import net.minecraft.world.phys.Vec3;
  * Eating in progress, a bow being drawn and any other use are finished, not cancelled, for a hit that only hurts; they are cancelled
  * only for a hit that would be lethal ({@link ShieldRules#mayInterrupt}). A ranged exchange of the combat task (its bow or crossbow
  * drawn or loaded, arrow in the offhand) keeps shooting: the shield is not at hand (its arrow took the offhand) and the answer to a
- * shooter is the return shot. The emergency tasks that build or escape (shelter, barricade, creeper defence, lava, fire, powder snow)
- * own the hands too.
+ * shooter is the return shot. The emergency tasks that build (shelter, barricade, creeper defence, lava, fire, powder snow) own the
+ * hands too; escape only yields for an already-in-flight projectile.
  */
 public final class ShieldGuard {
     public static final ShieldGuard INSTANCE = new ShieldGuard();
@@ -118,12 +127,16 @@ public final class ShieldGuard {
      * limit (a shooter drawing at the bot from farther is as real a threat), a longer one only costs a wider query.
      */
     private static double scanRange() {
-        MinecraftAiConfig config = MinecraftAiConfig.get();
-        return Math.max(1, config == null ? 16 : config.perception().radius());
+        return CreatureSenses.observationRadius();
     }
     /** Raise the shield a little ahead of CreeperDefenseTask's own late-fuse wall threshold. */
     static final float CREEPER_FUSE_THRESHOLD = 0.35F;
-    static final double CREEPER_FUSE_RANGE = 10.0D;
+    /** Vanilla Creeper starts at explosion radius 3; a powered Creeper doubles it, and explosion damage reaches twice that radius. */
+    private static final double VANILLA_CREEPER_EXPLOSION_RADIUS = 3.0D;
+    private static final double MAX_CREEPER_BLAST_REACH = VANILLA_CREEPER_EXPLOSION_RADIUS * 2.0D * 2.0D;
+    /** Vanilla {@link PrimedTnt}'s private default explosion power is 4; an explosion can damage out to twice its radius. */
+    private static final double VANILLA_TNT_EXPLOSION_RADIUS = 4.0D;
+    private static final double VANILLA_TNT_BLAST_REACH = VANILLA_TNT_EXPLOSION_RADIUS * 2.0D;
     /** Ticks between attempts after a raise that vanilla refused for a reason other than the cooldown. */
     private static final int RETRY_TICKS = 10;
 
@@ -153,6 +166,7 @@ public final class ShieldGuard {
     private enum Kind {
         PROJECTILE("incoming_projectile"),
         CREEPER("creeper_fuse"),
+        TNT("primed_tnt"),
         GUARDIAN_BEAM("guardian_beam"),
         SHOOTER("shooter_draw");
 
@@ -172,11 +186,16 @@ public final class ShieldGuard {
 
     private static final class State {
         Owner owner = Owner.NONE;
+        /** Retry clock for a refused reactive raise. It must never delay a task's melee rhythm. */
         long retryAt;
+        /** Retry clock for a refused task-owned melee raise. It must never suppress an urgent reactive threat scan. */
+        long taskRetryAt;
         String lastRefusal;
         RaiseCause lastRaise;
         /** The continuous exposure of each sensed projectile (entity id): the reaction time of a first sighting. */
         final ExposureTracker<Integer> projectiles = new ExposureTracker<>();
+        /** The continuous exposure of each visible primed-TNT entity: an object still takes the same human first-sighting reaction. */
+        final ExposureTracker<Integer> primedTnt = new ExposureTracker<>();
     }
 
     private final Map<AIPlayerEntity, State> states = new WeakHashMap<>();
@@ -237,7 +256,7 @@ public final class ShieldGuard {
         Inventory inventory = bot.getInventory();
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
             ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (stack.is(Items.SHIELD)) {
+            if (ShieldBlockability.isShield(stack)) {
                 return stack;
             }
         }
@@ -337,6 +356,61 @@ public final class ShieldGuard {
     public static int blockDelayTicks(AIPlayerEntity bot) {
         BlocksAttacks component = ShieldBlockability.component(shieldStack(bot));
         return component == null ? 5 : component.blockDelayTicks();
+    }
+
+    /**
+     * Holds a task-owned shield between the bot's own melee swings. Call this only after
+     * {@link CombatCore#strikeIfReady(AIPlayerEntity, LivingEntity)} declined to strike: that method is the only place that lowers a
+     * raised shield for a ready, legal swing, and intentionally leaves the swing for the following tick. Guard uses the same rhythm as
+     * {@link CombatTask} instead of making its unprotected cooldown windows a special case. Hunt's fixed prey are passive animals, so
+     * it deliberately has no task-owned melee block.
+     */
+    static boolean holdMeleeBetweenSwings(AIPlayerEntity bot, LivingEntity attacker) {
+        if (INSTANCE.holding(bot)) {
+            return false;
+        }
+        if (!meleeShieldEligible(bot, attacker)) {
+            lowerIfOwner(bot, Owner.TASK);
+            return false;
+        }
+        boolean ready = bot.getAttackStrengthScale(0.5F) >= 0.95F;
+        boolean onTarget = HumanAim.isUnderCrosshair(bot, attacker) && StrikeLegality.strikeRefusal(bot, attacker) == null;
+        double cooldownTicksLeft = bot.getCurrentItemAttackStrengthDelay()
+                * (1.0F - Math.min(1.0F, bot.getAttackStrengthScale(0.5F)));
+        ShieldRules.MeleeStep step = ShieldRules.meleeStep(ready, onTarget, true, shieldUsable(bot), usingShield(bot),
+                cooldownTicksLeft, blockDelayTicks(bot));
+        if (step == ShieldRules.MeleeStep.IDLE) {
+            lowerIfOwner(bot, Owner.TASK);
+            return true;
+        }
+        if (step != ShieldRules.MeleeStep.RAISE) {
+            return true;
+        }
+        State state = INSTANCE.stateOf(bot);
+        long now = bot.level().getGameTime();
+        if (now < state.taskRetryAt) {
+            return true;
+        }
+        if (raise(bot, Owner.TASK) == Raise.REFUSED) {
+            // A failed vanilla use is retried on the same modest cadence as reactive blocking, never once per tick. This clock is
+            // separate: a task-side refusal must not make tick() skip a real incoming projectile.
+            state.taskRetryAt = now + RETRY_TICKS;
+        }
+        return true;
+    }
+
+    /**
+     * The local facts a task needs before it can claim the between-swings rhythm: the bot itself, not only its owner, has noticed a
+     * live attacker in reach; the carried shield can block that attack's real vanilla damage source; and the task is not trying to
+     * stand against a threat its combat rules forbid (notably a warden or creeper).
+     */
+    static boolean meleeShieldEligible(AIPlayerEntity bot, LivingEntity attacker) {
+        if (!(bot.level() instanceof ServerLevel level) || attacker == null || !attacker.isAlive()
+                || CombatCore.isMeleeForbiddenThreat(attacker) || !CombatCore.inMeleeRange(bot, attacker)
+                || !ObservableWorldQuery.canNoticeCreature(bot, attacker) || !shieldUsable(bot)) {
+            return false;
+        }
+        return ShieldBlockability.meleeBlockable(level, shieldStack(bot), attacker);
     }
 
     /** What the main hand holds, for the vanilla use order (each case mirrors the item's own {@code use}). */
@@ -531,7 +605,8 @@ public final class ShieldGuard {
             return;
         }
         boolean held = active instanceof CombatTask combat && combat.holdsItsShield()
-                || active instanceof CreeperDefenseTask creeper && creeper.holdsItsShield();
+                || active instanceof CreeperDefenseTask creeper && creeper.holdsItsShield()
+                || active instanceof GuardTask guard && guard.holdsItsShield(bot);
         if (!held) {
             if (usingShield(bot)) {
                 bot.releaseUsingItem();
@@ -566,10 +641,7 @@ public final class ShieldGuard {
         if (task instanceof CombatTask combat) {
             return combat.isRangedExchange();
         }
-        // An escape (EvadeTask: a warden flight, a retreat) sprints: RULES, "always sprint while hostiles are aggroed" and "sprint away
-        // while the warden hunts". A raised shield would stop the sprint.
-        return task instanceof EvadeTask
-                || task instanceof EmergencyShelterTask
+        return task instanceof EmergencyShelterTask
                 || task instanceof MiningBarricadeTask
                 || task instanceof CreeperDefenseTask
                 || task instanceof LavaEscapeTask
@@ -622,10 +694,11 @@ public final class ShieldGuard {
             }
             logRefusalOnce(bot, state, "projectile_too_late");
         }
-        if (active instanceof FollowTask) {
-            // Following or escorting, the bot sprints after its player while hostiles are aggroed (RULES, follow and escort pace): it
-            // blocks what is ALREADY in flight at it (a hold of a few ticks), never a pre-emptive hold against a drawing shooter, a
-            // charging beam or a fuse (the danger watcher takes a follower off the follow for a creeper).
+        if (active instanceof FollowTask || active instanceof EvadeTask || active instanceof CombatRegroupTask
+                || active instanceof CombatTask combat && combat.retreating()) {
+            // Following, escorting, escaping, regrouping or a combat-task retreat, the bot normally sprints while hostiles are aggroed.
+            // It still blocks what is ALREADY in flight at it (a brief vanilla-slowed hold), never a pre-emptive hold against a drawing
+            // shooter, charging beam or fuse.
             return null;
         }
         // 2. A late creeper fuse (the creeper defence task has its own shield phase).
@@ -639,18 +712,54 @@ public final class ShieldGuard {
                 }
             }
         }
-        // 3. A guardian's beam locked on the bot: its mob_attack part is blockable from the front.
+        // 3. A visible primed TNT block: PrimedTnt exposes its real remaining fuse, and vanilla's own source decides whether this
+        // shield blocks this particular explosion. The GameRule is also vanilla's: no explosion means no reason to raise.
+        if (level.getGameRules().get(GameRules.TNT_EXPLODES)) {
+            List<PrimedTnt> tnts = imminentTnt(bot);
+            Set<Integer> inFieldTnt = new HashSet<>();
+            for (PrimedTnt tnt : tnts) {
+                if (tntInViewField(bot, tnt)) {
+                    inFieldTnt.add(tnt.getId());
+                }
+            }
+            // The object query is omnidirectional. Keep a reaction run only while this individual TNT stays in the perception field;
+            // in particular, an out-of-view near TNT must not mask a farther visible one that can actually be answered.
+            state.primedTnt.retain(inFieldTnt);
+            for (PrimedTnt tnt : tnts) {
+                if (!inFieldTnt.contains(tnt.getId())) {
+                    logRefusalOnce(bot, state, "tnt_outside_view");
+                    continue;
+                }
+                long exposed = state.primedTnt.sighted(tnt.getId(), now);
+                if (!reactedToVisibleTnt(bot, tnt, exposed)) {
+                    logRefusalOnce(bot, state, "tnt_reaction_time");
+                    continue;
+                }
+                DamageSource blast = Explosion.getDefaultDamageSource(level, tnt);
+                double arc = ShieldBlockability.halfArcDeg(component, blast);
+                if (ShieldBlockability.blocks(shield, blast)
+                        && canFace(bot, state, tnt.position(), arc)
+                        && canBlockPrimedTntInTime(bot, tnt, delay, arc, raised)) {
+                    return new Threat(Kind.TNT, tnt.position(), arc, tnt.getFuse(),
+                            primedTntWorstCaseDamage(bot.distanceTo(tnt)),
+                            BuiltInRegistries.ENTITY_TYPE.getKey(tnt.getType()).toString(), tnt.getId());
+                }
+            }
+        } else {
+            state.primedTnt.clear();
+        }
+        // 4. A guardian's beam locked on the bot: its mob_attack part is blockable from the front.
         Guardian guardian = guardianBeamOn(bot, active);
         if (guardian != null) {
             DamageSource bite = ShieldBlockability.meleeSource(level, guardian);
             double arc = ShieldBlockability.halfArcDeg(component, bite);
             if (ShieldBlockability.blocks(shield, bite) && canFace(bot, state, guardian.position(), arc)) {
                 return new Threat(Kind.GUARDIAN_BEAM, guardian.position(), arc, Double.NaN,
-                        (float) guardian.getAttributeValue(Attributes.ATTACK_DAMAGE) + 1.0F,
+                            guardianBeamDamage(level, guardian),
                         BuiltInRegistries.ENTITY_TYPE.getKey(guardian.getType()).toString(), guardian.getId());
             }
         }
-        // 4. A shooter drawing (or holding a loaded crossbow) at the bot: held until the shot lands or the draw stops.
+        // 5. A shooter drawing (or holding a loaded crossbow) at the bot: held until the shot lands or the draw stops.
         LivingEntity shooter = drawingShooterAt(bot, active);
         if (shooter != null) {
             DamageSource arrow = level.damageSources().source(DamageTypes.ARROW, shooter);
@@ -711,6 +820,30 @@ public final class ShieldGuard {
         return ShieldRules.reacted(true, false, CreaturePerception.exposureSeconds(exposedTicks), required);
     }
 
+    /** A visible but non-creature TNT entity follows the same first-sighting reaction formula as a visible projectile. */
+    private static boolean reactedToVisibleTnt(AIPlayerEntity bot, PrimedTnt tnt, long exposedTicks) {
+        if (CreatureSenses.INSTANCE.legacyObservationAnswers(bot)) {
+            return true;
+        }
+        Vec3 toward = tnt.position().subtract(bot.getEyePosition());
+        Vec3 look = bot.getViewVector(1.0F);
+        double theta = CreaturePerception.angleDeg(look.x, look.y, look.z, toward.x, toward.y, toward.z);
+        double required = CreaturePerception.requiredSeconds(perceptionParams(), theta, toward.length(),
+                CreaturePerception.Subject.of(false), false);
+        return ShieldRules.reacted(true, false, CreaturePerception.exposureSeconds(exposedTicks), required);
+    }
+
+    /** Whether a real visible TNT object is inside the same peripheral field whose continuous exposure earns a reaction. */
+    private static boolean tntInViewField(AIPlayerEntity bot, PrimedTnt tnt) {
+        if (CreatureSenses.INSTANCE.legacyObservationAnswers(bot)) {
+            return true;
+        }
+        Vec3 toward = tnt.position().subtract(bot.getEyePosition());
+        Vec3 look = bot.getViewVector(1.0F);
+        double theta = CreaturePerception.angleDeg(look.x, look.y, look.z, toward.x, toward.y, toward.z);
+        return theta <= perceptionParams().peripheralHalfAngleDeg();
+    }
+
     private static CreaturePerception.Params perceptionParams() {
         MinecraftAiConfig config = MinecraftAiConfig.get();
         MinecraftAiConfig.PerceptionBehaviour behaviour = config == null || config.behaviour() == null
@@ -733,6 +866,34 @@ public final class ShieldGuard {
         MainHandKind main = classifyMainHand(bot, bot.getMainHandItem());
         int switching = ShieldRules.mainHandConsumesUse(main) && main != MainHandKind.SHIELD ? ShieldRules.HOTBAR_SWITCH_TICKS : 0;
         return ShieldRules.canBeActiveInTime(ticksToImpact, turn, delay, switching);
+    }
+
+    /**
+     * The PrimedTnt-specific version of the same timing check. A shield already in use has only its remaining vanilla block delay and
+     * no hotbar change left; it still has to turn into the blast's front arc before the synced fuse reaches zero. A raised shield is
+     * not assumed active merely because {@link #usingShield} is true: {@link AIPlayerEntity#getTicksUsingItem()} is the vanilla count
+     * used to retain the rest of the item's {@code block_delay_seconds}.
+     */
+    private static boolean canBlockPrimedTntInTime(AIPlayerEntity bot, PrimedTnt tnt, int blockDelay, double halfArcDeg,
+                                                    boolean shieldAlreadyUp) {
+        if (halfArcDeg <= 0.0D) {
+            return false;
+        }
+        double offset = ShieldRules.offsetDeg(bot.getYHeadRot(), tnt.getX() - bot.getX(), tnt.getZ() - bot.getZ());
+        double degrees = ShieldRules.degreesToTurn(offset, halfArcDeg);
+        int turn = degrees <= 0.0D ? 0
+                : walking(bot) ? Integer.MAX_VALUE
+                : ShieldRules.turnTicks(degrees, HumanAim.maxTurnDegPerTick());
+        int delayRemaining = shieldAlreadyUp ? Math.max(0, blockDelay - bot.getTicksUsingItem()) : blockDelay;
+        MainHandKind main = classifyMainHand(bot, bot.getMainHandItem());
+        int switching = shieldAlreadyUp || main == MainHandKind.SHIELD || !ShieldRules.mainHandConsumesUse(main)
+                ? 0 : ShieldRules.HOTBAR_SWITCH_TICKS;
+        return primedTntCanBeActiveInTime(tnt.getFuse(), turn, delayRemaining, switching);
+    }
+
+    /** The pure fuse/envelope seam: {@link PrimedTnt#getFuse()} is positive until its next explosion tick. */
+    static boolean primedTntCanBeActiveInTime(int fuseTicks, int turnTicks, int blockDelayTicks, int switchTicks) {
+        return fuseTicks > 0 && ShieldRules.canBeActiveInTime(fuseTicks, turnTicks, blockDelayTicks, switchTicks);
     }
 
     private void logRefusalOnce(AIPlayerEntity bot, State state, String reason) {
@@ -796,40 +957,118 @@ public final class ShieldGuard {
 
     // ------------------------------------------------------------------ what threatens the bot
 
-    /** The nearest noticed creeper whose fuse has reached a late stage and is close enough for the blast to matter. */
+    /** The nearest noticed creeper whose fuse has reached a late stage and is inside its actual vanilla damage envelope. */
     static Creeper nearbyImminentCreeper(AIPlayerEntity bot) {
         return bot.level().getEntitiesOfClass(Creeper.class,
-                        bot.getBoundingBox().inflate(CREEPER_FUSE_RANGE),
+                        // The scan uses the maximum possible vanilla envelope; each result below is checked against its actual powered
+                        // state. This is not a shield-specific cutoff: explosion damage itself stops at radius * 2.
+                        bot.getBoundingBox().inflate(MAX_CREEPER_BLAST_REACH),
                         creeper -> creeper.isAlive()
+                                && isVanillaCreeper(creeper)
                                 && creeper.getSwelling(1.0F) >= CREEPER_FUSE_THRESHOLD
+                                && bot.distanceTo(creeper) <= creeperBlastReach(creeper.isPowered())
                                 && ObservableWorldQuery.canNoticeCreature(bot, creeper))
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .orElse(null);
     }
 
+    /** The furthest distance vanilla explosion damage can reach for this Creeper's public powered state. */
+    static double creeperBlastReach(boolean powered) {
+        return VANILLA_CREEPER_EXPLOSION_RADIUS * (powered ? 2.0D : 1.0D) * 2.0D;
+    }
+
+    /** The explosion-radius model applies only to the registered vanilla creeper, never an arbitrary mod subclass. */
+    private static boolean isVanillaCreeper(Creeper creeper) {
+        return creeper.getType() == EntityType.CREEPER;
+    }
+
     /**
-     * The nearest noticed guardian (or elder guardian) whose beam is locked on the bot: the beam is in plain view from its first tick
-     * (the synced attack target a client draws it to), so a player sees it charge and raises the shield. On the server the beam's
-     * target is the guardian's target while the beam is on ({@code Guardian.getActiveAttackTarget}).
+     * All visible primed vanilla TNT within the default TNT explosion's real damage envelope, nearest first. PrimedTnt synchronizes its fuse
+     * but deliberately exposes no explosion-power getter: this is the verified vanilla default (power 4, damage out to twice the
+     * radius), rather than a made-up shield scan radius. A data pack or mod that changes the private saved power needs to expose that
+     * value before a bot can honestly know a different envelope.
+     */
+    static List<PrimedTnt> imminentTnt(AIPlayerEntity bot) {
+        return bot.level().getEntitiesOfClass(PrimedTnt.class,
+                        bot.getBoundingBox().inflate(primedTntBlastReach()),
+                        tnt -> tnt.isAlive()
+                                && isVanillaPrimedTnt(tnt)
+                                && tnt.getFuse() > 0
+                                && bot.distanceTo(tnt) <= primedTntBlastReach()
+                                // TNT is an object, not a LivingEntity tracked by CreatureSenses: require the normal visible-entity
+                                // observation (profile radius + vanilla line of sight), never a query of an unseen fuse.
+                                && ObservableWorldQuery.canObserveEntity(bot, tnt))
+                .stream()
+                .sorted(Comparator.comparingDouble(bot::distanceToSqr))
+                .toList();
+    }
+
+    /** PrimedTnt has no public explosion-power getter, so use its default envelope only for the registered vanilla TNT entity. */
+    private static boolean isVanillaPrimedTnt(PrimedTnt tnt) {
+        return tnt.getType() == EntityType.TNT;
+    }
+
+    /** The furthest distance the default vanilla PrimedTnt explosion can damage; not a shield-specific scan cutoff. */
+    static double primedTntBlastReach() {
+        return VANILLA_TNT_BLAST_REACH;
+    }
+
+    /**
+     * A visible default-TNT blast's conservative vanilla damage bound at the bot's observed physical distance. Vanilla multiplies
+     * {@code (impact * impact + impact) / 2} by {@code 7 * radius * 2}, then truncates and adds one; using an unobstructed exposure
+     * of one and no armour makes this a bound, not a claim to know an obscuring block or future damage reduction. It is used only for
+     * the hand-interruption lethality decision, so a distant nonlethal TNT cannot cancel eating or drawing merely because the
+     * zero-distance damage is high.
+     */
+    static float primedTntWorstCaseDamage(double observedDistance) {
+        double normalizedDistance = Math.max(0.0D, Math.min(1.0D, observedDistance / VANILLA_TNT_BLAST_REACH));
+        double impact = 1.0D - normalizedDistance;
+        return (float) Math.floor((impact * impact + impact) * 0.5D * 7.0D * VANILLA_TNT_BLAST_REACH + 1.0D);
+    }
+
+    /**
+     * GuardianAttackGoal's complete damage for hand-priority lethality: its unavoidable indirect-magic opening (one, plus two on
+     * Hard and another two for an elder) followed by the guardian's normal public {@code mob_attack}. The shield only blocks the latter,
+     * but an eating/drawing decision must budget both rather than silently underestimating a hard/elder beam.
+     */
+    static float guardianBeamDamage(double attackDamage, boolean hard, boolean elder) {
+        return (float) attackDamage + 1.0F + (hard ? 2.0F : 0.0F) + (elder ? 2.0F : 0.0F);
+    }
+
+    private static float guardianBeamDamage(ServerLevel level, Guardian guardian) {
+        return guardianBeamDamage(guardian.getAttributeValue(Attributes.ATTACK_DAMAGE), level.getDifficulty() == Difficulty.HARD,
+                guardian instanceof ElderGuardian);
+    }
+
+    /**
+     * The nearest noticed registered vanilla guardian (or elder guardian) whose beam is locked on the bot: the beam is in plain view
+     * from its first tick (the synced attack target a client draws it to), so a player sees it charge and raises the shield. On the
+     * server the beam's target is the guardian's target while the beam is on ({@code Guardian.getActiveAttackTarget}). A modded
+     * {@link Guardian} subclass is unknown rather than assumed to share vanilla beam damage.
      */
     static Guardian guardianBeamOn(AIPlayerEntity bot) {
         return guardianBeamOn(bot, null);
     }
 
-    /** {@link #guardianBeamOn(AIPlayerEntity)} without the guardian the combat task's melee rhythm is fighting within reach. */
+    /** {@link #guardianBeamOn(AIPlayerEntity)} without a guardian an active melee rhythm is fighting within reach. */
     private static Guardian guardianBeamOn(AIPlayerEntity bot, Task active) {
-        CombatTask combat = active instanceof CombatTask c ? c : null;
         return bot.level().getEntitiesOfClass(Guardian.class,
                         bot.getBoundingBox().inflate(scanRange()),
                         guardian -> guardian.isAlive()
+                                && isVanillaGuardian(guardian)
                                 && guardian.hasActiveAttackTarget()
                                 && guardian.getActiveAttackTarget() == bot
                                 && ObservableWorldQuery.canNoticeCreature(bot, guardian)
-                                && (combat == null || !combat.meleeRhythmAgainst(bot, guardian)))
+                                && !activeMeleeRhythmAgainst(active, bot, guardian))
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .orElse(null);
+    }
+
+    /** Guardian beam formulae are vanilla-only: a compatible Java subclass is not evidence of compatible gameplay mechanics. */
+    private static boolean isVanillaGuardian(Guardian guardian) {
+        return guardian.getType() == EntityType.GUARDIAN || guardian.getType() == EntityType.ELDER_GUARDIAN;
     }
 
     /**
@@ -842,9 +1081,8 @@ public final class ShieldGuard {
         return drawingShooterAt(bot, null);
     }
 
-    /** {@link #drawingShooterAt(AIPlayerEntity)} without the shooter the combat task's melee rhythm is fighting within reach. */
+    /** {@link #drawingShooterAt(AIPlayerEntity)} without the shooter an active melee rhythm is fighting within reach. */
     private static LivingEntity drawingShooterAt(AIPlayerEntity bot, Task active) {
-        CombatTask combat = active instanceof CombatTask c ? c : null;
         return bot.level().getEntitiesOfClass(LivingEntity.class,
                         bot.getBoundingBox().inflate(scanRange()),
                         shooter -> shooter != bot
@@ -852,10 +1090,16 @@ public final class ShieldGuard {
                                 && isDrawingBowAt(shooter, bot)
                                 && CombatCore.hostileTo(bot, shooter)
                                 && ObservableWorldQuery.canNoticeCreature(bot, shooter)
-                                && (combat == null || !combat.meleeRhythmAgainst(bot, shooter)))
+                                && !activeMeleeRhythmAgainst(active, bot, shooter))
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .orElse(null);
+    }
+
+    /** Whether this task, rather than the reactive owner, owns the shield rhythm against {@code entity}. */
+    private static boolean activeMeleeRhythmAgainst(Task active, AIPlayerEntity bot, LivingEntity entity) {
+        return (active instanceof CombatTask combat && combat.meleeRhythmAgainst(bot, entity))
+                || (active instanceof GuardTask guard && guard.meleeRhythmAgainst(bot, entity));
     }
 
     /** True when {@code shooter} has a bow (or crossbow) up and its head is aimed at {@code bot}: see {@link #drawingShooterAt}. */

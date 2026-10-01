@@ -110,6 +110,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private enum BranchFluidSealResult {
         CLEAR,
         SEALED,
+        WAITING,
         BLOCKED
     }
 
@@ -263,6 +264,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private final int restoredPendingPickupInventory;
     private final BlockPos restoredActiveTargetBreakPos;
     private final int restoredActiveTargetBreakInventory;
+    private final boolean restoredActiveTargetBreakConfirmedGone;
     private final String oreFingerprint;
     private boolean restoringFace;
     /**
@@ -292,6 +294,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int deliveredBatchObservationTicks;
     private BlockPos activeTargetBreakPos;
     private int activeTargetBreakInventory = -1;
+    /**
+     * A factual ledger entry: this exact active break was seen to finish by its own BlockMiner or
+     * by an ordinary observed-GONE check. It is never inferred from an unobservable cell, and is
+     * cleared with the owner or if the cell is visibly occupied again.
+     */
+    private boolean activeTargetBreakConfirmedGone;
     private int budgetOffset;
     private int torchPlacements;
     private int resourceEpoch;
@@ -424,6 +432,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 ? null : restoredCheckpoint.activeBreakPos();
         this.restoredActiveTargetBreakInventory = restoredCheckpoint == null
                 ? -1 : restoredCheckpoint.activeBreakInventory();
+        this.restoredActiveTargetBreakConfirmedGone = restoredCheckpoint != null
+                && restoredCheckpoint.activeBreakConfirmedGone();
         this.budgetTargetCount = restoredCheckpoint != null && restoredCheckpoint.batchOpen()
                 ? restoredCheckpoint.targetCount() : Math.max(1, targetCount);
         this.deliveredAtStart = restoredCheckpoint != null && restoredCheckpoint.batchOpen()
@@ -882,12 +892,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (restoredActiveTargetBreakPos != null && restoredActiveTargetBreakInventory >= 0) {
             OreScan.Observation restoredTarget = OreScan.observeOre(
                     bot, restoredActiveTargetBreakPos, targetOres);
-            if (restoredTarget != OreScan.Observation.OBSERVED_GONE) {
+            if (restoredTarget != OreScan.Observation.OBSERVED_GONE
+                    || restoredActiveTargetBreakConfirmedGone) {
                 // A restart loses BlockMiner's controller, not ownership of the finite block.
                 // UNKNOWN keeps the exact active target staged until ordinary perception can prove
-                // either the intact ore or its factual disappearance.
+                // either the intact ore or its factual disappearance. A persisted factual-GONE
+                // bit also keeps a shield-deferred support placement retryable when this formerly
+                // open cell is now occluded; it is not inferred from the occlusion itself.
                 activeTargetBreakPos = restoredActiveTargetBreakPos;
                 activeTargetBreakInventory = restoredActiveTargetBreakInventory;
+                activeTargetBreakConfirmedGone = restoredActiveTargetBreakConfirmedGone;
                 targetOre = restoredActiveTargetBreakPos;
             } else if (pendingPickupPos == null) {
                 pendingPickupPos = restoredActiveTargetBreakPos;
@@ -1118,6 +1132,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (pendingPickupPos != null || activeTargetBreakPos != null) {
             clearStripMovementOwnership();
         }
+        if (settleObservedActiveBreakBeforeTerminalChecks(bot)) {
+            return;
+        }
         if (recoverPendingTargetDrop(bot)) {
             return;
         }
@@ -1296,10 +1313,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 }
                 BlockMiner.Status st = miner.tick(bot);
                 if (st == BlockMiner.Status.DONE) {
-                    finishTargetBreak(bot, targetOre, activeTargetBreakInventory);
-                    targetOre = null;
-                    noteProgress();
-                    consecutiveSkips = 0;
+                    if (finishTargetBreak(bot, targetOre, activeTargetBreakInventory)) {
+                        targetOre = null;
+                        noteProgress();
+                        consecutiveSkips = 0;
+                    }
                 } else if (st == BlockMiner.Status.FAILED
                         && !failMissingMiningChannelTool(bot)) {
                     clearActiveTargetBreak(targetOre);
@@ -1349,8 +1367,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 int breakBaseline = activeTargetBreakPos != null && activeTargetBreakPos.equals(targetOre)
                         ? activeTargetBreakInventory
                         : Math.max(0, inventoryNow - (targetInventoryAdvanced ? 1 : 0));
-                finishTargetBreak(bot, targetOre, breakBaseline);
-                targetOre = null;
+                if (finishTargetBreak(bot, targetOre, breakBaseline)) {
+                    targetOre = null;
+                }
                 return;
             }
             if (activeTargetBreakPos != null
@@ -1505,10 +1524,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     // pickup sweep, otherwise collected never increases and the bot gets pulled away
                     // by the next target having mined for nothing (geo_wall testing: 0/1 after
                     // mine_complete).
-                    finishTargetBreak(bot, targetOre, activeTargetBreakInventory);
-                    targetOre = null;
-                    noteProgress();
-                    consecutiveSkips = 0; // Successfully mined -> reset the skip count (this area is reachable, no need to force strip-mining)
+                    if (finishTargetBreak(bot, targetOre, activeTargetBreakInventory)) {
+                        targetOre = null;
+                        noteProgress();
+                        consecutiveSkips = 0; // Successfully mined -> reset the skip count (this area is reachable, no need to force strip-mining)
+                    }
                 } else if (st == BlockMiner.Status.FAILED
                         && !failMissingMiningChannelTool(bot)) {
                     clearActiveTargetBreak(targetOre);
@@ -1649,34 +1669,43 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             BlockPos active = activeTargetBreakPos;
             miner.cancel(bot);
             OreScan.Observation activeState = OreScan.observeOre(bot, active, targetOres);
-            if (activeState == OreScan.Observation.UNKNOWN) {
-                // Delivered inventory does not authorize guessing whether the last open break
-                // committed. But waiting blind is unbounded after a restart whose restore pose
-                // cannot see the cell at all — this fast path also runs before the hard timeout,
-                // so nothing else would ever end it. Walk the observable ring to regain
-                // perception; past the bounded window prefer the under-claiming exact-once
-                // outcome (leave the ore in the world, never count it).
-                deliveredBatchObservationTicks++;
-                if (deliveredBatchObservationTicks > RESTORE_FACE_LIMIT) {
-                    BotLog.action(bot, "ore_dig_delivered_batch_break_unobservable",
-                            "pos", active.toShortString(),
-                            "waited", deliveredBatchObservationTicks);
-                    clearActiveTargetBreak(active);
+            if (activeState == OreScan.Observation.OBSERVED_PRESENT) {
+                // The block was never committed (or a replacement was visibly placed at the
+                // coordinate). Leave it in the world and discard the old break baseline.
+                clearActiveTargetBreak(active);
+            } else {
+                if (activeState == OreScan.Observation.OBSERVED_GONE) {
+                    activeTargetBreakConfirmedGone = true;
+                }
+                if (activeBreakNeedsSettlement(activeState, activeTargetBreakConfirmedGone)) {
+                    // DONE/observed-GONE is a durable fact. A reactive shield may defer its
+                    // support placement, and subsequent lost sight must not let completed quota
+                    // erase that physical handoff.
+                    if (!finishTargetBreak(bot, active, activeTargetBreakInventory)) {
+                        return;
+                    }
+                } else {
+                    // Delivered inventory does not authorize guessing whether the last open break
+                    // committed. But waiting blind is unbounded after a restart whose restore pose
+                    // cannot see the cell at all — this fast path also runs before the hard timeout,
+                    // so nothing else would ever end it. Walk the observable ring to regain
+                    // perception; past the bounded window prefer the under-claiming exact-once
+                    // outcome (leave the ore in the world, never count it).
+                    deliveredBatchObservationTicks++;
+                    if (deliveredBatchObservationTicks > RESTORE_FACE_LIMIT) {
+                        BotLog.action(bot, "ore_dig_delivered_batch_break_unobservable",
+                                "pos", active.toShortString(),
+                                "waited", deliveredBatchObservationTicks);
+                        clearActiveTargetBreak(active);
+                        return;
+                    }
+                    if (deliveredBatchObservationTicks % 20 == 0
+                            && bot.getActionPack().isPathExecutorIdle()
+                            && bot.getActionPack().isWalkToIdle()) {
+                        startObservationSweepStep(bot, active);
+                    }
                     return;
                 }
-                if (deliveredBatchObservationTicks % 20 == 0
-                        && bot.getActionPack().isPathExecutorIdle()
-                        && bot.getActionPack().isWalkToIdle()) {
-                    startObservationSweepStep(bot, active);
-                }
-                return;
-            }
-            if (activeState == OreScan.Observation.OBSERVED_PRESENT) {
-                // The block was never committed. Leaving it in the world is the only exact-once
-                // outcome now that this batch's delivered quota is already complete.
-                clearActiveTargetBreak(active);
-            } else if (pendingPickupPos == null) {
-                finishTargetBreak(bot, active, activeTargetBreakInventory);
             }
         }
         if (recoverPendingTargetDrop(bot)) {
@@ -1931,7 +1960,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 io.github.zoyluo.minecraftai.action.InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
                 ActionResult placement = io.github.zoyluo.minecraftai.action.BuildAction.placeBlockAt(
                         bot, bot.blockPosition());
-                if (!placement.isFailed()) {
+                if (placement.isInProgress()) {
+                    // A reactive shield temporarily owns use. Keep this exact lighting boundary
+                    // without spending torch/branch state or letting the outer stall watchdog
+                    // turn the legitimate handoff into a mining failure.
+                    noteProgress();
+                    return;
+                }
+                if (placement.isSuccess()) {
                     if (rareExpeditionBatch) {
                         torchPlacements++;
                     }
@@ -2270,6 +2306,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 committed || pendingPickupPos == null ? -1 : pendingPickupGainTick,
                 committed ? null : activeTargetBreakPos,
                 committed || activeTargetBreakPos == null ? -1 : activeTargetBreakInventory,
+                !committed && activeTargetBreakPos != null && activeTargetBreakConfirmedGone,
                 durableRememberedHighWorkPoses);
         Map<String, String> encoded = live.encode();
         return OreDigCheckpoint.decode(encoded, targetOres).isPresent() ? encoded : Map.of();
@@ -2633,9 +2670,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             BlockMiner.Status st = miner.tick(bot);
             if (st == BlockMiner.Status.DONE) {
-                finishTargetBreak(bot, v, activeTargetBreakInventory);
-                veinQueue.pollFirst();
-                noteProgress();
+                if (finishTargetBreak(bot, v, activeTargetBreakInventory)) {
+                    veinQueue.pollFirst();
+                    noteProgress();
+                }
             } else if (st == BlockMiner.Status.FAILED
                     && !failMissingMiningChannelTool(bot)) {
                 clearActiveTargetBreak(v);
@@ -2662,7 +2700,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         if (veinState == OreScan.Observation.OBSERVED_GONE) {
             if (v != null && activeTargetBreakPos != null && activeTargetBreakPos.equals(v)) {
-                finishTargetBreak(bot, v, activeTargetBreakInventory);
+                if (!finishTargetBreak(bot, v, activeTargetBreakInventory)) {
+                    return true;
+                }
             } else {
                 forgetRememberedHighWorkPose(v);
             }
@@ -2745,9 +2785,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 ? miner.tick(bot)
                 : beginTargetMine(bot, v);
         if (st == BlockMiner.Status.DONE) {
-            finishTargetBreak(bot, v, activeTargetBreakInventory);
-            veinQueue.pollFirst();
-            noteProgress();
+            if (finishTargetBreak(bot, v, activeTargetBreakInventory)) {
+                veinQueue.pollFirst();
+                noteProgress();
+            }
         } else if (st == BlockMiner.Status.FAILED
                 && !failMissingMiningChannelTool(bot)) {
             clearActiveTargetBreak(v);
@@ -2935,6 +2976,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (activeTargetBreakPos == null || !activeTargetBreakPos.equals(pos)) {
             activeTargetBreakPos = pos.immutable();
             activeTargetBreakInventory = HarvestCore.countInventoryItems(bot, targetDrops);
+            activeTargetBreakConfirmedGone = false;
         }
         return beginMine(bot, pos);
     }
@@ -3002,7 +3044,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 && !state.getCollisionShape(world, support).isEmpty();
     }
 
-    private void finishTargetBreak(AIPlayerEntity bot, BlockPos pos, int inventoryBeforeBreak) {
+    /**
+     * Finishes a physically broken target once its drop catch is either proven or deliberately
+     * unavailable. Returns false only while a reactive shield has temporarily deferred the one
+     * required support placement; callers retain the exact break owner and retry next tick.
+     */
+    private boolean finishTargetBreak(AIPlayerEntity bot, BlockPos pos, int inventoryBeforeBreak) {
+        int safeBaseline = inventoryBeforeBreak >= 0
+                ? inventoryBeforeBreak
+                : HarvestCore.countInventoryItems(bot, targetDrops);
+        confirmActiveTargetBreakGone(pos, safeBaseline);
+        if (!stabilizeBrokenTargetDrop(bot, pos)) {
+            return false;
+        }
         if (veinMode) {
             veinBroken.add(pos.immutable());
             veinSweep.addLast(pos.immutable());
@@ -3015,13 +3069,70 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // pickup window. Record every newly visible target pose now, before chasing the randomized
         // ItemEntity can settle the bot under the remaining ore and occlude that staircase again.
         nearestOre(bot, bot.level());
-        stabilizeBrokenTargetDrop(bot, pos);
         MiningEvidenceAudit.recordDiamondOreBreak(bot, pos);
-        int safeBaseline = inventoryBeforeBreak >= 0
-                ? inventoryBeforeBreak
-                : HarvestCore.countInventoryItems(bot, targetDrops);
         beginPendingTargetDrop(bot, pos, safeBaseline);
         clearActiveTargetBreak(pos);
+        return true;
+    }
+
+    /** Records only a break fact supplied by a DONE or ordinary observed-GONE caller. */
+    private void confirmActiveTargetBreakGone(BlockPos pos, int inventoryBeforeBreak) {
+        if (activeTargetBreakPos == null) {
+            activeTargetBreakPos = pos.immutable();
+            activeTargetBreakInventory = inventoryBeforeBreak;
+        }
+        if (activeTargetBreakPos.equals(pos)) {
+            activeTargetBreakConfirmedGone = true;
+        }
+    }
+
+    /**
+     * Whether a durable factual break still needs its one finalization transaction. UNKNOWN never
+     * creates that fact, but it cannot erase one recorded from BlockMiner.DONE or an ordinary
+     * observed-GONE check. A newly visible target does erase it at the caller.
+     */
+    static boolean activeBreakNeedsSettlement(OreScan.Observation observation,
+                                              boolean confirmedGone) {
+        return observation != OreScan.Observation.OBSERVED_PRESENT
+                && (confirmedGone || observation == OreScan.Observation.OBSERVED_GONE);
+    }
+
+    /**
+     * A target can break and be picked up while a reactive shield still defers its required
+     * drop-support placement. Settle that observed, exact break owner before terminal quota or
+     * capacity decisions, so neither can bypass the physical handoff on the next task tick.
+     */
+    private boolean settleObservedActiveBreakBeforeTerminalChecks(AIPlayerEntity bot) {
+        BlockPos active = activeTargetBreakPos;
+        if (active == null || pendingPickupPos != null) {
+            return false;
+        }
+        OreScan.Observation observed = OreScan.observeOre(bot, active, targetOres);
+        if (observed == OreScan.Observation.OBSERVED_PRESENT) {
+            // A new visible block at the old coordinate invalidates the former break fact. It
+            // must never receive the former drop's support/finalization transaction or its old
+            // inventory baseline; the still-owned target will establish a fresh ledger to mine it.
+            clearActiveTargetBreak(active);
+            return false;
+        }
+        if (observed == OreScan.Observation.OBSERVED_GONE) {
+            activeTargetBreakConfirmedGone = true;
+        }
+        if (!activeBreakNeedsSettlement(observed, activeTargetBreakConfirmedGone)) {
+            return false;
+        }
+        if (!finishTargetBreak(bot, active, activeTargetBreakInventory)) {
+            return true;
+        }
+        if (active.equals(targetOre)) {
+            targetOre = null;
+        }
+        if (veinMode) {
+            veinQueue.remove(active);
+        }
+        consecutiveSkips = 0;
+        noteProgress();
+        return true;
     }
 
     /**
@@ -3032,9 +3143,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * solid. Higher targets first move to a real high work pose before entering this same bounded
      * break envelope. Failure leaves the ordinary durable pickup debt in charge.
      */
-    private void stabilizeBrokenTargetDrop(AIPlayerEntity bot, BlockPos ore) {
+    private boolean stabilizeBrokenTargetDrop(AIPlayerEntity bot, BlockPos ore) {
         if (!needsTargetDropSupport(bot, ore)) {
-            return;
+            return true;
         }
         ServerLevel world = bot.level();
         BlockPos support = ore.below();
@@ -3043,7 +3154,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),
                     "reason", "unobservable_after_break");
-            return;
+            return true;
         }
         var state = world.getBlockState(support);
         if (!state.getFluidState().isEmpty() || Standability.isDangerous(state)) {
@@ -3051,17 +3162,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),
                     "reason", !state.getFluidState().isEmpty() ? "fluid" : "dangerous");
-            return;
+            return true;
         }
         if (!state.getCollisionShape(world, support).isEmpty()) {
-            return;
+            return true;
         }
         if (!state.isAir()) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),
                     "reason", "not_empty");
-            return;
+            return true;
         }
 
         var blockSlot = io.github.zoyluo.minecraftai.action.MaterialPalette
@@ -3073,15 +3184,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),
                     "reason", blockSlot.isEmpty() ? "no_material" : "equip_rejected");
-            return;
+            return true;
         }
         ActionResult placed = io.github.zoyluo.minecraftai.action.BuildAction.placeBlockAt(bot, support);
+        if (placed.isInProgress()) {
+            noteProgress();
+            return false;
+        }
         if (placed.isFailed()) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),
                     "reason", "place_rejected:" + placed.reason());
-            return;
+            return true;
         }
         var placedState = world.getBlockState(support);
         if (!placedState.getFluidState().isEmpty()
@@ -3091,13 +3206,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),
                     "reason", "placed_without_support");
-            return;
+            return true;
         }
         noteProgress();
         BotLog.action(bot, "ore_dig_drop_support_placed",
                 "ore", ore.toShortString(),
                 "support", support.toShortString(),
                 "block", BuiltInRegistries.BLOCK.getKey(placedState.getBlock()));
+        return true;
     }
 
     private void clearActiveTargetBreak(BlockPos pos) {
@@ -3106,6 +3222,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         activeTargetBreakPos = null;
         activeTargetBreakInventory = -1;
+        activeTargetBreakConfirmedGone = false;
     }
 
     /** Returns true while target mining must remain paused for physical drop recovery. */
@@ -3445,7 +3562,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // block centers; BuildAction repeats the final vanilla placement proof.
         InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
         ActionResult sealResult = BuildAction.placeBlockAt(bot, lava);
-        if (!sealResult.isFailed()) {
+        if (sealResult.isInProgress()) {
+            // Retain the observed fluid target and freeze the mine watchdog until the reactive
+            // guard has released the hand; no placement or sealing telemetry is fabricated.
+            noteProgress();
+            return FluidSealStep.WORKING;
+        }
+        if (sealResult.isSuccess()) {
             BotLog.action(bot, "ore_dig_fluid_seal", "sealed", lava.toShortString());
             noteProgress(); // Sealing also counts as progress
         } else {
@@ -3775,6 +3898,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return true;
         }
         miner.cancel(bot);
+        if (fluid == BranchFluidSealResult.WAITING) {
+            // The observed fluid remains unsafe, but a reactive shield owns the use key. Hold
+            // this blind-branch boundary and keep the outer no-progress watchdog alive instead
+            // of manufacturing a reroute or a completed seal.
+            noteProgress();
+            return false;
+        }
         if (fluid == BranchFluidSealResult.BLOCKED) {
             rerouteBlindBranchAtObservedBoundary(
                     bot, world, "lava", step, factualRear);
@@ -4782,6 +4912,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
         ActionResult seal = BuildAction.placeBlockAt(bot, fluid);
+        if (seal.isInProgress()) {
+            return BranchFluidSealResult.WAITING;
+        }
         if (seal.isFailed()) {
             BotLog.action(bot, "ore_dig_branch_fluid_seal_failed",
                     "at", branchCell.toShortString(),
@@ -6143,7 +6276,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             InventoryAction.equipFromSlot(bot, slot.getAsInt());
             ActionResult result = BuildAction.placeBlockAt(bot, fluidCell);
-            return result.isFailed() ? SealResult.FAILED : SealResult.SEALED;
+            if (result.isInProgress()) {
+                return SealResult.WAITING;
+            }
+            return result.isSuccess() ? SealResult.SEALED : SealResult.FAILED;
         }
 
         @Override

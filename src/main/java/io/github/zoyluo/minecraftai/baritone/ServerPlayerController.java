@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.action.ToolSelector;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.task.ShieldGuard;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -103,6 +104,9 @@ public final class ServerPlayerController implements IPlayerController {
     @Override
     public InteractionResult processRightClickBlock(Player player, Level world, InteractionHand hand, BlockHitResult result) {
         AIPlayerEntity self = bot.get();
+        if (ShieldGuard.usingShield(self)) {
+            return InteractionResult.PASS;
+        }
         ItemStack inHand = self.getItemInHand(hand);
         if ((inHand.isEmpty() || BaritoneWaterFall.isFallBucket(inHand.getItem())) && BaritoneWaterFall.runningFall(self) != null) {
             // A bucket does nothing on a block: its use is the item use that follows (processRightClick, checked by BaritoneWaterFall).
@@ -124,6 +128,9 @@ public final class ServerPlayerController implements IPlayerController {
     @Override
     public InteractionResult processRightClick(Player player, Level world, InteractionHand hand) {
         AIPlayerEntity self = bot.get();
+        if (ShieldGuard.usingShield(self)) {
+            return InteractionResult.PASS;
+        }
         if (!BaritoneBreakPlacePolicy.checkUseItem(self, hand).allowed()) {
             return InteractionResult.FAIL;
         }

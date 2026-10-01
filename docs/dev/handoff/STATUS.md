@@ -1,7 +1,6 @@
 # STATUS at the second hand-off (2026-10-01, cloud session -> Codex). READ THIS FIRST, then HANDOFF.md and RULES.md.
 
-`main` is the only branch. Everything below that is "done" is merged on `main` and verified. The one unfinished job (sh) is
-preserved as patch files in `docs/dev/handoff/sh-patches/`, not as a branch.
+`main` is the only delivery branch. Everything marked done below is merged and verified on `main`; no patch-series-only work remains.
 
 ## What is merged on main (in order) and how it was verified
 | job | what | evidence |
@@ -14,28 +13,31 @@ preserved as patch files in `docs/dev/handoff/sh-patches/`, not as a branch.
 
 Unit suites on main: root 2658, wrapper 2011, all green. Run them with `scripts/dev/unittest.sh .` and `scripts/dev/unittest.sh --wrapper .`.
 
-## NOT done (continue here)
-1. **sh (companion shield blocking)**: patches `sh-patches/0001..0005` are `git format-patch main..tmp/sh` made on top of main 9ed6882
-   (apply with `git am`). 0001-0004 are reviewed and fixed (independent review: 2 MAJOR + minors, all addressed in 0003/0004) and passed
-   the shield/combat/follow/creeper/evade/ranged/hostile-bot classes BEFORE the rebase onto pf's perception-ON harness. 0005 is an
-   UNVERIFIED WIP (heardProjectileShot / ShieldGuard edits from the perception-ON verification pass; compile and test it, or drop
-   it). Remaining for sh: apply, compile, root unit green, run the perception-ON verification pass (classes: shield_blocking_*, *shield*,
-   combat_hardening_*, danger_watcher_low_health_*, creeper_defense_*, evade_*, follow_escort_*, *pace*, ranged_weapon_*,
-   hostile_bot_targeting_*, companion_perception_*, gear_worst_first_*, auto_eat*, hunger*), resolve the open points below, review the
-   rebased diff once, then merge. Spec: `specs/sh_shield_blocking.md`; RULES.md "Shield use".
-   Open points: (a) `CreatureSenses.heardProjectileShot` vs the HIDDEN_BLOCK_SCAN bypass and `scanFailedRecently` (decide consciously);
-   (b) item 12 of NITS (heard-shot matching too loose: match against the back-projected launch point); (c) the guardian-beam GameTest
-   was removed (unstable fixtures); the decision is covered by `ShieldBlockabilityTest`; try to restore a stable test; (d) GuardTask and HuntTask
-   swing without the shield rhythm (only CombatTask has it); (e) decisions made: in follow/escort/evade the shield blocks only projectiles
-   already in flight (RULES: always sprint while hostiles are aggroed); snowballs/eggs/pearls are NOT blockable (0 damage in vanilla).
-2. **Phase 2 remaining**: N2 (root product nits: `nits_triage.md` partitions N2a combat, N2b mining, N2c nav/other) and N3 (root test
+## Completed after the second hand-off
+1. **sh (companion shield blocking) — COMPLETE:** the reviewed 0001–0005 content was reconciled on the perception-ON head, including
+   component-backed shields, task-owned GuardTask melee rhythm, truthful watched/heard projectile handling, real visible-TNT reaction,
+   Guardian beam coverage, and the shield-handoff watchdog fixes. Two independent reviews found no remaining P1/P2 issue; the delta
+   review specifically verified the final exact-vanilla gates and schema-5 checkpoint coverage. The narrow post-`du` reconciliation only
+   classifies a shield by its vanilla `BLOCKS_ATTACKS` component; it preserves `du`'s equipment selection and ownership policy.
+   The specialised TNT, creeper, and guardian models decline modded subclasses rather than assuming vanilla fuse, radius, or beam mechanics.
+   HIDDEN_BLOCK_SCAN remains an explicit operator capability override; strict mode and scan-failure fallback use ordinary observable facts.
+   Heard-shot association is exact-type, physically back-projected, and uses vanilla vibration travel time; Guard owns its melee rhythm,
+   while Hunt deliberately remains passive; following/escape/regroup/retreat block only already-in-flight projectiles to preserve sprint.
+   Evidence: serial root fast suite 2714/2714 after all five source sets compiled; focused final contracts 18/18; live perception-ON
+   GameTests all passed — `shield_blocking_game_tests_*` 17/17, `*shield*` 25/25, `combat_hardening_*` 18/18,
+   `danger_watcher_low_health_*` 47/47, `creeper_defense_*` 8/8, `evade_*` 2/2, `follow_escort_*` 10/10, `*pace*` 41/41,
+   `ranged_weapon_*` 13/13, `hostile_bot_targeting_*` 17/17, `companion_perception_*` 15/15, `gear_worst_first_*` 26/26,
+   `auto_eat*` 4/4, and `hunger*` 3/3. Spec: `specs/sh_shield_blocking.md`; RULES.md "Shield use".
+
+## Still to do
+1. **Phase 2 remaining**: N2 (root product nits: `nits_triage.md` partitions N2a combat, N2b mining, N2c nav/other) and N3 (root test
    nits). Re-verify each item against current main first (many are obsolete; the triage was done before du/hx/pf merged: items marked
    "after tmp/du/hx/pf merges" must be re-checked). Item 184 decision: skip the calm-warden eat deferral when the need is urgent.
    W: production pathfinder warm-up at server start (hx report: the GameTest harness scales A*'s 50 ms wall-clock budget by 40 via
    `AStarPathfinder.setHarnessTimeScale`, so GameTests cannot catch a too-slow pathfinder; the warm-up job must add a real check).
    P3: switch `nav.engine` default from `legacy` to `baritone` (docs/NAVIGATION_ENGINE.md, NAVIGATION_BARITONE_PLAN.md), measure both engines
    (per-tick time, route time, pace and capability suites).
-3. **Phase 3**: adversarial review since `770ccd1` (lenses: correctness, user rules, concurrency/tick cost, test validity; include the
+2. **Phase 3**: adversarial review since `770ccd1` (lenses: correctness, user rules, concurrency/tick cost, test validity; include the
    unreviewed pieces listed above), root unit + ALL twice green, wrapper unit + ALL twice green, document `scripts/dev` in
    docs/TESTING_AND_EVIDENCE.md, delete `docs/dev/handoff/`, push main (only branch).
 

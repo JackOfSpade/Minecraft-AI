@@ -988,6 +988,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return false;
         }
         ActionResult placed = BuildAction.placeBlockAt(bot, target);
+        if (placed.isInProgress()) {
+            // A reactive shield may own the hand briefly.  Preserve the search
+            // state and do not let that intentional wait consume its watchdog.
+            lastProgressTick = totalBudget();
+            return false;
+        }
         if (placed.isFailed()) {
             fail("create_obsidian_search_torch_failed:" + placed.reason());
             return false;

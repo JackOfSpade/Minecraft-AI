@@ -183,6 +183,11 @@ public final class MiningBarricadeTask extends AbstractTask {
             return;
         }
         ActionResult placed = BuildAction.placeBlockAt(bot, target);
+        if (placed.isInProgress()) {
+            // A reactive shield is actively protecting the miner; pause this seal's no-progress budget.
+            lastProgressElapsed = elapsed;
+            return;
+        }
         if (placed.isSuccess() && isSealed(bot, target)) {
             lastProgressElapsed = elapsed;
             lastPlacementFailure = "none";

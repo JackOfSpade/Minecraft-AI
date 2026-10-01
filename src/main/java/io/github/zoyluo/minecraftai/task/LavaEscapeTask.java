@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
@@ -111,20 +112,24 @@ public final class LavaEscapeTask extends AbstractTask {
         // horizontally at the feet as a stepping platform (replacing flowing lava), then jump
         // onto it to escape the lava.
         if (elapsed - lastPlaceTick >= PLACE_INTERVAL) {
-            lastPlaceTick = elapsed;
             OptionalInt slot = MaterialPalette.pickSacrificialBlockSlot(bot);
             if (slot.isPresent()) {
                 InventoryAction.equipFromSlot(bot, slot.getAsInt());
                 BlockPos feet = bot.blockPosition();
                 for (Direction dir : Direction.Plane.HORIZONTAL) {
                     BlockPos side = feet.relative(dir);
-                    if (!BuildAction.placeBlockAt(bot, side).isFailed()) {
+                    ActionResult placed = BuildAction.placeBlockAt(bot, side);
+                    if (placed.isInProgress()) {
+                        return;
+                    }
+                    if (placed.isSuccess()) {
                         target = side; // platform built -> climb toward it
                         BotLog.action(bot, "lava_escape_platform", "at", side.toShortString());
                         break;
                     }
                 }
             }
+            lastPlaceTick = elapsed;
         }
     }
 }

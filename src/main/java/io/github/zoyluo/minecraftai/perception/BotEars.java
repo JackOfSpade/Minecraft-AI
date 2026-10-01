@@ -29,13 +29,13 @@ import net.minecraft.world.phys.Vec3;
  * blows, an item it dropped itself, an arrow or other projectile it shot landing: it knows what it made, so they never become
  * unexplained sounds), and a dead or removed bot hears nothing.
  *
- * <p>NO MAGIC: a received vibration is recorded as a sound at its position only ({@code onReceiveVibration}'s block position) and its
- * event kind (a shot); the source entity and the projectile owner are ignored.
+ * <p>NO MAGIC: a received vibration is recorded as its delivered block position, event kind and the original vanilla physical travel
+ * delay only; the source entity and the projectile owner are ignored.
  */
 final class BotEars implements VibrationSystem {
 
-    /** A vibration that reached the bot: where it was made and whether it was a projectile being shot. */
-    record Sound(Vec3 pos, boolean shot) {
+    /** A vibration that reached the bot: its delivered source block, kind and original vanilla physical travel delay. */
+    record Sound(Vec3 pos, BlockPos block, boolean shot, int travelTicks) {
     }
 
     private final AIPlayerEntity bot;
@@ -139,9 +139,15 @@ final class BotEars implements VibrationSystem {
         @Override
         public void onReceiveVibration(ServerLevel level, BlockPos pos, Holder<GameEvent> event, Entity sourceEntity,
                                        Entity projectileOwner, float distance) {
-            // NO MAGIC: the position of the sound (and that it was a shot) is all that is used; who made it is not looked at.
-            heard.add(new Sound(new Vec3(pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D),
-                    event.is(GameEvent.PROJECTILE_SHOOT.key())));
+            // NO MAGIC: only the delivered block, event kind and physical vibration travel delay are retained; who made it is not.
+            // `distance` is recomputed against the bot's current block at delivery. Data still holds the VibrationInfo selected at
+            // emission, whose distance is what vanilla used to schedule this arrival; use that exact value rather than a moving-bot
+            // approximation. Ticker clears currentVibration only after this callback.
+            var vibration = data.getCurrentVibration();
+            int travelTicks = vibration == null ? -1 : Hearing.this.calculateTravelTimeInTicks(vibration.distance());
+            BlockPos sourceBlock = pos.immutable();
+            heard.add(new Sound(new Vec3(sourceBlock.getX() + 0.5D, sourceBlock.getY(), sourceBlock.getZ() + 0.5D), sourceBlock,
+                    event.is(GameEvent.PROJECTILE_SHOOT.key()), travelTicks));
             if (heard.size() > 32) {
                 heard.remove(0);
             }

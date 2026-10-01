@@ -453,7 +453,7 @@ public final class DangerWatcher {
             boolean followKeeps = followKeepsThreat(server, bot, active, top);
             if (!followKeeps
                     && top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
-                    && shouldAssignThreatTask(active, top)
+                    && shouldAssignThreatTask(bot, active, top)
                     && canAssignThreatTask(server, bot, top)) {
                 Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot), hostilePressure);
                 // Align with the leash: a defensive fight against a target that is already outside its
@@ -1427,12 +1427,21 @@ public final class DangerWatcher {
         return CombatCore.hostileTo(bot, entity);
     }
 
-    private static boolean shouldAssignThreatTask(Optional<Task> active, Threat threat) {
+    private static boolean shouldAssignThreatTask(AIPlayerEntity bot, Optional<Task> active, Threat threat) {
         if (active.isEmpty()) {
             return true;
         }
         Task task = active.get();
         if (task instanceof EvadeTask) {
+            return false;
+        }
+        // A TaskManager-backed guard is already the durable owner of its ordinary hostile
+        // exchange. Replacing it with a one-off CombatTask loses the guard point and can abort
+        // its task-owned shield rhythm between swings; GuardTask itself acquires and defends
+        // observable hostiles that it has actually acquired (or would acquire while watching). High-priority pressure still preempts it:
+        // HIGH HOSTILE is a creeper/warden and LOW_HP, lava, drowning, or falling have their
+        // existing safety owners.
+        if (task instanceof GuardTask guard && guard.ownsOrdinaryThreat(bot, threat)) {
             return false;
         }
         return !(task instanceof CombatTask);

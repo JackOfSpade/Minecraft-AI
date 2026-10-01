@@ -107,6 +107,9 @@ public final class PlaceStationsTask extends AbstractTask {
             return;
         }
         ActionResult result = BuildAction.placeBlockAt(bot, spot);
+        if (result.isInProgress()) {
+            return;
+        }
         used.add(spot);
         if (result.isSuccess()) {
             placed++;

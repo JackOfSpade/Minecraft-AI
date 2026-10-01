@@ -903,6 +903,15 @@ final class OreDigDetourEngine {
                 return abort(host, "fluid_unsealable");
             }
             DetourHost.SealResult r = host.sealOneFluidNeighbour(f.present());
+            if (r == DetourHost.SealResult.WAITING) {
+                // Shield ownership is a real, temporary handoff rather than a failed seal. Keep
+                // the current post-break transaction and do not let either its local or outer
+                // OreDig watchdog expire meanwhile.
+                postStart = now;
+                leaseDeadline++;
+                beat(host);
+                return Result.CONSUMED;
+            }
             if (r == DetourHost.SealResult.SEALED) {
                 seals++;
                 sealsThisDebt++;

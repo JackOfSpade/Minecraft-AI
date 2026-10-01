@@ -84,9 +84,22 @@ public final class GuardTask extends AbstractTask {
     }
 
     @Override
+    protected void onPause(AIPlayerEntity bot) {
+        ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
+        super.onPause(bot);
+    }
+
+    @Override
+    protected void onAbort(AIPlayerEntity bot) {
+        ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
+        super.onAbort(bot);
+    }
+
+    @Override
     protected void onTick(AIPlayerEntity bot) {
         BlockPos point = resolveGuardPoint(bot);
         if (point == null) {
+            ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
             bot.getActionPack().stopAll();
             waiting = true;
             if (elapsed % 200 == 1) {
@@ -96,6 +109,14 @@ public final class GuardTask extends AbstractTask {
         }
         guardPoint = point;
         waiting = false;
+        // The central reactive owner has the aim and use hand for an incoming projectile/beam. Do not let guard turn or swing through
+        // that hold; the phase and target stay intact and resume as soon as the reactive shield comes down.
+        if (ShieldGuard.INSTANCE.holding(bot)) {
+            if (phase == Phase.STRIKE) {
+                bot.getActionPack().stopMovement();
+            }
+            return;
+        }
         switch (phase) {
             case WATCH -> watch(bot);
             case APPROACH -> approach(bot);
@@ -157,6 +178,7 @@ public final class GuardTask extends AbstractTask {
             cooldownTargetId = target.getUUID();
             cooldownUntilElapsed = elapsed + LOST_SIGHT_COOLDOWN_TICKS;
         }
+        ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
         bot.getActionPack().stopAll();
         target = null;
         lostSightTicks = 0;
@@ -191,14 +213,64 @@ public final class GuardTask extends AbstractTask {
             return;
         }
         if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE || !CombatCore.canStrikeNow(bot, target)) {
+            ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
             phase = Phase.APPROACH;
             CombatCore.startApproach(bot, target);
             return;
         }
+        // Do not change the weapon while a task shield is in use. On the next tick after its ready-swing lower, equip the physical
+        // successor before attacking; after a hit do it immediately, matching CombatTask's durability boundary.
+        if (!ShieldGuard.usingShield(bot)) {
+            CombatCore.ensureMeleeWeapon(bot, target);
+        }
         if (CombatCore.strikeIfReady(bot, target)) {
+            CombatCore.ensureMeleeWeapon(bot, target);
+            if (ShieldGuard.holdMeleeBetweenSwings(bot, target)) {
+                return;
+            }
             repositionTicks = 8;
             phase = Phase.REPOSITION;
+            return;
         }
+        // Between ready legal swings, raise the same task-owned shield rhythm CombatTask uses.
+        ShieldGuard.holdMeleeBetweenSwings(bot, target);
+    }
+
+    /** True while guard's close-quarters exchange owns its shield between swings. */
+    boolean holdsItsShield(AIPlayerEntity bot) {
+        return phase == Phase.STRIKE && state == TaskState.RUNNING && !waiting
+                && ShieldGuard.meleeShieldEligible(bot, target);
+    }
+
+    /** A drawing hostile in this close-quarters exchange belongs to the melee rhythm, not the reactive pre-emptive owner. */
+    boolean meleeRhythmAgainst(AIPlayerEntity bot, LivingEntity entity) {
+        return entity != null && entity == target && phase == Phase.STRIKE && state == TaskState.RUNNING && !waiting
+                && ShieldGuard.meleeShieldEligible(bot, target);
+    }
+
+    /**
+     * Whether this persistent guard, rather than a one-off defensive task, is the real owner of an ordinary hostile threat.
+     * An active engagement owns only its exact target. While watching, mirror the task's own acquisition query so an unrelated
+     * ranged attacker in the broader danger-pressure envelope can still preempt; preserving every MEDIUM hostile here would leave
+     * that attacker unanswered simply because the guard happens to be active.
+     */
+    boolean ownsOrdinaryThreat(AIPlayerEntity bot, Threat threat) {
+        if (state != TaskState.RUNNING
+                || threat.type() != Threat.Type.HOSTILE
+                || threat.severity() != Threat.Severity.MEDIUM
+                || threat.entity() == null) {
+            return false;
+        }
+        if (target != null) {
+            return threat.entity() == target;
+        }
+        if (phase != Phase.WATCH || guardPoint == null) {
+            return false;
+        }
+        return CombatCore.nearestHostileAround(bot, guardPoint, GUARD_RADIUS,
+                        entity -> !coolingDown(bot, entity))
+                .filter(entity -> entity == threat.entity())
+                .isPresent();
     }
 
     private void reposition(AIPlayerEntity bot) {

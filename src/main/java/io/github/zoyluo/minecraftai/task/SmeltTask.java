@@ -469,6 +469,9 @@ public final class SmeltTask extends AbstractTask {
                 furnaceEquipped = true;
             }
             ActionResult result = BuildAction.placeBlockAt(bot, candidate);
+            if (result.isInProgress()) {
+                return;
+            }
             if (result.isFailed()) {
                 lastFailure = result;
                 continue;

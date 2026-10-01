@@ -68,6 +68,8 @@ interface DetourHost {
     /** Result of {@link #sealOneFluidNeighbour}. */
     enum SealResult {
         SEALED,
+        /** A reactive shield temporarily owns the use key; retry without consuming a seal or timeout budget. */
+        WAITING,
         /** No sacrificial block above the protected reserve. */
         NO_BLOCK,
         /** The placement failed. */

@@ -503,6 +503,9 @@ public final class ContainerTask extends AbstractTask {
         }
         InventoryAction.equipFromSlot(bot, slot.getAsInt());
         ActionResult result = BuildAction.placeBlockAt(bot, cell);
+        if (result.isInProgress()) {
+            return;
+        }
         if (result.isFailed()) {
             BotLog.warn(LogCategory.TASK, bot, "container_fallback_chest_failed",
                     "cell", cell.toShortString(), "reason", result.reason());

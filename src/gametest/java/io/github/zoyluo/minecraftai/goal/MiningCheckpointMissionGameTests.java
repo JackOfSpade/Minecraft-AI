@@ -6103,6 +6103,11 @@ public final class MiningCheckpointMissionGameTests {
         checkpoint.put(prefix + "pickup_gain_budget", "-1");
         checkpoint.remove(prefix + "active_break_pos");
         checkpoint.put(prefix + "active_break_inventory", "-1");
+        if ("5".equals(checkpoint.get(prefix + "task_schema"))) {
+            checkpoint.put(prefix + "active_break_confirmed_gone", "false");
+        } else {
+            checkpoint.remove(prefix + "active_break_confirmed_gone");
+        }
     }
 
     private static void setOpenBreakLedger(Map<String, String> checkpoint,
@@ -6150,6 +6155,7 @@ public final class MiningCheckpointMissionGameTests {
         Map<String, String> checkpoint = new LinkedHashMap<>(runtime.active().checkpoint());
         for (String prefix : Set.of("task.", "mining.")) {
             checkpoint.put(prefix + "task_schema", "4");
+            checkpoint.remove(prefix + "active_break_confirmed_gone");
             checkpoint.put(prefix + "torch_limit", "40");
             checkpoint.put(prefix + "torch_placements", String.valueOf(placements));
             checkpoint.put(prefix + "resource_epoch", String.valueOf(epoch));
