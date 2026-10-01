@@ -613,12 +613,23 @@ public final class CreatureSenses {
     }
 
     /**
+     * True when {@code bot}'s answers about projectiles are today's legacy line of sight, not the realistic perception: perception off,
+     * the strict capability bypass (HIDDEN_BLOCK_SCAN: the bot is allowed to know everything), or the fail-safe right after a scan
+     * threw. Then acting on a projectile takes no first-sighting reaction either (the shield guard asks this, not {@link #enabled}).
+     */
+    public boolean legacyProjectileAnswers(AIPlayerEntity bot) {
+        return !enabled()
+                || CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "observable_entity_query").allowed()
+                || scanFailedRecently(bot);
+    }
+
+    /**
      * True when {@code bot} heard the shot of {@code projectile} (the {@code PROJECTILE_SHOOT} vibration, the same match as
-     * {@link #noticedProjectile}) and has a clear line to it: the hearing rule turns the bot to it (angle factor 1). False with
-     * perception off.
+     * {@link #noticedProjectile}) and has a clear line to it: the hearing rule turns the bot to it (angle factor 1). False under the
+     * legacy answers ({@link #legacyProjectileAnswers}), where no reaction time is asked at all.
      */
     public boolean heardProjectileShot(AIPlayerEntity bot, Entity projectile) {
-        if (!enabled()) {
+        if (legacyProjectileAnswers(bot)) {
             return false;
         }
         BotState s = bots.get(bot.getUUID());

@@ -691,7 +691,8 @@ public final class ShieldGuard {
      * hearing rule's angle factor 1; only seen: the angle factor of sight), over its continuous exposure.
      */
     private static boolean reactedTo(AIPlayerEntity bot, Projectile projectile, long exposedTicks) {
-        boolean on = CreatureSenses.enabled();
+        // Perception off, the capability bypass or the scan's fail-safe: today's legacy answer, no reaction time (as noticedProjectile).
+        boolean on = !CreatureSenses.INSTANCE.legacyProjectileAnswers(bot);
         Entity owner = projectile.getOwner();
         boolean tracked = owner instanceof LivingEntity living && living != bot && living.isAlive()
                 && ObservableWorldQuery.canNoticeCreature(bot, living);
