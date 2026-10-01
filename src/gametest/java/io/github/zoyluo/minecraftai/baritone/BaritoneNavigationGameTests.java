@@ -464,11 +464,21 @@ public final class BaritoneNavigationGameTests {
      * A linkage failure that escapes a Baritone call in the middle of a driven tick (the seam raises a {@link NoClassDefFoundError}
      * exactly where Baritone would): the bot's tick completes (the server does not die of it), Baritone is retired for the session
      * and every instance torn down, and the bot's next order is carried out by the legacy executor, which gets the bot in the
-     * same tick the driver gave up.
+     * same tick the driver gave up. The two fixtures deliberately cover both contained driver halves: before-physics returns to
+     * the ordinary scheduler branch, while after-physics returns false to the driven branch's same-tick legacy fallback.
      */
     @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_a_linkage_failure_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy", maxTicks = 500)
     public void aLinkageFailureInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy(GameTestHelper context) {
-        Course c = Course.begin(context, "NavFaultGT", 0, -2, 30, 4);
+        linkageFailureInsideADrivenTick(context, "NavFaultPreGT", "before_physics");
+    }
+
+    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_a_linkage_failure_after_physics_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy", maxTicks = 500)
+    public void aLinkageFailureAfterPhysicsInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy(GameTestHelper context) {
+        linkageFailureInsideADrivenTick(context, "NavFaultPostGT", "after_physics");
+    }
+
+    private void linkageFailureInsideADrivenTick(GameTestHelper context, String botName, String faultPhase) {
+        Course c = Course.begin(context, botName, 0, -2, 30, 4);
         c.snapshot();
         ActionPack pack = c.bot.getActionPack();
         BlockPos far = c.feet.offset(26, 0, 0);
@@ -492,8 +502,11 @@ public final class BaritoneNavigationGameTests {
                         }
                         if (driven[0] == 12) {
                             require(context, NavEngineSelector.baritoneActive(), "fixture: Baritone is not active");
+                            // Exercise exactly one contained driver half. beforePhysics returns false to the
+                            // ordinary scheduler branch; afterPhysics returns false to the driven branch's
+                            // same-tick legacy fallback. Both must retire Baritone without killing the bot.
                             BaritoneDriver.testFault = where -> {
-                                if (where.equals("after_physics")) {
+                                if (where.equals(faultPhase)) {
                                     throw new NoClassDefFoundError("baritone/pathing/movement/MovementHelper");
                                 }
                             };

@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
@@ -995,6 +996,10 @@ public final class ActionPack {
         } catch (Throwable failure) {
             // Reached from ~40 callers every tick, outside NavEngineSelector.attempt: whatever Baritone throws here ends the route
             // (a linkage-type failure also retires Baritone) and the callers just see an idle pack.
+            // This may be called by the Baritone driver's own post-physics path, where the
+            // driver otherwise completes normally. Record the real failure at this central
+            // progress seam so a Baritone-labelled P3 capture cannot silently survive it.
+            NavigationMeasurement.noteBaritoneFallback(player);
             boolean retired = NavEngineSelector.handleFailure("baritone_progress", failure);
             if (!retired) {
                 NavEngineSelector.hook("baritone_cancel", () -> BaritoneNavigator.cancel(player, "progress_failed"));
@@ -1338,6 +1343,24 @@ public final class ActionPack {
                 || jumping
                 || jumpTicks > 0
                 || player.isUsingItem();
+    }
+
+    /**
+     * Opt-in P3 diagnostic seam: which navigator actually owns a controller after this pack's
+     * update. A pending/active Baritone route is Baritone even when the scheduler admitted it on
+     * the preceding non-driven tick; a legacy path executor, direct walk, mining controller,
+     * walked step, or raw movement is a real legacy fallback. This is never consulted by normal
+     * navigation code.
+     */
+    public NavEngine navigationOwnerForMeasurement() {
+        if (route != null || NavEngineSelector.query("baritone_busy", () -> BaritoneRegistry.INSTANCE.isBusy(player), false)) {
+            return NavEngine.BARITONE;
+        }
+        if (pathExecutor != null || walkTo != null || mining != null || step != null
+                || forward != 0.0F || strafing != 0.0F || jumping || jumpTicks > 0) {
+            return NavEngine.LEGACY;
+        }
+        return null;
     }
 
     public boolean isPathExecutorIdle() {

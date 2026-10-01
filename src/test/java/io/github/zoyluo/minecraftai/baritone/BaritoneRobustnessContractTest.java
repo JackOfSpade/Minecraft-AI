@@ -41,6 +41,21 @@ class BaritoneRobustnessContractTest {
         assertTrue(failed.contains("NavEngineSelector.isInitialisationFailure(failure)")
                 && failed.contains("NavEngineSelector.markBaritoneUnavailable(event, failure)"), "a linkage-type failure retires Baritone");
         assertTrue(failed.contains("BaritoneRegistry.INSTANCE.reset(bot, reason)"), "an ordinary failure resets that bot's Baritone only");
+        assertTrue(failed.contains("NavigationMeasurement.noteBaritoneFallback(bot)"),
+                "a contained driver failure (including the existing testFault seam) invalidates an active Baritone measurement");
+        String gameTest = Files.readString(Path.of("src/gametest/java/io/github/zoyluo/minecraftai/baritone/BaritoneNavigationGameTests.java"));
+        assertTrue(gameTest.contains("aLinkageFailureInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy")
+                        && gameTest.contains("aLinkageFailureAfterPhysicsInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy")
+                        && gameTest.contains("\"before_physics\"") && gameTest.contains("\"after_physics\"")
+                        && gameTest.contains("linkageFailureInsideADrivenTick(context,"),
+                "separate linkage-failure GameTests must retain beforePhysics and afterPhysics contained-driver coverage");
+        String afterEnvironment = "baritone_navigation_game_tests_a_linkage_failure_after_physics_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy";
+        assertTrue(gameTest.contains("environment = \"minecraftai-gametest:" + afterEnvironment + "\""),
+                "the afterPhysics linkage-failure GameTest must name its registered test environment");
+        Path environments = Path.of("src/gametest/resources/data/minecraftai-gametest/test_environment");
+        assertEquals(Files.readString(environments.resolve("baritone_navigation_game_tests_a_linkage_failure_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy.json")),
+                Files.readString(environments.resolve(afterEnvironment + ".json")),
+                "the afterPhysics linkage-failure GameTest must carry the same minimal test environment as beforePhysics");
     }
 
     @Test
@@ -74,6 +89,8 @@ class BaritoneRobustnessContractTest {
         int catchAll = settle.indexOf("} catch (Throwable failure) {", progress);
         assertTrue(inactive >= 0 && progress > inactive && catchAll > progress, "no Baritone call after it was given up on, and any throwable is caught");
         assertTrue(settle.contains("NavEngineSelector.handleFailure(\"baritone_progress\", failure)"));
+        assertTrue(settle.contains("NavigationMeasurement.noteBaritoneFallback(player)"),
+                "a progress failure outside selector.attempt invalidates an active Baritone measurement too");
         assertTrue(settle.contains("finishRoute(NavOutcome.Status.FAILED,"), "a failed progress question ends the route FAILED");
         assertFalse(settle.replace("NavEngineSelector.hook(\"baritone_cancel\", () -> BaritoneNavigator.cancel(", "").contains("BaritoneNavigator.cancel("),
                 "every cancel in settleRoute is contained");

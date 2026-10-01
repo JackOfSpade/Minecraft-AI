@@ -225,12 +225,17 @@ public final class NavEngineSelector {
     /** As {@link #attempt(String, Supplier, Supplier)} for a request of bot {@code botId} (which may have its own engine). */
     public static <T> T attempt(UUID botId, String what, Supplier<T> baritoneWork, Supplier<T> fallback) {
         if (!baritoneSelectedFor(botId)) {
+            // A scale-one P3 row that requested Baritone must never silently retain its label if
+            // this request instead takes the legacy fallback (for example after a sticky init
+            // failure). The helper is inert outside an active measurement session.
+            NavigationMeasurement.noteBaritoneFallback(botId);
             return fallback.get();
         }
         try {
             return baritoneWork.get();
         } catch (Throwable failed) {
             handleFailure(what, failed);
+            NavigationMeasurement.noteBaritoneFallback(botId);
             return fallback.get();
         }
     }

@@ -15,6 +15,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
+import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import java.util.ArrayList;
@@ -103,7 +104,14 @@ public final class BaritoneNavigator {
             registry.clearLastPathEvent(bot);
 
             if (admit) {
+                boolean capturePlanner = NavigationMeasurement.isCapturing(bot);
+                long admissionStarted = capturePlanner ? System.nanoTime() : 0L;
                 BaritonePlanner.Plan plan = BaritonePlanner.planNow(baritone, goal, ADMISSION_PRIMARY_MS, ADMISSION_FAILURE_MS);
+                if (capturePlanner) {
+                    NavigationMeasurement.recordPlanner(bot, io.github.zoyluo.minecraftai.navigation.NavEngine.BARITONE,
+                            "admission", System.nanoTime() - admissionStarted, plan.searchMillis(), plan.nodesConsidered(),
+                            plan.movements().size(), plan.type().name());
+                }
                 PathCalculationResult.Type type = plan.type();
                 BotLog.path(bot, "baritone_admission", "goal", goal, "type", type, "nodes", plan.nodesConsidered(),
                         "moves", plan.movements().size(), "search_ms", plan.searchMillis(), "policy", policyOf(options));

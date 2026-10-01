@@ -3,6 +3,8 @@ package io.github.zoyluo.minecraftai.pathfinding;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.navigation.NavEngine;
+import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -53,6 +55,8 @@ public final class AStarPathfinder {
     };
 
     private final ServerLevel world;
+    /** The acting bot when this is a live route/replan; null for world-only proofs. */
+    private final AIPlayerEntity bot;
     private final BlockPos start;
     private final BlockPos goal;
     private final NeighborEnumerator enumerator;
@@ -76,6 +80,14 @@ public final class AStarPathfinder {
 
     public static void setHarnessTimeScale(long scale) {
         harnessTimeScale = Math.max(1L, scale);
+    }
+
+    /**
+     * Read-only diagnostic seam for the opt-in navigation evidence fixture. This exposes the
+     * effective allowance multiplier without providing another way to change gameplay timing.
+     */
+    public static long harnessTimeScaleForDiagnostics() {
+        return harnessTimeScale;
     }
 
     public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal) {
@@ -162,6 +174,7 @@ public final class AStarPathfinder {
     private AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal,
                             int maxNodes, long maxMillis, boolean canPillar, boolean allowDig,
                             double heuristicWeight, boolean applyHarnessTimeScale) {
+        this.bot = bot;
         this.world = world;
         this.start = start.immutable();
         this.goal = goal.immutable();
@@ -206,7 +219,25 @@ public final class AStarPathfinder {
         return findPath(false, minimumY);
     }
 
+    /**
+     * The one measurement seam for every legacy A* invocation, including executor-time replans
+     * and return proofs. Callers must not duplicate this at their request sites: doing so misses
+     * later replans and double-counts the initial route.
+     */
     private PathfindingResult findPath(boolean useResultCache, int minimumY) {
+        boolean capturePlanner = NavigationMeasurement.isCapturing(bot);
+        long measurementStarted = capturePlanner ? System.nanoTime() : 0L;
+        PathfindingResult result = findPathInternal(useResultCache, minimumY);
+        if (capturePlanner) {
+            NavigationMeasurement.recordPlanner(bot, NavEngine.LEGACY,
+                    useResultCache ? "astar_cached" : "astar_uncached",
+                    System.nanoTime() - measurementStarted, result.elapsedMs(), result.nodesExplored(), result.path().size(),
+                    result.success() ? "SUCCESS" : result.reason().name());
+        }
+        return result;
+    }
+
+    private PathfindingResult findPathInternal(boolean useResultCache, int minimumY) {
         long startTime = System.currentTimeMillis();
         BotLog.path(null, "findpath_start", "start", LogFields.pos(start), "goal", LogFields.pos(goal));
         Standability.clearCache();
