@@ -7,7 +7,6 @@
     "ServerTickProbeMixin",
     "ClientConnectionAccessorMixin",
     "PlayerManagerFakePlayerMixin",
-    "MerchantEntityInvokerMixin",
     "VillagerInvokerMixin",
     "ServerWorldEntityManagerAccessorMixin",
     "ServerEntityManagerCacheAccessorMixin",

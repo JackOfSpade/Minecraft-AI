@@ -376,7 +376,8 @@ public final class WalkedStep {
                 return refusal(bot, cell, kind);
             }
             case RECENTER, SNEAK_SHIFT -> {
-                if (here.getY() != cell.getY() || Math.abs(here.getX() - cell.getX()) > 1 || Math.abs(here.getZ() - cell.getZ()) > 1) {
+                if (!WalkedStepRules.inCellEnvelope(
+                        here.getX() - cell.getX(), here.getY() - cell.getY(), here.getZ() - cell.getZ())) {
                     // The point may lie a little over the edge of the bot's cell (a sneak shift to see the side face of its support) or in the
                     // cell it stands next to (the walk back from there): the bot's cell and the point's cell are the same or neighbours.
                     // This holds for every in-cell step (an anchored one names the cell that owns it, the same test applies); what keeps a
@@ -424,17 +425,24 @@ public final class WalkedStep {
     private static int choosePushDirection(AIPlayerEntity bot) {
         double[] shifts = new double[PUSH_DIRECTIONS.length];
         for (int i = 0; i < shifts.length; i++) {
-            shifts[i] = Double.POSITIVE_INFINITY;
-            for (double shift = PUSH_SEARCH_STEP; shift <= WalkedStepRules.PUSH_OUT_MAX_SHIFT + 1.0E-9D; shift += PUSH_SEARCH_STEP) {
-                AABB moved = bot.getBoundingBox().move(PUSH_DIRECTIONS[i][0] * shift, 0.0D, PUSH_DIRECTIONS[i][1] * shift)
-                        .deflate(BODY_EPSILON);
-                if (bot.level().noBlockCollision(bot, moved)) {
-                    shifts[i] = shift;
-                    break;
-                }
-            }
+            shifts[i] = pushDistanceToFree(bot, i);
         }
         return WalkedStepRules.bestPushDirection(shifts);
+    }
+
+    /** The nearest clearance distance in one push direction, or infinity when this local nudge cannot prove a free side. */
+    private static double pushDistanceToFree(AIPlayerEntity bot, int direction) {
+        for (double shift = PUSH_SEARCH_STEP;
+             shift <= WalkedStepRules.PUSH_OUT_MAX_SHIFT + 1.0E-9D;
+             shift += PUSH_SEARCH_STEP) {
+            AABB moved = bot.getBoundingBox().move(
+                    PUSH_DIRECTIONS[direction][0] * shift, 0.0D, PUSH_DIRECTIONS[direction][1] * shift)
+                    .deflate(BODY_EPSILON);
+            if (bot.level().noBlockCollision(bot, moved)) {
+                return shift;
+            }
+        }
+        return Double.POSITIVE_INFINITY;
     }
 
     private Result tickPushOut(ActionPack pack) {
@@ -448,7 +456,8 @@ public final class WalkedStep {
         // a small horizontal velocity, nothing else. The bot is free to leave the block it is in: collision only stops movement into one.
         int[] direction = PUSH_DIRECTIONS[pushDirection];
         Vec3 velocity = bot.getDeltaMovement();
-        bot.setDeltaMovement(direction[0] * WalkedStepRules.PUSH_OUT_SPEED, velocity.y, direction[1] * WalkedStepRules.PUSH_OUT_SPEED);
+        double speed = WalkedStepRules.pushSpeed(pushDistanceToFree(bot, pushDirection));
+        bot.setDeltaMovement(direction[0] * speed, velocity.y, direction[1] * speed);
         return Result.RUNNING;
     }
 

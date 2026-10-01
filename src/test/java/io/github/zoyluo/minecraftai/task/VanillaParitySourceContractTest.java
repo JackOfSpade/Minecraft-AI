@@ -57,6 +57,11 @@ final class VanillaParitySourceContractTest {
         assertTrue(trade.contains("villager.setTradingPlayer(null)"), "the trade window is closed again");
         assertTrue(trade.indexOf("minecraftai$invokeUpdateSpecialPrices(bot)") < trade.indexOf("completeTrade(bot)"),
                 "prices are made for this player (reputation, hero of the village) before any offer is chosen");
+        int opened = trade.indexOf("villager.setTradingPlayer(bot)");
+        int talked = trade.indexOf("bot.awardStat(Stats.TALKED_TO_VILLAGER)");
+        int completed = trade.indexOf("completeTrade(bot)");
+        assertTrue(opened >= 0 && talked > opened && completed > talked,
+                "opening the screen must award TALKED_TO_VILLAGER before a sale is attempted");
     }
 
     @Test
@@ -71,6 +76,11 @@ final class VanillaParitySourceContractTest {
                 "ingredients are matched with the vanilla ingredient test, not item identity per candidate");
         assertTrue(craft.contains("isPlain(stack)"));
         assertTrue(craft.contains("craft_remainder_capacity"));
+        int removeIngredient = craft.indexOf("static boolean removeIngredient(");
+        int removeIngredientEnd = craft.indexOf("/** A stack with nothing", removeIngredient);
+        String removal = craft.substring(removeIngredient, removeIngredientEnd);
+        assertTrue(removal.indexOf("for (boolean plainOnly") < removal.indexOf("for (Item item : ingredient.anyOf())"),
+                "plain preference must span all accepted ingredient alternatives before item order breaks ties");
 
         String registry = read("craft/RecipeRegistry.java");
         assertTrue(registry.contains("new Ingredient(List.of(Items.OAK_PLANKS), 4)"), "the oak fence of vanilla is made of oak planks");
@@ -83,6 +93,8 @@ final class VanillaParitySourceContractTest {
     void theVillagerPriceInvokerIsRegistered() throws IOException {
         String mixins = Files.readString(Path.of("src/main/resources/minecraftai.mixins.json"));
         assertTrue(mixins.contains("\"VillagerInvokerMixin\""));
+        assertFalse(mixins.contains("MerchantEntityInvokerMixin"),
+                "the unused AbstractVillager rewardTradeXp invoker must not remain registered");
         String mixin = read("mixin/VillagerInvokerMixin.java");
         assertTrue(mixin.contains("@Invoker(\"updateSpecialPrices\")"));
     }

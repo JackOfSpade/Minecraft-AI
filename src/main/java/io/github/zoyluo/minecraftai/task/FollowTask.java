@@ -310,6 +310,7 @@ public final class FollowTask extends AbstractTask {
         }
         // The player has left the water but the bot is still in it: swim to a dry landing near
         // them first (this renews the narrow swim lease itself), then ordinary land follow runs.
+        publishPace(bot, target);
         if (swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)) {
             escort.disengage();
             suspendLandRecovery(bot);
@@ -317,7 +318,6 @@ public final class FollowTask extends AbstractTask {
             waiting = swimming.isWaiting();
             return;
         }
-        publishPace(bot, target);
         followLand(bot, target);
         // After the movement decisions of this tick: a swing never stops or redirects the follow.
         escort.tick(bot, target);
@@ -357,7 +357,7 @@ public final class FollowTask extends AbstractTask {
         return Math.sqrt(dx * dx + dz * dz) / ((last[0] - first[0]) / 20.0D);
     }
 
-    /** Decides the gait of this tick (FollowPace) and leases it to the pace policy: the same for every land mode of the task. */
+    /** Decides the gait of this tick (FollowPace) and leases it to the pace policy for every walking or swimming follow mode. */
     private void publishPace(AIPlayerEntity bot, ServerPlayer target) {
         if (!MinecraftAiConfig.get().behaviour().paceOrDefaults().paceEnabled()) {
             return;
@@ -512,6 +512,9 @@ public final class FollowTask extends AbstractTask {
     }
 
     private void followSwimming(AIPlayerEntity bot, ServerPlayer target) {
+        // A swimmer still has a gap to close. The same FOLLOW lease makes a far swimmer sprint
+        // and lets a close/friendly player keep the bot at a walk or sneak pace.
+        publishPace(bot, target);
         if (BoatSupport.mountedBoat(bot).isPresent()) {
             // The player is swimming, not boating.  Never keep driving or acquire a new boat in
             // this branch; vanilla places the passenger in the adjacent water on dismount.

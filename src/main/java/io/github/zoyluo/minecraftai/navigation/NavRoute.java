@@ -15,7 +15,11 @@ public final class NavRoute {
     public enum Shape {
         BLOCK,
         NEAR,
-        /** Get at least {@code radius} blocks (horizontally) away from the target cell: a {@code GoalRunAway} (retreat, evade). */
+        /**
+         * Get at least {@code radius} blocks (horizontally) away from the target/source cell: a
+         * {@code GoalRunAway} (retreat, evade). The target is a threat reference, not an arrival
+         * destination, so callers must not report it as an active path goal.
+         */
         RUN_AWAY
     }
 

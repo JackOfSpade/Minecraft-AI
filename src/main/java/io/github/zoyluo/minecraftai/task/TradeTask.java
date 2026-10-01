@@ -138,6 +138,9 @@ public final class TradeTask extends AbstractTask {
         // trading player; closing it resets the prices. Everything below happens inside that window, as it does for a client.
         ((VillagerInvokerMixin) villager).minecraftai$invokeUpdateSpecialPrices(bot);
         villager.setTradingPlayer(bot);
+        // Villager#mobInteract awards this as soon as its trade screen opens, even if the player
+        // then closes it or cannot afford an offer. The completed-sale statistic remains below.
+        bot.awardStat(Stats.TALKED_TO_VILLAGER);
         try {
             completeTrade(bot);
         } finally {

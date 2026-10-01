@@ -52,6 +52,16 @@ class WalkedStepRulesTest {
     }
 
     @Test
+    void pointOwnedStepsMayStartInTheirCellOrAHorizontalNeighbourOnly() {
+        assertTrue(WalkedStepRules.inCellEnvelope(0, 0, 0));
+        assertTrue(WalkedStepRules.inCellEnvelope(1, 0, 0));
+        assertTrue(WalkedStepRules.inCellEnvelope(-1, 0, 1));
+        assertFalse(WalkedStepRules.inCellEnvelope(2, 0, 0));
+        assertFalse(WalkedStepRules.inCellEnvelope(0, 0, -2));
+        assertFalse(WalkedStepRules.inCellEnvelope(0, 1, 0));
+    }
+
+    @Test
     void swimMayRiseOrSinkOneCell() {
         assertTrue(WalkedStepRules.offsetAllowed(Kind.SWIM, 0, 1, 0), "straight up a water shaft");
         assertTrue(WalkedStepRules.offsetAllowed(Kind.SWIM, 1, -1, 1));
@@ -109,45 +119,27 @@ class WalkedStepRulesTest {
     }
 
     @Test
-    void theKeysPointFromTheHeadingToTheTarget() {
-        // Yaw 0 faces +z: a target straight ahead is forward, a target at +x is to the left (vanilla moveRelative frame).
-        float[] ahead = WalkedStepRules.keysToward(0.0D, 0.0D, 3.0D);
-        assertEquals(1.0F, ahead[0], 1.0E-5F);
-        assertEquals(0.0F, ahead[1], 1.0E-5F);
-        float[] left = WalkedStepRules.keysToward(0.0D, 3.0D, 0.0D);
-        assertEquals(0.0F, left[0], 1.0E-5F);
-        assertEquals(1.0F, left[1], 1.0E-5F);
-        // Facing +x (yaw -90) a target at +x is straight ahead.
-        float[] turned = WalkedStepRules.keysToward(-90.0D, 3.0D, 0.0D);
-        assertEquals(1.0F, turned[0], 1.0E-5F);
-        assertEquals(0.0F, turned[1], 1.0E-5F);
-        float[] none = WalkedStepRules.keysToward(10.0D, 0.0D, 0.0D);
-        assertEquals(0.0F, none[0]);
-        assertEquals(0.0F, none[1]);
-    }
-
-    @Test
     void aHopPressesJumpOnlyWhileGroundedBelowTheTargetFloor() {
-        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 4.0D, 5, false));
-        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.4D, 5, false), "no air jumps");
-        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, true), "out of the water the jump key is a swim stroke");
-        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 5.0D, 5, false), "already at the target floor");
-        assertFalse(WalkedStepRules.jumpNow(Kind.FLAT, true, 4.0D, 5, false));
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, true), "the head is under water: keep afloat");
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 3.0D, 4, false), "the target is higher");
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, false), "feet in the lower part of the cell: hold the depth");
-        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.6D, 4, false), "feet high in the cell: no need to jump");
+        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 4.0D, 5, false, false));
+        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.4D, 5, false, false), "no air jumps");
+        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, true, true), "in water the jump key is a swim stroke");
+        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 5.0D, 5, false, false), "already at the target floor");
+        assertFalse(WalkedStepRules.jumpNow(Kind.FLAT, true, 4.0D, 5, false, false));
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, true, true), "the head is under water: keep afloat");
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 3.0D, 4, false, false), "the target is higher");
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, false, false), "feet in the lower part of the cell: hold the depth");
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.6D, 4, false, false), "feet high in the cell: no need to jump");
     }
 
     @Test
     void aSwimmerHoldsItsDepthAndSinksToALowerCell() {
         // Level: jump only while the feet are in the lower part of the cell (no bobbing up out of it, no sinking below it).
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 4, true));
-        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.5D, 4, true));
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 4, true, true));
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.5D, 4, true, true));
         // Down: the target is a cell lower, the jump key stays up and gravity does the diving.
-        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 3, true));
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 3, true, true));
         // Up: keep jumping until the feet are in the target cell.
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.9D, 5, true));
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.9D, 5, true, true));
         // Afloat against a bank: the hop onto it holds jump although nothing is under the feet.
         assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, false, true));
         assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, false, false));

@@ -136,6 +136,9 @@ public final class VanillaParityGameTests {
         require(context, bot.getInventory().getItem(34).getCount() == 54, "arrows were partly inserted");
         require(context, offer.getUses() == 0 && villager.getVillagerXp() == xpBefore,
                 "a refused trade was counted: uses " + offer.getUses());
+        require(context, bot.getStats().getValue(net.minecraft.stats.Stats.CUSTOM.get(
+                        net.minecraft.stats.Stats.TALKED_TO_VILLAGER)) == 1,
+                "opening the refused trade did not award the talked-to-villager statistic");
 
         // With room, the trade completes and the villager does its bookkeeping.
         bot.getInventory().setItem(0, ItemStack.EMPTY);
@@ -161,6 +164,9 @@ public final class VanillaParityGameTests {
         require(context, villager.getVillagerXp() > xpBefore, "the villager got no trade experience");
         require(context, bot.getStats().getValue(net.minecraft.stats.Stats.CUSTOM.get(net.minecraft.stats.Stats.TRADED_WITH_VILLAGER)) == 1,
                 "the traded-with-villager statistic was not awarded");
+        require(context, bot.getStats().getValue(net.minecraft.stats.Stats.CUSTOM.get(
+                        net.minecraft.stats.Stats.TALKED_TO_VILLAGER)) == 2,
+                "each opened trade screen must award talked-to-villager");
         require(context, villager.getTradingPlayer() == null, "the bot was left as the villager's trading player");
         cleanup(context, f);
     }
@@ -242,6 +248,27 @@ public final class VanillaParityGameTests {
             }
         }
         require(context, carried, "the crafted stack lost the recipe result's components");
+
+        // An ingredient may accept several wood types. Plain preference applies to the entire
+        // accepted set, not just the first item type: a named oak keepsake must survive when an
+        // ordinary spruce plank can satisfy the same ingredient.
+        bot.getInventory().clearContent();
+        ItemStack namedOakAlternative = new ItemStack(Items.OAK_PLANKS, 1);
+        namedOakAlternative.set(DataComponents.CUSTOM_NAME, Component.literal("Alternative Keepsake"));
+        bot.getInventory().setItem(0, namedOakAlternative);
+        bot.getInventory().setItem(1, new ItemStack(Items.SPRUCE_PLANKS, 1));
+        RecipeRegistry.Recipe alternatives = new RecipeRegistry.Recipe(Items.STICK, 1,
+                List.of(new RecipeRegistry.Ingredient(List.of(Items.OAK_PLANKS, Items.SPRUCE_PLANKS), 1)), false,
+                DataComponentPatch.builder().build());
+        CraftTask.PreparedCraft alternativePrepared = CraftTask.prepareCraft(bot,
+                new CraftingHelper.CraftStep(alternatives, 1));
+        require(context, alternativePrepared.missingIngredient() == null,
+                "the mixed-plank ingredient should be craftable");
+        require(context, alternativePrepared.main().get(0).is(Items.OAK_PLANKS)
+                        && alternativePrepared.main().get(0).get(DataComponents.CUSTOM_NAME) != null,
+                "a named first alternative was consumed before a plain accepted alternative");
+        require(context, !alternativePrepared.main().get(1).is(Items.SPRUCE_PLANKS),
+                "the plain alternative was not consumed first");
 
         // Vanilla's oak fence is made of oak planks only.
         RecipeRegistry.Recipe fence = RecipeRegistry.find(Items.OAK_FENCE).orElseThrow();

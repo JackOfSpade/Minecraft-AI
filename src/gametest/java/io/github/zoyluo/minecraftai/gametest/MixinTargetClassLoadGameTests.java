@@ -14,7 +14,6 @@ import net.minecraft.server.MinecraftServer;
  *
  * <ul>
  *   <li>{@code LoginTimeoutMixin} (a {@code @ModifyConstant} in {@code ServerLoginPacketListenerImpl.tick}), and</li>
- *   <li>{@code MerchantEntityInvokerMixin} (an {@code @Invoker} on {@code AbstractVillager}, used by TradeTask), and</li>
  *   <li>{@code PhantomSpawnerHumansOnlyMixin} (a MixinExtras {@code @ModifyExpressionValue} on the {@code players()} call in {@code PhantomSpawner.tick}).</li>
  * </ul>
  *
@@ -22,9 +21,7 @@ import net.minecraft.server.MinecraftServer;
  * test also checks that the mixin really is merged into the loaded class.</p>
  */
 public final class MixinTargetClassLoadGameTests {
-    private static final String MIXIN_PACKAGE = "io.github.zoyluo.minecraftai.mixin.";
     private static final String LOGIN_LISTENER = "net.minecraft.server.network.ServerLoginPacketListenerImpl";
-    private static final String ABSTRACT_VILLAGER = "net.minecraft.world.entity.npc.villager.AbstractVillager";
     private static final String PHANTOM_SPAWNER = "net.minecraft.world.level.levelgen.PhantomSpawner";
 
     @GameTest(maxTicks = 20)
@@ -32,14 +29,6 @@ public final class MixinTargetClassLoadGameTests {
         Class<?> target = load(context, LOGIN_LISTENER);
         require(context, Arrays.stream(target.getDeclaredMethods()).anyMatch(m -> m.getName().contains("extendLoginTimeout")),
                 "LoginTimeoutMixin's @ModifyConstant handler was not merged into " + LOGIN_LISTENER);
-        context.succeed();
-    }
-
-    @GameTest(maxTicks = 20)
-    public void merchantInvokerMixinTargetLoadsWithTheInvokerInterfaceApplied(GameTestHelper context) {
-        Class<?> target = load(context, ABSTRACT_VILLAGER);
-        require(context, Arrays.stream(target.getInterfaces()).anyMatch(i -> i.getName().equals(MIXIN_PACKAGE + "MerchantEntityInvokerMixin")),
-                "MerchantEntityInvokerMixin is not an interface of " + ABSTRACT_VILLAGER + ": the @Invoker was not applied");
         context.succeed();
     }
 

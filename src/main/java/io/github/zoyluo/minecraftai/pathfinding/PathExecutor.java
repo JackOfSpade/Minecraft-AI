@@ -851,6 +851,7 @@ public final class PathExecutor {
                 dropOriginY = null;
                 resetJumpState();
                 prefix = replanStep;
+                pack.commitPlannedPhysicalSnap(replanStep);
                 return ActionResult.IN_PROGRESS;
             }
             reason = reason + "; replan_failed: "

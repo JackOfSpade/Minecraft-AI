@@ -467,6 +467,7 @@ public final class ActionPack {
         this.pathExecutor = new PathExecutor(
                 result.path(), resolvedGoal, canPillar, true, reserve);
         this.pathExecutor.prefixStep(startStep);
+        commitPlannedPhysicalSnap(startStep);
         this.walkTo = null;
         this.mining = null;
         return ActionResult.IN_PROGRESS;
@@ -637,6 +638,7 @@ public final class ActionPack {
                 : new PathExecutor(
                 result.path(), resolvedGoal, canPillar, allowDigFallback, reserve);
         this.pathExecutor.prefixStep(startStep);
+        commitPlannedPhysicalSnap(startStep);
         this.walkTo = null;
         this.mining = null;
         return ActionResult.IN_PROGRESS;
@@ -646,6 +648,13 @@ public final class ActionPack {
         if (route != null) {
             settleRoute();
             if (route != null) {
+                // RUN_AWAY's target is the threat/source that Baritone is fleeing, not an
+                // arrival goal. Exposing it here makes a caller treat the bot as though it is
+                // navigating *toward* the threat. Baritone normally has no resolved endpoint
+                // for this shape, in which case there simply is no active path goal to report.
+                if (route.shape() == NavRoute.Shape.RUN_AWAY) {
+                    return route.resolvedGoal();
+                }
                 return route.resolvedGoal() != null ? route.resolvedGoal() : route.target();
             }
         }
@@ -739,7 +748,7 @@ public final class ActionPack {
         }
         // Single writer: whatever the legacy executor was doing is dropped before Baritone is asked to move the bot.
         if (pathExecutor != null || walkTo != null || mining != null || forward != 0.0F || strafing != 0.0F
-                || sneaking || sprinting || jumping || jumpTicks > 0) {
+                || step != null || sneaking || sprinting || jumping || jumpTicks > 0) {
             yieldToBaritone();
         }
         // A route that already ended is recorded as it ended, not as "replaced".
@@ -923,10 +932,15 @@ public final class ActionPack {
      * What a route search starts from and how the bot gets there: {@code from} is the cell the search starts at, {@code prefix} the walk
      * that takes the bot from where it stands onto it (null when it already stands there).
      */
-    private record StartPlan(BlockPos from, WalkedStep prefix) {
+    private record StartPlan(BlockPos from, WalkedStep prefix, BlockPos snapOrigin) {
     }
 
     private StartPlan startPlan;
+    // A physical start snap is deliberately not entered in physicalSnapGuard while it is only a
+    // search plan. A failed A* search leaves the bot exactly where it was, so consuming the
+    // once-per-origin retry window there used to lock an unmoved bot out for ten seconds.
+    private WalkedStep unstartedPhysicalSnap;
+    private BlockPos unstartedPhysicalSnapOrigin;
 
     /**
      * Makes the bot's current position a valid start for a route search, WITHOUT moving it: a standable cell is the start as it is (a
@@ -940,11 +954,12 @@ public final class ActionPack {
      */
     public boolean snapPlayerToNearestStandable(String reason) {
         this.startPlan = null;
+        discardUnstartedPhysicalSnap();
         ServerLevel world = player.level();
         BlockPos current = player.blockPosition();
         Standability.clearCache();
         if (Standability.isStandable(world, current)) {
-            this.startPlan = new StartPlan(current.immutable(), null);
+            this.startPlan = new StartPlan(current.immutable(), null, null);
             return true;
         }
         if (physicalSnapSuppressed(current, reason)) {
@@ -967,12 +982,14 @@ public final class ActionPack {
      * or the guard refuses. The caller runs it with {@link #runStep}.
      */
     public WalkedStep adjacentStandableStep(String reason) {
+        discardUnstartedPhysicalSnap();
         BlockPos current = player.blockPosition();
         Standability.clearCache();
         if (physicalSnapSuppressed(current, reason)) {
             return null;
         }
         StartPlan planned = planAdjacentStep(player.level(), current, reason);
+        rememberUnstartedPhysicalSnap(planned);
         return planned == null ? null : planned.prefix();
     }
 
@@ -987,8 +1004,34 @@ public final class ActionPack {
         if (plan == null) {
             return null;
         }
-        startPlan = new StartPlan(plan.from(), null);
+        startPlan = new StartPlan(plan.from(), null, null);
+        rememberUnstartedPhysicalSnap(plan);
         return plan.prefix();
+    }
+
+    private void rememberUnstartedPhysicalSnap(StartPlan plan) {
+        unstartedPhysicalSnap = plan == null ? null : plan.prefix();
+        unstartedPhysicalSnapOrigin = plan == null ? null : plan.snapOrigin();
+    }
+
+    private void discardUnstartedPhysicalSnap() {
+        unstartedPhysicalSnap = null;
+        unstartedPhysicalSnapOrigin = null;
+    }
+
+    /**
+     * Commits the once-per-origin physical-snap guard when a controller actually accepts the
+     * planned walked step. Kept public for {@link PathExecutor}, which can install the same kind
+     * of prefix during a runtime replan. Planning, searching, and a refused prefix leave no guard
+     * entry, so a bot that never moved can retry immediately.
+     */
+    public void commitPlannedPhysicalSnap(WalkedStep acceptedStep) {
+        if (acceptedStep == null || acceptedStep != unstartedPhysicalSnap
+                || unstartedPhysicalSnapOrigin == null) {
+            return;
+        }
+        physicalSnapGuard.record(unstartedPhysicalSnapOrigin, serverTick());
+        discardUnstartedPhysicalSnap();
     }
 
     /**
@@ -1007,7 +1050,6 @@ public final class ActionPack {
     }
 
     private StartPlan planAdjacentStep(ServerLevel world, BlockPos current, String reason) {
-        int nowTick = player.level().getServer().getTickCount();
         // Same-level steps first, then a one-block drop (up to the drop a walk survives), finally a vanilla-style hop. A vertical
         // move includes one horizontal axis at most; a corner hop is never legitimate.
         int[][] horizontalOffsets = {
@@ -1030,14 +1072,14 @@ public final class ActionPack {
                 if (WalkedStep.refusal(player, candidate, kind) != null) {
                     continue;
                 }
-                physicalSnapGuard.record(current, nowTick);
-                BotLog.path(player, "path_start_walked_step",
+                BotLog.path(player, "path_start_walked_step_planned",
                         "reason", reason,
                         "from", LogFields.pos(current),
                         "to", LogFields.pos(candidate),
                         "kind", kind);
                 return new StartPlan(candidate.immutable(),
-                        WalkedStep.begin(player, candidate, kind, "path_start:" + reason));
+                        WalkedStep.begin(player, candidate, kind, "path_start:" + reason),
+                        current.immutable());
             }
         }
         return null;
@@ -1193,6 +1235,7 @@ public final class ActionPack {
         this.walkTo = null;
         this.step = next;
         this.lastStepResult = null;
+        commitPlannedPhysicalSnap(next);
     }
 
     /** True when no step is in flight. */

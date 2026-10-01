@@ -65,6 +65,15 @@ final class FollowSwimSourceContractTest {
         String follow = read("task/FollowTask.java");
         assertTrue(follow.contains("swimming.follow(bot, target, elapsed, SWIM_STOP_DISTANCE)"));
         assertTrue(follow.contains("swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)"));
+        int swimming = follow.indexOf("private void followSwimming(AIPlayerEntity bot, ServerPlayer target)");
+        int swimmingEnd = follow.indexOf("private void followLand", swimming);
+        String swimmingBody = follow.substring(swimming, swimmingEnd);
+        assertTrue(swimmingBody.indexOf("publishPace(bot, target);")
+                        < swimmingBody.indexOf("swimming.follow(bot, target, elapsed, SWIM_STOP_DISTANCE)"),
+                "a swimming follow must publish its FOLLOW gait before it starts swimming");
+        int exit = follow.indexOf("swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)");
+        assertTrue(follow.lastIndexOf("publishPace(bot, target);", exit) < exit,
+                "the water-to-land exit must retain its FOLLOW gait while it swims ashore");
         assertFalse(follow.contains("nextSwimRepathTick"), "the old launch-site swim entry is gone");
     }
 

@@ -15,6 +15,7 @@ import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.util.OfflineProfileFactory;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
@@ -24,11 +25,14 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.Vec3;
 import java.util.Collection;
 import java.util.Collections;
@@ -104,20 +108,25 @@ public final class AIPlayerManager {
     }
 
     /**
-     * What a vanilla respawn hands the player: a new ServerPlayer with nothing of the old one but its inventory (which
-     * die() already dropped as items and XP orbs). No status effects, no XP level, progress or total (the orbs it dropped are
-     * all of it), food 20 with saturation 5 and no exhaustion debt carried over, no fire, full air, no fall damage brewing,
-     * no absorption or frostbite. The bot is revived in place because it has no client to send the respawn packet, so the
-     * state a new player would not have is reset here. Package-visible for the GameTest.
+     * What a vanilla respawn hands the player: no status effects; food 20, saturation 5 and zero exhaustion debt; no fire,
+     * full air, no fall damage brewing, no absorption or frostbite. XP level, progress and total reset only when
+     * {@link GameRules#KEEP_INVENTORY} is false: {@code die()} drops those XP orbs in that case, while vanilla retains XP when
+     * keep-inventory prevents the drop. The bot is revived in place because it has no client to send the respawn packet, so
+     * the state a new player would not have is reset here. Package-visible for the GameTest.
      */
     static void applyVanillaRespawnState(AIPlayerEntity bot) {
         bot.removeAllEffects();
-        bot.setExperienceLevels(0);
-        bot.setExperiencePoints(0);
-        bot.experienceProgress = 0.0F;
-        bot.totalExperience = 0;
-        bot.getFoodData().setFoodLevel(20);
-        bot.getFoodData().setSaturation(5.0F);
+        if (!bot.level().getGameRules().get(GameRules.KEEP_INVENTORY)) {
+            bot.setExperienceLevels(0);
+            bot.setExperiencePoints(0);
+            bot.experienceProgress = 0.0F;
+            bot.totalExperience = 0;
+        }
+        // FoodData has no exhaustion setter. Reading its empty vanilla save form resets every
+        // field together (food=20, saturation=5, exhaustion=0, tick timer=0), rather than leaving
+        // an invisible pre-death hunger debit attached to a newly revived bot.
+        bot.getFoodData().readAdditionalSaveData(TagValueInput.create(
+                ProblemReporter.DISCARDING, bot.registryAccess(), new CompoundTag()));
         bot.clearFire();
         bot.setAirSupply(bot.getMaxAirSupply());
         bot.setAbsorptionAmount(0.0F);

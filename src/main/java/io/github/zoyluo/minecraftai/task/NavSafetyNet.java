@@ -43,7 +43,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class NavSafetyNet {
     public static final NavSafetyNet INSTANCE = new NavSafetyNet();
 
-    static final int AIR_SURFACE_THRESHOLD = 120; // Max is 300; below this while underwater -> surface to breathe
+    static final int AIR_SURFACE_THRESHOLD = 120; // Minimum air margin; Max is 300
+    // A swimmer needs roughly eleven air ticks per vertical water cell plus a short turn/step
+    // margin. The direct-column scan below uses this only when it can actually see a water
+    // surface above the bot; a sealed or unknown column keeps the conservative base floor.
+    private static final int AIR_PER_SURFACE_BLOCK = 11;
+    private static final int AIR_SURFACE_MARGIN = 24;
     private static final int EMERGENCY_AIR = 60;           // Below this with no hope of surfacing -> emergency teleport to a breathable landing spot
     // FollowTask renews this tiny lease only while it is physically swimming toward a waterborne
     // player (or climbing out after one) and still has a generous oxygen margin.  It is
@@ -53,8 +58,9 @@ public final class NavSafetyNet {
     // Ownership protocol (no ping-pong between follow and the crisis machine below): while the
     // lease is valid follow owns every decision, including turning up for breath early
     // (FollowOxygen.SURFACE_FLOOR_AIR sits above AIR_SURFACE_THRESHOLD, so follow always gets there
-    // first).  The moment air reaches AIR_SURFACE_THRESHOLD the lease ends and the crisis machine
-    // owns the bot; follow then makes NO movement at all, so neither undoes the other's step.
+    // first). The moment air reaches the measured direct-surface threshold (never lower than
+    // AIR_SURFACE_THRESHOLD) the lease ends and the crisis machine owns the bot; follow then
+    // makes NO movement at all, so neither undoes the other's step.
     // Kept at the original 6 ticks: a 20-tick lease was tried for lag tolerance but the shallow-swim
     // ping-pong GameTest passes identically with 6, so a longer window was never shown to matter.
     private static final int FOLLOW_SWIM_LEASE_TICKS = 6;
@@ -72,23 +78,23 @@ public final class NavSafetyNet {
     // breathable shore point) until the feet are actually on solid ground before releasing control
     // -- the goal of self-rescue is "reach shore", not "grab one breath".
     private final Map<UUID, BlockPos> waterRescueShore = new ConcurrentHashMap<>();
-    // SAFE-DROWN3: The tick the water crisis began. Swimming toward the shore point may never
-    // succeed (a 2-block-high shore wall that can't be jumped onto / current pushing the bot back
-    // -- measured: on a plains-lake expedition the bot still drowned at HP 2.2) -- once the crisis
-    // has dragged on past a timeout, give up on doing it gracefully and just emergency-teleport
-    // ashore to survive.
-    private final Map<UUID, Integer> waterRescueSince = new ConcurrentHashMap<>();
+    // SAFE-DROWN3: A physically proved route gets a deadline proportional to its remaining swim
+    // cells, rather than a flat ten seconds. An operator emergency teleport is therefore a last
+    // resort for a route that demonstrably stopped making progress, never a shortcut for a long
+    // but normally swimmable crossing.
+    private record WaterRescueDeadline(BlockPos feet, int routeCells, int deadlineTick) {
+    }
+    private final Map<UUID, WaterRescueDeadline> waterRescueDeadlines = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> followSwimLeaseUntil = new ConcurrentHashMap<>();
     // The Baritone counterpart of the follow swim lease: renewed on every tick Baritone drives a bot along a route that is
     // allowed to go through water (BaritoneDriver), so the bot is not treated as a drowning rescue case while it swims the
     // segment Baritone planned. Same guards as the follow lease: a few ticks long, void as soon as the air gets low.
     private final Map<UUID, Integer> baritoneWaterLeaseUntil = new ConcurrentHashMap<>();
     private static final int BARITONE_WATER_LEASE_TICKS = 6;
-    private static final int WATER_RESCUE_TELEPORT_AFTER = 200; // Still not out of the water after 10s -> force a teleport
     // xPerf-NAVSAFE-01 / detour-refactor-navsafetynet-water-search-cost: findPhysicalWaterEscape
     // (a full BFS over up to ~36k cells) and findNearestBreathableStandable (a full triple-nested
     // scan of the same size) used to re-run from scratch on every single tick a bot stayed in a
-    // water crisis -- up to WATER_RESCUE_TELEPORT_AFTER (200) ticks in a row. Cache their result per
+    // water crisis. Cache their result per
     // bot, keyed by the bot's own feet cell, and bound how stale that cache may get instead of
     // recomputing every tick:
     // - A changed feet cell invalidates the cache immediately (the very next tick recomputes),
@@ -103,8 +109,8 @@ public final class NavSafetyNet {
     //   and simply refuse the step (returning false, falling through to the remaining fallbacks
     //   below) if the cached route's next cell turned out to no longer be valid -- so a stale route
     //   can never move the bot into now-unsafe terrain, only delay noticing a shape change by at
-    //   most WATER_SEARCH_CACHE_TICKS ticks (a quarter of a second), far below the 200-tick
-    //   emergency-teleport timeout that remains the actual safety backstop.
+    //   most WATER_SEARCH_CACHE_TICKS ticks (a quarter of a second), far below even a one-cell
+    //   physical swim-step deadline that remains the actual safety backstop.
     private static final int WATER_SEARCH_CACHE_TICKS = 5;
     private record WaterSearchCache<T>(BlockPos feet, int computedTick, T result) {
     }
@@ -131,7 +137,7 @@ public final class NavSafetyNet {
         UUID id = bot.getUUID();
         nextLogTick.remove(id);
         waterRescueShore.remove(id);
-        waterRescueSince.remove(id);
+        waterRescueDeadlines.remove(id);
         followSwimLeaseUntil.remove(id);
         baritoneWaterLeaseUntil.remove(id);
         waterEscapeCache.remove(id);
@@ -143,7 +149,7 @@ public final class NavSafetyNet {
     public void clearAll() {
         nextLogTick.clear();
         waterRescueShore.clear();
-        waterRescueSince.clear();
+        waterRescueDeadlines.clear();
         followSwimLeaseUntil.clear();
         baritoneWaterLeaseUntil.clear();
         waterEscapeCache.clear();
@@ -170,7 +176,7 @@ public final class NavSafetyNet {
      * Package-private on purpose: no arbitrary task may opt out of the drowning safety net.
      */
     void renewFollowSwim(AIPlayerEntity bot) {
-        if (bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
+        if (bot.getAirSupply() <= surfaceAirThreshold(bot)) {
             clearFollowSwim(bot);
             return;
         }
@@ -178,7 +184,7 @@ public final class NavSafetyNet {
         // A prior rescue is for an accidental water entry.  An actively renewed, high-air swim
         // follow is a different, short-lived intent and must not inherit that old controller.
         waterRescueShore.remove(bot.getUUID());
-        waterRescueSince.remove(bot.getUUID());
+        waterRescueDeadlines.remove(bot.getUUID());
     }
 
     /** Clears the narrow FollowTask swim lease on cancellation or any non-swim transition. */
@@ -193,13 +199,13 @@ public final class NavSafetyNet {
      * opt-out: the lease is refused (and any rescue in progress carries on) once the air is at the surfacing threshold.
      */
     public void renewBaritoneWater(AIPlayerEntity bot) {
-        if (bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
+        if (bot.getAirSupply() <= surfaceAirThreshold(bot)) {
             clearBaritoneWater(bot);
             return;
         }
         baritoneWaterLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + BARITONE_WATER_LEASE_TICKS);
         waterRescueShore.remove(bot.getUUID());
-        waterRescueSince.remove(bot.getUUID());
+        waterRescueDeadlines.remove(bot.getUUID());
     }
 
     /** Ends the Baritone water lease: the drive ended (arrived, cancelled, taken over, bot removed) or the route no longer swims. */
@@ -214,7 +220,7 @@ public final class NavSafetyNet {
 
     private boolean hasBaritoneWaterLease(AIPlayerEntity bot, int currentTick) {
         Integer until = baritoneWaterLeaseUntil.get(bot.getUUID());
-        if (until == null || until < currentTick || bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
+        if (until == null || until < currentTick || bot.getAirSupply() <= surfaceAirThreshold(bot)) {
             baritoneWaterLeaseUntil.remove(bot.getUUID());
             return false;
         }
@@ -223,7 +229,7 @@ public final class NavSafetyNet {
 
     private boolean hasFollowSwimLease(AIPlayerEntity bot, int currentTick) {
         Integer until = followSwimLeaseUntil.get(bot.getUUID());
-        if (until == null || until < currentTick || bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
+        if (until == null || until < currentTick || bot.getAirSupply() <= surfaceAirThreshold(bot)) {
             followSwimLeaseUntil.remove(bot.getUUID());
             return false;
         }
@@ -290,7 +296,7 @@ public final class NavSafetyNet {
             // continuing to rely on it would shuttle the bot back and forth between two dry cells.
             if (isDryStandable(bot, world, feet)) {
                 waterRescueShore.remove(bot.getUUID());
-                waterRescueSince.remove(bot.getUUID());
+                waterRescueDeadlines.remove(bot.getUUID());
                 // The old navigator may still contain the DROP_DOWN edge that caused the rescue.
                 // Cancel the complete action stack before returning control or it will execute the
                 // same wet edge again on the next tick.
@@ -298,16 +304,12 @@ public final class NavSafetyNet {
                 return false;
             }
             int now = server.getTickCount();
-            Integer since = waterRescueSince.putIfAbsent(bot.getUUID(), now);
             // SAFE-DROWN: Air is critical and there's no air above to surface into (a water pocket
             // capped by stone) -> emergency-teleport to the nearest breathable landing spot.
-            // SAFE-DROWN3: Or the crisis has dragged on too long (can't reach the shore point: tall
-            // shore wall / current pushing back) -> likewise force a teleport to survive.
-            boolean rescueTimedOut = since != null && now - since > WATER_RESCUE_TELEPORT_AFTER;
-            if (rescueTimedOut || (bot.getAirSupply() <= EMERGENCY_AIR && !breathableAbove(world, feet))) {
+            if (bot.getAirSupply() <= EMERGENCY_AIR && !breathableAbove(world, feet)) {
                 if (emergencyTeleportToAir(bot, world, feet, now)) {
                     waterRescueShore.remove(bot.getUUID());
-                    waterRescueSince.remove(bot.getUUID());
+                    waterRescueDeadlines.remove(bot.getUUID());
                     throttledLog(server, bot, "navsafe_drown_teleport", feet);
                     return true;
                 }
@@ -333,6 +335,15 @@ public final class NavSafetyNet {
             WaterEscapeStep escape = cachedFindPhysicalWaterEscape(bot, world, feet, now);
             if (escape != null) {
                 waterRescueShore.put(bot.getUUID(), escape.shore().immutable());
+                scheduleWaterRescueDeadline(bot, feet, escape, now);
+                if (waterRescueDeadlineExceeded(bot, feet, now)) {
+                    if (emergencyTeleportToAir(bot, world, feet, now)) {
+                        waterRescueShore.remove(bot.getUUID());
+                        waterRescueDeadlines.remove(bot.getUUID());
+                        throttledLog(server, bot, "navsafe_drown_teleport", feet);
+                        return true;
+                    }
+                }
                 if (beginRescueStep(bot, escape.next(), "navsafe_water_rescue")) {
                     throttledLog(server, bot, "navsafe_water_step", feet);
                     return true;
@@ -343,7 +354,7 @@ public final class NavSafetyNet {
             // stepped back down from the top cell on the next tick. The two correct local actions
             // therefore formed an endless Y/Y+1 policy oscillation. Connected shore movement
             // remains the first choice; emergency breathing is a bounded fallback.
-            if (bot.getAirSupply() <= AIR_SURFACE_THRESHOLD
+            if (bot.getAirSupply() <= surfaceAirThreshold(bot)
                     && physicalStepTowardAir(bot, world, feet)) {
                 throttledLog(server, bot, "navsafe_surface_for_air", feet);
                 return true;
@@ -405,6 +416,74 @@ public final class NavSafetyNet {
         return found;
     }
 
+    /**
+     * The minimum air supply at which a direct vertical surface is worth taking over for. A
+     * shallow or unknown column keeps the historic floor; a measured deep column scales only with
+     * the water cells the bot must actually swim through, not with an arbitrary map radius.
+     */
+    static int surfaceAirThresholdForDepth(int waterCellsToSurface) {
+        return Math.max(AIR_SURFACE_THRESHOLD,
+                Math.max(0, waterCellsToSurface) * AIR_PER_SURFACE_BLOCK + AIR_SURFACE_MARGIN);
+    }
+
+    private static int surfaceAirThreshold(AIPlayerEntity bot) {
+        return surfaceAirThresholdForDepth(
+                verticalWaterCellsToSurface(bot.level(), bot.blockPosition()));
+    }
+
+    /**
+     * Counts a directly connected water column including the feet cell, returning zero when a
+     * solid ceiling, another fluid, or the local rescue scan limit hides the surface. This is a
+     * local upward check, not a remote-world search: it merely answers whether swimming straight
+     * up from the current column can reach air.
+     */
+    private static int verticalWaterCellsToSurface(ServerLevel world, BlockPos feet) {
+        if (!isWaterSwimCell(world, feet)) {
+            return 0;
+        }
+        int depth = 1;
+        for (int dy = 1; dy <= RESCUE_RADIUS_V; dy++) {
+            BlockPos above = feet.above(dy);
+            BlockState state = world.getBlockState(above);
+            if (!state.getCollisionShape(world, above).isEmpty()) {
+                return 0;
+            }
+            if (isWaterSwimCell(world, above)) {
+                depth++;
+                continue;
+            }
+            return world.getFluidState(above).isEmpty() ? depth : 0;
+        }
+        return 0;
+    }
+
+    /**
+     * Uses the same conservative timeout budget as a real {@link WalkedStep.Kind#SWIM}, scaled
+     * by the BFS-proved remaining cells. This keeps a 25-cell crossing from receiving the old
+     * fixed 200-tick operator teleport while still bounding a one-cell route that is truly stuck.
+     */
+    static int waterRescueTimeoutTicks(int routeCells) {
+        return (int) Math.ceil(WalkedStepRules.timeoutBudget(
+                WalkedStep.Kind.SWIM, Math.max(1, routeCells)));
+    }
+
+    private void scheduleWaterRescueDeadline(AIPlayerEntity bot, BlockPos feet,
+                                             WaterEscapeStep escape, int now) {
+        UUID id = bot.getUUID();
+        WaterRescueDeadline existing = waterRescueDeadlines.get(id);
+        if (existing != null && existing.feet().equals(feet)
+                && existing.routeCells() == escape.routeCells()) {
+            return;
+        }
+        waterRescueDeadlines.put(id, new WaterRescueDeadline(feet.immutable(), escape.routeCells(),
+                now + waterRescueTimeoutTicks(escape.routeCells())));
+    }
+
+    private boolean waterRescueDeadlineExceeded(AIPlayerEntity bot, BlockPos feet, int now) {
+        WaterRescueDeadline deadline = waterRescueDeadlines.get(bot.getUUID());
+        return deadline != null && deadline.feet().equals(feet) && now > deadline.deadlineTick();
+    }
+
     private static WaterEscapeStep findPhysicalWaterEscape(ServerLevel world, BlockPos start) {
         Standability.clearCache();
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
@@ -433,7 +512,8 @@ public final class NavSafetyNet {
                             && !previous.get(first).equals(origin)) {
                         first = previous.get(first);
                     }
-                    return new WaterEscapeStep(first.immutable(), candidate.immutable());
+                    return new WaterEscapeStep(first.immutable(), candidate.immutable(),
+                            cellsFromOrigin(previous, origin, candidate));
                 }
                 if (isWaterSwimCell(world, candidate)) {
                     queue.addLast(candidate);
@@ -441,6 +521,16 @@ public final class NavSafetyNet {
             }
         }
         return null;
+    }
+
+    private static int cellsFromOrigin(Map<BlockPos, BlockPos> previous, BlockPos origin,
+                                       BlockPos destination) {
+        int cells = 0;
+        for (BlockPos current = destination; current != null && !current.equals(origin);
+             current = previous.get(current)) {
+            cells++;
+        }
+        return Math.max(1, cells);
     }
 
     static List<BlockPos> waterEscapeNeighbors(BlockPos current) {
@@ -548,7 +638,8 @@ public final class NavSafetyNet {
         return beginRescueStep(bot, above, "navsafe_water_surface");
     }
 
-    private record WaterEscapeStep(BlockPos next, BlockPos shore) {
+    /** The number of input-driven cells from the current feet cell to the proved dry shore. */
+    private record WaterEscapeStep(BlockPos next, BlockPos shore, int routeCells) {
     }
 
     /**

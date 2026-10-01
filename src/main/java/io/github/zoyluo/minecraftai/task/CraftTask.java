@@ -504,9 +504,9 @@ public final class CraftTask extends AbstractTask {
 
     /**
      * Takes {@code count} units of {@code ingredient} out of the (copied) inventory, like a crafting grid does: a stack is
-     * accepted when vanilla's ingredient test accepts it (the ingredient's items are tried in their preference order), and
-     * the plain stacks of an item are used up before a renamed, damaged or enchanted one (a careful player does not put an
-     * enchanted item in the grid while plain ones lie next to it). Every consumed unit whose item leaves a container
+     * accepted when vanilla's ingredient test accepts it. Across every accepted alternative, plain stacks are used before a
+     * renamed, damaged or enchanted stack (a careful player does not put an enchanted item in the grid while a plain accepted
+     * alternative lies next to it); within each pass, the ingredient's item order still breaks ties. Every consumed unit whose item leaves a container
      * behind adds that remainder to {@code remainders}.
      */
     static boolean removeIngredient(
@@ -519,8 +519,8 @@ public final class CraftTask extends AbstractTask {
             return false;
         }
         int remaining = count;
-        for (Item item : ingredient.anyOf()) {
-            for (boolean plainOnly : new boolean[]{true, false}) {
+        for (boolean plainOnly : new boolean[]{true, false}) {
+            for (Item item : ingredient.anyOf()) {
                 for (List<ItemStack> region : List.of(main, offHand)) {
                     for (ItemStack stack : region) {
                         if (remaining <= 0) {

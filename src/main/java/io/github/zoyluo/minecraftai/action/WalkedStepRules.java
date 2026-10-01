@@ -2,7 +2,7 @@ package io.github.zoyluo.minecraftai.action;
 
 /**
  * The pure rules of {@link WalkedStep} (no world, no bot): which cell offsets a kind of step may cover, how much of its time budget a
- * tick costs, when the keys are let go, where a body that overlaps a block is pushed, and how the walk keys follow from the heading.
+ * tick costs, when the keys are let go, and where a body that overlaps a block is pushed.
  * Kept free of Minecraft state so they are unit-testable.
  */
 public final class WalkedStepRules {
@@ -69,6 +69,15 @@ public final class WalkedStepRules {
         };
     }
 
+    /**
+     * Whether a point-owned in-cell step may start from this relative cell. The target point can
+     * lie just over an edge, so the same cell and each horizontal neighbour are legitimate; a
+     * different Y or a two-cell hop is not.
+     */
+    public static boolean inCellEnvelope(int dx, int dy, int dz) {
+        return dy == 0 && Math.abs(dx) <= 1 && Math.abs(dz) <= 1;
+    }
+
     /** The walking kind that covers a height difference of {@code dy} cells to an adjacent cell (null when no walk does: up two, down four). */
     public static WalkedStep.Kind walkKindFor(int dy) {
         if (dy == 0) {
@@ -119,21 +128,6 @@ public final class WalkedStepRules {
         return Math.max(0.0D, Math.min(PUSH_OUT_SPEED, remaining));
     }
 
-    /**
-     * Forward and left key values that move the bot toward a target offset {@code (dx, dz)} when it faces {@code yawDegrees}
-     * (vanilla moveRelative: forward is (-sin, cos), left is (cos, sin) in the yaw frame). Unit length; zero when there is no offset.
-     */
-    public static float[] keysToward(double yawDegrees, double dx, double dz) {
-        double distance = Math.hypot(dx, dz);
-        if (distance < 1.0E-6D) {
-            return new float[]{0.0F, 0.0F};
-        }
-        double yaw = Math.toRadians(yawDegrees);
-        double ux = dx / distance;
-        double uz = dz / distance;
-        return new float[]{(float) (-Math.sin(yaw) * ux + Math.cos(yaw) * uz), (float) (Math.cos(yaw) * ux + Math.sin(yaw) * uz)};
-    }
-
     /** A swimmer holds the feet this far above the floor of the cell it swims through (jump below it, sink above it). */
     public static final double SWIM_HOLD_DEPTH = 0.3D;
     /** Swimming covers a block at about a third of the walking pace (about 2 blocks per second): a swim step is given longer. */
@@ -168,12 +162,7 @@ public final class WalkedStepRules {
      * The swimming and rescue steps (NaturalSwimGameTests) hold their depth with it, and the pool exit, rim and pickup steps of the
      * pickup job keep stroking until the feet are up.
      */
-    public static boolean jumpNow(WalkedStep.Kind kind, boolean grounded, double feetY, int targetY, boolean headUnderwater) {
-        // A head under water means the body is in water: the jump key is a swim stroke whether or not the caller says so.
-        return jumpNow(kind, grounded, feetY, targetY, headUnderwater, headUnderwater);
-    }
-
-    /** {@link #jumpNow(WalkedStep.Kind, boolean, double, int, boolean)} for a bot that may be afloat ({@code inWater}). */
+    /** Whether the step should hold the jump key for a bot that may be afloat ({@code inWater}). */
     public static boolean jumpNow(WalkedStep.Kind kind, boolean grounded, double feetY, int targetY, boolean headUnderwater,
                                   boolean inWater) {
         return switch (kind) {

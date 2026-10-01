@@ -60,8 +60,9 @@ final class BoatFollowSourceContractTest {
         assertTrue(safety.contains("FOLLOW_SWIM_LEASE_TICKS = 6"));
         assertTrue(safety.contains("void renewFollowSwim(AIPlayerEntity bot)"));
         assertTrue(safety.contains("void clearFollowSwim(AIPlayerEntity bot)"));
-        assertTrue(safety.contains("bot.getAirSupply() <= AIR_SURFACE_THRESHOLD"),
-                "the narrow swim allowance must expire before drowning safety is weakened");
+        assertTrue(safety.contains("surfaceAirThreshold(bot)")
+                        && safety.contains("AIR_SURFACE_THRESHOLD"),
+                "the narrow swim allowance must expire before drowning safety is weakened, including in a measured deep column");
     }
 
     /**

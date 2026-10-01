@@ -23,7 +23,7 @@ import java.util.Set;
 /**
  * Real-server proof of the snap guard ({@code SnapRepeatGuard}) under the R5 rule that no path correction teleports a bot in any profile:
  * {@code ActionPack.snapPlayerToNearestStandable} never moves the bot (a first snap out of a cell with no footing plans a walked step onto
- * the neighbouring strip, a second one out of the same cell inside the guard window is refused) and there is no privileged long-distance
+ * the neighbouring strip, and only handing that step to a controller enters the repeat guard) and there is no privileged long-distance
  * relocation left behind it (a cell with no adjacent footing is simply refused).
  *
  * <p>The default GameTest profile (strict_survival) denies the emergency teleport, which would make "no teleport happened" trivially
@@ -65,7 +65,8 @@ public final class ActionPackSuppressedSnapGameTests {
                     "fixture: the emergency teleport must be available so a fall-through would be visible");
 
             // 1) Over a cell with no footing, one step from the strip: the first snap plans a walked step onto the strip and
-            //    does not move the bot.
+            //    does not move the bot. Taking that plan without giving it to a controller models a failed A* search: it must not
+            //    consume the guard window, because the bot never moved.
             place(world, bot, hanging);
             require(context, !Standability.isStandable(world, hanging), "fixture: the hanging cell is standable");
             Vec3 first = bot.position();
@@ -74,19 +75,28 @@ public final class ActionPackSuppressedSnapGameTests {
             require(context, bot.getActionPack().startCell().equals(anchor.offset(3, 0, 0)),
                     "the first snap did not plan the step west onto the strip: " + bot.getActionPack().startCell());
             require(context, bot.position().distanceToSqr(first) < 1.0E-12D, "the first snap moved the bot");
-            bot.getActionPack().takeStartStep();
+            require(context, bot.getActionPack().takeStartStep() != null, "the planned start step was missing");
 
-            // 2) Whatever walked the bot back into that cell is not undone again inside the window: the snap is refused,
-            //    and the refusal must not become a teleport onto the strip.
+            // 2) The abandoned plan did not start, so a retry is admitted. Now hand the new physical step to the controller;
+            //    that is the point at which the guard starts protecting against a move that would be immediately undone.
+            place(world, bot, hanging);
+            require(context, bot.getActionPack().snapPlayerToNearestStandable("gametest_retry_after_unstarted_plan"),
+                    "an unstarted plan must not suppress the retry");
+            var started = bot.getActionPack().takeStartStep();
+            require(context, started != null, "the retry did not produce a physical step");
+            bot.getActionPack().runStep(started);
+
+            // 3) Whatever walked the bot back into that cell is not undone again inside the window: after a controller accepted
+            //    the step the snap is refused, and the refusal must not become a teleport onto the strip.
             place(world, bot, hanging);
             Vec3 before = bot.position();
             boolean second = bot.getActionPack().snapPlayerToNearestStandable("gametest_second_snap");
-            require(context, !second, "a repeated snap out of the same cell inside the window must be refused");
+            require(context, !second, "a started repeated snap out of the same cell inside the window must be refused");
             require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
                     "the refused snap moved the bot from " + before + " to " + bot.position()
                             + " (a suppressed snap fell through to a relocation)");
 
-            // 3) Control: a cell with no adjacent footing (so no walked step exists) and no guard entry is REFUSED by the very
+            // 4) Control: a cell with no adjacent footing (so no walked step exists) and no guard entry is REFUSED by the very
             //    same call under a profile that allows the emergency teleport: nothing relocates a bot for a path start any more.
             place(world, bot, farOut);
             Vec3 stranded = bot.position();

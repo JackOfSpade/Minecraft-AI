@@ -156,6 +156,33 @@ public final class SurfaceWaterRecoveryGameTests {
         });
     }
 
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_deep_water_surfaces_before_the_fixed_air_floor", maxTicks = 160)
+    public void deepWaterSurfacesBeforeTheFixedAirFloor(GameTestHelper context) {
+        // Twelve vertical water cells need more than the historic 120-air floor to surface by
+        // real swim input. At 140 air the dynamic threshold must install an upward WalkedStep;
+        // the old fixed check merely held jump in place and could leave this deep bot underwater.
+        WaterShaftFixture fixture = sealedWaterShaftFixture(context, -134, 12);
+        AIPlayerEntity bot = fixture.bot();
+        bot.setAirSupply(140);
+        NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+        TeleportAudit.reset(bot);
+
+        require(context, NavSafetyNet.INSTANCE.tickBot(context.getLevel().getServer(), bot),
+                "deep-water rescue did not take control");
+        require(context, !bot.getActionPack().stepIdle(),
+                "deep-water rescue did not start the physical upward step above the fixed air floor");
+        context.failIfEver(() -> {
+            if (!bot.blockPosition().equals(fixture.lower().above())) {
+                return;
+            }
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "deep-water ascent teleported the bot: " + TeleportAudit.lastCaller(bot));
+            NavSafetyNet.INSTANCE.clear(bot);
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), fixture.name());
+            context.succeed();
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_rescue_routes_around_a_wall_even_when_the_first_step_moves_away_from_shore", maxTicks = 320)
     public void rescueRoutesAroundAWallEvenWhenTheFirstStepMovesAwayFromShore(GameTestHelper context) {
         var world = context.getLevel();
@@ -807,10 +834,14 @@ public final class SurfaceWaterRecoveryGameTests {
     }
 
     private static WaterShaftFixture sealedWaterShaftFixture(GameTestHelper context, int z) {
+        return sealedWaterShaftFixture(context, z, 2);
+    }
+
+    private static WaterShaftFixture sealedWaterShaftFixture(GameTestHelper context, int z, int depth) {
         var world = context.getLevel();
         BlockPos lower = context.absolutePos(new BlockPos(8, 24, z));
 
-        // Fill the complete local rescue window, then carve only a two-cell water shaft. There is
+        // Fill the complete local rescue window, then carve only the requested water shaft. There is
         // deliberately no dry standable target for either connected-shore BFS or the legacy shore
         // search. The first tick therefore isolates the full-air gate; changing only the oxygen
         // level on the second tick proves that the adjacent emergency ascent remains available.
@@ -822,9 +853,10 @@ public final class SurfaceWaterRecoveryGameTests {
                 }
             }
         }
-        world.setBlock(lower, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(lower.above(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(lower.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        for (int dy = 0; dy < depth; dy++) {
+            world.setBlock(lower.above(dy), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        world.setBlock(lower.above(depth), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "WaterShaftGT" + Math.abs(z);

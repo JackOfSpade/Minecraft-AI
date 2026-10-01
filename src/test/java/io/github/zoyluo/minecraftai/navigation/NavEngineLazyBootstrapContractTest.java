@@ -138,9 +138,24 @@ final class NavEngineLazyBootstrapContractTest {
         int yield = pack.indexOf("yieldToBaritone();", start);
         int admit = pack.indexOf("BaritoneNavigator.start(player, request, admit)", start);
         assertTrue(start > 0 && yield > start && admit > yield, "single writer: legacy state is dropped first");
+        String handoff = pack.substring(start, yield);
+        assertTrue(handoff.contains("step != null"),
+                "an in-flight WalkedStep must be yielded before Baritone is admitted as the sole input writer");
         // A legacy order cancels the recorded Baritone route through the shared claim.
         assertTrue(pack.contains("private void claim(String why) {\n        releaseBaritone(why);"));
         assertTrue(pack.contains("cancelBaritoneRoute(\"stop_navigation\")"), "stopNavigation ends a Baritone route too");
+    }
+
+    @Test
+    void aRunAwayThreatReferenceIsNeverReportedAsAnArrivalGoal() throws IOException {
+        String pack = read("action/ActionPack.java");
+        int activeGoal = pack.indexOf("public BlockPos activePathGoal()");
+        int seam = pack.indexOf("// ==================== Navigator seam", activeGoal);
+        String body = pack.substring(activeGoal, seam);
+        int runAway = body.indexOf("route.shape() == NavRoute.Shape.RUN_AWAY");
+        int resolved = body.indexOf("return route.resolvedGoal();", runAway);
+        assertTrue(runAway >= 0 && resolved > runAway,
+                "RUN_AWAY must report only a real resolved destination (normally none), never its threat source");
     }
 
     @Test
