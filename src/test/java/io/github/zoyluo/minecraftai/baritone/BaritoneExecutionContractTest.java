@@ -30,13 +30,22 @@ class BaritoneExecutionContractTest {
         int before = source.indexOf("boolean baritoneDrives = baritoneBeforePhysics();", tick);
         int physics = source.indexOf("super.tick()", before);
         int doTick = source.indexOf("this.doTick()", physics);
-        int after = source.indexOf("baritoneAfterPhysics();", doTick);
+        int after = source.indexOf("baritoneCompleted = baritoneAfterPhysics();", doTick);
         int legacy = source.indexOf("this.actionPack.onUpdate()", doTick);
         assertTrue(tick >= 0 && before > tick && physics > before && doTick > physics && after > doTick && legacy > doTick,
                 "beforePhysics must precede the physics tick; afterPhysics and the legacy update follow it");
-        String between = source.substring(doTick, legacy);
-        assertTrue(between.contains("if (baritoneDrives)") && between.contains("else"),
-                "the legacy executor's update must be the alternative to afterPhysics, never run in the same tick");
+        String tickBody = method(source, "public void tick() {");
+        assertTrue(tickBody.contains("if (baritoneDrives) {\n                boolean baritoneCompleted = false;\n                try {\n                    baritoneCompleted = baritoneAfterPhysics();")
+                        && tickBody.contains("} finally {")
+                        && tickBody.contains("NavigationMeasurement.noteDriver(this, true, !baritoneCompleted, owner);"),
+                "the measured branch must retain whether Baritone actually completed its post-physics drive even when its legacy fallback throws");
+        int legacyBranch = tickBody.indexOf("} else {");
+        int beforeOwner = tickBody.indexOf("ownerBeforeUpdate = this.actionPack.navigationOwnerForMeasurement();", legacyBranch);
+        int legacyUpdate = tickBody.indexOf("this.actionPack.onUpdate();", legacyBranch);
+        int afterOwner = tickBody.indexOf("ownerAfterUpdate = this.actionPack.navigationOwnerForMeasurement();", legacyUpdate);
+        assertTrue(legacyBranch >= 0 && beforeOwner > legacyBranch && legacyUpdate > beforeOwner && afterOwner > legacyUpdate
+                        && tickBody.contains("try {\n                    this.actionPack.onUpdate();\n                } finally {"),
+                "a non-driven tick must preserve the legacy scheduler branch and observe its owner on both sides of the update, even on failure");
     }
 
     @Test
@@ -46,12 +55,14 @@ class BaritoneExecutionContractTest {
         before = before.substring(0, before.indexOf("\n    }\n"));
         assertTrue(before.indexOf("NavEngineSelector.baritoneActive()") < before.indexOf("BaritoneDriver.beforePhysics(this)"),
                 "the driver is asked only while Baritone is initialised and not given up on");
-        assertTrue(before.contains("catch (Throwable failure)") && before.contains("NavEngineSelector.handleFailure("),
-                "a linkage-type failure that escapes the driver retires Baritone and the tick carries on");
-        String after = source.substring(source.indexOf("private void baritoneAfterPhysics() {"));
-        after = after.substring(0, after.indexOf("\n    }\n"));
-        assertTrue(after.contains("catch (Throwable failure)") && after.contains("this.actionPack.onUpdate()"),
-                "when the post-physics hook fails the legacy update still runs this tick");
+        assertTrue(before.contains("catch (Throwable failure)") && before.contains("NavigationMeasurement.noteBaritoneFallback(this)")
+                        && before.contains("NavEngineSelector.handleFailure("),
+                "a linkage-type failure that escapes the driver invalidates an active capture, retires Baritone, and lets the tick carry on");
+        String after = method(source, "private boolean baritoneAfterPhysics() {");
+        assertTrue(after.contains("catch (Throwable failure)") && after.contains("NavigationMeasurement.noteBaritoneFallback(this)")
+                        && after.contains("this.actionPack.onUpdate()")
+                        && after.contains("return false;") && after.contains("return true;"),
+                "when the post-physics hook does not complete, the same tick falls back to legacy and reports false");
     }
 
     @Test
@@ -127,6 +138,22 @@ class BaritoneExecutionContractTest {
             count++;
         }
         return count;
+    }
+
+    private static String method(String source, String signature) {
+        int start = source.indexOf(signature);
+        assertTrue(start >= 0, signature + " must exist");
+        int open = source.indexOf('{', start);
+        int depth = 0;
+        for (int at = open; at < source.length(); at++) {
+            char current = source.charAt(at);
+            if (current == '{') {
+                depth++;
+            } else if (current == '}' && --depth == 0) {
+                return source.substring(start, at + 1);
+            }
+        }
+        throw new AssertionError(signature + " must close");
     }
 
     @Test

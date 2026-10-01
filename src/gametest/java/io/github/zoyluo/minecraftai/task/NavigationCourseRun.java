@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
@@ -70,6 +71,8 @@ final class NavigationCourseRun {
     private final List<Integer> legTicks = new ArrayList<>();
     private final List<long[]> forcedChunks = new ArrayList<>();
     private final Tracker tracker;
+    /** Non-null only for the explicit P3 scale-one GameTest evidence mode. */
+    private NavigationMeasurement.Run measurement;
     private AIPlayerEntity holder;
     private int tick;
     private int leg;
@@ -153,6 +156,14 @@ final class NavigationCourseRun {
             Runner runner = new Runner(bot, botName(i));
             runners.add(runner);
         }
+        measurement = NavigationMeasurement.startScaleOneGameTest(course.id, engine,
+                runners.stream().map(runner -> runner.bot.getUUID()).toList());
+        if (measurement != null) {
+            for (Runner runner : runners) {
+                NavigationMeasurement.noteEffectiveEngine(runner.bot.getUUID(),
+                        NavEngineSelector.effectiveFor(runner.bot.getUUID()));
+            }
+        }
         for (Runner r : runners) {
             if (course.mode == Mode.FOLLOW) {
                 r.follow = new FollowTask(holder.getGameProfile().name());
@@ -184,6 +195,9 @@ final class NavigationCourseRun {
         }
         for (Runner r : runners) {
             AIPlayerEntity bot = r.bot;
+            if (measurement != null) {
+                NavigationMeasurement.noteEffectiveEngine(bot.getUUID(), NavEngineSelector.effectiveFor(bot.getUUID()));
+            }
             if (!bot.isAlive() || bot.isRemoved()) {
                 r.dead = true;
                 end("died", "bot " + r.name + " is dead or removed at " + describePosition(bot));
@@ -446,7 +460,22 @@ final class NavigationCourseRun {
                     "reason", reason, "detail", describeTask(r));
         }
 
+        NavigationMeasurement.Snapshot measurementSnapshot = null;
+        boolean measurementPersisted = true;
+        if (measurement != null) {
+            measurementSnapshot = NavigationMeasurement.finish(measurement,
+                    new NavigationMeasurement.Outcome(reached, ticks, damage, tracker.broken, tracker.placed, water, lava, reason));
+            measurement = null;
+            measurementPersisted = appendMeasurement(measurementSnapshot);
+        }
+
         List<String> violations = new ArrayList<>();
+        if (measurementSnapshot != null && !measurementPersisted) {
+            violations.add("could not persist scale-one navigation evidence");
+        }
+        if (measurementSnapshot != null && !measurementSnapshot.hasRequiredEvidence()) {
+            violations.add("incomplete scale-one navigation evidence: " + measurementSnapshot.evidenceProblem());
+        }
         if (assertOutcome) {
             if (damage > 0.001D) {
                 violations.add("took " + damage + " damage");
@@ -540,12 +569,57 @@ final class NavigationCourseRun {
     }
 
     private static void append(String line) {
+        appendTo("results.tsv", line, "course result");
+    }
+
+    /** Writes an explicit unpaced/scale-one summary and one raw planner row per route planning call. */
+    private static boolean appendMeasurement(NavigationMeasurement.Snapshot snapshot) {
+        NavigationMeasurement.Stats engineTick = snapshot.engineTick();
+        NavigationMeasurement.Stats serverTick = snapshot.serverTick();
+        NavigationMeasurement.Stats plannerStats = snapshot.planner();
+        NavigationMeasurement.DriverStats driver = snapshot.driver();
+        NavigationMeasurement.Outcome outcome = snapshot.outcome();
+        String summary = String.join("\t", "NAVMEASURE", "1", snapshot.environment(), snapshot.course(),
+                snapshot.engine().name().toLowerCase(Locale.ROOT), Long.toString(snapshot.runId()),
+                Long.toString(snapshot.pathfinderBudgetScale()), Boolean.toString(snapshot.engineIsolated()),
+                Boolean.toString(outcome.reached()), Integer.toString(outcome.ticks()), format(outcome.damage()),
+                Integer.toString(outcome.broken()), Integer.toString(outcome.placed()), Integer.toString(outcome.waterTicks()),
+                Integer.toString(outcome.lavaTicks()), clean(outcome.reason()),
+                Integer.toString(engineTick.count()), format(engineTick.avgMs()), format(engineTick.p95Ms()), format(engineTick.maxMs()),
+                Integer.toString(serverTick.count()), format(serverTick.avgMs()), format(serverTick.p95Ms()), format(serverTick.maxMs()),
+                Integer.toString(plannerStats.count()), format(plannerStats.avgMs()), format(plannerStats.p95Ms()), format(plannerStats.maxMs()),
+                Integer.toString(driver.baritoneDriverTicks()), Integer.toString(driver.legacyActionPackTicks()),
+                Integer.toString(driver.baritoneFallbacks()));
+        LOGGER.info(summary);
+        boolean persisted = appendTo("measurements.tsv", summary, "navigation measurement");
+        for (NavigationMeasurement.PlannerSample plan : snapshot.planners()) {
+            String planner = String.join("\t", "NAVPLAN", "1", snapshot.environment(), snapshot.course(),
+                    snapshot.engine().name().toLowerCase(Locale.ROOT), Long.toString(snapshot.runId()), clean(plan.phase()),
+                    format(plan.wallMs()), Long.toString(plan.reportedMs()), Integer.toString(plan.nodes()),
+                    Integer.toString(plan.moves()), clean(plan.outcome()));
+            LOGGER.info(planner);
+            persisted &= appendTo("planner.tsv", planner, "navigation planner measurement");
+        }
+        return persisted;
+    }
+
+    private static String format(double value) {
+        return String.format(Locale.ROOT, "%.3f", value);
+    }
+
+    private static String clean(String value) {
+        return value == null ? "-" : value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
+    }
+
+    private static boolean appendTo(String name, String line, String description) {
         try {
-            Path file = FabricLoader.getInstance().getGameDir().resolve("nav_courses").resolve("results.tsv");
+            Path file = FabricLoader.getInstance().getGameDir().resolve("nav_courses").resolve(name);
             Files.createDirectories(file.getParent());
             Files.writeString(file, line + System.lineSeparator(), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            return true;
         } catch (IOException | RuntimeException e) {
-            LOGGER.warn("could not append the course result: {}", e.toString());
+            LOGGER.warn("could not append the {}: {}", description, e.toString());
+            return false;
         }
     }
 

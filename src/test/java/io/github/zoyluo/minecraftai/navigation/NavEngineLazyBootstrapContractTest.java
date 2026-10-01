@@ -62,8 +62,9 @@ final class NavEngineLazyBootstrapContractTest {
         assertTrue(entity.contains("boolean baritoneDrives = baritoneBeforePhysics();")
                         && entity.contains("if (!NavEngineSelector.baritoneActive()) {\n            return false;\n        }\n        try {\n            return BaritoneDriver.beforePhysics(this);"),
                 "the per-tick driver hook is only reached while Baritone is live and has not been given up on");
-        assertTrue(entity.contains("if (baritoneDrives) {\n                baritoneAfterPhysics();"),
-                "afterPhysics only runs for a bot beforePhysics reported as driven");
+        assertTrue(entity.contains("if (baritoneDrives) {\n                boolean baritoneCompleted = false;\n                try {\n                    baritoneCompleted = baritoneAfterPhysics();")
+                        && entity.contains("NavigationMeasurement.noteDriver(this, true, !baritoneCompleted, owner);"),
+                "afterPhysics only runs for a bot beforePhysics reported as driven, and its actual completion is measured");
         String lifecycle = read("runtime/RuntimeLifecycleCoordinator.java");
         assertGuarded(lifecycle, "BaritoneRegistry.INSTANCE.", "NavEngineSelector.hook(", 60, "RuntimeLifecycleCoordinator");
         String pack = read("action/ActionPack.java");

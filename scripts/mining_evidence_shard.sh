@@ -63,6 +63,42 @@ validate_assignment() {
   esac
 }
 
+# Keep the matrix smoke test independent of an optional Python installation.
+# Every emitted field is a fixed, shell-generated scalar; checking that each
+# row has the exact expected shape, is a valid canonical assignment, and is
+# unique proves the complete 58-coordinate matrix without relying on a JSON
+# interpreter (whose Windows Store aliases are not runnable in Git Bash).
+validate_matrix_json() {
+  local json="$1" prefix='{"include":[' suffix=']}' rows row
+  local target role seed run_index key count=0 primary=0 sentinel=0
+  local row_pattern='^\{"target":"(diamond|obsidian)","role":"(primary|sentinel)","seed":"([0-9]+)","run_index":"([123])"\}$'
+  declare -A seen=()
+
+  [[ "$json" == "$prefix"*"$suffix" ]] || return 1
+  rows="${json#"$prefix"}"
+  rows="${rows%"$suffix"}"
+  [[ -n "$rows" ]] || return 1
+
+  while IFS= read -r row || [[ -n "$row" ]]; do
+    [[ "$row" =~ $row_pattern ]] || return 1
+    target="${BASH_REMATCH[1]}"
+    role="${BASH_REMATCH[2]}"
+    seed="${BASH_REMATCH[3]}"
+    run_index="${BASH_REMATCH[4]}"
+    validate_assignment "$target" "$role" "$seed" "$run_index" || return 1
+    key="$target/$role/$seed/$run_index"
+    [[ -z "${seen[$key]+x}" ]] || return 1
+    seen[$key]=1
+    ((count += 1))
+    case "$role" in
+      primary) ((primary += 1)) ;;
+      sentinel) ((sentinel += 1)) ;;
+    esac
+  done < <(printf '%s' "$rows" | sed 's/},{/}\n{/g')
+
+  [[ "$count" == 58 && "$primary" == 40 && "$sentinel" == 18 ]]
+}
+
 if [[ "${1:-}" == --matrix-json ]]; then
   [[ $# -eq 1 ]] || { usage; exit 2; }
   emit_matrix_json
@@ -71,16 +107,7 @@ fi
 
 if [[ "${1:-}" == --self-test ]]; then
   [[ $# -eq 1 ]] || { usage; exit 2; }
-  emit_matrix_json | python3 -c '
-import json, sys
-data = json.load(sys.stdin)
-rows = data.get("include")
-assert isinstance(rows, list) and len(rows) == 58
-keys = {(r["target"], r["role"], r["seed"], r["run_index"]) for r in rows}
-assert len(keys) == 58
-assert sum(r["role"] == "primary" for r in rows) == 40
-assert sum(r["role"] == "sentinel" for r in rows) == 18
-'
+  validate_matrix_json "$(emit_matrix_json)"
   validate_assignment diamond primary 3000 1
   validate_assignment obsidian sentinel 777 3
   ! validate_assignment diamond primary 777 1

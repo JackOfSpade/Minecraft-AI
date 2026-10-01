@@ -1,13 +1,13 @@
 # Navigation obstacle courses: legacy navigator vs Baritone
 
 Status: built (P2a of `docs/NAVIGATION_BARITONE_PLAN.md`). This is the measurement that decides whether `nav.engine` may default to
-`baritone` (P3: only when Baritone is at least as good on every course). The suite changes no product code; it records where each
-engine stands and asserts only what both engines must always meet.
+`baritone` (P3: only when Baritone is at least as good on every course). The course fixture and the opt-in P3 timing probe add
+diagnostic instrumentation, but do not change navigation policy, the production configuration, or the default. They record where each
+engine stands and assert only what both engines must always meet.
 
-**Result in one line:** on all 19 courses Baritone reaches whatever legacy reaches, never later (12 of the 14 courses both reach are
-10-50 % faster, the other two are equal), takes no damage, breaks no block that legacy does not and stays dry; legacy fails three courses
-outright (closed door, fence gate, ladder), takes cactus damage, handles a sealed lake and a cliff rim poorly and follows a moving player
-less closely. No Baritone-worse case was found on these courses (section "Baritone observations" lists the costs worth watching).
+**Result in one line:** the historical outcome rows show Baritone reaching every legacy-reachable course safely and improving several
+capabilities, but the later paced comparison contains four slower Baritone rows (`lakedry`, `lava`, `cactus`, and `long`). Therefore the
+current evidence does **not** meet the “at least equal everywhere” gate and `nav.engine` remains `legacy`.
 
 ## What runs
 
@@ -45,6 +45,52 @@ engines: identical cells, same arena layer), the run and the metrics from `Navig
 
 Re-run: `bash /c/mcw/_tools/gt_filter.sh <worktree> <results> 'navigation_course_game_tests_*'` (about 3 minutes), then
 `scripts/nav_courses_table.sh build/run/gameTest/nav_courses/results.tsv`.
+
+## P3 timing preflight: scale one, explicitly unpaced
+
+The historical course table is outcome/tick evidence, not permission to flip the default. In particular, a normal GameTest run
+sets the legacy A* wall-clock allowance to 40x because its ticks run back-to-back, and it did not capture the complete engine or
+server-tick costs. `nav.engine` remains `legacy` while this evidence is gathered and reviewed.
+
+For a paired elapsed-duration capture, use the serial runner (five alternating repeats are the default):
+
+```bash
+bash scripts/dev/nav_measurement.sh <repo-or-worktree> <outdir> 5
+# Or a smaller smoke capture, retaining the same artifact schema:
+bash scripts/dev/nav_measurement.sh <repo-or-worktree> <outdir> 1 wall long
+```
+
+Choose an empty `<outdir>` outside the source tree: the runner refuses an in-tree bundle and requires a clean tree before it
+creates any evidence files.
+
+For each fixed course geometry it runs legacy then Baritone on odd repeats and Baritone then legacy on even repeats. It passes the
+explicit `-Dminecraftai.nav.measurement=scale1` property. The test harness consequently sets the legacy A* allowance to exactly one,
+then refuses to emit an evidence row unless the measured bots retain their requested per-bot engine, actual driver evidence matches the
+requested engine (a Baritone row needs a Baritone admission or driven tick and no legacy fallback), the full engine and server tick both
+have samples, and at least one matching planner/admission sample exists. It never changes the global config/default.
+
+Keep every directory under `<outdir>/runs/`; do not reduce them with `nav_courses_table.sh` before review. Each contains:
+
+* `results.tsv`: the existing `NAVCOURSE` outcome/tick/damage/edit/water row;
+* `measurements.tsv`: one `NAVMEASURE` schema-1 row with provenance `gametest_unpaced`, legacy budget scale, engine-isolation result,
+  duplicated route outcome, and count/average/p95/max for complete engine-owned bot ticks, complete server ticks, and planner calls;
+  it also includes actual Baritone-driver tick, legacy-`ActionPack` update, and Baritone-fallback counts;
+* `planner.tsv`: one raw `NAVPLAN` schema-1 row for every legacy A* invocation (including executor-time replans and return proofs) or
+  Baritone inline admission, including caller wall duration, engine-reported search duration, nodes, moves and result; and
+* the runner's full Gradle/server logs in `<outdir>/gt_logs/`.
+
+“Complete engine-owned bot tick” means the whole `AIPlayerEntity.tick`, including the Baritone driver before/after vanilla physics or
+the legacy `ActionPack.onUpdate`, rather than the old task-only profiler section. Separate driver counters distinguish a Baritone
+admission/scheduler tick from a Baritone-driven tick and invalidate a Baritone row if it falls back to legacy. The server metric brackets
+all of `MinecraftServer.tickServer`. The Baritone plan metric is its synchronous admission; its later worker planning is still visible in
+the per-bot PATH log but is not relabelled as server-thread admission time. Outside an explicit capture the probes stop at a volatile
+inactive gate before taking a timestamp or lock.
+
+This is still **not production wall-clock/pace proof**. A Fabric GameTest is unpaced, the source tree has no automated normal-server
+driver/RCON fixture, and a scale-one search budget only makes the legacy planner allowance factual. A default flip additionally needs
+a separately captured normal-server, fixed-geometry run on the same JDK/heap with server pacing, plus the LOCAL profile-mod pack check.
+No after-the-fact percentage tolerance is implied by these artifacts: under “at least equal everywhere,” any allowed jitter rule must
+be chosen by the user before comparison.
 
 ## Courses
 
@@ -240,6 +286,7 @@ hit for `DoorBlock|FenceGate|LadderBlock|CLIMBABLE` is the standability rule tha
 
 ## P3 (default flip)
 
-By this suite the criterion "Baritone at least as good as legacy on every course" is met: equal or better outcome on 19 of 19 courses,
-faster on 12 of the 14 that both reach, and legacy cannot do doors, fence gates or ladders at all. The flip itself is the owner's decision;
-the open items above (re-goal churn, sealed-bank retries) are performance notes, not correctness gaps.
+Do not flip the default. The pace-on table records Baritone later than legacy on fixed geometry for `lakedry` (73 vs 70 ticks), `lava`
+(73 vs 69), `cactus` (84 vs 79), and `long` (292 vs 281). That alone fails the stated “at least as good everywhere” condition; the
+unpaced P3 artifacts are additional diagnostic evidence, not a substitute for a normal-server paced capture or a user-chosen jitter rule.
+`nav.engine=legacy` remains the default.

@@ -30,8 +30,13 @@ public final class MinecraftAiHarnessTestMod implements ModInitializer {
         // Bots must not change how often they scan because a busy test server ticks slowly: a GameTest is counted in ticks, not in
         // milliseconds. A scenario that wants a degraded server forces it for its own bot (TpsGuard.forceDegradedForTests).
         io.github.zoyluo.minecraftai.observe.TpsGuard.setHarnessPinned(true);
-        // Same for the A* wall-clock budget (50 ms in production): the node budget stays, the milliseconds do not decide.
-        io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder.setHarnessTimeScale(40L);
+        // Same for the A* wall-clock budget (50 ms in production): ordinary GameTests deliberately
+        // stretch it because their ticks are unpaced. The P3 evidence runner is the explicit
+        // exception: it restores scale one and labels every artifact "gametest_unpaced", never
+        // as a production wall-clock result.
+        long pathfinderScale = io.github.zoyluo.minecraftai.navigation.NavigationMeasurement.scaleOneGameTestRequested()
+                ? 1L : 40L;
+        io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder.setHarnessTimeScale(pathfinderScale);
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 dispatcher.register(Commands.literal("minecraftai")
                         .then(MinecraftAiTestSubcommand.build(registryAccess))

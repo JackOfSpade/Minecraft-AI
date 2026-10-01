@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
 import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import java.util.function.BiFunction;
 
@@ -170,6 +171,11 @@ public final class BaritoneDriver {
         if (failure instanceof VirtualMachineError fatal && !(failure instanceof StackOverflowError)) {
             throw fatal;
         }
+        // beforePhysics contains failures itself and returns false, so AIPlayerEntity sees the
+        // ordinary scheduler branch. Mark the actual Baritone failure here rather than relying on
+        // that later branch to have a legacy controller; otherwise a P3 Baritone row could be
+        // mislabeled after a testFault or real driver failure.
+        NavigationMeasurement.noteBaritoneFallback(bot);
         try {
             BotLog.error(bot, event, failure);
         } catch (Throwable ignored) {
