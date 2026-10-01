@@ -1317,7 +1317,8 @@ public final class GatherQuotaTask extends AbstractTask {
             var visibleDrop = HarvestCore.nearestDropAnyOf(bot, acceptItems, 8.0D);
             boolean chasingVisibleDrop = false;
             if (visibleDrop.isPresent()
-                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()
+                    && bot.getActionPack().stepIdle()) {
                 chasingVisibleDrop = HarvestCore.approachDropPhysically(bot, visibleDrop.get());
             }
             // The drop can pop behind the logs that are still standing (out of line of sight, so
@@ -1330,7 +1331,8 @@ public final class GatherQuotaTask extends AbstractTask {
             // It runs only while no observed drop is being approached: a supported observed drop is
             // chased by approachDropPhysically above and the sweep must never pull the bot away from it.
             if (!chasingVisibleDrop && bootstrapPickupOrigin != null && bootstrapOriginSweep != null
-                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()
+                    && bot.getActionPack().stepIdle()) {
                 KnownCellPickupSweep.Step swept = bootstrapOriginSweep.step(bot);
                 if (swept == KnownCellPickupSweep.Step.MOVING && !bootstrapOriginApproachLogged) {
                     bootstrapOriginApproachLogged = true;
@@ -1390,7 +1392,8 @@ public final class GatherQuotaTask extends AbstractTask {
         var visibleDrop = HarvestCore.nearestDropAnyOf(bot, acceptItems, 8.0D);
         boolean chasingVisibleDrop = false;
         if (visibleDrop.isPresent()) {
-            if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+            if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()
+                    && bot.getActionPack().stepIdle()) {
                 chasingVisibleDrop = HarvestCore.approachDropPhysically(bot, visibleDrop.get());
             }
         }

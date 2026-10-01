@@ -18,7 +18,6 @@ import io.github.zoyluo.minecraftai.mining.MiningFoodReserve;
 import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
-
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.LinkedHashMap;
@@ -1005,10 +1004,11 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return;
         }
         // A completed OreDig walk may publish the correct BlockPos while the fake player is still
-        // on that cell's forward edge and carrying ordinary server-side horizontal velocity.  The
+        // near that cell's forward edge and carrying ordinary server-side horizontal velocity. The
         // OPEN phase is durable physical-debt authority, so it must never be entered until the
-        // service owns a stationary, centered work face.  Once OPEN is published any later drift
-        // correctly remains fail-closed and must be sealed as unresolved geometry debt.
+        // service owns a stationary in-cell work face. "Centered" here means within
+        // WalkedStepRules.POINT_TOLERANCE (0.2), not geometric exactness; if a slide crosses into
+        // another cell, recenter fails loudly instead of silently redefining the pocket geometry.
         // The recentre is a short walk with the movement keys: wait for it (a step in flight, or the last slide to a stop).
         InCellWalk.Centering centering = centerWalk.recenter(bot, workFace, "disposal_work_face_center");
         if (centering == InCellWalk.Centering.FAILED) {
@@ -2201,8 +2201,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     /**
-     * True while the bot stands still in the middle of the work face. Otherwise it walks there with its movement keys (a nudge toward
-     * spoil or the end of a walk leaves it off centre) and the caller asks again next tick; never moves the bot itself.
+     * True while the bot stands still within the 0.2 in-cell arrival tolerance of the work face.
+     * Otherwise it walks there with its movement keys (a nudge toward spoil or the end of a walk
+     * leaves it off centre) and the caller asks again next tick; a cross-cell slide fails loudly,
+     * and this helper never moves the bot itself.
      */
     private boolean ensureCenteredAtWorkFace(AIPlayerEntity bot) {
         return centerWalk.recenter(bot, workFace, "disposal_work_face_center") == InCellWalk.Centering.CENTERED;

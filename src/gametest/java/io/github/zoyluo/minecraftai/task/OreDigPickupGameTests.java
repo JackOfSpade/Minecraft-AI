@@ -3526,7 +3526,7 @@ public final class OreDigPickupGameTests {
 
         // The target's equal west/north delta makes west the deterministic preferred stair. Its
         // support is an open cave, while north is a factual dry landing. The task must select north
-        // before opening the west body column; otherwise descendInto loops on no_landing and later
+        // before opening the west body column; otherwise a refused walked descent loops on no_landing and later
         // hands the self-created drop back to the blind-branch cursor.
         for (BlockPos body : new BlockPos[]{
                 unsupported, unsupported.above(), unsupported.above(2), unsupported.below(),

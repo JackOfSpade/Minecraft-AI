@@ -23,7 +23,11 @@ import net.minecraft.world.phys.Vec3;
 public final class InCellWalk {
     /** How far from the middle of its cell a bot walks toward an item (the body stays inside the cell it stands in). */
     public static final double NUDGE_REACH = 0.4D;
-    /** The longest in-cell nudge: the walk stops and slides a little, so the body keeps 0.1 block to the edge of its cell (a bot that crosses it changes cell). */
+    /**
+     * The longest in-cell nudge: its centre stops 0.1 blocks short of the cell edge. A player's
+     * roughly 0.3-block half-width therefore overhangs the edge by about 0.2 blocks; it is the
+     * centre/collision cell, not the whole body, that must remain in the owning cell.
+     */
     public static final double MAX_NUDGE_REACH = 0.4D;
     /** How far over the edge of its support a sneaking bot leans to place a block on the side face of that support. */
     public static final double EDGE_SHIFT = 0.62D;

@@ -53,7 +53,13 @@ public final class DigNav {
                 ActionPack pack = bot.getActionPack();
                 WalkedStep descent = pack.beginDescend(step, "dig_nav");
                 if (descent == null) {
-                    return false; // no legal landing there (not standable, a hazard, something in the way): reroute or fail
+                    // A player or a just-falling entity can briefly occupy an otherwise legal landing.
+                    // Leave the physical world untouched and let the caller's normal no-progress
+                    // budget retry it next tick; permanent landing refusals still reroute/fail.
+                    WalkedStep.Kind kind = step.getX() == feet.getX() && step.getZ() == feet.getZ()
+                            ? WalkedStep.Kind.DROP : WalkedStep.Kind.STEP_DOWN;
+                    String refusal = WalkedStep.refusal(bot, step, kind);
+                    return isTransientDescentRefusal(refusal);
                 }
                 pack.runStep(descent);
             } else {
@@ -74,6 +80,11 @@ public final class DigNav {
             return false; // Breaking through immediately exposes an observed hazardous fluid -> hand back to the caller to reroute, consistent with the pre-check contract
         }
         return st == BlockMiner.Status.DONE || st == BlockMiner.Status.MINING;
+    }
+
+    /** A refusal caused by live collision occupancy, not an observed terrain/hazard verdict. */
+    static boolean isTransientDescentRefusal(String refusal) {
+        return "occupied".equals(refusal) || "entity_occupied".equals(refusal);
     }
 
     private static BlockMiner.Status begin(AIPlayerEntity bot, BlockMiner miner, BlockPos pos) {

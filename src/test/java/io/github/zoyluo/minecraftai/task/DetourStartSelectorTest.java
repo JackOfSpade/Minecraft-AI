@@ -265,6 +265,41 @@ class DetourStartSelectorTest {
     }
 
     @Test
+    void unknownHazardOnlyNoPoseStaysEligibleAfterMovementReobservation() {
+        class UnknownHazardHost extends FakeDetourHost {
+            boolean unknownHazardOnly = true;
+
+            @Override
+            public boolean poseBlockedOnlyByUnknownHazard(BlockPos ore, DetourHost.Anchor anchor,
+                                                          java.util.Set<BlockPos> forbiddenStands) {
+                return unknownHazardOnly;
+            }
+        }
+        UnknownHazardHost host = new UnknownHazardHost();
+        host.now = 1000;
+        BlockPos pos = new BlockPos(4, 40, 0);
+        host.sightings.add(sighting(pos, "diamond_ore", 100));
+        host.poseFn = ore -> null;
+
+        DetourStartSelector.Result hidden = DetourStartSelector.select(host);
+
+        assertNull(hidden.selection());
+        assertFalse(host.excludedUntil.containsKey(pos),
+                "an UNKNOWN adjacent-hazard pose must not receive the 600-tick no-pose exclusion");
+        assertTrue(host.logs.contains("ore_dig_detour_skip"));
+
+        // A normal walk changes the observation angle; after the hazard proof becomes factual,
+        // the same retained sighting is admitted on the next selector pass.
+        host.feet = host.feet.east();
+        host.unknownHazardOnly = false;
+        host.poseFn = ore -> new DetourHost.Pose(host.feet(), true);
+        DetourStartSelector.Result reprobed = DetourStartSelector.select(host);
+
+        assertTrue(reprobed.selection() != null && reprobed.selection().seed().equals(pos),
+                "the retained vein member was not re-probed after movement");
+    }
+
+    @Test
     void selectTakesAZeroTransitPoseWithoutTouchingReachOrRouteBudget() {
         FakeDetourHost host = new FakeDetourHost();
         host.now = 1000;

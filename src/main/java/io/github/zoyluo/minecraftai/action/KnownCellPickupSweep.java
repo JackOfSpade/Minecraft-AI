@@ -36,6 +36,8 @@ public final class KnownCellPickupSweep {
         MOVING,
         /** The bot is standing in the target cell, nudging toward the break cell, waiting for the pickup. */
         DWELLING,
+        /** Another controller owns a walked step; the pickup ledger retains this candidate and retries later. */
+        WAITING,
         /** The current cell was given up on (no route / attempts used up); nothing moved this call. */
         SKIPPED,
         /** Every candidate cell has been visited: nothing left to try. */
@@ -69,6 +71,9 @@ public final class KnownCellPickupSweep {
      * {@link Step#EXHAUSTED} once every candidate cell has been visited (nothing left to try).
      */
     public Step step(AIPlayerEntity bot) {
+        if (!bot.getActionPack().stepIdle()) {
+            return Step.WAITING;
+        }
         if (target == null) {
             target = nextTarget(bot);
             if (target == null) {

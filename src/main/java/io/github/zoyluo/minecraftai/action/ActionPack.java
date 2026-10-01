@@ -1200,6 +1200,18 @@ public final class ActionPack {
         return step == null;
     }
 
+    /**
+     * True only when this pack is still running the exact walked step identified by its owner.
+     * Callers that share pickup/navigation ownership use this instead of treating an unrelated
+     * step as their own progress.
+     */
+    public boolean stepInFlightFor(String reason, BlockPos cell, WalkedStep.Kind kind) {
+        return step != null
+                && step.kind() == kind
+                && step.cell().equals(cell)
+                && step.reason().equals(reason);
+    }
+
     /** How the last step this pack ran ended (null while it is in flight or before the first). */
     public WalkedStep.Result stepResult() {
         return lastStepResult;

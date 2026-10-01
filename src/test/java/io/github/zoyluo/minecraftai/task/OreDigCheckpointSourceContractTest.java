@@ -620,5 +620,16 @@ class OreDigCheckpointSourceContractTest {
         assertTrue(source.indexOf("endMoveInFlight(bot)", pause) > pause
                         && source.indexOf("endMoveInFlight(bot)", pause) < source.indexOf("detourInterrupted(bot)", pause),
                 "a pause ends the step in flight before it publishes the interruption cursor");
+        int abort = source.indexOf("protected void onAbort(AIPlayerEntity bot)");
+        assertTrue(source.indexOf("endMoveInFlight(bot)", abort) > abort
+                        && source.indexOf("endMoveInFlight(bot)", abort) < source.indexOf("detourInterrupted(bot)", abort),
+                "an abort ends the step in flight before it publishes the interruption cursor");
+        int endMove = source.indexOf("private void endMoveInFlight(AIPlayerEntity bot)");
+        int endMoveEnd = source.indexOf("/**", endMove + 1);
+        String endMoveBody = source.substring(endMove, endMoveEnd);
+        assertFalse(endMoveBody.contains("settleMove("),
+                "pause/abort must not run an already-ended landing closure after choosing its checkpoint");
+        assertTrue(endMoveBody.contains("moveInFlight = null") && endMoveBody.contains("cancelStep()"),
+                "pause/abort releases its cursor ownership and cancels only a live walked step");
     }
 }

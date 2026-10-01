@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import com.mojang.logging.LogUtils;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.pathfinding.MoveType;
@@ -36,10 +37,83 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
 
 /** Strict-survival regression for the stone bootstrap's factual staircase return. */
 public final class DigDownReturnGameTests {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_full_depth_24_step_stair_returns_within_ordinary_budget", maxTicks = 5_000)
+    public void fullDepth24StepStairReturnsWithinOrdinaryBudget(GameTestHelper context) {
+        BlockPos relativeOrigin = context.absolutePos(new BlockPos(4, 0, 80));
+        BlockPos start = new BlockPos(relativeOrigin.getX(), 24, relativeOrigin.getZ());
+        int depth = 24;
+        BlockPos cursor = start;
+        context.getLevel().setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        for (int level = 0; level < depth; level++) {
+            BlockPos ahead = cursor.north();
+            BlockPos landing = ahead.below();
+            for (BlockPos breakPos : List.of(ahead, ahead.above(), landing)) {
+                context.getLevel().setBlock(breakPos, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            }
+            context.getLevel().setBlock(landing.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            cursor = landing;
+        }
+        BlockPos expectedDeepestLanding = cursor;
+        require(context, start.getY() - expectedDeepestLanding.getY() == depth,
+                "full-depth DigDown fixture did not span 24 physical steps");
+
+        String name = "DigDownFullDepthReturnGT";
+        AIPlayerEntity bot = spawn(context, name, start);
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
+        DigDownTask task = new DigDownTask(Blocks.STONE, 48);
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_full_depth_return"));
+        AtomicInteger deepest = new AtomicInteger();
+        AtomicInteger maxWorkBudget = new AtomicInteger();
+        AtomicInteger maxReturnBudget = new AtomicInteger();
+        AtomicBoolean sawReturn = new AtomicBoolean();
+
+        context.failIfEver(() -> {
+            deepest.accumulateAndGet(start.getY() - bot.blockPosition().getY(), Math::max);
+            DigDownTask.DigDownCheckpoint live = DigDownTask.DigDownCheckpoint
+                    .decode(task.checkpoint()).orElse(null);
+            if (live != null) {
+                maxWorkBudget.accumulateAndGet(live.workBudgetUsed(), Math::max);
+                maxReturnBudget.accumulateAndGet(live.returnBudgetUsed(), Math::max);
+                sawReturn.compareAndSet(false, live.phase() == DigDownTask.Phase.RETURN);
+            }
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                context.fail(Component.nullToEmpty("24-step DigDown return ended as " + task.state()
+                        + ":" + task.failureReason() + " checkpoint=" + task.checkpoint()));
+            }
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            require(context, deepest.get() >= depth,
+                    "DigDown returned before physically descending 24 steps: " + deepest.get());
+            require(context, sawReturn.get() && maxReturnBudget.get() > 0
+                            && maxReturnBudget.get() <= 600,
+                    "ordinary 24-step return did not fit its 600-tick budget: "
+                            + maxReturnBudget.get());
+            require(context, maxWorkBudget.get()
+                            <= DigDownTask.maxWorkBudgetForTarget("minecraft:stone", 48),
+                    "full-depth work escaped its derived budget: " + maxWorkBudget.get());
+            require(context, bot.blockPosition().equals(start),
+                    "24-step DigDown did not return to its exact origin: "
+                            + bot.blockPosition().toShortString());
+            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= 48,
+                    "full-depth DigDown did not preserve the requested net stone delivery");
+            LOGGER.info("DIG_DOWN_FULL_DEPTH_RETURN depth={} work_budget={} return_budget={}",
+                    deepest.get(), maxWorkBudget.get(), maxReturnBudget.get());
+            finish(context, bot, name);
+        });
+    }
+
     @GameTest(maxTicks = 900)
     public void unsupportedNaturalSlopeRotatesToSupportedStoneStair(GameTestHelper context) {
         var world = context.getLevel();

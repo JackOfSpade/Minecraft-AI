@@ -141,6 +141,55 @@ class OreDigDetourEngineTest {
         assertFalse(host.mineCalls.containsKey(member));
     }
 
+    @Test
+    void unknownHazardOnlyNoPoseMemberIsReprobedAfterMovement() {
+        BlockPos seed = new BlockPos(5, 40, 0);
+        BlockPos member = new BlockPos(6, 40, 0);
+        class UnknownHazardMemberHost extends FakeDetourHost {
+            boolean memberHidden = true;
+
+            @Override
+            public DetourHost.Pose poseFor(BlockPos ore, DetourHost.Anchor anchor,
+                                           Set<BlockPos> forbiddenStands) {
+                return ore.equals(member) && memberHidden ? null : super.poseFor(ore, anchor, forbiddenStands);
+            }
+
+            @Override
+            public boolean poseBlockedOnlyByUnknownHazard(BlockPos ore, DetourHost.Anchor anchor,
+                                                          Set<BlockPos> forbiddenStands) {
+                return ore.equals(member) && memberHidden;
+            }
+        }
+        UnknownHazardMemberHost host = new UnknownHazardMemberHost();
+        // The engine starts from this hand-built seed selection, but the retained member is also
+        // a normal sighting for the later selector pass.
+        host.sightings.add(new SightingLedger.Sighting(member, "diamond_ore", 100, 0, 0));
+        OreDigDetourEngine first = new OreDigDetourEngine();
+        first.start(host, selectionFor(host, seed, "diamond_ore", 100, List.of(seed, member)));
+
+        OreDigDetourEngine.Result initial = runToFinish(host, first);
+
+        assertEquals("done", initial.reason());
+        assertFalse(host.excludedUntil.containsKey(member),
+                "an UNKNOWN-hazard-only member must not receive the normal 600-tick no-pose exclusion");
+        assertFalse(host.broken.contains(member), "the member remains a retained candidate until its pose is factual");
+
+        // A normal walk changes the observation point. Once the hazard probe is factual, the
+        // preserved sighting is eligible for a fresh selector/engine pass rather than hidden by
+        // the stale no-pose exclusion.
+        host.feet = host.feet.east();
+        host.memberHidden = false;
+        host.ledger = new MissionAssistLedger.Entry();
+        DetourStartSelector.Result reprobed = DetourStartSelector.select(host);
+
+        assertNotNull(reprobed.selection());
+        assertEquals(member, reprobed.selection().seed());
+        OreDigDetourEngine retry = new OreDigDetourEngine();
+        retry.start(host, reprobed.selection());
+        assertEquals("done", runToFinish(host, retry).reason());
+        assertTrue(host.broken.contains(member), "the member should mine after its later factual pose re-probe");
+    }
+
     // ---- safety -----------------------------------------------------------------------------------------------
 
     @Test

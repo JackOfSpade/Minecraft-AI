@@ -1854,7 +1854,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // A gravity block can put the eye inside collision geometry, making every ordinary rear
         // ray fail. The durable lastFace is still one exact factual cell even when pickup/target
         // ownership means this is not a blind-branch transaction. It may bypass only line of
-        // sight; stepToStandable still performs collision, support, fluid and entity checks, and
+        // sight; the walked-step landing rules still perform collision, support, fluid and entity checks, and
         // recoverBlockedBody separately decides whether the branch cursor may be mutated.
         if (lastFace != null && lastFace.getY() == feet.getY()
                 && Math.abs(lastFace.getX() - feet.getX())
@@ -2804,7 +2804,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      */
     private void approachTargetOre(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
         if (!bot.getActionPack().isPathExecutorIdle()
-                || !bot.getActionPack().isWalkToIdle()) {
+                || !bot.getActionPack().isWalkToIdle()
+                || !bot.getActionPack().stepIdle()) {
             return;
         }
         BlockPos workPose = approachGoalFor(bot, world, ore);
@@ -4267,23 +4268,20 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /**
-     * A pause or an abort while a step is in flight: a step that has already verified its landing is published (the cursor never
-     * lags behind where the bot stands); one still walking is cancelled, its keys released, and nothing is recorded (the checkpoint
-     * keeps the face it began on and the resumed task rejoins it from wherever the bot lands).
+     * A pause or abort ends this task's move ownership without running its landing closure. A
+     * closure can start another walked move or terminalize after the interruption checkpoint has
+     * already been selected. {@link #publishInterruptionCursor} is the sole durable publication at
+     * this boundary; an in-flight step is cancelled and an already-ended step is simply forgotten.
      */
     private void endMoveInFlight(AIPlayerEntity bot) {
         MoveInFlight move = moveInFlight;
         if (move == null) {
             return;
         }
-        if (bot.getActionPack().stepIdle()) {
-            settleMove(bot, move);
-            return;
-        }
         moveInFlight = null;
-        bot.getActionPack().cancelStep();
-        moveUnsettled = true;
-        moveUnsettledTicks = 0;
+        if (!bot.getActionPack().stepIdle()) {
+            bot.getActionPack().cancelStep();
+        }
     }
 
     /**
@@ -6088,6 +6086,41 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return new Pose(stand, stand.equals(feetPos));
             }
             return null;
+        }
+
+        @Override
+        public boolean poseBlockedOnlyByUnknownHazard(BlockPos ore, Anchor anchor,
+                                                      Set<BlockPos> forbiddenStands) {
+            Standability.clearCache();
+            if (DetourPolicy.inAnchorFloorPatch(ore, anchor.face())) {
+                return false;
+            }
+            MiningAssistConfig.Detour cfg = config();
+            for (Direction d : new Direction[]{Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST}) {
+                BlockPos stand = ore.relative(d);
+                if (!ObservableWorldQuery.canObserveCell(bot, stand)
+                        || !ObservableWorldQuery.canObserveCell(bot, stand.above())
+                        || !ObservableWorldQuery.canObserveBlock(bot, stand.below())) {
+                    continue;
+                }
+                if (!Standability.isStandable(world, stand)
+                        || OreScan.adjacentHazard(bot, stand) != OreScan.Observation.UNKNOWN
+                        || !hasReliableObservedDropCatch(bot, world, ore.below())) {
+                    continue;
+                }
+                if ((forbiddenStands != null && forbiddenStands.contains(stand)) || excluded(stand)
+                        || !DetourPolicy.standWithinLimits(stand, anchor.face(), minStandY(), cfg)
+                        || DetourPolicy.inAnchorFloorPatch(stand, anchor.face())) {
+                    continue;
+                }
+                if (state != null && (state.hazards().anyLavaWithin(stand, cfg.lavaClearRadius())
+                        || state.hazards().anyTrapWithin(stand, 3)
+                        || state.hazards().anyTrapWithin(ore, 3))) {
+                    continue;
+                }
+                return true;
+            }
+            return false;
         }
 
         @Override

@@ -49,8 +49,9 @@ import net.minecraft.core.BlockPos;
  *       <li>{@code host.capacityOk(pos, blockId)} false: skip, log {@code capacity}, and exclude the cluster for
  *           {@value #SOFT_EXCLUDE_TICKS} ticks (a short back-off, so the same candidates are not re-examined every
  *           check). Cheap, so before the pose.</li>
- *       <li>{@code host.poseFor(pos, anchor, {})}: null logs {@code no_pose} and excludes the whole cluster for
- *           {@value #CLUSTER_EXCLUDE_TICKS} ticks.</li>
+ *       <li>{@code host.poseFor(pos, anchor, {})}: a null result normally logs {@code no_pose} and excludes the
+ *           whole cluster for {@value #CLUSTER_EXCLUDE_TICKS} ticks. A null caused solely by an UNKNOWN adjacent
+ *           hazard logs {@code no_pose_unknown_hazard} but keeps the sighting for a later re-observation.</li>
  *       <li>If the pose is not zero transit: with {@code ledger.zeroTransitOnly(serverTick)} skip
  *           ({@code route_failures}); {@code host.observedReach(feet, stand)} UNREACHABLE logs
  *           {@code unreachable_observed} and excludes the cluster for {@value #CLUSTER_EXCLUDE_TICKS}; REACHABLE
@@ -197,6 +198,10 @@ final class DetourStartSelector {
 
             DetourHost.Pose pose = host.poseFor(pos, anchor, Set.of());
             if (pose == null) {
+                if (host.poseBlockedOnlyByUnknownHazard(pos, anchor, Set.of())) {
+                    logSkip(host, pos, blockId, value, "no_pose_unknown_hazard", "feet", host.feet());
+                    continue;
+                }
                 logSkip(host, pos, blockId, value, "no_pose", "feet", host.feet());
                 excludeCluster(host, r.cluster(), CLUSTER_EXCLUDE_TICKS);
                 continue;

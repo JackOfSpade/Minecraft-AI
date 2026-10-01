@@ -1069,6 +1069,24 @@ public final class UndergroundSafetyGameTests {
     @GameTest(maxTicks = 160)
     public void descendMinesTheGravelThatReoccupiesItsHeadWhenNoHopFitsInStrictSurvival(
             GameTestHelper context) {
+        runReoccupiedHeadGravelRecovery(context, "DescendGravelGT", true, false, 0.0F);
+    }
+
+    /**
+     * The same collapse occurs before Descend can acknowledge the just-landed stair. A normal
+     * iron pick is deliberately the only tool: clearing gravel is slower, so survival damage is
+     * bounded rather than assumed to be zero. The collapsed direction must be rejected from the
+     * factual landing before ordinary stair planning can resume.
+     */
+    @GameTest(maxTicks = 200)
+    public void descendRejectsCollapsedStairAfterNoShovelGravelRecoveryWithinBoundedDamage(
+            GameTestHelper context) {
+        runReoccupiedHeadGravelRecovery(context, "DescendNoShovelGravelGT", false, true, 4.0F);
+    }
+
+    private void runReoccupiedHeadGravelRecovery(GameTestHelper context, String botName,
+                                                   boolean giveShovel, boolean collapseBeforeAcknowledgement,
+                                                   float allowedDamage) {
         BlockPos start = context.absolutePos(new BlockPos(20, 12, 12));
         clearVolume(context, start, 4);
         BlockPos buriedLanding = start.north().below();
@@ -1093,11 +1111,14 @@ public final class UndergroundSafetyGameTests {
         context.getLevel().setBlock(buriedLanding.north().below(2),
                 Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
-        AIPlayerEntity bot = spawn(context, "DescendGravelGT", start);
-        // The descend tool gate typed-fails a pickless stair dig; this fixture tests the gravel collapse, so provision the ordinary
-        // descent pick like a real mission would, and a shovel for the gravel.
+        AIPlayerEntity bot = spawn(context, botName, start);
+        // The descend tool gate typed-fails a pickless stair dig; this fixture tests the gravel
+        // collapse, so provision the ordinary descent pick like a real mission would. The second
+        // variant deliberately omits a shovel to exercise the slower vanilla fallback.
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SHOVEL));
+        if (giveShovel) {
+            InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SHOVEL));
+        }
         bot.setHealth(bot.getMaxHealth());
         bot.setOnGround(true);
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
@@ -1110,14 +1131,33 @@ public final class UndergroundSafetyGameTests {
         task.start(bot);
         BlockPos reoccupiedHead = buriedLanding.above();
         float[] healthBefore = {0.0F};
+        boolean[] collapsePlaced = {false};
         DescendTickStages.run(context,
                 DescendTickStages.tickUntil(context, task, bot, 60, "fixture did not enter its first factual stair",
-                        () -> bot.blockPosition().equals(buriedLanding) && bot.getActionPack().stepIdle()
-                                && !"none".equals(task.checkpoint().get("pending_landing_target"))),
+                        () -> {
+                            boolean arrived = bot.blockPosition().equals(buriedLanding)
+                                    && bot.getActionPack().stepIdle()
+                                    && !"none".equals(task.checkpoint().get("pending_landing_target"));
+                            if (arrived && collapseBeforeAcknowledgement) {
+                                context.getLevel().setBlock(reoccupiedHead,
+                                        Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
+                                Standability.clearCache();
+                                require(context, !context.getLevel().getBlockState(reoccupiedHead)
+                                                .getCollisionShape(context.getLevel(), reoccupiedHead).isEmpty(),
+                                        "gravel fixture did not reoccupy the bot's head cell");
+                                healthBefore[0] = bot.getHealth();
+                                collapsePlaced[0] = true;
+                            }
+                            return arrived;
+                        }),
                 // The next task tick confirms the landing (the pending landing is cleared) and starts mining the solid north stair.
                 DescendTickStages.tickUntil(context, task, bot, 10, "fixture did not hold the confirmed landing before collapse",
-                        () -> "none".equals(task.checkpoint().get("pending_landing_target"))),
+                        () -> collapseBeforeAcknowledgement
+                                || "none".equals(task.checkpoint().get("pending_landing_target"))),
                 () -> {
+                    if (collapseBeforeAcknowledgement) {
+                        return true;
+                    }
                     require(context, task.state() == TaskState.RUNNING
                                     && bot.blockPosition().equals(buriedLanding),
                             "fixture did not hold the confirmed landing before collapse: "
@@ -1129,17 +1169,24 @@ public final class UndergroundSafetyGameTests {
                                     .getCollisionShape(context.getLevel(), reoccupiedHead).isEmpty(),
                             "gravel fixture did not reoccupy the bot's head cell");
                     healthBefore[0] = bot.getHealth();
+                    collapsePlaced[0] = true;
                     return true;
                 },
                 DescendTickStages.tickUntil(context, task, bot, 100, "descend did not clear the gravel on its head",
                         () -> {
+                            require(context, collapsePlaced[0], "gravel collapse was never injected");
                             require(context, bot.blockPosition().equals(buriedLanding),
                                     "blocked-body recovery moved the bot out of the gravel without a walkable retreat: "
                                             + buriedLanding.toShortString() + " -> " + bot.blockPosition().toShortString());
-                            require(context, bot.isAlive() && bot.getHealth() == healthBefore[0],
-                                    "bot took suffocation damage before the gravel was cleared");
+                            require(context, bot.isAlive() && bot.getHealth() >= healthBefore[0] - allowedDamage,
+                                    "bot took too much suffocation damage before the gravel was cleared: "
+                                            + bot.getHealth() + " < " + (healthBefore[0] - allowedDamage));
                             return context.getLevel().getBlockState(reoccupiedHead).isAir();
                         }),
+                DescendTickStages.tickUntil(context, task, bot, 20,
+                        "collapsed stair direction was not rejected after mining fallback",
+                        () -> !collapseBeforeAcknowledgement || (bot.blockPosition().equals(buriedLanding)
+                                && (Integer.parseInt(task.checkpoint().get("rejected_landing_directions")) & 1) != 0)),
                 () -> {
                     require(context, task.state() == TaskState.RUNNING,
                             "descend ended during recoverable gravel collapse: "
@@ -1147,7 +1194,7 @@ public final class UndergroundSafetyGameTests {
                     require(context, bot.blockPosition().equals(buriedLanding),
                             "descend left its landing while clearing the gravel: " + bot.blockPosition().toShortString());
                     task.cancel(bot, "gametest_complete");
-                    finish(context, bot, "DescendGravelGT");
+                    finish(context, bot, botName);
                     return true;
                 });
     }

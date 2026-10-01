@@ -70,13 +70,14 @@ final class GatherExactBreakSourceContractTest {
         String bootstrapPickup = methodBody(source, "private void bootstrapPickup(AIPlayerEntity bot)");
 
         // The fallback walks to the factual break cell (through the sweep, whose first step is that plain
-        // walk, pinned in theSweepStartsWithThePlainWalkToTheBreakCellAndReportsWhatItDid), only while both movers are idle
-        // (never fights a route) and no observed drop is being chased.
+        // walk, pinned in theSweepStartsWithThePlainWalkToTheBreakCellAndReportsWhatItDid), only while every movement
+        // owner is idle (never fights a route or another walked step) and no observed drop is being chased.
         assertTrue(matches(bootstrapPickup,
                         "!chasingVisibleDrop\\s*&&\\s*bootstrapPickupOrigin\\s*!=\\s*null\\s*&&\\s*bootstrapOriginSweep\\s*!=\\s*null"
                                 + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
-                                + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isWalkToIdle\\(\\)"),
-                "the origin sweep must wait for an idle path executor and walk-to, and not run while a visible drop is chased");
+                                + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isWalkToIdle\\(\\)"
+                                + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.stepIdle\\(\\)"),
+                "the origin sweep must wait for every movement owner, and not run while a visible drop is chased");
         assertTrue(matches(bootstrapPickup,
                         "chasingVisibleDrop\\s*=\\s*HarvestCore\\.approachDropPhysically\\(\\s*bot\\s*,\\s*visibleDrop\\.get\\(\\)\\s*\\)"),
                 "a supported observed drop is chased first and suppresses the sweep");
@@ -122,8 +123,9 @@ final class GatherExactBreakSourceContractTest {
 
         assertTrue(matches(pickup,
                         "!chasingVisibleDrop\\s*&&\\s*pickupOrigin\\s*!=\\s*null\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
-                                + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isWalkToIdle\\(\\)"),
-                "the pickup origin sweep must wait for idle movers and must not run while a visible drop is chased");
+                                + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isWalkToIdle\\(\\)"
+                                + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.stepIdle\\(\\)"),
+                "the pickup origin sweep must wait for every movement owner and must not run while a visible drop is chased");
         assertTrue(matches(pickup,
                         "chasingVisibleDrop\\s*=\\s*HarvestCore\\.approachDropPhysically\\(\\s*bot\\s*,\\s*visibleDrop\\.get\\(\\)\\s*\\)"),
                 "a supported observed drop is chased first and suppresses the sweep");

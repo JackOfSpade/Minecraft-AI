@@ -796,9 +796,12 @@ final class OreDigDetourEngine {
             if (!host.inBreakEnvelope(cur) || host.isCurrentSupport(cur)) {
                 DetourHost.Pose p = host.poseFor(cur, anchor, noStep);
                 if (p == null) {
-                    host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                    boolean unknownHazardOnly = host.poseBlockedOnlyByUnknownHazard(cur, anchor, noStep);
+                    if (!unknownHazardOnly) {
+                        host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                    }
                     memberDone(cur);
-                    logSkip(host, cur, "no_pose");
+                    logSkip(host, cur, unknownHazardOnly ? "no_pose_unknown_hazard" : "no_pose");
                     return toNext(host);
                 }
                 if (!p.stand().equals(feet)) {
@@ -1124,8 +1127,11 @@ final class OreDigDetourEngine {
             DetourHost.Pose p = host.poseFor(m, anchor, noStep);
             if (p == null) {
                 done.add(m);
-                host.exclude(m, ATTEMPT_EXCLUDE_TICKS);
-                logSkip(host, m, "no_pose");
+                boolean unknownHazardOnly = host.poseBlockedOnlyByUnknownHazard(m, anchor, noStep);
+                if (!unknownHazardOnly) {
+                    host.exclude(m, ATTEMPT_EXCLUDE_TICKS);
+                }
+                logSkip(host, m, unknownHazardOnly ? "no_pose_unknown_hazard" : "no_pose");
                 continue;
             }
             if (!p.zeroTransit() && ledger.zeroTransitOnly(host.serverTick())) {

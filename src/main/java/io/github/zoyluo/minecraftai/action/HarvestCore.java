@@ -450,6 +450,10 @@ public final class HarvestCore {
         if (shaftBase == null) {
             return false;
         }
+        ActionPack pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            return pack.stepInFlightFor("physical_drop_pickup", shaftBase, WalkedStep.Kind.DROP);
+        }
         BlockPos current = bot.blockPosition();
         if (current.equals(shaftBase)) {
             bot.getActionPack().stopMovement();
@@ -467,13 +471,14 @@ public final class HarvestCore {
     }
 
     /**
-     * Drops the bot into the open cell directly below it as a walked step ({@link ActionPack#beginDescend}); a step already in
-     * flight is left alone. False when the world refuses the step (the caller falls back to an exact route).
+     * Drops the bot into the open cell directly below it as a walked step ({@link ActionPack#beginDescend}).
+     * An in-flight step counts only when it is this pickup's own drop; another owner retains its
+     * movement and the pickup ledger retries later. False when the world refuses the step.
      */
     private static boolean walkDownInto(AIPlayerEntity bot, BlockPos cell) {
         ActionPack pack = bot.getActionPack();
         if (!pack.stepIdle()) {
-            return true;
+            return pack.stepInFlightFor("physical_drop_pickup", cell, WalkedStep.Kind.DROP);
         }
         WalkedStep step = pack.beginDescend(cell, "physical_drop_pickup");
         if (step == null) {
@@ -532,6 +537,10 @@ public final class HarvestCore {
         // the durable pickup ledger owns the retry/deadline.
         if (stand == null) {
             return false;
+        }
+        ActionPack pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            return pack.stepInFlightFor("physical_drop_pickup", stand, WalkedStep.Kind.DROP);
         }
         int vertical = stand.getY() - current.getY();
         int horizontal = Math.abs(stand.getX() - current.getX())

@@ -36,6 +36,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -479,7 +480,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
-        // A walked step in flight is cancelled (keys released); the stair is re-derived from where the bot stands when it resumes.
+        // A completed stair can be interrupted between the pack publishing its outcome and this
+        // task's next tick. Settle that factual landing before abandoning the task-owned step.
+        settleCompletedStepBeforeAbandon(bot);
+        // A walked step still in flight is cancelled (keys released); the stair is re-derived from where the bot stands when it resumes.
         abandonStep(bot);
         // A safety task can interrupt in the same server tick that Descend physically reached a
         // dry landing. Accept that factual landing before shelter/combat is allowed to move the
@@ -497,6 +501,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // DangerWatcher calls this immediately before pauseFor(). Settle the landing first, then
         // record the threat rejection against the new factual origin. onPause() will subsequently
         // no-op and therefore preserve this newly recorded rejection.
+        settleCompletedStepBeforeAbandon(bot);
         boolean stairStep = stepPurpose == StepPurpose.STAIR;
         BlockPos stairOrigin = stepOrigin;
         abandonStep(bot);
@@ -519,20 +524,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
         ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
-        if (holdForStep(bot, world)) {
-            return; // a walked step is in flight (or its bot is still landing): the stair changes only when the landing is verified
-        }
-        feet = bot.blockPosition();
-        // Vanilla falling-block updates run after task decisions. A stair that was clear when the
-        // bot entered it can therefore become occupied before the next task tick. Resolve the
-        // current collision first; continuing to mine the next stair leaves the bot suffocating,
-        // and eating cannot remove the block around its head.
-        if (recoverBlockedBody(bot, world, feet)) {
-            return;
-        }
-        rememberSafeLanding(world, feet);
+        // A task-owned walking/landing hold must never hide either terminal bound. In particular,
+        // lava escape and overshoot handling are allowed to interrupt a fall instead of waiting up
+        // to UNSETTLED_LIMIT ticks for unsupported footing.
         if (totalBudget() > budgetLimit) {
-            fail("descend_timeout at_y=" + bot.blockPosition().getY());
+            fail("descend_timeout at_y=" + feet.getY());
             return;
         }
         if (feet.getY() < targetY) {
@@ -546,6 +542,24 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     "target_y", targetY, "at_y", feet.getY(), "at", feet.toShortString());
             return;
         }
+        if (holdForStep(bot, world)) {
+            return; // a walked step is in flight (or its bot is still landing): the stair changes only when the landing is verified
+        }
+        feet = bot.blockPosition();
+        // DangerWatcher schedules lava escape after task ticks. Do not start another mine/walk
+        // controller in the same tick once the hold has released an in-lava pose.
+        if (bot.isInLava()) {
+            miner.cancel(bot);
+            return;
+        }
+        // Vanilla falling-block updates run after task decisions. A stair that was clear when the
+        // bot entered it can therefore become occupied before the next task tick. Resolve the
+        // current collision first; continuing to mine the next stair leaves the bot suffocating,
+        // and eating cannot remove the block around its head.
+        if (recoverBlockedBody(bot, world, feet)) {
+            return;
+        }
+        rememberSafeLanding(world, feet);
         if (handleRejectedLanding(bot, world, feet)) {
             return;
         }
@@ -843,6 +857,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // cell in firstBodyCollision so breathing is restored before any lower obstruction.
         if (!blocked.equals(blockedBodyRecoveryTarget)
                 || miner.target() == null || !miner.target().equals(blocked)) {
+            rejectCollapsedStairForMiningFallback(bot, feet);
             miner.begin(bot, blocked);
             blockedBodyRecoveryTarget = blocked.immutable();
             BotLog.danger(bot, "descend_blocked_body_clear",
@@ -916,6 +931,32 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
         }
         clearRejectedLandingDirections();
+    }
+
+    /**
+     * A falling block can bury a stair landing after the normal retreat has become impossible.
+     * The mining fallback must not treat the just-collapsed direction as a fresh safe stair as
+     * soon as the visible obstruction is cleared: preserve the factual old edge for the audit and
+     * reject that direction from the current landing before ordinary stair planning resumes.
+     */
+    private void rejectCollapsedStairForMiningFallback(AIPlayerEntity bot, BlockPos feet) {
+        if (pendingLandingOrigin == null || pendingLandingTarget == null
+                || !feet.equals(pendingLandingTarget)) {
+            return;
+        }
+        BlockPos origin = pendingLandingOrigin;
+        int direction = pendingLandingDirection;
+        rejectCollapsedEdge(origin, feet);
+        pendingLandingOrigin = null;
+        pendingLandingTarget = null;
+        pendingLandingDirection = -1;
+        // The old origin's rejection prevents a future factual return from replaying the buried
+        // edge. The current rejection prevents an immediate re-dig down the same unstable line.
+        rejectLandingDirection(feet, direction);
+        BotLog.danger(bot, "descend_collapsed_stair_rejected",
+                "from", origin.toShortString(), "at", feet.toShortString(),
+                "direction", direction >= 0 && direction < HORIZONTAL.length
+                        ? HORIZONTAL[direction].getSerializedName() : "unknown");
     }
 
     /**
@@ -1167,6 +1208,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         unsettledTicks = 0;
     }
 
+    /** Settles an already-ended ordinary step before an interruption forgets its task-local fields. */
+    private void settleCompletedStepBeforeAbandon(AIPlayerEntity bot) {
+        if (edge == null && stepPurpose != null && step != null && step.ended()) {
+            settleStep(bot, bot.level());
+        }
+    }
+
     /** True while the bot must be left alone: a step is in flight (or was just settled), or it is still falling after one was lost. */
     private boolean holdForStep(AIPlayerEntity bot, ServerLevel world) {
         if (edge != null || stepPurpose != null) {
@@ -1185,13 +1233,25 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return true;
         }
         if (poseUnsettled) {
-            if (WalkedStep.supported(bot) || bot.isInWater() || ++unsettledTicks > UNSETTLED_LIMIT) {
+            if (WalkedStep.supported(bot) || bot.isInWater()
+                    || isUnsettledHazard(bot, world)
+                    || ++unsettledTicks > UNSETTLED_LIMIT) {
                 poseUnsettled = false;
             } else {
                 return true;
             }
         }
         return tryLeanRecovery(bot, world);
+    }
+
+    /** Hazards own recovery; an old lost-step hold must not delay their first task tick. */
+    private static boolean isUnsettledHazard(AIPlayerEntity bot, ServerLevel world) {
+        BlockPos feet = bot.blockPosition();
+        return bot.isInLava()
+                || bot.onClimbable()
+                || bot.isInPowderSnow
+                || world.getBlockState(feet).is(Blocks.COBWEB)
+                || world.getBlockState(feet.above()).is(Blocks.COBWEB);
     }
 
     /**

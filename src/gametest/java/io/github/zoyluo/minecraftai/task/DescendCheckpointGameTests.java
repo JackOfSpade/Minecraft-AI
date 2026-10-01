@@ -650,7 +650,7 @@ public final class DescendCheckpointGameTests {
         BlockPos unsupportedBody = start.east();
         BlockPos upperRetreat = unsupportedBody.above();
         // The same-level EAST candidate is solid but has no floor. It is also the sole support for
-        // the dry upper retreat. The old detour mined it before stepToStandable rejected the lower
+        // the dry upper retreat. The old detour mined it before the walked-step landing rules rejected the lower
         // landing, thereby destroying both escape options.
         context.getLevel().setBlock(unsupportedBody,
                 Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);

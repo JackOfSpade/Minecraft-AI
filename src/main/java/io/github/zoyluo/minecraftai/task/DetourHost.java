@@ -325,6 +325,17 @@ interface DetourHost {
      */
     Pose poseFor(BlockPos ore, Anchor anchor, Set<BlockPos> forbiddenStands);
 
+    /**
+     * True only after {@link #poseFor} returned null because an otherwise legal side stand was
+     * rejected solely by {@code OreScan.adjacentHazard == UNKNOWN}. Such a cell remains a sighting:
+     * it must be re-probed after ordinary movement/re-observation instead of receiving the usual
+     * long no-pose exclusion. Hosts that cannot distinguish this conservative case return false.
+     */
+    default boolean poseBlockedOnlyByUnknownHazard(BlockPos ore, Anchor anchor,
+                                                   Set<BlockPos> forbiddenStands) {
+        return false;
+    }
+
     /** {@code hasRecoverableTargetBreakPose(bot, ore)}: dy in [-1, 2], Manhattan distance at most 1, within reach, from the current feet. */
     boolean inBreakEnvelope(BlockPos ore);
 
