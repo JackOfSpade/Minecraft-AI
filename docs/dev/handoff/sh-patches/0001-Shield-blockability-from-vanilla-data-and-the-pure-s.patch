@@ -1,0 +1,915 @@
+From 5a68cf4ea3589c9723d1670879fb1b0b968f1f55 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 22:17:18 +0000
+Subject: [PATCH 1/5] Shield blockability from vanilla data and the pure shield
+ rules
+
+ShieldBlockability answers "would this shield stop that hit" from the game's own data: any item with the BLOCKS_ATTACKS component is a shield; the direct hit of each vanilla projectile (damage type and amount, read off the projectile classes of the 1.21.11 jar) goes through the shield's bypassed_by tag (#bypasses_shield) on the real registry, the Piercing rule of LivingEntity.applyItemBlocking, and a zero-damage hit is nothing to block (Player.hurtServer returns at once for it). The front arc is the widest horizontal_blocking_angle of the damage reductions that apply to the source, the delay block_delay_seconds.
+
+Verified against the decompiled jar (scratch only): snowballs, eggs and ender pearls deal a thrown hit of 0 to a player (a snowball hurts only blazes; the ender_pearl damage type is the thrower's own landing), so they are never reacted to (the spec listed snowballs and eggs as blockable; the jar says there is nothing to block). A guardian beam (Guardian.GuardianAttackGoal) deals indirect_magic (1, 3 on Hard, +2 elder: unblockable) and then doHurtTarget's mob_attack (6, elder 8), which the shield blocks from the front: the larger part is blockable, so the beam is blocked like a melee hit. Splash and lingering potions and evoker fangs (indirect_magic), dragon fireballs (no hit; the cloud is magic), sonic_boom, lightning_bolt and the environment types of the tag stay unblockable.
+
+ShieldRules holds the pure decisions: the head-relative front arc and the turn at the human rate, whether a raise can be active before a hit (turn and block delay together, a hotbar change first, one tick of slack), the reaction rule for a projectile (a shooter being tracked was anticipated; anything else waits the shared perception formula), the hand policy (eating, a draw or another use is cancelled only for a lethal hit), the main-hand use order and the melee rhythm state machine.
+
+Tests: ShieldBlockabilityTest reads #bypasses_shield (with #bypasses_armor) from the vanilla jar and checks every projectile and damage kind, the zero-damage throws, the Piercing rule and the guardian beam; ShieldRulesTest covers the arc, the turn, the block delay, the reaction timing (an arrow from an unnoticed shooter at 15 blocks lands before the 0.85 s reaction; a ghast fireball seen at 40 blocks is still blocked), the hand policy, the main-hand order and a full swing/raise/hold/lower cycle with and without a disabled shield.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RTZfmHzKZpqKKFrYFQuc7f
+---
+ .../action/ShieldBlockability.java            | 246 ++++++++++++++++++
+ .../minecraftai/action/ShieldRules.java       | 207 +++++++++++++++
+ .../action/ShieldBlockabilityTest.java        | 170 ++++++++++++
+ .../minecraftai/action/ShieldRulesTest.java   | 238 +++++++++++++++++
+ 4 files changed, 861 insertions(+)
+ create mode 100644 src/main/java/io/github/zoyluo/minecraftai/action/ShieldBlockability.java
+ create mode 100644 src/main/java/io/github/zoyluo/minecraftai/action/ShieldRules.java
+ create mode 100644 src/test/java/io/github/zoyluo/minecraftai/action/ShieldBlockabilityTest.java
+ create mode 100644 src/test/java/io/github/zoyluo/minecraftai/action/ShieldRulesTest.java
+
+diff --git a/src/main/java/io/github/zoyluo/minecraftai/action/ShieldBlockability.java b/src/main/java/io/github/zoyluo/minecraftai/action/ShieldBlockability.java
+new file mode 100644
+index 0000000..a38bf48
+--- /dev/null
++++ b/src/main/java/io/github/zoyluo/minecraftai/action/ShieldBlockability.java
+@@ -0,0 +1,246 @@
++package io.github.zoyluo.minecraftai.action;
++
++import java.util.Map;
++import java.util.Optional;
++import java.util.Set;
++import java.util.function.Predicate;
++import net.minecraft.core.component.DataComponents;
++import net.minecraft.core.registries.BuiltInRegistries;
++import net.minecraft.core.registries.Registries;
++import net.minecraft.resources.Identifier;
++import net.minecraft.resources.ResourceKey;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.damagesource.DamageSource;
++import net.minecraft.world.damagesource.DamageType;
++import net.minecraft.world.entity.Entity;
++import net.minecraft.world.entity.LivingEntity;
++import net.minecraft.world.entity.animal.bee.Bee;
++import net.minecraft.world.entity.player.Player;
++import net.minecraft.world.entity.projectile.Projectile;
++import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
++import net.minecraft.world.item.ItemStack;
++import net.minecraft.world.item.component.BlocksAttacks;
++
++/**
++ * Whether the damage an incoming projectile or melee attacker would deal is BLOCKABLE by the item in the bot's offhand: the question a
++ * player answers by knowing the game. It is answered from vanilla's own data and code, never from a list of "unblockable" names:
++ *
++ * <ul>
++ *   <li>Any item with the {@code BLOCKS_ATTACKS} component is a shield ({@link #isShield}), whatever its name.</li>
++ *   <li>What a thing DEALS is the vanilla damage type and amount of its direct hit on a player ({@link Table}, the damage source the
++ *       vanilla projectile class itself builds); the shield's own {@code bypassed_by} tag ({@code #minecraft:bypasses_shield}) then
++ *       decides, through {@code DamageSource.is} on the real registry. A Piercing arrow bypasses the block, as in
++ *       {@code LivingEntity.applyItemBlocking}; a hit of zero damage is nothing to block ({@code Player.hurtServer} ignores it
++ *       altogether and {@code applyItemBlocking} returns zero for it).</li>
++ *   <li>The front arc ({@code horizontal_blocking_angle} of the damage reductions, {@link #halfArcDeg}) and the block delay
++ *       ({@code block_delay_seconds}) are the component's ({@link BlocksAttacks#resolveBlockedDamage},
++ *       {@link BlocksAttacks#blockDelayTicks}); see {@link ShieldRules}.</li>
++ * </ul>
++ *
++ * <p>Never blockable, each confirmed against the vanilla classes and the tag files of the 1.21.11 jar: thrown splash and lingering
++ * potions ({@code indirect_magic} of the Harming effect), experience bottles and area effect clouds (no hit), snowballs, eggs and
++ * ender pearls (a {@code thrown} hit of ZERO damage to a player: nothing reaches a shield; the pearl's {@code ender_pearl} damage is its
++ * thrower's own landing), a warden's sonic boom ({@code sonic_boom}), Piercing arrows and bolts, evoker fangs ({@code indirect_magic}),
++ * dragon fireballs (no hit; their breath cloud is magic) and the dragon breath cloud, lightning including a Channeling trident's bolt
++ * ({@code lightning_bolt}), and fire, lava, cactus, berry bushes, falling anvils and stalactites and every other environment damage of
++ * the tag. A guardian's beam ({@code Guardian.GuardianAttackGoal}) deals {@code indirect_magic} (unblockable: 1, 3 on Hard, +2 for an
++ * elder) and then, through {@code doHurtTarget}, its {@code mob_attack} (6, an elder 8) which a shield DOES stop from the front: the
++ * larger part of the beam is blockable, so it is blocked like a melee hit (see {@link #GUARDIAN_BEAM_NOTE}).
++ */
++public final class ShieldBlockability {
++    /** The documented decision for guardian and elder guardian beams (kept here so the table, the guard and the report agree). */
++    public static final String GUARDIAN_BEAM_NOTE =
++            "a guardian beam deals indirect_magic (bypasses the shield) and then its mob_attack, which the shield blocks from the front:"
++                    + " the larger part is blockable, so a beam locked on the bot is blocked like a melee hit";
++
++    private ShieldBlockability() {
++    }
++
++    /**
++     * The direct hit of a projectile on a player, from the vanilla projectile class: its damage type and the damage it deals (0 when it
++     * deals none to a player: a shield has nothing to stop). The amount is the class's own constant, or a typical value where it
++     * depends on the shot (an arrow's is {@code ceil(speed * baseDamage)}, see {@link #estimatedDamage}); it is used for the lethality
++     * of a hit, never to decide whether it is blockable beyond "zero or not".
++     */
++    public record Hit(String damageType, float damage) {
++    }
++
++    /** The pure half: the direct hit of each vanilla projectile, keyed by entity type path. Free of any Minecraft class. */
++    public static final class Table {
++        private static final Map<String, Hit> HIT = Map.ofEntries(
++                // Blockable: an ordinary attack damage type, and damage to stop.
++                Map.entry("arrow", new Hit("arrow", 6.0F)),                  // AbstractArrow: ceil(speed * 2.0), about 6 at a full draw
++                Map.entry("spectral_arrow", new Hit("arrow", 6.0F)),
++                Map.entry("trident", new Hit("trident", 8.0F)),              // ThrownTrident: 8
++                Map.entry("small_fireball", new Hit("fireball", 5.0F)),      // SmallFireball: 5
++                Map.entry("fireball", new Hit("fireball", 6.0F)),            // LargeFireball: 6 (and the explosion)
++                Map.entry("wither_skull", new Hit("wither_skull", 8.0F)),    // WitherSkull: 8
++                Map.entry("shulker_bullet", new Hit("mob_projectile", 4.0F)), // ShulkerBullet: 4, levitation only when it hurts
++                Map.entry("llama_spit", new Hit("spit", 1.0F)),              // LlamaSpit: 1
++                Map.entry("wind_charge", new Hit("wind_charge", 1.0F)),      // AbstractWindCharge: 1 (the burst still pushes)
++                Map.entry("breeze_wind_charge", new Hit("wind_charge", 1.0F)),
++                Map.entry("firework_rocket", new Hit("fireworks", 7.0F)),    // FireworkRocketEntity: 5 + 2 per explosion, near its blast
++                // A hit of zero damage to a player: Player.hurtServer returns at once, nothing reaches a shield.
++                Map.entry("snowball", new Hit("thrown", 0.0F)),              // Snowball: 3 to a blaze, 0 to anything else
++                Map.entry("egg", new Hit("thrown", 0.0F)),                   // ThrownEgg: 0
++                Map.entry("ender_pearl", new Hit("thrown", 0.0F)),           // ThrownEnderpearl: 0 (ender_pearl hurts its own thrower)
++                // Unblockable by the tag: they deal a damage type that bypasses the shield.
++                Map.entry("splash_potion", new Hit("indirect_magic", 6.0F)), // the Harming effect of AbstractThrownPotion
++                Map.entry("lingering_potion", new Hit("indirect_magic", 6.0F)),
++                Map.entry("evoker_fangs", new Hit("indirect_magic", 6.0F)),  // EvokerFangs: 6
++                Map.entry("dragon_fireball", new Hit("dragon_breath", 6.0F)), // no hit of its own: its breath cloud
++                Map.entry("lightning_bolt", new Hit("lightning_bolt", 5.0F)));
++
++        private Table() {
++        }
++
++        /**
++         * The direct hit of an entity of this type, or empty when it deals no hit at all (an experience bottle, an area effect cloud,
++         * an eye of ender, a fishing bobber, ...) or is unknown (never reacted to). {@code ownerKnown} matters for the ghast and blaze
++         * fireballs only: vanilla's {@code DamageSources.fireball} is {@code unattributed_fireball} without an owner.
++         */
++        public static Optional<Hit> hit(String entityTypePath, boolean ownerKnown) {
++            Hit hit = HIT.get(entityTypePath);
++            if (hit == null) {
++                return Optional.empty();
++            }
++            if ("fireball".equals(hit.damageType()) && !ownerKnown) {
++                return Optional.of(new Hit("unattributed_fireball", hit.damage()));
++            }
++            return Optional.of(hit);
++        }
++
++        /** The damage type path of the direct hit (see {@link #hit}). */
++        public static Optional<String> hitDamageType(String entityTypePath, boolean ownerKnown) {
++            return hit(entityTypePath, ownerKnown).map(Hit::damageType);
++        }
++
++        /** Every entity type path the table knows. */
++        public static Set<String> knownTypes() {
++            return HIT.keySet();
++        }
++    }
++
++    /**
++     * The decision over data alone: a hit is blockable when it deals damage to a player, its type does not bypass the shield, and it
++     * does not pierce.
++     */
++    public static boolean blockable(Optional<Hit> hit, Predicate<String> bypassesShield, int pierceLevel) {
++        return hit.isPresent() && hit.get().damage() > 0.0F && !bypassesShield.test(hit.get().damageType()) && pierceLevel <= 0;
++    }
++
++    /** {@link #blockable(Optional, Predicate, int)} for a damage type that deals damage (a melee blow, an explosion). */
++    public static boolean blockableDamageType(String damageType, Predicate<String> bypassesShield) {
++        return blockable(Optional.of(new Hit(damageType, 1.0F)), bypassesShield, 0);
++    }
++
++    // ------------------------------------------------------------------ the vanilla adapter
++
++    /** True for any item carrying the vanilla {@code BLOCKS_ATTACKS} component. */
++    public static boolean isShield(ItemStack stack) {
++        return !stack.isEmpty() && stack.get(DataComponents.BLOCKS_ATTACKS) != null;
++    }
++
++    /** The shield's blocking component, or null when {@code stack} is not a shield. */
++    public static BlocksAttacks component(ItemStack stack) {
++        return stack.isEmpty() ? null : stack.get(DataComponents.BLOCKS_ATTACKS);
++    }
++
++    private static DamageSource source(ServerLevel level, String damageTypePath, Entity direct, Entity causing) {
++        ResourceKey<DamageType> key = ResourceKey.create(Registries.DAMAGE_TYPE, Identifier.withDefaultNamespace(damageTypePath));
++        return level.damageSources().source(key, direct, causing);
++    }
++
++    /**
++     * Would this shield stop {@code source} (from the front)? Exactly the two vanilla gates of {@code LivingEntity.applyItemBlocking}:
++     * the item's {@code bypassed_by} tag and a Piercing arrow as the direct entity, then the damage reductions.
++     */
++    public static boolean blocks(ItemStack shield, DamageSource source) {
++        BlocksAttacks blocks = component(shield);
++        if (blocks == null) {
++            return false;
++        }
++        if (blocks.bypassedBy().map(source::is).orElse(false)) {
++            return false;
++        }
++        if (source.getDirectEntity() instanceof AbstractArrow arrow && arrow.getPierceLevel() > 0) {
++            return false;
++        }
++        return blocks.resolveBlockedDamage(source, 1.0F, 0.0D) > 0.0F;
++    }
++
++    /**
++     * The half angle (degrees, measured from the head direction) inside which {@code blocks} reduces {@code source}: the widest
++     * {@code horizontal_blocking_angle} of the damage reductions that apply to its type (vanilla's shield: one reduction, 90). Zero
++     * when none applies.
++     */
++    public static double halfArcDeg(BlocksAttacks blocks, DamageSource source) {
++        if (blocks == null) {
++            return 0.0D;
++        }
++        double widest = 0.0D;
++        for (BlocksAttacks.DamageReduction reduction : blocks.damageReductions()) {
++            if (reduction.type().isEmpty() || reduction.type().get().contains(source.typeHolder())) {
++                widest = Math.max(widest, reduction.horizontalBlockingAngle());
++            }
++        }
++        return widest;
++    }
++
++    /**
++     * The vanilla damage source the direct hit of {@code projectile} would carry, or empty when the projectile deals no hit damage to a
++     * player. The source is built the way the projectile's own class builds it ({@code DamageSources.source} with the same damage type).
++     */
++    public static Optional<DamageSource> hitSource(ServerLevel level, Entity projectile) {
++        Optional<Hit> hit = hitOf(projectile);
++        Entity owner = projectile instanceof Projectile p ? p.getOwner() : null;
++        return hit.filter(h -> h.damage() > 0.0F).map(h -> source(level, h.damageType(), projectile, owner));
++    }
++
++    /** The table's hit for {@code projectile}; a modded arrow is still an arrow (vanilla AbstractArrow builds DamageSources.arrow). */
++    private static Optional<Hit> hitOf(Entity projectile) {
++        Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType());
++        Entity owner = projectile instanceof Projectile p ? p.getOwner() : null;
++        if ("minecraft".equals(id.getNamespace())) {
++            return Table.hit(id.getPath(), owner != null);
++        }
++        return projectile instanceof AbstractArrow ? Optional.of(new Hit("arrow", 6.0F)) : Optional.empty();
++    }
++
++    /** True when {@code shield} would stop the damage {@code projectile} deals on a front hit (see the class comment). */
++    public static boolean projectileBlockable(ServerLevel level, ItemStack shield, Entity projectile) {
++        if (!isShield(shield)) {
++            return false;
++        }
++        return hitSource(level, projectile).map(source -> blocks(shield, source)).orElse(false);
++    }
++
++    /** The vanilla damage source of a melee blow by {@code attacker} (a player's attack, a bee's sting, any other mob's attack). */
++    public static DamageSource meleeSource(ServerLevel level, LivingEntity attacker) {
++        if (attacker instanceof Player player) {
++            return level.damageSources().playerAttack(player);
++        }
++        if (attacker instanceof Bee) {
++            return level.damageSources().sting(attacker);
++        }
++        return level.damageSources().mobAttack(attacker);
++    }
++
++    /** True when {@code shield} would stop a melee blow by {@code attacker} from the front. */
++    public static boolean meleeBlockable(ServerLevel level, ItemStack shield, LivingEntity attacker) {
++        return isShield(shield) && blocks(shield, meleeSource(level, attacker));
++    }
++
++    /**
++     * What a hit by {@code projectile} is expected to do, in half hearts, for the "is it lethal" decisions (never to decide whether to
++     * block): the arrow formula of vanilla ({@code ceil(speed * baseDamage)}, with the default base damage 2 an observer assumes: a
++     * Power bow is not visible in flight), the table's figure for the other vanilla projectiles.
++     */
++    public static float estimatedDamage(Entity projectile) {
++        if (projectile instanceof AbstractArrow && !(projectile instanceof net.minecraft.world.entity.projectile.arrow.ThrownTrident)) {
++            double speed = projectile.getDeltaMovement().length();
++            return (float) Math.ceil(Math.min(2.147483647E9D, speed * 2.0D));
++        }
++        return hitOf(projectile).map(Hit::damage).orElse(4.0F);
++    }
++}
+diff --git a/src/main/java/io/github/zoyluo/minecraftai/action/ShieldRules.java b/src/main/java/io/github/zoyluo/minecraftai/action/ShieldRules.java
+new file mode 100644
+index 0000000..c4cbd6f
+--- /dev/null
++++ b/src/main/java/io/github/zoyluo/minecraftai/action/ShieldRules.java
+@@ -0,0 +1,207 @@
++package io.github.zoyluo.minecraftai.action;
++
++/**
++ * The pure decisions of shield use, free of any Minecraft class so each one is unit-testable: the front arc, the time a block needs
++ * (turn, hotbar change, block delay) against the time a hit gives, the hand policy (what may be interrupted for a block), the
++ * main-hand use order, and the melee rhythm between a bot's own swings. The numbers are vanilla's ({@code BlocksAttacks}: a 90 degree
++ * half arc and {@code block_delay_seconds}), passed in by the callers from the item's own component.
++ */
++public final class ShieldRules {
++    /**
++     * The vanilla shield's {@code horizontal_blocking_angle} (its one damage reduction): a hit is blocked only when its source is within
++     * this many degrees of the head direction. The callers pass the arc of the shield in hand ({@code ShieldBlockability.halfArcDeg});
++     * this is the vanilla value for the tests.
++     */
++    public static final double VANILLA_HALF_ARC_DEG = 90.0D;
++    /**
++     * The arc the bot turns into, inside the vanilla one: a projectile's position at impact differs a little from where it is seen, and
++     * a turn that stops exactly on the edge would let the smallest drift leave it.
++     */
++    public static final double ARC_MARGIN_DEG = 20.0D;
++    /**
++     * Ticks of slack between the last moment a raise can become active and the tick of the hit: the impact estimate is the closest
++     * approach to the eyes (a little after first contact), and the use counter moves in the entity tick that may run after the arrow's.
++     */
++    public static final double HIT_SLACK_TICKS = 1.0D;
++    /** The hotbar change before a main-hand item that would take the use is swapped for one that does not: one tick. */
++    public static final int HOTBAR_SWITCH_TICKS = 1;
++
++    private ShieldRules() {
++    }
++
++    // ------------------------------------------------------------------ the front arc
++
++    /**
++     * The angle, degrees in 0..180, between the head direction ({@code headYawDeg}) and the direction to a hit source at
++     * {@code (dx, dz)} from the bot, both flattened: vanilla's {@code applyItemBlocking} measures exactly this with the head yaw.
++     */
++    public static double offsetDeg(double headYawDeg, double dx, double dz) {
++        double length = Math.hypot(dx, dz);
++        if (length < 1.0E-9D) {
++            return 0.0D;
++        }
++        double yaw = Math.toRadians(headYawDeg);
++        double headX = -Math.sin(yaw);
++        double headZ = Math.cos(yaw);
++        double dot = (headX * dx + headZ * dz) / length;
++        return Math.toDegrees(Math.acos(Math.max(-1.0D, Math.min(1.0D, dot))));
++    }
++
++    /** True when a source at {@code offsetDeg} from the head direction is inside the vanilla arc. */
++    public static boolean inArc(double offsetDeg, double halfArcDeg) {
++        return offsetDeg <= halfArcDeg;
++    }
++
++    /** Degrees the head must still turn to bring a source at {@code offsetDeg} inside the arc with the margin ({@code 0} when it already is). */
++    public static double degreesToTurn(double offsetDeg, double halfArcDeg) {
++        return Math.max(0.0D, offsetDeg - Math.max(0.0D, halfArcDeg - ARC_MARGIN_DEG));
++    }
++
++    /** Whole ticks a turn of {@code degrees} takes at {@code degPerTick} (the human turn rate); a bot that cannot turn never arrives. */
++    public static int turnTicks(double degrees, double degPerTick) {
++        if (degrees <= 0.0D) {
++            return 0;
++        }
++        return degPerTick <= 0.0D ? Integer.MAX_VALUE : (int) Math.ceil(degrees / degPerTick);
++    }
++
++    // ------------------------------------------------------------------ the reaction
++
++    /**
++     * May a sensed projectile be acted on now? A projectile from a shooter the bot is already tracking (noticed, see docs/PERCEPTION.md)
++     * was anticipated: the bot watched the release, so it reacts at once. Anything else (an arrow from a shooter it had not noticed, an
++     * ownerless one, a shot it only heard) is a first sighting: the human reaction time of the shared formula
++     * ({@code CreaturePerception.requiredSeconds} for the projectile's angle and distance) must have passed in continuous exposure
++     * first. Perception off: no reaction time (today's behaviour).
++     */
++    public static boolean reacted(boolean perceptionOn, boolean shooterTracked, double exposureSeconds, double requiredSeconds) {
++        if (!perceptionOn || shooterTracked) {
++            return true;
++        }
++        return requiredSeconds != Double.POSITIVE_INFINITY && exposureSeconds + 1.0E-9D >= requiredSeconds;
++    }
++
++    // ------------------------------------------------------------------ the time a block needs
++
++    /** Ticks still to wait before a shield raised {@code ticksUsing} ticks ago blocks (0 once {@code block_delay_seconds} has passed). */
++    public static int blockDelayRemaining(int blockDelayTicks, int ticksUsing) {
++        return Math.max(0, blockDelayTicks - Math.max(0, ticksUsing));
++    }
++
++    /**
++     * True when a block started now can be ACTIVE (turned into the arc, block delay passed) before a hit that lands in
++     * {@code ticksToImpact} ticks. The turn and the block delay run together (the head turns while the shield warms up); a
++     * hotbar change comes first. A raise that cannot make it is not started: the shield would only slow the bot down.
++     */
++    public static boolean canBeActiveInTime(double ticksToImpact, int turnTicks, int delayRemainingTicks, int switchTicks) {
++        long needed = (long) Math.max(0, switchTicks) + Math.max(turnTicks, delayRemainingTicks);
++        return ticksToImpact >= needed + HIT_SLACK_TICKS;
++    }
++
++    // ------------------------------------------------------------------ the hand policy
++
++    /** What the bot is using right now, for the decision whether a block may take the hand. */
++    public enum UseKind {
++        /** Nothing in use. */
++        NONE,
++        /** The shield, raised already. */
++        SHIELD,
++        /** Food, a potion or another consumable: eating in progress. */
++        CONSUMING,
++        /** A drawn bow, a charging crossbow or a raised trident: a shot in progress. */
++        RANGED_DRAW,
++        /** Any other item use (a spyglass, a goat horn). */
++        OTHER
++    }
++
++    /**
++     * May a block take the use hand from what the bot is doing? Nothing in use, or the shield itself: yes. Eating in progress, a
++     * shot being drawn and any other use are finished, never cancelled for a hit that only hurts: they are cancelled only for a hit
++     * that would be lethal (a sensible player keeps chewing at low health because the food is the heal, and keeps drawing because the
++     * arrow is the answer, but not with the next hit killing them).
++     */
++    public static boolean mayInterrupt(UseKind current, boolean incomingLethal) {
++        return switch (current) {
++            case NONE, SHIELD -> true;
++            case CONSUMING, RANGED_DRAW, OTHER -> incomingLethal;
++        };
++    }
++
++    /** True when a hit of {@code damage} half hearts would leave {@code healthAndAbsorption} at zero or below (armour and resistance ignored: the worst case). */
++    public static boolean lethal(float damage, float healthAndAbsorption) {
++        return damage >= healthAndAbsorption;
++    }
++
++    // ------------------------------------------------------------------ the main-hand use order
++
++    /** What the main hand holds, for the vanilla use order (the client tries MAIN_HAND, then OFF_HAND; the first that consumes the use wins). */
++    public enum MainHandKind {
++        EMPTY,
++        /** A sword, an axe, a tool, a block: {@code use} in the air passes to the offhand. */
++        PLAIN,
++        /** A shield: it blocks from the main hand itself. */
++        SHIELD,
++        /** A bow with ammunition, a loaded or loadable crossbow, a trident that can be raised: starts a draw, takes the use. */
++        RANGED_READY,
++        /** A bow without ammunition, a spent trident: the use fails and passes on. */
++        RANGED_UNUSABLE,
++        /** Food the bot can eat now, a potion, milk: starts eating. */
++        CONSUMABLE_READY,
++        /** Food the bot cannot eat now (full): the use passes on. */
++        CONSUMABLE_REFUSED,
++        /** Armour, an elytra, anything the use swaps into its slot. */
++        EQUIPPABLE_SWAP,
++        /** An item with a continued use (a spear charge, a spyglass, a goat horn) or an instant one in the air (a throwable, a fishing rod, a bucket). */
++        OTHER_USE
++    }
++
++    /** True when the item in the main hand would take the use before the offhand shield is tried (so the hotbar must change first). */
++    public static boolean mainHandConsumesUse(MainHandKind kind) {
++        return switch (kind) {
++            case EMPTY, PLAIN, RANGED_UNUSABLE, CONSUMABLE_REFUSED -> false;
++            case SHIELD, RANGED_READY, CONSUMABLE_READY, EQUIPPABLE_SWAP, OTHER_USE -> true;
++        };
++    }
++
++    // ------------------------------------------------------------------ the melee rhythm
++
++    /** What to do this tick in a melee exchange with a noticed attacker in reach. */
++    public enum MeleeStep {
++        /** The swing is ready and the target is under the crosshair in reach: lower the shield if it is up, swing (never strike while using an item). */
++        SWING,
++        /** Bring the shield up: it will be active before the swing comes round. */
++        RAISE,
++        /** Keep the shield up (the swing is still cooling down, or the aim is still settling on the target). */
++        HOLD,
++        /** Nothing to do with the shield this tick (no attacker in reach, no usable shield, or too little time before the swing to be worth a raise). */
++        IDLE
++    }
++
++    /**
++     * The skilled player's rhythm: swing the moment the weapon is ready and the target is under the crosshair, raise the shield right
++     * after and hold it through the cooldown, lower it for the next swing. A shield disabled by an axe ({@code shieldUsable} false, the
++     * vanilla item cooldown) is never raised: no attempts, the fight simply goes on.
++     *
++     * @param swingReady               the weapon's attack strength is back (vanilla 0.95)
++     * @param targetUnderCrosshairInReach the target is the entity under the crosshair within the weapon's vanilla reach
++     * @param attackerInReach          a noticed attacker is within its own reach of the bot
++     * @param shieldUsable             a shield is in the offhand and not on its item cooldown
++     * @param shieldUp                 the shield is in use now
++     * @param cooldownTicksLeft        ticks until the weapon is ready again
++     * @param blockDelayTicks          the shield's {@code block_delay_seconds} in ticks
++     */
++    public static MeleeStep meleeStep(boolean swingReady, boolean targetUnderCrosshairInReach, boolean attackerInReach,
++                                      boolean shieldUsable, boolean shieldUp, double cooldownTicksLeft, int blockDelayTicks) {
++        if (swingReady && targetUnderCrosshairInReach) {
++            return MeleeStep.SWING;
++        }
++        if (!attackerInReach || !shieldUsable) {
++            return MeleeStep.IDLE;
++        }
++        if (shieldUp) {
++            return MeleeStep.HOLD;
++        }
++        // Raising only pays when the shield can be active before the next swing: otherwise it is a slowdown for nothing.
++        return cooldownTicksLeft >= blockDelayTicks + 1 ? MeleeStep.RAISE : MeleeStep.IDLE;
++    }
++}
+diff --git a/src/test/java/io/github/zoyluo/minecraftai/action/ShieldBlockabilityTest.java b/src/test/java/io/github/zoyluo/minecraftai/action/ShieldBlockabilityTest.java
+new file mode 100644
+index 0000000..0326b1f
+--- /dev/null
++++ b/src/test/java/io/github/zoyluo/minecraftai/action/ShieldBlockabilityTest.java
+@@ -0,0 +1,170 @@
++package io.github.zoyluo.minecraftai.action;
++
++import com.google.gson.JsonArray;
++import com.google.gson.JsonElement;
++import com.google.gson.JsonObject;
++import com.google.gson.JsonParser;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.InputStreamReader;
++import java.nio.charset.StandardCharsets;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Optional;
++import java.util.Set;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * The blockability table over every projectile and damage kind the shield logic knows, checked against VANILLA'S OWN data: the
++ * {@code #minecraft:bypasses_shield} tag (with its nested {@code #minecraft:bypasses_armor}) is read from the 1.21.11 jar, so a
++ * kind is blockable only when the game's tag says its damage type does not bypass the shield, and the Piercing rule holds.
++ */
++class ShieldBlockabilityTest {
++    private static final Set<String> BYPASSES_SHIELD = tag("bypasses_shield");
++
++    /** The set of damage type paths a tag holds, nested tags expanded, read from the vanilla jar on the classpath. */
++    private static Set<String> tag(String name) {
++        Set<String> result = new HashSet<>();
++        String resource = "data/minecraft/tags/damage_type/" + name + ".json";
++        try (InputStream in = ShieldBlockabilityTest.class.getClassLoader().getResourceAsStream(resource)) {
++            assertTrue(in != null, "the vanilla tag file " + resource + " is on the classpath");
++            JsonObject json = JsonParser.parseReader(new InputStreamReader(in, StandardCharsets.UTF_8)).getAsJsonObject();
++            JsonArray values = json.getAsJsonArray("values");
++            for (JsonElement value : values) {
++                String entry = value.getAsString();
++                if (entry.startsWith("#minecraft:")) {
++                    result.addAll(tag(entry.substring("#minecraft:".length())));
++                } else {
++                    result.add(entry.substring("minecraft:".length()));
++                }
++            }
++        } catch (IOException exception) {
++            throw new IllegalStateException(exception);
++        }
++        return result;
++    }
++
++    private static boolean blockableProjectile(String entityType, boolean ownerKnown, int pierce) {
++        return ShieldBlockability.blockable(ShieldBlockability.Table.hit(entityType, ownerKnown), BYPASSES_SHIELD::contains, pierce);
++    }
++
++    private static boolean blockableDamage(String damageType) {
++        return ShieldBlockability.blockableDamageType(damageType, BYPASSES_SHIELD::contains);
++    }
++
++    @Test
++    void theVanillaTagHoldsTheDamageTypesTheTaskNamed() {
++        // #bypasses_shield = #bypasses_armor + these (the task's list, re-derived from the jar).
++        for (String path : List.of("cactus", "campfire", "dry_out", "falling_anvil", "falling_stalactite", "hot_floor", "in_fire",
++                "lava", "lightning_bolt", "sweet_berry_bush")) {
++            assertTrue(BYPASSES_SHIELD.contains(path), path + " bypasses the shield");
++        }
++        for (String path : List.of("magic", "indirect_magic", "sonic_boom", "dragon_breath", "wither", "freeze", "starve", "fall",
++                "drown", "on_fire", "in_wall", "cramming", "fly_into_wall", "generic", "generic_kill", "ender_pearl", "stalagmite",
++                "out_of_world", "outside_border")) {
++            assertTrue(BYPASSES_SHIELD.contains(path), path + " is in #bypasses_armor and so bypasses the shield");
++        }
++    }
++
++    @Test
++    void theBlockableProjectilesAreBlocked() {
++        // Arrows and bolts without Piercing (tipped and spectral too), tridents, ghast and blaze fireballs, wither skulls, shulker
++        // bullets, llama spit, wind charges (a player's and a breeze's), firework rockets (from crossbows).
++        for (String type : List.of("arrow", "spectral_arrow", "trident", "small_fireball", "fireball", "wither_skull",
++                "shulker_bullet", "llama_spit", "wind_charge", "breeze_wind_charge", "firework_rocket")) {
++            assertTrue(blockableProjectile(type, true, 0), type + " is blockable");
++        }
++        // An ownerless ghast fireball is vanilla's unattributed_fireball: still blockable.
++        assertEquals(Optional.of("unattributed_fireball"), ShieldBlockability.Table.hitDamageType("fireball", false));
++        assertTrue(blockableProjectile("fireball", false, 0));
++    }
++
++    @Test
++    void snowballsEggsAndPearlsDealNothingToAPlayerSoThereIsNothingToBlock() {
++        // Snowball: thrown, 3 to a blaze and 0 to anything else; ThrownEgg and ThrownEnderpearl: thrown, 0. Player.hurtServer returns at
++        // once for zero damage (no knockback either) and applyItemBlocking blocks nothing of it: never reacted to.
++        for (String type : List.of("snowball", "egg", "ender_pearl")) {
++            ShieldBlockability.Hit hit = ShieldBlockability.Table.hit(type, true).orElseThrow();
++            assertEquals("thrown", hit.damageType(), type);
++            assertEquals(0.0F, hit.damage(), type);
++            assertFalse(blockableProjectile(type, true, 0), type + " deals nothing a shield could stop");
++        }
++        // The thrown damage type itself is an ordinary blockable type: it is the zero amount that makes these three harmless.
++        assertTrue(blockableDamage("thrown"));
++    }
++
++    @Test
++    void piercingArrowsAndBoltsBypassTheBlock() {
++        assertFalse(blockableProjectile("arrow", true, 1));
++        assertFalse(blockableProjectile("arrow", true, 4));
++        assertFalse(blockableProjectile("spectral_arrow", true, 1));
++        assertFalse(blockableProjectile("trident", true, 1));
++        assertTrue(blockableProjectile("arrow", true, 0));
++    }
++
++    @Test
++    void theUnblockableProjectilesAreNeverBlocked() {
++        // Splash and lingering potions (indirect_magic), evoker fangs (indirect_magic), dragon fireballs (dragon_breath), lightning
++        // (lightning_bolt, a Channeling trident's bolt too): all data-driven by the tag.
++        for (String type : List.of("splash_potion", "lingering_potion", "evoker_fangs", "dragon_fireball", "lightning_bolt")) {
++            assertTrue(ShieldBlockability.Table.hit(type, true).isPresent(), type + " has a hit in the table");
++            assertTrue(BYPASSES_SHIELD.contains(ShieldBlockability.Table.hitDamageType(type, true).orElseThrow()),
++                    type + " deals a damage type of #bypasses_shield");
++            assertFalse(blockableProjectile(type, true, 0), type + " bypasses the shield");
++        }
++        // Things that deal no hit damage at all are never reacted to: no hit, no block.
++        for (String type : List.of("experience_bottle", "area_effect_cloud", "eye_of_ender", "fishing_bobber", "some_modded_thing")) {
++            assertEquals(Optional.empty(), ShieldBlockability.Table.hit(type, true), type);
++            assertFalse(blockableProjectile(type, true, 0), type + " deals no blockable hit");
++        }
++    }
++
++    @Test
++    void meleeAndExplosionsAreBlockableFromTheFront() {
++        for (String damage : List.of("mob_attack", "mob_attack_no_aggro", "player_attack", "sting", "mace_smash", "spear",
++                "explosion", "player_explosion", "arrow", "trident", "fireball", "unattributed_fireball", "wither_skull",
++                "mob_projectile", "spit", "thrown", "wind_charge", "fireworks", "thorns")) {
++            assertTrue(blockableDamage(damage), damage + " is blockable");
++        }
++    }
++
++    @Test
++    void theWardenSonicBoomTheEnvironmentAndMagicAreNeverBlockable() {
++        for (String damage : List.of("sonic_boom", "magic", "indirect_magic", "dragon_breath", "wither", "freeze", "starve",
++                "fall", "drown", "on_fire", "in_wall", "cramming", "fly_into_wall", "generic", "generic_kill", "ender_pearl",
++                "stalagmite", "out_of_world", "outside_border", "cactus", "campfire", "dry_out", "falling_anvil",
++                "falling_stalactite", "hot_floor", "in_fire", "lava", "lightning_bolt", "sweet_berry_bush")) {
++            assertFalse(blockableDamage(damage), damage + " bypasses the shield");
++        }
++    }
++
++    @Test
++    void aGuardianBeamIsBlockedForItsMobAttackPart() {
++        // Guardian.GuardianAttackGoal: an indirect_magic hit (unblockable, 1; 3 on Hard; +2 for an elder), then doHurtTarget, a
++        // mob_attack (6; an elder 8) that the shield stops from the front: the larger part of the beam is blockable.
++        assertFalse(blockableDamage("indirect_magic"));
++        assertTrue(blockableDamage("mob_attack"));
++        assertTrue(ShieldBlockability.GUARDIAN_BEAM_NOTE.contains("blocked like a melee hit"));
++    }
++
++    @Test
++    void everyDamageTypeOfTheTableIsEitherAttackOrBypassAsTheTaskListed() {
++        // A guard against a typo in the table: every mapped damage type is a known vanilla type path.
++        Set<String> known = new HashSet<>(BYPASSES_SHIELD);
++        known.addAll(List.of("arrow", "trident", "fireball", "unattributed_fireball", "wither_skull", "mob_projectile", "spit",
++                "thrown", "wind_charge", "fireworks"));
++        for (String type : ShieldBlockability.Table.knownTypes()) {
++            String damage = ShieldBlockability.Table.hitDamageType(type, true).orElseThrow();
++            assertTrue(known.contains(damage), type + " maps to an unknown damage type " + damage);
++        }
++        // Every entry is either a real attack (damage above zero, not in the tag), a zero hit, or a type of the tag.
++        for (String type : ShieldBlockability.Table.knownTypes()) {
++            ShieldBlockability.Hit hit = ShieldBlockability.Table.hit(type, true).orElseThrow();
++            assertTrue(hit.damage() >= 0.0F, type);
++        }
++    }
++}
+diff --git a/src/test/java/io/github/zoyluo/minecraftai/action/ShieldRulesTest.java b/src/test/java/io/github/zoyluo/minecraftai/action/ShieldRulesTest.java
+new file mode 100644
+index 0000000..f8e4b32
+--- /dev/null
++++ b/src/test/java/io/github/zoyluo/minecraftai/action/ShieldRulesTest.java
+@@ -0,0 +1,238 @@
++package io.github.zoyluo.minecraftai.action;
++
++import io.github.zoyluo.minecraftai.action.ShieldRules.MainHandKind;
++import io.github.zoyluo.minecraftai.action.ShieldRules.MeleeStep;
++import io.github.zoyluo.minecraftai.action.ShieldRules.UseKind;
++import io.github.zoyluo.minecraftai.perception.CreaturePerception;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/** The pure shield decisions: the front arc, the reaction/facing/block-delay timing, the hand policy, the main-hand order, the melee rhythm. */
++class ShieldRulesTest {
++    // ------------------------------------------------------------------ the front arc
++
++    @Test
++    void theOffsetIsMeasuredFromTheHeadDirectionFlattened() {
++        // Yaw 0 looks along +z (south): a source straight ahead is 0 degrees, to the side 90, behind 180.
++        assertEquals(0.0D, ShieldRules.offsetDeg(0.0D, 0.0D, 5.0D), 1.0E-6D);
++        assertEquals(90.0D, ShieldRules.offsetDeg(0.0D, 5.0D, 0.0D), 1.0E-6D);
++        assertEquals(90.0D, ShieldRules.offsetDeg(0.0D, -5.0D, 0.0D), 1.0E-6D);
++        assertEquals(180.0D, ShieldRules.offsetDeg(0.0D, 0.0D, -5.0D), 1.0E-6D);
++        // Yaw 90 looks along -x (west).
++        assertEquals(0.0D, ShieldRules.offsetDeg(90.0D, -5.0D, 0.0D), 1.0E-6D);
++        assertEquals(45.0D, ShieldRules.offsetDeg(90.0D, -5.0D, 5.0D), 1.0E-6D);
++        // A source on the bot itself has no direction: never an offset.
++        assertEquals(0.0D, ShieldRules.offsetDeg(33.0D, 0.0D, 0.0D), 1.0E-9D);
++    }
++
++    @Test
++    void theTurnBringsTheSourceInsideTheArcWithItsMargin() {
++        // Inside the margin (70 degrees): no turn at all, a follower keeps looking where it walks.
++        assertEquals(0.0D, ShieldRules.degreesToTurn(0.0D, 90.0D), 1.0E-9D);
++        assertEquals(0.0D, ShieldRules.degreesToTurn(70.0D, 90.0D), 1.0E-9D);
++        // Behind (180): 110 degrees to reach the 70 degree line.
++        assertEquals(110.0D, ShieldRules.degreesToTurn(180.0D, 90.0D), 1.0E-9D);
++        assertEquals(10.0D, ShieldRules.degreesToTurn(80.0D, 90.0D), 1.0E-9D);
++        assertTrue(ShieldRules.inArc(90.0D, 90.0D));
++        assertFalse(ShieldRules.inArc(90.5D, 90.0D));
++    }
++
++    @Test
++    void theTurnTakesTheHumanRateNeverAnInstantSpin() {
++        // The default human flick: 540 degrees per second = 27 per tick.
++        assertEquals(0, ShieldRules.turnTicks(0.0D, 27.0D));
++        assertEquals(1, ShieldRules.turnTicks(27.0D, 27.0D));
++        assertEquals(2, ShieldRules.turnTicks(27.5D, 27.0D));
++        assertEquals(5, ShieldRules.turnTicks(110.0D, 27.0D));
++        assertEquals(Integer.MAX_VALUE, ShieldRules.turnTicks(10.0D, 0.0D));
++    }
++
++    // ------------------------------------------------------------------ the reaction
++
++    @Test
++    void aProjectileFromATrackedShooterIsAnticipatedAnythingElseWaitsTheReactionTime() {
++        // Perception off: today's behaviour, no reaction time.
++        assertTrue(ShieldRules.reacted(false, false, 0.0D, 5.0D));
++        // A shooter the bot is tracking: it watched the release.
++        assertTrue(ShieldRules.reacted(true, true, 0.0D, 5.0D));
++        // A first sighting: continuous exposure must reach the required seconds.
++        assertFalse(ShieldRules.reacted(true, false, 0.80D, 0.85D));
++        assertTrue(ShieldRules.reacted(true, false, 0.85D, 0.85D));
++        // Behind (never sighted) is never reacted to.
++        assertFalse(ShieldRules.reacted(true, false, 99.0D, CreaturePerception.NEVER));
++    }
++
++    @Test
++    void anArrowFromAShooterNobodyNoticedJustHitsASlowFireballFromFarAwayCanStillBeBlocked() {
++        CreaturePerception.Params params = CreaturePerception.Params.defaults();
++        // A skeleton arrow seen at 15 blocks straight ahead: 0.5 + 1.5 * 15 / 64 = 0.85 s (17 ticks) of reaction, but at 1.6 blocks per
++        // tick it is on the bot in about 10 ticks: it lands before the reaction ends, like it would on a player caught off guard.
++        double arrowRequired = CreaturePerception.requiredSeconds(params, 0.0D, 15.0D, CreaturePerception.Subject.of(false), false);
++        assertEquals(0.8515625D, arrowRequired, 1.0E-9D);
++        long reactTick = CreaturePerception.noticeTick(arrowRequired);
++        assertEquals(18L, reactTick);
++        double flightTicks = 15.0D / 1.6D;
++        assertTrue(reactTick > flightTicks, "the reaction outlasts the flight");
++        // The same arrow from a shooter the bot is watching: blocked if the block can be active in time (no turn, 5 delay ticks).
++        assertTrue(ShieldRules.reacted(true, true, 0.0D, arrowRequired)
++                && ShieldRules.canBeActiveInTime(flightTicks, 0, 5, 0));
++        // Seen at 60 degrees the reaction is longer still (angle factor 1 + 30/70).
++        double side = CreaturePerception.requiredSeconds(params, 60.0D, 15.0D, CreaturePerception.Subject.of(false), false);
++        assertEquals(arrowRequired * (1.0D + 30.0D / 70.0D), side, 1.0E-9D);
++        // A ghast fireball first seen at 40 blocks needs 1.4375 s (29 ticks). It leaves the ghast at 0.1 blocks per tick and speeds up
++        // (AbstractHurtingProjectile: position += v, then v = (v + 0.1 * direction) * 0.95), so it takes far longer than an arrow:
++        // after the reaction the block delay still fits before it arrives, so it is blocked.
++        double fireballRequired = CreaturePerception.requiredSeconds(params, 0.0D, 40.0D, CreaturePerception.Subject.of(false), false);
++        assertEquals(1.4375D, fireballRequired, 1.0E-9D);
++        long fireballReact = CreaturePerception.noticeTick(fireballRequired);
++        double travelled = 0.0D;
++        double speed = 0.1D;
++        int fireballFlight = 0;
++        while (travelled < 40.0D) {
++            travelled += speed;
++            speed = (speed + 0.1D) * 0.95D;
++            fireballFlight++;
++        }
++        assertTrue(fireballFlight > fireballReact + 5 + ShieldRules.HIT_SLACK_TICKS,
++                "flight " + fireballFlight + " ticks, reaction " + fireballReact);
++        assertTrue(ShieldRules.canBeActiveInTime(fireballFlight - fireballReact, 0, 5, 0));
++    }
++
++    // ------------------------------------------------------------------ the time a block needs
++
++    @Test
++    void theBlockDelayRunsDownWhileTheShieldIsUp() {
++        assertEquals(5, ShieldRules.blockDelayRemaining(5, 0));
++        assertEquals(2, ShieldRules.blockDelayRemaining(5, 3));
++        assertEquals(0, ShieldRules.blockDelayRemaining(5, 5));
++        assertEquals(0, ShieldRules.blockDelayRemaining(5, 40));
++        assertEquals(5, ShieldRules.blockDelayRemaining(5, -3));
++    }
++
++    @Test
++    void aRaiseThatCannotBeActiveInTimeIsNotStarted() {
++        // In front (no turn), shield down: the five block-delay ticks plus the slack must fit before the hit.
++        assertTrue(ShieldRules.canBeActiveInTime(6.0D, 0, 5, 0));
++        assertFalse(ShieldRules.canBeActiveInTime(5.9D, 0, 5, 0));
++        // The turn and the delay run together: the longer of the two counts, not their sum.
++        assertTrue(ShieldRules.canBeActiveInTime(6.0D, 5, 5, 0));
++        assertFalse(ShieldRules.canBeActiveInTime(6.0D, 6, 5, 0));
++        // A hotbar change comes first and adds its tick.
++        assertFalse(ShieldRules.canBeActiveInTime(6.0D, 0, 5, ShieldRules.HOTBAR_SWITCH_TICKS));
++        assertTrue(ShieldRules.canBeActiveInTime(7.0D, 0, 5, ShieldRules.HOTBAR_SWITCH_TICKS));
++        // Already warming up: only what is left of the delay counts.
++        assertTrue(ShieldRules.canBeActiveInTime(3.0D, 0, 2, 0));
++        // A bot that cannot turn (a walker steers its head) never makes a turn-dependent block.
++        assertFalse(ShieldRules.canBeActiveInTime(30.0D, Integer.MAX_VALUE, 0, 0));
++    }
++
++    // ------------------------------------------------------------------ the hand policy
++
++    @Test
++    void eatingADrawnBowAndOtherUsesAreOnlyInterruptedForALethalHit() {
++        assertTrue(ShieldRules.mayInterrupt(UseKind.NONE, false));
++        assertTrue(ShieldRules.mayInterrupt(UseKind.SHIELD, false));
++        for (UseKind busy : new UseKind[]{UseKind.CONSUMING, UseKind.RANGED_DRAW, UseKind.OTHER}) {
++            assertFalse(ShieldRules.mayInterrupt(busy, false), busy + " is finished for a hit that only hurts");
++            assertTrue(ShieldRules.mayInterrupt(busy, true), busy + " is cancelled for a lethal hit");
++        }
++    }
++
++    @Test
++    void aHitIsLethalWhenItReachesTheHealthAndAbsorption() {
++        assertTrue(ShieldRules.lethal(6.0F, 6.0F));
++        assertTrue(ShieldRules.lethal(8.0F, 6.0F));
++        assertFalse(ShieldRules.lethal(5.0F, 6.0F));
++    }
++
++    // ------------------------------------------------------------------ the main-hand use order
++
++    @Test
++    void aMainHandItemThatTakesTheUseForcesAHotbarChange() {
++        for (MainHandKind takes : new MainHandKind[]{MainHandKind.SHIELD, MainHandKind.RANGED_READY, MainHandKind.CONSUMABLE_READY,
++                MainHandKind.EQUIPPABLE_SWAP, MainHandKind.OTHER_USE}) {
++            assertTrue(ShieldRules.mainHandConsumesUse(takes), takes + " takes the use before the offhand");
++        }
++        for (MainHandKind passes : new MainHandKind[]{MainHandKind.EMPTY, MainHandKind.PLAIN, MainHandKind.RANGED_UNUSABLE,
++                MainHandKind.CONSUMABLE_REFUSED}) {
++            assertFalse(ShieldRules.mainHandConsumesUse(passes), passes + " passes the use to the offhand");
++        }
++    }
++
++    // ------------------------------------------------------------------ the melee rhythm
++
++    @Test
++    void theSwingComesFirstAndNeverWithTheShieldUp() {
++        // Ready and on the crosshair: swing (the caller lowers the shield first), whatever else holds.
++        assertEquals(MeleeStep.SWING, ShieldRules.meleeStep(true, true, true, true, true, 0.0D, 5));
++        assertEquals(MeleeStep.SWING, ShieldRules.meleeStep(true, true, false, false, false, 0.0D, 5));
++        // Ready but the aim is still settling: the shield stays up until the swing can land.
++        assertEquals(MeleeStep.HOLD, ShieldRules.meleeStep(true, false, true, true, true, 0.0D, 5));
++    }
++
++    @Test
++    void theShieldGoesUpBetweenSwingsAndIsHeldThroughTheCooldown() {
++        // Just swung, 12 ticks to go, attacker in reach: raise. Then hold until the swing is ready again.
++        assertEquals(MeleeStep.RAISE, ShieldRules.meleeStep(false, false, true, true, false, 12.0D, 5));
++        assertEquals(MeleeStep.HOLD, ShieldRules.meleeStep(false, false, true, true, true, 7.0D, 5));
++    }
++
++    @Test
++    void aRaiseThatCouldNotBeActiveBeforeTheNextSwingIsSkipped() {
++        assertEquals(MeleeStep.RAISE, ShieldRules.meleeStep(false, false, true, true, false, 6.0D, 5));
++        assertEquals(MeleeStep.IDLE, ShieldRules.meleeStep(false, false, true, true, false, 5.0D, 5));
++    }
++
++    @Test
++    void aFullRhythmSwingRaiseHoldLowerSwingAndNoRaiseOnADisabledShield() {
++        // A stone sword: 12.5 ticks between full swings (1.6 attacks per second), the shield's 5-tick block delay.
++        double interval = 20.0D / 1.6D;
++        StringBuilder trace = new StringBuilder();
++        boolean shieldUp = false;
++        int raises = 0;
++        int swings = 0;
++        for (int tick = 0; tick < 40; tick++) {
++            double sinceSwing = tick % 13; // a swing lands every 13 ticks (the first tick at which the strength is back)
++            double cooldownLeft = Math.max(0.0D, interval - sinceSwing);
++            boolean ready = cooldownLeft <= 0.625D; // vanilla 0.95 of the strength scale
++            MeleeStep step = ShieldRules.meleeStep(ready, true, true, true, shieldUp, cooldownLeft, 5);
++            switch (step) {
++                case SWING -> {
++                    assertFalse(shieldUp && trace.toString().endsWith("W"), "never two swings with the shield up in between");
++                    shieldUp = false; // lowered first, the swing follows
++                    swings++;
++                    trace.append('W');
++                }
++                case RAISE -> {
++                    shieldUp = true;
++                    raises++;
++                    trace.append('R');
++                }
++                case HOLD -> {
++                    assertTrue(shieldUp);
++                    trace.append('H');
++                }
++                case IDLE -> trace.append('.');
++            }
++        }
++        assertTrue(swings >= 3 && raises >= 3, trace.toString());
++        assertTrue(trace.toString().contains("WRHHHH"), "raised right after a swing and held through the cooldown: " + trace);
++        // The axe hit: the shield on its item cooldown is never raised, the swings go on.
++        for (int tick = 0; tick < 13; tick++) {
++            double cooldownLeft = Math.max(0.0D, interval - tick);
++            MeleeStep step = ShieldRules.meleeStep(cooldownLeft <= 0.625D, true, true, false, false, cooldownLeft, 5);
++            assertTrue(step == MeleeStep.IDLE || step == MeleeStep.SWING, "a disabled shield is left alone: " + step);
++        }
++    }
++
++    @Test
++    void noAttackerInReachOrNoUsableShieldMeansNoShieldWork() {
++        assertEquals(MeleeStep.IDLE, ShieldRules.meleeStep(false, false, false, true, false, 12.0D, 5));
++        // A shield disabled by an axe (the vanilla item cooldown) is never raised: no re-raise attempts.
++        assertEquals(MeleeStep.IDLE, ShieldRules.meleeStep(false, false, true, false, false, 12.0D, 5));
++        assertEquals(MeleeStep.IDLE, ShieldRules.meleeStep(false, false, true, false, true, 12.0D, 5));
++    }
++}
+-- 
+2.43.0
+
