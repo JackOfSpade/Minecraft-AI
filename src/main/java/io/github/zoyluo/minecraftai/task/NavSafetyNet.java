@@ -176,7 +176,7 @@ public final class NavSafetyNet {
      * Package-private on purpose: no arbitrary task may opt out of the drowning safety net.
      */
     void renewFollowSwim(AIPlayerEntity bot) {
-        if (bot.getAirSupply() <= surfaceAirThreshold(bot)) {
+        if (followSwimMustYield(bot)) {
             clearFollowSwim(bot);
             return;
         }
@@ -229,7 +229,7 @@ public final class NavSafetyNet {
 
     private boolean hasFollowSwimLease(AIPlayerEntity bot, int currentTick) {
         Integer until = followSwimLeaseUntil.get(bot.getUUID());
-        if (until == null || until < currentTick || bot.getAirSupply() <= surfaceAirThreshold(bot)) {
+        if (until == null || until < currentTick || followSwimMustYield(bot)) {
             followSwimLeaseUntil.remove(bot.getUUID());
             return false;
         }
@@ -429,6 +429,15 @@ public final class NavSafetyNet {
     private static int surfaceAirThreshold(AIPlayerEntity bot) {
         return surfaceAirThresholdForDepth(
                 verticalWaterCellsToSurface(bot.level(), bot.blockPosition()));
+    }
+
+    /**
+     * The oxygen boundary at which FollowSwimming must stop writing movement and let the water
+     * rescue own the next tick.  This is deliberately shared with the follow lease so a deep
+     * shaft cannot leave Follow and NavSafetyNet taking turns replacing one another's swim step.
+     */
+    static boolean followSwimMustYield(AIPlayerEntity bot) {
+        return bot.getAirSupply() <= surfaceAirThreshold(bot);
     }
 
     /**

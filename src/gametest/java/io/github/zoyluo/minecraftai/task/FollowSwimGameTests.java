@@ -1,7 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
@@ -10,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
@@ -214,6 +217,73 @@ public final class FollowSwimGameTests {
                     && bot.distanceTo(target) <= 5.0D) {
                 finish(context, pond, bot, target);
             }
+        });
+    }
+
+    /**
+     * A FollowTask runs before NavSafetyNet. In a twelve-cell shaft, 140 air is above the old
+     * fixed 120 floor but below the depth-aware rescue boundary. Follow must therefore write no
+     * swim step, hand the writer to NavSafetyNet, and keep its hands off that rescue step on the
+     * following task tick.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_deep_water_follow_hands_writer_to_safety_without_ping_pong", maxTicks = 80)
+    public void deepWaterFollowHandsWriterToSafetyWithoutPingPong(GameTestHelper context) {
+        DeepFollowShaft shaft = buildDeepFollowShaft(context);
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, "DeepFollowHandoffBot", shaft.lower());
+        AIPlayerEntity target = spawnBot(world, "DeepFollowHandoffTarget", shaft.lower().east(4).above());
+        submerge(world, bot, shaft.lower());
+        submerge(world, target, shaft.lower().east(4).above());
+        // A teleport updates the fake player's position immediately, but its water flags on the
+        // next entity tick. Wait for that genuine fluid tick before any Follow/Safety writer runs.
+        context.runAfterDelay(2, () -> {
+            require(context, world.getFluidState(shaft.lower()).is(FluidTags.WATER)
+                            && world.getFluidState(shaft.lower().east(4).above()).is(FluidTags.WATER),
+                    "deep follow shaft did not retain water at the two submerged spawn cells");
+            require(context, bot.isUnderWater() && target.isUnderWater(),
+                    "fixture did not leave both follower and target genuinely submerged");
+            bot.setAirSupply(140);
+            target.setAirSupply(target.getMaxAirSupply());
+            TeleportAudit.reset(bot);
+
+            FollowTask follow = new FollowTask(target.getGameProfile().name());
+            TaskManager.INSTANCE.assign(bot, follow,
+                    TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_swim_deep_handoff"));
+
+            // This is the production writer order: TaskManager gives Follow its tick, then the safety
+            // coordinator decides whether it owns the same tick.  It is deliberately not a safety-net
+            // unit test: the assertion before tickBot proves Follow did not write the competing step.
+            TaskManager.INSTANCE.tickAll(world.getServer());
+            requireRunning(context, follow, bot);
+            require(context, bot.isUnderWater() && target.isUnderWater(),
+                    "fixture lost a submerged follower or target before the writer handoff");
+            require(context, NavSafetyNet.surfaceAirThresholdForDepth(DEEP_FOLLOW_SHAFT_DEPTH) > bot.getAirSupply(),
+                    "fixture air did not fall below the deep-water rescue boundary");
+            require(context, bot.getActionPack().stepIdle(),
+                    "Follow wrote a swim step after the depth-aware rescue boundary");
+
+            require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
+                    "NavSafetyNet did not take the writer after Follow yielded");
+            require(context, bot.getActionPack().stepInFlightFor("navsafe_water_surface", shaft.lower().above(), WalkedStep.Kind.SWIM),
+                    "NavSafetyNet did not begin its exact physical upward rescue step");
+
+            // On the next real task writer turn, Follow still yields instead of cancelling or replacing
+            // the rescue step. A second safety turn must retain that same exact owner: no ping-pong.
+            TaskManager.INSTANCE.tickAll(world.getServer());
+            require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == follow,
+                    "the follow task was unexpectedly replaced during the writer handoff");
+            require(context, bot.getActionPack().stepInFlightFor("navsafe_water_surface", shaft.lower().above(), WalkedStep.Kind.SWIM),
+                    "Follow cancelled or replaced NavSafetyNet's exact rescue step");
+            require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
+                    "NavSafetyNet did not retain its physical rescue writer");
+            require(context, bot.getActionPack().stepInFlightFor("navsafe_water_surface", shaft.lower().above(), WalkedStep.Kind.SWIM),
+                    "the follow and safety writers ping-ponged NavSafetyNet's exact rescue step away");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "deep-water handoff used a correction teleport: " + TeleportAudit.lastCaller(bot));
+
+            TaskManager.INSTANCE.abort(bot);
+            despawn(world, bot, target);
+            context.succeed();
         });
     }
 
@@ -461,6 +531,34 @@ public final class FollowSwimGameTests {
     record Pond(BlockPos feet, int x0, int x1, int maxX, AABB area) {
     }
 
+    private static final int DEEP_FOLLOW_SHAFT_DEPTH = 12;
+
+    /** A broad enough submerged column for a real Follow target, with no horizontal dry rescue route. */
+    private static DeepFollowShaft buildDeepFollowShaft(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos lower = context.absolutePos(new BlockPos(8, 24, -24));
+        for (int dx = -8; dx <= 8; dx++) {
+            for (int dz = -8; dz <= 8; dz++) {
+                for (int dy = -16; dy <= 16; dy++) {
+                    world.setBlock(lower.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        for (int dx = -1; dx <= 5; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dy = 0; dy < DEEP_FOLLOW_SHAFT_DEPTH; dy++) {
+                    world.setBlock(lower.offset(dx, dy, dz), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+                }
+                world.setBlock(lower.offset(dx, DEEP_FOLLOW_SHAFT_DEPTH, dz),
+                        Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        return new DeepFollowShaft(lower.immutable());
+    }
+
+    private record DeepFollowShaft(BlockPos lower) {
+    }
+
     /**
      * Land for the whole box except a pond of {@code depth} blocks spanning x in [x0, x1] and
      * z in [{@value #POND_Z0}, {@value #POND_Z1}]; the water surface block is flush with the bank.
@@ -556,6 +654,13 @@ public final class FollowSwimGameTests {
             NavSafetyNet.INSTANCE.clear(bot);
             AIPlayerManager.INSTANCE.despawn(world.getServer(), bot.getGameProfile().name());
         }
+    }
+
+    private static void submerge(ServerLevel world, AIPlayerEntity bot, BlockPos feet) {
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY() + 0.125D, feet.getZ() + 0.5D,
+                Set.of(), 0.0F, 0.0F, false);
+        bot.setDeltaMovement(Vec3.ZERO);
+        bot.fallDistance = 0.0F;
     }
 
     static void requireRunning(GameTestHelper context, FollowTask follow, AIPlayerEntity bot) {

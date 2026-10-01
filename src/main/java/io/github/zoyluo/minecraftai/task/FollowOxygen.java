@@ -11,16 +11,16 @@ package io.github.zoyluo.minecraftai.task;
  *       those effects is hard-coded.</li>
  *   <li>{@link #shouldSurface} compares the air that is left, in ticks, with how long the way back
  *       up takes (distance to breathable air over a deliberately slow ascent speed, times a safety
- *       factor, plus a fixed margin) and with a fixed air floor that sits just above
- *       {@code NavSafetyNet}'s rescue threshold, so follow always starts its own ascent first and
- *       the safety net stays a genuine last line of defence.</li>
+ *       factor, plus a fixed margin) and with a baseline shallow-water air floor. FollowSwimming
+ *       separately yields at NavSafetyNet's depth-aware boundary, so a deep column cannot make
+ *       the two writers fight over a swim step.</li>
  *   <li>{@link #mayResumeDive} gives the decision hysteresis: once follow has turned up for
  *       breath it stays up until the lungs are (almost) full again, instead of flapping around the
  *       trigger level.</li>
  * </ul>
  */
 final class FollowOxygen {
-    /** Air at or below which {@code NavSafetyNet}'s drowning rescue owns the bot (its lease ends). */
+    /** Baseline shallow-water rescue floor; deep columns use NavSafetyNet's depth-aware boundary. */
     static final int RESCUE_AIR = NavSafetyNet.AIR_SURFACE_THRESHOLD;
     /**
      * Follow always turns up at least this early, so it is never the rescue that has to. A bot swims by real inputs now (about

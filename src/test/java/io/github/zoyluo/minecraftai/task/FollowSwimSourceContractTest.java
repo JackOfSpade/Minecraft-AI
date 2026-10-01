@@ -20,16 +20,28 @@ final class FollowSwimSourceContractTest {
     void followYieldsToTheDrowningRescueBelowItsThresholdAndNeverMovesThen() throws IOException {
         String swim = read("task/FollowSwimming.java");
         String oxygen = read("task/FollowOxygen.java");
+        String safety = read("task/NavSafetyNet.java");
 
         assertTrue(oxygen.contains("RESCUE_AIR = NavSafetyNet.AIR_SURFACE_THRESHOLD"),
-                "follow's yield level must be the safety net's own threshold, not a copy");
+                "the shallow-water oxygen floor must still be the safety net's historic floor");
         assertTrue(oxygen.contains("SURFACE_FLOOR_AIR = RESCUE_AIR +"),
                 "follow must always start its ascent before the rescue has to");
-        int yield = swim.indexOf("air <= FollowOxygen.RESCUE_AIR");
-        int renew = swim.indexOf("NavSafetyNet.INSTANCE.renewFollowSwim(bot)");
-        assertTrue(yield >= 0 && renew > yield,
-                "the yield-without-moving check must run before the lease is renewed");
-        String yieldBlock = swim.substring(yield, renew);
+        int predicate = safety.indexOf("static boolean followSwimMustYield(AIPlayerEntity bot)");
+        assertTrue(predicate >= 0);
+        String predicateBody = safety.substring(predicate, safety.indexOf("    /**", predicate + 1));
+        assertTrue(predicateBody.contains("bot.getAirSupply() <= surfaceAirThreshold(bot)"),
+                "Follow and NavSafetyNet must share the depth-aware rescue threshold");
+        assertTrue(count(swim, "mustYieldToWaterRescue(bot)") == 3,
+                "swim-after, water exit, and an in-flight step must all yield at the same boundary");
+        String swimAfter = body(swim, "private boolean swimAfter", "private boolean ascendWhileSubmerged");
+        String exit = body(swim, "boolean exitWaterForLand", "// ---- entering the water");
+        String heldStep = body(swim, "private boolean holdStep", "private void clearRoute");
+        assertYieldBeforeRenew(swimAfter, "swim-after");
+        assertYieldBeforeRenew(exit, "water exit");
+        assertYieldBeforeRenew(heldStep, "in-flight step");
+        int yield = swimAfter.indexOf("if (mustYieldToWaterRescue(bot))");
+        int renew = swimAfter.indexOf("NavSafetyNet.INSTANCE.renewFollowSwim(bot)");
+        String yieldBlock = swimAfter.substring(yield, renew);
         assertTrue(yieldBlock.contains("clearFollowSwim(bot)") && yieldBlock.contains("stopMovement()"));
         assertFalse(yieldBlock.contains("swimStepTo") || yieldBlock.contains("stepAlongRoute")
                 || yieldBlock.contains("ascendStep"),
@@ -193,6 +205,20 @@ final class FollowSwimSourceContractTest {
             n++;
         }
         return n;
+    }
+
+    private static String body(String source, String start, String end) {
+        int begin = source.indexOf(start);
+        int finish = source.indexOf(end, begin);
+        assertTrue(begin >= 0 && finish > begin, start);
+        return source.substring(begin, finish);
+    }
+
+    private static void assertYieldBeforeRenew(String body, String branch) {
+        int yield = body.indexOf("if (mustYieldToWaterRescue(bot))");
+        int renew = body.indexOf("NavSafetyNet.INSTANCE.renewFollowSwim(bot)");
+        assertTrue(yield >= 0 && renew > yield,
+                branch + " must yield before it renews or continues Follow swimming");
     }
 
     private static String readGametest(String relative) throws IOException {

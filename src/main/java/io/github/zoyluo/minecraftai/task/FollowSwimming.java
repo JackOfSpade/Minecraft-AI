@@ -37,8 +37,8 @@ import net.minecraft.world.effect.MobEffects;
  *   <li><b>Oxygen.</b> Follow owns the ascent while its {@link NavSafetyNet} lease is valid: it
  *       measures the bot's real air loss ({@link FollowOxygen.LossEstimator}) and turns up for
  *       breath early enough (see {@link FollowOxygen#shouldSurface}); it stays up until the lungs are
- *       nearly full. Below {@link FollowOxygen#RESCUE_AIR} it makes no move at all so the drowning
- *       rescue is never undone.</li>
+ *       nearly full. At NavSafetyNet's current depth-aware rescue boundary it makes no move at all
+ *       so the drowning rescue is never undone.</li>
  *   <li><b>Leaving.</b> When the player leaves the water the bot swims to a dry landing near them,
  *       then ordinary land follow takes over.</li>
  * </ul>
@@ -169,9 +169,9 @@ final class FollowSwimming {
         ServerLevel world = bot.level();
         boolean submerged = bot.isUnderWater();
         int air = bot.getAirSupply();
-        if (submerged && air <= FollowOxygen.RESCUE_AIR) {
-            // NavSafetyNet's drowning rescue owns the bot from here (its lease ends at this air
-            // level); make no move that could undo one of its steps.
+        if (mustYieldToWaterRescue(bot)) {
+            // NavSafetyNet's drowning rescue owns the bot from here (its lease ends at this
+            // depth-aware air level); make no move that could undo one of its steps.
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             bot.getActionPack().stopMovement();
             clearRoute();
@@ -371,7 +371,7 @@ final class FollowSwimming {
         }
         boolean submerged = bot.isUnderWater();
         int air = bot.getAirSupply();
-        if (submerged && air <= FollowOxygen.RESCUE_AIR) {
+        if (mustYieldToWaterRescue(bot)) {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             bot.getActionPack().stopMovement();
             clearRoute();
@@ -678,7 +678,7 @@ final class FollowSwimming {
      * @return true when the bot deliberately made no progress (it was handed to the rescue)
      */
     private boolean holdStep(AIPlayerEntity bot) {
-        if (bot.isUnderWater() && bot.getAirSupply() <= FollowOxygen.RESCUE_AIR) {
+        if (mustYieldToWaterRescue(bot)) {
             cancelStep(bot);
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             bot.getActionPack().stopMovement();
@@ -687,6 +687,11 @@ final class FollowSwimming {
         }
         NavSafetyNet.INSTANCE.renewFollowSwim(bot);
         return false;
+    }
+
+    /** Follow only yields while submerged; a low-air swimmer who has reached the surface may refill normally. */
+    private static boolean mustYieldToWaterRescue(AIPlayerEntity bot) {
+        return bot.isUnderWater() && NavSafetyNet.followSwimMustYield(bot);
     }
 
     private void clearRoute() {
