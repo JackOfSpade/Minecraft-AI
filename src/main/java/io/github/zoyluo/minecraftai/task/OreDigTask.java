@@ -1345,8 +1345,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         BlockPos observedWorkPose = approachGoalFor(bot, world, targetOre);
                         if (observedWorkPose != null) {
                             rememberObservedHighWorkPose(bot, targetOre, observedWorkPose);
-                            bot.getActionPack().startDigPathTo(
-                                    observedWorkPose, protectedStoneLikeReserve);
+                            // The finite owner is temporarily occluded, so no route may alter
+                            // terrain that could include it.  A failed surface route falls back
+                            // only to the guarded one-cell approach below, which refuses the
+                            // owner as its next head or foot cell.
+                            ActionResult route = bot.getActionPack().startSurfacePathTo(observedWorkPose);
+                            if (route.isFailed()
+                                    && !"pathfinding_throttled".equals(route.reason())) {
+                                continueUnknownOwnerApproach(
+                                        bot, world, targetOre, TunnelIntent.TARGET_APPROACH);
+                            }
                         } else if (!tryRememberedHighWorkPoseRoute(bot, world, targetOre)) {
                             continueUnknownOwnerApproach(
                                     bot, world, targetOre, TunnelIntent.TARGET_APPROACH);
@@ -2637,11 +2645,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
-            ActionResult path = bot.getActionPack().startPathTo(
-                    lastFace, protectedStoneLikeReserve);
-            if (path.isFailed()) {
-                path = bot.getActionPack().startDigPathTo(
-                        lastFace, protectedStoneLikeReserve);
+            boolean finiteTargetOwner = targetOre != null || !veinQueue.isEmpty()
+                    || activeTargetBreakPos != null || pendingPickupPos != null;
+            // A safety pause can preserve a finite target owner while its strip face must be
+            // restored.  Its return route is therefore walk-only: a two-cell dig route could
+            // otherwise break that owner before beginTargetMine records the physical-drop debt.
+            ActionResult path = finiteTargetOwner
+                    ? bot.getActionPack().startSurfacePathTo(lastFace)
+                    : bot.getActionPack().startPathTo(lastFace, protectedStoneLikeReserve);
+            if (!finiteTargetOwner && path.isFailed()) {
+                path = bot.getActionPack().startDigPathTo(lastFace, protectedStoneLikeReserve);
             }
             if (path.isFailed()) {
                 BotLog.action(bot, "ore_dig_restore_face_retry",
@@ -2845,8 +2858,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         rememberObservedHighWorkPose(bot, ore, workPose);
-        ActionResult approach = bot.getActionPack().startDigPathTo(
-                workPose, protectedStoneLikeReserve);
+        // The finite ore may occupy the head cell of a route to this otherwise-safe stance.
+        // Keep that route non-destructive; a blocked surface route falls through to the one-cell
+        // approach below, which hands the finite owner back to beginTargetMine before it breaks.
+        ActionResult approach = bot.getActionPack().startSurfacePathTo(workPose);
         if (approach.isFailed()) {
             if (!"pathfinding_throttled".equals(approach.reason())) {
                 BotLog.action(bot, "ore_dig_approach_rejected", "why", approach.reason(),
@@ -3099,6 +3114,20 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /**
+     * True only while the action pack is still physically mining the exact unconfirmed owner.
+     * ActionPack clears its mining controller in the player tick that commits a break; BlockMiner
+     * deliberately retains the coordinate until the following task tick reads DONE. That lag must
+     * not make a replacement block look like the old in-flight target.
+     */
+    static boolean activeBreakStillMining(BlockPos active, BlockPos minerTarget,
+                                          boolean miningIdle, boolean confirmedGone) {
+        return !confirmedGone
+                && !miningIdle
+                && active != null
+                && active.equals(minerTarget);
+    }
+
+    /**
      * A target can break and be picked up while a reactive shield still defers its required
      * drop-support placement. Settle that observed, exact break owner before terminal quota or
      * capacity decisions, so neither can bypass the physical handoff on the next task tick.
@@ -3110,9 +3139,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         OreScan.Observation observed = OreScan.observeOre(bot, active, targetOres);
         if (observed == OreScan.Observation.OBSERVED_PRESENT) {
+            if (activeBreakStillMining(active, miner.target(), bot.getActionPack().isMiningIdle(),
+                    activeTargetBreakConfirmedGone)) {
+                // This is the ordinary pre-break state of the live target miner. The action pack
+                // clears its controller as soon as the physical break commits, while BlockMiner
+                // keeps its target until this later task tick polls it. Therefore a matching
+                // BlockMiner target alone is stale evidence: preserve only a non-idle controller
+                // on an unconfirmed break, so a newly placed replacement still invalidates old debt.
+                return false;
+            }
             // A new visible block at the old coordinate invalidates the former break fact. It
             // must never receive the former drop's support/finalization transaction or its old
             // inventory baseline; the still-owned target will establish a fresh ledger to mine it.
+            miner.cancel(bot);
             clearActiveTargetBreak(active);
             return false;
         }
@@ -3578,8 +3617,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         if (sealResult.isFailed()
                 && bot.getActionPack().isPathExecutorIdle()) {
-            bot.getActionPack().startDigPathTo(
-                    ore.below(), protectedStoneLikeReserve); // Close in until sealing is reachable
+            // Do not DIG_THROUGH toward ore.below(): the target itself is that endpoint's head
+            // cell.  The controlled target approach can open only intermediate body cells and
+            // yields when the finite owner becomes the next one.
+            digTowardStep(bot, bot.level(), ore, TunnelIntent.TARGET_APPROACH);
         }
         return FluidSealStep.WORKING;
     }
@@ -3931,6 +3972,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 && OreScan.adjacentHazard(bot, obstruction)
                 == OreScan.Observation.OBSERVED_PRESENT) {
             abandonTargetApproach(bot, goal, "adjacent_fluid", obstruction);
+            miner.cancel(bot);
+            return;
+        }
+        // The finite owner can itself become the next body cell of its ordinary approach
+        // (eye-height ore is the head cell; foot-height ore is the step cell).  Channel mining
+        // would physically break it without opening active_break_pos, so yield one task tick to
+        // the target branch, which re-proves the pickup envelope and starts beginTargetMine.
+        // The cell is adjacent here, hence that branch has a recoverable break pose; this is a
+        // hand-off of an already observed owner, not a new scan or coordinate inference.
+        if (intent == TunnelIntent.TARGET_APPROACH && obstruction.equals(goal)) {
             miner.cancel(bot);
             return;
         }
@@ -6585,8 +6636,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                 bot.level(), candidate)) {
                     continue;
                 }
-                ActionResult result = bot.getActionPack().startPathTo(
-                        candidate, protectedStoneLikeReserve);
+                // This is a relocation away from the finite target's support.  The observed
+                // stand is adjacent and already clear, so no-dig routing is both sufficient and
+                // prevents a planner shortcut through the target before its ledger is open.
+                ActionResult result = bot.getActionPack().startSurfacePathTo(candidate);
                 if (!result.isFailed()) {
                     BotLog.action(bot, "ore_dig_leave_support",
                             "ore", support.toShortString(), "to", candidate.toShortString());
