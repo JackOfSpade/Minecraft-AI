@@ -1247,6 +1247,11 @@ public final class CombatTask extends AbstractTask {
      * {@link CombatCore#STEP_TIMEOUT_TICKS}, re-proving the footing and hazards every tick), so the
      * exposure lasts as long as the walk really takes instead of one teleported tick.
      */
+    /** True when a mob's blow (an arrow, a hit) landed on the bot during the current peek cycle. */
+    private boolean hitDuringThisPeek(AIPlayerEntity bot) {
+        return bot.getLastHurtByMob() != null && bot.tickCount - bot.getLastHurtByMobTimestamp() <= peekCycleTicks;
+    }
+
     private void coverPeek(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
             cancelPeekStep(bot);
@@ -1326,6 +1331,14 @@ public final class CombatTask extends AbstractTask {
         if (back == CombatCore.StepStatus.FAILED) {
             String why = peekStep.failure();
             peekStep = null;
+            if (("timeout".equals(why) || "left_course".equals(why)) && hitDuringThisPeek(bot)) {
+                // A blow (a shooter's arrow) knocked the bot about while it ducked back: like a player, it keeps going for its cover
+                // from where it landed. The hide phase walks it back in (one more bounded step; a failure there gives the peek up).
+                BotLog.action(bot, "peekaboo_knocked_on_the_way_back", "reason", why, "at", bot.blockPosition().toShortString());
+                peekStage = PeekStage.OUT;
+                phase = Phase.COVER_HIDE;
+                return;
+            }
             abandonPeekaboo(bot, "peekaboo_hide_step_failed:" + why);
             return;
         }
