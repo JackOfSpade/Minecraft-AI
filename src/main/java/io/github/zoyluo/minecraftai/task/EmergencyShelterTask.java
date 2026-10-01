@@ -44,7 +44,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     private static final int PREBUILD_RETREAT_DISTANCE = 10;
     private static final int PREBUILD_RETREAT_LIMIT = 260;
     private static final int EXIT_LIMIT = 500;
-    /** Three failed, non-cancelled attempts at the same open doorway mean its pose is no longer trustworthy. */
+    /** Three refused or failed, non-cancelled attempts at one doorway mean its live pose is no longer trustworthy. */
     private static final int EGRESS_MOTION_FAILURE_LIMIT = 3;
     private static final int DAYLIGHT_GRACE_TICKS = 100;
     /**
@@ -141,7 +141,6 @@ public final class EmergencyShelterTask extends AbstractTask {
     private BlockPos egressFailureTarget;
     private int egressMotionFailures;
     private BlockPos exitMiningTarget;
-    private Direction lastDeferredForcedDirection;
     /** A real jump for the roof support is in flight (the bot is in the air or about to be). */
     private boolean elevatedForRoofSupport;
     private boolean roofJumpAirborneSeen;
@@ -256,7 +255,6 @@ public final class EmergencyShelterTask extends AbstractTask {
         exitMiningTarget = null;
         egressFailureTarget = null;
         egressMotionFailures = 0;
-        lastDeferredForcedDirection = null;
         surfaceShelter = false;
         forcePressureExit = false;
         consecutiveDaylightTicks = 0;
@@ -793,25 +791,11 @@ public final class EmergencyShelterTask extends AbstractTask {
             }
             case EGRESS -> {
                 if (!succeeded && !"cancelled".equals(why) && egressFeet != null) {
-                    if (!egressFeet.equals(egressFailureTarget)) {
-                        egressFailureTarget = egressFeet.immutable();
-                        egressMotionFailures = 0;
-                    }
-                    if (++egressMotionFailures >= EGRESS_MOTION_FAILURE_LIMIT) {
-                        // The open doorway looked safe before each start, but the actual input-driven
-                        // step could not verify its landing. Reopen selection rather than trying this
-                        // same pose forever; rejectCurrentEgress preserves the first terminal cause.
-                        int failures = egressMotionFailures;
-                        BlockPos failedEgress = egressFeet;
-                        rejectCurrentEgress(bot, "shelter_exit_pose_unverified");
-                        egressFailureTarget = null;
-                        egressMotionFailures = 0;
-                        phase = Phase.OPEN_EXIT;
-                        phaseStartedElapsed = elapsed;
-                        BotLog.action(bot, "shelter_exit_pose_reopened",
-                                "egress", failedEgress, "failures", failures, "why", why);
-                        return true;
-                    }
+                    // Reopen before the next live proof instead of starting another step in this
+                    // same tick. A block or entity can appear after the first controller input,
+                    // so the surrounding world must be re-read before this doorway is retried.
+                    retryOrRejectEgress(bot, "shelter_exit_pose_unverified", why);
+                    return true;
                 }
                 return false;
             }
@@ -1176,10 +1160,16 @@ public final class EmergencyShelterTask extends AbstractTask {
                     returnToPressureHold(bot, "shelter_pressure_cycle_restarted");
                     return;
                 }
-                if (forcePressureExit || !hasOpenEnvelopeSide(bot)) {
-                    // A typed pressure timeout may not become terminal at the sealed anchor. Keep
-                    // retrying until an owned, non-hard-rejected side can be made physically
-                    // passable; STEP_OUT is the only terminal boundary for the forced transaction.
+                if (forcePressureExit) {
+                    // Every forced candidate was rejected from a live, physically checked doorway,
+                    // or the live terrain no longer offers any owned/openable doorway.  Continuing
+                    // to wait cannot create a landing.  The terminal handoff below either records
+                    // exact cleanup for an already open side or preserves an owned two-cell exit
+                    // debt before this task releases the sealed anchor.
+                    failForcedEgressExhausted(bot);
+                    return;
+                }
+                if (!hasOpenEnvelopeSide(bot)) {
                     return;
                 }
                 // A build can lose its remaining material immediately after preflight, before any
@@ -1230,7 +1220,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         Standability.clearCache();
         if (!Standability.isStandable(bot.level(), egressFeet)) {
             if (forcePressureExit) {
-                deferForcedEgress(bot, "shelter_exit_not_standable");
+                retryOrRejectEgress(bot, "shelter_exit_not_standable", "not_standable");
                 return;
             }
             // The doorway has now been physically reopened and every removed block was owned by
@@ -1357,14 +1347,23 @@ public final class EmergencyShelterTask extends AbstractTask {
             }
             return;
         }
-        // Out through the doorway on foot (a walked step onto the landing); a refused or failed step is the old refused
-        // step: back to opening the exit, which tries again until the exit clock forces one.
+        // Out through the doorway on foot (a walked step onto the landing).  Forced egress treats
+        // a preflight refusal as an attempt at this specific live doorway: otherwise an occupied
+        // but terrain-standable landing would reopen and select itself forever.
         Standability.clearCache();
         WalkedStep.Kind kind = WalkedStepRules.walkKindFor(egressFeet.getY() - bot.blockPosition().getY());
-        if (kind == null
-                || !Standability.isStandable(bot.level(), egressFeet)
-                || WalkedStep.refusal(bot, egressFeet, kind) != null) {
+        String refusal = kind == null
+                ? "step_kind_unavailable"
+                : !Standability.isStandable(bot.level(), egressFeet)
+                ? "not_standable"
+                : WalkedStep.refusal(bot, egressFeet, kind);
+        if (refusal != null) {
+            if (forcePressureExit) {
+                retryOrRejectEgress(bot, "shelter_exit_preflight_refused:" + refusal, refusal);
+                return;
+            }
             phase = Phase.OPEN_EXIT;
+            phaseStartedElapsed = elapsed;
             return;
         }
         startMotion(bot, Motion.EGRESS, WalkedStep.begin(bot, egressFeet, kind, "shelter_owned_egress"));
@@ -1783,23 +1782,55 @@ public final class EmergencyShelterTask extends AbstractTask {
         egressFeet = null;
     }
 
-    private void deferForcedEgress(AIPlayerEntity bot, String reason) {
-        Direction direction = directionTo(egressFeet);
-        if (direction != null && direction == lastDeferredForcedDirection) {
-            // The exact same forced candidate came back unusable two ticks in a row with nothing
-            // in the world able to change that (e.g. its landing support is gone for good).
-            // Further retries cannot converge, so fail closed instead of spinning until the
-            // GameTest/production watchdog timeout.
-            failShelter(bot, reason);
+    /**
+     * Accounts for either a preflight refusal or a failed real step at the currently observed
+     * doorway.  A different doorway starts fresh.  The retry limit deliberately applies before
+     * rejection so a transient occupant can clear on its own, but it makes a permanent refusal
+     * bounded even while this task's {@link #isWaiting()} suppresses a generic stuck watchdog.
+     */
+    private void retryOrRejectEgress(AIPlayerEntity bot, String reason, String why) {
+        if (egressFeet == null) {
             return;
         }
-        lastDeferredForcedDirection = direction;
-        exitMiner.cancel(bot);
-        exitMiningTarget = null;
-        egressFeet = null;
-        BotLog.action(bot, "shelter_forced_egress_deferred",
+        if (!egressFeet.equals(egressFailureTarget)) {
+            egressFailureTarget = egressFeet.immutable();
+            egressMotionFailures = 0;
+        }
+        if (++egressMotionFailures < EGRESS_MOTION_FAILURE_LIMIT) {
+            phase = Phase.OPEN_EXIT;
+            phaseStartedElapsed = elapsed;
+            return;
+        }
+        int failures = egressMotionFailures;
+        BlockPos failedEgress = egressFeet;
+        rejectCurrentEgress(bot, reason);
+        egressFailureTarget = null;
+        egressMotionFailures = 0;
+        phase = Phase.OPEN_EXIT;
+        phaseStartedElapsed = elapsed;
+        BotLog.action(bot, "shelter_exit_pose_reopened",
+                "egress", failedEgress,
+                "failures", failures,
                 "reason", reason,
-                "exit_age", exitAge());
+                "why", why);
+    }
+
+    /**
+     * Forced egress only uses live, owned/openable cells.  Once those candidates are exhausted,
+     * no retry can honestly manufacture a landing.  Settle the exact ownership debt before
+     * publishing the failure: an open door becomes cleanup work, while a still-sealed owned shell
+     * becomes an ExitDebt for FollowTask to physically reopen.
+     */
+    private void failForcedEgressExhausted(AIPlayerEntity bot) {
+        String reason = pendingFailure == null
+                ? "shelter_forced_egress_exhausted"
+                : pendingFailure;
+        BotLog.action(bot, "shelter_forced_egress_exhausted",
+                "reason", reason,
+                "rejected", rejectedEgress.size(),
+                "open_side", hasOpenEnvelopeSide(bot),
+                "passable_side", hasPassableEnvelopeSide(bot));
+        failShelter(bot, reason);
     }
 
     private int phaseAge() {
@@ -1862,6 +1893,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private void failShelter(AIPlayerEntity bot, String reason) {
+        settleTerminalOwnership(bot, "shelter_failed");
         fail(reason);
         recordTerminal(bot, TaskState.FAILED, reason);
     }
@@ -2242,15 +2274,21 @@ public final class EmergencyShelterTask extends AbstractTask {
         return List.copyOf(candidates);
     }
 
-    @Override
-    protected void onAbort(AIPlayerEntity bot) {
+    /**
+     * A terminal failure does not invoke {@link #onAbort(AIPlayerEntity)}.  Preserve the same
+     * exact-state handoff for both paths before this task drops its miners and controller input:
+     * a sealed owned shell receives an ExitDebt, while an already passable side can safely become
+     * ordinary cleanup.  Never publish both, because cleanup before a physical exit could entomb
+     * the bot behind its own remaining placements.
+     */
+    private void settleTerminalOwnership(AIPlayerEntity bot, String cancelReason) {
         exitMiner.cancel(bot);
-        cancelHoldEating(bot, "shelter_aborted");
+        cancelHoldEating(bot, cancelReason);
         boolean exitDebtHandedOff = preserveOwnedExitDebt(bot);
-        // A cancelled partial shell still deserves cleanup, but only after the bot is already
-        // outside its anchor or a collision-free side proves that a worker cannot entomb it by
-        // removing the remaining owned blocks. A sealed/side-trapped shell instead stays out of
-        // the cleanup registry until FollowTask has physically repaid its ExitDebt.
+        // A partial shell still deserves cleanup, but only after the bot is already outside its
+        // anchor or a collision-free side proves that a worker cannot entomb it by removing the
+        // remaining owned blocks. A sealed/side-trapped shell instead stays out of the cleanup
+        // registry until FollowTask has physically repaid its ExitDebt.
         if (!exitDebtHandedOff
                 && (shelterFeet == null
                 || !bot.blockPosition().equals(shelterFeet)
@@ -2258,6 +2296,11 @@ public final class EmergencyShelterTask extends AbstractTask {
             registerOwnedCleanupDebt(bot);
         }
         bot.getActionPack().stopAll();
+    }
+
+    @Override
+    protected void onAbort(AIPlayerEntity bot) {
+        settleTerminalOwnership(bot, "shelter_aborted");
     }
 
     /**

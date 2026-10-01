@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
@@ -19,6 +20,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.vehicle.boat.Boat;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
@@ -442,6 +444,175 @@ public final class UndergroundSafetyGameTests {
                         "shelter mined a preexisting tunnel wall at " + direction);
             }
             finish(context, bot, "ShelterLostExitSupportGT");
+        });
+    }
+
+    /**
+     * A neutral, collidable boat appears only after each forced doorway is physically open. The
+     * real shelter task sees each preflight refusal, gives that live doorway its bounded retries,
+     * then rotates through all four owned doors. Once none remain it must publish a failure and
+     * exact cleanup debt rather than spinning under {@link EmergencyShelterTask#isWaiting()}.
+     */
+    @GameTest(maxTicks = 700)
+    public void forcedEgressPreflightRefusalsExhaustDoorsAndRegisterCleanup(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
+        preparePlatform(context, feet, 3);
+        context.getLevel().setDayTime(1000L);
+        AIPlayerEntity bot = spawn(context, "ShelterForcedPreflightGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
+        TeleportAudit.reset(bot);
+
+        EmergencyShelterTask task = new EmergencyShelterTask();
+        task.start(bot);
+        List<Boat> blockers = new ArrayList<>();
+        List<BlockPos> blockedDoors = new ArrayList<>();
+        int[] forcedAt = {-1};
+        int[] fourthDoorBlockedAt = {-1};
+
+        context.onEachTick(() -> {
+            context.getLevel().setDayTime(1000L);
+            if (task.state() == TaskState.RUNNING) {
+                if (task.describe().contains("force_pressure_exit=true") && forcedAt[0] < 0) {
+                    forcedAt[0] = task.elapsedTicks();
+                }
+                // This callback deliberately runs before the task's next tick. At STEP_OUT the
+                // foot/head cells are already physically open, so this is a genuine preflight
+                // landing refusal rather than a block-mining or post-start fixture.
+                if (forcedAt[0] >= 0
+                        && task.describe().contains("phase=STEP_OUT")
+                        && bot.getActionPack().stepIdle()) {
+                    for (Direction direction : Direction.Plane.HORIZONTAL) {
+                        BlockPos door = feet.relative(direction);
+                        if (!blockedDoors.contains(door)
+                                && context.getLevel().getBlockState(door).isAir()
+                                && context.getLevel().getBlockState(door.above()).isAir()) {
+                            blockers.add(spawnBoatOccupant(context, door));
+                            blockedDoors.add(door.immutable());
+                        }
+                    }
+                    if (blockedDoors.size() == 4 && fourthDoorBlockedAt[0] < 0) {
+                        // The full forced transaction includes real vanilla mining for the first
+                        // three owned doors, so that elapsed time is intentionally not treated as
+                        // a spin. Once the fourth live doorway is open and occupied, only its
+                        // three remaining bounded preflight attempts (the production limit) and
+                        // terminal handoff are left. The 80-tick tail below allows ordinary tick
+                        // scheduling without treating the earlier real mining as a spin.
+                        fourthDoorBlockedAt[0] = task.elapsedTicks();
+                    }
+                }
+                task.tick(bot);
+                require(context, task.elapsedTicks() < 620,
+                        "forced preflight exhaustion did not reach a bounded terminal: " + task.describe());
+                return;
+            }
+
+            require(context, forcedAt[0] >= 0, "fixture never entered forced egress");
+            require(context, blockedDoors.size() == 4,
+                    "forced preflight did not rotate across four factual doorways: " + blockedDoors);
+            require(context, fourthDoorBlockedAt[0] >= 0,
+                    "fixture never occupied the fourth forced doorway");
+            require(context, task.state() == TaskState.FAILED
+                            && task.failureReason().startsWith("shelter_exit_preflight_refused:"),
+                    "forced preflight exhaustion ended unexpectedly: "
+                            + task.state() + ":" + task.failureReason());
+            require(context, task.elapsedTicks() - fourthDoorBlockedAt[0] <= 80,
+                    "forced preflight exhaustion did not terminate within 80 ticks of the fourth "
+                            + "open occupied doorway: " + task.describe());
+            require(context, bot.blockPosition().equals(feet),
+                    "preflight refusal moved through an occupied doorway: " + bot.blockPosition().toShortString());
+            require(context, EmergencyShelterTask.hasPendingCleanup(bot),
+                    "failed forced preflight did not register exact owned cleanup");
+            require(context, EmergencyShelterTask.pendingExitDebt(bot).isEmpty(),
+                    "open forced doorways incorrectly became a sealed-shell exit debt");
+            require(context, bot.getActionPack().stepIdle() && bot.getActionPack().isMiningIdle(),
+                    "failed forced preflight left shelter input in flight");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "forced preflight used a teleport: " + TeleportAudit.lastCaller(bot));
+            blockers.forEach(Boat::discard);
+            finish(context, bot, "ShelterForcedPreflightGT");
+        });
+    }
+
+    /**
+     * The obstacle is introduced only after a real {@code shelter_owned_egress} step is in
+     * flight. Each blocked step therefore exercises the post-start completion path, not the
+     * preflight check above. The task must reject all four three-attempt doorways and settle its
+     * remaining owned shell as cleanup without inventing an exit landing.
+     */
+    @GameTest(maxTicks = 700)
+    public void forcedEgressPostStartFailuresExhaustDoorsAndRegisterCleanup(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
+        preparePlatform(context, feet, 3);
+        context.getLevel().setDayTime(1000L);
+        AIPlayerEntity bot = spawn(context, "ShelterForcedPostStartGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
+        TeleportAudit.reset(bot);
+
+        EmergencyShelterTask task = new EmergencyShelterTask();
+        task.start(bot);
+        Boat[] activeBlocker = {null};
+        BlockPos[] activeDoor = {null};
+        List<BlockPos> steppedDoors = new ArrayList<>();
+        int[] forcedAt = {-1};
+        int[] postStartFailures = {0};
+
+        context.onEachTick(() -> {
+            context.getLevel().setDayTime(1000L);
+            if (task.state() == TaskState.RUNNING) {
+                if (task.describe().contains("force_pressure_exit=true") && forcedAt[0] < 0) {
+                    forcedAt[0] = task.elapsedTicks();
+                }
+                if (forcedAt[0] >= 0 && activeBlocker[0] == null) {
+                    for (Direction direction : Direction.Plane.HORIZONTAL) {
+                        BlockPos door = feet.relative(direction);
+                        if (bot.getActionPack().stepInFlightFor(
+                                "shelter_owned_egress", door, WalkedStep.Kind.FLAT)) {
+                            activeDoor[0] = door.immutable();
+                            activeBlocker[0] = spawnBoatOccupant(context, door);
+                            if (!steppedDoors.contains(door)) {
+                                steppedDoors.add(door.immutable());
+                            }
+                            break;
+                        }
+                    }
+                } else if (activeBlocker[0] != null && bot.getActionPack().stepIdle()) {
+                    WalkedStep.Result result = bot.getActionPack().stepResult();
+                    require(context, result != null && result.failed(),
+                            "post-start boat did not fail its in-flight egress step at "
+                                    + activeDoor[0].toShortString());
+                    activeBlocker[0].discard();
+                    activeBlocker[0] = null;
+                    activeDoor[0] = null;
+                    postStartFailures[0]++;
+                }
+                task.tick(bot);
+                require(context, task.elapsedTicks() < 620,
+                        "forced post-start exhaustion did not reach a bounded terminal: " + task.describe());
+                return;
+            }
+
+            require(context, activeBlocker[0] == null, "terminal arrived while a post-start blocker remained");
+            require(context, forcedAt[0] >= 0, "fixture never entered forced egress");
+            require(context, steppedDoors.size() == 4 && postStartFailures[0] == 12,
+                    "post-start failures did not use three real attempts at all four doors: doors="
+                            + steppedDoors + " failures=" + postStartFailures[0]);
+            require(context, task.state() == TaskState.FAILED
+                            && "shelter_exit_pose_unverified".equals(task.failureReason()),
+                    "forced post-start exhaustion ended unexpectedly: "
+                            + task.state() + ":" + task.failureReason());
+            require(context, task.elapsedTicks() - forcedAt[0] <= 240,
+                    "forced post-start exhaustion spun after all doors failed: " + task.describe());
+            require(context, bot.blockPosition().equals(feet),
+                    "post-start failure invented an occupied-door exit: " + bot.blockPosition().toShortString());
+            require(context, EmergencyShelterTask.hasPendingCleanup(bot),
+                    "failed forced post-start exit did not register exact owned cleanup");
+            require(context, EmergencyShelterTask.pendingExitDebt(bot).isEmpty(),
+                    "open forced doorways incorrectly became a sealed-shell exit debt");
+            require(context, bot.getActionPack().stepIdle() && bot.getActionPack().isMiningIdle(),
+                    "failed forced post-start exit left shelter input in flight");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "forced post-start exit used a teleport: " + TeleportAudit.lastCaller(bot));
+            finish(context, bot, "ShelterForcedPostStartGT");
         });
     }
 
@@ -1333,6 +1504,19 @@ public final class UndergroundSafetyGameTests {
                 }
             }
         }
+    }
+
+    /** A neutral collidable occupant for doorway checks; unlike a hostile it cannot alter combat ownership. */
+    private static Boat spawnBoatOccupant(GameTestHelper context, BlockPos feet) {
+        Boat boat = EntityType.OAK_BOAT.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        if (boat == null) {
+            throw new IllegalStateException("failed to create occupied doorway boat");
+        }
+        boat.snapTo(feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, 0.0F, 0.0F);
+        if (!context.getLevel().addFreshEntity(boat)) {
+            throw new IllegalStateException("failed to spawn occupied doorway boat");
+        }
+        return boat;
     }
 
     private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {

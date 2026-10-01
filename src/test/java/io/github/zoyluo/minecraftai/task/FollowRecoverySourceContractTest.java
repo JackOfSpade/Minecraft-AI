@@ -89,10 +89,12 @@ final class FollowRecoverySourceContractTest {
         String repayer = read("task/ShelterExitDebtRepayer.java");
 
         int onAbort = shelter.indexOf("protected void onAbort(AIPlayerEntity bot)");
-        int preserve = shelter.indexOf("preserveOwnedExitDebt(bot);", onAbort);
+        int settle = shelter.indexOf("private void settleTerminalOwnership(AIPlayerEntity bot, String cancelReason)");
+        int preserve = shelter.indexOf("preserveOwnedExitDebt(bot);", settle);
         int stop = shelter.indexOf("bot.getActionPack().stopAll();", preserve);
-        assertTrue(onAbort >= 0 && preserve > onAbort && stop > preserve,
-                "cancellation must snapshot the owned exit before its action state is discarded");
+        assertTrue(onAbort >= 0 && settle >= 0 && preserve > settle && stop > preserve
+                        && shelter.indexOf("settleTerminalOwnership(bot, \"shelter_aborted\");", onAbort) > onAbort,
+                "cancellation must reuse the terminal ownership handoff before action state is discarded");
         assertTrue(shelter.contains("currentOwned.containsKey(candidate) && currentOwned.containsKey(candidate.above())"));
         assertTrue(shelter.contains("boolean matchesDimension(AIPlayerEntity bot)"));
         assertTrue(shelter.contains("owned.equals(bot.level().getBlockState(position))"));

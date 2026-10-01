@@ -19,8 +19,9 @@ import net.minecraft.world.item.Items;
 
 /**
  * R6: a bot eats when its food drops to 7, so it never falls to 6, where a player can no longer sprint. It does not wait for a walk
- * to end (a follower on a long route would otherwise run out of sprint first), it does not eat in the middle of a fight or next to a
- * calm warden (it eats as soon as they allow), and the normal food rules hold (no reserve food, no poison).
+ * to end (a follower on a long route would otherwise run out of sprint first), routine eating defers next to a calm warden, while
+ * urgent critical-hunger, healing, or shelter-cleanup recovery can still eat there. The normal food rules still hold (no reserve
+ * food, no poison).
  */
 public final class AutoEatSprintLimitGameTests {
     private static final String ENV = "minecraftai-gametest:auto_eat_sprint_limit_game_tests_";
@@ -195,7 +196,7 @@ public final class AutoEatSprintLimitGameTests {
         ServerPlayer target = f.target(1, 0);
         bot.getFoodData().setFoodLevel(20);
         f.give(bot, new ItemStack(Items.BREAD, 4));
-        Warden warden = f.warden(-2.0D, 12.0D);
+        Warden warden = f.warden(-2.0D, 18.0D);
         // The bot notices the calm warden (it is full, so it does not eat meanwhile), THEN it is hungry.
         PerceptionFixtures.faceToward(bot, warden);
         PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
@@ -208,8 +209,10 @@ public final class AutoEatSprintLimitGameTests {
             int now = ++tick[0];
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             if (wardenGoneAt[0] < 0) {
+                f.require(!CombatCore.isWithinHostilePressureEnvelope(bot, warden),
+                        "ordinary fixture put the calm warden inside hostile pressure");
                 f.require(!(active instanceof EatTask), "the bot chewed next to a calm warden at tick " + now);
-                f.require(active == follow, "the bot left the follow next to a calm warden 12 blocks away: " + (active == null ? "none" : active.name()));
+                f.require(active == follow, "the bot left the follow next to a calm warden 18 blocks away: " + (active == null ? "none" : active.name()));
                 if (now == 80) {
                     warden.discard();
                     wardenGoneAt[0] = now;
@@ -232,10 +235,10 @@ public final class AutoEatSprintLimitGameTests {
         ServerPlayer target = f.target(1, 0);
         bot.getFoodData().setFoodLevel(20);
         f.give(bot, new ItemStack(Items.BREAD, 4));
-        Warden warden = f.warden(-2.0D, 12.0D);
-        // Establish the same factual calm-warden observation as the ordinary-deferral test before
-        // lowering food. The bot remains healthy, so urgency (not the low-health exception) admits
-        // the bite.
+        Warden warden = f.warden(-2.0D, 18.0D);
+        // Establish a factual calm-warden observation outside the 17-block hostile-pressure
+        // envelope but inside the 20-block calm-warden range. The bot remains healthy, so urgent
+        // critical hunger (not the low-health exception or combat pressure) admits the bite.
         PerceptionFixtures.faceToward(bot, warden);
         PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
             int critical = MinecraftAiConfig.get().survival().hungerCriticalThreshold();
@@ -252,6 +255,8 @@ public final class AutoEatSprintLimitGameTests {
                             "fixture accidentally took the low-health warden exception");
                     f.require(QuietZone.calmWardenObservedWithin(bot, DangerWatcher.CALM_WARDEN_EAT_RANGE),
                             "fixture lost its calm warden observation before the urgent bite");
+                    f.require(!CombatCore.isWithinHostilePressureEnvelope(bot, warden),
+                            "urgent fixture put the calm warden back inside hostile pressure");
                     if (active instanceof EatTask) {
                         eatingStarted[0] = true;
                         f.require(TaskManager.INSTANCE.peekPaused(bot).orElse(null) == follow,

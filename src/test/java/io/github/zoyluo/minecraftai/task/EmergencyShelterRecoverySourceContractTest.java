@@ -110,20 +110,29 @@ final class EmergencyShelterRecoverySourceContractTest {
     }
 
     @Test
-    void cancellationDoesNotLeaveAnUnroofedButSideSealedBotWithoutAnExitOrSafeCleanup() throws IOException {
+    void everyTerminalPathDoesNotLeaveAnUnroofedButSideSealedBotWithoutAnExitOrSafeCleanup() throws IOException {
         String shelter = read("task/EmergencyShelterTask.java");
         int preserve = shelter.indexOf("private boolean preserveOwnedExitDebt(AIPlayerEntity bot)");
+        int settle = shelter.indexOf("private void settleTerminalOwnership(AIPlayerEntity bot, String cancelReason)");
         int abort = shelter.indexOf("protected void onAbort(AIPlayerEntity bot)");
 
-        assertTrue(preserve >= 0 && abort > preserve);
-        String preservation = shelter.substring(preserve, abort);
+        assertTrue(preserve >= 0 && settle > preserve && abort > settle);
+        String preservation = shelter.substring(preserve, settle);
+        String terminalOwnership = shelter.substring(settle, abort);
         String cancellation = shelter.substring(abort);
         assertTrue(preservation.contains("|| hasPassableEnvelopeSide(bot)"),
                 "a roofless but side-sealed shell still needs a verified owned doorway handoff");
-        assertTrue(cancellation.contains("boolean exitDebtHandedOff = preserveOwnedExitDebt(bot);"));
-        assertTrue(cancellation.contains("!exitDebtHandedOff"));
-        assertTrue(cancellation.contains("registerOwnedCleanupDebt(bot);"),
-                "partial shells are registered only after cancellation proves a passable escape");
+        assertTrue(terminalOwnership.contains("boolean exitDebtHandedOff = preserveOwnedExitDebt(bot);"));
+        assertTrue(terminalOwnership.contains("!exitDebtHandedOff"));
+        assertTrue(terminalOwnership.contains("registerOwnedCleanupDebt(bot);"),
+                "partial shells are registered only after a terminal path proves a passable escape");
+        assertTrue(cancellation.contains("settleTerminalOwnership(bot, \"shelter_aborted\");"),
+                "cancellation must reuse the exact failure-time ownership handoff");
+        int failShelter = shelter.indexOf("private void failShelter(AIPlayerEntity bot, String reason)");
+        int fail = shelter.indexOf("fail(reason);", failShelter);
+        assertTrue(failShelter >= 0 && fail > failShelter
+                        && shelter.indexOf("settleTerminalOwnership(bot, \"shelter_failed\");", failShelter) < fail,
+                "failed tasks must settle owned exit/cleanup debt before AbstractTask.fail skips onAbort");
     }
 
     @Test
@@ -136,10 +145,25 @@ final class EmergencyShelterRecoverySourceContractTest {
         assertTrue(egress >= 0);
         String egressCase = motionCompletion.substring(egress);
         assertTrue(shelter.contains("EGRESS_MOTION_FAILURE_LIMIT = 3"));
-        assertTrue(egressCase.contains("shelter_exit_pose_unverified")
-                        && egressCase.contains("rejectCurrentEgress(bot, \"shelter_exit_pose_unverified\")")
-                        && egressCase.contains("phase = Phase.OPEN_EXIT;"),
-                "three failed real egress steps must reopen selection rather than spin on the same landing pose");
+        assertTrue(egressCase.contains("retryOrRejectEgress(bot, \"shelter_exit_pose_unverified\", why)"),
+                "a failed real egress step must use the shared bounded doorway retry policy");
+        int retry = shelter.indexOf("private void retryOrRejectEgress(AIPlayerEntity bot, String reason, String why)");
+        int forcedExhausted = shelter.indexOf("private void failForcedEgressExhausted(AIPlayerEntity bot)");
+        assertTrue(retry >= 0 && forcedExhausted > retry);
+        String retryPolicy = shelter.substring(retry, forcedExhausted);
+        assertTrue(retryPolicy.contains("++egressMotionFailures < EGRESS_MOTION_FAILURE_LIMIT")
+                        && retryPolicy.contains("rejectCurrentEgress(bot, reason)")
+                        && retryPolicy.contains("phase = Phase.OPEN_EXIT;"),
+                "three failed real egress steps must reopen selection rather than spin on one pose");
+        int stepOut = shelter.indexOf("private void tickStepOut(AIPlayerEntity bot)");
+        int nextMethod = shelter.indexOf("private boolean beginRoofSupportJump", stepOut);
+        String preflight = shelter.substring(stepOut, nextMethod);
+        assertTrue(preflight.contains("shelter_exit_preflight_refused:")
+                        && preflight.contains("retryOrRejectEgress(bot"),
+                "a forced preflight refusal must consume the same per-door bounded retry budget");
+        int openExit = shelter.indexOf("private void tickOpenExit(AIPlayerEntity bot)");
+        assertTrue(shelter.indexOf("failForcedEgressExhausted(bot);", openExit) > openExit,
+                "all rejected forced doorways must terminally hand off debt instead of waiting forever");
         int recover = shelter.indexOf("private boolean recoverAnchorOrRelease(AIPlayerEntity bot)");
         int failDisplaced = shelter.indexOf("private void failDisplacedAnchor", recover);
         String anchorRecovery = shelter.substring(recover, failDisplaced);
