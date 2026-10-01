@@ -28,6 +28,8 @@ import net.minecraft.world.phys.Vec3;
 public final class ActionPack {
     /** Failure reason of a request identical to the previous one still inside its cooldown. */
     public static final String PATHFINDING_THROTTLED = "pathfinding_throttled";
+    /** A strict guarded step has not yet been reconciled by its exact owner. */
+    public static final String GUARDED_STEP_FENCE = "guarded_step_fence";
     private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
     private static final int PATHFIND_FAILURE_COOLDOWN_TICKS = 20;
     // NAV-OPT two-phase pathfinding budget: pure walking only searches air cells (small search
@@ -42,6 +44,17 @@ public final class ActionPack {
     // fallback, and its semantics are unchanged).
     private static final int DIG_APPROACH_MAX_NODES = 24_000;
     private static final long PATHFIND_MAX_MILLIS = 50L;
+
+    /**
+     * Opaque proof that identifies one exact {@link #runStep(WalkedStep, WalkedStep.ContinuationGuard)}
+     * admission. A continuation-guarded step keeps its fence until its owner releases this lease,
+     * so another controller cannot swap in an unguarded step between the guard's last proof and
+     * the owner's next reconciliation tick.
+     */
+    public static final class StepLease {
+        private StepLease() {
+        }
+    }
 
     private final AIPlayerEntity player;
 
@@ -61,6 +74,24 @@ public final class ActionPack {
     private PathExecutor pathExecutor;
     /** The input-driven step this pack runs (see {@link WalkedStep}); it has the bot to itself while it is in flight. */
     private WalkedStep step;
+    /** Lease of {@link #step}, cleared as soon as the active step ends or is cancelled. */
+    private StepLease activeStepLease;
+    /** Exact lease whose natural completion produced {@link #lastStepResult}, if any. */
+    private StepLease completedStepLease;
+    /**
+     * Continuation-guard fence retained across a generic cancellation or a natural completion
+     * until the original owner explicitly consumes/releases it. See {@link StepLease}.
+     */
+    private StepLease guardedStepLease;
+    /**
+     * A live NavSafetyNet suffocation step is a guarded step with one extra property: ordinary
+     * controller shutdown must not zero its already-issued physical inputs between entity ticks.
+     * Its opaque lease is still released only through the normal exact-owner APIs, or replaced by
+     * a later {@link #preemptGuardedStepForEmergency()}.
+     */
+    private StepLease emergencyStepLease;
+    /** True only while the guarded step itself is issuing its already-proved vanilla inputs. */
+    private boolean tickingGuardedStep;
     private WalkedStep.Result lastStepResult;
     private PathRequestIdentity lastPathRequest;
     private PathRequestIdentity activePathRequest;
@@ -106,6 +137,50 @@ public final class ActionPack {
     }
 
     /**
+     * A continuation guard is a pre-terrain-read safety proof, not merely task bookkeeping. Until
+     * its opaque lease is reconciled, no unrelated controller may begin planning or take a
+     * Baritone handoff in the gap left by a generic cancellation.
+     */
+    private boolean controllerStartBlocked() {
+        return guardedStepLease != null;
+    }
+
+    /**
+     * Read-only admission boundary for ordinary task controllers. A returned {@code true} means
+     * a guarded physical-step owner has retained the handoff fence, so a nullable helper result
+     * must be treated as an unstarted retry rather than as a terrain refusal.
+     */
+    public boolean stepAdmissionBlocked() {
+        return controllerStartBlocked();
+    }
+
+    /**
+     * Read-only admission boundary for the Baritone integration. A guarded physical step has
+     * already proved its next terrain revalidation, so a Baritone process must not start (or
+     * keep applying its direct bridge inputs) until that exact step owner reconciles its lease.
+     * The only priority override is {@link #preemptGuardedStepForEmergency()}, used by
+     * {@code NavSafetyNet} before an actual lava or suffocation escape.
+     */
+    public boolean baritoneControlBlocked() {
+        return controllerStartBlocked();
+    }
+
+    /** Zero/false releases remain safe; nonzero inputs belong only to the guarded step's own tick. */
+    private boolean nonzeroInputBlocked() {
+        return guardedStepLease != null && !tickingGuardedStep;
+    }
+
+    /**
+     * Unlike an ordinary guarded step, a live emergency successor cannot be stopped by a generic
+     * pause/stop call between its ActionPack update and the next vanilla physics tick. Its exact
+     * NavSafetyNet owner and a later emergency preemption deliberately bypass this boundary.
+     */
+    private boolean emergencyInputBlocked() {
+        return step != null && activeStepLease != null && activeStepLease == emergencyStepLease
+                && !tickingGuardedStep;
+    }
+
+    /**
      * Whatever Baritone is doing for this bot stops: the route this pack started (recorded as cancelled) or, for a caller that
      * drives Baritone directly, its goal and path. Nothing Baritone-related is touched while Baritone has never been initialised.
      */
@@ -122,6 +197,9 @@ public final class ActionPack {
      * the two never write at once. Called by {@code BaritoneDriver} on the first tick it drives the bot.
      */
     public void yieldToBaritone() {
+        if (controllerStartBlocked()) {
+            return;
+        }
         dropPathExecutor(); // keeps the route lease (requested after the route was started)
         cancelStep();
         stopMining();
@@ -130,14 +208,26 @@ public final class ActionPack {
     }
 
     public void setForward(float value) {
+        if (emergencyInputBlocked()) {
+            return;
+        }
         if (value != 0.0F) {
+            if (nonzeroInputBlocked()) {
+                return;
+            }
             claim("set_forward");
         }
         this.forward = clampInput(value);
     }
 
     public void setStrafing(float value) {
+        if (emergencyInputBlocked()) {
+            return;
+        }
         if (value != 0.0F) {
+            if (nonzeroInputBlocked()) {
+                return;
+            }
             claim("set_strafing");
         }
         this.strafing = clampInput(value);
@@ -154,6 +244,12 @@ public final class ActionPack {
     }
 
     public void setSneaking(boolean sneaking) {
+        if (emergencyInputBlocked()) {
+            return;
+        }
+        if (sneaking && nonzeroInputBlocked()) {
+            return;
+        }
         if (sneaking && !baritoneOwnsBot()) {
             claim("set_sneaking");
         }
@@ -165,6 +261,12 @@ public final class ActionPack {
     }
 
     public void setSprinting(boolean sprinting) {
+        if (emergencyInputBlocked()) {
+            return;
+        }
+        if (sprinting && nonzeroInputBlocked()) {
+            return;
+        }
         if (sprinting && !baritoneOwnsBot()) {
             claim("set_sprinting");
         }
@@ -176,13 +278,25 @@ public final class ActionPack {
     }
 
     public void setJumping(boolean jumping) {
+        if (emergencyInputBlocked()) {
+            return;
+        }
         if (jumping) {
+            if (nonzeroInputBlocked()) {
+                return;
+            }
             claim("set_jumping");
         }
         this.jumping = jumping;
     }
 
     public void jumpOnce() {
+        if (emergencyInputBlocked()) {
+            return;
+        }
+        if (nonzeroInputBlocked()) {
+            return;
+        }
         claim("jump_once");
         this.jumpTicks = 2;
     }
@@ -411,6 +525,9 @@ public final class ActionPack {
 
     /** Starts a direct walk with a caller-defined horizontal arrival tolerance. */
     public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         claim("walk_to");
         logEngine("walk_to", BlockPos.containing(target), NavEngine.LEGACY, "straight_line_walk");
         clearActivePathExecutor();
@@ -434,6 +551,9 @@ public final class ActionPack {
      * The same reserve gates initial pillar planning, physical pillar execution and replanning.
      */
     public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         claim("dig_path_to");
         logEngine("dig_path_to", goal, NavEngine.LEGACY, "dig_approach");
         int reserve = Math.max(0, protectedStoneLikeReserve);
@@ -540,6 +660,9 @@ public final class ActionPack {
                                      boolean allowDigFallback,
                                      int protectedStoneLikeReserve,
                                      PathExecutor.RouteContract routeContract) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         // Engine seam: with nav.engine=baritone an ordinary walk (not a contract route) is Baritone's. A null answer means
         // "not routed" (legacy engine, contract route, or Baritone failed to initialise) and the legacy code below carries on.
         ActionResult routed = routeOnBaritone("path_to", goal, canPillar, allowDigFallback, protectedStoneLikeReserve, routeContract);
@@ -701,6 +824,9 @@ public final class ActionPack {
      * @return {@link #ENGINE_NOT_BARITONE} failure when the engine is not (or no longer) Baritone: the caller uses its legacy walk
      */
     public ActionResult startApproachTo(BlockPos target, int radius, boolean refresh, boolean allowBreak) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
             return ActionResult.failed(ENGINE_NOT_BARITONE);
         }
@@ -716,6 +842,9 @@ public final class ActionPack {
      * drives it). No breaking, no placing.
      */
     public ActionResult startSwimRouteTo(BlockPos goal) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
             return ActionResult.failed(ENGINE_NOT_BARITONE);
         }
@@ -732,6 +861,9 @@ public final class ActionPack {
      *         caller then projects its own escape goal and uses the ordinary surface path
      */
     public ActionResult startRunAwayFrom(BlockPos source, int distance) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
             return ActionResult.failed(ENGINE_NOT_BARITONE);
         }
@@ -741,6 +873,9 @@ public final class ActionPack {
     }
 
     private ActionResult startBaritoneRoute(NavRoute request, PathRequestIdentity identity, boolean admit) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         int now = serverTick();
         if (identity != null && identity.equals(lastPathRequest) && now < nextPathfindTick) {
             logEngine(request.label(), request.target(), NavEngine.BARITONE, "throttled");
@@ -924,6 +1059,9 @@ public final class ActionPack {
      * out with real inputs).
      */
     public boolean recenterPlayerInCurrentStandableCell(String reason) {
+        if (controllerStartBlocked()) {
+            return false;
+        }
         Standability.clearCache();
         return Standability.isStandable(player.level(), player.blockPosition());
     }
@@ -953,6 +1091,9 @@ public final class ActionPack {
      * @return false when there is no legal start (the caller's search fails with NO_START)
      */
     public boolean snapPlayerToNearestStandable(String reason) {
+        if (controllerStartBlocked()) {
+            return false;
+        }
         this.startPlan = null;
         discardUnstartedPhysicalSnap();
         ServerLevel world = player.level();
@@ -982,6 +1123,9 @@ public final class ActionPack {
      * or the guard refuses. The caller runs it with {@link #runStep}.
      */
     public WalkedStep adjacentStandableStep(String reason) {
+        if (controllerStartBlocked()) {
+            return null;
+        }
         discardUnstartedPhysicalSnap();
         BlockPos current = player.blockPosition();
         Standability.clearCache();
@@ -1093,6 +1237,9 @@ public final class ActionPack {
      * the cell is not below the bot or the landing is refused (not standable, a hazard, a block or an entity in the way).
      */
     public WalkedStep beginDescend(BlockPos cell, String reason) {
+        if (controllerStartBlocked()) {
+            return null;
+        }
         BlockPos here = player.blockPosition();
         if (cell.getY() >= here.getY()) {
             return null;
@@ -1109,6 +1256,9 @@ public final class ActionPack {
     }
 
     public ActionResult startMining(BlockPos pos, Direction face) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
         claim("mining");
         this.mining = new MiningController(pos, face);
         clearActivePathExecutor();
@@ -1125,6 +1275,9 @@ public final class ActionPack {
     }
 
     public void stopMovement() {
+        if (emergencyInputBlocked()) {
+            return;
+        }
         setSneaking(false);
         setSprinting(false);
         this.forward = 0.0F;
@@ -1141,6 +1294,9 @@ public final class ActionPack {
      * item use alone.
      */
     public void stopNavigation() {
+        if (emergencyInputBlocked()) {
+            return;
+        }
         if (route != null) {
             cancelBaritoneRoute("stop_navigation");
         }
@@ -1152,6 +1308,9 @@ public final class ActionPack {
     }
 
     public void stopAll() {
+        if (emergencyInputBlocked()) {
+            return;
+        }
         releaseBaritone("stop_all");
         cancelStep();
         clearActivePathExecutor();
@@ -1224,23 +1383,83 @@ public final class ActionPack {
 
     /**
      * Runs {@code next} as this pack's controller: it is ticked once per game tick in {@link #onUpdate} (so the bot counts as
-     * controller-driven and the pace enforcer applies the pace and the vanilla rules to its keys) until it succeeds or fails;
-     * {@link #stepResult()} then holds the answer. Takes the bot over from a route, a walk and a break in progress.
+     * controller-driven and the pace enforcer applies the pace and the vanilla rules to its keys) until it succeeds or fails.
+     * Returns an opaque admission lease, or {@code null} when another guarded owner retains the handoff fence. A caller must treat
+     * {@code null} as not started; stateful callers reconcile only their own admitted lease with
+     * {@link #stepInFlightFor(StepLease)} and {@link #stepResultFor(StepLease)}, never the global {@link #stepResult()}.
+     * Takes the bot over from a route, a walk and a break in progress.
      */
-    public void runStep(WalkedStep next) {
+    public StepLease runStep(WalkedStep next) {
+        return runStep(next, null);
+    }
+
+    /**
+     * Runs a physical step with an optional owner-supplied continuation proof. The proof is held
+     * by {@link WalkedStep} itself and is invoked before that step's next terrain revalidation,
+     * which is earlier than task ownership reconciliation at END_SERVER_TICK.
+     */
+    public StepLease runStep(WalkedStep next, WalkedStep.ContinuationGuard continuationGuard) {
+        return startStep(next, continuationGuard, false);
+    }
+
+    /**
+     * Starts NavSafetyNet's own physical suffocation successor. It retains the usual guarded
+     * lease fence, plus a narrow immunity to generic stop/cancel/input-zeroing calls while it is
+     * live. Returns {@code null} when an earlier guarded owner retains the handoff fence; callers
+     * must then publish no local emergency state. Its exact owner must reconcile an admitted lease with {@link #cancelStep(StepLease)} or
+     * {@link #releaseStepLease(StepLease)}; a later actual emergency may still preempt it.
+     */
+    public StepLease runEmergencyStep(WalkedStep next, WalkedStep.ContinuationGuard continuationGuard) {
+        return startStep(next, continuationGuard, true);
+    }
+
+    private StepLease startStep(WalkedStep next, WalkedStep.ContinuationGuard continuationGuard,
+                                boolean emergencyStep) {
+        // A strict owner has proved this step's continuation before raw terrain validation. Do
+        // not let a different controller replace it with an unguarded (or merely different)
+        // step before that owner gets a chance to observe the handoff. The owner alone has the
+        // opaque lease needed to release or cancel this fence deliberately.
+        if (guardedStepLease != null) {
+            return null;
+        }
         claim("run_step");
         cancelStep();
         clearActivePathExecutor();
         stopMining();
         this.walkTo = null;
+        next.setContinuationGuard(continuationGuard);
         this.step = next;
+        StepLease lease = new StepLease();
+        this.activeStepLease = lease;
+        if (continuationGuard != null || emergencyStep) {
+            this.guardedStepLease = lease;
+        }
+        if (emergencyStep) {
+            this.emergencyStepLease = lease;
+        }
         this.lastStepResult = null;
+        this.completedStepLease = null;
         commitPlannedPhysicalSnap(next);
+        return lease;
     }
 
     /** True when no step is in flight. */
     public boolean stepIdle() {
         return step == null;
+    }
+
+    /**
+     * Ticks elapsed on the currently owned physical step, or {@code -1} when the pack is idle.
+     * Owners use the zero/one-tick settling window only to preserve {@link WalkedStep}'s narrow
+     * first-tick source normalization; it is not a general-purpose position override.
+     */
+    public int activeStepTicks() {
+        return step == null ? -1 : step.ticks();
+    }
+
+    /** Kind of the active physical step, or {@code null} while idle. */
+    public WalkedStep.Kind activeStepKind() {
+        return step == null ? null : step.kind();
     }
 
     /**
@@ -1255,6 +1474,38 @@ public final class ActionPack {
                 && step.reason().equals(reason);
     }
 
+    /** True only while the exact lease's walked step is still active. */
+    public boolean stepInFlightFor(StepLease lease) {
+        return lease != null && step != null && activeStepLease == lease;
+    }
+
+    /**
+     * Returns the result only when this exact lease completed naturally. A replacement or a
+     * generic cancellation must never be mistaken for the old owner's outcome.
+     */
+    public WalkedStep.Result stepResultFor(StepLease lease) {
+        return lease != null && completedStepLease == lease ? lastStepResult : null;
+    }
+
+    /**
+     * Releases a completed/cancelled guarded-step fence after its owner has reconciled it.
+     * Active steps require {@link #cancelStep(StepLease)} instead, so an owner cannot accidentally
+     * make a still-running strict step replaceable.
+     */
+    public boolean releaseStepLease(StepLease lease) {
+        if (lease == null || guardedStepLease != lease || activeStepLease == lease) {
+            return false;
+        }
+        guardedStepLease = null;
+        if (emergencyStepLease == lease) {
+            emergencyStepLease = null;
+        }
+        if (completedStepLease == lease) {
+            completedStepLease = null;
+        }
+        return true;
+    }
+
     /** How the last step this pack ran ended (null while it is in flight or before the first). */
     public WalkedStep.Result stepResult() {
         return lastStepResult;
@@ -1262,10 +1513,75 @@ public final class ActionPack {
 
     /** Abandons the step in flight (its keys are released; no result is recorded). */
     public void cancelStep() {
+        if (emergencyInputBlocked()) {
+            return;
+        }
+        cancelStepUnchecked();
+    }
+
+    /**
+     * Internal cancellation path for an exact owner or a later actual emergency. Public generic
+     * cancellation deliberately cannot interrupt a live {@link #runEmergencyStep} successor.
+     */
+    private void cancelStepUnchecked() {
         if (step != null) {
             step.cancel();
             step = null;
         }
+        activeStepLease = null;
+    }
+
+    /**
+     * Cancels and releases only the strict step owned by {@code lease}. This is the intentional
+     * handoff path; ordinary {@link #cancelStep()} deliberately leaves the guarded fence in place.
+     */
+    public boolean cancelStep(StepLease lease) {
+        if (lease == null || guardedStepLease != lease) {
+            return false;
+        }
+        if (activeStepLease == lease) {
+            // WalkedStep.end() releases its keys through ActionPack. Clear the emergency marker
+            // first so this exact NavSafetyNet lifecycle cancellation can perform that cleanup.
+            if (emergencyStepLease == lease) {
+                emergencyStepLease = null;
+            }
+            cancelStepUnchecked();
+        }
+        guardedStepLease = null;
+        if (emergencyStepLease == lease) {
+            emergencyStepLease = null;
+        }
+        if (completedStepLease == lease) {
+            completedStepLease = null;
+        }
+        return true;
+    }
+
+    /**
+     * Explicit priority handoff for an immediate physical safety reflex (lava or being buried).
+     * Ordinary controllers must use an exact {@link StepLease}; only NavSafetyNet calls this before
+     * it writes its real emergency inputs, so a stale guarded follow/rescue step cannot suppress a
+     * higher-priority escape indefinitely.
+     */
+    public boolean preemptGuardedStepForEmergency() {
+        StepLease lease = guardedStepLease;
+        if (lease == null) {
+            return false;
+        }
+        // A later lava/burial emergency intentionally outranks a live emergency successor. Its
+        // marker must be cleared before WalkedStep.end() can zero the old physical keys.
+        if (emergencyStepLease == lease) {
+            emergencyStepLease = null;
+        }
+        cancelStep();
+        guardedStepLease = null;
+        if (emergencyStepLease == lease) {
+            emergencyStepLease = null;
+        }
+        if (completedStepLease == lease) {
+            completedStepLease = null;
+        }
+        return true;
     }
 
     /** Ticks the step; true while it is still in flight (the other controllers do not run this tick). */
@@ -1273,12 +1589,21 @@ public final class ActionPack {
         if (step == null) {
             return false;
         }
-        WalkedStep.Result result = step.tick();
+        boolean guarded = activeStepLease != null && activeStepLease == guardedStepLease;
+        tickingGuardedStep = guarded;
+        WalkedStep.Result result;
+        try {
+            result = step.tick();
+        } finally {
+            tickingGuardedStep = false;
+        }
         if (result.inProgress()) {
             return true;
         }
         lastStepResult = result;
+        completedStepLease = activeStepLease;
         step = null;
+        activeStepLease = null;
         return false;
     }
 

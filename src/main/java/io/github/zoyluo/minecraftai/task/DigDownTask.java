@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
@@ -159,6 +160,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     /** What the walked step in flight is for (see {@link #launchStep}); null while none is. Never persisted: a checkpoint holds the trail, not a step. */
     private StepPurpose stepPurpose;
+    /** Exact ActionPack admission for {@link #step}; foreign step results never settle this trail. */
+    private ActionPack.StepLease stepLease;
+    private WalkedStep step;
     private BlockPos stepOrigin;
     private int stepDirIndex;
     /** Set when a step was abandoned or failed: the bot may be in the air between two trail cells, so no pose is recorded until it stands on something. */
@@ -800,6 +804,11 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             launchStep(bot, descent, StepPurpose.STAIR, stairDirIndex);
             return;
         }
+        if (bot.getActionPack().stepAdmissionBlocked()) {
+            // beginDescend observed only the guarded handoff fence. No physical refusal occurred,
+            // so retain this stair direction and retry after its exact owner reconciles.
+            return;
+        }
         // Terrain may change between viability check and movement (falling blocks/entities), and
         // ActionPack is the final collision authority. Never retry the same unsupported cell for
         // 200 ticks: rotate to a different safe staircase, then fall back to supported horizontal
@@ -885,11 +894,19 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * Hands a walked step to the pack. The bot is moved by its keys only: the step's landing is verified on a later tick (see
      * {@link #settleStep}) and the trail, the return cursor and the checkpoint change only then, never in the tick that starts the step.
      */
-    private void launchStep(AIPlayerEntity bot, WalkedStep walked, StepPurpose purpose, int dirIndex) {
+    private boolean launchStep(AIPlayerEntity bot, WalkedStep walked, StepPurpose purpose, int dirIndex) {
+        ActionPack.StepLease lease = bot.getActionPack().runStep(walked);
+        if (lease == null) {
+            // A guarded owner still owns ActionPack. Do not publish a trail-step purpose/origin
+            // that could later consume another controller's global result; retry this route.
+            return false;
+        }
+        step = walked;
+        stepLease = lease;
         stepPurpose = purpose;
         stepOrigin = bot.blockPosition().immutable();
         stepDirIndex = dirIndex;
-        bot.getActionPack().runStep(walked);
+        return true;
     }
 
     /**
@@ -898,20 +915,43 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * re-derived from where it lands, the bot is never moved to fit the trail.
      */
     private void abandonStep(AIPlayerEntity bot) {
-        bot.getActionPack().cancelStep();
+        if (bot.getActionPack().stepInFlightFor(stepLease)) {
+            // An ordinary lease has no exact cancellation overload. This ownership check makes
+            // the generic cancellation safe and leaves a higher-priority successor untouched.
+            bot.getActionPack().cancelStep();
+        }
         if (stepPurpose != null) {
             stepPurpose = null;
             poseUnsettled = true;
             unsettledTicks = 0;
         }
+        clearStepFields();
+    }
+
+    /** Clears only this task's admission record; it never changes whichever controller owns the pack. */
+    private void clearStepFields() {
+        stepPurpose = null;
+        stepLease = null;
+        step = null;
+        stepOrigin = null;
+        stepDirIndex = -1;
     }
 
     /** True while the bot must be left alone: a step is in flight (or was just settled), or it is still falling after one was lost. */
     private boolean holdForStepOrLanding(AIPlayerEntity bot) {
         if (stepPurpose != null) {
-            if (bot.getActionPack().stepIdle()) {
-                settleStep(bot);
+            ActionPack pack = bot.getActionPack();
+            ActionPack.StepLease lease = stepLease;
+            if (pack.stepInFlightFor(lease)) {
+                return true;
             }
+            if (!pack.stepIdle()) {
+                // A successor owns ActionPack now. Its result/position is not evidence about our
+                // trail micro-step, so drop only stale local state and yield to it.
+                clearStepFields();
+                return true;
+            }
+            settleStep(bot, pack.stepResultFor(lease));
             return true;
         }
         if (poseUnsettled) {
@@ -925,12 +965,17 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     }
 
     /** A step ended: the landing it verified is the only thing that changes the trail; a failed step is re-derived from the pose. */
-    private void settleStep(AIPlayerEntity bot) {
+    private void settleStep(AIPlayerEntity bot, WalkedStep.Result result) {
         StepPurpose purpose = stepPurpose;
         BlockPos origin = stepOrigin;
         int dirIndex = stepDirIndex;
         stepPurpose = null;
-        WalkedStep.Result result = bot.getActionPack().stepResult();
+        stepLease = null;
+        step = null;
+        stepOrigin = null;
+        stepDirIndex = -1;
+        // The exact lease is the only source of a result. A successor's completion is never
+        // evidence about this trail step.
         boolean landed = result != null && result.succeeded();
         if (!landed) {
             poseUnsettled = true;

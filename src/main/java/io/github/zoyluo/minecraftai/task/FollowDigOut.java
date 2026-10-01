@@ -75,6 +75,9 @@ final class FollowDigOut {
     private int stepFailures;
     /** The walk into the cell just opened is running (a real walked step over several ticks) and the cell it ends in. */
     private boolean stepping;
+    /** Exact ActionPack admission for {@link #step}; never infer this from another controller's global result. */
+    private ActionPack.StepLease stepLease;
+    private WalkedStep step;
     private BlockPos stepCell;
 
     boolean isActive() {
@@ -166,7 +169,15 @@ final class FollowDigOut {
             return ++stepFailures >= MAX_STEP_FAILURES ? finish(bot, "step_blocked") : true;
         }
         // The bot walks into the opened cell with its own keys (never placed there); the walk runs over the next ticks.
-        bot.getActionPack().runStep(WalkedStep.begin(bot, ahead, kind, "follow_dig_step"));
+        // A guarded water/safety owner can deny admission. Do not publish an in-flight dig-out
+        // step in that case: its exact owner must finish first, and this same open cell is retried.
+        WalkedStep next = WalkedStep.begin(bot, ahead, kind, "follow_dig_step");
+        ActionPack.StepLease lease = bot.getActionPack().runStep(next);
+        if (lease == null) {
+            return true;
+        }
+        step = next;
+        stepLease = lease;
         stepping = true;
         stepCell = ahead.immutable();
         return true;
@@ -174,18 +185,34 @@ final class FollowDigOut {
 
     /** One tick with the walk into the opened cell in flight: it carries on by itself; when it has ended the dig-out goes on or ends. */
     private boolean tickStep(AIPlayerEntity bot, ActionPack pack) {
-        if (!pack.stepIdle()) {
+        ActionPack.StepLease lease = stepLease;
+        if (pack.stepInFlightFor(lease)) {
             return true;
         }
+        if (!pack.stepIdle()) {
+            // A successor owns the pack. Forget only our stale admission and leave both its
+            // inputs and eventual result untouched.
+            stepping = false;
+            stepLease = null;
+            step = null;
+            stepCell = null;
+            return true;
+        }
+        BlockPos completedCell = stepCell;
+        WalkedStep.Result result = pack.stepResultFor(lease);
         stepping = false;
-        WalkedStep.Result result = pack.stepResult();
-        if (result == null || !result.succeeded()) {
+        step = null;
+        stepLease = null;
+        stepCell = null;
+        // The exact lease, not ActionPack's global last result, is the sole terminal evidence
+        // for this dig-out step.
+        if (completedCell == null || result == null || !result.succeeded()) {
             return ++stepFailures >= MAX_STEP_FAILURES ? finish(bot, "step_blocked") : true;
         }
         advanced++;
         stepFailures = 0;
         ServerLevel world = bot.level();
-        BlockPos next = stepCell.relative(direction);
+        BlockPos next = completedCell.relative(direction);
         if (advanced >= MAX_CELLS || (isOpen(world, next) && isOpen(world, next.above()))) {
             return finish(bot, "through");
         }
@@ -194,8 +221,16 @@ final class FollowDigOut {
 
     private boolean finish(AIPlayerEntity bot, String reason) {
         if (stepping) {
-            bot.getActionPack().cancelStep();
+            ActionPack pack = bot.getActionPack();
+            if (pack.stepInFlightFor(stepLease)) {
+                // runStep's ordinary lease has no release API, but this exact-active check makes
+                // the generic cancellation safe: it cannot cancel a successor.
+                pack.cancelStep();
+            }
             stepping = false;
+            stepLease = null;
+            step = null;
+            stepCell = null;
         }
         if (active) {
             bot.getActionPack().stopMining();

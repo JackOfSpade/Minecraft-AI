@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
@@ -119,6 +120,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     /** The stages of the sneak-bridge that places one floor block: lean over the edge, place, walk back to the middle of the cell. */
     private enum EdgeStage {
         SHIFTING,
+        /** The floor interaction has completed; wait to admit the physical recenter step. */
+        RETURN_PENDING,
         RETURNING
     }
 
@@ -148,6 +151,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // The walked step in flight and what it is for. Never persisted: a checkpoint holds the settled landing history, not a step; a
     // pause, a restart or a hazard abort cancels the step and the stair is re-derived from bot.blockPosition().
     private StepPurpose stepPurpose;
+    /** Exact ActionPack admission for the ordinary walked step; edge helpers retain their own object. */
+    private ActionPack.StepLease stepLease;
     private WalkedStep step;
     private BlockPos stepOrigin;
     private BlockPos stepTarget;
@@ -775,6 +780,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         BlockPos origin = feet.immutable();
         WalkedStep descent = bot.getActionPack().beginDescend(next, "descend_stair");
         if (descent == null) {
+            if (bot.getActionPack().stepAdmissionBlocked()) {
+                // beginDescend also observes the guarded handoff boundary. No terrain verdict
+                // was made, so leave this stair direction untouched and retry it next tick.
+                return;
+            }
             rejectLandingDirection(origin, stairDirIndex);
             rotateStair(bot, world, origin);
             BotLog.action(bot, "descend_landing_rejected",
@@ -844,10 +854,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // The bot walks (or hops) back onto the landing it came from; the bookkeeping of the retreat happens when the landing is
             // verified (settleStep). A step that cannot start (the head room of a hop is the blocked cell itself) falls through to mining.
             miner.cancel(bot);
-            stepBlocked = blocked.immutable();
-            stepBlockedName = String.valueOf(BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()));
-            launchStep(bot, WalkedStep.begin(bot, retreat, retreatKind, "descend_blocked_body_retreat"),
-                    StepPurpose.RETREAT, feet, retreat, -1, "descend_blocked_body_retreat");
+            if (launchStep(bot, WalkedStep.begin(bot, retreat, retreatKind, "descend_blocked_body_retreat"),
+                    StepPurpose.RETREAT, feet, retreat, -1, "descend_blocked_body_retreat")) {
+                // This metadata belongs to the admitted step only. A fenced admission must not
+                // let a future foreign result look like this task's blocked-body retreat.
+                stepBlocked = blocked.immutable();
+                stepBlockedName = String.valueOf(BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()));
+            }
             return true;
         }
 
@@ -1177,8 +1190,15 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * {@link #settleStep}) and the pending landing, the detour edges and the checkpoint change only then, never in the tick that
      * starts the step.
      */
-    private void launchStep(AIPlayerEntity bot, WalkedStep walked, StepPurpose purpose,
-                            BlockPos origin, BlockPos target, int dirIndex, String reason) {
+    private boolean launchStep(AIPlayerEntity bot, WalkedStep walked, StepPurpose purpose,
+                               BlockPos origin, BlockPos target, int dirIndex, String reason) {
+        ActionPack.StepLease lease = bot.getActionPack().runStep(walked);
+        if (lease == null) {
+            // Another guarded owner remains responsible for the pack. Keep all local step state
+            // unset; callers either hold this tick or re-evaluate the same physical route later.
+            return false;
+        }
+        stepLease = lease;
         step = walked;
         stepPurpose = purpose;
         stepOrigin = origin.immutable();
@@ -1188,11 +1208,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (purpose == StepPurpose.STAIR) {
             markStarted(bot, origin);
         }
-        bot.getActionPack().runStep(walked);
+        return true;
     }
 
     private void clearStepFields() {
         stepPurpose = null;
+        stepLease = null;
         step = null;
         stepOrigin = null;
         stepTarget = null;
@@ -1211,9 +1232,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (stepPurpose == null && edge == null) {
             return;
         }
-        // Only a step of this task is cancelled: one that is still in flight is the pack's own step; another controller's step is left alone.
-        WalkedStep inFlight = edge != null ? edge.step : step;
-        if (inFlight != null && !inFlight.ended()) {
+        // Only a step of this task is cancelled. Ordinary steps retain their exact lease; the
+        // InCell helpers expose their own returned step object rather than ActionPack's lease.
+        if (edge != null) {
+            if (edge.step != null && !edge.step.ended()) {
+                bot.getActionPack().cancelStep();
+            }
+        } else if (bot.getActionPack().stepInFlightFor(stepLease)) {
             bot.getActionPack().cancelStep();
         }
         clearStepFields();
@@ -1224,9 +1249,20 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     /** Settles an already-ended ordinary step before an interruption forgets its task-local fields. */
     private void settleCompletedStepBeforeAbandon(AIPlayerEntity bot) {
-        if (edge == null && stepPurpose != null && step != null && step.ended()) {
-            settleStep(bot, bot.level());
+        if (edge != null || stepPurpose == null) {
+            return;
         }
+        ActionPack pack = bot.getActionPack();
+        ActionPack.StepLease lease = stepLease;
+        if (pack.stepInFlightFor(lease)) {
+            return;
+        }
+        if (!pack.stepIdle()) {
+            // A successor owns the pack. Its state says nothing about this descent edge.
+            clearStepFields();
+            return;
+        }
+        settleStep(bot, bot.level(), pack.stepResultFor(lease));
     }
 
     /** True while the bot must be left alone: a step is in flight (or was just settled), or it is still falling after one was lost. */
@@ -1239,10 +1275,18 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
             if (edge != null) {
                 tickEdgePlacement(bot, world);
-            } else if (step.ended()) {
-                // The step object knows how it ended (another controller that takes the pack cancels it: no outcome), whatever step
-                // the pack runs now.
-                settleStep(bot, world);
+            } else {
+                ActionPack pack = bot.getActionPack();
+                ActionPack.StepLease lease = stepLease;
+                if (pack.stepInFlightFor(lease)) {
+                    return true;
+                }
+                if (!pack.stepIdle()) {
+                    // A successor owns ActionPack. Drop only local state and let it complete.
+                    clearStepFields();
+                    return true;
+                }
+                settleStep(bot, world, pack.stepResultFor(lease));
             }
             return true;
         }
@@ -1272,7 +1316,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * A step ended: the landing it verified is the only thing that changes the stair history; a failed step is re-derived from the
      * pose (its edge is never tried again by this task).
      */
-    private void settleStep(AIPlayerEntity bot, ServerLevel world) {
+    private void settleStep(AIPlayerEntity bot, ServerLevel world, WalkedStep.Result result) {
         StepPurpose purpose = stepPurpose;
         BlockPos origin = stepOrigin;
         BlockPos target = stepTarget;
@@ -1280,7 +1324,6 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         String reason = stepReason;
         BlockPos blocked = stepBlocked;
         String blockedName = stepBlockedName;
-        WalkedStep.Result result = step.outcome();
         clearStepFields();
         BlockPos feet = bot.blockPosition();
         boolean landed = result != null && result.succeeded() && feet.equals(target);
@@ -1673,6 +1716,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // ended, and the walk back to the middle of the cell after it (tickEdgePlacement). The next task ticks are held until then.
         WalkedStep lean = InCellWalk.beginEdgeShift(bot, origin, direction, "descend_detour_support");
         if (lean == null) {
+            if (bot.getActionPack().stepAdmissionBlocked()) {
+                // Keep the observed detour candidate unpoisoned while its guarded owner finishes.
+                return true;
+            }
             BotLog.action(bot, "descend_detour_support_failed",
                     "origin", origin.toShortString(),
                     "landing", landing.toShortString(),
@@ -1692,6 +1739,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private void tickEdgePlacement(AIPlayerEntity bot, ServerLevel world) {
         EdgePlacement current = edge;
         if (!current.step.ended()) {
+            return;
+        }
+        ActionPack pack = bot.getActionPack();
+        if (!pack.stepIdle()) {
+            // InCellWalk owns the exact edge-step object but cannot expose the ActionPack lease.
+            // A foreign successor may have cancelled that object; clear only this stale edge and
+            // yield rather than stopping the successor's inputs or publishing its result.
+            edge = null;
             return;
         }
         WalkedStep.Result result = current.step.outcome();
@@ -1721,7 +1776,17 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 return;
             }
             current.placeFailure = placed.isFailed() ? placed.reason() : null;
-            current.step = InCellWalk.beginEdgeReturn(bot, current.origin, "descend_detour_support");
+            // The placement is already an interaction receipt. A guarded successor can temporarily
+            // deny the walk back, so retain a pending state instead of assigning null to the edge
+            // step or repeating the placement on every retry.
+            current.stage = EdgeStage.RETURN_PENDING;
+        }
+        if (current.stage == EdgeStage.RETURN_PENDING) {
+            WalkedStep returning = InCellWalk.beginEdgeReturn(bot, current.origin, "descend_detour_support");
+            if (returning == null) {
+                return;
+            }
+            current.step = returning;
             current.stage = EdgeStage.RETURNING;
             return;
         }

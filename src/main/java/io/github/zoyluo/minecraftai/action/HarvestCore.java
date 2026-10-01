@@ -484,8 +484,9 @@ public final class HarvestCore {
         if (step == null) {
             return false;
         }
-        pack.runStep(step);
-        return true;
+        // A completed guarded owner can retain the pack's admission fence briefly after its
+        // physical step ends.  Only report this pickup drop as under way once it owns a lease.
+        return pack.runStep(step) != null;
     }
 
     /**

@@ -15,7 +15,8 @@ import net.minecraft.world.phys.Vec3;
  * few steps toward an item that lies on the far side of the cell (the pickup nudge), the walk back to the middle of the cell before
  * a placement, and the sneak shift over the edge of the support with the walk back from it. Each one is a {@link WalkedStep}
  * ({@code RECENTER} or {@code SNEAK_SHIFT}) run through {@link ActionPack#runStep}: the bot moves at the speed a player has, the next
- * action of the owner happens only when the step has ended, and nothing here ever moves the bot itself.
+ * action of the owner happens only when the step has ended, and nothing here ever moves the bot itself. A guarded owner can
+ * temporarily refuse a new step admission; that is not a completed in-cell walk.
  *
  * <p>A walk inside a cell is finished when the bot is within {@link WalkedStepRules#POINT_TOLERANCE} of its point, so a point that
  * close to where the bot already stands is "there" (no step is started).</p>
@@ -106,8 +107,8 @@ public final class InCellWalk {
         if (Math.hypot(point.x - bot.getX(), point.z - bot.getZ()) <= WalkedStepRules.POINT_TOLERANCE) {
             return true;
         }
-        pack.runStep(WalkedStep.begin(bot, point, WalkedStep.Kind.RECENTER, reason));
-        return true;
+        WalkedStep step = WalkedStep.begin(bot, point, WalkedStep.Kind.RECENTER, reason);
+        return pack.runStep(step) != null;
     }
 
     /** {@link #nudgeToward} with the default reach. */
@@ -140,11 +141,20 @@ public final class InCellWalk {
         // about the cell: it is asked again next tick and does not count against the owner.
         boolean unsettled = recenterStep != null && recenterStep.outcome() != null
                 && recenterStep.outcome().failed() && "not_supported".equals(recenterStep.outcome().reason());
-        if (!unsettled && ++recenterStarts > MAX_RECENTER_STARTS) {
+        if (!unsettled && recenterStarts + 1 > MAX_RECENTER_STARTS) {
             return Centering.FAILED;
         }
-        recenterStep = WalkedStep.begin(bot, middle, WalkedStep.Kind.RECENTER, reason);
-        pack.runStep(recenterStep);
+        WalkedStep candidate = WalkedStep.begin(bot, middle, WalkedStep.Kind.RECENTER, reason);
+        if (pack.runStep(candidate) == null) {
+            // A foreign guarded owner has not released its completed step yet.  Keep the prior
+            // retry count and step outcome intact so this harmless admission delay neither
+            // consumes a retry nor publishes a step that the pack never owns.
+            return Centering.WALKING;
+        }
+        if (!unsettled) {
+            recenterStarts++;
+        }
+        recenterStep = candidate;
         return Centering.WALKING;
     }
 
@@ -152,8 +162,8 @@ public final class InCellWalk {
      * Starts the sneak shift over the edge of the support of {@code anchorFeet} toward {@code direction}: the bot leans out by
      * {@link #EDGE_SHIFT} (a sneaking body does not fall off its support) so the side face of the support is in view of a placement.
      * Returns the step (its {@link WalkedStep#ended} and {@link WalkedStep#outcome} tell when and how it ended, whatever else the pack
-     * runs meanwhile), or null when it cannot start (not standing supported in the anchor, a vertical direction). Sneak stays held
-     * after a successful shift.
+     * runs meanwhile), or null when it cannot start (not standing supported in the anchor, a vertical direction, or another guarded
+     * owner refuses admission). Sneak stays held after a successful shift.
      */
     public static WalkedStep beginEdgeShift(AIPlayerEntity bot, BlockPos anchorFeet, Direction direction, String reason) {
         if (direction.getAxis().isVertical() || !bot.blockPosition().equals(anchorFeet) || !WalkedStep.supported(bot)) {
@@ -164,15 +174,16 @@ public final class InCellWalk {
         Vec3 point = new Vec3(anchorFeet.getX() + 0.5D + direction.getStepX() * EDGE_SHIFT, bot.getY(),
                 anchorFeet.getZ() + 0.5D + direction.getStepZ() * EDGE_SHIFT);
         WalkedStep step = WalkedStep.beginAnchored(bot, anchorFeet, point, WalkedStep.Kind.SNEAK_SHIFT, reason);
-        bot.getActionPack().runStep(step);
-        return step;
+        return bot.getActionPack().runStep(step) == null ? null : step;
     }
 
-    /** Starts the walk from the shifted pose back to the middle of {@code anchorFeet} (sneak stays on until the step ends). */
+    /**
+     * Starts the walk from the shifted pose back to the middle of {@code anchorFeet} (sneak stays on until the step ends), or returns
+     * {@code null} when another guarded owner refuses its admission.
+     */
     public static WalkedStep beginEdgeReturn(AIPlayerEntity bot, BlockPos anchorFeet, String reason) {
         Vec3 middle = new Vec3(anchorFeet.getX() + 0.5D, bot.getY(), anchorFeet.getZ() + 0.5D);
         WalkedStep step = WalkedStep.beginAnchored(bot, anchorFeet, middle, WalkedStep.Kind.RECENTER, reason);
-        bot.getActionPack().runStep(step);
-        return step;
+        return bot.getActionPack().runStep(step) == null ? null : step;
     }
 }

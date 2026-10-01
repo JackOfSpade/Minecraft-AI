@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
@@ -165,6 +166,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private BlockPos obsidianStandHint;
     // The reason of the walked step this task started in the water recovery ("surface" or "rim"); judged when the step has ended.
     private String recoveryWalk;
+    /** Exact ActionPack admission for {@link #recoveryWalk}; never infer our outcome from a later owner. */
+    private ActionPack.StepLease recoveryWalkLease;
     private BlockPos standPos;
     private PourPlan pourPlan;
     private BlockPos activeBreakPos;
@@ -385,6 +388,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         miner.cancel(bot);
+        clearRecoveryWalk();
         bot.getActionPack().stopAll();
         // A replacement may retain already committed conversions, but it must never inherit an
         // open placement candidate. Reconcile factual obsidian at the interruption boundary and
@@ -1319,12 +1323,20 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (recoveryWalk != null) {
             // A swim stroke or a step out of the pool is in flight: it has the bot to itself. When it has ended the recovery is derived
             // again from where the bot stands (a refused or failed step keeps the old failure reasons).
-            if (!bot.getActionPack().stepIdle()) {
+            var pack = bot.getActionPack();
+            ActionPack.StepLease lease = recoveryWalkLease;
+            if (pack.stepInFlightFor(lease)) {
+                return;
+            }
+            // A later safety successor is not this task's surface/rim result. Forget only the
+            // local admission and leave that owner uninterrupted until its own next tick.
+            if (!pack.stepIdle()) {
+                clearRecoveryWalk();
                 return;
             }
             String walk = recoveryWalk;
-            recoveryWalk = null;
-            WalkedStep.Result walked = bot.getActionPack().stepResult();
+            clearRecoveryWalk();
+            WalkedStep.Result walked = pack.stepResultFor(lease);
             if (walked != null && walked.failed()) {
                 fail("surface".equals(walk)
                         ? "create_obsidian_water_recovery_surface_blocked"
@@ -1347,9 +1359,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 // make one collision-validated adjacent rise so the eye is above the flowing
                 // sheet and the retained source face becomes ray-visible again.
                 // A swim stroke (the jump key in water), not a hop: the step ends when the body is in the cell above.
-                bot.getActionPack().runStep(WalkedStep.begin(
+                ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(
                         bot, bot.blockPosition().above(), WalkedStep.Kind.SWIM, "obsidian_surface"));
-                recoveryWalk = "surface";
+                if (lease != null) {
+                    recoveryWalk = "surface";
+                    recoveryWalkLease = lease;
+                }
                 return;
             }
             if (obsidianStandHint != null
@@ -1360,9 +1375,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 // Leave the water column while it still provides the legitimate upward movement,
                 // then recover from the dry remembered rim. Removing the source while suspended
                 // over the hole drops the fake player straight back to the pool floor.
-                bot.getActionPack().runStep(WalkedStep.begin(
+                ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(
                         bot, obsidianStandHint, WalkedStep.Kind.FLAT, "obsidian_return_rim"));
-                recoveryWalk = "rim";
+                if (lease != null) {
+                    recoveryWalk = "rim";
+                    recoveryWalkLease = lease;
+                }
                 return;
             }
             if (bot.getEyePosition().distanceToSqr(waterSource.getCenter()) <= REACH_MARGIN_SQUARED) {
@@ -2085,8 +2103,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (kind == null || WalkedStep.refusal(bot, cell, kind) != null) {
             return false;
         }
-        bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason));
-        return true;
+        return bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason)) != null;
     }
 
     private static boolean isSafePickupCollisionCell(AIPlayerEntity bot, BlockPos target) {
@@ -2332,6 +2349,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private void resetForNextScan(AIPlayerEntity bot) {
         miner.cancel(bot);
         bot.getActionPack().stopAll();
+        clearRecoveryWalk();
         if (waterSource != null) {
             // A placed source is a transactional resource obligation. Do not forget its position
             // merely because the target/pose became invalid; recover the real bucket first.
@@ -2355,6 +2373,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void clearWorkTargets() {
+        clearRecoveryWalk();
         waterTarget = null;
         waterSource = null;
         lavaClue = null;
@@ -2372,6 +2391,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         protectionPrepared = false;
         clearActiveBreak();
         rejectedPourDestinations.clear();
+    }
+
+    /** Clears only this task's remembered admission; it never cancels a replacement owner. */
+    private void clearRecoveryWalk() {
+        recoveryWalk = null;
+        recoveryWalkLease = null;
     }
 
     private void pathToWorkPose(AIPlayerEntity bot, BlockPos target, String failure) {

@@ -23,9 +23,11 @@ final class FollowOxygen {
     /** Baseline shallow-water rescue floor; deep columns use NavSafetyNet's depth-aware boundary. */
     static final int RESCUE_AIR = NavSafetyNet.AIR_SURFACE_THRESHOLD;
     /**
-     * Follow always turns up at least this early, so it is never the rescue that has to. A bot swims by real inputs now (about
-     * 0.11 blocks per tick up, measured by NaturalSwimGameTests.legacyInputsSwimAndSurface), so a way up from a few blocks down takes
-     * a few seconds: 80 units of air (four seconds) above the rescue level.
+     * Follow turns up at least this early while it still owns its swim lease. A bot swims by real
+     * inputs now (about 0.11 blocks per tick up, measured by NaturalSwimGameTests.legacyInputsSwimAndSurface),
+     * so a way up from a few blocks down takes a few seconds: 80 units of air (four seconds) above
+     * the base rescue level. Strict NavSafetyNet conservatively claims the bot at this same floor;
+     * operator mode's measured threshold normally lets Follow begin first.
      */
     static final int SURFACE_FLOOR_AIR = RESCUE_AIR + 80;
     /** A little slower than the measured real swim-up speed (about 0.11 blocks per tick), so the ascent estimate errs on the safe side. */

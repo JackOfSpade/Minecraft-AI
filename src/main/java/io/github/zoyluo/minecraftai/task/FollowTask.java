@@ -215,7 +215,7 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         nextRepathTick = 0;
-        swimming.reset();
+        swimming.reset(bot);
         waiting = false;
         repathBackoff = false;
         noRouteAnnounced = false;
@@ -252,6 +252,10 @@ public final class FollowTask extends AbstractTask {
             targetSamples.clear();
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             suspendLandRecovery(bot);
+            // stopAll() is intentionally a generic cancellation and therefore cannot release
+            // FollowSwimming's guarded lease.  Reconcile our exact owner before waiting for an
+            // offline/cross-dimension target, or its ActionPack fence would survive forever.
+            swimming.cancelStep(bot);
             stopBoatAndActions(bot);
             baritoneGoalPos = null;
             baritoneProgress.clear();
@@ -858,7 +862,7 @@ public final class FollowTask extends AbstractTask {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
         swimming.cancelStep(bot);
-        swimming.reset();
+        swimming.reset(bot);
         shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
             boatFollow.pause(bot);
@@ -882,7 +886,7 @@ public final class FollowTask extends AbstractTask {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
         swimming.cancelStep(bot);
-        swimming.reset();
+        swimming.reset(bot);
         shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
             boatFollow.abort(bot);

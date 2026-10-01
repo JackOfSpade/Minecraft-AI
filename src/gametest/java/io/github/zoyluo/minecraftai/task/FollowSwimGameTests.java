@@ -1,11 +1,20 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.baritone.BaritoneGoals;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
@@ -24,6 +33,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import java.lang.reflect.Field;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -287,6 +299,43 @@ public final class FollowSwimGameTests {
         });
     }
 
+    /**
+     * A healthy swimmer in a clear shaft deeper than one cooperative vertical slice still has an
+     * unfinished air-column cursor, not proof that air is absent. It must keep its ordinary
+     * Follow stroke instead of cancelling it to wait for a nonexistent terminal result.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_pending_air_column_keeps_healthy_follow_stroke", maxTicks = 30)
+    public void strictPendingAirColumnKeepsHealthyFollowStroke(GameTestHelper context) {
+        DeepFollowShaft shaft = buildDeepFollowShaft(context);
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, "StrictPendingAirBot", shaft.lower());
+        AIPlayerEntity target = spawnBot(world, "StrictPendingAirTarget", shaft.lower().east(4).above());
+        submerge(world, bot, shaft.lower());
+        submerge(world, target, shaft.lower().east(4).above());
+        context.runAfterDelay(2, () -> {
+            MinecraftAiConfig original = MinecraftAiConfig.get();
+            FollowSwimming follower = new FollowSwimming();
+            try {
+                installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+                require(context, bot.isUnderWater() && target.isUnderWater(),
+                        "pending-column fixture did not leave both bots submerged");
+                require(context, DEEP_FOLLOW_SHAFT_DEPTH > 8,
+                        "fixture must exceed FollowSwimming's bounded vertical air slice");
+                bot.setAirSupply(bot.getMaxAirSupply());
+                target.setAirSupply(target.getMaxAirSupply());
+                follower.follow(bot, target, 1, 0.25D);
+                require(context, bot.getActionPack().stepInFlightFor(
+                                "follow_swim", shaft.lower().east(), WalkedStep.Kind.SWIM),
+                        "a pending clear air column cancelled healthy follow instead of starting its visible swim stroke");
+            } finally {
+                follower.cancelStep(bot);
+                installConfig(original);
+                despawn(world, bot, target);
+            }
+            context.succeed();
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_stuck_behind_natural_wall_digs_through_with_its_tools", maxTicks = 1500)
     public void stuckBehindNaturalWallDigsThroughWithItsTools(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
@@ -490,6 +539,701 @@ public final class FollowSwimGameTests {
         });
     }
 
+    /**
+     * A visible local water neighbour is allowed to be explored later, but the follow route
+     * planner must not turn a shore hidden behind an opaque bend into an EXIT route. This is the
+     * route-level companion to SurfaceWaterRecoveryGameTests' visible-local-step rescue proof.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_route_does_not_plan_through_a_hidden_shore", maxTicks = 20)
+    public void strictRouteDoesNotPlanThroughAHiddenShore(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 5, -36));
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+
+        // Pick fixed, non-overlapping cardinal cells rather than relying on the 26-neighbour
+        // enumeration order (whose first entry is now diagonal).
+        BlockPos visibleDeadEnd = start.west();
+        BlockPos hiddenRouteFirst = start.north();
+        require(context, NavSafetyNet.waterEscapeNeighbors(start).containsAll(
+                        List.of(visibleDeadEnd, hiddenRouteFirst)),
+                "water rescue neighbourhood lost required cardinal cells");
+        int routeDx = hiddenRouteFirst.getX() - start.getX();
+        int routeDz = hiddenRouteFirst.getZ() - start.getZ();
+        // Keep every later route cell more than one diagonal move from the origin. The shared
+        // rescue/follow neighbourhood deliberately includes diagonal strokes, so a one-cell bend
+        // would otherwise let the raw control skip the intended hidden first edge.
+        BlockPos forwardTwo = hiddenRouteFirst.offset(routeDx, 0, routeDz);
+        int turnDx = -routeDz;
+        int turnDz = routeDx;
+        BlockPos bendOne = forwardTwo.offset(turnDx, 0, turnDz);
+        BlockPos bendTwo = bendOne.offset(turnDx, 0, turnDz);
+        BlockPos shore = bendTwo.offset(turnDx, 0, turnDz);
+        List<BlockPos> waterRoute = List.of(start, visibleDeadEnd, hiddenRouteFirst, forwardTwo, bendOne, bendTwo);
+        require(context, waterRoute.stream().distinct().count() == waterRoute.size(),
+                "hidden-route differential accidentally reuses a water cell: " + waterRoute);
+        for (BlockPos cell : waterRoute) {
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        world.setBlock(shore, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        // Keep the eye above the source water.  Fluid-aware sight rays must reach the exposed
+        // local step itself, not terminate on a waterlogged decoration in the bot's own column.
+        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        Standability.clearCache();
+
+        AIPlayerEntity bot = spawnBot(world, "StrictFollowRouteBot", start);
+        poseWaterObserver(bot, start);
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            // This must be a genuinely useful differential fixture, rather than merely proving
+            // that strict mode returns no route in an accidentally disconnected maze.  The raw
+            // operator planner knows the complete physical route and selects its hidden first
+            // water step; strict survival must reject exactly that hidden knowledge.
+            installConfig(withProfile(original, OperatingProfile.OPERATOR));
+            require(context, CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "operator_follow_route_gametest").allowed(),
+                    "operator control did not allow the raw water planner");
+            Optional<List<BlockPos>> operatorRoute = SwimRoute.search(
+                    bot, world, start, shore, SwimRoute.Goal.EXIT, 0.0D);
+            require(context, operatorRoute.isPresent() && !operatorRoute.get().isEmpty(),
+                    "operator planner did not find the physical hidden-shore route: " + operatorRoute);
+            require(context, operatorRoute.get().get(0).equals(hiddenRouteFirst),
+                    "operator planner did not choose the route's hidden first water step: " + operatorRoute);
+
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_follow_route_gametest").allowed(),
+                    "strict_survival unexpectedly allowed hidden water scans");
+            require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, visibleDeadEnd)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, visibleDeadEnd.above()),
+                    "fixture must offer a visible local water cell");
+            require(context, !ObservableWorldQuery.canObserveCellThroughFluids(bot, shore),
+                    "fixture must keep the dry shore behind the opaque turn");
+
+            Optional<List<BlockPos>> route = SwimRoute.search(bot, world, start, shore, SwimRoute.Goal.EXIT, 0.0D);
+            require(context, route.isEmpty(),
+                    "strict follow route planned to an unseen shore: " + route);
+        } finally {
+            installConfig(original);
+            despawn(world, bot);
+        }
+        context.succeed();
+    }
+
+    /**
+     * A visible lake edge may be farther than a tiny historical six-block heuristic.  It is still
+     * ordinary player knowledge when it is inside the configured perception radius: strict follow
+     * must make physical land progress to that observed shore and enter the water, not wait forever
+     * or borrow a hidden scan.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_follow_approaches_a_visible_far_water_edge", maxTicks = 180)
+    public void strictFollowApproachesAVisibleFarWaterEdge(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(0, 6, -52));
+        for (int dx = -2; dx <= 13; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        BlockPos shore = start.east(7);
+        BlockPos water = shore.east();
+        BlockPos targetWater = water.east(2);
+        for (int dx = 8; dx <= 12; dx++) {
+            BlockPos cell = start.east(dx);
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        Standability.clearCache();
+
+        AIPlayerEntity bot = spawnBot(world, "StrictFarWaterBot", start);
+        AIPlayerEntity target = spawnBot(world, "StrictFarWaterTarget", targetWater);
+        target.teleportTo(world, targetWater.getX() + 0.5D, targetWater.getY() + 0.125D,
+                targetWater.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        target.setAirSupply(target.getMaxAirSupply());
+        FollowSwimming follower = new FollowSwimming();
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withPerceptionRadius(withProfile(original, OperatingProfile.STRICT_SURVIVAL), 12));
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_far_water_edge_gametest").allowed(),
+                    "strict fixture unexpectedly enabled hidden-world scanning");
+            require(context, MinecraftAiConfig.get().perception().radius() == 12
+                            && SwimRoute.observationRadius(bot) == 12,
+                    "strict route clamped its observation radius below the configured value");
+            require(context, bot.getEyePosition().distanceToSqr(shore.getCenter()) > 36.0D
+                            && bot.getEyePosition().distanceToSqr(water.getCenter()) > 36.0D,
+                    "fixture edge did not actually exceed the old six-block heuristic");
+            require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, shore)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, shore.above())
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, water)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, water.above()),
+                    "fixture did not leave the farther shore and water edge visibly exposed");
+            TeleportAudit.reset(bot);
+            require(context, !follower.follow(bot, target, 1, 1.0D),
+                    "strict follow waited instead of beginning a physical approach to a visible water edge");
+            require(context, bot.getActionPack().stepInFlightFor(
+                            "follow_swim_observed_land_approach", start.east(), WalkedStep.Kind.FLAT),
+                    "strict non-adjacent edge used a hidden path planner instead of its observed local land step");
+        } finally {
+            // The initial edge proof above is the behavior under the explicit radius. The remaining
+            // real server ticks use the normal strict default, which is at least as permissive, and
+            // this keeps a failing asynchronous GameTest from leaking a global config into another.
+            installConfig(original);
+        }
+
+        int[] elapsed = {1};
+        boolean[] sawLandProgress = {false};
+        context.failIfEver(() -> {
+            elapsed[0]++;
+            follower.follow(bot, target, elapsed[0], 1.0D);
+            sawLandProgress[0] |= bot.getX() > start.getX() + 1.25D;
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "strict far-edge follow used a correction teleport: " + TeleportAudit.lastCaller(bot));
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_far_water_edge_progress").allowed(),
+                    "strict far-edge follow enabled a hidden-world scan while approaching");
+            boolean enteredWater = world.getFluidState(bot.blockPosition()).is(FluidTags.WATER);
+            if (enteredWater) {
+                require(context, sawLandProgress[0],
+                        "bot entered the water without physically approaching the observed shore");
+                follower.cancelStep(bot);
+                despawn(world, bot, target);
+                context.succeed();
+                return;
+            }
+            require(context, elapsed[0] < 140,
+                    "strict follow permanently waited before reaching its visible water edge");
+        });
+    }
+
+    /**
+     * Before a distant lake enters the configured perception radius, strict follow still knows its
+     * named waterborne target. It may therefore take one real, currently visible dry step toward
+     * that target. This fixture leaves a diagonal landing as the only dry local candidate; the two
+     * corner cells are open but unsupported, so the test also protects legal diagonal land motion.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_no_edge_uses_diagonal_observed_land_approach", maxTicks = 30)
+    public void strictNoEdgeUsesDiagonalObservedLandApproach(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(0, 6, -56));
+        BlockPos diagonal = start.east().north();
+        BlockPos shore = start.east(12).north();
+        BlockPos water = shore.east();
+        BlockPos targetWater = water.east();
+        for (int dx = -1; dx <= 15; dx++) {
+            for (int dz = -2; dz <= 1; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        // The origin and only diagonal landing have real footing. East and north are deliberately
+        // unsupported but open: a diagonal walked step may sweep through them, whereas strict
+        // approach must not select either as a dry destination.
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(diagonal.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        for (BlockPos cell : List.of(water, targetWater)) {
+            world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        Standability.clearCache();
+
+        AIPlayerEntity bot = spawnBot(world, "StrictDiagonalApproachBot", start);
+        AIPlayerEntity target = spawnBot(world, "StrictDiagonalApproachTarget", targetWater);
+        target.teleportTo(world, targetWater.getX() + 0.5D, targetWater.getY() + 0.125D,
+                targetWater.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        FollowSwimming follower = new FollowSwimming();
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withPerceptionRadius(withProfile(original, OperatingProfile.STRICT_SURVIVAL), 12));
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_diagonal_land_approach").allowed(),
+                    "diagonal strict fixture unexpectedly enabled a hidden scan");
+            require(context, !ObservableWorldQuery.canObserveCellThroughFluids(bot, shore)
+                            && !ObservableWorldQuery.canObserveCellThroughFluids(bot, water),
+                    "fixture accidentally exposed an entry edge before the local approach step");
+            require(context, SwimRoute.observedCell(bot, world, diagonal, false) == SwimRoute.Cell.DRY,
+                    "fixture lost its only visible diagonal dry landing");
+            require(context, SwimRoute.observedCell(bot, world, start.east(), false) == null
+                            && SwimRoute.observedCell(bot, world, start.north(), false) == null,
+                    "cardinal corner cells accidentally became strict dry approach candidates");
+            TeleportAudit.reset(bot);
+            require(context, !follower.follow(bot, target, 1, 0.25D),
+                    "strict follow waited despite a legal observed diagonal approach step");
+            require(context, bot.getActionPack().stepInFlightFor(
+                            "follow_swim_observed_land_approach", diagonal, WalkedStep.Kind.FLAT),
+                    "strict no-edge approach did not start its only legal diagonal walked step");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "strict diagonal land approach used a correction teleport: " + TeleportAudit.lastCaller(bot));
+        } finally {
+            follower.cancelStep(bot);
+            installConfig(original);
+            despawn(world, bot, target);
+        }
+        context.succeed();
+    }
+
+    /**
+     * A destination can be visible even though a diagonal walk's corner column is behind a
+     * separate opaque block. Strict follow must decline before {@link WalkedStep#refusal} reads
+     * that hidden column; the exposed lower landing itself remains an ordinary observed dry cell.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_refusal_envelope_rejects_hidden_diagonal_corner", maxTicks = 30)
+    public void strictRefusalEnvelopeRejectsHiddenDiagonalCorner(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(0, 6, -64));
+        BlockPos landing = start.east().north().below();
+        BlockPos blockedCornerHead = start.east().above();
+        buildStrictRefusalEnvelopeFixture(world, start, landing, blockedCornerHead);
+        // The north-offset eye enters these source-side cells before the diagonal landing shaft.
+        // Keep that landing ray honest without opening the deliberately blocked east-corner head
+        // cell that the refusal-envelope assertion must still reject.
+        world.setBlock(start.north(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.north().above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        // It is a ray tunnel only, never a competing descending or flat landing for strict
+        // follow's complete three-block-down local envelope.
+        for (int dy = 1; dy <= 4; dy++) {
+            world.setBlock(start.north().below(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        BlockPos targetGoal = landing.east(2);
+        clearDryTarget(world, targetGoal);
+
+        AIPlayerEntity bot = spawnBot(world, "StrictHiddenCornerBot", start);
+        // Look from the north side of the source cell: the landing ray enters its own diagonal
+        // shaft before the blocked east-corner column, while the direct east-corner ray still
+        // strikes that blocker.
+        poseRaisedObserver(bot, start, 0.40D, -0.40D);
+        AIPlayerEntity target = spawnBot(world, "StrictHiddenCornerTarget", targetGoal);
+        FollowSwimming follower = new FollowSwimming();
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            require(context, SwimRoute.observedCell(bot, world, landing, false) == SwimRoute.Cell.DRY,
+                    "the lower diagonal landing itself must remain visibly provable");
+            require(context, SwimRoute.observedCell(bot, world, start.north(), false) != SwimRoute.Cell.DRY,
+                    "the diagonal landing ray tunnel accidentally became a competing dry step");
+            require(context, !ObservableWorldQuery.canObserveCellThroughFluids(bot, start.east()),
+                    "fixture did not hide the diagonal corner column behind its head blocker");
+            require(context, !SwimRoute.canObserveWalkedStepRefusalEnvelope(
+                            bot, landing, WalkedStep.Kind.STEP_DOWN),
+                    "strict diagonal fixture did not reject the hidden corner refusal envelope");
+            TeleportAudit.reset(bot);
+            require(context, follower.follow(bot, target, 1, 0.25D),
+                    "strict follow started a diagonal step despite an unobservable corner envelope");
+            require(context, bot.getActionPack().stepIdle() && bot.blockPosition().equals(start)
+                            && TeleportAudit.corrections(bot) == 0,
+                    "hidden diagonal-corner validation moved the bot instead of failing closed");
+        } finally {
+            follower.cancelStep(bot);
+            installConfig(original);
+            despawn(world, bot, target);
+        }
+        context.succeed();
+    }
+
+    /**
+     * The destination and its support may be exposed below a ledge while a cell in a three-block
+     * fall column is not. Strict follow must reject the whole DROP/STEP_DOWN sweep before the raw
+     * validator probes its hidden vertical cells.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_refusal_envelope_rejects_hidden_deep_drop_column", maxTicks = 30)
+    public void strictRefusalEnvelopeRejectsHiddenDeepDropColumn(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(0, 6, -72));
+        BlockPos landing = start.east().below(2);
+        BlockPos hiddenFallCellBlocker = landing.above(4);
+        buildStrictRefusalEnvelopeFixture(world, start, landing, hiddenFallCellBlocker);
+        BlockPos targetGoal = landing.east(2);
+        clearDryTarget(world, targetGoal);
+
+        AIPlayerEntity bot = spawnBot(world, "StrictHiddenDropBot", start);
+        // Keep feet in the source cell but put the eye high enough that the far ledge hides the
+        // upper swept cell, without blocking the lower landing or its support.
+        poseRaisedObserver(bot, start, 0.90D);
+        AIPlayerEntity target = spawnBot(world, "StrictHiddenDropTarget", targetGoal);
+        FollowSwimming follower = new FollowSwimming();
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            require(context, SwimRoute.observedCell(bot, world, landing, false) == SwimRoute.Cell.DRY,
+                    "the lower landing and its support must remain visibly provable");
+            require(context, !ObservableWorldQuery.canObserveCellThroughFluids(bot, landing.above(3)),
+                    "fixture did not hide an intermediate deep-drop sweep cell");
+            require(context, !SwimRoute.canObserveWalkedStepRefusalEnvelope(
+                            bot, landing, WalkedStep.Kind.STEP_DOWN),
+                    "strict deep-drop fixture did not reject the hidden fall-column envelope");
+            TeleportAudit.reset(bot);
+            require(context, follower.follow(bot, target, 1, 0.25D),
+                    "strict follow started a deep drop despite an unobservable fall-column cell");
+            require(context, bot.getActionPack().stepIdle() && bot.blockPosition().equals(start)
+                            && TeleportAudit.corrections(bot) == 0,
+                    "hidden deep-drop validation moved the bot instead of failing closed");
+        } finally {
+            follower.cancelStep(bot);
+            installConfig(original);
+            despawn(world, bot, target);
+        }
+        context.succeed();
+    }
+
+    /**
+     * A long, completely visible water corridor takes more than one strict search work slice.
+     * PENDING must remain distinct from EMPTY and retain the partially consumed neighbour cursor,
+     * otherwise a strict follow would either report a false no-route result or restart forever.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_route_search_resumes_after_pending_slice", maxTicks = 30)
+    public void strictRouteSearchResumesAfterPendingSlice(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -80));
+        for (int dx = -2; dx <= 6; dx++) {
+            for (int dz = -4; dz <= 2; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        // Four water cells force more than one bounded 96-operation search slice because every
+        // expanded node still consumes its full 26-cell neighbour envelope.  Under the scoped
+        // water-navigation observer, a player can see through the water medium but not terrain,
+        // so a straight, solid-walled lane gives the far shore an unambiguous physical sightline.
+        BlockPos first = start.east();
+        BlockPos second = start.east(2);
+        BlockPos third = start.east(3);
+        BlockPos shore = start.east(4);
+        List<BlockPos> waterRoute = List.of(start, first, second, third);
+        for (BlockPos cell : waterRoute) {
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        // The shore's strict dry proof also observes its support. Open this one water-lane
+        // support cell so the raised swimmer can honestly see that support ray rather than
+        // turning an otherwise visible route into retained UNKNOWN work.
+        world.setBlock(third.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        Standability.clearCache();
+
+        AIPlayerEntity bot = spawnBot(world, "StrictPendingRouteBot", start);
+        poseWaterObserver(bot, start);
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withPerceptionRadius(withProfile(original, OperatingProfile.STRICT_SURVIVAL), 20));
+            require(context, SwimRoute.observedCell(bot, world, shore, false) == SwimRoute.Cell.DRY,
+                    "the far shore and its support must be visibly/physically provable within the configured strict perception radius");
+            SwimRoute.SearchProgress progress = SwimRoute.startSearch(
+                    start, shore, SwimRoute.Goal.EXIT, 0.0D, false);
+            SwimRoute.SearchResult result = progress.advance(bot, world,
+                    SwimRoute.STRICT_SEARCH_CANDIDATES_PER_TICK);
+            require(context, result.status() == SwimRoute.SearchStatus.PENDING && result.path().isEmpty(),
+                    "a bounded strict route slice reported an empty/final route instead of PENDING: " + result.status());
+
+            int slices = 1;
+            while (result.status() == SwimRoute.SearchStatus.PENDING && slices < 8) {
+                result = progress.advance(bot, world, SwimRoute.STRICT_SEARCH_CANDIDATES_PER_TICK);
+                slices++;
+            }
+            require(context, slices > 1 && result.status() == SwimRoute.SearchStatus.FOUND,
+                    "strict search did not resume its retained frontier to the visible shore: status="
+                            + result.status() + " slices=" + slices);
+            require(context, !result.path().isEmpty()
+                            && result.path().get(0).equals(first)
+                            && result.path().get(result.path().size() - 1).equals(shore),
+                    "resumed route lost its first edge or visible shore: " + result.path());
+        } finally {
+            installConfig(original);
+            despawn(world, bot);
+        }
+        context.succeed();
+    }
+
+    /**
+     * A strict search may retain unknown side edges, but it must not make an actually proved
+     * adjacent EXIT wait for an exhaustive score pass. The first bounded slice must publish this
+     * visible shore as an actionable physical route.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_strict_route_search_returns_adjacent_visible_exit", maxTicks = 30)
+    public void strictRouteSearchReturnsAdjacentVisibleExit(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -84));
+        for (int dx = -2; dx <= 4; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        BlockPos shore = start.east();
+        world.setBlock(start, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        Standability.clearCache();
+
+        AIPlayerEntity bot = spawnBot(world, "StrictAdjacentExitBot", start);
+        poseWaterObserver(bot, start);
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withPerceptionRadius(withProfile(original, OperatingProfile.STRICT_SURVIVAL), 12));
+            require(context, SwimRoute.observedCell(bot, world, shore, false) == SwimRoute.Cell.DRY,
+                    "adjacent strict EXIT shore was not visibly/physically provable");
+            SwimRoute.SearchResult result = SwimRoute.startSearch(
+                            start, shore, SwimRoute.Goal.EXIT, 0.0D, false)
+                    .advance(bot, world, SwimRoute.STRICT_SEARCH_CANDIDATES_PER_TICK);
+            require(context, result.status() == SwimRoute.SearchStatus.FOUND
+                            && result.path().size() == 1 && result.path().get(0).equals(shore),
+                    "strict route delayed a proved adjacent EXIT behind exhaustive search work: "
+                            + result.status() + " " + result.path());
+        } finally {
+            installConfig(original);
+            despawn(world, bot);
+        }
+        context.succeed();
+    }
+
+    /**
+     * An in-flight FollowSwimming step has a capability provenance just like a cached route. If an
+     * operator step loses that provenance mid-step, strict survival must cancel it before it can
+     * advance and then require a new live observation proof.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_operator_step_is_cancelled_before_strict_reproof", maxTicks = 30)
+    public void operatorStepIsCancelledBeforeStrictReproof(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -60));
+        for (int dx = -1; dx <= 3; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        BlockPos next = start.east();
+        BlockPos targetWater = next.east();
+        for (BlockPos cell : List.of(start, next, targetWater)) {
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        Standability.clearCache();
+
+        AIPlayerEntity bot = spawnBot(world, "FollowProvenanceBot", start);
+        AIPlayerEntity target = spawnBot(world, "FollowProvenanceTarget", targetWater);
+        target.teleportTo(world, targetWater.getX() + 0.5D, targetWater.getY() + 0.125D,
+                targetWater.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        FollowSwimming follower = new FollowSwimming();
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withProfile(original, OperatingProfile.OPERATOR));
+            require(context, CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "operator_follow_step_provenance").allowed(),
+                    "operator fixture did not enable the hidden-world capability");
+            TeleportAudit.reset(bot);
+            follower.follow(bot, target, 1, 0.25D);
+            require(context, bot.getActionPack().stepInFlightFor("follow_swim", next, WalkedStep.Kind.SWIM),
+                    "operator follow did not start its provenance-bearing swim step");
+            Vec3 before = bot.position();
+
+            // The old operator admission is deliberately made invalid before strict gets a turn.
+            // A continued action would either pass into this new blocker or carry privileged state
+            // across the profile boundary; a correct strict tick cancels and re-proves first.
+            world.setBlock(next, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(next.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            Standability.clearCache();
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_follow_step_provenance").allowed(),
+                    "strict fixture unexpectedly retained hidden-world capability");
+            // A generic controller deliberately asks for an indistinguishable same-cell/kind
+            // step. The old reason/cell/kind ownership check could mistake this unguarded
+            // replacement for Follow's own admission; the opaque ActionPack lease must reject it
+            // before the pre-owner ActionPack tick gets a chance to raw-validate the blocker.
+            ActionPack.StepLease foreignLease = bot.getActionPack().runStep(
+                    WalkedStep.begin(bot, next, WalkedStep.Kind.SWIM, "follow_swim"));
+            require(context, foreignLease == null
+                            && bot.getActionPack().stepInFlightFor("follow_swim", next, WalkedStep.Kind.SWIM),
+                    "an unguarded same-cell/kind step replaced Follow's guarded strict admission");
+            // This is the ordering used by AIPlayerEntity.tick(): ActionPack advances its
+            // owned step before the END_SERVER_TICK Follow owner gets a chance to reconcile the
+            // profile.  The guard must therefore stop the old operator step at this boundary,
+            // before WalkedStep can perform its first raw terrain validation.
+            bot.getActionPack().onUpdate();
+            WalkedStep.Result preOwner = bot.getActionPack().stepResult();
+            require(context, bot.getActionPack().stepIdle()
+                            && preOwner != null && preOwner.failed()
+                            && "continuation_guard".equals(preOwner.reason()),
+                    "the ActionPack pre-owner tick did not reject the operator step: "
+                            + (preOwner == null ? "no result" : preOwner.status() + " " + preOwner.reason()));
+            require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
+                    "the pre-owner profile guard advanced the bot: " + before + " -> " + bot.position());
+
+            // The ordinary owner reconciliation is intentionally second. It may only plan a
+            // fresh strict action, never resurrect the just-refused privileged step.
+            follower.follow(bot, target, 2, 0.25D);
+            require(context, bot.getActionPack().stepIdle(),
+                    "strict follow let an operator-admitted in-flight step continue after reproof failed");
+            require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
+                    "profile transition advanced the bot before strict reproof: " + before + " -> " + bot.position());
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "profile transition used a correction teleport: " + TeleportAudit.lastCaller(bot));
+        } finally {
+            follower.cancelStep(bot);
+            installConfig(original);
+            despawn(world, bot, target);
+        }
+        context.succeed();
+    }
+
+    /**
+     * A real Follow-owned guarded water step may be interrupted by a higher-priority buried-player
+     * escape. Once that emergency has installed its own physical successor, it owns movement
+     * against stale Follow planning, generic interruption, direct key release, and Baritone until
+     * NavSafetyNet performs its exact lifecycle cleanup.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_emergency_preemption_does_not_let_stale_follow_cancel_successor", maxTicks = 40)
+    public void emergencyPreemptionDoesNotLetStaleFollowCancelSuccessor(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -176));
+        for (int dx = -2; dx <= 3; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        BlockPos followNext = start.east();
+        BlockPos targetWater = followNext.east();
+        BlockPos emergencyShore = start.west();
+        for (BlockPos water : List.of(start, followNext, targetWater)) {
+            world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(water.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(water.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        // The direct suffocation-input helper sees precisely one ordinary physical landing after
+        // it preempts Follow: east is water, every other neighbour remains solid, and west is dry.
+        world.setBlock(emergencyShore, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(emergencyShore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(emergencyShore.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        Standability.clearCache();
+
+        AIPlayerEntity bot = spawnBot(world, "FollowEmergencyPreemptBot", start);
+        poseWaterObserver(bot, start);
+        AIPlayerEntity target = spawnBot(world, "FollowEmergencyPreemptTarget", targetWater);
+        poseWaterObserver(target, targetWater);
+        FollowSwimming follower = new FollowSwimming();
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            SwimRoute.Cell observedFollowNext = SwimRoute.observedCell(bot, world, followNext, false);
+            require(context, observedFollowNext != null && observedFollowNext.isWater(),
+                    "fixture did not expose Follow's first guarded water stroke: " + observedFollowNext);
+            follower.follow(bot, target, 1, 0.25D);
+            require(context, bot.getActionPack().stepInFlightFor(
+                            "follow_swim", followNext, WalkedStep.Kind.SWIM),
+                    "Follow did not install its owned guarded swim step before the emergency");
+
+            TeleportAudit.reset(bot);
+            require(context, NavSafetyNet.INSTANCE.escapeSuffocationByInputs(bot, world, start),
+                    "the suffocation emergency did not preempt Follow's guarded lease");
+            ActionPack pack = bot.getActionPack();
+            require(context, pack.stepInFlightFor(
+                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT),
+                    "the suffocation emergency did not install its exact physical dry successor");
+            require(context, pack.baritoneControlBlocked(),
+                    "the live Nav emergency successor did not retain the controller/Baritone fence");
+
+            // Tick the actual physical successor once, then attempt every foreign generic
+            // shutdown and zero/false key release. None may erase its inputs or lease outside
+            // ActionPack's own guarded-step tick.
+            pack.onUpdate();
+            int emergencyTicks = pack.activeStepTicks();
+            float emergencyForward = bot.zza;
+            require(context, emergencyTicks > 0 && emergencyForward > 0.0F,
+                    "the physical emergency successor did not write its real forward input before interference");
+            pack.cancelStep();
+            pack.stopMovement();
+            pack.stopNavigation();
+            pack.stopAll();
+            pack.setForward(0.0F);
+            pack.setStrafing(0.0F);
+            pack.setSneaking(false);
+            pack.setSprinting(false);
+            pack.setJumping(false);
+            require(context, pack.stepInFlightFor(
+                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT)
+                            && pack.activeStepTicks() == emergencyTicks && bot.zza == emergencyForward,
+                    "a foreign generic stop or zero/false input interfered with the live emergency successor");
+
+            follower.cancelStep(bot);
+            require(context, pack.stepInFlightFor(
+                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT),
+                    "stale Follow cancellation reached the active emergency successor");
+
+            // Calling Follow again reaches its private stepInFlight reconciliation with the old
+            // Follow lease no longer active and the emergency successor still running. Use the
+            // ordinary follow standoff so this catches both stale reconciliation and a later
+            // planner attempt in the same tick.
+            follower.follow(bot, target, 2, 0.25D);
+            require(context, pack.stepInFlightFor(
+                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT),
+                    "stale Follow reconciliation cancelled the active emergency successor");
+
+            ActionPack.StepLease foreignLease = pack.runStep(
+                    WalkedStep.begin(bot, followNext, WalkedStep.Kind.SWIM, "foreign_emergency_replacement"));
+            ActionResult blockedPath = pack.startSurfacePathTo(targetWater);
+            BaritoneGoals.Outcome blockedGoal = BaritoneGoals.walkTo(bot, targetWater);
+            require(context, foreignLease == null && blockedPath.isFailed()
+                            && ActionPack.GUARDED_STEP_FENCE.equals(blockedPath.reason())
+                            && !blockedGoal.accepted()
+                            && ActionPack.GUARDED_STEP_FENCE.equals(blockedGoal.reason()),
+                    "a foreign step, path, or direct Baritone goal bypassed the live emergency successor");
+
+            // Re-entering the direct emergency helper must recognize its own live lease rather
+            // than treating it as a foreign guarded step and preempting it.
+            require(context, NavSafetyNet.INSTANCE.escapeSuffocationByInputs(bot, world, start)
+                            && pack.stepInFlightFor(
+                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT)
+                            && pack.activeStepTicks() == emergencyTicks,
+                    "the suffocation helper self-preempted its own live physical successor");
+
+            NavSafetyNet.INSTANCE.clear(bot);
+            require(context, pack.stepIdle() && !pack.baritoneControlBlocked(),
+                    "NavSafetyNet.clear did not exactly cancel and release its emergency successor");
+            ActionPack.StepLease afterClear = pack.runStep(
+                    WalkedStep.begin(bot, emergencyShore, WalkedStep.Kind.FLAT, "after_nav_clear"));
+            require(context, afterClear != null && pack.stepInFlightFor(afterClear),
+                    "exact Nav lifecycle cleanup left a stale controller fence behind");
+            pack.cancelStep(afterClear);
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "emergency handoff used a correction teleport: " + TeleportAudit.lastCaller(bot));
+        } finally {
+            follower.cancelStep(bot);
+            bot.getActionPack().cancelStep();
+            installConfig(original);
+            despawn(world, bot, target);
+        }
+        context.succeed();
+    }
+
     private static boolean wallIntact(ServerLevel world, BlockPos feet, int zMin, int zMax) {
         for (int z = zMin; z <= zMax; z++) {
             for (int x = 10; x <= 11; x++) {
@@ -605,6 +1349,46 @@ public final class FollowSwimGameTests {
         return world.getEntitiesOfClass(AbstractBoat.class, pond.area(), boat -> true).isEmpty();
     }
 
+    /** Builds one exposed lower landing while every competing local dry landing stays sealed. */
+    private static void buildStrictRefusalEnvelopeFixture(ServerLevel world, BlockPos start, BlockPos landing,
+                                                           BlockPos hiddenBlocker) {
+        for (int dx = -2; dx <= 4; dx++) {
+            for (int dz = -3; dz <= 2; dz++) {
+                for (int dy = -5; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        // The eye-to-low-landing ray crosses this cell before it turns into the diagonal shaft.
+        // It must be open so the destination itself is genuinely visible, independently of the
+        // higher blocker that hides the validator's auxiliary corner/fall cell.
+        for (int y = start.getY() - 1; y <= start.getY(); y++) {
+            world.setBlock(new BlockPos(landing.getX(), y, start.getZ()),
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        world.setBlock(landing.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        // The exposed destination proof needs its whole feet/head shaft through the upper swept
+        // cell. The caller's blocker remains one cell above this opening, so a deep-drop
+        // validation ray still has an intentionally hidden auxiliary cell to reject.
+        for (int y = landing.getY(); y <= start.getY() + 1; y++) {
+            world.setBlock(new BlockPos(landing.getX(), y, landing.getZ()),
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        world.setBlock(hiddenBlocker, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        Standability.clearCache();
+    }
+
+    private static void clearDryTarget(ServerLevel world, BlockPos target) {
+        world.setBlock(target.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(target, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(target.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(target.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        Standability.clearCache();
+    }
+
     // ---- entity helpers --------------------------------------------------------------------
 
     static void holdStill(AIPlayerEntity bot) {
@@ -642,6 +1426,29 @@ public final class FollowSwimGameTests {
         return bot;
     }
 
+    /**
+     * Put a waterborne test bot just high enough that its eye is above its own source block.  The
+     * feet still resolve to {@code feet} and the body remains in water, but a fluid-aware sight
+     * ray can prove an exposed neighbouring water/shore cell instead of immediately striking the
+     * source water below the eye.
+     */
+    private static void poseWaterObserver(AIPlayerEntity bot, BlockPos feet) {
+        poseRaisedObserver(bot, feet, 0.125D);
+    }
+
+    /** Keeps the physical feet block fixed while giving a low-landing fixture a clear eye ray. */
+    private static void poseRaisedObserver(AIPlayerEntity bot, BlockPos feet, double yOffset) {
+        poseRaisedObserver(bot, feet, yOffset, 0.0D);
+    }
+
+    /** Keeps the physical feet block fixed while moving the observer inside that source cell. */
+    private static void poseRaisedObserver(AIPlayerEntity bot, BlockPos feet, double yOffset, double zOffset) {
+        bot.teleportTo(bot.level(), feet.getX() + 0.5D, feet.getY() + yOffset, feet.getZ() + 0.5D + zOffset,
+                Set.of(), 0.0F, 0.0F, true);
+        bot.setDeltaMovement(Vec3.ZERO);
+        bot.fallDistance = 0.0F;
+    }
+
     static void finish(GameTestHelper context, Pond pond, AIPlayerEntity bot, AIPlayerEntity target) {
         TaskManager.INSTANCE.abort(bot);
         despawn(context.getLevel(), bot, target);
@@ -653,6 +1460,34 @@ public final class FollowSwimGameTests {
             DangerWatcher.INSTANCE.clear(bot);
             NavSafetyNet.INSTANCE.clear(bot);
             AIPlayerManager.INSTANCE.despawn(world.getServer(), bot.getGameProfile().name());
+        }
+    }
+
+    /** Test-only immutable-config replacement; always restore it before a test yields another tick. */
+    private static MinecraftAiConfig withProfile(MinecraftAiConfig config, OperatingProfile profile) {
+        return new MinecraftAiConfig(profile, config.operatorCapabilities(), config.llm(), config.perception(),
+                config.brain(), config.watchdog(), config.logging(), config.survival(), config.combat(), config.night(),
+                config.mining(), config.goal(), config.nav(), config.pickup(), config.conversation(), config.storage(),
+                config.behaviour());
+    }
+
+    private static MinecraftAiConfig withPerceptionRadius(MinecraftAiConfig config, int radius) {
+        MinecraftAiConfig.Perception perception = config.perception();
+        return new MinecraftAiConfig(config.profile(), config.operatorCapabilities(), config.llm(),
+                new MinecraftAiConfig.Perception(radius, perception.maxBlocks(), perception.maxEntities(),
+                        perception.maxItems(), perception.includeRawLists()),
+                config.brain(), config.watchdog(), config.logging(), config.survival(), config.combat(), config.night(),
+                config.mining(), config.goal(), config.nav(), config.pickup(), config.conversation(), config.storage(),
+                config.behaviour());
+    }
+
+    private static void installConfig(MinecraftAiConfig config) {
+        try {
+            Field instance = MinecraftAiConfig.class.getDeclaredField("instance");
+            instance.setAccessible(true);
+            instance.set(null, config);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("failed to install GameTest config", exception);
         }
     }
 

@@ -1,10 +1,15 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -14,12 +19,14 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.level.block.state.BlockState;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -56,11 +63,12 @@ public final class NavSafetyNet {
     // immediately restore normal rescue.
     //
     // Ownership protocol (no ping-pong between follow and the crisis machine below): while the
-    // lease is valid follow owns every decision, including turning up for breath early
-    // (FollowOxygen.SURFACE_FLOOR_AIR sits above AIR_SURFACE_THRESHOLD, so follow always gets there
-    // first). The moment air reaches the measured direct-surface threshold (never lower than
-    // AIR_SURFACE_THRESHOLD) the lease ends and the crisis machine owns the bot; follow then
-    // makes NO movement at all, so neither undoes the other's step.
+    // lease is valid follow owns every decision, including turning up for breath early. Operator
+    // mode measures the direct column and normally leaves FollowOxygen.SURFACE_FLOOR_AIR room to
+    // do that first. Strict mode deliberately assumes the full bounded rescue depth instead; its
+    // conservative threshold equals that floor, so Nav takes ownership at the tie. Once either
+    // threshold is reached the lease ends and follow makes NO movement at all, so neither undoes
+    // the other's step.
     // Kept at the original 6 ticks: a 20-tick lease was tried for lag tolerance but the shallow-swim
     // ping-pong GameTest passes identically with 6, so a longer window was never shown to matter.
     private static final int FOLLOW_SWIM_LEASE_TICKS = 6;
@@ -82,7 +90,8 @@ public final class NavSafetyNet {
     // cells, rather than a flat ten seconds. An operator emergency teleport is therefore a last
     // resort for a route that demonstrably stopped making progress, never a shortcut for a long
     // but normally swimmable crossing.
-    private record WaterRescueDeadline(BlockPos feet, int routeCells, int deadlineTick) {
+    private record WaterRescueDeadline(BlockPos feet, BlockPos shore, int routeCells,
+                                       boolean hiddenWorldScan, int deadlineTick) {
     }
     private final Map<UUID, WaterRescueDeadline> waterRescueDeadlines = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> followSwimLeaseUntil = new ConcurrentHashMap<>();
@@ -100,22 +109,42 @@ public final class NavSafetyNet {
     // - A changed feet cell invalidates the cache immediately (the very next tick recomputes),
     //   since the search itself starts from that position.
     // - Otherwise the cached result is reused for at most WATER_SEARCH_CACHE_TICKS ticks. Water can
-    //   spread/recede every tick from vanilla scheduled fluid ticks (the same reason
-    //   Standability.clearCache() below still runs unconditionally every tick for every *other*
-    //   standability read this method makes), so an unbounded cache could hand back a route through
-    //   a cell that is no longer actually passable. A short, bounded staleness window keeps that
-    //   risk negligible without paying the full scan cost every tick: WalkedStep.refusal
-    //   (the check every walked step starts with) re-verifies the specific destination cell's *current* state before moving
-    //   and simply refuse the step (returning false, falling through to the remaining fallbacks
-    //   below) if the cached route's next cell turned out to no longer be valid -- so a stale route
-    //   can never move the bot into now-unsafe terrain, only delay noticing a shape change by at
-    //   most WATER_SEARCH_CACHE_TICKS ticks (a quarter of a second), far below even a one-cell
-    //   physical swim-step deadline that remains the actual safety backstop.
+    //   spread/recede every tick from vanilla scheduled fluid ticks, so an unbounded cache could
+    //   hand back a route through a cell that is no longer actually passable. A short, bounded
+    //   staleness window keeps that
+    //   risk negligible without paying the full scan cost every tick. Before a cached route may
+    //   influence a strict action, its immediate step and its proved shore are observed again;
+    //   WalkedStep.refusal then re-verifies the specific destination cell's *current* state before
+    //   moving. A stale route can therefore neither steer a strict bot with hidden information nor
+    //   move it into now-unsafe terrain.
     private static final int WATER_SEARCH_CACHE_TICKS = 5;
-    private record WaterSearchCache<T>(BlockPos feet, int computedTick, T result) {
+    /**
+     * Strict survival spreads the same complete bounded rescue BFS across server ticks. This is a
+     * scheduling slice, not a route/visibility/movement bound: the continuation retains every
+     * visible candidate until it finds a shore or exhausts the established rescue volume. It keeps
+     * a wide open lake from turning one drowning tick into tens of thousands of raycasts.
+     */
+    private static final int STRICT_WATER_SEARCH_CANDIDATES_PER_TICK = 96;
+    /**
+     * Reserve the exact 26-cell vanilla adjacent swim envelope inside the same strict rescue
+     * work slice. The remainder advances the retained BFS; neither number limits a route result.
+     */
+    private static final int STRICT_WATER_FALLBACK_WORK_PER_TICK = 26;
+    private static final int STRICT_WATER_BFS_WORK_PER_TICK = STRICT_WATER_SEARCH_CANDIDATES_PER_TICK
+            - STRICT_WATER_FALLBACK_WORK_PER_TICK;
+    /** A short-lived answer is reusable only under the perception context that proved it. */
+    private record WaterSearchCache<T>(BlockPos feet, int computedTick, boolean hiddenBlockScan,
+                                       int observationRadius, T result) {
     }
     private final Map<UUID, WaterSearchCache<WaterEscapeStep>> waterEscapeCache = new ConcurrentHashMap<>();
+    /** Incomplete strict routes retain their BFS frontier instead of synchronously re-scanning it. */
+    private final Map<UUID, StrictWaterEscapeSearch> strictWaterEscapeSearches = new ConcurrentHashMap<>();
     private final Map<UUID, WaterSearchCache<BlockPos>> breathableStandableCache = new ConcurrentHashMap<>();
+    /**
+     * A Nav emergency preempted a guarded Follow/rescue owner and may have started its own
+     * successor. Until ActionPack is idle, no normal water planning may reclaim its movement.
+     */
+    private final Set<UUID> awaitingEmergencySuccessors = ConcurrentHashMap.newKeySet();
 
     /**
      * Pure cache-validity check for the water-search memoization above, package-private so it can
@@ -141,9 +170,11 @@ public final class NavSafetyNet {
         followSwimLeaseUntil.remove(id);
         baritoneWaterLeaseUntil.remove(id);
         waterEscapeCache.remove(id);
+        strictWaterEscapeSearches.remove(id);
         breathableStandableCache.remove(id);
-        suffocationEscapes.remove(id);
-        rescueSteps.remove(id);
+        awaitingEmergencySuccessors.remove(id);
+        releaseSuffocationEscape(bot);
+        releaseRescueStep(bot, true);
     }
 
     public void clearAll() {
@@ -153,9 +184,17 @@ public final class NavSafetyNet {
         followSwimLeaseUntil.clear();
         baritoneWaterLeaseUntil.clear();
         waterEscapeCache.clear();
+        strictWaterEscapeSearches.clear();
         breathableStandableCache.clear();
+        for (SuffocationEscape escape : suffocationEscapes.values()) {
+            releaseSuffocationEscape(escape.bot);
+        }
         suffocationEscapes.clear();
+        for (RescueStepAdmission admission : rescueSteps.values()) {
+            admission.bot().getActionPack().cancelStep(admission.lease());
+        }
         rescueSteps.clear();
+        awaitingEmergencySuccessors.clear();
     }
 
     /**
@@ -180,11 +219,15 @@ public final class NavSafetyNet {
             clearFollowSwim(bot);
             return;
         }
-        followSwimLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + FOLLOW_SWIM_LEASE_TICKS);
         // A prior rescue is for an accidental water entry.  An actively renewed, high-air swim
         // follow is a different, short-lived intent and must not inherit that old controller.
+        // Remove its exact guarded admission before publishing the new Follow lease; merely
+        // dropping this bookkeeping would make tickBot return early with ActionPack fenced.
+        releaseRescueStep(bot, true);
+        followSwimLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + FOLLOW_SWIM_LEASE_TICKS);
         waterRescueShore.remove(bot.getUUID());
         waterRescueDeadlines.remove(bot.getUUID());
+        strictWaterEscapeSearches.remove(bot.getUUID());
     }
 
     /** Clears the narrow FollowTask swim lease on cancellation or any non-swim transition. */
@@ -206,6 +249,7 @@ public final class NavSafetyNet {
         baritoneWaterLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + BARITONE_WATER_LEASE_TICKS);
         waterRescueShore.remove(bot.getUUID());
         waterRescueDeadlines.remove(bot.getUUID());
+        strictWaterEscapeSearches.remove(bot.getUUID());
     }
 
     /** Ends the Baritone water lease: the drive ended (arrived, cancelled, taken over, bot removed) or the route no longer swims. */
@@ -236,6 +280,30 @@ public final class NavSafetyNet {
         return true;
     }
 
+    /** Records the only intentional way a stale guarded owner can hand movement to safety. */
+    private void noteEmergencyPreemption(AIPlayerEntity bot, boolean preempted) {
+        if (preempted) {
+            awaitingEmergencySuccessors.add(bot.getUUID());
+        }
+    }
+
+    /**
+     * A preempted owner must never re-plan over its unguarded/guarded safety successor. Clear the
+     * latch only after ActionPack reports no active step; an exact Nav owner then releases any
+     * completed emergency lease during its normal lifecycle reconciliation.
+     */
+    private boolean emergencySuccessorOwnsMovement(AIPlayerEntity bot) {
+        UUID id = bot.getUUID();
+        if (!awaitingEmergencySuccessors.contains(id)) {
+            return false;
+        }
+        if (!bot.getActionPack().stepIdle()) {
+            return true;
+        }
+        awaitingEmergencySuccessors.remove(id);
+        return false;
+    }
+
     public boolean tickBot(MinecraftServer server, AIPlayerEntity bot) {
         if (!bot.isAlive()) {
             return false;
@@ -263,8 +331,16 @@ public final class NavSafetyNet {
 
         // 1) Lava: standing in lava / lava underfoot -> escape immediately (highest priority)
         if (inLava(world, feet) || inLava(world, feet.below())) {
+            noteEmergencyPreemption(bot, bot.getActionPack().preemptGuardedStepForEmergency());
             escapeLava(bot, world, feet);
             throttledLog(server, bot, "navsafe_lava_escape", feet);
+            return true;
+        }
+
+        // A prior emergency successor remains the sole movement owner across later normal water
+        // ticks. Keep lava and buried-suffocation above this gate: a new actual emergency may
+        // intentionally preempt the earlier one.
+        if (emergencySuccessorOwnsMovement(bot)) {
             return true;
         }
 
@@ -284,59 +360,92 @@ public final class NavSafetyNet {
         }
         if (inCrisis) {
             // Fluid blocks can disappear/spread from vanilla scheduled ticks without going
-            // through our block actions, so the global standability cache may describe the
-            // previous water shape. Every standability read this method makes below (other than
-            // the memoized full-volume searches, which accept their own small bounded staleness --
-            // see WATER_SEARCH_CACHE_TICKS above) must use the current shape every tick.
-            Standability.clearCache();
+            // through our block actions. Water-rescue checks therefore use isStandableFresh for
+            // their handful of local proofs rather than evicting every bot's shared standability
+            // memo on every drowning tick.
             // Release condition: once the bot reaches a dry, standable position verified by
             // server-side block state -> the crisis is over, hand control back.
             // The fake player's cell-by-cell physical movement has no client landing packet, so
             // isOnGround() can still be false even after it is already standing on solid ground;
             // continuing to rely on it would shuttle the bot back and forth between two dry cells.
             if (isDryStandable(bot, world, feet)) {
-                waterRescueShore.remove(bot.getUUID());
-                waterRescueDeadlines.remove(bot.getUUID());
+                UUID id = bot.getUUID();
+                waterRescueShore.remove(id);
+                waterRescueDeadlines.remove(id);
+                // A retained strict frontier is meaningful only for this water crisis. Do not
+                // let it survive a normal landing and later bias a nearby, unrelated entry.
+                waterEscapeCache.remove(id);
+                strictWaterEscapeSearches.remove(id);
                 // The old navigator may still contain the DROP_DOWN edge that caused the rescue.
                 // Cancel the complete action stack before returning control or it will execute the
                 // same wet edge again on the next tick.
+                releaseRescueStep(bot, true);
                 bot.getActionPack().stopAll();
                 return false;
             }
             int now = server.getTickCount();
             // SAFE-DROWN: Air is critical and there's no air above to surface into (a water pocket
             // capped by stone) -> emergency-teleport to the nearest breathable landing spot.
-            if (bot.getAirSupply() <= EMERGENCY_AIR && !breathableAbove(world, feet)) {
+            // Do not read an unobserved air column merely to decide whether to attempt a rescue
+            // that strict survival cannot execute. emergencyTeleportToAir repeats the decision at
+            // its privileged boundary before its own volume scan.
+            boolean emergencyTeleportAllowed = bot.getAirSupply() <= EMERGENCY_AIR
+                    && CapabilityRuntime.decide(bot, PrivilegedCapability.EMERGENCY_TELEPORT,
+                    "navsafe_drowning_probe").allowed();
+            if (emergencyTeleportAllowed && !breathableAbove(world, feet)) {
                 if (emergencyTeleportToAir(bot, world, feet, now)) {
-                    waterRescueShore.remove(bot.getUUID());
-                    waterRescueDeadlines.remove(bot.getUUID());
+                    UUID id = bot.getUUID();
+                    waterRescueShore.remove(id);
+                    waterRescueDeadlines.remove(id);
+                    waterEscapeCache.remove(id);
+                    strictWaterEscapeSearches.remove(id);
                     throttledLog(server, bot, "navsafe_drown_teleport", feet);
                     return true;
                 }
             }
             // A rescue step in flight carries on by itself: nothing is re-planned until it has ended. A step somebody else
             // left running is dropped, the rescue owns the bot.
-            if (rescueStepInFlight(bot)) {
+            // Latch the current decision before an owned step is allowed to carry this tick.
+            // rescueStepInFlight cancels a step admitted under a different capability state.
+            boolean hiddenWaterScan = canUseHiddenWaterScan(bot);
+            if (rescueStepInFlight(bot, hiddenWaterScan)) {
                 throttledLog(server, bot, "navsafe_water_step", feet);
                 return true;
             }
             // A step that ends on the bank is done at the cell's edge, with the body still partly over the water: the last bit is a
             // walk to the middle of the dry cell (the release above needs the body out of the water), not a new escape from a cell that
             // is already dry.
-            if (bot.isInWater() && isDryStandableCell(world, feet) && WalkedStep.supported(bot)
-                    && beginRescueRecenter(bot, feet)) {
+            boolean dryCellForRecenter = hiddenWaterScan
+                    ? isFreshDryStandableCell(world, feet)
+                    : observedWaterEscapeCell(bot, world, feet, false) == WaterEscapeCell.DRY;
+            if (bot.isInWater() && dryCellForRecenter && WalkedStep.supported(bot)
+                    && beginRescueRecenter(bot, feet, hiddenWaterScan)) {
                 throttledLog(server, bot, "navsafe_water_step", feet);
                 return true;
             }
+            // A full-water-volume route proof is an operator capability. Strict survival still
+            // runs the same bounded BFS, but its frontier may only enter cells the bot can observe
+            // right now; this preserves ordinary physical exploration without inventing a shore
+            // behind a wall. The boolean is also part of the cache key so a profile/capability
+            // change can never reuse a privileged route in strict survival.
             // First prove a physically connected water route. The old Euclidean-only shore
             // choice could select a dry cell directly behind a wall and then reject every first
             // step because it temporarily increased straight-line distance. In a flooded cave
             // that left the bot motionless until strict-survival denied the teleport fallback.
-            WaterEscapeStep escape = cachedFindPhysicalWaterEscape(bot, world, feet, now);
+            WaterEscapeStep escape = cachedFindPhysicalWaterEscape(bot, world, feet, now, hiddenWaterScan);
+            if (escape != null && !reproveWaterEscapeStep(bot, world, escape, hiddenWaterScan)) {
+                // Do not keep retrying a route whose next action or shore proof went stale. The
+                // local observable fallback below can still move this tick; the next one will
+                // rebuild the bounded route from the current feet cell.
+                waterEscapeCache.remove(bot.getUUID());
+                strictWaterEscapeSearches.remove(bot.getUUID());
+                waterRescueDeadlines.remove(bot.getUUID());
+                escape = null;
+            }
             if (escape != null) {
                 waterRescueShore.put(bot.getUUID(), escape.shore().immutable());
-                scheduleWaterRescueDeadline(bot, feet, escape, now);
-                if (waterRescueDeadlineExceeded(bot, feet, now)) {
+                scheduleWaterRescueDeadline(bot, feet, escape, now, hiddenWaterScan);
+                if (waterRescueDeadlineExceeded(bot, feet, now, hiddenWaterScan)) {
                     if (emergencyTeleportToAir(bot, world, feet, now)) {
                         waterRescueShore.remove(bot.getUUID());
                         waterRescueDeadlines.remove(bot.getUUID());
@@ -344,46 +453,66 @@ public final class NavSafetyNet {
                         return true;
                     }
                 }
-                if (beginRescueStep(bot, escape.next(), "navsafe_water_rescue")) {
+                if (beginRescueStep(bot, escape.next(), "navsafe_water_rescue", hiddenWaterScan)) {
                     throttledLog(server, bot, "navsafe_water_step", feet);
                     return true;
                 }
             }
+            boolean surfaceAirUrgent = bot.getAirSupply() <= surfaceAirThreshold(bot, hiddenWaterScan);
             // Surface only when oxygen is actually low. At full air this used to pre-empt the
             // cached shore route from a lower water cell, then the shore controller deliberately
             // stepped back down from the top cell on the next tick. The two correct local actions
-            // therefore formed an endless Y/Y+1 policy oscillation. Connected shore movement
-            // remains the first choice; emergency breathing is a bounded fallback.
-            if (bot.getAirSupply() <= surfaceAirThreshold(bot)
-                    && physicalStepTowardAir(bot, world, feet)) {
+            // therefore formed an endless Y/Y+1 policy oscillation. A completed connected shore
+            // route remains the first choice above; without one, urgent breathable air outranks
+            // speculative same-level exploration.
+            if (surfaceAirUrgent && physicalStepTowardAir(bot, world, feet, hiddenWaterScan)) {
                 throttledLog(server, bot, "navsafe_surface_for_air", feet);
+                return true;
+            }
+            // A strict bot may know enough to take one visible water or dry step without yet
+            // knowing a complete route to shore. Let it explore that local, observation-proven
+            // frontier rather than freezing until it drowns; it will re-prove the next cell after
+            // every real walked step.
+            if (!hiddenWaterScan && beginObservableWaterRescueStep(bot, world, feet,
+                    strictWaterEscapeSearches.get(bot.getUUID()), surfaceAirUrgent)) {
+                throttledLog(server, bot, "navsafe_water_step", feet);
                 return true;
             }
             // Legacy local fallback: use the cached shore if it is still valid, otherwise search
             // again (the nearest landing spot that is both standable and has air at feet and head).
-            BlockPos shore = waterRescueShore.get(bot.getUUID());
-            if (shore == null || shore.equals(feet) || !Standability.isStandable(world, shore)) {
-                shore = cachedFindNearestBreathableStandable(bot, world, feet, now).orElse(null);
-            }
-            if (shore != null) {
-                waterRescueShore.put(bot.getUUID(), shore.immutable());
-                // Advance one validated adjacent swim/shore cell by real inputs (a walked step): ordinary movement.
-                if (physicalStepTowardShore(bot, world, feet, shore)) {
-                    throttledLog(server, bot, "navsafe_water_step", feet);
-                    return true;
+            if (hiddenWaterScan) {
+                BlockPos shore = waterRescueShore.get(bot.getUUID());
+                if (shore == null || shore.equals(feet) || !Standability.isStandableFresh(world, shore)) {
+                    shore = cachedFindNearestBreathableStandable(bot, world, feet, now).orElse(null);
                 }
-                double yaw = Math.toDegrees(Math.atan2(
-                        -(shore.getX() + 0.5D - bot.getX()), shore.getZ() + 0.5D - bot.getZ()));
-                bot.setYRot((float) yaw);
-                bot.setYHeadRot((float) yaw);
-                bot.setYBodyRot((float) yaw);
-                bot.getActionPack().setForward(1.0F); // swim toward shore
+                if (shore != null) {
+                    waterRescueShore.put(bot.getUUID(), shore.immutable());
+                    // Advance one validated adjacent swim/shore cell by real inputs (a walked step): ordinary movement.
+                    if (physicalStepTowardShore(bot, world, feet, shore)) {
+                        throttledLog(server, bot, "navsafe_water_step", feet);
+                        return true;
+                    }
+                    double yaw = Math.toDegrees(Math.atan2(
+                            -(shore.getX() + 0.5D - bot.getX()), shore.getZ() + 0.5D - bot.getZ()));
+                    bot.setYRot((float) yaw);
+                    bot.setYHeadRot((float) yaw);
+                    bot.setYBodyRot((float) yaw);
+                    bot.getActionPack().setForward(1.0F); // swim toward shore
+                } else {
+                    waterRescueShore.put(bot.getUUID(), feet.immutable()); // no shore point (open deep water): placeholder to hold crisis state, surface for air first
+                    bot.getActionPack().setForward(0.0F);
+                }
             } else {
+                // Do not turn or steer toward a shore learned from a hidden-world scan. Holding
+                // the crisis state leaves only visible walked steps and the physical air fallback.
                 waterRescueShore.put(bot.getUUID(), feet.immutable()); // no shore point (open deep water): placeholder to hold crisis state, surface for air first
                 bot.getActionPack().setForward(0.0F);
             }
             bot.getActionPack().setSprinting(false);
-            bot.getActionPack().setJumping(true); // continuous jump in water = surfacing/swimming
+            // A held jump is a physical upward stroke, not an idle-safe key.  The complete
+            // shore route above may always take its proved next step, but this no-route fallback
+            // may surface only once the same measured oxygen policy made air urgent.
+            bot.getActionPack().setJumping(surfaceAirUrgent);
             throttledLog(server, bot, "navsafe_surface_for_air", feet);
             return true;
         }
@@ -393,13 +522,59 @@ public final class NavSafetyNet {
 
     /** Memoized front for {@link #findPhysicalWaterEscape} -- see WATER_SEARCH_CACHE_TICKS above. */
     private WaterEscapeStep cachedFindPhysicalWaterEscape(AIPlayerEntity bot, ServerLevel world,
-                                                           BlockPos feet, int now) {
+                                                            BlockPos feet, int now, boolean hiddenWaterScan) {
+        if (hiddenWaterScan) {
+            // A strict continuation contains visibility-era facts and must never survive an
+            // operator transition only to be reused if strict survival is restored later.
+            strictWaterEscapeSearches.remove(bot.getUUID());
+        }
         WaterSearchCache<WaterEscapeStep> cached = waterEscapeCache.get(bot.getUUID());
-        if (cached != null && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
+        if (cached != null && cached.hiddenBlockScan() == hiddenWaterScan
+                && cached.observationRadius() == SwimRoute.observationRadius(bot)
+                && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
             return cached.result();
         }
-        WaterEscapeStep escape = findPhysicalWaterEscape(world, feet);
-        waterEscapeCache.put(bot.getUUID(), new WaterSearchCache<>(feet.immutable(), now, escape));
+        if (!hiddenWaterScan) {
+            return continueStrictWaterEscapeSearch(bot, world, feet, now);
+        }
+        WaterEscapeStep escape = findPhysicalWaterEscape(bot, world, feet, hiddenWaterScan);
+        waterEscapeCache.put(bot.getUUID(), new WaterSearchCache<>(feet.immutable(), now, hiddenWaterScan,
+                SwimRoute.observationRadius(bot), escape));
+        return escape;
+    }
+
+    /**
+     * Advances a strict rescue's retained BFS frontier by a bounded amount of server work. A
+     * finished answer remains in the normal short cache so the existing immediate-step/shore
+     * reproof applies unchanged; an incomplete answer deliberately returns {@code null} so this
+     * tick can use only the adjacent observable fallback or air stroke.
+     */
+    private WaterEscapeStep continueStrictWaterEscapeSearch(AIPlayerEntity bot, ServerLevel world,
+                                                            BlockPos feet, int now) {
+        UUID id = bot.getUUID();
+        StrictWaterEscapeSearch search = strictWaterEscapeSearches.get(id);
+        int observationRadius = SwimRoute.observationRadius(bot);
+        if (search == null || !search.accepts(feet, observationRadius)) {
+            search = new StrictWaterEscapeSearch(feet);
+            strictWaterEscapeSearches.put(id, search);
+        }
+        if (!search.admitCurrentFeet(feet)) {
+            // A non-adjacent displacement cannot be connected to the retained observed tree by
+            // an input-driven step, so it is the one safe re-root boundary.
+            search = new StrictWaterEscapeSearch(feet);
+            strictWaterEscapeSearches.put(id, search);
+        }
+        // World edits can open a previously occluded ray without moving the bot. Revalidate one
+        // retained UNKNOWN edge on a later server tick, rather than requiring a movement that
+        // strict survival cannot safely invent. A real viewpoint change still releases its old
+        // frontier under the normal bounded work budget.
+        search.beginObservationTick(now);
+        WaterEscapeStep escape = search.advance(bot, world, feet, STRICT_WATER_BFS_WORK_PER_TICK);
+        if (escape != null || search.exhausted()) {
+            strictWaterEscapeSearches.remove(id, search);
+            waterEscapeCache.put(id, new WaterSearchCache<>(feet.immutable(), now, false,
+                    observationRadius, escape));
+        }
         return escape;
     }
 
@@ -407,13 +582,21 @@ public final class NavSafetyNet {
     private Optional<BlockPos> cachedFindNearestBreathableStandable(AIPlayerEntity bot, ServerLevel world,
                                                                      BlockPos feet, int now) {
         WaterSearchCache<BlockPos> cached = breathableStandableCache.get(bot.getUUID());
-        if (cached != null && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
+        if (cached != null && cached.observationRadius() == SwimRoute.observationRadius(bot)
+                && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
             return Optional.ofNullable(cached.result());
         }
         Optional<BlockPos> found = findNearestBreathableStandable(world, feet);
         breathableStandableCache.put(bot.getUUID(),
-                new WaterSearchCache<>(feet.immutable(), now, found.orElse(null)));
+                new WaterSearchCache<>(feet.immutable(), now, false, SwimRoute.observationRadius(bot),
+                        found.orElse(null)));
         return found;
+    }
+
+    /** Whether this tick may use a route proof that reads cells outside the bot's observation. */
+    private static boolean canUseHiddenWaterScan(AIPlayerEntity bot) {
+        return CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                "navsafe_water_rescue").allowed();
     }
 
     /**
@@ -427,6 +610,19 @@ public final class NavSafetyNet {
     }
 
     private static int surfaceAirThreshold(AIPlayerEntity bot) {
+        return surfaceAirThreshold(bot, canUseHiddenWaterScan(bot));
+    }
+
+    /**
+     * Strict survival has no right to measure an unseen vertical water column. It instead assumes
+     * the bounded rescue depth, which starts a visible upward swim early enough for the deepest
+     * supported shaft without learning anything about that shaft. Operator mode retains the more
+     * precise measured-depth oxygen margin.
+     */
+    private static int surfaceAirThreshold(AIPlayerEntity bot, boolean hiddenWaterScan) {
+        if (!hiddenWaterScan) {
+            return surfaceAirThresholdForDepth(RESCUE_RADIUS_V);
+        }
         return surfaceAirThresholdForDepth(
                 verticalWaterCellsToSurface(bot.level(), bot.blockPosition()));
     }
@@ -477,24 +673,28 @@ public final class NavSafetyNet {
     }
 
     private void scheduleWaterRescueDeadline(AIPlayerEntity bot, BlockPos feet,
-                                             WaterEscapeStep escape, int now) {
+                                             WaterEscapeStep escape, int now, boolean hiddenWorldScan) {
         UUID id = bot.getUUID();
         WaterRescueDeadline existing = waterRescueDeadlines.get(id);
         if (existing != null && existing.feet().equals(feet)
-                && existing.routeCells() == escape.routeCells()) {
+                && existing.shore().equals(escape.shore())
+                && existing.routeCells() == escape.routeCells()
+                && existing.hiddenWorldScan() == hiddenWorldScan) {
             return;
         }
-        waterRescueDeadlines.put(id, new WaterRescueDeadline(feet.immutable(), escape.routeCells(),
-                now + waterRescueTimeoutTicks(escape.routeCells())));
+        waterRescueDeadlines.put(id, new WaterRescueDeadline(feet.immutable(), escape.shore().immutable(), escape.routeCells(),
+                hiddenWorldScan, now + waterRescueTimeoutTicks(escape.routeCells())));
     }
 
-    private boolean waterRescueDeadlineExceeded(AIPlayerEntity bot, BlockPos feet, int now) {
+    private boolean waterRescueDeadlineExceeded(AIPlayerEntity bot, BlockPos feet, int now,
+                                                boolean hiddenWorldScan) {
         WaterRescueDeadline deadline = waterRescueDeadlines.get(bot.getUUID());
-        return deadline != null && deadline.feet().equals(feet) && now > deadline.deadlineTick();
+        return deadline != null && deadline.feet().equals(feet)
+                && deadline.hiddenWorldScan() == hiddenWorldScan && now > deadline.deadlineTick();
     }
 
-    private static WaterEscapeStep findPhysicalWaterEscape(ServerLevel world, BlockPos start) {
-        Standability.clearCache();
+    private static WaterEscapeStep findPhysicalWaterEscape(AIPlayerEntity bot, ServerLevel world,
+                                                            BlockPos start, boolean hiddenWaterScan) {
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
         Map<BlockPos, BlockPos> previous = new HashMap<>();
         HashSet<BlockPos> visited = new HashSet<>();
@@ -505,31 +705,462 @@ public final class NavSafetyNet {
         while (!queue.isEmpty()) {
             BlockPos current = queue.removeFirst();
             for (BlockPos candidate : waterEscapeNeighbors(current)) {
-                if (Math.abs(candidate.getX() - origin.getX()) > RESCUE_RADIUS_H
-                        || Math.abs(candidate.getZ() - origin.getZ()) > RESCUE_RADIUS_H
-                        || Math.abs(candidate.getY() - origin.getY()) > RESCUE_RADIUS_V
-                        || !visited.add(candidate)) {
+                if (!withinRescueBounds(candidate, origin) || !visited.add(candidate)) {
                     continue;
                 }
-                if (!passableWaterColumn(world, candidate)) {
+                WaterEscapeCell cell = observedWaterEscapeCell(bot, world, candidate, hiddenWaterScan);
+                if (cell == null) {
                     continue;
                 }
                 previous.put(candidate, current);
-                if (isDryStandableCell(world, candidate)) {
-                    BlockPos first = candidate;
-                    while (previous.containsKey(first)
-                            && !previous.get(first).equals(origin)) {
-                        first = previous.get(first);
-                    }
-                    return new WaterEscapeStep(first.immutable(), candidate.immutable(),
-                            cellsFromOrigin(previous, origin, candidate));
+                if (cell == WaterEscapeCell.DRY) {
+                    return waterEscapeStep(previous, origin, candidate);
                 }
-                if (isWaterSwimCell(world, candidate)) {
+                if (cell == WaterEscapeCell.WATER) {
                     queue.addLast(candidate);
                 }
             }
         }
         return null;
+    }
+
+    /** The established physical rescue volume, shared by synchronous operator and sliced strict searches. */
+    private static boolean withinRescueBounds(BlockPos candidate, BlockPos origin) {
+        return Math.abs(candidate.getX() - origin.getX()) <= RESCUE_RADIUS_H
+                && Math.abs(candidate.getZ() - origin.getZ()) <= RESCUE_RADIUS_H
+                && Math.abs(candidate.getY() - origin.getY()) <= RESCUE_RADIUS_V;
+    }
+
+    private static WaterEscapeStep waterEscapeStep(Map<BlockPos, BlockPos> previous,
+                                                   BlockPos origin, BlockPos shore) {
+        BlockPos first = shore;
+        while (previous.containsKey(first) && !previous.get(first).equals(origin)) {
+            first = previous.get(first);
+        }
+        return new WaterEscapeStep(first.immutable(), shore.immutable(),
+                cellsFromOrigin(previous, origin, shore));
+    }
+
+    /**
+     * Reconstructs a retained BFS tree from the bot's <em>current</em> cell, not merely from the
+     * session's original root. A local fallback may have walked a different observed branch while
+     * the search was pending; following parent links to the lowest common ancestor then down to
+     * the shore yields an adjacent first step and never teleports or invents a new terrain edge.
+     */
+    private static WaterEscapeStep waterEscapeStepFromCurrent(Map<BlockPos, BlockPos> previous,
+                                                              BlockPos current, BlockPos shore) {
+        HashSet<BlockPos> currentAncestors = new HashSet<>();
+        for (BlockPos cursor = current; cursor != null; cursor = previous.get(cursor)) {
+            currentAncestors.add(cursor);
+        }
+        List<BlockPos> shoreToAncestor = new java.util.ArrayList<>();
+        BlockPos common = shore;
+        while (!currentAncestors.contains(common)) {
+            shoreToAncestor.add(common);
+            common = previous.get(common);
+            if (common == null) {
+                return null;
+            }
+        }
+        BlockPos next = null;
+        int cells = 0;
+        for (BlockPos cursor = current; !cursor.equals(common); cursor = previous.get(cursor)) {
+            BlockPos parent = previous.get(cursor);
+            if (parent == null) {
+                return null;
+            }
+            if (next == null) {
+                next = parent;
+            }
+            cells++;
+        }
+        if (next == null && !shoreToAncestor.isEmpty()) {
+            // The list is shore -> parent -> ...; its last member is the first child from the
+            // common ancestor toward the shore.
+            next = shoreToAncestor.get(shoreToAncestor.size() - 1);
+        }
+        cells += shoreToAncestor.size();
+        return next == null ? null : new WaterEscapeStep(next.immutable(), shore.immutable(), Math.max(1, cells));
+    }
+
+    /**
+     * A retained strict BFS. The work slice never discards a reachable observed cell: it merely
+     * resumes from {@link #queue} on the next server tick. A real adjacent fallback step is
+     * attached to the same observed tree, so visible work accumulates while the bot explores;
+     * only leaving the established rescue volume, a non-adjacent displacement, or a perception
+     * configuration change starts a fresh session.
+     */
+    private static final class StrictWaterEscapeSearch {
+        private final BlockPos origin;
+        private final int observationRadius;
+        private final ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+        /** A frontier cell is queued at most once while it awaits expansion. */
+        private final HashSet<BlockPos> queued = new HashSet<>();
+        private final Map<BlockPos, BlockPos> previous = new HashMap<>();
+        /** Candidates examined from the current viewpoint; valid cells also have a tree parent. */
+        private final HashSet<BlockPos> visited = new HashSet<>();
+        /**
+         * Visibility misses are retried after either a real viewpoint change or a later server
+         * tick. The latter matters because a nearby occluder can be removed while a strict bot is
+         * stationary. A fixed view re-proves only one retained edge on a later tick; a real
+         * viewpoint change still releases its old frontier under the cooperative work slice, so a
+         * large occluded shoreline cannot make the crisis tick iterate an entire rescue volume.
+         */
+        private final ArrayDeque<UnknownCandidate> unknowns = new ArrayDeque<>();
+        private final HashSet<BlockPos> unknownCells = new HashSet<>();
+        private BlockPos current;
+        private List<BlockPos> currentNeighbors;
+        private int nextNeighbor;
+        private BlockPos lastFeet;
+        private int observationEpoch;
+        /** Last server tick whose one stationary UNKNOWN retry allowance was reset. */
+        private int lastObservationTick = Integer.MIN_VALUE;
+        /** A stationary view re-proves at most one previously retained unknown edge each tick. */
+        private boolean stationaryUnknownRetryUsed;
+        private boolean retryTurn = true;
+        private boolean exhausted;
+        /** Retained strict local fallback: scan the legal 26-cell envelope once per feet cell. */
+        private BlockPos fallbackFeet;
+        private List<BlockPos> fallbackNeighbors;
+        private final ArrayList<ObservedWaterEscapeCell> fallbackCandidates = new ArrayList<>();
+        private int nextFallbackNeighbor;
+        private int nextFallbackCandidate;
+        private boolean fallbackScanned;
+
+        private StrictWaterEscapeSearch(BlockPos origin) {
+            this.origin = origin.immutable();
+            this.observationRadius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+            enqueue(this.origin);
+            visited.add(this.origin);
+            lastFeet = this.origin;
+        }
+
+        private boolean accepts(BlockPos feet, int currentObservationRadius) {
+            return observationRadius == currentObservationRadius && withinRescueBounds(feet, origin);
+        }
+
+        /**
+         * Re-roots the route *view* at a physically adjacent fallback landing without throwing
+         * away the known BFS tree. The new feet cell was just admitted by a strict walked step,
+         * so attaching it contains no new world read or hidden route fact.
+         */
+        private boolean admitCurrentFeet(BlockPos feet) {
+            if (!feet.equals(lastFeet)) {
+                // Every retained edge is connected to the last physical landing. A non-adjacent
+                // relocation (another controller, a command, or a teleport) must not inherit
+                // that tree merely because it happens to name an older visited cell.
+                if (!adjacent(lastFeet, feet)) {
+                    return false;
+                }
+                // Do not synchronously revisit every occluded candidate here. The new epoch
+                // merely makes the retained unknown queue eligible for the normal work slice.
+                observationEpoch++;
+                exhausted = false;
+            }
+            if (!connected(feet)) {
+                if (!connected(lastFeet)) {
+                    return false;
+                }
+                // `feet` may have been an unknown candidate earlier. The successful physical
+                // fallback is the new observed edge that makes it part of the retained tree.
+                visited.add(feet.immutable());
+                unknownCells.remove(feet);
+                previous.put(feet.immutable(), lastFeet.immutable());
+                enqueue(feet.immutable());
+                exhausted = false;
+            }
+            lastFeet = feet.immutable();
+            return true;
+        }
+
+        /**
+         * A ray's result is current observation, not a permanent fact about a stationary bot.
+         * When the world changes, an occluding block can disappear without a physical fallback
+         * being legal or necessary. Each new server tick grants one retained UNKNOWN edge a fresh
+         * ray; a physical viewpoint change still advances the epoch and releases its old
+         * frontier. Neither path turns an unobserved edge into a route without a fresh ray and
+         * cell proof.
+         */
+        private void beginObservationTick(int now) {
+            if (lastObservationTick == now) {
+                return;
+            }
+            lastObservationTick = now;
+            stationaryUnknownRetryUsed = false;
+            if (!unknowns.isEmpty()) {
+                exhausted = false;
+            }
+        }
+
+        private boolean exhausted() {
+            return exhausted && fallbackScanned && nextFallbackCandidate >= fallbackCandidates.size();
+        }
+
+        private WaterEscapeStep advance(AIPlayerEntity bot, ServerLevel world, BlockPos feet, int workBudget) {
+            int work = 0;
+            while (work < workBudget) {
+                boolean retryReady = hasEligibleUnknown();
+                boolean frontierReady = current != null || !queue.isEmpty();
+                if (!retryReady && !frontierReady) {
+                    // An unknown from this exact observation epoch remains deliberately pending.
+                    // A physical viewpoint change or its one later server-tick revalidation can
+                    // make it eligible; caching an empty answer here would discard that future
+                    // observable work.
+                    exhausted = unknowns.isEmpty();
+                    return null;
+                }
+
+                WaterEscapeStep escape;
+                if (retryReady && (retryTurn || !frontierReady)) {
+                    // A retry dequeue, including a stale entry, is a unit of work. Alternating
+                    // it with the BFS frontier makes both the retained exploration and newly
+                    // observable edge work live without imposing a route-result cap.
+                    work++;
+                    escape = retryOneUnknown(bot, world, feet);
+                    retryTurn = false;
+                } else {
+                    // Loading a frontier node, closing its partial neighbour cursor, every
+                    // skipped neighbour, and every observed neighbour all consume one unit.
+                    // That keeps queue bookkeeping itself from becoming an unbounded tick cost.
+                    work++;
+                    escape = advanceOneFrontierOperation(bot, world, feet);
+                    retryTurn = true;
+                }
+                if (escape != null) {
+                    return escape;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Advances the fully legal local swim envelope without adding work beyond this rescue
+         * tick's shared 96-operation budget. It retains the observed candidates until every
+         * geometry slot is examined, preserving dry-first ranking without rescanning 26 rays
+         * after every incomplete BFS slice.
+         */
+        private BlockPos nextObservableFallback(AIPlayerEntity bot, ServerLevel world, BlockPos feet,
+                                                int workBudget, boolean allowWaterExploration) {
+            if (!feet.equals(fallbackFeet)) {
+                fallbackFeet = feet.immutable();
+                fallbackNeighbors = waterEscapeNeighbors(fallbackFeet);
+                fallbackCandidates.clear();
+                nextFallbackNeighbor = 0;
+                nextFallbackCandidate = 0;
+                fallbackScanned = false;
+            }
+            int work = 0;
+            while (!fallbackScanned && work < workBudget) {
+                if (nextFallbackNeighbor >= fallbackNeighbors.size()) {
+                    fallbackCandidates.sort(java.util.Comparator.comparingInt(candidate ->
+                            observableWaterStepPriority(fallbackFeet, candidate.cell(), candidate.kind())));
+                    fallbackScanned = true;
+                    break;
+                }
+                BlockPos candidate = fallbackNeighbors.get(nextFallbackNeighbor++);
+                work++;
+                WaterEscapeCell cell = observedWaterEscapeCell(bot, world, candidate, false);
+                if (cell != null) {
+                    fallbackCandidates.add(new ObservedWaterEscapeCell(candidate.immutable(), cell));
+                }
+            }
+            if (!fallbackScanned && nextFallbackNeighbor >= fallbackNeighbors.size()) {
+                fallbackCandidates.sort(java.util.Comparator.comparingInt(candidate ->
+                        observableWaterStepPriority(fallbackFeet, candidate.cell(), candidate.kind())));
+                fallbackScanned = true;
+            }
+            if (!fallbackScanned || nextFallbackCandidate >= fallbackCandidates.size()) {
+                return null;
+            }
+            ObservedWaterEscapeCell candidate = fallbackCandidates.get(nextFallbackCandidate);
+            // A water-rescue request can exist while the bot still has full lungs (for example
+            // after a transient entry). Preserve the established oxygen policy: an immediately
+            // visible dry bank and same-level water exploration remain useful, but a vertical
+            // surface/dive stroke waits until the measured rescue threshold asks for air. The
+            // retained cursor is deliberately not consumed, so that exact observed stroke becomes
+            // available immediately when the air boundary is crossed.
+            if (!allowWaterExploration && candidate.kind() != WaterEscapeCell.DRY
+                    && candidate.cell().getY() != fallbackFeet.getY()) {
+                return null;
+            }
+            nextFallbackCandidate++;
+            return candidate.cell();
+        }
+
+        private boolean hasEligibleUnknown() {
+            UnknownCandidate unknown = unknowns.peekFirst();
+            return unknown != null && (unknown.observationEpoch() < observationEpoch
+                    || (!stationaryUnknownRetryUsed && unknown.observedTick() < lastObservationTick));
+        }
+
+        /** Performs exactly one queue/cursor/neighbour operation from the retained BFS. */
+        private WaterEscapeStep advanceOneFrontierOperation(AIPlayerEntity bot, ServerLevel world,
+                                                             BlockPos feet) {
+            if (current == null) {
+                current = queue.pollFirst();
+                if (current == null) {
+                    return null;
+                }
+                queued.remove(current);
+                currentNeighbors = waterEscapeNeighbors(current);
+                nextNeighbor = 0;
+                return null;
+            }
+            if (nextNeighbor >= currentNeighbors.size()) {
+                current = null;
+                currentNeighbors = null;
+                return null;
+            }
+            BlockPos candidate = currentNeighbors.get(nextNeighbor++);
+            if (!withinRescueBounds(candidate, origin) || !visited.add(candidate)) {
+                return null;
+            }
+            WaterEscapeProbe probe = probeWaterEscapeCell(bot, world, candidate, false);
+            WaterEscapeCell cell = probe.cell();
+            if (cell == null) {
+                // Retain only a true visibility miss for a later fresh observation (from a
+                // viewpoint change or the bounded next-tick retry); a visible physical rejection
+                // is known and must not keep this rescue PENDING forever.
+                if (probe.unknown()) {
+                    rememberUnknown(candidate, current);
+                }
+                return null;
+            }
+            return admitObservedCell(candidate, current, cell, feet);
+        }
+
+        /** Retries one formerly unknown edge after a real viewpoint change or its next observation tick. */
+        private WaterEscapeStep retryOneUnknown(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+            UnknownCandidate unknown = unknowns.removeFirst();
+            if (!unknownCells.remove(unknown.cell()) || connected(unknown.cell())
+                    || !connected(unknown.parent())) {
+                return null;
+            }
+            // A changed viewpoint can release several older edges under this slice's budget. A
+            // fixed view gets one retained ray only; the requeued edge records this tick and is
+            // consequently ineligible until the next one.
+            stationaryUnknownRetryUsed = true;
+            WaterEscapeProbe probe = probeWaterEscapeCell(bot, world, unknown.cell(), false);
+            WaterEscapeCell cell = probe.cell();
+            if (cell == null) {
+                if (probe.unknown()) {
+                    rememberUnknown(unknown.cell(), unknown.parent());
+                }
+                return null;
+            }
+            return admitObservedCell(unknown.cell(), unknown.parent(), cell, feet);
+        }
+
+        private WaterEscapeStep admitObservedCell(BlockPos candidate, BlockPos parent,
+                                                   WaterEscapeCell cell, BlockPos feet) {
+            BlockPos admitted = candidate.immutable();
+            previous.put(admitted, parent.immutable());
+            if (cell == WaterEscapeCell.DRY) {
+                return waterEscapeStepFromCurrent(previous, feet, admitted);
+            }
+            enqueue(admitted);
+            return null;
+        }
+
+        private void rememberUnknown(BlockPos candidate, BlockPos parent) {
+            BlockPos unknown = candidate.immutable();
+            if (unknownCells.add(unknown)) {
+                unknowns.addLast(new UnknownCandidate(unknown, parent.immutable(), observationEpoch,
+                        lastObservationTick));
+            }
+        }
+
+        private void enqueue(BlockPos cell) {
+            if (queued.add(cell)) {
+                queue.addLast(cell);
+            }
+        }
+
+        private boolean connected(BlockPos cell) {
+            return origin.equals(cell) || previous.containsKey(cell);
+        }
+
+        private static boolean adjacent(BlockPos from, BlockPos to) {
+            int dx = Math.abs(to.getX() - from.getX());
+            int dy = Math.abs(to.getY() - from.getY());
+            int dz = Math.abs(to.getZ() - from.getZ());
+            return dx <= 1 && dy <= 1 && dz <= 1 && (dx != 0 || dy != 0 || dz != 0);
+        }
+
+        private record UnknownCandidate(BlockPos cell, BlockPos parent, int observationEpoch, int observedTick) {
+        }
+    }
+
+    private enum WaterEscapeCell {
+        WATER,
+        DRY
+    }
+
+    /**
+     * Classifies a rescue cell while keeping observation failure distinct from a visible physical
+     * rejection. The retained strict frontier retries only genuinely unobserved edges; a visible
+     * wall/hazard/non-landing is known invalid and must let a search complete normally.
+     */
+    private static WaterEscapeProbe probeWaterEscapeCell(AIPlayerEntity bot, ServerLevel world,
+                                                         BlockPos candidate, boolean hiddenWaterScan) {
+        if (!hiddenWaterScan && !canObserveWaterRescueColumn(bot, candidate)) {
+            return WaterEscapeProbe.unobserved();
+        }
+        BlockState feet = world.getBlockState(candidate);
+        BlockState head = world.getBlockState(candidate.above());
+        if (!feet.getCollisionShape(world, candidate).isEmpty()
+                || !head.getCollisionShape(world, candidate.above()).isEmpty()
+                || Standability.isDangerous(feet)
+                || Standability.isDangerous(head)) {
+            return WaterEscapeProbe.invalid();
+        }
+        if (feet.getFluidState().is(FluidTags.WATER) || head.getFluidState().is(FluidTags.WATER)) {
+            return WaterEscapeProbe.valid(WaterEscapeCell.WATER);
+        }
+        // An exposed empty support is a visible physical rejection, not an unobserved collider:
+        // prove the cell before fresh standability checks so strict fallback can exhaust it.
+        if (!hiddenWaterScan && !ObservableWorldQuery.canObserveCellThroughFluids(bot, candidate.below())) {
+            return WaterEscapeProbe.unobserved();
+        }
+        return Standability.isStandableFresh(world, candidate)
+                ? WaterEscapeProbe.valid(WaterEscapeCell.DRY) : WaterEscapeProbe.invalid();
+    }
+
+    /** Immediate caller view of {@link #probeWaterEscapeCell}. */
+    private static WaterEscapeCell observedWaterEscapeCell(AIPlayerEntity bot, ServerLevel world,
+                                                           BlockPos candidate, boolean hiddenWaterScan) {
+        return probeWaterEscapeCell(bot, world, candidate, hiddenWaterScan).cell();
+    }
+
+    private record WaterEscapeProbe(WaterEscapeCell cell, boolean observed) {
+        private static WaterEscapeProbe valid(WaterEscapeCell cell) {
+            return new WaterEscapeProbe(cell, true);
+        }
+
+        private static WaterEscapeProbe invalid() {
+            return new WaterEscapeProbe(null, true);
+        }
+
+        private static WaterEscapeProbe unobserved() {
+            return new WaterEscapeProbe(null, false);
+        }
+
+        private boolean unknown() {
+            return !observed;
+        }
+    }
+
+    /** Cheap configured-range rejection keeps a strict water BFS from issuing futile rays. */
+    private static boolean canObserveWaterRescueColumn(AIPlayerEntity bot, BlockPos candidate) {
+        return withinWaterRescueObservationRange(bot, candidate)
+                && withinWaterRescueObservationRange(bot, candidate.above())
+                && ObservableWorldQuery.canObserveCellThroughFluids(bot, candidate)
+                && ObservableWorldQuery.canObserveCellThroughFluids(bot, candidate.above());
+    }
+
+    private static boolean withinWaterRescueObservationRange(AIPlayerEntity bot, BlockPos candidate) {
+        double radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        return bot.getEyePosition().distanceToSqr(candidate.getCenter()) <= radius * radius;
     }
 
     private static int cellsFromOrigin(Map<BlockPos, BlockPos> previous, BlockPos origin,
@@ -543,14 +1174,19 @@ public final class NavSafetyNet {
     }
 
     static List<BlockPos> waterEscapeNeighbors(BlockPos current) {
-        java.util.ArrayList<BlockPos> result = new java.util.ArrayList<>(14);
-        result.add(current.above());
-        for (Direction direction : Direction.Plane.HORIZONTAL) {
-            result.add(current.relative(direction));
-            result.add(current.relative(direction).above());
-            result.add(current.relative(direction).below());
+        // WalkedStep.Kind.SWIM accepts the complete adjacent 3x3x3 envelope (except the current
+        // cell), including diagonal strokes. Do not quietly turn vanilla-legal diagonal water or
+        // bank exits into an invented cardinal-only restriction.
+        java.util.ArrayList<BlockPos> result = new java.util.ArrayList<>(26);
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx != 0 || dy != 0 || dz != 0) {
+                        result.add(current.offset(dx, dy, dz));
+                    }
+                }
+            }
         }
-        result.add(current.below());
         return result;
     }
 
@@ -575,32 +1211,108 @@ public final class NavSafetyNet {
                 && Standability.isStandable(world, candidate);
     }
 
+    /** Fresh water-crisis form: does not touch the shared memo while fluid shapes are changing. */
+    private static boolean isFreshDryStandableCell(ServerLevel world, BlockPos candidate) {
+        return world.getFluidState(candidate).isEmpty()
+                && world.getFluidState(candidate.above()).isEmpty()
+                && Standability.isStandableFresh(world, candidate);
+    }
+
     /**
      * The kind of {@link WalkedStep} that takes the bot from its cell onto the adjacent {@code cell}: a swim for a water cell, a walk,
      * hop or drop for a dry landing (null when no walk covers the height difference). Shared by the rescue and the swim follower.
      */
     static WalkedStep.Kind stepKindTo(AIPlayerEntity bot, BlockPos cell) {
         if (isDryStandableCell(bot.level(), cell)) {
-            return WalkedStepRules.walkKindFor(cell.getY() - bot.blockPosition().getY());
+            return dryStepKind(bot, cell);
         }
         return WalkedStep.Kind.SWIM;
     }
 
-    /** Bots whose action pack is running a step this net started (the water rescue). */
-    private final java.util.Set<UUID> rescueSteps = ConcurrentHashMap.newKeySet();
+    private static WalkedStep.Kind freshStepKindTo(AIPlayerEntity bot, BlockPos cell) {
+        if (isFreshDryStandableCell(bot.level(), cell)) {
+            return dryStepKind(bot, cell);
+        }
+        return WalkedStep.Kind.SWIM;
+    }
+
+    /** Dry member of the adjacent rescue envelope: a vertical descent is a real gravity drop. */
+    private static WalkedStep.Kind dryStepKind(AIPlayerEntity bot, BlockPos cell) {
+        BlockPos feet = bot.blockPosition();
+        if (cell.getX() == feet.getX() && cell.getZ() == feet.getZ() && cell.getY() < feet.getY()) {
+            return WalkedStep.Kind.DROP;
+        }
+        return WalkedStepRules.walkKindFor(cell.getY() - feet.getY());
+    }
+
+    /**
+     * Rescue steps this net owns, latched to the hidden-world capability and the short physical
+     * corridor that admitted them. A step begun by an operator route must not keep moving after
+     * strict survival is restored, nor after another controller relocates the bot away from its
+     * own input-driven source/target corridor.
+     */
+    private final Map<UUID, RescueStepAdmission> rescueSteps = new ConcurrentHashMap<>();
+
+    private record RescueStepAdmission(AIPlayerEntity bot, ActionPack.StepLease lease,
+                                       boolean hiddenWorldScan, BlockPos origin, BlockPos destination) {
+        private RescueStepAdmission withLease(ActionPack.StepLease nextLease) {
+            return new RescueStepAdmission(bot, nextLease, hiddenWorldScan, origin, destination);
+        }
+    }
+
+    /** Removes a rescue admission and releases only its exact guarded ActionPack lease. */
+    private void releaseRescueStep(AIPlayerEntity bot, boolean cancel) {
+        RescueStepAdmission admission = rescueSteps.remove(bot.getUUID());
+        if (admission == null || admission.lease() == null) {
+            return;
+        }
+        if (cancel) {
+            bot.getActionPack().cancelStep(admission.lease());
+        } else {
+            bot.getActionPack().releaseStepLease(admission.lease());
+        }
+    }
 
     /**
      * Whether a rescue step is still running. Otherwise a step that somebody else left running is dropped: from here on the rescue
      * owns the bot's keys.
      */
-    private boolean rescueStepInFlight(AIPlayerEntity bot) {
+    private boolean rescueStepInFlight(AIPlayerEntity bot, boolean hiddenWaterScan) {
         var pack = bot.getActionPack();
-        if (rescueSteps.contains(bot.getUUID())) {
-            if (!pack.stepIdle()) {
-                return true;
+        if (emergencySuccessorOwnsMovement(bot)) {
+            return true;
+        }
+        RescueStepAdmission admission = rescueSteps.get(bot.getUUID());
+        if (admission != null) {
+            if (!pack.stepInFlightFor(admission.lease())) {
+                // A generic cancellation cannot contribute a rescue result. Ordinary foreign
+                // starts are fenced while this lease is live; an active non-owned successor here
+                // is the higher-priority lava/suffocation handoff and must carry on untouched.
+                boolean emergencySuccessorActive = !pack.stepIdle();
+                releaseRescueStep(bot, false);
+                waterEscapeCache.remove(bot.getUUID());
+                strictWaterEscapeSearches.remove(bot.getUUID());
+                waterRescueDeadlines.remove(bot.getUUID());
+                if (emergencySuccessorActive) {
+                    awaitingEmergencySuccessors.add(bot.getUUID());
+                    return true;
+                }
+                return false;
             }
-            rescueSteps.remove(bot.getUUID());
-            return false;
+            if (admission.hiddenWorldScan() != hiddenWaterScan
+                    || !withinRescueStepContinuationEnvelope(bot.blockPosition(), admission,
+                    pack.activeStepKind(), pack.activeStepTicks())) {
+                // Cancel before the action pack advances. The rest of this safety tick then
+                // re-plans under the current capability and can use only a fresh strict proof.
+                // A command or another controller may likewise not inherit movement keys that
+                // were admitted from a now-distant rescue source.
+                releaseRescueStep(bot, true);
+                waterEscapeCache.remove(bot.getUUID());
+                strictWaterEscapeSearches.remove(bot.getUUID());
+                waterRescueDeadlines.remove(bot.getUUID());
+                return false;
+            }
+            return true;
         }
         if (!pack.stepIdle()) {
             pack.cancelStep();
@@ -609,34 +1321,172 @@ public final class NavSafetyNet {
     }
 
     /** Starts a walk to the middle of the bot's own dry cell (its body is still partly over the water); false when it is refused. */
-    private boolean beginRescueRecenter(AIPlayerEntity bot, BlockPos feet) {
+    private boolean beginRescueRecenter(AIPlayerEntity bot, BlockPos feet, boolean hiddenWorldScan) {
+        if (!hiddenWorldScan && observedWaterEscapeCell(bot, bot.level(), feet, false) != WaterEscapeCell.DRY) {
+            return false;
+        }
         net.minecraft.world.phys.Vec3 middle = net.minecraft.world.phys.Vec3.atBottomCenterOf(feet);
         if (Math.hypot(middle.x - bot.getX(), middle.z - bot.getZ()) < WalkedStepRules.POINT_TOLERANCE) {
             return false;
         }
-        bot.getActionPack().runStep(WalkedStep.begin(bot, middle, WalkedStep.Kind.RECENTER, "navsafe_water_rescue"));
-        rescueSteps.add(bot.getUUID());
+        RescueStepAdmission admission = new RescueStepAdmission(bot, null, hiddenWorldScan,
+                feet.immutable(), feet.immutable());
+        ActionPack.StepLease lease = bot.getActionPack().runStep(
+                WalkedStep.begin(bot, middle, WalkedStep.Kind.RECENTER, "navsafe_water_rescue"),
+                (guardBot, step) -> canContinueRescueStep(guardBot, step, admission));
+        if (lease == null) {
+            return false;
+        }
+        rescueSteps.put(bot.getUUID(), admission.withLease(lease));
         return true;
     }
 
     /** Starts a rescue step onto {@code cell} (never moves the bot itself); false when the step is refused. */
-    private boolean beginRescueStep(AIPlayerEntity bot, BlockPos cell, String reason) {
-        WalkedStep.Kind kind = stepKindTo(bot, cell);
-        if (kind == null || WalkedStep.refusal(bot, cell, kind) != null) {
+    private boolean beginRescueStep(AIPlayerEntity bot, BlockPos cell, String reason, boolean hiddenWorldScan) {
+        // Do the strict observation proof immediately before fresh physical validation. This is
+        // deliberately repeated for a cached route: the proof that selected it can be stale.
+        if (!hiddenWorldScan && observedWaterEscapeCell(bot, bot.level(), cell, false) == null) {
             return false;
         }
-        bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason));
-        rescueSteps.add(bot.getUUID());
+        WalkedStep.Kind kind = freshStepKindTo(bot, cell);
+        if (kind == null) {
+            return false;
+        }
+        // The destination proof above covers the landing/water cell. The WalkedStep validator
+        // additionally reads corner/headroom/drop-sweep cells for dry moves, so prove precisely
+        // that vanilla envelope immediately before invoking it in strict survival.
+        if (!hiddenWorldScan && !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, cell, kind)) {
+            return false;
+        }
+        if (WalkedStep.refusal(bot, cell, kind) != null) {
+            return false;
+        }
+        RescueStepAdmission admission = new RescueStepAdmission(bot, null, hiddenWorldScan,
+                bot.blockPosition().immutable(), cell.immutable());
+        ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason),
+                (guardBot, step) -> canContinueRescueStep(guardBot, step, admission));
+        if (lease == null) {
+            return false;
+        }
+        rescueSteps.put(bot.getUUID(), admission.withLease(lease));
         return true;
+    }
+
+    /**
+     * Runs inside WalkedStep before its first or later raw terrain validation. This is the actual
+     * pre-owner tick boundary: ActionPack advances before END_SERVER_TICK can reconcile the
+     * rescue map, so a profile flip or a newly hidden strict destination must be rejected here.
+     */
+    private static boolean canContinueRescueStep(AIPlayerEntity bot, WalkedStep step,
+                                                  RescueStepAdmission admission) {
+        // This check has no world read and runs before the capability/visibility proof below.
+        // It permits only the one-cell target box (or intermediate vertical cells of a legal
+        // DROP/STEP_DOWN), plus WalkedStep's one-tick source-settling normalization envelope.
+        // A multi-cell external relocation therefore cannot keep old rescue keys alive.
+        if (!step.cell().equals(admission.destination())
+                || !withinRescueStepContinuationEnvelope(bot.blockPosition(), admission, step.kind(), step.ticks())) {
+            return false;
+        }
+        if (admission.hiddenWorldScan()) {
+            return canUseHiddenWaterScan(bot);
+        }
+        WaterEscapeCell observed = observedWaterEscapeCell(bot, bot.level(), step.cell(), false);
+        if (observed == null) {
+            return false;
+        }
+        if (step.kind() == WalkedStep.Kind.SWIM ? observed != WaterEscapeCell.WATER
+                : observed != WaterEscapeCell.DRY) {
+            return false;
+        }
+        return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
+    }
+
+    /** The axis-aligned corridor of one vanilla step; a drop's intermediate vertical cells are legitimate. */
+    private static boolean withinRescueStepCorridor(BlockPos feet, BlockPos origin, BlockPos destination) {
+        return between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getY(), origin.getY(), destination.getY())
+                && between(feet.getZ(), origin.getZ(), destination.getZ());
+    }
+
+    /**
+     * Preserve only WalkedStep's documented first-tick adjustment for a falling source: before
+     * its first terrain proof, a dry FLAT/STEP_UP/STEP_DOWN can be one cell above or below the
+     * planned source and normalize its kind from there. It must still be in the exact source
+     * column, and the exception expires after that first action tick.
+     */
+    private static boolean withinRescueStepContinuationEnvelope(BlockPos feet, RescueStepAdmission admission,
+                                                                 WalkedStep.Kind kind, int activeStepTicks) {
+        if (withinRescueStepCorridor(feet, admission.origin(), admission.destination())) {
+            return true;
+        }
+        BlockPos origin = admission.origin();
+        return isNormalizableDryWalk(kind)
+                && activeStepTicks >= 0 && activeStepTicks <= 1
+                && feet.getX() == origin.getX()
+                && feet.getZ() == origin.getZ()
+                && Math.abs(feet.getY() - origin.getY()) == 1;
+    }
+
+    private static boolean isNormalizableDryWalk(WalkedStep.Kind kind) {
+        return kind == WalkedStep.Kind.FLAT
+                || kind == WalkedStep.Kind.STEP_UP
+                || kind == WalkedStep.Kind.STEP_DOWN;
+    }
+
+    private static boolean between(int value, int first, int second) {
+        return value >= Math.min(first, second) && value <= Math.max(first, second);
+    }
+
+    /**
+     * Strict-survival fallback when the observation-bounded BFS has not yet seen a complete shore
+     * route. It can take only an adjacent candidate already proved by observedWaterEscapeCell; dry
+     * landings win, then same-height water, then upward/downward water. This is exploration by
+     * ordinary walked steps, never a steering vector toward an unseen shore.
+     */
+    private boolean beginObservableWaterRescueStep(AIPlayerEntity bot, ServerLevel world, BlockPos feet,
+                                                    StrictWaterEscapeSearch search, boolean allowWaterExploration) {
+        if (search == null) {
+            return false;
+        }
+        BlockPos candidate = search.nextObservableFallback(bot, world, feet,
+                STRICT_WATER_FALLBACK_WORK_PER_TICK, allowWaterExploration);
+        return candidate != null && beginRescueStep(bot, candidate, "navsafe_water_rescue", false);
+    }
+
+    private record ObservedWaterEscapeCell(BlockPos cell, WaterEscapeCell kind) {
+    }
+
+    /**
+     * Re-proves the two facts a cached route would otherwise carry across ticks: its immediate
+     * input-driven step and its dry destination. This is deliberately done before publishing the
+     * shore, scheduling a deadline, or beginning the step, so strict survival never acts on a
+     * route that became hidden behind a newly placed block.
+     */
+    private static boolean reproveWaterEscapeStep(AIPlayerEntity bot, ServerLevel world,
+                                                  WaterEscapeStep escape, boolean hiddenWaterScan) {
+        return observedWaterEscapeCell(bot, world, escape.next(), hiddenWaterScan) != null
+                && observedWaterEscapeCell(bot, world, escape.shore(), hiddenWaterScan) == WaterEscapeCell.DRY;
+    }
+
+    private static int observableWaterStepPriority(BlockPos feet, BlockPos candidate, WaterEscapeCell kind) {
+        if (kind == WaterEscapeCell.DRY) {
+            return 0;
+        }
+        int deltaY = candidate.getY() - feet.getY();
+        return deltaY == 0 ? 1 : deltaY > 0 ? 2 : 3;
     }
 
     private boolean physicalStepTowardAir(AIPlayerEntity bot,
                                           ServerLevel world,
-                                          BlockPos feet) {
+                                           BlockPos feet,
+                                           boolean hiddenWaterScan) {
         if (!isWaterSwimCell(world, feet)) {
             return false;
         }
         BlockPos above = feet.above();
+        if (!hiddenWaterScan && !canObserveWaterRescueColumn(bot, above)) {
+            return false;
+        }
         if (!world.getBlockState(above).getCollisionShape(world, above).isEmpty()
                 || !world.getBlockState(above.above()).getCollisionShape(world, above.above()).isEmpty()) {
             return false;
@@ -644,7 +1494,7 @@ public final class NavSafetyNet {
         if (!isWaterSwimCell(world, above)) {
             return false;
         }
-        return beginRescueStep(bot, above, "navsafe_water_surface");
+        return beginRescueStep(bot, above, "navsafe_water_surface", hiddenWaterScan);
     }
 
     /** The number of input-driven cells from the current feet cell to the proved dry shore. */
@@ -660,10 +1510,24 @@ public final class NavSafetyNet {
      * upward, the bot gets out the way a player does: {@link #escapeSuffocationByInputs}.
      */
     private boolean escapeSuffocation(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        // Reconcile a terminal physical successor first, but do not self-preempt a live one on
+        // the next NavSafetyNet tick. Operator teleport remains allowed to supersede that live
+        // step after its capability decision and before its privileged volume scan.
+        boolean physicalEscapeActive = suffocationStepInFlight(bot);
         boolean emergency = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(
                 bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                 "navsafe_suffocation").allowed();
-        if (emergency && suffocationEscapeIdle(bot)) {
+        // This method normally runs before tickBot's outer lava branch. A live physical
+        // suffocation successor must therefore not hide a newly lethal lava cell merely because
+        // it is still buried: lava deliberately preempts even this emergency lease before its
+        // direct jump/escape inputs are issued. Keep the capability decision above this ordinary
+        // local danger probe, so no privileged suffocation volume scan can move ahead of it.
+        if (inLava(world, feet) || inLava(world, feet.below())) {
+            noteEmergencyPreemption(bot, bot.getActionPack().preemptGuardedStepForEmergency());
+            escapeLava(bot, world, feet);
+            return true;
+        }
+        if (emergency && (physicalEscapeActive || suffocationEscapeIdle(bot))) {
             // The cache must be invalidated: reaching this "buried" branch means a block just changed (a cave-in / live-burial
             // scenario calling setBlockState), so the Standability cache still reflects the world before the change.
             Standability.clearCache();
@@ -671,6 +1535,10 @@ public final class NavSafetyNet {
             for (int dy = 1; dy <= SUFFOCATION_CLIMB_UP && feet.getY() + dy < top - 1; dy++) {
                 BlockPos candidate = feet.above(dy);
                 if (Standability.isStandable(world, candidate)) {
+                    // An operator teleport replaces any exact emergency ownership before it
+                    // changes position; never strand its guarded ActionPack fence.
+                    releaseSuffocationEscape(bot);
+                    releaseRescueStep(bot, true);
                     bot.getActionPack().stopAll();
                     bot.teleportTo(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
                             Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
@@ -679,13 +1547,26 @@ public final class NavSafetyNet {
                 }
             }
         }
+        if (physicalEscapeActive) {
+            return true;
+        }
+        // A buried bot outranks a retained Follow/rescue step. This is the only intentional
+        // foreign guarded-lease handoff before the strict real-input escape begins.
+        noteEmergencyPreemption(bot, bot.getActionPack().preemptGuardedStepForEmergency());
         return escapeSuffocationByInputs(bot, world, feet);
     }
 
     /** The state of one bot's escape from a block, kept across ticks: the break it is doing and when it last logged. */
     private static final class SuffocationEscape {
+        final AIPlayerEntity bot;
         final io.github.zoyluo.minecraftai.action.BlockMiner miner = new io.github.zoyluo.minecraftai.action.BlockMiner();
+        /** Exact guarded ActionPack lease for the physical PUSH_OUT/adjacent successor. */
+        ActionPack.StepLease stepLease;
         int lastLogTick = -1000;
+
+        private SuffocationEscape(AIPlayerEntity bot) {
+            this.bot = bot;
+        }
     }
 
     private final Map<UUID, SuffocationEscape> suffocationEscapes = new ConcurrentHashMap<>();
@@ -694,13 +1575,53 @@ public final class NavSafetyNet {
     /** No privileged escape may start while the bot is already walking or digging its own way out (that one carries on). */
     private boolean suffocationEscapeIdle(AIPlayerEntity bot) {
         SuffocationEscape state = suffocationEscapes.get(bot.getUUID());
-        return bot.getActionPack().stepIdle() && (state == null || state.miner.target() == null);
+        return bot.getActionPack().stepIdle()
+                && (state == null || (state.stepLease == null && state.miner.target() == null));
+    }
+
+    /** Reconciles only the exact physical escape lease; a later safety preemption is left alone. */
+    private boolean suffocationStepInFlight(AIPlayerEntity bot) {
+        SuffocationEscape state = suffocationEscapes.get(bot.getUUID());
+        if (state == null || state.stepLease == null) {
+            return false;
+        }
+        ActionPack.StepLease lease = state.stepLease;
+        if (bot.getActionPack().stepInFlightFor(lease)) {
+            return true;
+        }
+        bot.getActionPack().releaseStepLease(lease);
+        state.stepLease = null;
+        return false;
+    }
+
+    /** A guarded emergency step needs no terrain scan beyond WalkedStep's own physical checks. */
+    private static boolean canContinueSuffocationStep(AIPlayerEntity bot, WalkedStep step) {
+        return true;
+    }
+
+    /** Begins the exact, guarded successor that remains immune to generic ActionPack shutdown. */
+    private boolean beginSuffocationEmergencyStep(AIPlayerEntity bot, SuffocationEscape state, WalkedStep step) {
+        ActionPack.StepLease lease = bot.getActionPack().runEmergencyStep(step,
+                NavSafetyNet::canContinueSuffocationStep);
+        if (lease == null) {
+            return false;
+        }
+        state.stepLease = lease;
+        awaitingEmergencySuccessors.add(bot.getUUID());
+        return true;
     }
 
     /** The bot is not (or no longer) inside a block: whatever it was digging for its escape is over. */
     private void releaseSuffocationEscape(AIPlayerEntity bot) {
         SuffocationEscape state = suffocationEscapes.remove(bot.getUUID());
-        if (state != null && state.miner.target() != null) {
+        if (state == null) {
+            return;
+        }
+        if (state.stepLease != null) {
+            bot.getActionPack().cancelStep(state.stepLease);
+            state.stepLease = null;
+        }
+        if (state.miner.target() != null) {
             state.miner.cancel(bot);
         }
     }
@@ -717,10 +1638,18 @@ public final class NavSafetyNet {
      */
     boolean escapeSuffocationByInputs(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         var pack = bot.getActionPack();
+        SuffocationEscape state = suffocationEscapes.computeIfAbsent(bot.getUUID(), ignored -> new SuffocationEscape(bot));
+        // This direct helper can be called by GameTests as well as the buried tick path. Never
+        // preempt its own exact successor on the next invocation; release a completed lease first.
+        if (suffocationStepInFlight(bot)) {
+            return true;
+        }
+        // This package-visible helper is also exercised directly by GameTests; preserve the same
+        // high-priority handoff if it is entered outside tickBot's buried branch.
+        noteEmergencyPreemption(bot, pack.preemptGuardedStepForEmergency());
         if (!pack.stepIdle()) {
             return true;
         }
-        SuffocationEscape state = suffocationEscapes.computeIfAbsent(bot.getUUID(), ignored -> new SuffocationEscape());
         int now = world.getServer().getTickCount();
         if (state.miner.target() != null) {
             return tickEscapeBreak(bot, state);
@@ -728,14 +1657,14 @@ public final class NavSafetyNet {
         Standability.clearCache();
         if (io.github.zoyluo.minecraftai.action.WalkedStep.canPushOut(bot)) {
             pack.stopAll();
-            pack.runStep(io.github.zoyluo.minecraftai.action.WalkedStep.begin(bot, bot.position(),
-                    io.github.zoyluo.minecraftai.action.WalkedStep.Kind.PUSH_OUT, "navsafe_suffocation"));
+            beginSuffocationEmergencyStep(bot, state, WalkedStep.begin(bot, bot.position(),
+                    WalkedStep.Kind.PUSH_OUT, "navsafe_suffocation"));
             return true;
         }
         var walked = pack.adjacentStandableStep("navsafe_suffocation");
         if (walked != null) {
             pack.stopAll();
-            pack.runStep(walked);
+            beginSuffocationEmergencyStep(bot, state, walked);
             return true;
         }
         BlockPos target = escapeBreakTarget(bot, world, feet);
@@ -810,10 +1739,13 @@ public final class NavSafetyNet {
             return false;
         }
         BlockPos to = safe.get();
+        // A privileged teleport is the exact Nav lifecycle handoff for any physical suffocation
+        // successor too; clear that guarded lease before stopAll releases its former keys.
+        releaseSuffocationEscape(bot);
+        releaseRescueStep(bot, true);
         bot.getActionPack().stopAll();
         bot.teleportTo(world, to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D,
                 Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-        Standability.clearCache();
         return true;
     }
 
@@ -829,7 +1761,7 @@ public final class NavSafetyNet {
                     if (cursor.equals(origin)) {
                         continue; // proactive recovery must actually leave the wet edge/origin
                     }
-                    if (!Standability.isStandable(world, cursor)) {
+                    if (!Standability.isStandableFresh(world, cursor)) {
                         continue;
                     }
                     if (!world.getBlockState(cursor).isAir() || !world.getBlockState(cursor.above()).isAir()) {
@@ -876,7 +1808,7 @@ public final class NavSafetyNet {
                     // a swim cell made the fake player step out of the water for one tick, fall
                     // back, and repeat forever between the same two Y levels. Water cells may be
                     // traversed explicitly; dry cells still need real footing.
-                    if (!waterCell && !Standability.isStandable(world, candidate)) {
+                    if (!waterCell && !Standability.isStandableFresh(world, candidate)) {
                         continue;
                     }
                     candidates.add(candidate.immutable());
@@ -885,7 +1817,7 @@ public final class NavSafetyNet {
         }
         candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.distSqr(shore)));
         for (BlockPos candidate : candidates) {
-            if (beginRescueStep(bot, candidate, "navsafe_water_rescue")) {
+            if (beginRescueStep(bot, candidate, "navsafe_water_rescue", true)) {
                 return true;
             }
         }
@@ -896,7 +1828,7 @@ public final class NavSafetyNet {
         return !bot.isInWater()
                 && !world.getFluidState(feet).is(FluidTags.WATER)
                 && !world.getFluidState(feet.above()).is(FluidTags.WATER)
-                && Standability.isStandable(world, feet);
+                && Standability.isStandableFresh(world, feet);
     }
 
     private static void escapeLava(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {

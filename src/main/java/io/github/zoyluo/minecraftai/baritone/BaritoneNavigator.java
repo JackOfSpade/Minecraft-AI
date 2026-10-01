@@ -10,6 +10,7 @@ import baritone.api.pathing.goals.GoalNear;
 import baritone.api.pathing.goals.GoalRunAway;
 import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.utils.PathCalculationResult;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
@@ -75,6 +76,12 @@ public final class BaritoneNavigator {
      *              route that is already running without paying for another search on the server thread
      */
     public static Admission start(AIPlayerEntity bot, NavRoute route, boolean admit) {
+        // ActionPack is the only production caller, but keep the mutation boundary defensive:
+        // a guarded physical step must not even initialise or retarget a Baritone process before
+        // its exact owner reconciles the lease.
+        if (bot.getActionPack().baritoneControlBlocked()) {
+            return Admission.refused(ActionPack.GUARDED_STEP_FENCE);
+        }
         BaritoneRegistry registry = BaritoneRegistry.INSTANCE;
         IBaritone baritone = registry.get(bot);
         BaritoneSettings.applyNavLimits();

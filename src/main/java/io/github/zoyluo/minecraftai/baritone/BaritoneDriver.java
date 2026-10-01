@@ -4,6 +4,7 @@ import baritone.api.IBaritone;
 import baritone.api.event.events.PlayerUpdateEvent;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -80,6 +81,13 @@ public final class BaritoneDriver {
         boolean wasDriven = entry.driven;
         try {
             entry.bot = bot;
+            // ActionPack.yieldToBaritone() is cleanup, not admission: it deliberately refuses to
+            // disturb an unreconciled guarded step. The driver is the final boundary before a
+            // Baritone PRE tick or BotInputBridge can move the bot, so it must cleanly hand any
+            // direct/existing Baritone process back before the guarded step gets this tick.
+            if (guardedStepBlocksBaritone(bot, entry, baritone)) {
+                return false;
+            }
             if (entry.placedWater != null) {
                 BaritoneWaterFall.recover(bot, entry); // a water source a bucket fall left behind is taken back (also when not driven)
             }
@@ -89,11 +97,22 @@ public final class BaritoneDriver {
             entry.context.refreshEntities();
             injectTestFault("before_physics");
             baritone.getGameEventHandler().onTick(nextTick(EventState.PRE));
+            // A callback in PRE may have changed controller ownership in this same tick; do
+            // not let that turn into a bridge input below.
+            if (guardedStepBlocksBaritone(bot, entry, baritone)) {
+                return false;
+            }
             if (busy(baritone)) {
                 if (!wasDriven) {
                     entry.driven = true;
                     bot.getActionPack().yieldToBaritone();
+                    if (guardedStepBlocksBaritone(bot, entry, baritone)) {
+                        return false;
+                    }
                     BotLog.lifecycle(bot, "baritone_takeover", "goal", baritone.getPathingBehavior().getGoal());
+                }
+                if (guardedStepBlocksBaritone(bot, entry, baritone)) {
+                    return false;
                 }
                 entry.startX = bot.getX();
                 entry.startY = bot.getY();
@@ -118,6 +137,23 @@ public final class BaritoneDriver {
             tickFailed(bot, "baritone_tick_failed", "tick_failed", failure);
             return false;
         }
+    }
+
+    /**
+     * Cancels a direct or already-driven Baritone process before it can enter the input bridge.
+     * This is intentionally a cancellation, never a lease release: only the exact step owner
+     * (or NavSafetyNet's explicit emergency preemption) may remove the ActionPack fence.
+     */
+    private static boolean guardedStepBlocksBaritone(AIPlayerEntity bot, BaritoneRegistry.Entry entry, IBaritone baritone) {
+        if (!bot.getActionPack().baritoneControlBlocked()) {
+            return false;
+        }
+        if (entry.driven || busy(baritone)) {
+            // Registry preemption clears forced Baritone keys when it had driven a prior tick,
+            // cancels a just-started direct process, and preserves its normal route/water cleanup.
+            BaritoneRegistry.INSTANCE.preempt(bot, ActionPack.GUARDED_STEP_FENCE);
+        }
+        return true;
     }
 
     /**

@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
@@ -76,6 +77,9 @@ final class FollowStuckRecovery {
     private final FollowDigOut digOut = new FollowDigOut();
     /** A recovery step is running on the bot's action pack (it is a real walk, hop or drop over several ticks). */
     private boolean stepOwned;
+    /** Exact admission for the recovery step; stale recovery state must not observe or cancel a successor. */
+    private ActionPack.StepLease stepLease;
+    private WalkedStep step;
 
     /** True while a dig-out owns the bot (it is breaking blocks toward the player). */
     boolean isDigging() {
@@ -85,8 +89,13 @@ final class FollowStuckRecovery {
     void reset(AIPlayerEntity bot, int nowTick) {
         digOut.cancel(bot);
         if (stepOwned) {
-            bot.getActionPack().cancelStep();
+            ActionPack pack = bot.getActionPack();
+            if (pack.stepInFlightFor(stepLease)) {
+                pack.cancelStep();
+            }
             stepOwned = false;
+            stepLease = null;
+            step = null;
         }
         lastPos = bot.blockPosition().immutable();
         recoveryStartDistance = Double.NaN;
@@ -120,12 +129,33 @@ final class FollowStuckRecovery {
             return false;
         }
         if (stepOwned) {
-            if (!bot.getActionPack().stepIdle()) {
+            ActionPack pack = bot.getActionPack();
+            ActionPack.StepLease lease = stepLease;
+            if (pack.stepInFlightFor(lease)) {
                 // A step is deliberate progress in flight: the stall clock does not count these ticks, and the next window is not opened
                 // until the step has ended.
                 return true;
             }
+            if (!pack.stepIdle()) {
+                // A safety successor owns the pack. Clear only stale recovery bookkeeping and
+                // yield; its global result must never be treated as this recovery step.
+                stepOwned = false;
+                stepLease = null;
+                step = null;
+                return true;
+            }
+            // A terminal recovery step is reconciled through its exact admission. A failed or
+            // cancelled own step has not established physical recovery, so give the ordinary
+            // follower an immediate fresh route instead of treating any unrelated global result
+            // as progress.
+            WalkedStep.Result result = pack.stepResultFor(lease);
             stepOwned = false;
+            stepLease = null;
+            step = null;
+            if (result == null || !result.succeeded()) {
+                forceRepathPending = true;
+                return false;
+            }
         }
         boolean wasRecovering = clock.isRecovering();
         boolean targetCloser = wasRecovering
@@ -220,8 +250,14 @@ final class FollowStuckRecovery {
                 }
             }
         }
-        if (best != null && beginStep(bot, current, best)) {
-            return;
+        if (best != null) {
+            StepStart started = beginStep(bot, current, best);
+            if (started != StepStart.REFUSED) {
+                // A guarded owner denied admission, or this exact recovery step started. In both
+                // cases leave the newly opened/verified candidate alone and retry later rather
+                // than falling through into a competing dig-out controller.
+                return;
+            }
         }
         // LAST recovery step before "I am stuck": no adjacent verified step got any closer (or the
         // one found was refused), so with a tool that can break it, tunnel through the natural
@@ -237,13 +273,25 @@ final class FollowStuckRecovery {
      * step is refused, and nothing happens, when something is in the way (a block, or the followed player standing in the gap): the
      * caller tries again shortly, or the next window forces a replan.
      */
-    private boolean beginStep(AIPlayerEntity bot, BlockPos current, BlockPos best) {
+    private enum StepStart {
+        STARTED,
+        REFUSED,
+        ADMISSION_DENIED
+    }
+
+    private StepStart beginStep(AIPlayerEntity bot, BlockPos current, BlockPos best) {
         WalkedStep.Kind kind = WalkedStepRules.walkKindFor(best.getY() - current.getY());
         if (kind == null || WalkedStep.refusal(bot, best, kind) != null) {
-            return false;
+            return StepStart.REFUSED;
         }
-        bot.getActionPack().runStep(WalkedStep.begin(bot, best, kind, "follow_recovery_step"));
+        WalkedStep next = WalkedStep.begin(bot, best, kind, "follow_recovery_step");
+        ActionPack.StepLease lease = bot.getActionPack().runStep(next);
+        if (lease == null) {
+            return StepStart.ADMISSION_DENIED;
+        }
+        step = next;
+        stepLease = lease;
         stepOwned = true;
-        return true;
+        return StepStart.STARTED;
     }
 }

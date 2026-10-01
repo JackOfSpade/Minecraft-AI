@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
@@ -147,6 +148,8 @@ public final class EmergencyShelterTask extends AbstractTask {
     private int roofJumpStartedElapsed;
     private int roofJumpTries;
     private Motion motion = Motion.NONE;
+    /** Exact ActionPack admission for {@link #motion}; never consume a successor's result. */
+    private ActionPack.StepLease motionLease;
     private int motionStartedElapsed;
     private boolean initialSettlePending;
     private int settleRestWait;
@@ -269,6 +272,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         roofJumpAirborneSeen = false;
         roofJumpTries = 0;
         motion = Motion.NONE;
+        motionLease = null;
         initialSettlePending = false;
         settleRestWait = 0;
         settleCount = 0;
@@ -690,11 +694,15 @@ public final class EmergencyShelterTask extends AbstractTask {
     /** Hands the bot to a walked step; false when the step cannot even start (the caller keeps its own failure semantics). */
     private boolean startMotion(AIPlayerEntity bot, Motion kind, WalkedStep step) {
         var pack = bot.getActionPack();
+        ActionPack.StepLease lease = pack.runStep(step);
+        if (lease == null) {
+            return false;
+        }
         if (step.kind() != WalkedStep.Kind.SNEAK_SHIFT && kind != Motion.FOUNDATION_RETURN) {
             pack.setSneaking(false);
         }
-        pack.runStep(step);
         motion = kind;
+        motionLease = lease;
         motionStartedElapsed = elapsed;
         return true;
     }
@@ -714,19 +722,28 @@ public final class EmergencyShelterTask extends AbstractTask {
             return false;
         }
         var pack = bot.getActionPack();
-        if (!pack.stepIdle()) {
+        ActionPack.StepLease lease = motionLease;
+        if (pack.stepInFlightFor(lease)) {
             creditBuildClock(1);
             return true;
         }
+        if (!pack.stepIdle()) {
+            // A later safety owner has the body. Do not turn its live step/result into a failed
+            // shelter motion, and do not issue another foundation/egress move beside it.
+            forgetMotionWithoutResult();
+            return true;
+        }
         Motion finished = motion;
-        motion = Motion.NONE;
-        WalkedStep.Result result = pack.stepResult();
+        WalkedStep.Result result = pack.stepResultFor(lease);
         if (result == null) {
-            // Cancelled from outside (a pause, a restart, another owner): nothing to finish, the phase re-derives from the world.
+            // Cancelled from outside: nothing to finish, and no foreign ActionPack result can
+            // affect this shelter's attempt counters. The current phase re-derives from the world.
+            forgetMotionWithoutResult();
             BotLog.action(bot, "shelter_walked_step_cancelled", "motion", finished);
-            onMotionEnded(bot, finished, false, "cancelled");
             return false;
         }
+        motion = Motion.NONE;
+        motionLease = null;
         if (result.failed()) {
             BotLog.action(bot, "shelter_walked_step_failed", "motion", finished, "why", result.reason());
         }
@@ -805,9 +822,10 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
     }
 
-    /** Forgets the walked step in flight (its owner stopped the pack, which cancelled it) and the foundation attempt it belonged to. */
+    /** Forgets this task's walked-step admission and the foundation attempt it belonged to. */
     private void dropMotion() {
         motion = Motion.NONE;
+        motionLease = null;
         foundationStage = FoundationStage.NONE;
         foundationFailure = null;
         foundationShifts = 0;
@@ -1650,8 +1668,12 @@ public final class EmergencyShelterTask extends AbstractTask {
                 shelterFeet.getY(),
                 shelterFeet.getZ() + 0.5D + foundationDirection.getStepZ() * reach);
         foundationStage = FoundationStage.SHIFTING;
-        startMotion(bot, Motion.FOUNDATION_SHIFT,
-                WalkedStep.begin(bot, point, WalkedStep.Kind.SNEAK_SHIFT, "shelter_foundation"));
+        if (!startMotion(bot, Motion.FOUNDATION_SHIFT,
+                WalkedStep.begin(bot, point, WalkedStep.Kind.SNEAK_SHIFT, "shelter_foundation"))) {
+            // A guarded safety owner denied admission. Keep the foundation uncommitted and retry
+            // only after the normal build tick has re-proved the live edge pose.
+            foundationStage = FoundationStage.NONE;
+        }
         return ActionResult.IN_PROGRESS;
     }
 
@@ -1685,8 +1707,22 @@ public final class EmergencyShelterTask extends AbstractTask {
     /** Walks back from the edge (sneaking, until the last hop) to the middle of the anchor cell. */
     private void startFoundationReturn(AIPlayerEntity bot) {
         foundationStage = FoundationStage.RETURNING;
-        startMotion(bot, Motion.FOUNDATION_RETURN,
-                WalkedStep.begin(bot, recenterPoint(bot), WalkedStep.Kind.RECENTER, "shelter_foundation_return"));
+        if (!startMotion(bot, Motion.FOUNDATION_RETURN,
+                WalkedStep.begin(bot, recenterPoint(bot), WalkedStep.Kind.RECENTER, "shelter_foundation_return"))) {
+            foundationStage = FoundationStage.NONE;
+        }
+    }
+
+    /** Drops only local state when this walked step has no exact natural result to reconcile. */
+    private void forgetMotionWithoutResult() {
+        Motion replaced = motion;
+        motion = Motion.NONE;
+        motionLease = null;
+        if (replaced == Motion.FOUNDATION_SHIFT || replaced == Motion.FOUNDATION_RETURN) {
+            // The physical edge/return outcome is unknown. Re-open normal live-pose planning
+            // instead of charging an attempt or treating the successor's result as ours.
+            foundationStage = FoundationStage.NONE;
+        }
     }
 
     private void beginExit(AIPlayerEntity bot, String failure) {

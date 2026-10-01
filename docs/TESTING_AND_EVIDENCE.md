@@ -15,6 +15,39 @@ Minecraft-AI treats “code passes tests,” “the scenario passes locally,” 
 
 The current source test inventory is 19 JUnit classes, 68 tests, and 3 GameTests. In the current local diagnostics, the strict/operator capability + runtime-control suite is `7/7 PASS` for both; the two-JVM persistence probe recovers the checkpoint map exactly, and reaches the original Mission's `COMPLETED 4/4` after resume. These numbers describe verification of this working tree and do not substitute for the clean-commit evidence gate.
 
+## Developer Test Runners (`scripts/dev`)
+
+Use the Bash runners for repeatable local verification. Run them from Linux, WSL, or Git Bash; on this Windows machine the maintained local runners under `C:\mcw\_tools` are an equivalent transport when they are available. Do not run two GameTest servers in one worktree, and keep `GT_SLOTS=1` unless the machine has been deliberately provisioned for more memory.
+
+```bash
+# Root or wrapper unit tests. The runner serializes unit-test Gradle processes,
+# retries Maven Central 429 responses only, and prints a counted UNIT PASS/FAIL line.
+bash scripts/dev/unittest.sh "$PWD"
+bash scripts/dev/unittest.sh --wrapper "$PWD"
+
+# One real-server GameTest filter per server start. Use an exact method name or a glob;
+# most class globs need the leading '*'. Results and per-filter logs are retained.
+bash scripts/dev/gametest.sh "$PWD" "$PWD/build/gametest-root.txt" '*follow_swim_game_tests_*'
+bash scripts/dev/gametest.sh --wrapper "$PWD" "$PWD/build/gametest-wrapper.txt" '*wrapper_game_tests_*'
+
+# A whole-suite run is exclusive: ALL acquires every GameTest slot and must not share the machine
+# with another GameTest server.
+bash scripts/dev/gametest.sh "$PWD" "$PWD/build/gametest-root-all.txt" ALL
+bash scripts/dev/gametest.sh --wrapper "$PWD" "$PWD/build/gametest-wrapper-all.txt" ALL
+```
+
+`gametest.sh` adds the correct mod-specific GameTest namespace, writes one `PASS`, `FAIL`, `NOMATCH`, `ERROR`, `HUNG`, or `SKIPPED` line per requested filter, and stores full Gradle/server output beside the chosen result file in `gt_logs/`. `GT_HEAP` controls the server heap (default `2560m`), `GT_TIMEOUT` controls a filtered-run watchdog, and `GT_DAEMON=1` opts into a resident Gradle daemon; the default is `--no-daemon` to reduce resident memory. A `NOMATCH`, `ERROR`, `HUNG`, or `SKIPPED` result is not test evidence.
+
+The wrapper suite needs the upstream PvP BOT and HeroBot runtime jars. Fetch them outside the repository before running it; the script verifies the expected checksums and never adds the jars to Git:
+
+```bash
+bash scripts/dev/fetch-upstream-mods.sh
+# Or choose a non-repository cache explicitly:
+UPSTREAM_MODS_DIR="$HOME/.cache/upstream-mods" bash scripts/dev/fetch-upstream-mods.sh "$UPSTREAM_MODS_DIR"
+```
+
+Pass the same `UPSTREAM_MODS_DIR` to `gametest.sh --wrapper` when using a non-default cache. The runner treats missing jars as `SKIPPED`, which is a setup failure to resolve before claiming wrapper coverage.
+
 ## Production Boundary
 
 `MinecraftAiTestSubcommand`, `MinecraftAiVerifySubcommand`, the GameTest classes, and the restart harness all live under `src/gametest`. Production `src/main` does not register `/minecraftai test` or `/minecraftai verify`, and the production jar should not contain these classes either.

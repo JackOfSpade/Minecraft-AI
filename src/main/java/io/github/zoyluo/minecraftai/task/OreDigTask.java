@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
@@ -843,6 +844,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         lastProgressBudget = restoredCheckpoint != null && restoredCheckpoint.batchOpen()
                 ? restoredCheckpoint.lastProgressBudget() : 0;
         pickupGrace = 0;
+        moveInFlight = null;
+        moveUnsettled = false;
+        moveUnsettledTicks = 0;
         targetOre = null;
         rememberedHighWorkPoses.clear();
         rememberedHighWorkPoseRouteOwner = null;
@@ -4242,7 +4246,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /** A walked move in flight: where it began, the cell it must verify, and the publication that runs on that verified landing. */
-    private record MoveInFlight(BlockPos origin, BlockPos landing, String what, Runnable onLanded) {
+    private record MoveInFlight(ActionPack.StepLease lease, BlockPos origin, BlockPos landing,
+                                String what, Runnable onLanded) {
     }
 
     private static String moveKey(BlockPos origin, BlockPos landing) {
@@ -4272,8 +4277,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "from", origin.toShortString(), "to", landing.toShortString(), "why", refused);
             return false;
         }
-        bot.getActionPack().runStep(WalkedStep.begin(bot, landing, kind, what));
-        moveInFlight = new MoveInFlight(origin, landing.immutable(), what, onLanded);
+        ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(bot, landing, kind, what));
+        if (lease == null) {
+            return false;
+        }
+        moveInFlight = new MoveInFlight(lease, origin, landing.immutable(), what, onLanded);
         return true;
     }
 
@@ -4293,7 +4301,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             return false;
         }
-        if (!bot.getActionPack().stepIdle()) {
+        var pack = bot.getActionPack();
+        if (pack.stepInFlightFor(move.lease())) {
+            return true;
+        }
+        if (!pack.stepIdle()) {
+            // The old move was preempted. Leave the successor alone and resume only after the
+            // ordinary task preflight can derive a fresh cursor from the physical world.
+            moveInFlight = null;
             return true;
         }
         settleMove(bot, move);
@@ -4303,7 +4318,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /** A step ended (or was lost): the verified landing publishes the move; anything else is re-derived from the bot's block position. */
     private void settleMove(AIPlayerEntity bot, MoveInFlight move) {
         moveInFlight = null;
-        WalkedStep.Result result = bot.getActionPack().stepResult();
+        WalkedStep.Result result = bot.getActionPack().stepResultFor(move.lease());
         boolean landed = result != null && result.succeeded() && bot.blockPosition().equals(move.landing());
         if (landed) {
             failedMoves.clear();
@@ -4330,7 +4345,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         moveInFlight = null;
-        if (!bot.getActionPack().stepIdle()) {
+        if (bot.getActionPack().stepInFlightFor(move.lease())) {
             bot.getActionPack().cancelStep();
         }
     }

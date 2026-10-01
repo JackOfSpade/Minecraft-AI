@@ -8,6 +8,7 @@ import baritone.api.pathing.goals.GoalNear;
 import baritone.api.pathing.goals.GoalTwoBlocks;
 import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.pathing.goals.GoalYLevel;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.List;
@@ -63,6 +64,9 @@ public final class BaritoneGoals {
 
     /** Gives the bot's Baritone a coordinate goal and starts walking there. Server thread. */
     public static Outcome setGoal(AIPlayerEntity bot, Goal goal) {
+        if (bot.getActionPack().baritoneControlBlocked()) {
+            return Outcome.refused(ActionPack.GUARDED_STEP_FENCE);
+        }
         if (goal == null || !allowedType(goal)) {
             BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, null, "goal_type_not_allowed", String.valueOf(goal));
             return Outcome.refused("goal_type_not_allowed");
@@ -85,6 +89,9 @@ public final class BaritoneGoals {
      * that the bot has not seen is not a target), it is a kind of block a bot may break, and the bot may break at all.
      */
     public static Outcome mineAt(AIPlayerEntity bot, BlockPos target) {
+        if (bot.getActionPack().baritoneControlBlocked()) {
+            return Outcome.refused(ActionPack.GUARDED_STEP_FENCE);
+        }
         if (!BaritoneRegistry.INSTANCE.policy(bot).allowBreak()) {
             BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, "policy_no_break", "mine_at");
             return Outcome.refused("policy_no_break");

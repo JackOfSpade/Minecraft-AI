@@ -61,7 +61,11 @@ public final class DigNav {
                     String refusal = WalkedStep.refusal(bot, step, kind);
                     return isTransientDescentRefusal(refusal);
                 }
-                pack.runStep(descent);
+                if (pack.runStep(descent) == null) {
+                    // A guarded owner still has the action pack even though its physical step
+                    // may already have ended.  Do not report a descent that was never admitted.
+                    return false;
+                }
             } else {
                 bot.getActionPack().startWalkTo(step.getCenter());
             }

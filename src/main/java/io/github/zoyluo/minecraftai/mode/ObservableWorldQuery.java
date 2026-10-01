@@ -51,7 +51,7 @@ public final class ObservableWorldQuery {
      * below the configured perception radius. Ordinary block scans keep the base radius.
      */
     public static boolean canObserveBlockWithin(AIPlayerEntity bot, BlockPos pos, int range) {
-        return observeShapeFaces(bot, pos, range, true, "observable_block_query");
+        return observeShapeFaces(bot, pos, range, true, "observable_block_query", ClipContext.Fluid.ANY);
     }
 
     /**
@@ -65,11 +65,37 @@ public final class ObservableWorldQuery {
 
     /** {@link #canObserveCollider} at prey-grounding range ({@link #canObserveBlockWithin}). */
     public static boolean canObserveColliderWithin(AIPlayerEntity bot, BlockPos pos, int range) {
-        return observeShapeFaces(bot, pos, range, false, "observable_block_query");
+        return observeShapeFaces(bot, pos, range, false, "observable_block_query", ClipContext.Fluid.ANY);
+    }
+
+    /**
+     * A real collider visible on vanilla entity line of sight, which deliberately does not let
+     * water (the medium an underwater player is looking through) block the ray. This is scoped to
+     * water navigation; placement and ordinary block-interaction proofs keep their fluid-aware
+     * observation policy above.
+     */
+    public static boolean canObserveColliderThroughFluids(AIPlayerEntity bot, BlockPos pos) {
+        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                "observable_water_collider_query").allowed()) {
+            return true;
+        }
+        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        Vec3 eye = bot.getEyePosition();
+        Vec3 target = pos.getCenter();
+        if (eye.distanceToSqr(target) > (double) radius * radius) {
+            return false;
+        }
+        // This first-hit collider ray proves both visibility through water and that the target is
+        // a real collider, without reading the target BlockState to derive a shape before it has
+        // crossed the transparent-water observation boundary. A conservative center sample may
+        // reject an unusually shaped exposed collider, but can never invent one behind terrain.
+        BlockHitResult hit = bot.level().clip(new ClipContext(
+                eye, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos);
     }
 
     private static boolean observeShapeFaces(AIPlayerEntity bot, BlockPos pos, int range,
-                                             boolean outlineFallback, String reason) {
+                                             boolean outlineFallback, String reason, ClipContext.Fluid fluid) {
         if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, reason).allowed()) {
             return true;
         }
@@ -82,7 +108,7 @@ public final class ObservableWorldQuery {
                 ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
         for (Direction direction : Direction.values()) {
             var face = FaceAim.facePoint(aim.box(), direction, FaceAim.OBSERVE_DEPTH, 0.0D, 0.0D);
-            if (canObserveFaceAfterPolicy(bot, pos, direction, face, range, aim.clipShape())) {
+            if (canObserveFaceAfterPolicy(bot, pos, direction, face, range, aim.clipShape(), fluid)) {
                 return true;
             }
         }
@@ -144,14 +170,15 @@ public final class ObservableWorldQuery {
                                                       Direction face,
                                                       net.minecraft.world.phys.Vec3 endpoint,
                                                       int range,
-                                                      ClipContext.Block clipShape) {
+                                                      ClipContext.Block clipShape,
+                                                      ClipContext.Fluid fluid) {
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
         if (bot.getEyePosition().distanceToSqr(endpoint) > (double) radius * radius) {
             return false;
         }
         BlockHitResult hit = bot.level().clip(new ClipContext(
                 bot.getEyePosition(), endpoint,
-                clipShape, ClipContext.Fluid.ANY, bot));
+                clipShape, fluid, bot));
         return hit.getType() == HitResult.Type.BLOCK
                 && hit.getBlockPos().equals(pos)
                 && hit.getDirection() == face;
@@ -171,6 +198,20 @@ public final class ObservableWorldQuery {
     }
 
     /**
+     * Cell observation for underwater movement. It uses the same eye/range/solid-terrain ray as
+     * {@link net.minecraft.world.entity.Entity#hasLineOfSight(Entity)}, whose fluid mode is
+     * {@link ClipContext.Fluid#NONE}: water does not make a nearby visible shore or water column
+     * into hidden-world knowledge. Callers remain responsible for rejecting hazardous fluids.
+     */
+    public static boolean canObserveCellThroughFluids(AIPlayerEntity bot, BlockPos pos) {
+        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                "observable_water_cell_query").allowed()) {
+            return true;
+        }
+        return canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.NONE);
+    }
+
+    /**
      * Prey-grounding cell observation at surface-search range; see
      * {@link #canObserveBlockWithin(AIPlayerEntity, BlockPos, int)} for the fairness rationale.
      */
@@ -183,13 +224,18 @@ public final class ObservableWorldQuery {
     }
 
     private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range) {
+        return canObserveCellWithinAfterPolicy(bot, pos, range, ClipContext.Fluid.ANY);
+    }
+
+    private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range,
+                                                            ClipContext.Fluid fluid) {
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
         if (bot.getEyePosition().distanceToSqr(pos.getCenter()) > (double) radius * radius) {
             return false;
         }
         BlockHitResult hit = bot.level().clip(new ClipContext(
                 bot.getEyePosition(), pos.getCenter(),
-                ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
+                ClipContext.Block.COLLIDER, fluid, bot));
         return hit.getType() == HitResult.Type.MISS
                 || (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos));
     }

@@ -72,20 +72,22 @@ class BaritoneExecutionContractTest {
     void everyLegacyEntryThatMakesTheBotActClaimsItFirst() throws IOException {
         String source = read("action/ActionPack.java");
         for (String entry : new String[]{
-                "public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {\n        claim(",
-                "public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {\n        claim(",
-                "public ActionResult startMining(BlockPos pos, Direction face) {\n        claim(",
-                "public void stopAll() {\n        releaseBaritone(\"stop_all\");"}) {
+                "public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {\n        if (controllerStartBlocked()) {\n            return ActionResult.failed(GUARDED_STEP_FENCE);\n        }\n        claim(",
+                "public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {\n        if (controllerStartBlocked()) {\n            return ActionResult.failed(GUARDED_STEP_FENCE);\n        }\n        claim(",
+                "public ActionResult startMining(BlockPos pos, Direction face) {\n        if (controllerStartBlocked()) {\n            return ActionResult.failed(GUARDED_STEP_FENCE);\n        }\n        claim(",
+                "public void stopAll() {\n        if (emergencyInputBlocked()) {\n            return;\n        }\n        releaseBaritone(\"stop_all\");"}) {
             assertTrue(source.contains(entry), "missing hand-over in ActionPack: " + entry.split("\n")[0]);
         }
-        // The private path entry may hand the request to Baritone first (which is not the legacy executor and needs no
-        // hand-over), but everything the legacy executor does after a null answer starts with the claim.
-        int entry = source.indexOf("PathExecutor.RouteContract routeContract) {\n        // Engine seam");
-        int routed = source.indexOf("routeOnBaritone(\"path_to\"", entry);
+        // The private path entry refuses a guarded fence before it can start either engine. It may hand an admitted request to
+        // Baritone first (which is not the legacy executor and needs no hand-over), but legacy work after a null answer claims it.
+        int entry = source.indexOf("PathExecutor.RouteContract routeContract) {");
+        int fence = source.indexOf("if (controllerStartBlocked())", entry);
+        int refusal = source.indexOf("return ActionResult.failed(GUARDED_STEP_FENCE);", fence);
+        int routed = source.indexOf("routeOnBaritone(\"path_to\"", refusal);
         int claim = source.indexOf("claim(\"path_to\");", routed);
         int legacyWork = source.indexOf("int reserve = Math.max(0, protectedStoneLikeReserve);", claim);
-        assertTrue(entry > 0 && routed > entry && claim > routed && legacyWork > claim,
-                "startPathTo: the engine seam first, then the claim, then any legacy work");
+        assertTrue(entry > 0 && fence > entry && refusal > fence && routed > refusal && claim > routed && legacyWork > claim,
+                "startPathTo: the guarded refusal must precede the engine seam, and the legacy claim must precede legacy work");
         assertTrue(source.contains("if (routed != null) {\n            return routed;\n        }\n        claim(\"path_to\")"),
                 "only a routed (non-null) answer may skip the claim");
         // The claim and stopAll go through releaseBaritone, which is what preempts Baritone (and ends a recorded route).

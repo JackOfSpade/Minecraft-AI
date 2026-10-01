@@ -36,6 +36,9 @@ public final class MiningBarricadeTask extends AbstractTask {
     private final BlockPos barrierFeet;
     private Phase phase = Phase.RETREAT;
     private boolean retreatStepLaunched;
+    /** Exact ActionPack admission for the one-cell retreat. */
+    private ActionPack.StepLease retreatStepLease;
+    private WalkedStep retreatStep;
     private boolean retreatStepFailed;
     private int phaseStartedElapsed;
     private int lastProgressElapsed;
@@ -84,6 +87,8 @@ public final class MiningBarricadeTask extends AbstractTask {
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.RETREAT;
         retreatStepLaunched = false;
+        retreatStepLease = null;
+        retreatStep = null;
         retreatStepFailed = false;
         phaseStartedElapsed = 0;
         lastProgressElapsed = 0;
@@ -119,7 +124,35 @@ public final class MiningBarricadeTask extends AbstractTask {
     }
 
     private void tickRetreat(AIPlayerEntity bot) {
+        ActionPack pack = bot.getActionPack();
+        BlockPos here = bot.blockPosition();
+        if (retreatStepLaunched) {
+            ActionPack.StepLease lease = retreatStepLease;
+            if (pack.stepInFlightFor(lease)) {
+                return; // the exact walked retreat step is still in flight
+            }
+            if (!pack.stepIdle()) {
+                // A successor owns ActionPack. Forget only this task's stale retreat admission;
+                // do not turn its terminal result into a barricade route failure.
+                retreatStepLaunched = false;
+                retreatStepLease = null;
+                retreatStep = null;
+                return;
+            }
+            WalkedStep.Result result = pack.stepResultFor(lease);
+            // The exact retreat step ended. Arrival is handled below only after this lease has
+            // settled, so a foreign successor can never promote the barricade phase.
+            retreatStepLaunched = false;
+            retreatStepLease = null;
+            retreatStep = null;
+            retreatStepFailed = result == null || !result.succeeded() || !here.equals(retreatFeet);
+        }
+        if (!pack.stepIdle()) {
+            return;
+        }
         if (bot.blockPosition().equals(retreatFeet)) {
+            // This arrival is observed only after an idle pack (or this task's exact lease has
+            // settled). A foreign successor that happened to enter the same cell is left alone.
             bot.getActionPack().stopAll();
             enterPhase(Phase.SEAL);
             return;
@@ -128,25 +161,23 @@ public final class MiningBarricadeTask extends AbstractTask {
             fail("mining_barricade_retreat_timeout");
             return;
         }
-        ActionPack pack = bot.getActionPack();
-        if (!pack.stepIdle()) {
-            return; // the walked retreat step is in flight; the barricade is placed after arrival (tickSeal)
-        }
         if (!pack.isPathExecutorIdle()) {
             return;
-        }
-        BlockPos here = bot.blockPosition();
-        if (retreatStepLaunched) {
-            // The step ended and the bot is not on the retreat cell (arrival is checked first): fall back to the route.
-            retreatStepLaunched = false;
-            retreatStepFailed = true;
         }
         if (!retreatStepFailed
                 && here.getY() == retreatFeet.getY()
                 && horizontalManhattan(here, retreatFeet) == 1
                 && WalkedStep.refusal(bot, retreatFeet, WalkedStep.Kind.FLAT) == null) {
             // One block back is a walked step (forward key), never a teleport; the tunnel is sealed only once the bot stands there.
-            pack.runStep(WalkedStep.begin(bot, retreatFeet, WalkedStep.Kind.FLAT, "mining_barricade_retreat"));
+            WalkedStep next = WalkedStep.begin(bot, retreatFeet, WalkedStep.Kind.FLAT, "mining_barricade_retreat");
+            ActionPack.StepLease lease = pack.runStep(next);
+            if (lease == null) {
+                // A guarded owner still owns the handoff fence. Keep the retreat unstarted and
+                // retry its same physical route instead of treating another step as ours.
+                return;
+            }
+            retreatStep = next;
+            retreatStepLease = lease;
             retreatStepLaunched = true;
             lastProgressElapsed = elapsed;
             return;
@@ -223,6 +254,13 @@ public final class MiningBarricadeTask extends AbstractTask {
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
+        ActionPack pack = bot.getActionPack();
+        if (pack.stepInFlightFor(retreatStepLease)) {
+            pack.cancelStep();
+        }
+        retreatStep = null;
+        retreatStepLease = null;
+        retreatStepLaunched = false;
         bot.getActionPack().stopAll();
     }
 

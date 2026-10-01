@@ -27,6 +27,16 @@ import net.minecraft.world.phys.Vec3;
  * re-derives its state from {@code bot.blockPosition()}.</p>
  */
 public final class WalkedStep {
+    /**
+     * A no-world-read admission check run immediately before this step can inspect terrain again.
+     * Owners that admitted a step with a perception/capability-sensitive proof install one so a
+     * profile change or a newly occluded target cannot wait for an end-of-server-tick task pass.
+     */
+    @FunctionalInterface
+    public interface ContinuationGuard {
+        boolean allows(AIPlayerEntity bot, WalkedStep step);
+    }
+
     public enum Kind {
         /** Walk to the adjacent cell at the same height. */
         FLAT,
@@ -90,6 +100,7 @@ public final class WalkedStep {
     private Result finalResult;
     private int pushDirection = -1;
     private boolean startedWet;
+    private ContinuationGuard continuationGuard;
 
     private boolean anchored;
 
@@ -137,6 +148,11 @@ public final class WalkedStep {
 
     public int ticks() {
         return ticks;
+    }
+
+    /** Installed by {@link ActionPack} before an owner-sensitive step enters the action pack. */
+    void setContinuationGuard(ContinuationGuard continuationGuard) {
+        this.continuationGuard = continuationGuard;
     }
 
     /** Why the step failed, or {@code null} while it has not. */
@@ -259,6 +275,16 @@ public final class WalkedStep {
         double speed = lastPosition == null ? 0.0D : Math.hypot(position.x - lastPosition.x, position.z - lastPosition.z);
         lastPosition = position;
         if (ticks == 1) {
+            normalizeWalkKindAtCurrentFeet();
+        }
+        // This has to live inside the step rather than in Follow/NavSafetyNet. AIPlayerEntity
+        // calls ActionPack.onUpdate before END_SERVER_TICK reaches those owners, and the first
+        // terrain read below (startedWet/refusal or later landing/swim reproof) would otherwise
+        // let an operator-admitted step inspect terrain after strict survival was restored.
+        if (continuationGuard != null && !continuationGuard.allows(bot, this)) {
+            return fail("continuation_guard");
+        }
+        if (ticks == 1) {
             startedWet = startsWet(bot);
             String refused = firstTickRefusal();
             if (refused != null) {
@@ -364,12 +390,6 @@ public final class WalkedStep {
         BlockPos here = bot.blockPosition();
         switch (kind) {
             case FLAT, STEP_UP, STEP_DOWN -> {
-                // A bot that is falling or settling when the step starts stands one cell higher or lower than the caller saw: the
-                // kind follows the height difference that is really there (a walk to the cell, up or down).
-                Kind actual = WalkedStepRules.walkKindFor(cell.getY() - here.getY());
-                if (actual != null) {
-                    kind = actual;
-                }
                 return refusal(bot, cell, kind);
             }
             case SWIM, DROP -> {
@@ -414,6 +434,21 @@ public final class WalkedStep {
             }
         }
         return null;
+    }
+
+    /**
+     * A falling bot can be one cell above or below where its owner planned. This adjusts only
+     * coordinate arithmetic, before a continuation guard proves the exact resulting envelope;
+     * it intentionally performs no world read.
+     */
+    private void normalizeWalkKindAtCurrentFeet() {
+        if (kind != Kind.FLAT && kind != Kind.STEP_UP && kind != Kind.STEP_DOWN) {
+            return;
+        }
+        Kind actual = WalkedStepRules.walkKindFor(cell.getY() - bot.blockPosition().getY());
+        if (actual != null) {
+            kind = actual;
+        }
     }
 
     /** Whether a push out has somewhere to go: the body overlaps a block and a free side is within a block. */

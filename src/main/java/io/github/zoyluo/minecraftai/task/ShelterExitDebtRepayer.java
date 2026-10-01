@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
@@ -26,23 +27,23 @@ final class ShelterExitDebtRepayer {
     private boolean waiting;
     /** The walk out through the doorway is running (a real walked step over several ticks). */
     private boolean stepping;
+    /** Exact ActionPack admission for the exit walk; global step results belong to other owners. */
+    private ActionPack.StepLease stepLease;
+    private WalkedStep step;
 
     /** Adopts (or clears) any exit debt outstanding for the bot at the start of a follow task. */
     void reset(AIPlayerEntity bot) {
+        cancelOwnedStep(bot);
         shelterExitMiner.cancel(bot);
         rejectedShelterEgress.clear();
         shelterExitDebt = EmergencyShelterTask.pendingExitDebt(bot).orElse(null);
         activeShelterEgress = null;
         waiting = false;
-        stepping = false;
     }
 
     void cancel(AIPlayerEntity bot) {
         shelterExitMiner.cancel(bot);
-        if (stepping) {
-            bot.getActionPack().cancelStep();
-            stepping = false;
-        }
+        cancelOwnedStep(bot);
     }
 
     /**
@@ -104,7 +105,16 @@ final class ShelterExitDebtRepayer {
             return true;
         }
         // The bot walks out through the opened doorway with its own keys (never placed there); the walk runs over the next ticks.
-        bot.getActionPack().runStep(WalkedStep.begin(bot, egress, kind, "follow_shelter_exit"));
+        WalkedStep next = WalkedStep.begin(bot, egress, kind, "follow_shelter_exit");
+        ActionPack.StepLease lease = bot.getActionPack().runStep(next);
+        if (lease == null) {
+            // A guarded controller still owns the handoff. Keep this exact egress selected and
+            // retry it, rather than marking it bad from another controller's outcome.
+            waiting = true;
+            return true;
+        }
+        step = next;
+        stepLease = lease;
         stepping = true;
         waiting = true;
         return true;
@@ -116,13 +126,27 @@ final class ShelterExitDebtRepayer {
      * forgotten (no player-built blocks can enter the registry). A failed walk rejects that doorway and tries another.
      */
     private boolean tickWalkOut(AIPlayerEntity bot) {
-        var pack = bot.getActionPack();
-        if (!pack.stepIdle()) {
+        ActionPack pack = bot.getActionPack();
+        ActionPack.StepLease lease = stepLease;
+        if (pack.stepInFlightFor(lease)) {
             waiting = true;
             return true;
         }
+        if (!pack.stepIdle()) {
+            // A safety successor owns the pack. Forget only this repayer's old admission and
+            // leave its inputs and result completely untouched.
+            stepping = false;
+            step = null;
+            stepLease = null;
+            waiting = true;
+            return true;
+        }
+        WalkedStep.Result result = pack.stepResultFor(lease);
         stepping = false;
-        WalkedStep.Result result = pack.stepResult();
+        step = null;
+        stepLease = null;
+        // Use this exact lease only. A successor may legitimately occupy ActionPack after this
+        // task was displaced, and its global result must not settle this shelter debt.
         if (result == null || !result.succeeded()) {
             if (activeShelterEgress != null) {
                 rejectedShelterEgress.add(activeShelterEgress);
@@ -195,5 +219,16 @@ final class ShelterExitDebtRepayer {
         shelterExitDebt = null;
         rejectedShelterEgress.clear();
         activeShelterEgress = null;
+    }
+
+    private void cancelOwnedStep(AIPlayerEntity bot) {
+        if (stepping && bot.getActionPack().stepInFlightFor(stepLease)) {
+            // This is safe only after the exact lease check; a stale debt repayer must not cancel
+            // a higher-priority successor that took the pack after its own step ended.
+            bot.getActionPack().cancelStep();
+        }
+        stepping = false;
+        stepLease = null;
+        step = null;
     }
 }

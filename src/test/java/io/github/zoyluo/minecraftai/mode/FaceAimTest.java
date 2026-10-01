@@ -83,7 +83,12 @@ class FaceAimTest {
                 "src/main/java/io/github/zoyluo/minecraftai/mode/ObservableWorldQuery.java"));
         assertEquals(2, count(source, "FaceAim.aim(bot.level()"), "both block observation predicates are shape-aware");
         assertFalse(source.contains("getStepX() * 0.499D"), "the cell-face endpoint arithmetic is gone");
-        assertTrue(source.contains("aim.clipShape()") && source.contains("clipShape, ClipContext.Fluid.ANY"));
+        assertTrue(source.contains("aim.clipShape(), fluid"),
+                "ordinary shape-aware observation must ray-cast against its derived collider or outline");
+        assertTrue(source.contains("aim.clipShape(),\n                        ClipContext.Fluid.ANY"),
+                "inset face observation retains its fluid-aware shape ray");
+        assertTrue(source.contains("ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot"),
+                "water collider observation must prove a first collider hit without reading target shape first");
     }
 
     @Test

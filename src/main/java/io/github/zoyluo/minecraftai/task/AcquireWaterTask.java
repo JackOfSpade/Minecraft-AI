@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
@@ -83,6 +84,8 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     /** The sneak-bridge in flight: the bot leans over the edge (SHIFTING), places, then walks back to the middle (RETURNING). */
     private enum EdgeStage {
         SHIFTING,
+        /** The foundation interaction has finished; wait until the exact walk-back can be admitted. */
+        RETURN_PENDING,
         RETURNING
     }
 
@@ -147,6 +150,8 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private BlockPos ascentTarget;
     private EdgePlacement edge;
     private WalkedStep ascentSettle;
+    /** Exact admission for the local settle step; a successor must not settle it by proxy. */
+    private ActionPack.StepLease ascentSettleLease;
     private BlockPos ascentCommittedFrom;
     private boolean ascentPathStarted;
     private int ascentPathStartedBudget;
@@ -318,6 +323,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         ascentPathStarted = false;
         edge = null;
         ascentSettle = null;
+        ascentSettleLease = null;
         ascentRelocationTarget = null;
         ascentRelocationOrigin = null;
         ascentRelocationPathStarted = false;
@@ -353,6 +359,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         ascentPathStarted = false;
         edge = null;
         ascentSettle = null;
+        ascentSettleLease = null;
 
         if (ascentRelocationTarget == null) {
             return;
@@ -391,6 +398,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         ascentPathStarted = false;
         edge = null;
         ascentSettle = null;
+        ascentSettleLease = null;
         ascentRelocationTarget = null;
         ascentRelocationOrigin = null;
         ascentRelocationPathStarted = false;
@@ -807,10 +815,26 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
      */
     private boolean settleOnStandableCell(AIPlayerEntity bot, ServerLevel world, BlockPos current) {
         if (ascentSettle != null) {
-            if (!ascentSettle.ended()) {
+            ActionPack pack = bot.getActionPack();
+            ActionPack.StepLease lease = ascentSettleLease;
+            if (pack.stepInFlightFor(lease)) {
                 return true;
             }
+            if (!pack.stepIdle()) {
+                // A successor owns the action pack. Forget only the stale settle admission;
+                // never let its global terminal result decide this ascent's footing.
+                ascentSettle = null;
+                ascentSettleLease = null;
+                return true;
+            }
+            WalkedStep.Result result = pack.stepResultFor(lease);
             ascentSettle = null;
+            ascentSettleLease = null;
+            if (result != null && result.succeeded()) {
+                // A completed recenter is real ascent progress even though the next candidate is
+                // selected from the factual current cell rather than from the step result.
+                noteAscentProgress();
+            }
             return false;
         }
         if (Standability.isStandableFresh(world, current) || !WalkedStep.supported(bot)) {
@@ -822,8 +846,15 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         }
         returnMiner.cancel(bot);
         bot.getActionPack().stopAll();
-        bot.getActionPack().runStep(step);
+        ActionPack.StepLease lease = bot.getActionPack().runStep(step);
+        if (lease == null) {
+            // A guarded safety owner still owns the ActionPack handoff. Leave the settlement
+            // unpublished so this same physical recovery is retried rather than observing a
+            // foreign step result on the next tick.
+            return true;
+        }
         ascentSettle = step;
+        ascentSettleLease = lease;
         ascentPathStarted = false;
         ascentTarget = null;
         return true;
@@ -938,6 +969,11 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         }
         WalkedStep lean = InCellWalk.beginEdgeShift(bot, current, direction, "acquire_water_ascent_foundation");
         if (lean == null) {
+            if (bot.getActionPack().stepAdmissionBlocked()) {
+                // InCellWalk rejected only the handoff admission. Keep this support candidate
+                // live; its owner will release the fence and this exact lean can be retried.
+                return;
+            }
             failedAscentSupports.add(support.immutable());
             ascentTarget = null;
             BotLog.action(bot, "acquire_water_ascent_foundation_failed",
@@ -952,6 +988,13 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         var pack = bot.getActionPack();
         EdgePlacement current = edge;
         if (!current.step.ended()) {
+            return;
+        }
+        if (!pack.stepIdle()) {
+            // InCellWalk gives us the completed step object but not its ActionPack lease. If a
+            // higher-priority owner replaced it, do not let this old edge terminal path release
+            // that successor's movement inputs or turn its activity into a failed foundation.
+            edge = null;
             return;
         }
         WalkedStep.Result result = current.step.outcome();
@@ -977,7 +1020,18 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
                 return;
             }
             current.placeFailure = placed.isFailed() ? placed.reason() : null;
-            current.step = InCellWalk.beginEdgeReturn(bot, current.anchor, "acquire_water_ascent_foundation");
+            // The placement is now a durable physical receipt; if a guarded owner blocks the
+            // walk back, retain that receipt and retry only the unstarted return. Do not put a
+            // null WalkedStep into the RETURNING state or repeat the placement on every retry.
+            current.stage = EdgeStage.RETURN_PENDING;
+        }
+        if (current.stage == EdgeStage.RETURN_PENDING) {
+            WalkedStep returning = InCellWalk.beginEdgeReturn(
+                    bot, current.anchor, "acquire_water_ascent_foundation");
+            if (returning == null) {
+                return;
+            }
+            current.step = returning;
             current.stage = EdgeStage.RETURNING;
             return;
         }
