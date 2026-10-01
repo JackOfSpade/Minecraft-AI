@@ -68,9 +68,14 @@ public final class DigDownReturnGameTests {
                 "full-depth DigDown fixture did not span 24 physical steps");
 
         String name = "DigDownFullDepthReturnGT";
+        // The live 48-item run reached y=1 (23 completed landings) with 71 gross stone:
+        // 48 requested delivery plus the 23-layer return reserve. Requiring one more net item
+        // raises that factual y=1 threshold to 72, so RETURN cannot begin until the next stair
+        // landing has completed and its newly exposed tier has had a vanilla pickup opportunity.
+        int requiredNetStone = 49;
         AIPlayerEntity bot = spawn(context, name, start);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
-        DigDownTask task = new DigDownTask(Blocks.STONE, 48);
+        DigDownTask task = new DigDownTask(Blocks.STONE, requiredNetStone);
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_full_depth_return"));
         AtomicInteger deepest = new AtomicInteger();
@@ -86,6 +91,9 @@ public final class DigDownReturnGameTests {
                 maxWorkBudget.accumulateAndGet(live.workBudgetUsed(), Math::max);
                 maxReturnBudget.accumulateAndGet(live.returnBudgetUsed(), Math::max);
                 sawReturn.compareAndSet(false, live.phase() == DigDownTask.Phase.RETURN);
+                require(context, live.phase() != DigDownTask.Phase.RETURN || deepest.get() >= depth,
+                        "DigDown entered RETURN before completing the 24th physical landing: "
+                                + deepest.get() + " checkpoint=" + task.checkpoint());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.fail(Component.nullToEmpty("24-step DigDown return ended as " + task.state()
@@ -101,12 +109,12 @@ public final class DigDownReturnGameTests {
                     "ordinary 24-step return did not fit its 600-tick budget: "
                             + maxReturnBudget.get());
             require(context, maxWorkBudget.get()
-                            <= DigDownTask.maxWorkBudgetForTarget("minecraft:stone", 48),
+                            <= DigDownTask.maxWorkBudgetForTarget("minecraft:stone", requiredNetStone),
                     "full-depth work escaped its derived budget: " + maxWorkBudget.get());
             require(context, bot.blockPosition().equals(start),
                     "24-step DigDown did not return to its exact origin: "
                             + bot.blockPosition().toShortString());
-            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= 48,
+            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= requiredNetStone,
                     "full-depth DigDown did not preserve the requested net stone delivery");
             LOGGER.info("DIG_DOWN_FULL_DEPTH_RETURN depth={} work_budget={} return_budget={}",
                     deepest.get(), maxWorkBudget.get(), maxReturnBudget.get());
