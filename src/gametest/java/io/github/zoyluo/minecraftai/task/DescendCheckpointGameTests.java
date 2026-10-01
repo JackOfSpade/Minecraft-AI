@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import com.mojang.logging.LogUtils;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
@@ -29,9 +30,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
 
 /** Restart contracts for the exact staircase hand-off owned by {@link DescendToYTask}. */
 public final class DescendCheckpointGameTests {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     @GameTest(environment = "minecraftai-gametest:descend_checkpoint_game_tests_full_depth_deepslate_descent_with_five_stone_pickaxes_fits_its_persisted_window", maxTicks = 9_000)
     public void fullDepthDeepslateDescentWithFiveStonePickaxesFitsItsPersistedWindow(
             GameTestHelper context) {
@@ -100,6 +104,8 @@ public final class DescendCheckpointGameTests {
                             && "8400".equals(terminal.get("budget_limit"))
                             && "false".equals(terminal.get("task_open")),
                     "full-depth descent violated its persisted dynamic budget: " + terminal);
+            LOGGER.info("DESCEND_FULL_DEPTH_DEEPSLATE budget_used={} budget_limit={} headroom={} levels={}",
+                    budgetUsed, 8_400, 8_400 - budgetUsed, start.getY() - targetY);
             require(context, physicalBreaks.stream().allMatch(pos ->
                             !context.getLevel().getBlockState(pos).is(Blocks.DEEPSLATE)),
                     "full-depth descent completed without physically clearing every body block");

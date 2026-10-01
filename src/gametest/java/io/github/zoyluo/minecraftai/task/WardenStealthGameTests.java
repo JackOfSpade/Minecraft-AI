@@ -3,9 +3,12 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.github.zoyluo.minecraftai.action.PacePolicy;
+import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.brain.ToolDefinition;
 import io.github.zoyluo.minecraftai.brain.ToolRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.RecentDamage;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -142,6 +145,96 @@ public final class WardenStealthGameTests {
                 f.finish();
             }
             f.require(now < 450, "the bot never got 20 blocks from the hunting warden: " + bot.distanceTo(warden) + " " + gaits.summary());
+        });
+        });
+    }
+
+    /**
+     * A real hit from a NoAI warden keeps the flight sprinting after its visible roar has stopped, until the factual
+     * {@link WardenState#HIT_WINDOW_TICKS} record expires. The warden is then physically kept within the observed pressure envelope
+     * while the same task keeps moving, so the post-window sneak proves a true hunting-to-calm transition rather than a one-tick pose
+     * change or a completed route. The bot never attacks the warden.
+     */
+    @GameTest(environment = ENV + "hunting_warden_calming_after_recorded_hit_resumes_sneaking",
+            maxTicks = 700 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void huntingWardenCalmingAfterRecordedHitResumesSneaking(GameTestHelper context) {
+        FollowFieldFixture f = new FollowFieldFixture(context, 64, 24);
+        AIPlayerEntity bot = f.bot("WsCalmAfterHit", 0, 0, false);
+        Warden warden = f.warden(-10.0D, 0.0D);
+        warden.setPose(Pose.ROARING);
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
+        EvadeTask evade = assignEvade(f, bot);
+        Gaits initialSprint = new Gaits();
+        Gaits recordedHitSprint = new Gaits();
+        Gaits calmSneak = new Gaits();
+        int hitTick = 35;
+        int[] tick = {0};
+        long[] hitAt = {-1L};
+        PerceptionFixtures.everyTick(context, () -> {
+            int now = ++tick[0];
+            long gameTime = f.level.getGameTime();
+            if (now < hitTick) {
+                warden.setPose(Pose.ROARING);
+            } else {
+                warden.setPose(Pose.STANDING);
+            }
+            if (now == hitTick) {
+                float health = bot.getHealth();
+                f.require(PerceptionFixtures.struckBy(context, bot, warden, 1.0F)
+                                && bot.getHealth() < health,
+                        "fixture warden did not land a real non-lethal hit");
+                hitAt[0] = f.level.getGameTime();
+                f.require(RecentDamage.lastHitBy(bot.getUUID(), warden.getUUID(), hitAt[0], WardenState.HIT_WINDOW_TICKS)
+                                .isPresent()
+                                && WardenState.isHunting(warden, QuietZone.victimsOf(bot), hitAt[0]),
+                        "the real warden hit did not create the hunting record");
+            }
+
+            // This is the fixture's NoAI threat source, not a bot relocation: it follows at a factual visible distance so the
+            // real EvadeTask must keep renewing routes across the complete hit-record window.
+            warden.snapTo(bot.getX() - 10.0D, bot.getY(), bot.getZ(), 90.0F, 0.0F);
+            f.require(TaskManager.INSTANCE.getActive(bot).orElse(null) == evade && evade.state() == TaskState.RUNNING,
+                    "the evade ended before the warden transition: " + evade.state() + ":" + evade.failureReason());
+
+            initialSprint.judgeOnly = ignored -> now < hitTick;
+            initialSprint.sample(bot);
+            if (hitAt[0] >= 0L) {
+                long sinceHit = gameTime - hitAt[0];
+                recordedHitSprint.judgeOnly = ignored -> sinceHit > PacePolicy.DAMAGE_WINDOW_TICKS + 4L
+                        && sinceHit <= WardenState.HIT_WINDOW_TICKS;
+                calmSneak.judgeOnly = ignored -> sinceHit > WardenState.HIT_WINDOW_TICKS + 2L;
+                recordedHitSprint.sample(bot);
+                calmSneak.sample(bot);
+                if (sinceHit > PacePolicy.DAMAGE_WINDOW_TICKS + 4L && sinceHit <= WardenState.HIT_WINDOW_TICKS) {
+                    f.require(WardenState.isHunting(warden, QuietZone.victimsOf(bot), gameTime),
+                            "the recorded hit stopped counting as hunting before its window expired");
+                    f.require(bot.isSprinting() && !bot.isShiftKeyDown(),
+                            "the bot did not keep sprinting during the live recorded-hit window");
+                }
+                if (sinceHit > WardenState.HIT_WINDOW_TICKS + 2L) {
+                    f.require(RecentDamage.lastHitBy(bot.getUUID(), warden.getUUID(), gameTime, WardenState.HIT_WINDOW_TICKS)
+                                    .isEmpty()
+                                    && WardenState.isCalm(warden, QuietZone.victimsOf(bot), gameTime),
+                            "the warden did not become calm after the recorded-hit window expired");
+                }
+            }
+            if (now > hitTick + 5) {
+                f.require(initialSprint.judged >= 12 && initialSprint.sprinting >= initialSprint.judged - 1,
+                        "the initial roaring warden did not make the bot sprint: " + initialSprint.summary());
+            }
+            if (calmSneak.judged >= 15) {
+                f.require(recordedHitSprint.judged >= 20
+                                && recordedHitSprint.sprinting >= recordedHitSprint.judged - 1
+                                && recordedHitSprint.sneaking == 0,
+                        "the bot did not sustain a sprint after the damage-only grace period: "
+                                + recordedHitSprint.summary());
+                f.require(calmSneak.sneaking >= calmSneak.judged - 1 && calmSneak.sprinting == 0,
+                        "the bot did not resume sneaking after the warden became calm: " + calmSneak.summary());
+                f.finish();
+            }
+            f.require(now < 650, "the warden never completed its hunting-to-calm gait transition: initial="
+                    + initialSprint.summary() + " recorded=" + recordedHitSprint.summary() + " calm=" + calmSneak.summary());
         });
         });
     }

@@ -4,7 +4,7 @@
 
 MINING_PUBLIC_SEEDS='3000,155361719,632510390,111,700,4040404,12345,54321,99999,246810,105441651,1061665215,206232996,42414950,456718736,586434987,633819475,715809951,222222,1234567'
 MINING_SENTINEL_SEEDS='3000,20260610,777'
-MINING_STRICT_CAPABILITIES='hiddenBlockScan=false,emergencyTeleport=false,forcedPickup=false,manualTeleport=false'
+MINING_STRICT_CAPABILITIES='hiddenBlockScan=false,emergencyTeleport=false,manualTeleport=false'
 # Evidence must remain viable under the supported degraded-rate floor, not only Minecraft's ideal
 # 20 TPS ceiling. These are harness ceilings, not scenario tick budgets: evidence_run verifies the
 # actual timeout announced by the live verifier before accepting either value.

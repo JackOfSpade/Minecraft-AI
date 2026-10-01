@@ -163,8 +163,7 @@ public final class WalkedStepRules {
      * pickup job keep stroking until the feet are up.
      */
     /** Whether the step should hold the jump key for a bot that may be afloat ({@code inWater}). */
-    public static boolean jumpNow(WalkedStep.Kind kind, boolean grounded, double feetY, int targetY, boolean headUnderwater,
-                                  boolean inWater) {
+    public static boolean jumpNow(WalkedStep.Kind kind, boolean grounded, double feetY, int targetY, boolean inWater) {
         return switch (kind) {
             case STEP_UP -> (grounded || inWater) && feetY < targetY - 0.05D;
             case SWIM -> feetY < targetY + SWIM_HOLD_DEPTH;

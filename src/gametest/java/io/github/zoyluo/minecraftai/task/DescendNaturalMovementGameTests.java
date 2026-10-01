@@ -369,4 +369,56 @@ public final class DescendNaturalMovementGameTests {
                     return true;
                 });
     }
+
+    /**
+     * The same restart contract, but the replacement task starts in the tick that cancelled the airborne step. This guards the
+     * unsettled-pose restore path directly: neither task is allowed to publish the old landing or wait for a fixture to put the bot
+     * back on a floor.
+     */
+    @GameTest(environment = "minecraftai-gametest:descend_natural_movement_game_tests_restart_while_airborne_re_derives_without_settling", maxTicks = 1600)
+    public void restartWhileAirborneReDerivesWithoutSettling(GameTestHelper context) {
+        BlockPos start = buildStoneArena(context, 5, 4);
+        AIPlayerEntity bot = spawn(context, "DescendAirRestartGT", start);
+        int targetY = start.getY() - 3;
+        DescendToYTask first = new DescendToYTask(targetY);
+        first.start(bot);
+        Map<String, String>[] snapshot = new Map[1];
+        DescendToYTask[] restored = new DescendToYTask[1];
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, first, bot, 900,
+                        "no stair step became airborne before the restart",
+                        () -> {
+                            requireUntouched(context, bot, "airborne restart at " + bot.blockPosition().toShortString());
+                            return !bot.getActionPack().stepIdle() && bot.getY() < start.getY() - 0.05D
+                                    && !bot.onGround();
+                        }),
+                () -> {
+                    snapshot[0] = first.checkpoint();
+                    require(context, "none".equals(snapshot[0].get("pending_landing_target")),
+                            "the airborne checkpoint invented a landing: " + snapshot[0]);
+                    first.cancel(bot, "simulate_airborne_process_restart");
+                    require(context, bot.getActionPack().stepIdle(), "cancelling left the airborne step in flight");
+                    require(context, !bot.onGround(), "fixture settled before the replacement task could start");
+                    DescendToYTask task = new DescendToYTask(targetY, snapshot[0]);
+                    task.start(bot);
+                    require(context, task.state() == TaskState.RUNNING,
+                            "the airborne restored task did not start: " + task.state() + " " + task.failureReason());
+                    restored[0] = task;
+                    return true;
+                },
+                DescendTickStages.tickUntil(context, () -> restored[0], bot, 1200,
+                        "the immediately restored descent did not finish",
+                        () -> {
+                            requireUntouched(context, bot, "immediately restored descent at "
+                                    + bot.blockPosition().toShortString());
+                            return restored[0].state() == TaskState.COMPLETED;
+                        }),
+                () -> {
+                    require(context, bot.blockPosition().getY() == targetY,
+                            "the immediately restored descent completed off its target layer: "
+                                    + bot.blockPosition().toShortString());
+                    finish(context, bot, restored[0]);
+                    return true;
+                });
+    }
 }

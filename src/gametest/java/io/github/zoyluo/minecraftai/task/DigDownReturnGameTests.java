@@ -3,10 +3,13 @@ package io.github.zoyluo.minecraftai.task;
 import com.mojang.logging.LogUtils;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.pathfinding.MoveType;
 import io.github.zoyluo.minecraftai.pathfinding.Node;
 import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.TeleportAudit;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.goal.Goal;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.goal.GoalResult;
@@ -24,7 +27,10 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.vehicle.boat.Boat;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
@@ -1159,7 +1165,14 @@ public final class DigDownReturnGameTests {
         finish(context, bot, "DigDownScaledRestoreGT");
     }
 
-    @GameTest(maxTicks = 700)
+    // The serialized live run completed the 12-cell out-and-back corridor plus its closed-frontier settlement in 191 ticks.
+    // 240 leaves seven additional 7-tick owned step/settle turns (49 ticks). The remaining supported-frontier proof has one stone break,
+    // pickup settlement and exactly two flat walked legs (into the frontier and back), so its separate 60-tick allowance
+    // leaves 46 ticks beyond the two ordinary 7-tick walk/settle legs. The outer limit is their sum, not a second loose timer.
+    private static final int HORIZONTAL_CORRIDOR_TICK_CAP = 240;
+    private static final int HORIZONTAL_FRONTIER_TICK_ALLOWANCE = 60;
+
+    @GameTest(maxTicks = HORIZONTAL_CORRIDOR_TICK_CAP + HORIZONTAL_FRONTIER_TICK_ALLOWANCE)
     public void horizontalOpenCorridorAdvancesFactuallyAndNeverBacktracks(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(6, 5, 18));
@@ -1197,7 +1210,7 @@ public final class DigDownReturnGameTests {
                 return;
             }
             ticks[0]++;
-            require(context, ticks[0] < 650, "horizontal corridor timed out in phase " + phase[0]
+            require(context, ticks[0] <= HORIZONTAL_CORRIDOR_TICK_CAP, "horizontal corridor timed out in phase " + phase[0]
                     + " at " + bot.blockPosition().toShortString());
             if (task.state() == TaskState.RUNNING) {
                 task.tick(bot);
@@ -1264,6 +1277,10 @@ public final class DigDownReturnGameTests {
                     require(context, bot.blockPosition().equals(start),
                             "closed horizontal frontier failed away from its exact origin: "
                                     + bot.blockPosition().toShortString());
+                    LOGGER.info("DIG_DOWN_HORIZONTAL_OPEN_CORRIDOR elapsed_ticks={} internal_tick_cap={} outer_tick_cap={} work_budget_used={}",
+                            ticks[0], HORIZONTAL_CORRIDOR_TICK_CAP,
+                            HORIZONTAL_CORRIDOR_TICK_CAP + HORIZONTAL_FRONTIER_TICK_ALLOWANCE,
+                            task.checkpoint().getOrDefault("work_budget_used", "not_recorded"));
                     AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "DigDownHorizontalCorridorGT");
                     frontierPart[0] = horizontalFrontierPart(context);
                 }
@@ -1780,6 +1797,151 @@ public final class DigDownReturnGameTests {
         });
     }
 
+    /**
+     * The north stair is valid when DigDown starts, then loses its support after the real walked step owns it. The failed landing
+     * must mark that exact direction rejected and choose the next factual east stair; it must not publish the missing north landing
+     * or correct the bot there.
+     */
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_post_start_stair_support_loss_rejects_direction_and_rotates", maxTicks = 180)
+    public void postStartStairSupportLossRejectsDirectionAndRotates(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos origin = context.absolutePos(new BlockPos(24, 20, 24));
+        BlockPos northLanding = origin.north().below();
+        BlockPos eastLanding = origin.east().below();
+        for (BlockPos feet : List.of(origin, northLanding, eastLanding)) {
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        Standability.clearCache();
+        AIPlayerEntity bot = spawn(context, "DigDownPostStartStairGT", origin);
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
+        TeleportAudit.reset(bot);
+        DigDownTask task = new DigDownTask(Blocks.STONE, 3,
+                strictDescentCheckpoint(origin, List.of(origin), 3, 0));
+        task.start(bot);
+        boolean[] supportRemoved = {false};
+        boolean[] failureSettled = {false};
+        int[] ticks = {0};
+
+        context.failIfEver(() -> {
+            require(context, ++ticks[0] < 160, "post-start stair failure did not rotate to the east landing");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "post-start stair failure used a teleport: " + TeleportAudit.lastCaller(bot));
+            require(context, task.state() == TaskState.RUNNING,
+                    "post-start stair task ended: " + task.state() + ":" + task.failureReason());
+            if (!supportRemoved[0]
+                    && bot.getActionPack().stepInFlightFor("dig_down_stair", northLanding, WalkedStep.Kind.STEP_DOWN)) {
+                // Deliberately after beginDescend admitted the landing: this is the dynamic re-proof, not a preflight refusal.
+                world.setBlock(northLanding.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                Standability.clearCache();
+                supportRemoved[0] = true;
+                return;
+            }
+            if (supportRemoved[0] && !failureSettled[0] && bot.getActionPack().stepIdle()) {
+                WalkedStep.Result result = bot.getActionPack().stepResult();
+                require(context, result != null && result.failed() && "no_landing".equals(result.reason()),
+                        "the post-start stair did not fail from lost support: " + result);
+                task.tick(bot); // settle the owned failed step before reading the durable rejection marker
+                DigDownTask.DigDownCheckpoint checkpoint = DigDownTask.DigDownCheckpoint.decode(task.checkpoint()).orElse(null);
+                require(context, checkpoint != null && origin.equals(checkpoint.rejectedLandingOrigin())
+                                && (checkpoint.rejectedLandingDirections() & 1) != 0
+                                && bot.blockPosition().equals(origin),
+                        "failed stair did not reject only its factual north landing: " + task.checkpoint());
+                failureSettled[0] = true;
+                return;
+            }
+            task.tick(bot);
+            if (failureSettled[0]
+                    && bot.getActionPack().stepInFlightFor("dig_down_stair", eastLanding, WalkedStep.Kind.STEP_DOWN)) {
+                DigDownTask.DigDownCheckpoint checkpoint = DigDownTask.DigDownCheckpoint.decode(task.checkpoint()).orElse(null);
+                require(context, checkpoint != null && checkpoint.stairDirection() == 1,
+                        "post-start stair failure did not rotate NORTH to EAST: " + task.checkpoint());
+                require(context, TeleportAudit.corrections(bot) == 0,
+                        "rotated stair used a teleport: " + TeleportAudit.lastCaller(bot));
+                task.cancel(bot, "gametest_complete");
+                finish(context, bot, "DigDownPostStartStairGT");
+            }
+        });
+    }
+
+    /**
+     * A neutral boat occupies the exact return entry only after the real return micro-step has started. Once that step fails, the
+     * entry is walled before the fallback is admitted: a plain two-phase route would snap its WALK endpoint to the standing tail,
+     * whereas the DIG approach must preserve the solid exact endpoint, physically clear it, and walk back into it.
+     */
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_post_start_return_occupancy_promotes_dig_path_fallback", maxTicks = 180)
+    public void postStartReturnOccupancyPromotesDigPathFallback(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(24, 20, 40));
+        BlockPos tail = start.east();
+        preparePlatform(context, start, 5);
+        AIPlayerEntity bot = spawn(context, "DigDownPostStartReturnGT", tail);
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
+        TeleportAudit.reset(bot);
+        DigDownTask task = new DigDownTask(Blocks.STONE, 3,
+                returnCheckpoint(start, List.of(start, tail), 0, 0, false));
+        task.start(bot);
+        Boat[] blocker = {null};
+        boolean[] failedStepSettled = {false};
+        boolean[] exactEntryWalled = {false};
+        boolean[] exactDigPathStarted = {false};
+        int[] ticks = {0};
+
+        context.failIfEver(() -> {
+            require(context, ++ticks[0] < 160, "post-start return occupancy did not begin a DIG-path fallback");
+            require(context, TeleportAudit.corrections(bot) == 0,
+                    "post-start return failure used a teleport: " + TeleportAudit.lastCaller(bot));
+            require(context, task.state() == TaskState.RUNNING,
+                    "post-start return task ended: " + task.state() + ":" + task.failureReason());
+            if (blocker[0] == null
+                    && bot.getActionPack().stepInFlightFor("dig_down_return_trail", start, WalkedStep.Kind.FLAT)) {
+                blocker[0] = spawnBoatOccupant(context, start);
+                return;
+            }
+            if (blocker[0] != null && !failedStepSettled[0] && bot.getActionPack().stepIdle()) {
+                WalkedStep.Result result = bot.getActionPack().stepResult();
+                require(context, result != null && result.failed() && "entity_occupied".equals(result.reason()),
+                        "the post-start return did not fail from its injected occupant: " + result);
+                blocker[0].discard();
+                // The failed step still owns the factual exact origin. Seal both body cells only after it has failed: this makes
+                // the endpoint deliberately non-standable, so the fallback must retain it as a DIG endpoint instead of accepting
+                // an ordinary WALK route snapped back to tail.
+                context.getLevel().setBlock(start, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(start.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                exactEntryWalled[0] = true;
+                task.tick(bot); // settle the failed owned micro-step while the cursor still names the exact start
+                DigDownTask.DigDownCheckpoint checkpoint = DigDownTask.DigDownCheckpoint.decode(task.checkpoint()).orElse(null);
+                require(context, checkpoint != null && checkpoint.returnPathFallback()
+                                && checkpoint.returnTrailIndex() == 0,
+                        "failed return step did not retain the factual exact entry for fallback: " + task.checkpoint());
+                failedStepSettled[0] = true;
+                return;
+            }
+            if (exactDigPathStarted[0] && bot.blockPosition().equals(start)) {
+                require(context, context.getLevel().getBlockState(start).isAir()
+                                && context.getLevel().getBlockState(start.above()).isAir(),
+                        "DIG fallback reached the exact entry without physically clearing its walled body");
+                require(context, TeleportAudit.corrections(bot) == 0,
+                        "DIG-path return fallback used a teleport: " + TeleportAudit.lastCaller(bot));
+                task.cancel(bot, "gametest_complete");
+                finish(context, bot, "DigDownPostStartReturnGT");
+                return;
+            }
+            task.tick(bot);
+            if (failedStepSettled[0] && !bot.getActionPack().isPathExecutorIdle()) {
+                require(context, start.equals(bot.getActionPack().activePathGoal()),
+                        "return fallback did not preserve its solid exact-entry target: "
+                                + bot.getActionPack().activePathGoal());
+                require(context, exactEntryWalled[0],
+                        "fallback began before the post-failure exact-entry wall was installed");
+                exactDigPathStarted[0] = true;
+                require(context, TeleportAudit.corrections(bot) == 0,
+                        "DIG-path return fallback used a teleport: " + TeleportAudit.lastCaller(bot));
+            }
+        });
+    }
+
     private static Map<String, String> returnCheckpoint(BlockPos start,
                                                          List<BlockPos> trail,
                                                          int returnIndex,
@@ -1863,6 +2025,19 @@ public final class DigDownReturnGameTests {
         bot.teleportTo(context.getLevel(), pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         return bot;
+    }
+
+    /** A neutral, collidable return-landing occupant; it cannot change combat ownership. */
+    private static Boat spawnBoatOccupant(GameTestHelper context, BlockPos feet) {
+        Boat boat = EntityType.OAK_BOAT.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        if (boat == null) {
+            throw new IllegalStateException("failed to create occupied return boat");
+        }
+        boat.snapTo(feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, 0.0F, 0.0F);
+        if (!context.getLevel().addFreshEntity(boat)) {
+            throw new IllegalStateException("failed to spawn occupied return boat");
+        }
+        return boat;
     }
 
     private static String encode(BlockPos pos) {

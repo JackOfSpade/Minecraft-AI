@@ -329,7 +329,7 @@ public final class WalkedStep {
             bot.setDeltaMovement(velocity.x, velocity.y - WalkedStepRules.SWIM_DIVE_PUSH, velocity.z);
         }
         boolean grounded = supported(bot);
-        boolean jump = WalkedStepRules.jumpNow(kind, grounded, bot.getY(), cell.getY(), bot.isUnderWater(), bot.isInWater());
+        boolean jump = WalkedStepRules.jumpNow(kind, grounded, bot.getY(), cell.getY(), bot.isInWater());
         if (kind == Kind.STEP_UP) {
             if (jump) {
                 pack.jumpOnce();

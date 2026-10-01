@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import com.mojang.logging.LogUtils;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
@@ -40,9 +41,12 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
 
 /** Live strict-survival regression coverage for OreDig's physical target-drop ledger. */
 public final class OreDigPickupGameTests {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_adjacent_coal_over_five_deep_shaft_is_caught_before_deep_fall", maxTicks = 500)
     public void adjacentCoalOverFiveDeepShaftIsCaughtBeforeDeepFall(GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreDropCatchGT");
@@ -3172,11 +3176,13 @@ public final class OreDigPickupGameTests {
                     require(context, bot.blockPosition().equals(start),
                             "OreDig did not physically retreat to its previous face: "
                                     + buried.toShortString() + " -> " + bot.blockPosition().toShortString());
-                    // Walking out of a block takes a few ticks inside it: at most one vanilla suffocation hit (invulnerability
-                    // frames give one per ten ticks), never the death or a long stay the old instant teleport could not have.
-                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 2.0F,
+                    // The serialized gravity-retreat measurement was zero loss. Keep one vanilla suffocation hit as the only
+                    // frame-timing allowance; invulnerability frames prevent a second hit during this short physical exit.
+                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 1.0F,
                             "OreDig lost more than one suffocation hit leaving the occupied body cell: "
                                     + healthBefore + " -> " + bot.getHealth());
+                    LOGGER.info("ORE_DIG_GRAVITY_HEAD_RETREAT health_loss={} health_before={} health_after={}",
+                            healthBefore - bot.getHealth(), healthBefore, bot.getHealth());
                     require(context, gravityBlockPresent(context.getLevel(), buried, buried.above()),
                             "strict retreat silently removed the gravity obstruction");
                     require(context, "1".equals(task.checkpoint().get("steps_left"))
@@ -3345,10 +3351,13 @@ public final class OreDigPickupGameTests {
                     require(context, world.getBlockState(northBoundary).is(Blocks.GRAVEL)
                                     && gravityBlockPresent(world, westDetour, westDetour.above()),
                             "finite reroute mutated a protected gravity obstruction");
-                    // Walking out of the collapsed cell takes a few ticks inside a block: at most one vanilla suffocation hit.
-                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 2.0F,
+                    // The serialized gravity-retreat measurement was zero loss. One vanilla suffocation hit is the only
+                    // retained frame-timing allowance while the bot physically leaves the collapsed cell.
+                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 1.0F,
                             "collapse recovery lost more than one suffocation hit before reaching the safe branch: "
                                     + healthBefore + " -> " + bot.getHealth());
+                    LOGGER.info("ORE_DIG_COLLAPSED_DETOUR_RETREAT health_loss={} health_before={} health_after={}",
+                            healthBefore - bot.getHealth(), healthBefore, bot.getHealth());
                     restored.cancel(bot, "gametest_complete");
                     finish(context, fixture);
                 });
@@ -3417,10 +3426,13 @@ public final class OreDigPickupGameTests {
                             "non-branch pickup owner mutated the strip cursor or reroute marker: " + live);
                     require(context, gravityBlockPresent(world, blockedFace, blockedFace.above()),
                             "pickup-owned retreat silently removed the gravity obstruction");
-                    // Walking out of the occupied cell takes a few ticks inside a block: at most one vanilla suffocation hit.
-                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 2.0F,
+                    // The serialized gravity-retreat measurement was zero loss. One vanilla suffocation hit is the only
+                    // retained frame-timing allowance while the pickup owner physically leaves the occupied cell.
+                    require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 1.0F,
                             "pickup-owned retreat lost more than one suffocation hit before reaching safety: "
                                     + healthBefore + " -> " + bot.getHealth());
+                    LOGGER.info("ORE_DIG_PICKUP_OWNER_GRAVITY_RETREAT health_loss={} health_before={} health_after={}",
+                            healthBefore - bot.getHealth(), healthBefore, bot.getHealth());
 
                     task.cancel(bot, "gametest_complete");
                     finish(context, fixture);

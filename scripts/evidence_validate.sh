@@ -216,12 +216,12 @@ validate_one() {
   profile="$(harness_manifest_get "$manifest" profile)"
   case "$profile" in strict_survival|operator) ;; *) validation_fail invalid_profile; return 1 ;; esac
   capabilities="$(harness_manifest_get "$manifest" operator_capabilities)"
-  if [[ ! "$capabilities" =~ ^hiddenBlockScan=(true|false),emergencyTeleport=(true|false),forcedPickup=(true|false),manualTeleport=(true|false)$ ]]; then
+  if [[ ! "$capabilities" =~ ^hiddenBlockScan=(true|false),emergencyTeleport=(true|false),manualTeleport=(true|false)$ ]]; then
     validation_fail malformed_operator_capabilities
     return 1
   fi
   if [[ "$profile" == strict_survival ]] && \
-     [[ "$capabilities" != 'hiddenBlockScan=false,emergencyTeleport=false,forcedPickup=false,manualTeleport=false' ]]; then
+     [[ "$capabilities" != 'hiddenBlockScan=false,emergencyTeleport=false,manualTeleport=false' ]]; then
     validation_fail strict_profile_has_privileged_capability
     return 1
   fi
@@ -267,7 +267,7 @@ try:
             raise ValueError("mining assist schema")
         config_assist = assist["mode"]
     caps = data["operatorCapabilities"]
-    ordered = ("hiddenBlockScan", "emergencyTeleport", "forcedPickup", "manualTeleport")
+    ordered = ("hiddenBlockScan", "emergencyTeleport", "manualTeleport")
     if data.get("schemaVersion") != 1 or set(caps) != set(ordered):
         raise ValueError("schema")
     if not all(isinstance(caps[name], bool) for name in ordered):
@@ -774,11 +774,11 @@ validate_batch() {
   profile="$(harness_manifest_get "$manifest" profile)"
   case "$profile" in strict_survival|operator) ;; *) validation_fail invalid_batch_profile; return 1 ;; esac
   batch_capabilities="$(harness_manifest_get "$manifest" operator_capabilities)"
-  [[ "$batch_capabilities" =~ ^hiddenBlockScan=(true|false),emergencyTeleport=(true|false),forcedPickup=(true|false),manualTeleport=(true|false)$ ]] || {
+  [[ "$batch_capabilities" =~ ^hiddenBlockScan=(true|false),emergencyTeleport=(true|false),manualTeleport=(true|false)$ ]] || {
     validation_fail malformed_batch_capabilities
     return 1
   }
-  if [[ "$profile" == strict_survival && "$batch_capabilities" != 'hiddenBlockScan=false,emergencyTeleport=false,forcedPickup=false,manualTeleport=false' ]]; then
+  if [[ "$profile" == strict_survival && "$batch_capabilities" != 'hiddenBlockScan=false,emergencyTeleport=false,manualTeleport=false' ]]; then
     validation_fail strict_batch_has_privileged_capability
     return 1
   fi

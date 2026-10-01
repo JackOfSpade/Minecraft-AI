@@ -192,7 +192,11 @@ public final class NaturalMovementAcceptanceGameTests {
         owner.setShiftKeyDown(sneak);
     }
 
-    /** Puts the owner at {@code dx} on the course, on the ground (or afloat) there, facing east. */
+    /**
+     * Puts the non-ticked survival mock owner at {@code dx} on the course, on the ground (or afloat) there, facing east.
+     * This is scripted client placement, not production movement or a correction of the bot under test; {@link TeleportAudit}
+     * therefore remains scoped to the bot's real inputs.
+     */
     private static void moveOwner(FollowFieldFixture f, ServerPlayer owner, double dx) {
         double y = f.arena.origin.getY() + groundAt(dx);
         owner.teleportTo(f.level, f.x(dx), y, f.z(0.0D), Set.of(), (float) YAW_EAST, 0.0F, true);

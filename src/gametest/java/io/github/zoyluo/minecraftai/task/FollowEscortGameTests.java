@@ -76,10 +76,12 @@ public final class FollowEscortGameTests {
         int[] strikesSeen = {0};
         int[] excludeUntil = {0};
         int[] checked = {0};
+        double[] maxAbsLateral = {0.0D};
         context.failIfEver(() -> {
             int now = ++tick[0];
             f.require(follow.state() == TaskState.RUNNING, "follow ended: " + follow.state());
             Vec3 here = bot.position();
+            maxAbsLateral[0] = Math.max(maxAbsLateral[0], Math.abs(here.z - f.z(0.0D)));
             boolean moving = Math.hypot(here.x - last[0].x, here.z - last[0].z) > MOVING;
             last[0] = here;
             if (follow.escortStrikes() > strikesSeen[0]) {
@@ -98,6 +100,8 @@ public final class FollowEscortGameTests {
             if (now >= 150) {
                 f.require(strikesSeen[0] >= 1, "fixture: the follower never swung at the zombie beside its path");
                 f.require(checked[0] >= 20, "fixture: only " + checked[0] + " moving ticks were checked");
+                f.require(maxAbsLateral[0] < 0.5D,
+                        "the follower drifted toward the zombie: " + maxAbsLateral[0] + " blocks off its route");
                 f.finish();
             }
         });

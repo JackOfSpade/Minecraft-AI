@@ -114,8 +114,8 @@ public final class PickupNaturalMovementGameTests {
      * base block against the side face and walks back to the middle of the cell. The old code teleported 0.55 blocks out and back in
      * one tick; now both are steps with the movement keys and the placement happens between them.
      */
-    @GameTest(environment = "minecraftai-gametest:pickup_natural_movement_game_tests_acquire_water_scoops_from_edge_without_teleport", maxTicks = 900)
-    public void acquireWaterScoopsFromEdgeWithoutTeleport(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:pickup_natural_movement_game_tests_sneak_bridge_climb_leans_from_edge_without_teleport", maxTicks = 900)
+    public void sneakBridgeClimbLeansFromEdgeWithoutTeleport(GameTestHelper context) {
         Arena arena = Arena.build(context, 0, -6, 6, -6, 6);
         BlockPos start = arena.feet;
         AIPlayerEntity bot = arena.spawn("PickupWaterEdgeGT", start);
