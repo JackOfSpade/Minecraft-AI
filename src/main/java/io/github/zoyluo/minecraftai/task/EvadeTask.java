@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.Gait;
 import io.github.zoyluo.minecraftai.action.PaceOwner;
+import io.github.zoyluo.minecraftai.action.PacePolicy;
 import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.entity.RecentDamage;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -74,7 +75,7 @@ public final class EvadeTask extends AbstractTask {
                 && MinecraftAiConfig.get().behaviour().wardenOrDefaults().sneakAwayEnabled()) {
             long now = bot.level().getGameTime();
             if (WardenState.isCalm(warden, QuietZone.victimsOf(bot), now)
-                    && !RecentDamage.tookEntityDamage(bot.getUUID(), now, io.github.zoyluo.minecraftai.action.PacePolicy.DAMAGE_WINDOW_TICKS)) {
+                    && !RecentDamage.tookEntityDamage(bot.getUUID(), now, PacePolicy.DAMAGE_WINDOW_TICKS)) {
                 return Gait.SNEAK;
             }
         }

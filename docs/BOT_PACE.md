@@ -209,7 +209,8 @@ ticks, and never turns the flight around (the escort is silent next to a calm wa
 A player cannot sprint at 6 food points or fewer, so a bot eats when its food is at 7 or lower (`DangerWatcher.SPRINT_LIMIT_FOOD`), whatever
 `survival.hungerEatThreshold` is, and it does not wait for its walk to end (a follower on a long route would otherwise reach 6 first). It does
 not eat in the middle of a fight (a hostile in view, or hurt this tick) or while an Evade/Combat task runs, and it defers next to a calm
-warden (20 blocks) unless its health is 6 or lower; it eats as soon as they allow. The normal food rules apply (`FoodPolicy`: no reserve food,
+warden (20 blocks) unless its health is 6 or lower or the bite is urgent (critical hunger, a healing emergency or shelter-cleanup recovery);
+it eats as soon as they allow. The normal food rules apply (`FoodPolicy`: no reserve food,
 no poison, harmful food last), and a protected transaction (a mining break, craft, smelt, container) still finishes first below the critical
 level. Tests: `AutoEatSprintLimitGameTests`.
 

@@ -44,6 +44,8 @@ public final class EmergencyShelterTask extends AbstractTask {
     private static final int PREBUILD_RETREAT_DISTANCE = 10;
     private static final int PREBUILD_RETREAT_LIMIT = 260;
     private static final int EXIT_LIMIT = 500;
+    /** Three failed, non-cancelled attempts at the same open doorway mean its pose is no longer trustworthy. */
+    private static final int EGRESS_MOTION_FAILURE_LIMIT = 3;
     private static final int DAYLIGHT_GRACE_TICKS = 100;
     /**
      * A non-surface shelter's HOLD phase must wait out a real minimum window before treating the
@@ -135,6 +137,9 @@ public final class EmergencyShelterTask extends AbstractTask {
     private BlockPos roofSupport;
     private BlockPos roofSupportBase;
     private BlockPos egressFeet;
+    /** The doorway whose failed walked-step attempts are being counted (a different doorway starts fresh). */
+    private BlockPos egressFailureTarget;
+    private int egressMotionFailures;
     private BlockPos exitMiningTarget;
     private Direction lastDeferredForcedDirection;
     /** A real jump for the roof support is in flight (the bot is in the air or about to be). */
@@ -200,6 +205,7 @@ public final class EmergencyShelterTask extends AbstractTask {
                 + " remaining=" + targets.size()
                 + " observation_reseals=" + observationReseals
                 + " pressured_egress=" + pressuredEgress.size()
+                + " egress_motion_failures=" + egressMotionFailures
                 + " daylight_ticks=" + consecutiveDaylightTicks
                 + " exit_age=" + exitAge()
                 + " force_pressure_exit=" + forcePressureExit
@@ -248,6 +254,8 @@ public final class EmergencyShelterTask extends AbstractTask {
         pendingFailure = null;
         terminalRecorded = false;
         exitMiningTarget = null;
+        egressFailureTarget = null;
+        egressMotionFailures = 0;
         lastDeferredForcedDirection = null;
         surfaceShelter = false;
         forcePressureExit = false;
@@ -696,6 +704,10 @@ public final class EmergencyShelterTask extends AbstractTask {
     /**
      * Follows the walked step in flight. The step is ticked by the action pack every game tick; this only reads how it ended and
      * decides what the build does next from the world (never from the step's word alone: another owner may have replaced it).
+     * While that physical move owns the body, the phase's BUILD/HOLD work and generic no-progress checks intentionally do not run:
+     * the walked step re-proves its landing every tick and owns its own deadline, and {@link #creditBuildClock(int)} freezes only
+     * the BUILD clocks. The environmental ownership hand-off is checked before this method, so water/drowning can still preempt.
+     * Once the step ends, the current phase re-derives its next action from the live world.
      *
      * @return true while the tick belongs to the walked step (in flight, or its ending was handled here)
      */
@@ -774,7 +786,33 @@ public final class EmergencyShelterTask extends AbstractTask {
                 bot.getActionPack().setSneaking(false);
                 return false;
             }
-            case ANCHOR_RETURN, EGRESS -> {
+            case ANCHOR_RETURN -> {
+                // recoverAnchorOrRelease keeps one aggregate ANCHOR_RECOVERY_LIMIT across every
+                // failed/restarted walked return; do not give each individual attempt a fresh budget.
+                return false;
+            }
+            case EGRESS -> {
+                if (!succeeded && !"cancelled".equals(why) && egressFeet != null) {
+                    if (!egressFeet.equals(egressFailureTarget)) {
+                        egressFailureTarget = egressFeet.immutable();
+                        egressMotionFailures = 0;
+                    }
+                    if (++egressMotionFailures >= EGRESS_MOTION_FAILURE_LIMIT) {
+                        // The open doorway looked safe before each start, but the actual input-driven
+                        // step could not verify its landing. Reopen selection rather than trying this
+                        // same pose forever; rejectCurrentEgress preserves the first terminal cause.
+                        int failures = egressMotionFailures;
+                        BlockPos failedEgress = egressFeet;
+                        rejectCurrentEgress(bot, "shelter_exit_pose_unverified");
+                        egressFailureTarget = null;
+                        egressMotionFailures = 0;
+                        phase = Phase.OPEN_EXIT;
+                        phaseStartedElapsed = elapsed;
+                        BotLog.action(bot, "shelter_exit_pose_reopened",
+                                "egress", failedEgress, "failures", failures, "why", why);
+                        return true;
+                    }
+                }
                 return false;
             }
             default -> {
@@ -1662,6 +1700,8 @@ public final class EmergencyShelterTask extends AbstractTask {
             exitStartedElapsed = elapsed;
         }
         elevatedForRoofSupport = false;
+        egressFailureTarget = null;
+        egressMotionFailures = 0;
         dropMotion();
         exitMiningTarget = null;
         cancelHoldEating(bot, "shelter_hold_finished");
@@ -1680,6 +1720,8 @@ public final class EmergencyShelterTask extends AbstractTask {
     private void beginForcedPressureExit(AIPlayerEntity bot) {
         forcePressureExit = true;
         pressuredEgress.clear();
+        egressFailureTarget = null;
+        egressMotionFailures = 0;
 
         Direction currentDirection = directionTo(egressFeet);
         boolean keepCurrent = currentDirection != null
@@ -1705,6 +1747,8 @@ public final class EmergencyShelterTask extends AbstractTask {
 
     private void returnToPressureHold(AIPlayerEntity bot, String reason) {
         phase = Phase.HOLD;
+        egressFailureTarget = null;
+        egressMotionFailures = 0;
         dropMotion();
         phaseStartedElapsed = elapsed;
         exitMiningTarget = null;

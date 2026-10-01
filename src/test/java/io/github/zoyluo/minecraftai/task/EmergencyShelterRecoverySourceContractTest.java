@@ -126,6 +126,27 @@ final class EmergencyShelterRecoverySourceContractTest {
                 "partial shells are registered only after cancellation proves a passable escape");
     }
 
+    @Test
+    void failedEgressStepsRotateTheDoorwayInsteadOfRetryingOneUnverifiedPoseForever() throws IOException {
+        String shelter = read("task/EmergencyShelterTask.java");
+        int onMotionEnded = shelter.indexOf("private boolean onMotionEnded(AIPlayerEntity bot, Motion finished");
+        int dropMotion = shelter.indexOf("private void dropMotion()", onMotionEnded);
+        String motionCompletion = shelter.substring(onMotionEnded, dropMotion);
+        int egress = motionCompletion.indexOf("case EGRESS ->");
+        assertTrue(egress >= 0);
+        String egressCase = motionCompletion.substring(egress);
+        assertTrue(shelter.contains("EGRESS_MOTION_FAILURE_LIMIT = 3"));
+        assertTrue(egressCase.contains("shelter_exit_pose_unverified")
+                        && egressCase.contains("rejectCurrentEgress(bot, \"shelter_exit_pose_unverified\")")
+                        && egressCase.contains("phase = Phase.OPEN_EXIT;"),
+                "three failed real egress steps must reopen selection rather than spin on the same landing pose");
+        int recover = shelter.indexOf("private boolean recoverAnchorOrRelease(AIPlayerEntity bot)");
+        int failDisplaced = shelter.indexOf("private void failDisplacedAnchor", recover);
+        String anchorRecovery = shelter.substring(recover, failDisplaced);
+        assertTrue(anchorRecovery.contains("elapsed - anchorRecoveryStartedElapsed > ANCHOR_RECOVERY_LIMIT"),
+                "anchor-return attempts retain their one aggregate recovery limit");
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(MAIN.resolve(relative));
     }

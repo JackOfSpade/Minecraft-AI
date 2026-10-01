@@ -233,7 +233,13 @@ public final class HostileBotLedger {
         return seenThisTick(bot, player);
     }
 
-    /** One vision result per (observer bot, aggressor, game time): StrikeLegality.isFriendly and hostileTo both ask within a tick. */
+    /**
+     * One vision result per (observer bot, aggressor, game time): {@code StrikeLegality.isFriendly} and {@code hostileTo} both ask
+     * within a tick. This is a server-thread cache only: every production caller reads world/entity state on that thread, so the
+     * volatile tick and concurrent map are not a licence to call it from a worker. The result is intentionally up to one game tick
+     * stale (the map clear and {@code seenTick} update are not one atomic world snapshot); a fixture that moves an entity, turns an
+     * owner or changes a wall inside that tick must call {@link #invalidateVisionCache()}.
+     */
     private record SeenKey(UUID bot, UUID aggressor) {
     }
 

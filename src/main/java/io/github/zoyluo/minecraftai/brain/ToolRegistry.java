@@ -574,7 +574,7 @@ public final class ToolRegistry {
             return ok("equipped_armor_pieces: " + equipped);
         });
 
-        register("attack", "Start a deterministic combat task against nearby entities of a type. The bot equips armor and weapon, attacks on cooldown, and retreats at low health.", objectSchema()
+        register("attack", "Start a deterministic combat task against nearby entities of a type. The bot equips armor and weapon, attacks on cooldown, and retreats at low health. It never fights a warden.", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:zombie"))
                 .property("count", integerSchema("number of kills"))
                 .required("entity_type")

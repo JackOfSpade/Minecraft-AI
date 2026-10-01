@@ -311,6 +311,8 @@ public final class WardenStealthGameTests {
         ToolDefinition attack = registry.get("attack").orElse(null);
         ToolDefinition assignTask = registry.get("assign_task").orElse(null);
         f.require(attack != null && assignTask != null, "the attack or assign_task tool is not registered");
+        f.require(attack.description().contains("never fights a warden"),
+                "the attack tool description does not tell the planner that wardens are refused");
 
         JsonObject args = JsonParser.parseString("{\"entity_type\":\"minecraft:warden\",\"count\":1}").getAsJsonObject();
         ToolDefinition.ToolResult result = attack.handler().invoke(bot, args);

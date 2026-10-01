@@ -450,11 +450,10 @@ public final class DangerWatcher {
         }
         if (threat.isPresent()) {
             Threat top = threat.get();
-            boolean followKeeps = followKeepsThreat(server, bot, active, top);
-            if (!followKeeps
-                    && top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
+            if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
                     && shouldAssignThreatTask(bot, active, top)
-                    && canAssignThreatTask(server, bot, top)) {
+                    && canAssignThreatTask(server, bot, top)
+                    && !followKeepsThreat(server, bot, active, top)) {
                 Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot), hostilePressure);
                 // Align with the leash: a defensive fight against a target that is already outside its
                 // leash (a drowned in water 10 blocks off / below the floor) would be assigned and then
@@ -818,7 +817,10 @@ public final class DangerWatcher {
             return false;
         }
         if (bot.getActionPack().hasActiveActions() && !urgent && !sprintLimitHunger) {
-            return false; // Non-urgent eating waits for the current action to finish; critical starvation can still preempt to save the bot's life.
+            // A routine bite waits for the current action. Urgent survival and food 7 (the last
+            // sprint-legal point) may pause ordinary travel, so a long coordinate move cannot strand
+            // the bot below vanilla's sprint floor.
+            return false;
         }
         if (active.isPresent() && active.get() instanceof EatTask) {
             return true;
@@ -840,8 +842,11 @@ public final class DangerWatcher {
         if (now < nextEatAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
         }
-        // Chewing is a sound a calm warden hears: wait until it is out of range, unless the bot is badly hurt.
-        if (bot.getHealth() > CALM_WARDEN_EAT_HEALTH && QuietZone.calmWardenObservedWithin(bot, CALM_WARDEN_EAT_RANGE)) {
+        // Chewing is a sound a calm warden hears: delay only a routine meal while it is in range.
+        // Critical hunger, a healing emergency and shelter-cleanup recovery are all urgent survival
+        // transactions, so the bite wins even when the bot is otherwise healthy.
+        if (!urgent && bot.getHealth() > CALM_WARDEN_EAT_HEALTH
+                && QuietZone.calmWardenObservedWithin(bot, CALM_WARDEN_EAT_RANGE)) {
             nextEatAttemptTick.put(bot.getUUID(), now + 20);
             return false;
         }

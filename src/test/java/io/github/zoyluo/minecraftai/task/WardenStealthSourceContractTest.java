@@ -25,6 +25,10 @@ final class WardenStealthSourceContractTest {
         int refuse = tools.indexOf("WardenRefusal.refuses(attackType)", attackTool);
         int build = tools.indexOf("new CombatTask(", attackTool);
         assertTrue(attackTool >= 0 && refuse > attackTool && build > refuse, "the attack tool refuses a warden before it builds the task");
+        int attackDescriptionEnd = tools.indexOf("objectSchema()", attackTool);
+        assertTrue(attackDescriptionEnd > attackTool
+                        && tools.substring(attackTool, attackDescriptionEnd).contains("never fights a warden"),
+                "the attack tool tells the planner that wardens are never a valid combat target");
         int assign = tools.indexOf("register(\"assign_task\"");
         int refuseTask = tools.indexOf("WardenRefusal.refuses(requiredEntityType(params, \"entity_type\"))", assign);
         int create = tools.indexOf("Task task = createTask(bot, taskType, params);", assign);
@@ -45,6 +49,9 @@ final class WardenStealthSourceContractTest {
         int lease = evade.indexOf("requestFleeRoutePace(bot, source);", start);
         assertTrue(admit >= 0 && start > admit && lease > start, "the route lease is requested after the route has started");
         assertTrue(evade.contains("bot.getActionPack().requestPace(gait, owner)"), "a tick lease is renewed every tick");
+        assertTrue(evade.contains("import io.github.zoyluo.minecraftai.action.PacePolicy;"));
+        assertFalse(evade.contains("io.github.zoyluo.minecraftai.action.PacePolicy.DAMAGE_WINDOW_TICKS"),
+                "EvadeTask imports the shared pace policy rather than hiding its dependency inline");
         assertTrue(evade.contains("WardenState.isCalm(warden, QuietZone.victimsOf(bot)"), "calm is judged by WardenState, never getTarget");
         assertFalse(evade.contains("getTarget()") || evade.contains("getEntityAngryAt"), "hidden warden state is never read");
         assertTrue(evade.contains("private static final int BUDGET_TICKS = 400;") && evade.contains("SNEAK_BUDGET_FACTOR = 4"),

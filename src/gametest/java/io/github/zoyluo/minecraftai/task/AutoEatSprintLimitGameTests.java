@@ -1,10 +1,14 @@
 package io.github.zoyluo.minecraftai.task;
 
 import java.util.List;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -57,6 +61,48 @@ public final class AutoEatSprintLimitGameTests {
             }
             f.require(now < 300, "the follow did not resume after eating, active: " + (active == null ? "none" : active.name())
                     + " food " + bot.getFoodData().getFoodLevel());
+        });
+    }
+
+    @GameTest(environment = ENV + "eats_at_seven_while_moving_to_a_coordinate", maxTicks = 320)
+    public void eatsAtSevenWhileMovingToACoordinate(GameTestHelper context) {
+        // MoveTask is the current coordinate-travel task (the older review called this GotoTask).
+        // It must get the same pause/resume treatment as follow instead of losing sprint on a long route.
+        FollowFieldFixture f = new FollowFieldFixture(context, 44, 8);
+        AIPlayerEntity bot = f.bot("AeMove", -30, 0, false);
+        BlockPos goal = f.cell(30, 0);
+        bot.getFoodData().setFoodLevel(7);
+        bot.getFoodData().setSaturation(0.0F);
+        f.give(bot, new ItemStack(Items.BREAD, 4));
+        MoveTask move = new MoveTask(bot, goal);
+        TaskManager.INSTANCE.assign(bot, move, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_auto_eat_move"));
+        int[] tick = {0};
+        boolean[] eatingStarted = {false};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            if (active instanceof EatTask) {
+                eatingStarted[0] = true;
+                f.require(bot.getFoodData().getFoodLevel() >= 7,
+                        "the coordinate traveler fell below food 7 before it ate: " + bot.getFoodData().getFoodLevel());
+                f.require(TaskManager.INSTANCE.peekPaused(bot).orElse(null) == move
+                                && TaskManager.INSTANCE.pausedDepth(bot) == 1,
+                        "eating did not pause exactly the running coordinate move");
+                return;
+            }
+            if (!eatingStarted[0]) {
+                f.require(bot.getFoodData().getFoodLevel() >= 7,
+                        "the coordinate traveler reached food " + bot.getFoodData().getFoodLevel() + " without eating");
+                f.require(now < 150, "the coordinate traveler never ate at food 7 (active: "
+                        + (active == null ? "none" : active.name()) + ")");
+                return;
+            }
+            if (active == move && bot.getFoodData().getFoodLevel() == 20) {
+                f.require(!TaskManager.INSTANCE.hasPaused(bot), "a stale move pause remained after eating");
+                f.finish();
+            }
+            f.require(now < 300, "the coordinate move did not resume after eating (active: "
+                    + (active == null ? "none" : active.name()) + ", food=" + bot.getFoodData().getFoodLevel() + ")");
         });
     }
 
@@ -176,6 +222,53 @@ public final class AutoEatSprintLimitGameTests {
             f.require(now < 280, "the bot did not eat once the warden was gone, active: " + (active == null ? "none" : active.name())
                     + " food " + bot.getFoodData().getFoodLevel());
         });
+        });
+    }
+
+    @GameTest(environment = ENV + "urgent_hunger_eats_next_to_a_calm_warden", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void urgentHungerEatsNextToACalmWarden(GameTestHelper context) {
+        FollowFieldFixture f = new FollowFieldFixture(context, 20, 18);
+        AIPlayerEntity bot = f.bot("AeUrgentWarden", -2, 0, false);
+        ServerPlayer target = f.target(1, 0);
+        bot.getFoodData().setFoodLevel(20);
+        f.give(bot, new ItemStack(Items.BREAD, 4));
+        Warden warden = f.warden(-2.0D, 12.0D);
+        // Establish the same factual calm-warden observation as the ordinary-deferral test before
+        // lowering food. The bot remains healthy, so urgency (not the low-health exception) admits
+        // the bite.
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
+            int critical = MinecraftAiConfig.get().survival().hungerCriticalThreshold();
+            bot.getFoodData().setFoodLevel(critical);
+            bot.getFoodData().setSaturation(0.0F);
+            FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_auto_eat_urgent_warden");
+            int[] tick = {0};
+            boolean[] eatingStarted = {false};
+            PerceptionFixtures.everyTick(context, () -> {
+                int now = ++tick[0];
+                Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+                if (!eatingStarted[0]) {
+                    f.require(bot.getHealth() > DangerWatcher.CALM_WARDEN_EAT_HEALTH,
+                            "fixture accidentally took the low-health warden exception");
+                    f.require(QuietZone.calmWardenObservedWithin(bot, DangerWatcher.CALM_WARDEN_EAT_RANGE),
+                            "fixture lost its calm warden observation before the urgent bite");
+                    if (active instanceof EatTask) {
+                        eatingStarted[0] = true;
+                        f.require(TaskManager.INSTANCE.peekPaused(bot).orElse(null) == follow,
+                                "urgent hunger did not pause the follow before eating");
+                        return;
+                    }
+                    f.require(now < 100, "critical hunger stayed deferred next to a calm warden (active: "
+                            + (active == null ? "none" : active.name()) + ")");
+                    return;
+                }
+                if (active == follow && bot.getFoodData().getFoodLevel() == 20) {
+                    f.require(!TaskManager.INSTANCE.hasPaused(bot), "a stale follow pause remained after urgent eating");
+                    f.finish();
+                }
+                f.require(now < 300, "the follow did not resume after urgent eating (active: "
+                        + (active == null ? "none" : active.name()) + ", food=" + bot.getFoodData().getFoodLevel() + ")");
+            });
         });
     }
 }

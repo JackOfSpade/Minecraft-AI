@@ -98,6 +98,31 @@ final class FollowEscortSourceContractTest {
         assertTrue(pressure >= 0 && start > pressure, "the fight gate still comes before the bite");
     }
 
+    @Test
+    void theFollowEscapeCheckRunsOnlyForAThreatThatCouldActuallyBeAssigned() throws IOException {
+        String watcher = read("task/DangerWatcher.java");
+        int top = watcher.indexOf("Threat top = threat.get();");
+        int branch = watcher.lastIndexOf("if (threat.isPresent()) {", top);
+        int end = watcher.indexOf("        // Mitigation hardening", top);
+        assertTrue(branch >= 0 && end > top);
+        String dispatch = watcher.substring(branch, end);
+        int severity = dispatch.indexOf("top.severity().ordinal()");
+        int owner = dispatch.indexOf("shouldAssignThreatTask(bot, active, top)");
+        int cooldown = dispatch.indexOf("canAssignThreatTask(server, bot, top)");
+        int followKeeps = dispatch.indexOf("followKeepsThreat(server, bot, active, top)");
+        assertTrue(severity >= 0 && owner > severity && cooldown > owner && followKeeps > cooldown,
+                "follow escort logging and shelter probing run only after a medium-or-higher threat can dispatch");
+    }
+
+    @Test
+    void aCalmWardenOnlyDefersRoutineEatingNotUrgentSurvivalTransactions() throws IOException {
+        String watcher = read("task/DangerWatcher.java");
+        int wardenGate = watcher.indexOf("QuietZone.calmWardenObservedWithin(bot, CALM_WARDEN_EAT_RANGE)");
+        int urgentGate = watcher.lastIndexOf("if (!urgent", wardenGate);
+        assertTrue(wardenGate >= 0 && urgentGate >= 0 && urgentGate < wardenGate,
+                "critical hunger, healing and shelter-cleanup recovery must bypass the calm-warden eating deferral");
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(MAIN.resolve(relative));
     }

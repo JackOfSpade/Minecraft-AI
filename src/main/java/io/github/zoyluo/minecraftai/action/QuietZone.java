@@ -168,12 +168,12 @@ public final class QuietZone {
         }
     }
 
-    /** The bot and its owner when the owner is online: the ones a warden hunting "us" is hunting. */
-    /** The bot and its owner: who a warden hunting "us" is hunting (for the callers outside this package). */
+    /** The bot and its online owner: the victims a warden hunting "us" may be hunting, for callers outside this package. */
     public static List<LivingEntity> victimsOf(AIPlayerEntity bot) {
         return victims(bot);
     }
 
+    /** Internal copy of {@link #victimsOf(AIPlayerEntity)} used by the cached quiet-zone scan. */
     static List<LivingEntity> victims(AIPlayerEntity bot) {
         List<LivingEntity> victims = new ArrayList<>(2);
         victims.add(bot);
