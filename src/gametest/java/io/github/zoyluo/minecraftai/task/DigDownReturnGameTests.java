@@ -1301,6 +1301,12 @@ public final class DigDownReturnGameTests {
                                 drop -> drop.isAlive() && drop.getItem().is(Items.COBBLESTONE))
                         .stream().findFirst().ifPresent(drop -> {
                             drop.setNeverPickUp();
+                            // The drop stays in the frontier cell it was mined from. Vanilla pops it with a random sideways velocity
+                            // (up to about a block of travel) and this frontier's floor is one cell wide with open pits beside it: a drop
+                            // that rolled over the edge fell five blocks, out of every reach (seen: drops_within_16 one block east, five
+                            // down), and the task rightly settled as WALLED. The fixture is about the pickup debt, not about a lost drop,
+                            // so it takes the roll out of the pop and leaves the geometry the task decides on untouched.
+                            drop.setDeltaMovement(0.0D, drop.getDeltaMovement().y, 0.0D);
                             delayedDrop.set(drop);
                         });
             }
@@ -1347,6 +1353,9 @@ public final class DigDownReturnGameTests {
                                 .map(drop -> String.format(java.util.Locale.ROOT, "%.2f@%s", drop.distanceTo(bot),
                                         drop.blockPosition().toShortString()))
                                 .toList()
+                        + " drops_within_16=" + world.getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(16.0D),
+                                        drop -> drop.isAlive() && drop.getItem().is(Items.COBBLESTONE)).stream()
+                                .map(drop -> drop.position().toString()).toList()
                         + " bot=" + bot.position()));
                 return;
             }
