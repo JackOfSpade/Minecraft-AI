@@ -18,6 +18,7 @@ import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.observe.TpsGuard;
 import io.github.zoyluo.minecraftai.persist.BotPersistence;
+import io.github.zoyluo.minecraftai.pathfinding.RuntimePathfinderWarmup;
 import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.task.BotTickCoordinator;
 import io.github.zoyluo.minecraftai.task.TaskManager;
@@ -83,9 +84,14 @@ public class MinecraftAiMod implements ModInitializer {
         CommonLifecycleEvents.TAGS_LOADED.register((registries, client) -> BreakVerdictCache.invalidate());
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             BotLog.lifecycle("server_started", "motd", server.getMotd());
+            // Pay the cold A* class-load/JIT cost before restored work or a user's first route request can reach the path executor.
+            RuntimePathfinderWarmup.warmAtServerStart(server);
             RuntimeLifecycleCoordinator.INSTANCE.onServerStarted(server, config);
         });
-        ServerLifecycleEvents.SERVER_STOPPING.register(RuntimeLifecycleCoordinator.INSTANCE::onServerStopping);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            RuntimePathfinderWarmup.clear(server);
+            RuntimeLifecycleCoordinator.INSTANCE.onServerStopping(server);
+        });
         // Damage records (who hurt whom, in level game time) and the teleport counters are per server run.
         io.github.zoyluo.minecraftai.entity.RecentDamage.register();
         // Pace: hostiles after the bot, its owner, the followed player or a Minecraft-AI bot keep it at a sprint (see AggroSense).

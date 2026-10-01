@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.FollowTask;
@@ -97,11 +98,23 @@ public final class NaturalMovementGameTests {
             if (pathfinderWarm) {
                 return;
             }
-            pathfinderWarm = true;
             ServerLevel level = bot.level();
             BlockPos goal = where.east(3);
-            new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, false).findPath();
-            new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, true).findPath();
+            if (!Standability.isStandableFresh(level, where) || !Standability.isStandableFresh(level, goal)) {
+                throw new IllegalStateException("warm-up fixture has no standable two-cell route: " + where.toShortString()
+                        + " -> " + goal.toShortString());
+            }
+            PathfindingResult walk = new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, false).findPath();
+            PathfindingResult dig = new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, true).findPath();
+            if (!didRealPathfindingWork(walk) || !didRealPathfindingWork(dig)) {
+                throw new IllegalStateException("warm-up did not search a real route: walk=" + walk.reason() + "/" + walk.nodesExplored()
+                        + ", dig=" + dig.reason() + "/" + dig.nodesExplored());
+            }
+            pathfinderWarm = true;
+        }
+
+        private static boolean didRealPathfindingWork(PathfindingResult result) {
+            return result.success() || result.nodesExplored() > 1;
         }
 
         /** A legacy-engine bot at {@code where}, full health and food, no fixture teleport counted against it. */

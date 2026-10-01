@@ -47,7 +47,12 @@ get there at all". No path, or an exact-cell request whose search ran out of pla
 reached over the loaded terrain), is `GOAL_UNREACHABLE`. A partial path (far goal, cut-off search) is accepted; approach requests
 (follow) also accept the partial path to the closest reachable point, which is how a follower walks up to its bank when the player is
 across water. A search that used its whole budget for nothing proves nothing (cold start, busy server) and lets the route start.
-The first request of a session runs one warm-up search so class loading does not eat the admission budget.
+At server start, before restored bot work can request a route, legacy A* finds an actually standable pair near the ordinary spawn and
+runs a one-off warm-up. It then runs the same route under the real, unscaled 50 ms budget and logs `pathfinder_warm_up` with both
+wall-clock measurements, nodes and the `within_50ms` result. This is a production regression signal rather than a GameTest claim:
+the GameTest harness deliberately stretches normal A* wall-clock allowances so tick-counted fixtures cannot certify a 50 ms bound.
+If a user-built spawn has no observed standable pair, the warm-up logs that fact and never invents one; a later route remains governed
+by its normal budget.
 
 ## Movement capabilities (`nav.baritone`, only with `engine = baritone`)
 

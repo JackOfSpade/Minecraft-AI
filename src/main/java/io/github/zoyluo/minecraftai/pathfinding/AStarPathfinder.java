@@ -18,7 +18,8 @@ import net.minecraft.server.level.ServerLevel;
 
 public final class AStarPathfinder {
     private static final int DEFAULT_MAX_NODES = 10_000;
-    private static final long DEFAULT_MAX_MILLIS = 50L;
+    /** Production wall-clock budget for an ordinary synchronous route search. */
+    static final long DEFAULT_MAX_MILLIS = 50L;
     private static final int MAX_CACHE_ENTRIES = 256;
     // Goal-snap window/fallback bounds -- see resolveEndpoint's goal branch and
     // Standability.findNearestStandableForGoal's header.
@@ -142,10 +143,25 @@ public final class AStarPathfinder {
 
     // Weighted constructor (the unified approach primitive uses ε=3): see the heuristicWeight comment.
     public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
-        this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, heuristicWeight);
+        this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, heuristicWeight, true);
     }
 
     public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
+        this(bot, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, heuristicWeight, true);
+    }
+
+    /**
+     * A startup performance probe must observe the real production wall-clock allowance even when a GameTest has deliberately
+     * stretched ordinary searches. It is package-private because callers must not use it to make gameplay routes flaky in a harness.
+     */
+    static AStarPathfinder withRealTimeBudget(ServerLevel world, BlockPos start, BlockPos goal,
+                                               int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
+        return new AStarPathfinder(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D, false);
+    }
+
+    private AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal,
+                            int maxNodes, long maxMillis, boolean canPillar, boolean allowDig,
+                            double heuristicWeight, boolean applyHarnessTimeScale) {
         this.world = world;
         this.start = start.immutable();
         this.goal = goal.immutable();
@@ -154,7 +170,7 @@ public final class AStarPathfinder {
         this.heuristicWeight = heuristicWeight;
         this.enumerator = new NeighborEnumerator(bot, canPillar, allowDig);
         this.maxNodes = maxNodes;
-        this.maxMillis = maxMillis * harnessTimeScale;
+        this.maxMillis = maxMillis * (applyHarnessTimeScale ? harnessTimeScale : 1L);
     }
 
     public static void invalidateCache(String reason) {
