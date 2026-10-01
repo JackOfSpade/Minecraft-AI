@@ -132,6 +132,60 @@ public final class DescendCheckpointGameTests {
         finish(context, bot, "DescendBudgetRestoreGT");
     }
 
+    /**
+     * The terminal budget check runs before Descend's normal step hold. A real task-owned stair
+     * step is therefore live when the restored clock crosses its bound; terminal failure must
+     * cancel that step and every controller input rather than relying on task removal to do it.
+     */
+    @GameTest(maxTicks = 30)
+    public void timeoutCancelsTaskOwnedWalkedStepAndAllInputs(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(2, 8, 2));
+        BlockPos landing = start.north().below();
+        prepareLanding(context, start);
+        prepareLanding(context, landing);
+        context.getLevel().setBlock(start.north().above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        AIPlayerEntity bot = spawn(context, "DescendTimeoutStepGT", start);
+
+        Map<String, String> checkpoint = nearTerminalCheckpoint(bot, start.getY() - 2);
+        DescendToYTask task = new DescendToYTask(start.getY() - 2, checkpoint);
+        task.start(bot);
+        task.tick(bot); // budget == limit: starts the real diagonal stair but does not yet fail.
+        require(context, task.state() == TaskState.RUNNING && !bot.getActionPack().stepIdle()
+                        && bot.getActionPack().hasActiveActions(),
+                "fixture did not create a task-owned active stair at the timeout boundary");
+        bot.getActionPack().onUpdate(); // prove a live walked step has written controller input.
+
+        task.tick(bot); // budget > limit; this is deliberately before holdForStep.
+        requireTerminalStepReleased(context, task, bot, "descend_timeout");
+        finish(context, bot, "DescendTimeoutStepGT");
+    }
+
+    /** The same release invariant applies when an in-flight stair has physically overshot its target. */
+    @GameTest(maxTicks = 30)
+    public void overshootCancelsTaskOwnedWalkedStepAndAllInputs(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(6, 8, 2));
+        BlockPos landing = start.north().below();
+        BlockPos overshot = start.below(3);
+        prepareLanding(context, start);
+        prepareLanding(context, landing);
+        prepareLanding(context, overshot);
+        context.getLevel().setBlock(start.north().above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        AIPlayerEntity bot = spawn(context, "DescendOvershootStepGT", start);
+
+        DescendToYTask task = new DescendToYTask(start.getY() - 2);
+        task.start(bot);
+        task.tick(bot); // starts the task-owned stair.
+        require(context, task.state() == TaskState.RUNNING && !bot.getActionPack().stepIdle()
+                        && bot.getActionPack().hasActiveActions(),
+                "fixture did not create a task-owned active stair before overshoot");
+        bot.getActionPack().onUpdate();
+        BotFixtureMoves.place(bot, overshot); // models a factual fall/knockback below the target while keys are live.
+
+        task.tick(bot);
+        requireTerminalStepReleased(context, task, bot, "descend_overshoot_unrecoverable");
+        finish(context, bot, "DescendOvershootStepGT");
+    }
+
     @GameTest(maxTicks = 30)
     public void schemaFourRestartKeepsTheOriginalDepthWindowAtANewHeight(GameTestHelper context) {
         BlockPos lane = context.absolutePos(new BlockPos(3, 0, 12));
@@ -1122,6 +1176,30 @@ public final class DescendCheckpointGameTests {
         Map<String, String> checkpoint = task.checkpoint();
         task.cancel(bot, "gametest_checkpoint_fixture");
         return checkpoint;
+    }
+
+    private static Map<String, String> nearTerminalCheckpoint(AIPlayerEntity bot, int targetY) {
+        Map<String, String> checkpoint = new LinkedHashMap<>(freshCheckpoint(bot, targetY));
+        checkpoint.put("budget_used", "4799");
+        checkpoint.put("last_progress_budget", "4799");
+        checkpoint.put("budget_limit", "4800");
+        if (DescendToYTask.inspectCheckpoint(checkpoint).isEmpty()) {
+            throw new IllegalStateException("near-terminal checkpoint was invalid: " + checkpoint);
+        }
+        return checkpoint;
+    }
+
+    private static void requireTerminalStepReleased(GameTestHelper context, DescendToYTask task,
+                                                     AIPlayerEntity bot, String failurePrefix) {
+        require(context, task.state() == TaskState.FAILED && task.failureReason().startsWith(failurePrefix),
+                "unexpected terminal Descend state: " + task.state() + ":" + task.failureReason());
+        require(context, bot.getActionPack().stepIdle(),
+                "terminal Descend failure left its walked step active");
+        require(context, bot.getActionPack().isPathExecutorIdle()
+                        && bot.getActionPack().isWalkToIdle()
+                        && bot.getActionPack().isMiningIdle()
+                        && !bot.getActionPack().hasActiveActions(),
+                "terminal Descend failure left a controller or movement input active");
     }
 
     private static MissionRuntimeRecord missionRuntime(UUID missionId,

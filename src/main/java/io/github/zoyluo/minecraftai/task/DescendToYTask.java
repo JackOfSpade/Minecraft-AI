@@ -528,16 +528,15 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // lava escape and overshoot handling are allowed to interrupt a fall instead of waiting up
         // to UNSETTLED_LIMIT ticks for unsupported footing.
         if (totalBudget() > budgetLimit) {
-            fail("descend_timeout at_y=" + feet.getY());
+            failAfterStoppingOwnedWork(bot, "descend_timeout at_y=" + feet.getY());
             return;
         }
         if (feet.getY() < targetY) {
-            miner.cancel(bot);
-            bot.getActionPack().stopAll();
+            failAfterStoppingOwnedWork(bot,
+                    "descend_overshoot_unrecoverable target_y=" + targetY + " at_y=" + feet.getY());
             pendingLandingOrigin = null;
             pendingLandingTarget = null;
             pendingLandingDirection = -1;
-            fail("descend_overshoot_unrecoverable target_y=" + targetY + " at_y=" + feet.getY());
             BotLog.danger(bot, "descend_overshoot_unrecoverable",
                     "target_y", targetY, "at_y", feet.getY(), "at", feet.toShortString());
             return;
@@ -1156,6 +1155,21 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             started = true;
             BotLog.action(bot, "descend_started", "target_y", targetY, "from_y", feet.getY());
         }
+    }
+
+    /**
+     * {@link AbstractTask#fail(String)} only changes task state; it does not invoke
+     * {@link #onAbort(AIPlayerEntity)}. Terminal bounds are intentionally checked before
+     * {@link #holdForStep(AIPlayerEntity, ServerLevel)}, so release an active task-owned walked
+     * step and every input it wrote before recording failure. Otherwise a removed task can leave
+     * its forward/jump keys held through the next owner.
+     */
+    private void failAfterStoppingOwnedWork(AIPlayerEntity bot, String reason) {
+        miner.cancel(bot);
+        blockedBodyRecoveryTarget = null;
+        bot.getActionPack().stopAll();
+        abandonStep(bot);
+        fail(reason);
     }
 
     /**
