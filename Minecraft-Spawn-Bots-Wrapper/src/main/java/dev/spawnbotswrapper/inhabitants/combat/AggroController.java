@@ -834,7 +834,7 @@ public final class AggroController {
                 st.hint = sound.pos();
                 st.hintTick = now;
             } else {
-                // Never replaces a live attention that carries a matched candidate (set by an earlier sound this tick).
+                // Never replaces a live (unexpired, ATTENTION_TICKS) attention that carries a matched candidate.
                 Attention current = attention.get(name);
                 if (current == null || current.until() < now || current.candidate() == null) {
                     attention.put(name, new Attention(null, sound.pos(), now + LOOK_TICKS));
@@ -1002,7 +1002,8 @@ public final class AggroController {
         }
         Body target = world.bodyOf(st.entity);
         String bad = invalidTarget(bot, target);
-        if (bad != null && st.unseen == 0 && (target == null || sees(bot, target, cfg))) {
+        if (bad != null && st.unseen == 0 && (target == null
+                || !Objects.equals(bot.dimension(), target.dimension()) || sees(bot, target, cfg))) {
             // It was in view a tick ago AND is now (a body that still exists is judged by this tick's view, so one that dies
             // the tick it steps behind cover is lost sight, not a seen death): the bot saw it die, leave or vanish.
             giveUps.merge(bad, 1L, Long::sum);

@@ -115,6 +115,59 @@ class PopulationEngineRemovalCrashTest {
         assertEquals(3, rig.record(s.key()).vacantSlots());
     }
 
+    /** A seen bot (state and snapshot known) whose player is then taken far away, so the allocation puts it to sleep. */
+    private static String seenBot(Rig rig, StructureSnapshot s) {
+        playerAt(rig, -10, 70, 0);
+        rig.engine.submit(s);
+        rig.run(100);
+        BotRecord bot = rig.record(s.key()).bots.get(0);
+        rig.bots.liveState.put(FakeBots.key(bot.name), snapshotOf(5.0f));
+        rig.bots.visibleToHuman.add(FakeBots.key(bot.name));
+        rig.run(30);
+        assertTrue(bot.seen);
+        return bot.name;
+    }
+
+    @Test
+    void aSeenBotWhoseRemovalOutcomeIsUnknownIsSettledLaterOfflineMeansAsleepNeverDead() {
+        Rig rig = rig();
+        rig.cfg.processing.goneConfirmTicks = 100;
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        String name = seenBot(rig, s);
+        rig.bots.beforeRemove = n -> rig.bots.throwIsOnline = true; // removed, but the gateway cannot say so
+        playerAt(rig, 900, 70, 0);
+        rig.run(100);
+        assertTrue(rig.bots.removes.contains(name));
+        rig.bots.throwIsOnline = false;
+        rig.run(400);
+        BotRecord after = rig.record(s.key()).bots.stream().filter(b -> b.name.equals(name)).findFirst().orElseThrow();
+        assertEquals(BotState.DORMANT, after.state, "committed: it sleeps with its snapshot");
+        assertFalse(after.removing);
+        assertEquals(0, rig.record(s.key()).deadCount(), "never a death");
+    }
+
+    @Test
+    void aSeenBotWhoseRemovalOutcomeIsUnknownAndWhoIsStillThereIsUndoneAndTrackedAgain() {
+        Rig rig = rig();
+        rig.cfg.processing.goneConfirmTicks = 100;
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        String name = seenBot(rig, s);
+        rig.bots.throwRemove = true;     // the removal does not happen ...
+        rig.bots.throwIsOnline = true;   // ... and the gateway cannot say so
+        playerAt(rig, 900, 70, 0);
+        rig.run(60);
+        rig.bots.throwIsOnline = false;
+        rig.bots.throwRemove = false;
+        rig.bots.visibleToHuman.clear();
+        playerAt(rig, -10, 70, 0);
+        rig.run(200);
+        BotRecord after = rig.record(s.key()).bots.stream().filter(b -> b.name.equals(name)).findFirst().orElseThrow();
+        assertTrue(rig.bots.online.contains(FakeBots.key(name)), "the bot lives on");
+        assertEquals(BotState.SPAWNED, after.state, "the record says so again: no sleeper with a copy beside a live bot");
+        assertFalse(after.removing);
+        assertEquals(0, rig.record(s.key()).deadCount());
+    }
+
     @Test
     void withoutTheMarkTheSameCrashWouldHaveBeenReadAsADeath() {
         // the contrast: a bot that is gone WITHOUT the mark is concluded dead after the long confirmation (unchanged rule)

@@ -540,6 +540,7 @@ class AggroControllerTest {
         steve.dimension = "the_nether";
         s.run(1);
         assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"));
+        assertEquals(Phase.RETURN, s.phase(), "a level change the bot SAW ends the engagement at once (not lost sight)");
     }
 
     @Test
@@ -686,9 +687,9 @@ class AggroControllerTest {
 
     @Test
     void aProjectileFromBeyondTheEngageLimitIsNeverEngagedOnlyInvestigatedAlongItsLine() {
-        // RULES 'Engagement': the hit gives a DIRECTION only. The bot may walk toward where the line ends (an investigation, at
-        // most the engage limit away from the bot), but it never engages (forced target, CHASE) a shooter it has not sighted
-        // or one it sights beyond 64 blocks.
+        // RULES no magic knowledge: the hit gives a DIRECTION only. A hit starts the hunt (RULES 'Engagement') as an
+        // investigation toward where the line ends (at most the engage limit away from the bot); no forced target and no CHASE
+        // without a sighting within 64 blocks.
         steve.x = 70;
         s.shot(steve, 1, 0);
         s.run(2);

@@ -623,8 +623,9 @@ once.
   projectile's velocity at impact. It turns to look along that line (the sight rules and the reaction time apply to whoever
   it then sees: seen within 64 blocks, it chases after the reaction time; seen beyond 64, it does not engage) and PURSUES
   (investigates) the point found by tracing back along the incoming line from the impact point to the first blocking
-  block (or 64 blocks), then searches. The hit alone never engages anyone: no forced target and no CHASE for a shooter the
-  bot has not sighted or one it sights beyond 64 blocks. It never learns the shooter's position or identity, so an arrow
+  block (or 64 blocks), then searches. The hit starts the hunt (engagement starts when the bot is hit) as an investigation:
+  no forced target and no CHASE without a sighting within 64 blocks. It never learns the shooter's position or identity (no
+  magic knowledge: an arrow from an unseen shooter tells the direction only), so an arrow
   of a mob or of an ally sends it along the line in just the same way (it cannot tell whose it was). Hits are detected through the
   damage taken (HeroBot fake players skip the Fabric damage event), never through PvP BOT's revenge memory, which names the
   attacker whether or not the bot could know (for players it is cleared at once).
@@ -919,8 +920,8 @@ harness-only mixin into PvP BOT's `InventoryHelper`. It is the ONE known excepti
 it only translates PvP BOT's reflective hotbar-index lookup (`selectedSlot`, `field_7545`) to the runtime field name
 (`selected`), because the dev runtime uses Mojang names while PvP BOT looks up Yarn and intermediary ones, so without it PvP
 BOT's tick dies in `InventoryHelper.<clinit>`. It changes no behaviour, the addon itself contains no mixin, and
-`NoUpstreamMixinTest` fails the build if a mixin ever appears in `src/main`, in the built jar, or anywhere in the
-GameTest source set other than this shim. The other workaround is `attackInvincible` in the run's PvP BOT settings because GameTest mock players report
+`NoUpstreamMixinTest` fails the build if a mixin ever appears in `src/main` or its resources, or anywhere in the
+GameTest source set other than this shim (and in an already built jar, when one exists when the tests run). The other workaround is `attackInvincible` in the run's PvP BOT settings because GameTest mock players report
 `isCreative()`.
 
 ## Test procedure

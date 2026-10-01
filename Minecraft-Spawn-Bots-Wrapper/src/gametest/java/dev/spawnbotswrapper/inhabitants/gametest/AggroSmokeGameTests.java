@@ -289,6 +289,14 @@ public final class AggroSmokeGameTests {
                 return;
             }
             double home = horizontal(pos, s.home);
+            String phase = dev.spawnbotswrapper.inhabitants.InhabitantsMod.aggroDescribe(s.rig.botName);
+            if (phase != null && phase.startsWith("returning home") && now - clearedAt[0] < 170) {
+                // Phase-based: the walk back may only begin after the 10 s search (which itself starts at the last known position).
+                s.end();
+                s.rig.fail("the walk home began only " + (now - clearedAt[0]) + " ticks after the chase was lost, before the 10 s "
+                        + "search could have run; " + s.status() + " aggro=" + phase);
+                return;
+            }
             // Home means: it went to where it last saw the player (at least 2 blocks from home) and only came back after the 10 s search.
             if (home <= 1.5 && maxAway[0] >= 2.0 && now - clearedAt[0] < 170) {
                 // The 10 s search is not optional: a bot that went out and was back home this early skipped it.

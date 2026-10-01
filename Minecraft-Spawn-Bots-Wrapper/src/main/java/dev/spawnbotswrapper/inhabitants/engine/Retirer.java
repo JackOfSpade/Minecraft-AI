@@ -231,10 +231,10 @@ final class Retirer {
             return Result.KEPT;
         }
         if (stillThere == null) {
-            // The gateway cannot tell whether the removal took effect. Undoing would read as "still alive" and, if the bot IS
-            // gone, turn the removal into a death. The mark stays: tickLate removes the bot if it turns out to be there, and
-            // clears the mark once it is known to be offline (the snapshot stands).
-            watchLate(s.key, bot, cfg);
+            // The gateway cannot tell whether the removal took effect: DEFER, neither commit nor undo. The record keeps its
+            // removing mark and the pending state; tickLate settles it: online -> the removal did not happen, undo and track the
+            // bot again; offline -> commit (the snapshot stands). Undoing at once could turn a removal into a death.
+            watchLate(s.key, bot, cfg, s);
             roster.untrackOne(bot);
             return Result.SLEPT;
         }
@@ -257,7 +257,7 @@ final class Retirer {
         roster.untrackOne(bot);
         if (stillThere == null) {
             // Cannot tell whether it is gone: keep the removing mark (a vacant slot, never a death) and let tickLate settle it.
-            watchLate(m.key, bot, cfg);
+            watchLate(m.key, bot, cfg, null);
             return Result.DELETED;
         }
         dropRecord(m.key, bot);
@@ -267,9 +267,9 @@ final class Retirer {
     }
 
     /** Watches a bot whose removal could not be confirmed, exactly like the bot of an interrupted removal (see {@link #tickLate}). */
-    private void watchLate(StructureKey key, BotRecord bot, InhabitantsConfig cfg) {
+    private void watchLate(StructureKey key, BotRecord bot, InhabitantsConfig cfg, Marked pending) {
         long period = Math.max(1, EngineContext.processing(cfg).goneConfirmTicks);
-        late.put(EngineContext.lower(bot.name), new Late(key, bot, ctx.now() + period));
+        late.put(EngineContext.lower(bot.name), new Late(key, bot, ctx.now() + period, pending));
     }
 
     /** Takes an unseen bot out of its structure's record: its slot is vacant (its index is never reused). */
@@ -313,7 +313,7 @@ final class Retirer {
     // ------------------------------------------------------------------ after a crash
 
     /** A bot of a record that was "removing" when the server went down; see {@link #finishInterrupted}. */
-    private record Late(StructureKey key, BotRecord bot, long until) {
+    private record Late(StructureKey key, BotRecord bot, long until, Marked pending) {
     }
 
     /**
@@ -356,11 +356,11 @@ final class Retirer {
             if (bot.seen) {
                 bot.removing = false; // the snapshot in the record is what counts; the bot may wake now
                 ctx.store.markDirty();
-                late.put(EngineContext.lower(bot.name), new Late(key, bot, until));
+                late.put(EngineContext.lower(bot.name), new Late(key, bot, until, null));
             } else if (online) {
                 dropRecord(key, bot);
             } else {
-                late.put(EngineContext.lower(bot.name), new Late(key, bot, until)); // a vacant slot until the period ends
+                late.put(EngineContext.lower(bot.name), new Late(key, bot, until, null)); // a vacant slot until the period ends
             }
             finished++;
         }
@@ -395,6 +395,15 @@ final class Retirer {
             if (online == null) {
                 continue;
             }
+            if (online && l.pending() != null && !inFlight.test(bot.name)) {
+                // A removal that was deferred and turns out not to have happened: the bot lives on (what the adapter had
+                // emptied was put back), so the record goes back to what it was and the roster tracks the bot again.
+                l.pending().undo();
+                roster.trackSpawned(l.key(), bot);
+                late.remove(lower);
+                ctx.info("Inhabitant {} was still online after a removal whose outcome could not be read; the removal was undone", bot.name);
+                continue;
+            }
             if (online && !inFlight.test(bot.name)) {
                 if (discardStray(bot)) {
                     ctx.info("Inhabitant {} rejoined after an interrupted removal; it was emptied and removed again (its saved state "
@@ -410,8 +419,9 @@ final class Retirer {
                 continue;
             }
             if (!online && bot.seen && bot.removing) {
-                bot.removing = false; // known to be offline now: the removal took effect and the snapshot stands
+                bot.removing = false; // known to be offline now: the removal took effect, committed; the snapshot stands
                 ctx.store.markDirty();
+                late.put(lower, new Late(l.key(), bot, l.until(), null)); // nothing pending any more
             }
             if (now >= l.until()) {
                 late.remove(lower);

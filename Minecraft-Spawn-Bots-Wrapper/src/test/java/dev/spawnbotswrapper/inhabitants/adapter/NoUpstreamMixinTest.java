@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 /**
  * The mod boundary: "never modify the PvP BOT or HeroBot jars, and no mixins into their classes". The published addon contains
  * no mixin at all (none in {@code src/main}, no mixin config, none declared by its {@code fabric.mod.json}, none in the built
- * jar when one exists). The ONE mixin of the project is the test-harness shim {@code InventoryHelperDevShimMixin} in the
+ * jar, checked only when a jar has been built before the tests run). The ONE mixin of the project is the test-harness shim {@code InventoryHelperDevShimMixin} in the
  * GameTest source set: it only translates PvP BOT's reflective hotbar-field lookup to the Mojang-named runtime field so the
  * dev-environment server can run PvP BOT at all, changes no behaviour, and is never part of the published jar. It is the only
  * mixin allowed to exist anywhere in this build, and any other mixin (above all one into an upstream class) fails here.
@@ -70,7 +70,8 @@ class NoUpstreamMixinTest {
         Path gametest = projectRoot().resolve("src").resolve("gametest");
         List<String> mixins = new ArrayList<>();
         for (Path p : files(gametest.resolve("java"), ".java")) {
-            if (Files.readString(p).contains("@Mixin(")) {
+            String text = Files.readString(p);
+            if (text.contains("org.spongepowered") || text.contains("@Mixin")) {
                 mixins.add(p.getFileName().toString());
             }
         }
@@ -81,6 +82,9 @@ class NoUpstreamMixinTest {
             String text = Files.readString(file);
             assertTrue(text.contains("TEST HARNESS ONLY") && text.contains("never part of the published jar"),
                     mixin + " must say that it is harness-only and not published");
+            assertTrue(text.contains("@Mixin(targets = \"org.stepan1411.pvp_bot.utils.InventoryHelper\")"),
+                    mixin + " may only target PvP BOT's InventoryHelper (the reflective hotbar-field lookup)");
+            assertEquals(1, text.split("@Mixin", -1).length - 1, mixin + " holds exactly one mixin");
         }
     }
 
