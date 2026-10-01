@@ -23,6 +23,7 @@
       "io.github.zoyluo.minecraftai.task.NaturalSwimGameTests",
       "io.github.zoyluo.minecraftai.task.NaturalMovementAcceptanceGameTests",
       "io.github.zoyluo.minecraftai.action.BuildActionEdgeVisibilityGameTests",
+      "io.github.zoyluo.minecraftai.manager.AIPlayerManagerGameTests",
       "io.github.zoyluo.minecraftai.manager.BotRespawnStateGameTests",
       "io.github.zoyluo.minecraftai.task.VanillaParityGameTests",
       "io.github.zoyluo.minecraftai.action.ObservationShapeGameTests",

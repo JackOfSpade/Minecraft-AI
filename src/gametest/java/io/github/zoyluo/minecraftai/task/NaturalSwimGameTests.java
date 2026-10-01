@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import com.mojang.logging.LogUtils;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -24,6 +25,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
 
 /**
  * No micro-teleports in the water and recovery paths (R5): a bot swims, climbs out of a pit, digs through a wall and leaves a
@@ -37,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class NaturalSwimGameTests {
     private static final int LANE_Z = FollowSwimGameTests.LANE_Z;
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
@@ -152,8 +155,8 @@ public final class NaturalSwimGameTests {
                 phase[0] = 1;
                 phaseStart[0] = now;
                 startX[0] = bot.getX();
-                System.out.println("SWIMPROBE surfaced ticks=" + now + " y=" + bot.getY() + " air=" + bot.getAirSupply()
-                        + " underWater=" + bot.isUnderWater());
+                LOGGER.info("SWIMPROBE surfaced ticks={} y={} air={} under_water={}",
+                        now, bot.getY(), bot.getAirSupply(), bot.isUnderWater());
             }
             if (phase[0] == 1) {
                 if (here.getX() < pond.feet().getX() + 17) {
@@ -163,8 +166,8 @@ public final class NaturalSwimGameTests {
                 double blocks = bot.getX() - startX[0];
                 int ticks = now - phaseStart[0];
                 double bps = blocks * 20.0D / Math.max(1, ticks);
-                System.out.println("SWIMPROBE crossed blocks=" + String.format("%.2f", blocks) + " ticks=" + ticks
-                        + " bps=" + String.format("%.2f", bps) + " stepFailures=" + stepFailures[0]);
+                LOGGER.info("SWIMPROBE crossed blocks={} ticks={} bps={} step_failures={}",
+                        blocks, ticks, bps, stepFailures[0]);
                 require(context, surfaceTicks[0] <= 120, "surfacing from a 4-deep floor took " + surfaceTicks[0] + " ticks");
                 require(context, bps >= 1.0D, "horizontal swim speed " + bps + " b/s is not a swim");
                 requireNoCorrections(context, bot, "legacy swim probe");
@@ -215,8 +218,8 @@ public final class NaturalSwimGameTests {
                     && bot.distanceTo(target) <= 5.0D) {
                 require(context, sawWater[0], "the bot reached the far shore without ever entering the water");
                 requireNoCorrections(context, bot, "swim follow across the pond");
-                System.out.println("SWIMPROBE follow_across_pond done tick=" + now + " minAir=" + minAir[0]
-                        + " dist=" + bot.distanceTo(target));
+                LOGGER.info("SWIMPROBE follow_across_pond done tick={} min_air={} distance={}",
+                        now, minAir[0], bot.distanceTo(target));
                 FollowSwimGameTests.finish(context, pond, bot, target);
                 TeleportAudit.reset(bot);
             }
@@ -242,7 +245,7 @@ public final class NaturalSwimGameTests {
                     && Standability.isStandable(context.getLevel(), bot.blockPosition())
                     && !NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
                 requireNoCorrections(context, bot, "water rescue");
-                System.out.println("SWIMPROBE water_rescue done tick=" + now + " air=" + bot.getAirSupply());
+                LOGGER.info("SWIMPROBE water_rescue done tick={} air={}", now, bot.getAirSupply());
                 despawn(context, bot);
                 context.succeed();
             }
@@ -266,7 +269,7 @@ public final class NaturalSwimGameTests {
             requireUnhurt(context, bot, "surfacing with 60 air", now);
             if (now > 5 && !bot.isUnderWater() && bot.getAirSupply() > 0) {
                 requireNoCorrections(context, bot, "drowning pressure");
-                System.out.println("SWIMPROBE drowning_pressure surfaced tick=" + now + " minAir=" + minAir[0]);
+                LOGGER.info("SWIMPROBE drowning_pressure surfaced tick={} min_air={}", now, minAir[0]);
                 despawn(context, bot);
                 context.succeed();
             }
@@ -303,7 +306,7 @@ public final class NaturalSwimGameTests {
             if (bot.blockPosition().getY() >= feet.getY() && bot.blockPosition().getX() > feet.getX() + 10) {
                 require(context, now >= 95, "impossible instant recovery");
                 requireNoCorrections(context, bot, "stuck recovery");
-                System.out.println("SWIMPROBE stuck_recovery done tick=" + now + " at " + bot.blockPosition().toShortString());
+                LOGGER.info("SWIMPROBE stuck_recovery done tick={} position={}", now, bot.blockPosition().toShortString());
                 despawn(context, bot, target);
                 context.succeed();
             }
@@ -347,7 +350,7 @@ public final class NaturalSwimGameTests {
                 require(context, world.getBlockState(feet.offset(10, 0, 8)).isAir() && world.getBlockState(feet.offset(11, 1, 8)).isAir(),
                         "the wall cells on the bot's lane were not opened");
                 requireNoCorrections(context, bot, "dig out");
-                System.out.println("SWIMPROBE dig_out done tick=" + now);
+                LOGGER.info("SWIMPROBE dig_out done tick={}", now);
                 despawn(context, bot, target);
                 context.succeed();
             }
@@ -397,7 +400,7 @@ public final class NaturalSwimGameTests {
                         "the doorway was not opened");
                 require(context, EmergencyShelterTask.pendingExitDebt(bot).isEmpty(), "the exit debt was not repaid");
                 requireNoCorrections(context, bot, "shelter exit");
-                System.out.println("SWIMPROBE shelter_exit done tick=" + now);
+                LOGGER.info("SWIMPROBE shelter_exit done tick={}", now);
                 despawn(context, bot, target);
                 context.succeed();
             }

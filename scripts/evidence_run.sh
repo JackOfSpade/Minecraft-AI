@@ -130,13 +130,11 @@ TIMEOUT_CONTRACT_ERROR=""
 
 HIDDEN_SCAN=false
 EMERGENCY_TELEPORT=false
-FORCED_PICKUP=false
 MANUAL_TELEPORT=false
 if [[ "$PROFILE" == operator ]]; then
   if [[ -z "$CAPABILITY_SPEC" || "$CAPABILITY_SPEC" == all ]]; then
     HIDDEN_SCAN=true
     EMERGENCY_TELEPORT=true
-    FORCED_PICKUP=true
     MANUAL_TELEPORT=true
   elif [[ "$CAPABILITY_SPEC" != none ]]; then
     old_ifs="$IFS"
@@ -145,7 +143,6 @@ if [[ "$PROFILE" == operator ]]; then
       case "$capability" in
         hiddenBlockScan) HIDDEN_SCAN=true ;;
         emergencyTeleport) EMERGENCY_TELEPORT=true ;;
-        forcedPickup) FORCED_PICKUP=true ;;
         manualTeleport) MANUAL_TELEPORT=true ;;
         *) printf 'evidence-run: invalid operator capability: %s\n' "$capability" >&2; exit 2 ;;
       esac
@@ -315,7 +312,6 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt" || exit 3
   printf '  "operatorCapabilities": {\n'
   printf '    "hiddenBlockScan": %s,\n' "$HIDDEN_SCAN"
   printf '    "emergencyTeleport": %s,\n' "$EMERGENCY_TELEPORT"
-  printf '    "forcedPickup": %s,\n' "$FORCED_PICKUP"
   printf '    "manualTeleport": %s\n' "$MANUAL_TELEPORT"
   printf '  },\n'
   printf '  "llm": { "apiKey": "" },\n'
@@ -332,7 +328,6 @@ KEY_MARKER='<redacted:unset>'
   printf '  "operatorCapabilities": {\n'
   printf '    "hiddenBlockScan": %s,\n' "$HIDDEN_SCAN"
   printf '    "emergencyTeleport": %s,\n' "$EMERGENCY_TELEPORT"
-  printf '    "forcedPickup": %s,\n' "$FORCED_PICKUP"
   printf '    "manualTeleport": %s\n' "$MANUAL_TELEPORT"
   printf '  },\n'
   printf '  "llm": { "enabled": %s, "apiKey": "%s" },\n' "$([[ $WITH_LLM -eq 1 ]] && printf true || printf false)" "$KEY_MARKER"
@@ -643,7 +638,7 @@ add_unverified_reason() {
 [[ "$LOG_SECRET_REDACTIONS" == 0 ]] || add_unverified_reason server_log_secret_redacted
 
 FINISHED_AT="$(harness_now_utc)"
-CAPABILITIES="hiddenBlockScan=$HIDDEN_SCAN,emergencyTeleport=$EMERGENCY_TELEPORT,forcedPickup=$FORCED_PICKUP,manualTeleport=$MANUAL_TELEPORT"
+CAPABILITIES="hiddenBlockScan=$HIDDEN_SCAN,emergencyTeleport=$EMERGENCY_TELEPORT,manualTeleport=$MANUAL_TELEPORT"
 OS_RUNTIME="$(uname -srm | tr '\t\r\n' '   ')"
 {
   printf 'schema_version\t2\n'

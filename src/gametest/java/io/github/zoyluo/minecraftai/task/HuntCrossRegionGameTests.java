@@ -432,7 +432,14 @@ public final class HuntCrossRegionGameTests {
     @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_unloaded_target_is_reacquired_instead_of_inventing_pickup_debt", maxTicks = 1200)
     public void unloadedTargetIsReacquiredInsteadOfInventingPickupDebt(GameTestHelper context) {
         var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(8, 5, -152));
+        // This lane is 56 blocks beyond the nearest hunt arena, so the 16-block global
+        // chicken check below cannot inherit another fixture's still-live prey.
+        BlockPos start = context.absolutePos(new BlockPos(8, 5, -520));
+        AABB nearbyPrey = new AABB(start).inflate(16.0D);
+        require(context, world.getEntitiesOfClass(
+                        net.minecraft.world.entity.animal.chicken.Chicken.class, nearbyPrey, Entity::isAlive)
+                        .isEmpty(),
+                "fixture leaked a live chicken into the isolated reload lane before setup");
         for (int x = -4; x <= 4; x++) {
             for (int z = -4; z <= 12; z++) {
                 BlockPos feet = start.offset(x, 0, z);
@@ -449,6 +456,10 @@ public final class HuntCrossRegionGameTests {
                 start.getX() + 0.5D, start.getY(), start.getZ() + 5.5D,
                 180.0F, 0.0F);
         require(context, world.addFreshEntity(original), "failed to spawn original chicken");
+        require(context, world.getEntitiesOfClass(
+                        net.minecraft.world.entity.animal.chicken.Chicken.class, nearbyPrey, Entity::isAlive)
+                        .size() == 1,
+                "fixture did not isolate exactly its original chicken");
 
         String name = "HuntTargetReloadGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
@@ -488,10 +499,10 @@ public final class HuntCrossRegionGameTests {
                 sawReacquire.set(true);
             }
             if (description.contains("phase=PICKUP")) {
-                // Only this test's own chickens count: animals that earlier tests of the run left in the neighbouring arenas are
-                // alive within 16 blocks now and then, and they are no prey of this hunt.
-                require(context, !original.isAlive() && (replacement.get() == null || !replacement.get().isAlive()),
-                        "hunt opened pickup debt while the reloaded chicken was still alive");
+                require(context, world.getEntitiesOfClass(
+                                net.minecraft.world.entity.animal.chicken.Chicken.class, nearbyPrey, Entity::isAlive)
+                                .isEmpty(),
+                        "hunt opened pickup debt while a nearby live chicken remained");
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.fail(Component.nullToEmpty("target-reload hunt ended as " + task.state()

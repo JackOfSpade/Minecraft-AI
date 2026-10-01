@@ -48,7 +48,7 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt"
 } > "$SERVER_RUN_DIR/server.properties"
 {
   printf '{\n  "profile": "strict_survival",\n'
-  printf '  "operatorCapabilities": { "hiddenBlockScan": false, "emergencyTeleport": false, "forcedPickup": false, "manualTeleport": false },\n'
+  printf '  "operatorCapabilities": { "hiddenBlockScan": false, "emergencyTeleport": false, "manualTeleport": false },\n'
   printf '  "llm": { "apiKey": "" }\n}\n'
 } > "$SERVER_RUN_DIR/config/minecraftai.json"
 

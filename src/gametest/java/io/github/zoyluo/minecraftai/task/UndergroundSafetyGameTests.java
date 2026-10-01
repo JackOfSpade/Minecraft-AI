@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import com.mojang.logging.LogUtils;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
@@ -31,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
 
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.finish;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.isSealed;
@@ -40,6 +42,8 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterS
 
 /** Deterministic regressions for the bounded underground safety contracts. */
 public final class UndergroundSafetyGameTests {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     @GameTest(maxTicks = 20)
     public void emergencyShelterRejectsAnUnstableOriginBeforeWorldMutation(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
@@ -795,11 +799,12 @@ public final class UndergroundSafetyGameTests {
                 },
                 // The walked step ends as soon as the bot is in the cell, wherever in it (the old teleporting step centred it), and from
                 // the edge of the cell the south landing is hidden behind the floor tile, so the restored task needs a tick to reject
-                // that direction before the last fresh edge is gone: it fails closed within a few ticks.
+                // that direction before the last fresh edge is gone. The serialized run terminated in two ticks; five retains
+                // three scheduler/re-proof ticks while still requiring the same prompt fail-closed result.
                 () -> {
                     DescendToYTask restored = restoredTask[0];
                     if (restored.state() == TaskState.RUNNING) {
-                        require(context, ++restoredTicks[0] <= 10, "restored Descend did not fail closed within 10 ticks: "
+                        require(context, ++restoredTicks[0] <= 5, "restored Descend did not fail closed within 5 ticks: "
                                 + restored.checkpoint());
                         restored.tick(bot);
                     }
@@ -819,6 +824,8 @@ public final class UndergroundSafetyGameTests {
                                     + restored.checkpoint());
                     require(context, TeleportAudit.corrections(bot) == 0,
                             "the bot was teleported: " + TeleportAudit.lastCaller(bot));
+                    LOGGER.info("DESCEND_RESTORED_EDGE_EXHAUSTION terminal_ticks={} tick_cap={}",
+                            restoredTicks[0], 5);
                     finish(context, bot, "DescendEdgeLoopGT");
                     return true;
                 });
@@ -1198,8 +1205,8 @@ public final class UndergroundSafetyGameTests {
                         && bot.getActionPack().isWalkToIdle()
                         && bot.getActionPack().isMiningIdle(),
                 "suffocation recovery left the stale route able to replay its blocked edge");
-        // R5: the exit is a real shove out of the gravel (no teleport), so the bot is inside the block for the few ticks it takes: a
-        // physical exit cannot cost nothing. It may cost the suffocation damage of those ticks, never more than two hearts.
+        // R5: the exit is a real shove out of the gravel (no teleport), so the bot is inside the block for the few ticks it takes.
+        // The serialized run exited in 10 ticks with zero loss; permit at most one heart for vanilla damage-frame timing.
         int[] ticks = {0};
         context.onEachTick(() -> {
             ticks[0]++;
@@ -1219,8 +1226,10 @@ public final class UndergroundSafetyGameTests {
                     "physical suffocation exit was not standable: " + after.toShortString());
             require(context, context.getLevel().getBlockState(blockedHead).is(Blocks.STONE),
                     "physical suffocation exit silently removed the obstruction");
-            require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 4.0F,
-                    "bot took more than two hearts before the adjacent suffocation exit: " + bot.getHealth());
+            require(context, bot.isAlive() && bot.getHealth() >= healthBefore - 2.0F,
+                    "bot took more than one heart before the adjacent suffocation exit: " + bot.getHealth());
+            LOGGER.info("STRICT_SUFFOCATION_PHYSICAL_EXIT ticks={} health_loss={} health_before={} health_after={}",
+                    ticks[0], healthBefore - bot.getHealth(), healthBefore, bot.getHealth());
             require(context, bot.getActionPack().isPathExecutorIdle()
                             && bot.getActionPack().isWalkToIdle()
                             && bot.getActionPack().isMiningIdle(),

@@ -64,7 +64,10 @@ class DeadlineCreditTest {
         assertEquals(0, DeadlineCredit.forBudget(-5).note(Gait.SNEAK));
     }
 
-    /** Baritone taking over on its first driven tick must not drop the route lease that was requested after the route started. */
+    /**
+     * Cheap source-shape tripwire for the route-lease ordering; the real behavior is exercised by
+     * {@code PaceBaritoneGameTests.routeLeaseHoldsAfterBaritoneTakesOver}.
+     */
     @Test
     void yieldToBaritoneKeepsTheRouteLease() throws Exception {
         String pack = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/action/ActionPack.java"));

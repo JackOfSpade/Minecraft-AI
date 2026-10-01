@@ -120,29 +120,29 @@ class WalkedStepRulesTest {
 
     @Test
     void aHopPressesJumpOnlyWhileGroundedBelowTheTargetFloor() {
-        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 4.0D, 5, false, false));
-        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.4D, 5, false, false), "no air jumps");
-        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, true, true), "in water the jump key is a swim stroke");
-        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 5.0D, 5, false, false), "already at the target floor");
-        assertFalse(WalkedStepRules.jumpNow(Kind.FLAT, true, 4.0D, 5, false, false));
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, true, true), "the head is under water: keep afloat");
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 3.0D, 4, false, false), "the target is higher");
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, false, false), "feet in the lower part of the cell: hold the depth");
-        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.6D, 4, false, false), "feet high in the cell: no need to jump");
+        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 4.0D, 5, false));
+        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.4D, 5, false), "no air jumps");
+        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, true), "in water the jump key is a swim stroke");
+        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, true, 5.0D, 5, false), "already at the target floor");
+        assertFalse(WalkedStepRules.jumpNow(Kind.FLAT, true, 4.0D, 5, false));
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, true), "feet are in the lower depth-hold range");
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 3.0D, 4, false), "the target is higher");
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.0D, 4, false), "feet in the lower part of the cell: hold the depth");
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.6D, 4, false), "feet high in the cell: no need to jump");
     }
 
     @Test
     void aSwimmerHoldsItsDepthAndSinksToALowerCell() {
         // Level: jump only while the feet are in the lower part of the cell (no bobbing up out of it, no sinking below it).
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 4, true, true));
-        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.5D, 4, true, true));
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 4, true));
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.5D, 4, true));
         // Down: the target is a cell lower, the jump key stays up and gravity does the diving.
-        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 3, true, true));
+        assertFalse(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.1D, 3, true));
         // Up: keep jumping until the feet are in the target cell.
-        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.9D, 5, true, true));
+        assertTrue(WalkedStepRules.jumpNow(Kind.SWIM, false, 4.9D, 5, true));
         // Afloat against a bank: the hop onto it holds jump although nothing is under the feet.
-        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, false, true));
-        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, false, false));
+        assertTrue(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, true));
+        assertFalse(WalkedStepRules.jumpNow(Kind.STEP_UP, false, 4.0D, 5, false));
     }
 
     @Test

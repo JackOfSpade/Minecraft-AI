@@ -78,13 +78,11 @@ BATCH_LLM_ENABLED=no
 [[ $WITH_LLM -eq 0 ]] || BATCH_LLM_ENABLED=yes
 BATCH_HIDDEN_SCAN=false
 BATCH_EMERGENCY_TELEPORT=false
-BATCH_FORCED_PICKUP=false
 BATCH_MANUAL_TELEPORT=false
 if [[ "$PROFILE" == operator ]]; then
   if [[ -z "$CAPABILITIES" || "$CAPABILITIES" == all ]]; then
     BATCH_HIDDEN_SCAN=true
     BATCH_EMERGENCY_TELEPORT=true
-    BATCH_FORCED_PICKUP=true
     BATCH_MANUAL_TELEPORT=true
   elif [[ "$CAPABILITIES" != none ]]; then
     old_cap_ifs="$IFS"
@@ -93,7 +91,6 @@ if [[ "$PROFILE" == operator ]]; then
       case "$capability" in
         hiddenBlockScan) BATCH_HIDDEN_SCAN=true ;;
         emergencyTeleport) BATCH_EMERGENCY_TELEPORT=true ;;
-        forcedPickup) BATCH_FORCED_PICKUP=true ;;
         manualTeleport) BATCH_MANUAL_TELEPORT=true ;;
         *) printf 'evidence-batch: invalid operator capability: %s\n' "$capability" >&2; exit 2 ;;
       esac
@@ -104,7 +101,7 @@ elif [[ -n "$CAPABILITIES" && "$CAPABILITIES" != none ]]; then
   printf 'evidence-batch: strict_survival cannot enable operator capabilities\n' >&2
   exit 2
 fi
-BATCH_CAPABILITIES="hiddenBlockScan=$BATCH_HIDDEN_SCAN,emergencyTeleport=$BATCH_EMERGENCY_TELEPORT,forcedPickup=$BATCH_FORCED_PICKUP,manualTeleport=$BATCH_MANUAL_TELEPORT"
+BATCH_CAPABILITIES="hiddenBlockScan=$BATCH_HIDDEN_SCAN,emergencyTeleport=$BATCH_EMERGENCY_TELEPORT,manualTeleport=$BATCH_MANUAL_TELEPORT"
 [[ "$RUNS" =~ ^[1-9][0-9]*$ && "$TIMEOUT" =~ ^[1-9][0-9]*$ && "$STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || {
   printf 'evidence-batch: runs and timeouts must be positive integers\n' >&2
   exit 2
