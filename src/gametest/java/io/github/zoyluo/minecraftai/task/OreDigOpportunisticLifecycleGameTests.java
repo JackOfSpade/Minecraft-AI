@@ -393,9 +393,16 @@ public final class OreDigOpportunisticLifecycleGameTests {
         // A lone ore cell with no same-block neighbour: the vein has exactly one member (the seed itself), so
         // the one claim taken during MINE prep is unambiguously this exact cell. dy=1 + a solid roof (not
         // dy=0): see the pose comment on the first test in this file.
-        BlockPos ore = room.at(6, 1, 0);
-        room.set(6, 1, 0, Blocks.DIAMOND_ORE);
-        room.set(6, 2, 0, Blocks.STONE);
+        // Keep the asserted seed close enough that the first selector pass has an unambiguous observed
+        // route from either of the local coal cells. At x=6 an unlucky first pass from the west coal can
+        // legitimately report UNREACHABLE, exclude the otherwise-valid seed for 600 ticks, and let OreDig's
+        // ordinary strip search leave the room before it can be re-proved. This test is about terminal
+        // orphan cleanup after MINE, not the 600-tick observed-reach exclusion policy.
+        // x=4 stays outside OreDig's ordinary nearby-bonus reach, so this remains a real detour rather
+        // than allowing the normal mission path to mine the asserted diamond before the selector can claim it.
+        BlockPos ore = room.at(4, 1, 0);
+        room.set(4, 1, 0, Blocks.DIAMOND_ORE);
+        room.set(4, 2, 0, Blocks.STONE);
         // Keep OreDig's ordinary ladder in this observed room until the detour selector has actually admitted
         // the diamond. Without local coal, the age-60 selector check can correctly see a partial observed
         // route as unreachable, exclude the seed for 600 ticks, and let the no-target strip search leave the
