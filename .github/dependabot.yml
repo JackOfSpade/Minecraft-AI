@@ -15,3 +15,13 @@ updates:
     groups:
       gradle-dependencies:
         patterns: ["*"]
+
+  # The spawn-bot wrapper is an independent Gradle build with its own wrapper
+  # and settings file, so Dependabot must scan it separately from the root.
+  - package-ecosystem: "gradle"
+    directory: "/Minecraft-Spawn-Bots-Wrapper"
+    schedule:
+      interval: "weekly"
+    groups:
+      gradle-wrapper-dependencies:
+        patterns: ["*"]
