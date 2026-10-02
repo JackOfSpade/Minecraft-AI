@@ -1,0 +1,33 @@
+Harden Baritone's generated sources against CodeQL findings: make intended float narrowing explicit and use an unambiguous comma-separated block-state property grammar so malformed schematic data cannot trigger regex backtracking.
+
+diff --git a/src/main/java/baritone/behavior/LookBehavior.java b/src/main/java/baritone/behavior/LookBehavior.java
+--- a/src/main/java/baritone/behavior/LookBehavior.java
++++ b/src/main/java/baritone/behavior/LookBehavior.java
+@@ -220,8 +220,10 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
+                 desiredPitch = nudgeToLevel(desiredPitch);
+             }
+ 
+-            desiredYaw += this.randomYawOffset;
+-            desiredPitch += this.randomPitchOffset;
++            // Rotation is intentionally stored as float. Make the narrowing at
++            // this boundary explicit instead of relying on compound assignment.
++            desiredYaw = (float) (desiredYaw + this.randomYawOffset);
++            desiredPitch = (float) (desiredPitch + this.randomPitchOffset);
+ 
+             return new Rotation(
+                     this.calculateMouseMove(prev.getYaw(), desiredYaw),
+diff --git a/src/main/java/baritone/utils/schematic/format/defaults/SpongeSchematic.java b/src/main/java/baritone/utils/schematic/format/defaults/SpongeSchematic.java
+--- a/src/main/java/baritone/utils/schematic/format/defaults/SpongeSchematic.java
++++ b/src/main/java/baritone/utils/schematic/format/defaults/SpongeSchematic.java
+@@ -96,7 +96,10 @@ public final class SpongeSchematic extends StaticSchematic {
+ 
+     private static final class SerializedBlockState {
+ 
+-        private static final Pattern REGEX = Pattern.compile("(?<location>(\\w+:)?\\w+)(\\[(?<properties>(\\w+=\\w+,?)+)])?");
++        // A property list has one unambiguous comma-separated form. Keeping the
++        // delimiter outside the repeated property avoids exponential backtracking
++        // when malformed, attacker-controlled schematic data is parsed.
++        private static final Pattern REGEX = Pattern.compile("(?<location>(?:\\w+:)?\\w+)(?:\\[(?<properties>\\w+=\\w+(?:,\\w+=\\w+)*)])?");
+ 
+         private final Identifier identifier;
+         private final Map<String, String> properties;
