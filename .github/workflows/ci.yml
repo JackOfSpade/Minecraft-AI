@@ -20,18 +20,18 @@ jobs:
 
     steps:
       - name: Check out full repository history
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Set up Java 21
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
 
       - name: Check source-set and workflow invariants
         run: bash scripts/ci_static_check.sh
@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload CI diagnostics and evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ci-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn

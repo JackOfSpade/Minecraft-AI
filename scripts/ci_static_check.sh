@@ -74,10 +74,19 @@ for script in scripts/ci_static_check.sh scripts/food_test.sh scripts/night_watc
   bash -n "$script" || fail "shell syntax failed: $script"
 done
 
+# Every third-party workflow action is pinned to an immutable commit. Dependabot
+# still updates these pins, while this check prevents a mutable tag or branch
+# from quietly becoming the executable CI supply chain.
+while IFS= read -r uses_line; do
+  action_ref="${uses_line##*@}"
+  [[ "$action_ref" =~ ^[0-9a-f]{40}$ ]] \
+    || fail "workflow action is not pinned to a full commit SHA: $uses_line"
+done < <(grep -RhoE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]#]+' .github/workflows)
+
 for workflow in .github/workflows/ci.yml .github/workflows/nightly.yml .github/workflows/manual-llm.yml; do
   grep -Fq 'fetch-depth: 0' "$workflow" \
     || fail "$workflow must fetch full history for commit reachability validation"
-  grep -Eq 'actions/upload-artifact@v[0-9]+' "$workflow" \
+  grep -Eq 'actions/upload-artifact@[0-9a-f]{40}' "$workflow" \
     || fail "$workflow does not upload diagnostics"
   grep -Fq 'if: always()' "$workflow" \
     || fail "$workflow may discard diagnostics after a failure"
@@ -102,7 +111,7 @@ grep -Fq 'scripts/mining_acceptance.sh' .github/workflows/nightly.yml \
   || fail 'nightly lacks the explicit long Mining First entrypoint'
 grep -Fq 'fromJSON(needs.prepare_mining_shards.outputs.matrix)' .github/workflows/nightly.yml \
   || fail 'from_zero Mining First workflow is not using the fixed parallel shard matrix'
-grep -Eq 'actions/download-artifact@v[0-9]+' .github/workflows/nightly.yml \
+grep -Eq 'actions/download-artifact@[0-9a-f]{40}' .github/workflows/nightly.yml \
   || fail 'from_zero Mining First workflow does not download shard evidence for aggregation'
 grep -Fq 'scripts/mining_evidence_aggregate.sh' .github/workflows/nightly.yml \
   || fail 'from_zero Mining First workflow does not revalidate and aggregate shards'
