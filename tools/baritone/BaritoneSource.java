@@ -34,7 +34,7 @@ import java.util.stream.Stream;
  * </pre>
  *
  * Run with a JDK 21+: {@code java tools/baritone/BaritoneSource.java <command> [options]}.
- * Commands: generate (default), resume, report, verify, export. See tools/baritone/README.md.
+ * Commands: generate (default), resume, report, verify, export. See docs/NAVIGATION_ENGINE.md and tools/baritone/patches/.
  * The output directory is its own git repository: one commit for the excluded upstream tree, one for the
  * overlay, then one commit per patch (subject = patch name), so patches can be edited and re-exported.
  */

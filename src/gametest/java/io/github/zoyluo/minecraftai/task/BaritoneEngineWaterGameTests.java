@@ -1,17 +1,15 @@
 package io.github.zoyluo.minecraftai.task;
 
-import baritone.api.pathing.goals.GoalBlock;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
+import io.github.zoyluo.minecraftai.baritone.ObservedBaritoneTestRoutes;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
-import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.fabricmc.loader.impl.launch.FabricLauncherBase;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.level.block.Block;
@@ -20,16 +18,16 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * Baritone driving a bot through water (the drowning safety net must not take a swimmer over while Baritone owns the route),
- * the fail-soft fallback to the legacy navigator, and the guarantee that the legacy engine never loads Baritone.
+ * fail-closed handling when Baritone is unavailable, and default Baritone bootstrap.
  */
 public final class BaritoneEngineWaterGameTests {
     private static final double AT_GOAL = 1.7D;
 
     /**
      * A swim route across a two-deep, four-wide channel for a bot that starts submerged on its bottom (it has just fallen in): with
-     * its eyes under the surface the safety net declares a rescue and moves the bot by a block or more per step (the spike measured
-     * a 1.43-block displacement), off the path Baritone is walking it along. With the Baritone lease it must not: every tick's
-     * displacement is swimming speed, no rescue is ever active, and the lease ends with the route.
+     * its eyes under the surface the safety net declares a rescue and moves the bot by a block or more per step, off the path
+     * Baritone is walking it along. With the Baritone lease it must not: every tick's displacement is swimming speed, no rescue is
+     * ever active, and the lease ends with the route.
      */
     @GameTest(environment = "minecraftai-gametest:baritone_engine_water_game_tests_baritone_swim_route_is_not_hijacked_by_the_safety_net", maxTicks = 500)
     public void baritoneSwimRouteIsNotHijackedByTheSafetyNet(GameTestHelper context) {
@@ -80,17 +78,16 @@ public final class BaritoneEngineWaterGameTests {
         });
     }
 
-    /**
-     * The control of the test above: the same bot in the same place, driven by Baritone directly with no swim permission recorded
-     * (what the spike did). The safety net must interfere here, otherwise the lease test would prove nothing.
-     */
+    /** The control of the lease test: revoke the lease after a production-seam swim route starts, so the safety net must intervene. */
     @GameTest(environment = "minecraftai-gametest:baritone_engine_water_game_tests_baritone_swim_route_is_not_hijacked_by_the_safety_net", maxTicks = 500)
     public void withoutTheLeaseTheSafetyNetTakesTheSwimmerOver(GameTestHelper context) {
         BaritoneEngineArena arena = channel(context, 21);
         AIPlayerEntity bot = arena.spawnOnBaritone("BeSwimNoLease", arena.cell(-6, 0, 0));
         arena.teleportTo(bot, arena.cell(1, -1, 0));
         BlockPos goal = arena.cell(8, 0, 0);
-        BaritoneRegistry.INSTANCE.get(bot).getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
+        ObservedBaritoneTestRoutes.swim(bot, goal, "swim_without_lease");
+        BaritoneRegistry.INSTANCE.setWaterAllowed(bot, false);
+        NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
         boolean[] intervened = {false};
         int[] tick = {0};
         context.failIfEver(() -> {
@@ -105,143 +102,120 @@ public final class BaritoneEngineWaterGameTests {
         });
     }
 
-    /** Baritone is the configured engine but cannot be initialised: the request is answered by the legacy navigator. */
-    @GameTest(environment = "minecraftai-gametest:baritone_engine_water_game_tests_baritone_unavailable_falls_back_to_the_legacy_navigator", maxTicks = 400)
-    public void baritoneUnavailableFallsBackToTheLegacyNavigator(GameTestHelper context) {
+    /** An unavailable Baritone session refuses navigation without creating an instance or starting a hidden fallback. */
+    @GameTest(maxTicks = 160)
+    public void baritoneUnavailableStopsNavigation(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 24, 14, 6);
-        AIPlayerEntity bot = arena.spawnOnBaritone("BeFallback", arena.cell(-9, 0, 0));
-        // Whatever happens, the failure flag is not left behind for the tests that follow.
-        context.runAfterDelay(380, NavEngineSelector::clearFailureForTests);
-        NavEngineSelector.markBaritoneUnavailable("gametest", new NoClassDefFoundError("baritone/api/BaritoneAPI"));
-        arena.require(NavEngineSelector.configuredFor(bot.getUUID()) == NavEngine.BARITONE && !NavEngineSelector.baritoneSelectedFor(bot.getUUID()),
-                "fixture: Baritone is still selected after it failed");
-        BlockPos goal = arena.cell(9, 0, 0);
-        ActionPack pack = bot.getActionPack();
-        MoveTask move = new MoveTask(bot, goal);
-        TaskManager.INSTANCE.assign(bot, move, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_baritone_fallback"));
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            tick[0]++;
-            arena.require(!pack.hasBaritoneRoute() && BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null,
-                    "a bot whose Baritone failed to initialise got a Baritone route or instance");
-            if (move.state() == TaskState.COMPLETED) {
-                arena.require(bot.position().distanceTo(goal.getCenter()) <= 2.0D, "the legacy fallback did not get there: " + bot.position());
-                arena.require(pack.lastRouteOutcome() == null, "a Baritone outcome was recorded");
-                NavEngineSelector.clearFailureForTests();
+        AIPlayerEntity bot = arena.spawn("BeUnavailable", arena.cell(-9, 0, 0));
+        context.runAfterDelay(140, NavEngineSelector::clearFailureForTests);
+        try {
+            NavEngineSelector.markBaritoneUnavailable("gametest", new NoClassDefFoundError("baritone/api/BaritoneAPI"));
+            arena.require(NavEngineSelector.configuredFor(bot.getUUID()) == NavEngine.BARITONE && !NavEngineSelector.baritoneSelectedFor(bot.getUUID()),
+                    "fixture: Baritone is still selected after it failed");
+            BlockPos goal = arena.cell(9, 0, 0);
+            ActionPack pack = bot.getActionPack();
+            ActionResult refused = pack.startPathTo(goal);
+            arena.require(!refused.isInProgress() && "baritone_unavailable".equals(refused.reason()),
+                    "unavailable Baritone accepted a route: " + refused.status() + " " + refused.reason());
+            arena.require(!pack.hasBaritoneRoute() && pack.isPathExecutorIdle() && BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null,
+                    "unavailable Baritone created a route, an instance, or a fallback controller");
+            Vec3 stoppedAt = bot.position();
+            context.runAfterDelay(30, () -> {
+                try {
+                    arena.require(bot.position().distanceTo(stoppedAt) < 0.05D,
+                            "bot moved after unavailable navigation was refused: " + bot.position());
+                    arena.require(BaritoneRegistry.INSTANCE.size() == 0, "a Baritone instance appeared after an unavailable request");
+                } finally {
+                    // A failed GameTest must not leak a sticky process-wide failure into later tests.
+                    NavEngineSelector.clearFailureForTests();
+                }
                 arena.finish(bot);
-                return;
-            }
-            arena.require(move.state() == TaskState.RUNNING, "move ended: " + move.state() + " " + move.failureReason());
-        });
+            });
+        } catch (RuntimeException failure) {
+            NavEngineSelector.clearFailureForTests();
+            throw failure;
+        }
     }
 
-    /**
-     * Baritone fails AFTER it was live (a class that cannot load on a driven tick): the route that was running is ended (FAILED,
-     * baritone_unavailable), every instance is torn down, no hook of the lifecycle or of the legacy entries touches Baritone again,
-     * and a legacy request succeeds and walks the bot to its goal.
-     */
-    @GameTest(environment = "minecraftai-gametest:baritone_engine_water_game_tests_baritone_failing_after_it_was_live_hands_the_bot_to_the_legacy_navigator", maxTicks = 500)
-    public void baritoneFailingAfterItWasLiveHandsTheBotToTheLegacyNavigator(GameTestHelper context) {
+    /** A Baritone failure after a route started ends that route and later requests still fail closed. */
+    @GameTest(maxTicks = 180)
+    public void baritoneFailureStopsActiveRoute(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 22, 14, 6);
-        AIPlayerEntity bot = arena.spawnOnBaritone("BeFailLive", arena.cell(-10, 0, 0));
-        // Whatever happens, the failure flag is not left behind for the tests that follow.
-        context.runAfterDelay(480, NavEngineSelector::clearFailureForTests);
+        AIPlayerEntity bot = arena.spawn("BeFailLive", arena.cell(-10, 0, 0));
+        context.runAfterDelay(160, NavEngineSelector::clearFailureForTests);
         ActionPack pack = bot.getActionPack();
-        arena.require(pack.startPathTo(arena.cell(10, 0, 0)).isInProgress() && pack.hasBaritoneRoute(), "the Baritone route did not start");
-        BlockPos legacyGoal = arena.cell(9, 0, 3);
+        arena.require(pack.startPathTo(arena.cell(3, 0, 0)).isInProgress() && pack.hasBaritoneRoute(),
+                "the Baritone route did not start");
+        BlockPos retryGoal = arena.cell(3, 0, 3);
         int[] tick = {0};
-        int[] phase = {0};
         context.failIfEver(() -> {
             int now = ++tick[0];
-            arena.require(now < 470, "phase " + phase[0] + " never finished: " + bot.position());
-            if (phase[0] == 0 && now == 12) {
-                arena.require(NavEngineSelector.baritoneActive() && BaritoneRegistry.INSTANCE.find(bot.getUUID()) != null,
-                        "fixture: Baritone is not live with an instance");
-                NavEngineSelector.markBaritoneUnavailable("gametest_after_live", new NoClassDefFoundError("baritone/pathing/movement/MovementHelper"));
-                arena.require(NavEngineSelector.baritoneLive() && !NavEngineSelector.baritoneActive(), "the flags after the failure are wrong");
-                arena.require(BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null && BaritoneRegistry.INSTANCE.size() == 0,
-                        "the instances were not torn down");
-                // The route is over as far as any caller can tell, without a single call into Baritone.
-                arena.require(!pack.hasBaritoneRoute() && pack.isPathExecutorIdle(), "the route outlived Baritone");
-                NavOutcome outcome = pack.lastRouteOutcome();
-                arena.require(outcome != null && outcome.status() == NavOutcome.Status.FAILED && "baritone_unavailable".equals(outcome.reason()),
-                        "the running route was not ended as baritone_unavailable: " + outcome);
-                pack.hasActiveActions(); // asks Baritone nothing any more (and must not throw)
-                // The legacy request now succeeds (a null Baritone answer, the legacy navigator runs) and no hook makes an instance.
-                pack.stopAll();
-                arena.require(pack.startPathTo(legacyGoal).isInProgress() && !pack.hasBaritoneRoute() && !pack.isPathExecutorIdle(),
-                        "the legacy navigator did not take the request");
-                phase[0] = 1;
-                return;
-            }
-            if (phase[0] == 1) {
-                arena.require(BaritoneRegistry.INSTANCE.size() == 0, "something created a Baritone instance after the failure");
-                if (pack.isPathExecutorIdle()) {
-                    arena.require(bot.position().distanceTo(legacyGoal.getCenter()) <= 2.0D, "the legacy route did not arrive: " + bot.position());
-                    arena.require(pack.lastRouteOutcome().status() == NavOutcome.Status.FAILED, "a legacy route recorded a Baritone outcome");
+            arena.require(now < 150, "Baritone failure test did not finish: " + bot.position());
+            if (now == 12) {
+                try {
+                    arena.require(NavEngineSelector.baritoneActive() && BaritoneRegistry.INSTANCE.find(bot.getUUID()) != null,
+                            "fixture: Baritone is not live with an instance");
+                    NavEngineSelector.markBaritoneUnavailable("gametest_after_live",
+                            new NoClassDefFoundError("baritone/pathing/movement/MovementHelper"));
+                    arena.require(NavEngineSelector.baritoneLive() && !NavEngineSelector.baritoneActive(), "the flags after the failure are wrong");
+                    arena.require(BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null && BaritoneRegistry.INSTANCE.size() == 0,
+                            "the instances were not torn down");
+                    arena.require(!pack.hasBaritoneRoute() && pack.isPathExecutorIdle(), "the active route outlived Baritone");
+                    NavOutcome outcome = pack.lastRouteOutcome();
+                    arena.require(outcome != null && outcome.status() == NavOutcome.Status.FAILED
+                                    && "baritone_unavailable".equals(outcome.reason()),
+                            "the running route was not ended as baritone_unavailable: " + outcome);
+                    ActionResult retry = pack.startPathTo(retryGoal);
+                    arena.require(!retry.isInProgress() && "baritone_unavailable".equals(retry.reason()),
+                            "a route request after Baritone failure did not fail closed: " + retry.status() + " " + retry.reason());
+                    context.runAfterDelay(20, () -> {
+                        try {
+                            // Cancelling input preserves ordinary vanilla momentum; it must not
+                            // keep a controller writing fresh movement after the route is gone.
+                            arena.require(!pack.hasBaritoneRoute() && pack.isPathExecutorIdle(),
+                                    "a route resumed after its Baritone failure");
+                            arena.require(bot.zza == 0.0F && bot.xxa == 0.0F && !bot.isSprinting(),
+                                    "Baritone inputs were not released after failure");
+                            arena.require(BaritoneRegistry.INSTANCE.size() == 0,
+                                    "a Baritone instance reappeared after failure");
+                        } finally {
+                            NavEngineSelector.clearFailureForTests();
+                        }
+                        arena.finish(bot);
+                    });
+                } catch (RuntimeException failure) {
                     NavEngineSelector.clearFailureForTests();
-                    arena.finish(bot);
+                    throw failure;
                 }
             }
         });
     }
 
-    /**
-     * With the default (legacy) engine no Baritone class is loaded by the mod's own hooks: the per-tick driver hook, the lifecycle
-     * hooks and every ActionPack entry work without initialising anything. (The mixins that expose vanilla classes to Baritone
-     * are applied at start-up and load a few interfaces; the classes checked here are the ones that hold behaviour or state.)
-     *
-     * <p>Conclusive only in a fresh JVM: run it alone, {@code gt_filter.sh <repo> <out> baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes}
-     * (docs/TESTING_AND_EVIDENCE.md). Selected that way it FAILS when Baritone was already loaded. Inside a bigger run (a class glob, the
-     * whole suite) another test of the same server may have used Baritone first, so the load check cannot tell and only the legacy route
-     * is verified (the result is logged as {@code gametest_legacy_lazy conclusive=false}).</p>
-     */
-    @GameTest(environment = "minecraftai-gametest:baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes", maxTicks = 400)
-    public void legacyEngineLoadsNoBaritoneClasses(GameTestHelper context) {
+    /** The default configuration starts a normal route through Baritone without a per-bot switch. */
+    @GameTest(maxTicks = 400)
+    public void defaultNavigationBootstrapsBaritone(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 23, 14, 6);
-        String[] markers = {
-                "baritone.api.BaritoneAPI", "baritone.Baritone", "baritone.behavior.PathingBehavior",
-                "io.github.zoyluo.minecraftai.baritone.BaritoneNavigator",
-                "io.github.zoyluo.minecraftai.baritone.BaritoneHost",
-                "io.github.zoyluo.minecraftai.baritone.BaritoneRegistry", "io.github.zoyluo.minecraftai.baritone.BaritoneDriver",
-                "io.github.zoyluo.minecraftai.baritone.BaritoneExecutor", "io.github.zoyluo.minecraftai.baritone.BaritoneNavigator",
-                "io.github.zoyluo.minecraftai.baritone.ServerPlayerContext", "io.github.zoyluo.minecraftai.baritone.BaritoneSettings",
-                "io.github.zoyluo.minecraftai.baritone.PaletteAccess", "io.github.zoyluo.minecraftai.baritone.PolicyRefusalStreak"};
-        boolean conclusive = loadedMarkers(markers).isEmpty() && !NavEngineSelector.baritoneLive();
-        boolean dedicated = dedicatedRun();
-        // In the run this test is meant for (selected alone, so in a fresh JVM) an inconclusive result is a FAILURE, never a pass: it
-        // means something loaded Baritone before the legacy route was even tried.
-        arena.require(conclusive || !dedicated, "the run is inconclusive although this test runs alone: Baritone classes were already loaded "
-                + loadedMarkers(markers) + " (live=" + NavEngineSelector.baritoneLive() + ")");
-        arena.require(NavEngineSelector.configured() == NavEngine.LEGACY, "the default engine is not legacy");
-        AIPlayerEntity bot = arena.spawn("BeLegacyLazy", arena.cell(-9, 0, 0));
-        BlockPos goal = arena.cell(9, 0, 0);
+        arena.require(NavEngineSelector.configured() == NavEngine.BARITONE,
+                "the default navigation engine is not Baritone");
+        AIPlayerEntity bot = arena.spawn("BeDefaultBaritone", arena.cell(-9, 0, 0));
+        BlockPos goal = arena.cell(4, 0, 0);
         ActionPack pack = bot.getActionPack();
         ActionResult started = pack.startPathTo(goal);
-        arena.require(started.isInProgress() && !pack.isPathExecutorIdle() && !pack.hasBaritoneRoute(), "the legacy navigator did not take the route");
-        pack.hasActiveActions();
+        arena.require(started.isInProgress() && pack.hasBaritoneRoute() && BaritoneRegistry.INSTANCE.find(bot.getUUID()) != null,
+                "the default route did not bootstrap Baritone: " + started.status() + " " + started.reason());
         int[] tick = {0};
         context.failIfEver(() -> {
             int now = ++tick[0];
-            if (now == 20) {
-                // Every ActionPack entry a caller may use, mid-route.
-                pack.stopNavigation();
-                pack.startWalkTo(goal.getCenter());
-                pack.stopAll();
-                arena.require(pack.startPathTo(goal).isInProgress(), "the legacy navigator did not restart");
-                arena.require(pack.lastRouteOutcome() == null, "a Baritone outcome was recorded by the legacy engine");
-            }
-            if (pack.isPathExecutorIdle() && now > 25) {
-                arena.require(bot.position().distanceTo(goal.getCenter()) <= 2.0D, "the legacy route did not arrive: " + bot.position());
-                java.util.List<String> loaded = loadedMarkers(markers);
-                BotLog.path(bot, "gametest_legacy_lazy", "conclusive", conclusive, "dedicated_run", dedicated, "loaded_after", loaded);
-                if (conclusive) {
-                    arena.require(loaded.isEmpty(), "the legacy engine loaded Baritone classes: " + loaded);
-                    arena.require(!NavEngineSelector.baritoneLive(), "the legacy engine marked Baritone live");
-                }
+            arena.require(now < 380, "the default Baritone route never arrived: " + bot.position());
+            if (!pack.hasBaritoneRoute()) {
+                NavOutcome outcome = pack.lastRouteOutcome();
+                arena.require(outcome != null && outcome.status() == NavOutcome.Status.SUCCESS,
+                        "the default Baritone route did not succeed: " + outcome);
+                arena.require(bot.position().distanceTo(goal.getCenter()) <= 2.0D,
+                        "the default Baritone route ended away from the goal: " + bot.position());
+                BotLog.path(bot, "gametest_baritone_default_bootstrap", "outcome", outcome.status(), "ticks", now);
                 arena.finish(bot);
             }
-            arena.require(now < 380, "the legacy route never arrived: " + bot.position());
         });
     }
 
@@ -264,21 +238,5 @@ public final class BaritoneEngineWaterGameTests {
             }
         }
         return arena;
-    }
-
-    /** Whether this test was selected alone (a filter that names it, no glob): the server is a fresh JVM. */
-    private static boolean dedicatedRun() {
-        String filter = System.getProperty("fabric-api.gametest.filter", "");
-        return filter.endsWith("legacy_engine_loads_no_baritone_classes") && !filter.contains("*");
-    }
-
-    private static java.util.List<String> loadedMarkers(String[] names) {
-        java.util.List<String> loaded = new java.util.ArrayList<>();
-        for (String name : names) {
-            if (FabricLauncherBase.getLauncher().isClassLoaded(name)) {
-                loaded.add(name);
-            }
-        }
-        return loaded;
     }
 }

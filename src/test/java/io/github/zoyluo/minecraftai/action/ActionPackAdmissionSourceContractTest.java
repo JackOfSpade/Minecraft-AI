@@ -32,8 +32,6 @@ class ActionPackAdmissionSourceContractTest {
             "(?ms)^\\s*(?!(?:if|return)\\b)(?![^;\\n]*=)[A-Za-z_$][\\w$().]*\\.runStep\\s*\\([^;]*?\\);");
 
     private static final List<String> MIGRATED_RUN_STEP_SOURCES = List.of(
-            "action/DigNav.java",
-            "action/HarvestCore.java",
             "action/InCellWalk.java",
             "task/AcquireWaterTask.java",
             "task/CreateObsidianTask.java",
@@ -89,21 +87,36 @@ class ActionPackAdmissionSourceContractTest {
         String createObsidian = source("task/CreateObsidianTask.java");
         String recovery = methodBody(createObsidian, "private void recoverWater(");
         assertInOrder(recovery,
-                "obsidian_surface",
-                "if (lease != null)",
-                "recoveryWalk = \"surface\"",
-                "recoveryWalkLease = lease");
+                "beginRecoveryStep(bot, recoveryFeet.above(), WalkedStep.Kind.SWIM",
+                "\"obsidian_surface\", \"surface\")");
         assertInOrder(recovery,
-                "obsidian_return_rim",
-                "if (lease != null)",
-                "recoveryWalk = \"rim\"",
-                "recoveryWalkLease = lease");
+                "canObserveRecoveryTransitEnvelope(bot, obsidianStandHint)",
+                "beginRecoveryStep(bot, obsidianStandHint, WalkedStep.Kind.FLAT",
+                "\"obsidian_return_rim\", \"rim\")");
         assertContains(recovery, "stepInFlightFor(lease)",
                 "CreateObsidian must wait for its own recovery lease");
         assertContains(recovery, "stepResultFor(lease)",
                 "CreateObsidian must not consume a successor recovery result");
-        assertInOrder(methodBody(createObsidian, "private static boolean beginPickupStep("),
-                "return bot.getActionPack().runStep(", "!= null");
+        assertContains(recovery, "releaseRecoveryWalk(bot)",
+                "CreateObsidian must release its guarded recovery lease after reconciliation");
+        String recoveryStep = methodBody(createObsidian, "private boolean beginRecoveryStep(");
+        assertInOrder(recoveryStep,
+                "canObserveRecoveryTransitEnvelope(bot, cell)",
+                "WalkedStep.refusal(bot, cell, kind)",
+                "ActionPack.StepLease lease = bot.getActionPack().runStep(",
+                "if (lease == null)",
+                "recoveryWalk = recoveryKind",
+                "recoveryWalkLease = lease");
+        assertContains(recoveryStep, "canContinueObservedRecoveryStep",
+                "CreateObsidian recovery steps must retain an observed continuation guard");
+        String pickupStep = methodBody(createObsidian, "private boolean beginPickupStep(");
+        assertInOrder(pickupStep,
+                "ActionPack.StepLease lease = bot.getActionPack().runStep(",
+                "pickupStepLease = lease;", "return true;");
+        assertContains(pickupStep, "canContinueObservedPickupStep",
+                "CreateObsidian pickup must retain an observed continuation guard");
+        assertInOrder(methodBody(createObsidian, "private boolean awaitPickupStep("),
+                "stepInFlightFor(lease)", "stepResultFor(lease)", "releaseStepLease(lease)");
 
         String acquireWater = source("task/AcquireWaterTask.java");
         assertInOrder(methodBody(acquireWater, "private boolean settleOnStandableCell("),
@@ -115,10 +128,13 @@ class ActionPackAdmissionSourceContractTest {
 
         String shelter = source("task/EmergencyShelterTask.java");
         assertInOrder(methodBody(shelter, "private boolean startMotion("),
-                "ActionPack.StepLease lease = pack.runStep(step)",
+                "EgressAdmission admission = kind == Motion.EGRESS",
+                "ActionPack.StepLease lease = admission == null ? pack.runStep(step)",
                 "if (lease == null)",
                 "motion = kind",
                 "motionLease = lease");
+        assertContains(shelter, "canContinueObservedEgress",
+                "EmergencyShelter egress must retain an observed continuation guard");
         assertExactLeaseReconciliation(shelter, "EmergencyShelterTask");
 
         String ore = source("task/OreDigTask.java");
@@ -202,11 +218,15 @@ class ActionPackAdmissionSourceContractTest {
                 "edge helpers must return null when their admission is denied");
 
         String digNav = source("action/DigNav.java");
-        assertContains(digNav, "if (pack.runStep(descent) == null)",
-                "DigNav must not report a denied descent as started");
+        assertContains(digNav, "ActionResult route = pack.startPathTo(target);",
+                "DigNav compatibility requests must enter through Baritone");
+        assertContains(digNav, "legacy_dig_nav_refused",
+                "DigNav must log a typed refusal instead of excavating a legacy tunnel");
+        assertFalse(digNav.contains("TerrainProbe.firstNonAir") || digNav.contains("beginDescend("),
+                "DigNav must not retain a raw terrain probe or local descent fallback");
         String harvest = source("action/HarvestCore.java");
-        assertContains(harvest, "return pack.runStep(step) != null",
-                "HarvestCore must return whether pickup-step admission succeeded");
+        assertContains(harvest, "return startExactPickupPath(bot, cell);",
+                "HarvestCore must keep pickup descents behind the observed Baritone route");
 
         for (String relative : discoveredRunStepSources()) {
             assertFalse(source(relative).contains(".stepResult()"),

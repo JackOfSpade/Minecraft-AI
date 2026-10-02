@@ -2,10 +2,11 @@ package io.github.zoyluo.minecraftai.baritone;
 
 import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import baritone.api.IBaritone;
-import baritone.api.pathing.goals.GoalNear;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,8 +35,8 @@ import net.minecraft.world.phys.Vec3;
  * ON (the move happens, safely) and OFF (the engine behaves as it did before the switch existed):
  *
  * <ul>
- *   <li>parkour: gaps of 2 and 3 blocks are jumped, a 4-block gap is refused (Baritone plans at most a 3-block gap: the bot never
- *       falls), a jump that lands one block higher (parkour-ascend);</li>
+ *   <li>parkour: visibly observed two- and three-block jumps (including an ascending landing) succeed; a supplied-block
+ *       parkour-place crossing succeeds; and an uncrossable gap or disabled parkour is refused before it drives the bot;</li>
  *   <li>water-bucket fall: a drop of 10 blocks is taken with a carried water bucket, without damage, and the water is picked up
  *       again (no water is left, the bucket is full again);</li>
  *   <li>vines: a vine column is climbed up and down;</li>
@@ -53,6 +54,8 @@ public final class BaritoneCapabilityGameTests {
     private static final int BASE_Y = 60;
     private static final int SLAB_STEP = 22;
     private static final Map<String, Integer> SLABS = new HashMap<>();
+    /** A water-bucket descent genuinely needs water movement permission; it remains break/place-free. */
+    private static final NavRoute.Options WATER_BUCKET_FALL_ROUTE = new NavRoute.Options(false, false, true);
 
     // ---------------------------------------------------------------------------------------------------------------
     // Parkour
@@ -60,17 +63,17 @@ public final class BaritoneCapabilityGameTests {
 
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_parkour_jumps_two_block_gap", maxTicks = 500)
     public void parkourJumpsTwoBlockGap(GameTestHelper context) {
-        crossesGap(context, "CapParkour2GT", 2, false);
+        crossesObservedGap(context, "CapParkour2GT", 2, false);
     }
 
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_parkour_jumps_three_block_gap", maxTicks = 500)
     public void parkourJumpsThreeBlockGap(GameTestHelper context) {
-        crossesGap(context, "CapParkour3GT", 3, false);
+        crossesObservedGap(context, "CapParkour3GT", 3, false);
     }
 
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_parkour_ascend_jumps_gap_onto_higher_block", maxTicks = 500)
     public void parkourAscendJumpsGapOntoHigherBlock(GameTestHelper context) {
-        crossesGap(context, "CapParkourUpGT", 2, true);
+        crossesObservedGap(context, "CapParkourUpGT", 2, true);
     }
 
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_parkour_place_lands_on_block_placed_in_the_air_over_four_block_gap", maxTicks = 600)
@@ -78,7 +81,9 @@ public final class BaritoneCapabilityGameTests {
         Course c = gapCourse(context, "CapParkourPlaceGT", 4, false, MinecraftAiConfig.BaritoneCaps.defaults());
         c.giveBlocks(Items.COBBLESTONE, 8);
         BlockPos goal = c.feet.offset(4 + 4 + 4, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        // The fixture deliberately supplies blocks, so placement is an honest route permission;
+        // the visible gap still has to be admitted by the production observation fence.
+        c.goalNear(goal, 1, new NavRoute.Options(false, true, false));
         c.await(500, run -> {
             run.requireNear(goal, 1.6, 0.8, "gap of 4 with a block placed in the air");
             require(context, run.minY >= c.feet.getY() - 0.1D, "the bot fell into the gap: min y offset " + (run.minY - c.feet.getY()));
@@ -93,46 +98,41 @@ public final class BaritoneCapabilityGameTests {
 
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_parkour_refuses_four_block_gap_and_the_bot_stays_on_the_ledge", maxTicks = 500)
     public void parkourRefusesFourBlockGapAndTheBotStaysOnTheLedge(GameTestHelper context) {
-        Course c = gapCourse(context, "CapParkour4GT", 4, false, MinecraftAiConfig.BaritoneCaps.defaults());
-        BlockPos goal = c.feet.offset(4 + 4 + 4, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(400, run -> {
-            require(context, c.bot.getX() < c.feet.getX() + 4.0D, "the bot crossed a 4-block gap: " + c.describe());
-            require(context, run.minY >= c.feet.getY() - 0.1D, "the bot fell off the ledge: min y offset " + (run.minY - c.feet.getY()));
-            require(context, run.maxY < c.feet.getY() + 0.4D, "the bot jumped although no 4-block jump is planned (max y offset " + (run.maxY - c.feet.getY()) + ")");
-            require(context, c.bot.getHealth() >= c.startHealth, "the bot lost health: " + c.startHealth + " -> " + c.bot.getHealth());
-            run.requireNoEdits();
-        });
+        refusesUnbridgedGap(context, "CapParkour4GT", 4, false, MinecraftAiConfig.BaritoneCaps.defaults());
     }
 
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_parkour_off_leaves_two_block_gap_alone", maxTicks = 500)
     public void parkourOffLeavesTwoBlockGapAlone(GameTestHelper context) {
-        Course c = gapCourse(context, "CapParkourOffGT", 2, false, MinecraftAiConfig.BaritoneCaps.allOff());
-        BlockPos goal = c.feet.offset(4 + 2 + 4, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        refusesUnbridgedGap(context, "CapParkourOffGT", 2, false, MinecraftAiConfig.BaritoneCaps.allOff());
+    }
+
+    /** A short jump must be proved by the complete observation-fenced Baritone plan, never fixture knowledge. */
+    private static void crossesObservedGap(GameTestHelper context, String name, int gap, boolean ascend) {
+        Course c = gapCourse(context, name, gap, ascend, MinecraftAiConfig.BaritoneCaps.defaults());
+        int gapStart = 4;
+        BlockPos goal = c.feet.offset(gapStart + gap + 4, ascend ? 1 : 0, 0);
+        c.goalNear(goal, 1);
         c.await(400, run -> {
-            require(context, c.bot.getX() < c.feet.getX() + 4.0D, "the bot crossed the gap with parkour off: " + c.describe());
-            require(context, run.minY >= c.feet.getY() - 0.1D, "the bot fell off the ledge: min y offset " + (run.minY - c.feet.getY()));
-            require(context, run.maxY < c.feet.getY() + 0.4D, "the bot jumped with parkour off (max y offset " + (run.maxY - c.feet.getY()) + ")");
-            require(context, c.bot.getHealth() >= c.startHealth, "the bot lost health");
+            run.requireNear(goal, 1.6, 0.8, "gap of " + gap);
+            require(context, run.minY >= c.feet.getY() - 0.1D,
+                    "the bot fell into the gap: min y offset " + (run.minY - c.feet.getY()));
+            boolean airborneOverGap = run.trail.stream().anyMatch(p -> p.x > c.feet.getX() + gapStart + 0.3D
+                    && p.x < c.feet.getX() + gapStart + gap - 0.3D && p.y > c.feet.getY() + 0.1D);
+            require(context, airborneOverGap, "the bot never was in the air over the gap: " + c.describe());
+            require(context, c.bot.getHealth() >= c.startHealth,
+                    "the bot lost health: " + c.startHealth + " -> " + c.bot.getHealth());
             run.requireNoEdits();
         });
     }
 
-    private static void crossesGap(GameTestHelper context, String name, int gap, boolean ascend) {
-        Course c = gapCourse(context, name, gap, ascend, MinecraftAiConfig.BaritoneCaps.defaults());
+    /** A visible far side is not enough to cross an unbridged gap: WALK_ONLY needs a complete fence-constrained plan. */
+    private static void refusesUnbridgedGap(GameTestHelper context, String name, int gap, boolean ascend,
+                                            MinecraftAiConfig.BaritoneCaps caps) {
+        Course c = gapCourse(context, name, gap, ascend, caps);
         int gapStart = 4;
         BlockPos goal = c.feet.offset(gapStart + gap + 4, ascend ? 1 : 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(400, run -> {
-            run.requireNear(goal, 1.6, 0.8, "gap of " + gap);
-            require(context, run.minY >= c.feet.getY() - 0.1D, "the bot fell into the gap: min y offset " + (run.minY - c.feet.getY()));
-            boolean airborneOverGap = run.trail.stream().anyMatch(p -> p.x > c.feet.getX() + gapStart + 0.3D && p.x < c.feet.getX() + gapStart + gap - 0.3D
-                    && p.y > c.feet.getY() + 0.1D);
-            require(context, airborneOverGap, "the bot never was in the air over the gap: " + c.describe());
-            require(context, c.bot.getHealth() >= c.startHealth, "the bot lost health: " + c.startHealth + " -> " + c.bot.getHealth());
-            run.requireNoEdits();
-        });
+        c.expectGoalNearRefusal(goal, 1, NavRoute.Options.WALK_ONLY,
+                "navigation_observed_corridor_unavailable");
     }
 
     /**
@@ -167,7 +167,11 @@ public final class BaritoneCapabilityGameTests {
         BlockPos goal = c.feet.offset(9, 0, 0);
         c.bot.getInventory().setItem(1, new ItemStack(Items.WATER_BUCKET));
         c.bot.getInventory().setSelectedSlot(0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        // A player has to lean over a real edge before the full drop is visible.  This is a
+        // physical fixture position (still supported by the top block), not a visibility grant;
+        // the precondition below proves every cell Baritone may use for the fall is in view.
+        c.peekOverCliffEdge();
+        c.goalNear(goal, 1, WATER_BUCKET_FALL_ROUTE);
         c.await(600, run -> {
             run.requireNear(goal, 1.6, 0.8, "bucket fall");
             require(context, run.maxFall >= 7.0D, "the bot never fell from a height (max fall distance " + run.maxFall + ")");
@@ -189,17 +193,18 @@ public final class BaritoneCapabilityGameTests {
         Course c = cliffCourse(context, "CapBucketOffGT", MinecraftAiConfig.BaritoneCaps.allOff());
         BlockPos goal = c.feet.offset(9, 0, 0);
         c.bot.getInventory().setItem(1, new ItemStack(Items.WATER_BUCKET));
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(400, run -> {
-            require(context, run.minY >= c.feet.getY() + 10.0D - 0.1D, "the bot left the cliff top with the fall switched off: min y offset " + (run.minY - c.feet.getY()));
-            require(context, c.bot.getHealth() >= c.startHealth, "the bot lost health");
-            require(context, c.count(Items.WATER_BUCKET) == 1, "the bucket was used");
-            require(context, !run.sawWater, "water was placed with the fall switched off");
-            run.requireNoEdits();
-        });
+        // The same honest edge-peek supplies visible terrain. With the capability off, the dry
+        // route remains synchronously unavailable rather than taking a partial path over it.
+        c.peekOverCliffEdge();
+        c.expectGoalNearRefusal(goal, 1, NavRoute.Options.WALK_ONLY,
+                "navigation_observed_corridor_unavailable");
     }
 
-    /** A floor, and a stone platform ten blocks above it at x = -2..3 whose edge is a cliff; the bot starts on the platform. */
+    /**
+     * A floor and a stone platform ten blocks above it at x = -2..3 whose edge is a cliff. The
+     * water tests put the bot at a real supported outer edge before admission, as a player would
+     * when looking down a drop; a centered position correctly cannot see through the full lip.
+     */
     private static Course cliffCourse(GameTestHelper context, String name, MinecraftAiConfig.BaritoneCaps caps) {
         Course c = Course.begin(context, name, -2, 12, 4, 13, caps, 10, 0);
         for (int dx = -2; dx <= 3; dx++) {
@@ -219,8 +224,9 @@ public final class BaritoneCapabilityGameTests {
     public void vinesLetTheBotClimbVineColumnUpToPlatform(GameTestHelper context) {
         Course c = vineCourse(context, "CapVineUpGT", vinesOn(), 0);
         BlockPos goal = c.feet.offset(7, 6, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(700, run -> {
+        // The top platform is behind the wall from the floor. The upper vine cell is visible;
+        // after climbing it, the platform becomes a real visible second leg.
+        c.awaitVia(c.feet.offset(2, 5, 0), 0, goal, NavRoute.Options.WALK_ONLY, 700, run -> {
             run.requireNear(goal, 1.6, 0.8, "vine climb");
             require(context, run.maxY >= c.feet.getY() + 5.9D, "the bot never got to the top (max y offset " + (run.maxY - c.feet.getY()) + ")");
             require(context, c.bot.getHealth() >= c.startHealth, "the bot lost health");
@@ -232,8 +238,11 @@ public final class BaritoneCapabilityGameTests {
     public void vinesLetTheBotClimbDownVineColumnWithoutDamage(GameTestHelper context) {
         Course c = vineCourse(context, "CapVineDownGT", vinesOn(), 6);
         BlockPos goal = c.feet.offset(0, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(700, run -> {
+        // From the top platform the lower vine is hidden by the wall. Walk to its visible lip,
+        // then use a one-block near goal at the visible cell directly above the vine. The floor
+        // leg is issued only after the bot physically reaches that edge and can observe downward.
+        c.awaitThrough(List.of(c.feet.offset(3, 6, 0), c.feet.offset(2, 5, 0)), List.of(0, 1),
+                goal, NavRoute.Options.WALK_ONLY, 700, run -> {
             run.requireNear(goal, 1.6, 0.8, "vine descent");
             require(context, c.bot.getHealth() >= c.startHealth, "the six-block descent cost health: " + c.startHealth + " -> " + c.bot.getHealth());
             require(context, run.minY <= c.feet.getY() + 0.1D, "the bot never reached the floor");
@@ -245,8 +254,7 @@ public final class BaritoneCapabilityGameTests {
     public void vinesOffStillClimbsVineColumnAsBefore(GameTestHelper context) {
         Course c = vineCourse(context, "CapVineOffGT", MinecraftAiConfig.BaritoneCaps.allOff(), 0);
         BlockPos goal = c.feet.offset(7, 6, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(700, run -> {
+        c.awaitVia(c.feet.offset(2, 5, 0), 0, goal, NavRoute.Options.WALK_ONLY, 700, run -> {
             System.out.println("BARITONE_VINE_OFF " + c.describe() + " maxY offset " + (run.maxY - c.feet.getY()));
             run.requireNear(goal, 1.6, 0.8, "vine climb, vines off");
             run.requireNoEdits();
@@ -284,31 +292,34 @@ public final class BaritoneCapabilityGameTests {
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_mob_avoidance_bends_the_route_around_hostile_the_bot_can_see", maxTicks = 600 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void mobAvoidanceBendsTheRouteAroundHostileTheBotCanSee(GameTestHelper context) {
         Course c = Course.begin(context, "CapMobSeenGT", -2, 26, 12, 14, MinecraftAiConfig.BaritoneCaps.defaults(), 0, 0);
-        Slime slime = slime(c, 12, 0, 0);
+        // Keep both the hostile and the across-it goal inside the normal 16-block observation
+        // radius, so this remains one real observed Baritone plan rather than a relay that
+        // changes the avoidance cost horizon.
+        Slime slime = slime(c, 7, 0, 0);
         c.snapshot();
         // The bot must have NOTICED the hostile for its route to bend around it: it turns to it and waits the reaction time first.
         PerceptionFixtures.faceToward(c.bot, slime);
         PerceptionFixtures.afterNoticed(context, c.bot, List.of(slime), since -> {
-        BlockPos goal = c.feet.offset(24, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(500, run -> {
-            slime.discard();
-            run.requireNear(goal, 1.6, 0.8, "route around a hostile");
-            double closest = run.closestTo(slime.position());
-            System.out.println("BARITONE_AVOID seen closest=" + String.format("%.2f", closest));
-            require(context, closest >= 4.5D, "the route passed within " + closest + " blocks of a hostile the bot could see");
-            run.requireNoEdits();
-        });
+            BlockPos goal = c.feet.offset(15, 0, 0);
+            c.goalNear(goal, 1);
+            c.await(500, run -> {
+                slime.discard();
+                run.requireNear(goal, 1.6, 0.8, "route around a hostile");
+                double closest = run.closestTo(slime.position());
+                System.out.println("BARITONE_AVOID seen closest=" + String.format("%.2f", closest));
+                require(context, closest >= 4.5D, "the route passed within " + closest + " blocks of a hostile the bot could see");
+                run.requireNoEdits();
+            });
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_mob_avoidance_off_walks_straight_past_the_same_hostile", maxTicks = 600)
     public void mobAvoidanceOffWalksStraightPastTheSameHostile(GameTestHelper context) {
         Course c = Course.begin(context, "CapMobOffGT", -2, 26, 12, 14, MinecraftAiConfig.BaritoneCaps.allOff(), 0, 0);
-        Slime slime = slime(c, 12, 0, 0);
+        Slime slime = slime(c, 7, 0, 0);
         c.snapshot();
-        BlockPos goal = c.feet.offset(24, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        BlockPos goal = c.feet.offset(15, 0, 0);
+        c.goalNear(goal, 1);
         c.await(500, run -> {
             slime.discard();
             run.requireNear(goal, 1.6, 0.8, "route past a hostile, avoidance off");
@@ -322,21 +333,21 @@ public final class BaritoneCapabilityGameTests {
     @GameTest(environment = "minecraftai-gametest:baritone_capability_game_tests_mob_avoidance_ignores_hostile_sealed_behind_wall", maxTicks = 600)
     public void mobAvoidanceIgnoresHostileSealedBehindWall(GameTestHelper context) {
         Course c = Course.begin(context, "CapMobHiddenGT", -2, 26, 12, 14, MinecraftAiConfig.BaritoneCaps.defaults(), 0, 0);
-        // A bedrock box (3 x 3 x 3 inside walls) whose near wall is the row z = 1; the hostile stands inside it, two blocks from the lane.
-        for (int dx = 10; dx <= 14; dx++) {
+        // A bedrock box (3 x 3 x 3 inside walls) whose near wall is the row z = 1; the hostile is visibly close but sealed off the lane.
+        for (int dx = 5; dx <= 9; dx++) {
             for (int dz = 1; dz <= 5; dz++) {
                 for (int dy = 0; dy <= 3; dy++) {
-                    boolean shell = dx == 10 || dx == 14 || dz == 1 || dz == 5 || dy == 3;
+                    boolean shell = dx == 5 || dx == 9 || dz == 1 || dz == 5 || dy == 3;
                     if (shell) {
                         c.set(dx, dy, dz, Blocks.BEDROCK);
                     }
                 }
             }
         }
-        Slime slime = slime(c, 12, 0, 3);
+        Slime slime = slime(c, 7, 0, 3);
         c.snapshot();
-        BlockPos goal = c.feet.offset(24, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        BlockPos goal = c.feet.offset(15, 0, 0);
+        c.goalNear(goal, 1);
         c.await(500, run -> {
             slime.discard();
             run.requireNear(goal, 1.6, 0.8, "route past a sealed hostile");
@@ -523,6 +534,48 @@ public final class BaritoneCapabilityGameTests {
             world.setBlock(feet.offset(dx, dy, dz), block.defaultBlockState(), Block.UPDATE_ALL);
         }
 
+        void goalNear(BlockPos goal, int radius) {
+            goalNear(goal, radius, NavRoute.Options.WALK_ONLY);
+        }
+
+        void goalNear(BlockPos goal, int radius, NavRoute.Options options) {
+            ObservedBaritoneTestRoutes.near(bot, goal, radius, options, "gametest_" + name);
+        }
+
+        BaritoneNavigator.Admission admitGoalNear(BlockPos goal, int radius, NavRoute.Options options) {
+            return ObservedBaritoneTestRoutes.admitNear(bot, goal, radius, options, "gametest_" + name);
+        }
+
+        /** Verifies that this fixture's deliberately unavailable route is refused before it can drive the bot. */
+        void expectGoalNearRefusal(BlockPos goal, int radius, NavRoute.Options options, String expectedReason) {
+            BaritoneNavigator.Admission admission = admitGoalNear(goal, radius, options);
+            try {
+                assertRefusal(admission, expectedReason, goal);
+            } finally {
+                stopAndRestore();
+            }
+            requireNoBaritoneAfterDespawn();
+            context.succeed();
+        }
+
+        private void assertRefusal(BaritoneNavigator.Admission admission, String expectedReason, BlockPos goal) {
+            require(context, !admission.accepted(), name + ": unavailable goal was admitted: " + goal);
+            require(context, expectedReason.equals(admission.failure()), name + ": unavailable goal " + goal
+                    + " was refused as " + admission.failure() + ", expected " + expectedReason);
+            require(context, !BaritoneRegistry.INSTANCE.isBusy(bot), name + ": a refused goal still drives the bot");
+            new Run(this).requireNoEdits();
+        }
+
+        private void stopAndRestore() {
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+            restoreConfig();
+        }
+
+        private void requireNoBaritoneAfterDespawn() {
+            require(context, BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null,
+                    "the refused route's Baritone instance outlived the bot");
+        }
+
         void fill(int dx, int dz, Block block, int fromDy, int toDy) {
             for (int dy = fromDy; dy <= toDy; dy++) {
                 set(dx, dy, dz, block);
@@ -533,6 +586,22 @@ public final class BaritoneCapabilityGameTests {
             spawn();
             before.clear();
             forEachCell(pos -> before.put(pos, world.getBlockState(pos)));
+        }
+
+        /**
+         * Positions the fixture bot at the actual outer edge of its current top block. It retains
+         * enough collision overlap to stand safely, while its eye can genuinely see the drop
+         * column instead of the test treating terrain behind the lip as known.
+         */
+        void peekOverCliffEdge() {
+            bot.teleportTo(world, feet.getX() + 3.93D, feet.getY() + 10.0D, feet.getZ() + 0.5D,
+                    Set.of(), bot.getYRot(), bot.getXRot(), true);
+            bot.setOnGround(true);
+            for (int dy = -1; dy <= 11; dy++) {
+                BlockPos cell = feet.offset(4, dy, 0);
+                require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, cell),
+                        name + ": edge peek cannot see required fall cell " + cell);
+            }
         }
 
         void forEachCell(Consumer<BlockPos> action) {
@@ -600,9 +669,167 @@ public final class BaritoneCapabilityGameTests {
             });
         }
 
+        /** Walks through one real, observed relay before issuing the final observed route. */
+        void awaitVia(BlockPos waypoint, BlockPos goal, int limit, Consumer<Run> check) {
+            awaitVia(waypoint, 1, goal, NavRoute.Options.WALK_ONLY, limit, check);
+        }
+
+        /** Walks through one exact or near visible relay before issuing a final route with its real permissions. */
+        void awaitVia(BlockPos waypoint, int waypointRadius, BlockPos goal, NavRoute.Options options,
+                      int limit, Consumer<Run> check) {
+            awaitThrough(List.of(waypoint), waypointRadius, goal, options, limit, check);
+        }
+
+        /**
+         * Walks through real visible segment goals before issuing the final observed route. This
+         * is deliberately not a fixture visibility grant: every later target is submitted only
+         * after the bot physically arrives at the prior segment.
+         */
+        void awaitThrough(List<BlockPos> waypoints, int waypointRadius, BlockPos goal, NavRoute.Options options,
+                          int limit, Consumer<Run> check) {
+            awaitThrough(waypoints, java.util.Collections.nCopies(waypoints.size(), waypointRadius),
+                    goal, options, limit, check);
+        }
+
+        /**
+         * As {@link #awaitThrough(List, int, BlockPos, NavRoute.Options, int, Consumer)}, but
+         * lets a later relay stop at a genuinely visible neighbour of a thin climbable block.
+         * It is still a real Baritone goal and never grants terrain evidence for the following leg.
+         */
+        void awaitThrough(List<BlockPos> waypoints, List<Integer> waypointRadii, BlockPos goal, NavRoute.Options options,
+                          int limit, Consumer<Run> check) {
+            require(context, !waypoints.isEmpty(), name + ": a staged route needs a visible first segment");
+            require(context, waypoints.size() == waypointRadii.size(), name + ": relay waypoint/radius count differs");
+            for (int radius : waypointRadii) {
+                require(context, radius >= 0, name + ": relay radius is negative");
+            }
+            Run run = new Run(this);
+            int[] nextWaypoint = {0};
+            try {
+                goalNear(waypoints.get(0), waypointRadii.get(0));
+            } catch (RuntimeException exception) {
+                stopAndRestore();
+                throw exception;
+            }
+            PerceptionFixtures.scheduleEachTick(context, () -> {
+                if (run.done) {
+                    return;
+                }
+                run.sample();
+                boolean busy = BaritoneRegistry.INSTANCE.isBusy(bot);
+                if (run.ticks > 2 && !busy) {
+                    if (nextWaypoint[0] < waypoints.size()) {
+                        try {
+                            run.requireNear(waypoints.get(nextWaypoint[0]), 1.6D, 1.2D, "visible relay waypoint");
+                            nextWaypoint[0]++;
+                            if (nextWaypoint[0] < waypoints.size()) {
+                                goalNear(waypoints.get(nextWaypoint[0]), waypointRadii.get(nextWaypoint[0]));
+                            } else {
+                                goalNear(goal, 1, options);
+                            }
+                        } catch (RuntimeException exception) {
+                            run.done = true;
+                            stopAndRestore();
+                            throw exception;
+                        }
+                        return;
+                    }
+                    run.done = true;
+                    try {
+                        System.out.println("BARITONE_CAP " + name + " finished through visible segments after " + run.ticks + " ticks at " + describe());
+                        check.accept(run);
+                    } finally {
+                        stopAndRestore();
+                    }
+                    context.succeed();
+                } else if (run.ticks > limit) {
+                    run.done = true;
+                    String where = describe();
+                    stopAndRestore();
+                    require(context, false, name + ": visible-segment route still busy after " + limit + " ticks, " + where);
+                }
+            });
+        }
+
+        /** Reaches a visible edge, then checks that the deliberately unavailable final leg is rejected before input. */
+        void awaitViaThenRefusal(BlockPos waypoint, int waypointRadius, BlockPos goal, NavRoute.Options options,
+                                  String expectedReason, int limit, Consumer<Run> check) {
+            awaitThroughThenRefusal(List.of(waypoint), waypointRadius, goal, options, expectedReason, limit, check);
+        }
+
+        /** Reaches every real visible relay before checking the deliberately unavailable final leg. */
+        void awaitThroughThenRefusal(List<BlockPos> waypoints, int waypointRadius, BlockPos goal, NavRoute.Options options,
+                                      String expectedReason, int limit, Consumer<Run> check) {
+            require(context, !waypoints.isEmpty(), name + ": a refusal route needs a visible first segment");
+            Run run = new Run(this);
+            int[] nextWaypoint = {0};
+            try {
+                goalNear(waypoints.get(0), waypointRadius);
+            } catch (RuntimeException exception) {
+                stopAndRestore();
+                throw exception;
+            }
+            PerceptionFixtures.scheduleEachTick(context, () -> {
+                if (run.done) {
+                    return;
+                }
+                run.sample();
+                boolean busy = BaritoneRegistry.INSTANCE.isBusy(bot);
+                if (run.ticks > 2 && !busy) {
+                    try {
+                        run.requireNear(waypoints.get(nextWaypoint[0]), 1.6D, 1.2D, "visible refusal relay");
+                        nextWaypoint[0]++;
+                        if (nextWaypoint[0] < waypoints.size()) {
+                            goalNear(waypoints.get(nextWaypoint[0]), waypointRadius);
+                            return;
+                        }
+                        run.done = true;
+                        assertRefusal(admitGoalNear(goal, 1, options), expectedReason, goal);
+                        check.accept(run);
+                    } finally {
+                        if (run.done) {
+                            stopAndRestore();
+                        }
+                    }
+                    if (run.done) {
+                        requireNoBaritoneAfterDespawn();
+                        context.succeed();
+                    }
+                } else if (run.ticks > limit) {
+                    run.done = true;
+                    String where = describe();
+                    stopAndRestore();
+                    require(context, false, name + ": refusal relay still busy after " + limit + " ticks, " + where);
+                }
+            });
+        }
+
         String describe() {
             return "pos=" + bot.position() + " offset=(" + String.format("%.2f,%.2f,%.2f", bot.getX() - feet.getX(), bot.getY() - feet.getY(), bot.getZ() - feet.getZ())
                     + ") goal=" + baritone.getPathingBehavior().getGoal() + " hp=" + bot.getHealth();
+        }
+
+        /** Compact immutable-fence diagnostic for a failed GameTest route; it performs no world read. */
+        String observedRouteEvidence(BlockPos goal) {
+            ObservedNavigationFence fence = BaritoneRegistry.INSTANCE.observationMemory(bot);
+            BlockPos current = bot.blockPosition();
+            int direction = Integer.signum(goal.getX() - current.getX());
+            BlockPos drop = direction == 0 ? current : current.offset(direction, 0, 0);
+            StringBuilder column = new StringBuilder();
+            int lower = Math.min(goal.getY() - 1, current.getY() - 2);
+            int upper = Math.max(goal.getY() + 2, current.getY() + 2);
+            for (int y = upper; y >= lower; y--) {
+                if (column.length() > 0) {
+                    column.append(',');
+                }
+                BlockState state = fence.stateAt(drop.getX(), y, drop.getZ());
+                column.append(y).append('=').append(state == null ? '?' : state.getBlock());
+            }
+            return " observed_fence={cells=" + fence.cellCount()
+                    + ",current=" + fence.stateAt(current)
+                    + ",goal=" + fence.stateAt(goal)
+                    + ",goal_below=" + fence.stateAt(goal.below())
+                    + ",drop=" + drop + "[" + column + "]}";
         }
     }
 
@@ -664,7 +891,7 @@ public final class BaritoneCapabilityGameTests {
             double dz = c.bot.getZ() - target.z;
             double dy = c.bot.getY() - target.y;
             require(c.context, Math.sqrt(dx * dx + dz * dz) <= horizontal && Math.abs(dy) <= vertical,
-                    what + ": the bot is not at the goal " + goal + ": " + c.describe());
+                    what + ": the bot is not at the goal " + goal + ": " + c.describe() + c.observedRouteEvidence(goal));
         }
 
         void requireNoEdits() {

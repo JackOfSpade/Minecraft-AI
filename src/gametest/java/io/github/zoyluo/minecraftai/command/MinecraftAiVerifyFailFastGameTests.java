@@ -28,57 +28,54 @@ public final class MinecraftAiVerifyFailFastGameTests {
     private static final String ZERO_DEATH_VIOLATION = "zero_death_violation";
 
     @GameTest(maxTicks = 5)
-    public void verifyAllExpandsLegacyStripMineByOperatingProfile(GameTestHelper context) {
+    public void verifyAllIncludesTheRetiredLegacyMiningBoundary(GameTestHelper context) {
         List<String> strictAll = MinecraftAiVerifySubcommand.expandFeaturesForGameTest(
                 List.of("all"), OperatingProfile.STRICT_SURVIVAL);
         List<String> operatorAll = MinecraftAiVerifySubcommand.expandFeaturesForGameTest(
                 List.of("all"), OperatingProfile.OPERATOR);
 
-        require(context, !strictAll.contains("strip_mine"),
-                "strict all retained the legacy strip_mine success scenario");
-        require(context, count(strictAll, MinecraftAiVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE) == 1,
-                "strict all did not include exactly one typed strip_mine rejection scenario");
-        require(context, operatorAll.contains("strip_mine"),
-                "operator all lost the legacy strip_mine success scenario");
-        require(context, !operatorAll.contains(MinecraftAiVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE),
-                "operator all incorrectly selected the strict rejection scenario");
+        require(context, !strictAll.contains("strip_mine") && !operatorAll.contains("strip_mine"),
+                "verify all retained a public legacy strip_mine scenario");
+        require(context, count(strictAll, MinecraftAiVerifySubcommand.RETIRED_LEGACY_MINING_FEATURE) == 1
+                        && count(operatorAll, MinecraftAiVerifySubcommand.RETIRED_LEGACY_MINING_FEATURE) == 1,
+                "verify all must include exactly one profile-independent retirement boundary");
         require(context, strictAll.size() == operatorAll.size(),
                 "profile expansion silently changed verify-all coverage cardinality");
 
         require(context, MinecraftAiVerifySubcommand.expandFeaturesForGameTest(
-                        List.of("strip_mine"), OperatingProfile.STRICT_SURVIVAL)
-                        .equals(List.of(MinecraftAiVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE)),
-                "explicit strict strip_mine did not map to the typed rejection check");
+                        List.of(MinecraftAiVerifySubcommand.RETIRED_LEGACY_MINING_FEATURE), OperatingProfile.STRICT_SURVIVAL)
+                        .equals(List.of(MinecraftAiVerifySubcommand.RETIRED_LEGACY_MINING_FEATURE)),
+                "explicit retired legacy-mining verification did not remain available");
         require(context, MinecraftAiVerifySubcommand.expandFeaturesForGameTest(
                         List.of("strip_mine"), OperatingProfile.OPERATOR)
-                        .equals(List.of("strip_mine")),
-                "explicit operator strip_mine no longer maps to the legacy success check");
+                        .isEmpty(),
+                "retired strip_mine unexpectedly remained a verification feature");
         require(context, count(MinecraftAiVerifySubcommand.expandFeaturesForGameTest(
-                        List.of("all+strip_mine"), OperatingProfile.STRICT_SURVIVAL),
-                        MinecraftAiVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE) == 1,
-                "composed strict suites duplicated the typed rejection scenario");
+                        List.of("all+" + MinecraftAiVerifySubcommand.RETIRED_LEGACY_MINING_FEATURE), OperatingProfile.STRICT_SURVIVAL),
+                        MinecraftAiVerifySubcommand.RETIRED_LEGACY_MINING_FEATURE) == 1,
+                "composed suites duplicated the retirement boundary");
         context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void strictStripMineScenarioRequiresExactTypedRejection(GameTestHelper context) {
+    public void retiredLegacyMiningScenarioRequiresExactTypedRejection(GameTestHelper context) {
         AIPlayerEntity bot = spawnBot(context, "VerifyStripGateGT");
-        String feature = MinecraftAiVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE;
+        String feature = MinecraftAiVerifySubcommand.RETIRED_LEGACY_MINING_FEATURE;
         try {
             require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                    "typed rejection fixture is not running under strict_survival");
+                    "typed retirement fixture is not running under strict_survival");
             require(context, MinecraftAiVerifySubcommand.startForGameTest(
                             bot.level().getServer().createCommandSourceStack(), bot, feature),
-                    "strict strip_mine rejection verifier did not start");
+                    "retired legacy-mining verifier did not start");
 
             MinecraftAiVerifySubcommand.tick(bot.level().getServer());
-            require(context, StripMineTask.STRICT_SURVIVAL_REJECTION.equals(
+            require(context, StripMineTask.RETIRED_REJECTION.equals(
                             TaskManager.INSTANCE.status(bot).failureReason()),
-                    "real StripMineTask did not emit the exact typed rejection");
+                    "retained StripMineTask did not emit the exact retirement rejection");
 
             MinecraftAiVerifySubcommand.tick(bot.level().getServer());
             require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUUID(), feature)
-                            .filter(detail -> detail.endsWith(StripMineTask.STRICT_SURVIVAL_REJECTION))
+                            .filter(detail -> detail.endsWith(StripMineTask.RETIRED_REJECTION))
                             .isPresent(),
                     "verifier did not accept the exact typed rejection as coverage PASS");
 

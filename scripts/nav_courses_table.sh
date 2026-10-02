@@ -14,8 +14,8 @@ BEGIN {
 END {
   print "| course | engine | reached | ticks | damage | broken | placed | water ticks | failure reason |"
   print "|---|---|---|---|---|---|---|---|---|"
-  for (i = 1; i <= n; i++) for (e = 1; e <= 2; e++) {
-    eng = (e == 1) ? "legacy" : "baritone"
+  for (i = 1; i <= n; i++) {
+    eng = "baritone"
     key = order[i] SUBSEP eng
     if (!(key in row)) continue
     split(row[key], f, "\t")

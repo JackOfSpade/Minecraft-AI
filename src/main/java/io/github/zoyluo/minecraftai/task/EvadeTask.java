@@ -247,8 +247,8 @@ public final class EvadeTask extends AbstractTask {
         LivingEntity source = threat.entity();
         int distance = escapeDistanceFor(source);
         runAwayFrom = null;
-        // On the Baritone engine the flight is Baritone's own run-away goal (it picks the way); the fan of hand-made goals below is
-        // the legacy engine's, and what a refused run-away falls back to.
+        // A flight uses Baritone's own run-away goal (it picks the way). If that route is refused, the fan below is a bounded,
+        // observed-surface retry rather than a second navigation engine.
         BlockPos from = runAwaySource(bot, source);
         if (from != null) {
             double dx = bot.getX() - (from.getX() + 0.5D);

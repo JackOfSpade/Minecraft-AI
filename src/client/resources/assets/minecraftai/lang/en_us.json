@@ -93,8 +93,6 @@
   "task.minecraftai.harvest": "Harvest",
   "task.minecraftai.breed": "Breed",
   "task.minecraftai.build": "Build",
-  "task.minecraftai.strip_mine": "Strip mine",
-  "task.minecraftai.mine_vein": "Mine vein",
   "task.minecraftai.attack": "Combat",
   "task.minecraftai.container_deposit": "Deposit",
   "task.minecraftai.container_withdraw": "Withdraw",

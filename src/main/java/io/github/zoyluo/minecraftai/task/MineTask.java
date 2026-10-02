@@ -81,7 +81,7 @@ public final class MineTask extends AbstractTask {
         HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6);
         if (choice == null) {
             if (OreScan.isOreBlock(targetBlock)) {
-                fail("no_exposed_ore:use_strip_mine:" + BuiltInRegistries.BLOCK.getKey(targetBlock));
+                fail("no_observed_ore_target:" + BuiltInRegistries.BLOCK.getKey(targetBlock));
                 return;
             }
             fail("no_reachable_target_block_in_range");

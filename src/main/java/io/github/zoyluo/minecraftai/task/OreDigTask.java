@@ -82,21 +82,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * OREDIG (field-tested #10): reliable ore mining, replacing the OreSeekTask that GoalExecutor's
- * MINE_ORE step originally used.
- *
- * OreSeek's "scan -> A* approach -> corridor fallback" approach logic kept getting stuck
- * (#6/#8/#10) on ore wrapped in stone.
- * This task instead uses a mode already verified to **never deadlock**: **controlled direct-dig
- * tunneling + a shared {@link BlockMiner}**, never pathfinding/walking:
- *  - SCAN: use full server-side data to find the nearest target ore (rate-limited); if none is
- *    found, dig down one block to change layer and scan again;
- *  - DIG: each tick only mine "the next cell toward the ore" (horizontal or one down); BlockMiner
- *    drives the shaping block by block,
- *    and the bot naturally follows; once the ore enters reach -> mine it directly, and clear out
- *    adjacent same-vein ore along with it;
- *  - a no-progress watchdog runs throughout: if no block is broken before timeout, fail cleanly
- *    and hand off to GoalExecutor.
+ * OREDIG mines only finite ore blocks the bot can actually observe. Baritone owns every approach;
+ * direct {@link BlockMiner} work is limited to the currently visible target and newly exposed
+ * visible vein members. It never strips, descends, prospects through loaded terrain, or opens a
+ * tunnel toward an unseen resource.
  *
  * Self-contained state machine (Iron Rule G1), no internal assign; runs entirely on the main thread (G2).
  */
@@ -1191,6 +1180,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
+        if (RetiredNavigationTask.legacyExcavationDisabled()
+                && (pendingAdvance.phase() != PendingBlindAdvancePhase.NONE
+                || recoverableUnpublishedAdvance || committedUnrecoverableAdvance)) {
+            retireUnobservedOreSearch(bot, "legacy_branch_checkpoint");
+            return;
+        }
         // Do not let a scan discover a competing owner while a blind-branch move is only partially
         // published. The direct walker may report the destination BlockPos one server update before
         // it clears its controller; wait for that owner to settle, then consume the exact step and
@@ -1579,6 +1574,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // advancing, resume normal scanning next round; nearby ore is now reachable and gets locked
         // and mined (real_armor's actual fix: 372 skips in place mining only 9 -> stable mining
         // after strip-mine advances).
+        if (RetiredNavigationTask.legacyExcavationDisabled() && consecutiveSkips >= STRIP_AFTER_SKIPS) {
+            retireUnobservedOreSearch(bot, "observed_target_unreachable");
+            return;
+        }
         if (consecutiveSkips >= STRIP_AFTER_SKIPS) {
             consecutiveSkips = 0;
             stripMine(bot, world);
@@ -1600,6 +1599,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "pos", found.getX() + "," + found.getY() + "," + found.getZ(),
                     "dist", (int) Math.sqrt(bot.blockPosition().distSqr(found)),
                     "collected", collected + "/" + targetCount);
+            return;
+        }
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            retireUnobservedOreSearch(bot, "no_visible_ore");
             return;
         }
         // No ore nearby (24 blocks) -> wide-range prospecting (64 blocks, ported from the player
@@ -1661,6 +1664,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         markStripCoverage(bot);
         // Horizontal strip-mine digging exposes new ore faces.
         stripMine(bot, world);
+    }
+
+    /**
+     * Ends a former prospect/strip branch without opening a single unseen terrain cell. The event
+     * distinguishes a policy refusal from an ordinary depleted visible vein in player logs.
+     */
+    private void retireUnobservedOreSearch(AIPlayerEntity bot, String reason) {
+        miner.cancel(bot);
+        clearStripMovementOwnership();
+        bot.getActionPack().stopAll();
+        BotLog.action(bot, "ore_dig_observed_target_required",
+                "reason", reason, "collected", collected + "/" + targetCount);
+        fail("no_observed_ore_target");
     }
 
     /** Two static reads and a return while L1 is off (design 5.3); see {@link #tickOpportunistic} for the idiom. */
@@ -1937,6 +1953,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return null;
     }
 
+    // Historical branch implementation retained only to decode old task checkpoints. New calls fail
+    // at the boundary below rather than opening terrain to look for an ore.
     // Horizontal strip-mine: dig a straight tunnel in the current direction, exposing new ore faces
     // (each cell advanced, the next round's nearestOre will pick up new ore on both sides of the
     // tunnel); if a whole segment (STRIP_SEGMENT) is dug with no ore found -> drop down one layer +
@@ -1947,6 +1965,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // unreachable ore into reach (real_armor testing: without forced strip-mining, it would lock
     // onto far ore and skip 372 times in place, mining only 9).
     private void stripMine(AIPlayerEntity bot, ServerLevel world) {
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            retireUnobservedOreSearch(bot, "legacy_strip_mining");
+            return;
+        }
         Direction activeDirection = stripDirIndex < 0 ? null : STRIP_DIRS[stripDirIndex];
         BlockPos factualRear = publishStripProgress(bot, activeDirection);
         if (stripStepsLeft <= 0) {
@@ -3762,6 +3784,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                BlockPos goal,
                                TunnelIntent intent,
                                BlockPos factualRear) {
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            miner.cancel(bot);
+            if (intent == TunnelIntent.TARGET_APPROACH) {
+                abandonTargetApproach(bot, goal, "baritone_observed_route_required", goal);
+            } else {
+                retireUnobservedOreSearch(bot, "legacy_tunnel_navigation");
+            }
+            return;
+        }
         BlockPos feet = bot.blockPosition();
         // P0 (fixes zero-displacement spinning on deep diagonally-below ore): the target is deep
         // underfoot (>=2 lower) and already horizontally close (<=2) -> the same-layer horizontal

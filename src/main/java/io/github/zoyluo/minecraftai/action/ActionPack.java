@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.baritone.BaritoneEdits;
 import io.github.zoyluo.minecraftai.baritone.BaritoneNavigator;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -9,14 +10,11 @@ import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavigationControllerOwner;
 import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
-import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
-import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
-import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
-import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -34,18 +32,6 @@ public final class ActionPack {
     public static final String GUARDED_STEP_FENCE = "guarded_step_fence";
     private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
     private static final int PATHFIND_FAILURE_COOLDOWN_TICKS = 20;
-    // NAV-OPT two-phase pathfinding budget: pure walking only searches air cells (small search
-    // space, so give it a generous allowance); the dig-through cap is smaller, to contain the 3D
-    // volume search blowing up when trapped/underground.
-    private static final int WALK_MAX_NODES = 10_000;
-    private static final int DIG_MAX_NODES = 4_000;
-    // Large budget dedicated to the approach primitive: approaching ore enclosed in stone
-    // necessarily requires digging, so it goes straight to DIG with an enlarged budget (the
-    // digging neighbor branching factor is small, so 24k nodes covers ~40 blocks of direct
-    // through-mountain travel; the small-budget DIG in ordinary startPathTo is only a walking
-    // fallback, and its semantics are unchanged).
-    private static final int DIG_APPROACH_MAX_NODES = 24_000;
-    private static final long PATHFIND_MAX_MILLIS = 50L;
 
     /**
      * Opaque proof that identifies one exact {@link #runStep(WalkedStep, WalkedStep.ContinuationGuard)}
@@ -73,7 +59,6 @@ public final class ActionPack {
     static final int DESTROY_DELAY_TICKS = 5;
     /** Game time before which the running mining controller does nothing (the post-break delay); 0 when none. */
     private long nextBreakAt;
-    private PathExecutor pathExecutor;
     /** The input-driven step this pack runs (see {@link WalkedStep}); it has the bot to itself while it is in flight. */
     private WalkedStep step;
     /** Lease of {@link #step}, cleared as soon as the active step ends or is cancelled. */
@@ -96,12 +81,9 @@ public final class ActionPack {
     private boolean tickingGuardedStep;
     private WalkedStep.Result lastStepResult;
     private PathRequestIdentity lastPathRequest;
-    private PathRequestIdentity activePathRequest;
-    private BlockPos activePathGoal;
     private int nextPathfindTick;
     private final SnapRepeatGuard physicalSnapGuard = new SnapRepeatGuard();
-    // The route Baritone executes for this pack (engine=baritone), and how the previous one ended. Never set with the legacy
-    // engine; nothing below touches a Baritone class while it is null.
+    // The route Baritone executes for this pack, and how the previous one ended. A null route means no Baritone route is active.
     private NavRoute route;
     private NavOutcome lastRouteOutcome;
 
@@ -202,7 +184,6 @@ public final class ActionPack {
         if (controllerStartBlocked()) {
             return;
         }
-        dropPathExecutor(); // keeps the route lease (requested after the route was started)
         cancelStep();
         stopMining();
         this.walkTo = null;
@@ -236,12 +217,12 @@ public final class ActionPack {
     }
 
     /**
-     * Keeps the world-space direction of an already-issued legacy movement input when a late task action changes the bot's yaw
-     * before the next physics tick. This rewrites only the legacy input fields (including the values physics will consume next); it
+     * Keeps the world-space direction of an already-issued local movement input when a late task action changes the bot's yaw
+     * before the next physics tick. This rewrites only those input fields (including the values physics will consume next); it
      * never claims control, stops navigation, or replans. It leaves every input untouched while Baritone owns the bot, including a
      * direct Baritone caller that has no ActionPack route to advertise.
      */
-    public void reprojectLegacyInputsForYawChange(float yawBefore) {
+    public void reprojectControllerInputsForYawChange(float yawBefore) {
         if (baritoneOwnsBot()) {
             return;
         }
@@ -250,8 +231,8 @@ public final class ActionPack {
                 || Math.abs(Mth.wrapDegrees(yawAfter - yawBefore)) < 1.0E-4F) {
             return;
         }
-        LegacyInputs raw = reprojectLegacyInputs(forward, strafing, yawBefore, yawAfter);
-        LegacyInputs applied = reprojectLegacyInputs(player.zza, player.xxa, yawBefore, yawAfter);
+        MovementInputs raw = reprojectControllerInputs(forward, strafing, yawBefore, yawAfter);
+        MovementInputs applied = reprojectControllerInputs(player.zza, player.xxa, yawBefore, yawAfter);
         forward = raw.forward();
         strafing = raw.strafing();
         player.zza = applied.forward();
@@ -259,7 +240,7 @@ public final class ActionPack {
     }
 
     /** Converts forward/strafe inputs between two body yaws while retaining their world-space direction. */
-    static LegacyInputs reprojectLegacyInputs(float forward, float strafing, float yawBefore, float yawAfter) {
+    static MovementInputs reprojectControllerInputs(float forward, float strafing, float yawBefore, float yawAfter) {
         double beforeRadians = Math.toRadians(yawBefore);
         double worldX = strafing * Math.cos(beforeRadians) - forward * Math.sin(beforeRadians);
         double worldZ = forward * Math.cos(beforeRadians) + strafing * Math.sin(beforeRadians);
@@ -273,10 +254,10 @@ public final class ActionPack {
             projectedForward /= largest;
             projectedStrafing /= largest;
         }
-        return new LegacyInputs(clampInput((float) projectedForward), clampInput((float) projectedStrafing));
+        return new MovementInputs(clampInput((float) projectedForward), clampInput((float) projectedStrafing));
     }
 
-    record LegacyInputs(float forward, float strafing) {
+    record MovementInputs(float forward, float strafing) {
     }
 
     /**
@@ -370,8 +351,8 @@ public final class ActionPack {
     }
 
     /**
-     * A per-tick hard ceiling: the gait is at most {@code max} on this tick and the next, whoever asks for more (the legacy executor
-     * caps to a walk on jump, drop, pillar, bridge and dig nodes; raw-input drivers use it for their steps). Ceilings combine to the
+     * A per-tick hard ceiling: the gait is at most {@code max} on this tick and the next, whoever asks for more (Baritone and
+     * raw-input drivers use it for their player-legal steps). Ceilings combine to the
      * lowest.
      */
     public void capPace(Gait max, String reason) {
@@ -387,7 +368,7 @@ public final class ActionPack {
 
     /**
      * A raw-input driver (it writes {@code setForward}/{@code setStrafing} itself, like the walked combat step) calls this every
-     * tick it drives, so the legacy enforcer applies the pace and the vanilla rules to its keys this tick.
+     * tick it drives, so the local-input enforcer applies the pace and the vanilla rules to its keys this tick.
      */
     public void markControllerInput() {
         this.controllerInputTick = player.level().getGameTime();
@@ -475,7 +456,7 @@ public final class ActionPack {
     }
 
     /**
-     * What an enforcer (legacy or Baritone bridge) really applied this tick: the gait the bot moves at, the input scale and whether the
+     * What an enforcer (a local physical action or the Baritone bridge) really applied this tick: the gait the bot moves at, the input scale and whether the
      * item-use slowdown is part of it. The walkers scale their limits by it, and a route's deadline moves out for a slow tick.
      */
     public void noteEnforced(Gait actual, float inputScale, boolean itemSlowdown) {
@@ -485,7 +466,7 @@ public final class ActionPack {
     }
 
     /**
-     * Records that a route ran a tick at {@code gait} (Baritone bridge and legacy enforcer): the route's deadline moves out by the
+     * Records that a route ran a tick at {@code gait} (Baritone bridge and local physical-action enforcer): the route's deadline moves out by the
      * part of the tick a slow gait does not count, so a bot that deliberately sneaks past a sculk sensor is not timed out for it. The
      * total credit of a route is capped ({@link DeadlineCredit}): a long SNEAK lease still meets its deadline when the bot is stuck.
      */
@@ -502,13 +483,11 @@ public final class ActionPack {
     }
 
     /**
-     * A Baritone request that did not start a route (rejected, or threw) with no Baritone route of this pack behind it: the legacy route
-     * that {@link #yieldToBaritone} dropped just before the admission (it keeps the route lease so a route that DOES start owns it)
-     * has nothing left to own the lease, so a clockless ROUTE lease of the old route would stay in force for a bot that is idle. The
-     * legacy route is over either way, so its lease is too. (Only this pack's own lease: a tick lease of a task is untouched.)
+     * A Baritone request that did not start a route (rejected, or threw) with no Baritone route of this pack behind it leaves no
+     * navigation owner for a clockless route lease. Release only this pack's stale lease; a task's independent tick lease is untouched.
      */
     private void dropStaleRouteLease() {
-        if (pathExecutor == null && walkTo == null && step == null) {
+        if (walkTo == null && step == null) {
             clearRouteLease();
         }
     }
@@ -539,14 +518,13 @@ public final class ActionPack {
     }
 
     /**
-     * Legacy enforcer: the pace policy and the vanilla rules applied to the keys of controller-driven movement (see
+     * Local-input enforcer: the pace policy and the vanilla rules applied to the keys of controller-driven movement (see
      * {@link PacePolicy}). Runs in {@link #onUpdate} after the controllers have written their keys.
      */
     private void enforcePace(MinecraftAiConfig.Pace config) {
         Gait gait = PacePolicy.resolve(player, goalDistance(), true);
-        WalkToController walker = walkTo != null ? walkTo : pathExecutor != null ? pathExecutor.activeWalker() : null;
-        boolean edge = (pathExecutor != null && pathExecutor.onEdgeDescentNode())
-                || (step != null && step.descends()) || player.onClimbable();
+        WalkToController walker = walkTo;
+        boolean edge = (step != null && step.descends()) || player.onClimbable();
         boolean effectiveSneak = sneaking || (gait == Gait.SNEAK && !edge);
         boolean geometry = walker == null || walker.geometryAllowsSprint();
         boolean effectiveSprint = gait == Gait.SPRINT && geometry && PaceRules.sprintAllowed(player, forward, effectiveSneak);
@@ -561,7 +539,7 @@ public final class ActionPack {
 
     private boolean controllerDriven() {
         // A raw-input driver marks its tick from a task tick, which may run just before or just after this bot's own tick.
-        return pathExecutor != null || walkTo != null || step != null
+        return walkTo != null || step != null
                 || (controllerInputTick != Long.MIN_VALUE && player.level().getGameTime() - controllerInputTick <= 1L);
     }
 
@@ -569,25 +547,27 @@ public final class ActionPack {
         return startWalkTo(target, 0.6D);
     }
 
-    /** Starts a direct walk with a caller-defined horizontal arrival tolerance. */
+    /**
+     * Starts an ordinary point approach through Baritone. Local safety code uses {@link #runStep}
+     * for a bounded, separately audited physical move; this public navigation entry point no
+     * longer has a straight-line controller fallback.
+     */
     public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {
         if (controllerStartBlocked()) {
             return ActionResult.failed(GUARDED_STEP_FENCE);
         }
         claim("walk_to");
-        logEngine("walk_to", BlockPos.containing(target), NavEngine.LEGACY, "straight_line_walk");
-        clearActivePathExecutor();
-        clearRouteLease();
-        this.walkTo = new WalkToController(target, arrivalThreshold);
-        this.mining = null;
-        return ActionResult.IN_PROGRESS;
+        BlockPos goal = BlockPos.containing(target);
+        // A coordinate walk is a block goal, not an entity-follow direction: it therefore needs
+        // live/remembered target evidence rather than letting an arbitrary raw coordinate steer.
+        NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0,
+                new NavRoute.Options(false, false, player.isInWater()), "walk_to", serverTick());
+        return NavEngineSelector.attempt(player.getUUID(), "walk_to", () -> startBaritoneRoute(request, null, true),
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
 
-    // Unified entry point for the approach primitive: dig-aware pathfinding (large-budget DIG
-    // straight to the goal; the goal may be a solid cell that is "dug open, then stood on" -- see
-    // the dig-endpoint exemption in AStarPathfinder.resolveEndpoint). Use this for approaching ore
-    // enclosed in stone / going straight through a mountain; ordinary walking still uses
-    // startPathTo (WALK first, then small-budget DIG).
+    // Unified entry point for a deliberate, observed digging approach. The target and every block
+    // Baritone may use remain subject to the route's immutable observation fence.
     public ActionResult startDigPathTo(BlockPos goal) {
         return startDigPathTo(goal, 0);
     }
@@ -600,43 +580,13 @@ public final class ActionPack {
         if (controllerStartBlocked()) {
             return ActionResult.failed(GUARDED_STEP_FENCE);
         }
-        claim("dig_path_to");
-        logEngine("dig_path_to", goal, NavEngine.LEGACY, "dig_approach");
-        int reserve = Math.max(0, protectedStoneLikeReserve);
-        int now = player.level().getServer().getTickCount();
-        BlockPos immutableGoal = goal.immutable();
-        boolean canPillar = PathExecutor.hasPlaceableBlock(player, reserve);
-        PathRequestIdentity request = new PathRequestIdentity(
-                immutableGoal, canPillar, true, reserve,
-                PathExecutor.RouteContract.unrestricted());
-        if (preparePathRequest(request, now)) {
-            return ActionResult.failed(PATHFINDING_THROTTLED);
-        }
-        if (!snapPlayerToNearestStandable("path_start_invalid")) {
-            lastPathRequest = request;
-            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
-            return ActionResult.failed("pathfinding_failed: NO_START");
-        }
-        WalkedStep startStep = takeStartStep();
-        PathfindingResult result = new AStarPathfinder(player, player.level(), startCell(), goal,
-                DIG_APPROACH_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true, 10.0D).findPath();
-        if (!result.success()) {
-            lastPathRequest = request;
-            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
-            return ActionResult.failed("pathfinding_failed: " + result.reason());
-        }
-        lastPathRequest = request;
-        nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
-        BlockPos resolvedGoal = result.resolvedGoal() == null ? immutableGoal : result.resolvedGoal();
-        activePathGoal = resolvedGoal;
-        activePathRequest = request;
-        this.pathExecutor = new PathExecutor(
-                result.path(), resolvedGoal, canPillar, true, reserve);
-        this.pathExecutor.prefixStep(startStep);
-        commitPlannedPhysicalSnap(startStep);
-        this.walkTo = null;
-        this.mining = null;
-        return ActionResult.IN_PROGRESS;
+        // Digging remains a genuine player action, but a route may only reach a target and its
+        // intervening cells after the observation fence has proved them. There is no raw A* tunnel
+        // fallback behind this request.
+        ActionResult routed = routeOnBaritone("dig_path_to", goal,
+                hasPathSupport(player, protectedStoneLikeReserve), true,
+                Math.max(0, protectedStoneLikeReserve), RouteConstraints.unrestricted());
+        return routed == null ? ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE) : routed;
     }
 
     public ActionResult startPathTo(BlockPos goal) {
@@ -650,8 +600,7 @@ public final class ActionPack {
      */
     public ActionResult startPathTo(BlockPos goal, int protectedStoneLikeReserve) {
         int reserve = Math.max(0, protectedStoneLikeReserve);
-        return startPathTo(
-                goal, PathExecutor.hasPlaceableBlock(player, reserve), true, reserve);
+        return startPathTo(goal, hasPathSupport(player, reserve), true, reserve);
     }
 
     /**
@@ -679,7 +628,7 @@ public final class ActionPack {
     public ActionResult startSurfacePathTo(
             BlockPos goal, int minimumY, BlockPos returnAnchor) {
         return startPathTo(goal, false, false, 0,
-                PathExecutor.RouteContract.constrainedSurface(minimumY, returnAnchor));
+                RouteConstraints.constrainedSurface(minimumY, returnAnchor));
     }
 
     /**
@@ -692,125 +641,27 @@ public final class ActionPack {
     public ActionResult startSurfaceDigFallbackPathTo(
             BlockPos goal, int minimumY, BlockPos returnAnchor) {
         return startPathTo(goal, false, true, 0,
-                PathExecutor.RouteContract.constrainedSurface(minimumY, returnAnchor));
+                RouteConstraints.constrainedSurface(minimumY, returnAnchor));
     }
 
     private ActionResult startPathTo(BlockPos goal, boolean canPillar,
                                      boolean allowDigFallback,
                                      int protectedStoneLikeReserve) {
         return startPathTo(goal, canPillar, allowDigFallback, protectedStoneLikeReserve,
-                PathExecutor.RouteContract.unrestricted());
+                RouteConstraints.unrestricted());
     }
 
     private ActionResult startPathTo(BlockPos goal, boolean canPillar,
                                      boolean allowDigFallback,
                                      int protectedStoneLikeReserve,
-                                     PathExecutor.RouteContract routeContract) {
+                                     RouteConstraints routeConstraints) {
         if (controllerStartBlocked()) {
             return ActionResult.failed(GUARDED_STEP_FENCE);
         }
-        // Engine seam: with nav.engine=baritone an ordinary walk (not a contract route) is Baritone's. A null answer means
-        // "not routed" (legacy engine, contract route, or Baritone failed to initialise) and the legacy code below carries on.
-        ActionResult routed = routeOnBaritone("path_to", goal, canPillar, allowDigFallback, protectedStoneLikeReserve, routeContract);
-        if (routed != null) {
-            return routed;
-        }
-        claim("path_to");
-        int reserve = Math.max(0, protectedStoneLikeReserve);
-        int now = player.level().getServer().getTickCount();
-        BlockPos immutableGoal = goal.immutable();
-        PathRequestIdentity request = new PathRequestIdentity(
-                immutableGoal, canPillar, allowDigFallback, reserve, routeContract);
-        if (preparePathRequest(request, now)) {
-            return ActionResult.failed(PATHFINDING_THROTTLED);
-        }
-        if (routeContract.constrained()
-                && player.blockPosition().getY() < routeContract.minimumY()) {
-            lastPathRequest = request;
-            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
-            return ActionResult.failed("path_contract_failed: start_below_minimum_y");
-        }
-        boolean startReady = routeContract.constrained()
-                ? recenterPlayerInCurrentStandableCell("path_start_invalid")
-                : snapPlayerToNearestStandable("path_start_invalid");
-        if (!startReady) {
-            lastPathRequest = request;
-            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
-            return ActionResult.failed("pathfinding_failed: NO_START");
-        }
-        ServerLevel world = player.level();
-        WalkedStep startStep = routeContract.constrained() ? null : takeStartStep();
-        BlockPos from = routeContract.constrained() ? player.blockPosition() : startCell();
-        // NAV-OPT two-phase pathfinding: try pure walking first (no digging allowed, search
-        // space = air cells, so it converges fast and won't be blown out to SEARCH_LIMIT by
-        // dig-through neighbors); only if pure walking has no solution do we allow the dig-through
-        // fallback (tunneling/breaking obstacles), with a smaller dig budget to bound the 3D
-        // volume search blowing up when trapped/underground.
-        AStarPathfinder walkFinder =
-                new AStarPathfinder(
-                        player, world, from, goal, WALK_MAX_NODES, PATHFIND_MAX_MILLIS,
-                        canPillar, false);
-        PathfindingResult result = routeContract.constrained()
-                ? walkFinder.findPathUncachedAtOrAbove(routeContract.minimumY())
-                : walkFinder.findPath();
-        boolean dugOutbound = false;
-        if (!result.success() && allowDigFallback) {
-            AStarPathfinder digFinder = new AStarPathfinder(
-                    player, world, from, goal, DIG_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true);
-            PathfindingResult dig = routeContract.constrained()
-                    ? digFinder.findPathUncachedAtOrAbove(routeContract.minimumY())
-                    : digFinder.findPath();
-            if (dig.success()) {
-                result = dig;
-                dugOutbound = true;
-            }
-        }
-        if (!result.success()) {
-            lastPathRequest = request;
-            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
-            return ActionResult.failed("pathfinding_failed: " + result.reason());
-        }
-        PathfindingResult returnProof = null;
-        if (routeContract.requiresReturnProof()) {
-            if (dugOutbound && PathExecutor.isReversibleStair(result)) {
-                // The pre-dig world cannot prove the walk-only return yet; the dug stair is
-                // itself that return, so derive the proof from the reversed outbound nodes.
-                java.util.List<io.github.zoyluo.minecraftai.pathfinding.Node> reversed =
-                        new java.util.ArrayList<>(result.path());
-                java.util.Collections.reverse(reversed);
-                returnProof = new PathfindingResult(
-                        reversed, true, FailureReason.NONE,
-                        result.nodesExplored(), result.elapsedMs(),
-                        result.resolvedGoal(), result.resolvedStart());
-            } else {
-                returnProof = new AStarPathfinder(
-                        player, world, immutableGoal, routeContract.returnAnchor(),
-                        WALK_MAX_NODES, PATHFIND_MAX_MILLIS, false, false)
-                        .findPathUncachedAtOrAbove(routeContract.minimumY());
-            }
-        }
-        PathExecutor.RouteValidation validation = PathExecutor.validateRouteContract(
-                result, immutableGoal, routeContract, returnProof);
-        if (!validation.accepted()) {
-            lastPathRequest = request;
-            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
-            return ActionResult.failed("path_contract_failed: " + validation.reason());
-        }
-        lastPathRequest = request;
-        nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
-        BlockPos resolvedGoal = result.resolvedGoal() == null ? immutableGoal : result.resolvedGoal();
-        activePathGoal = resolvedGoal;
-        activePathRequest = request;
-        this.pathExecutor = routeContract.constrained()
-                ? new PathExecutor(
-                result.path(), resolvedGoal, canPillar, allowDigFallback, reserve, routeContract)
-                : new PathExecutor(
-                result.path(), resolvedGoal, canPillar, allowDigFallback, reserve);
-        this.pathExecutor.prefixStep(startStep);
-        commitPlannedPhysicalSnap(startStep);
-        this.walkTo = null;
-        this.mining = null;
-        return ActionResult.IN_PROGRESS;
+        // Every ordinary and contract path is Baritone-owned. A non-null answer is the only
+        // production result; no raw-world path executor may satisfy this request.
+        ActionResult routed = routeOnBaritone("path_to", goal, canPillar, allowDigFallback, protectedStoneLikeReserve, routeConstraints);
+        return routed == null ? ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE) : routed;
     }
 
     public BlockPos activePathGoal() {
@@ -827,38 +678,29 @@ public final class ActionPack {
                 return route.resolvedGoal() != null ? route.resolvedGoal() : route.target();
             }
         }
-        return activePathGoal;
+        return null;
     }
 
-    // ==================== Navigator seam (nav.engine = baritone) ====================
-
-    /** Failure reason of {@link #startApproachTo} when the Baritone engine is not the one answering requests. */
-    public static final String ENGINE_NOT_BARITONE = "engine_not_baritone";
+    // ==================== Navigator seam (Baritone-only) ====================
 
     /**
-     * Routes an ordinary walk to Baritone. Returns null when the request is not Baritone's (legacy engine, a contract-bound
-     * route, Baritone unavailable) and the caller runs the legacy navigator; otherwise the same answer the legacy code would give:
-     * {@code IN_PROGRESS}, {@code failed("pathfinding_failed: GOAL_UNREACHABLE")} or {@code failed(PATHFINDING_THROTTLED)}.
-     *
-     * <p>Routing table (docs/NAVIGATION_BARITONE_PLAN.md): ordinary walks and surface-only walks are Baritone's (surface-only:
-     * no breaking, no placing); contract routes, dig approaches, straight-line walks and one-cell safety moves stay legacy.</p>
+     * Routes every production path request to Baritone. Unavailable or refused Baritone is an
+     * explicit failure, never authority to invoke the old raw-world A* executor.
      */
     private ActionResult routeOnBaritone(String kind, BlockPos goal, boolean canPillar, boolean allowDigFallback,
-                                         int protectedStoneLikeReserve, PathExecutor.RouteContract routeContract) {
-        if (routeContract.constrained()) {
-            logEngine(kind, goal, NavEngine.LEGACY, "contract_route");
-            return null;
-        }
+                                         int protectedStoneLikeReserve, RouteConstraints routeConstraints) {
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
-            logEngine(kind, goal, NavEngine.LEGACY, NavEngineSelector.baritoneFailed() ? "baritone_unavailable" : "engine_legacy");
-            return null;
+            logEngine(kind, goal, NavEngine.BARITONE, "baritone_unavailable");
+            return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
         }
         int reserve = Math.max(0, protectedStoneLikeReserve);
         // A caller that keeps a stone reserve must not have it spent on pillars/bridges by a planner that cannot see the reserve.
         NavRoute.Options options = NavRouteRules.optionsFor(allowDigFallback, canPillar, reserve, player.isInWater());
-        NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0, options, kind, serverTick());
-        PathRequestIdentity identity = new PathRequestIdentity(goal, canPillar, allowDigFallback, reserve, routeContract);
-        return NavEngineSelector.attempt(player.getUUID(), kind, () -> startBaritoneRoute(request, identity, true), () -> null);
+        NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0, options, kind, serverTick(),
+                routeConstraints.minimumY(), routeConstraints.returnAnchor());
+        PathRequestIdentity identity = new PathRequestIdentity(goal, canPillar, allowDigFallback, reserve, routeConstraints);
+        return NavEngineSelector.attempt(player.getUUID(), kind, () -> startBaritoneRoute(request, identity, true),
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
 
     /**
@@ -867,55 +709,54 @@ public final class ActionPack {
      *
      * @param refresh    re-target the route that is already running without another admission search on the server thread
      * @param allowBreak whether breaking through an obstacle is allowed as a last resort when there is no way around
-     * @return {@link #ENGINE_NOT_BARITONE} failure when the engine is not (or no longer) Baritone: the caller uses its legacy walk
+     * @return a typed Baritone-unavailable or observation-admission failure; callers do not get a legacy route
      */
     public ActionResult startApproachTo(BlockPos target, int radius, boolean refresh, boolean allowBreak) {
         if (controllerStartBlocked()) {
             return ActionResult.failed(GUARDED_STEP_FENCE);
         }
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
-            return ActionResult.failed(ENGINE_NOT_BARITONE);
+            return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
         }
         NavRoute.Options options = new NavRoute.Options(allowBreak, false, player.isInWater());
         NavRoute request = new NavRoute(NavRoute.Shape.NEAR, target, radius, options, "approach", serverTick());
         boolean admit = !(refresh && route != null);
         return NavEngineSelector.attempt(player.getUUID(), "approach", () -> startBaritoneRoute(request, null, admit),
-                () -> ActionResult.failed(ENGINE_NOT_BARITONE));
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
 
     /**
-     * Baritone-only: a walk that may cross water (the route is leased against the drowning safety net for as long as Baritone
-     * drives it). No breaking, no placing.
+     * Baritone-only: a walk that may cross water on its way to an ordinary observed dry destination (the route is leased against
+     * the drowning safety net for as long as Baritone drives it). No breaking, no placing.
      */
     public ActionResult startSwimRouteTo(BlockPos goal) {
         if (controllerStartBlocked()) {
             return ActionResult.failed(GUARDED_STEP_FENCE);
         }
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
-            return ActionResult.failed(ENGINE_NOT_BARITONE);
+            return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
         }
         NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0, NavRoute.Options.SWIM, "swim_route", serverTick());
         return NavEngineSelector.attempt(player.getUUID(), "swim_route", () -> startBaritoneRoute(request, null, true),
-                () -> ActionResult.failed(ENGINE_NOT_BARITONE));
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
 
     /**
      * Baritone-only: flee. Walks until at least {@code distance} blocks (horizontally) from {@code source}, using Baritone's own
      * run-away goal (no hand-made flee target). Walk-only (no breaking, no placing) and dry, like every surface escape.
      *
-     * @return {@link #ENGINE_NOT_BARITONE} failure when the engine is not (or no longer) Baritone, or the admission failure: the
-     *         caller then projects its own escape goal and uses the ordinary surface path
+     * @return a typed Baritone-unavailable or observation-admission failure; callers do not gain an alternate navigator
      */
     public ActionResult startRunAwayFrom(BlockPos source, int distance) {
         if (controllerStartBlocked()) {
             return ActionResult.failed(GUARDED_STEP_FENCE);
         }
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
-            return ActionResult.failed(ENGINE_NOT_BARITONE);
+            return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
         }
         NavRoute request = new NavRoute(NavRoute.Shape.RUN_AWAY, source, distance, NavRoute.Options.WALK_ONLY, "run_away", serverTick());
         return NavEngineSelector.attempt(player.getUUID(), "run_away", () -> startBaritoneRoute(request, null, true),
-                () -> ActionResult.failed(ENGINE_NOT_BARITONE));
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
 
     private ActionResult startBaritoneRoute(NavRoute request, PathRequestIdentity identity, boolean admit) {
@@ -927,8 +768,8 @@ public final class ActionPack {
             logEngine(request.label(), request.target(), NavEngine.BARITONE, "throttled");
             return ActionResult.failed(PATHFINDING_THROTTLED);
         }
-        // Single writer: whatever the legacy executor was doing is dropped before Baritone is asked to move the bot.
-        if (pathExecutor != null || walkTo != null || mining != null || forward != 0.0F || strafing != 0.0F
+        // Single writer: any local controller state is dropped before Baritone is asked to move the bot.
+        if (walkTo != null || mining != null || forward != 0.0F || strafing != 0.0F
                 || step != null || sneaking || sprinting || jumping || jumpTicks > 0) {
             yieldToBaritone();
         }
@@ -1027,7 +868,7 @@ public final class ActionPack {
             return;
         }
         if (!NavEngineSelector.baritoneActive()) {
-            // Baritone was given up on while the route ran: there is nothing left to ask, and the bot is the legacy navigator's.
+            // Baritone was given up on while the route ran: there is nothing left to ask, so the route fails closed.
             finishRoute(NavOutcome.Status.FAILED, NavRouteRules.BARITONE_UNAVAILABLE, false);
             return;
         }
@@ -1043,7 +884,7 @@ public final class ActionPack {
             // (a linkage-type failure also retires Baritone) and the callers just see an idle pack.
             // This may be called by the Baritone driver's own post-physics path, where the
             // driver otherwise completes normally. Record the real failure at this central
-            // progress seam so a Baritone-labelled P3 capture cannot silently survive it.
+            // progress seam so a Baritone-labelled diagnostic capture cannot silently survive it.
             NavigationMeasurement.noteBaritoneFallback(player);
             boolean retired = NavEngineSelector.handleFailure("baritone_progress", failure);
             if (!retired) {
@@ -1215,9 +1056,8 @@ public final class ActionPack {
 
     /**
      * Commits the once-per-origin physical-snap guard when a controller actually accepts the
-     * planned walked step. Kept public for {@link PathExecutor}, which can install the same kind
-     * of prefix during a runtime replan. Planning, searching, and a refused prefix leave no guard
-     * entry, so a bot that never moved can retry immediately.
+     * planned walked step. Planning and a refused prefix leave no guard entry, so a bot that never
+     * moved can retry immediately.
      */
     public void commitPlannedPhysicalSnap(WalkedStep acceptedStep) {
         if (acceptedStep == null || acceptedStep != unstartedPhysicalSnap
@@ -1309,9 +1149,21 @@ public final class ActionPack {
         if (controllerStartBlocked()) {
             return ActionResult.failed(GUARDED_STEP_FENCE);
         }
+        if (pos == null || face == null) {
+            BotLog.action(player, "mine_refused", "reason", "invalid_mining_target", "pos", String.valueOf(pos));
+            return ActionResult.failed("invalid_mining_target");
+        }
+        // Do this before claim() can preempt another controller. A coordinate supplied by a task,
+        // command, or stale checkpoint does not authorise a direct world read or tool switch;
+        // MiningController keeps re-proving the same target while the break is in flight.
+        if (!MiningController.currentObservedTarget(player, pos)) {
+            BotLog.action(player, "mine_refused", "reason", MiningController.TARGET_NOT_OBSERVED,
+                    "pos", LogFields.pos(pos));
+            return ActionResult.failed(MiningController.TARGET_NOT_OBSERVED);
+        }
         claim("mining");
         this.mining = new MiningController(pos, face);
-        clearActivePathExecutor();
+        clearRouteLease();
         this.forward = 0.0F;
         this.strafing = 0.0F;
         return ActionResult.IN_PROGRESS;
@@ -1338,10 +1190,9 @@ public final class ActionPack {
     }
 
     /**
-     * Cancels the active path executor and direct walk and releases the movement keys.  Unlike
-     * {@link #stopMovement()} (keys only -- a live executor re-presses forward on its very next
-     * tick and keeps walking a stale route), this really stops navigation, but leaves mining and
-     * item use alone.
+     * Cancels the active Baritone route and direct local movement and releases the movement keys.
+     * Unlike {@link #stopMovement()} (keys only), this really stops navigation, but leaves mining
+     * and item use alone.
      */
     public void stopNavigation() {
         if (emergencyInputBlocked()) {
@@ -1351,7 +1202,6 @@ public final class ActionPack {
             cancelBaritoneRoute("stop_navigation");
         }
         cancelStep();
-        clearActivePathExecutor();
         this.walkTo = null;
         clearRouteLease();
         stopMovement();
@@ -1363,7 +1213,6 @@ public final class ActionPack {
         }
         releaseBaritone("stop_all");
         cancelStep();
-        clearActivePathExecutor();
         stopMining();
         this.walkTo = null;
         clearRouteLease();
@@ -1377,7 +1226,6 @@ public final class ActionPack {
 
     public boolean hasActiveActions() {
         return NavEngineSelector.query("baritone_busy", () -> BaritoneRegistry.INSTANCE.isBusy(player), false)
-                || pathExecutor != null
                 || step != null
                 || walkTo != null
                 || mining != null
@@ -1391,26 +1239,26 @@ public final class ActionPack {
     }
 
     /**
-     * Opt-in P3 diagnostic seam: which navigator actually owns a controller after this pack's
-     * update. A pending/active Baritone route is Baritone even when the scheduler admitted it on
-     * the preceding non-driven tick; a legacy path executor, direct walk, mining controller,
-     * walked step, or raw movement is a real legacy fallback. This is never consulted by normal
-     * navigation code.
+     * Opt-in P3 diagnostic seam: which physical controller actually owns this bot after the
+     * pack's update. A pending/active Baritone route is Baritone even when the scheduler admitted
+     * it on the preceding non-driven tick; a direct local walk, mining controller, walked step,
+     * or raw input is a bounded physical action, not an alternate navigation route. This is never
+     * consulted by normal navigation code.
      */
-    public NavEngine navigationOwnerForMeasurement() {
+    public NavigationControllerOwner controllerOwnerForMeasurement() {
         if (route != null || NavEngineSelector.query("baritone_busy", () -> BaritoneRegistry.INSTANCE.isBusy(player), false)) {
-            return NavEngine.BARITONE;
+            return NavigationControllerOwner.BARITONE;
         }
-        if (pathExecutor != null || walkTo != null || mining != null || step != null
+        if (walkTo != null || mining != null || step != null
                 || forward != 0.0F || strafing != 0.0F || jumping || jumpTicks > 0) {
-            return NavEngine.LEGACY;
+            return NavigationControllerOwner.LOCAL_ACTION;
         }
         return null;
     }
 
     public boolean isPathExecutorIdle() {
         settleRoute();
-        return pathExecutor == null && route == null;
+        return route == null;
     }
 
     public boolean isWalkToIdle() {
@@ -1426,7 +1274,6 @@ public final class ActionPack {
         // A step in flight has the bot to itself: whatever route, walk or break another owner left running waits (it was stopped by
         // the owner that started the step, and a controller a task starts meanwhile must not fight the step for the keys).
         if (!tickStep()) {
-            tickPathExecutor();
             tickWalkTo();
             tickMining();
         }
@@ -1492,9 +1339,9 @@ public final class ActionPack {
         }
         claim("run_step");
         cancelStep();
-        clearActivePathExecutor();
         stopMining();
         this.walkTo = null;
+        clearRouteLease();
         next.setContinuationGuard(continuationGuard);
         this.step = next;
         StepLease lease = new StepLease();
@@ -1698,31 +1545,6 @@ public final class ActionPack {
         player.setJumping(false);
     }
 
-    private void tickPathExecutor() {
-        if (pathExecutor == null) {
-            return;
-        }
-
-        ActionResult result = pathExecutor.tick(this);
-        if (result.isInProgress()) {
-            return;
-        }
-
-        if (result.isSuccess()) {
-            BotLog.path(player, "path_complete", "ticks", pathExecutor.totalTicks());
-        } else {
-            BotLog.warn(LogCategory.ERROR, player, "path_failed", "reason", result.reason());
-        }
-        pathExecutor = null;
-        activePathGoal = null;
-        activePathRequest = null;
-        clearRouteLease();
-        forward = 0.0F;
-        strafing = 0.0F;
-        jumping = false;
-        player.setJumping(false);
-    }
-
     /**
      * Ticks one break controller under vanilla's destroyDelay: after a break that took more than one tick a client waits five ticks
      * (continueDestroyBlock returns early while the counter runs) before it starts on the next block. A bot that chained breaks back
@@ -1761,32 +1583,20 @@ public final class ActionPack {
             // even though the world cell is air by now.
             BlockState brokenState = mining.brokenBlockState();
             ItemStack tool = player.getMainHandItem();
+            String brokenBlock = brokenState == null ? "unknown" : BuiltInRegistries.BLOCK.getKey(brokenState.getBlock()).toString();
+            String toolName = tool.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(tool.getItem()).toString();
             BotLog.action(player, "mine_complete",
-                    "block", brokenState == null ? "unknown" : BuiltInRegistries.BLOCK.getKey(brokenState.getBlock()).toString(),
+                    "block", brokenBlock,
                     "pos", LogFields.pos(mining.pos()),
-                    "tool", tool.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(tool.getItem()).toString(),
+                    "tool", toolName,
                     "ticks", mining.elapsedTicks());
+            if (brokenState != null) {
+                BaritoneEdits.recordBreak(player, mining.pos(), brokenBlock, toolName, mining.elapsedTicks());
+            }
         } else {
             BotLog.warn(LogCategory.ERROR, player, "mine_failed", "reason", result.reason());
         }
         mining = null;
-    }
-
-    /**
-     * Returns true when an identical request is still inside its cooldown.
-     * A different active identity is stopped before cooldown evaluation so an old, weaker route
-     * can never keep moving merely because the replacement happens to share the same goal.
-     */
-    private boolean preparePathRequest(PathRequestIdentity request, int now) {
-        if (pathExecutor != null && !request.equals(activePathRequest)) {
-            clearActivePathExecutor();
-        }
-        if (request.equals(lastPathRequest) && now < nextPathfindTick) {
-            return true;
-        }
-        // An explicit restart after cooldown owns the controller from this point onward.
-        clearActivePathExecutor();
-        return false;
     }
 
     /**
@@ -1799,23 +1609,23 @@ public final class ActionPack {
         nextPathfindTick = 0;
     }
 
-    /** Drops the legacy path executor and its request AND the route lease that went with it. */
-    private void clearActivePathExecutor() {
-        dropPathExecutor();
-        clearRouteLease();
+    private static boolean hasPathSupport(AIPlayerEntity player, int protectedStoneLikeReserve) {
+        return MaterialPalette.pickPathSupportBlockSlot(player, Math.max(0, protectedStoneLikeReserve)).isPresent();
     }
 
-    /**
-     * Drops the legacy path executor and its request but keeps the route lease: a lease is requested after a route is started, and
-     * Baritone taking the bot over ({@link #yieldToBaritone}) is the first tick of the route it belongs to, not its end.
-     */
-    private void dropPathExecutor() {
-        if (pathExecutor != null) {
-            pathExecutor.abort(this);
-            pathExecutor = null;
+    /** The constraints a Baritone route carries independently of the retired local executor. */
+    private record RouteConstraints(int minimumY, BlockPos returnAnchor) {
+        private RouteConstraints {
+            returnAnchor = returnAnchor == null ? null : returnAnchor.immutable();
         }
-        activePathGoal = null;
-        activePathRequest = null;
+
+        static RouteConstraints unrestricted() {
+            return new RouteConstraints(Integer.MIN_VALUE, null);
+        }
+
+        static RouteConstraints constrainedSurface(int minimumY, BlockPos returnAnchor) {
+            return new RouteConstraints(minimumY, returnAnchor);
+        }
     }
 
     private record PathRequestIdentity(
@@ -1823,11 +1633,11 @@ public final class ActionPack {
             boolean canPillar,
             boolean allowDig,
             int protectedStoneLikeReserve,
-            PathExecutor.RouteContract routeContract) {
+            RouteConstraints routeConstraints) {
         private PathRequestIdentity {
             goal = goal.immutable();
             protectedStoneLikeReserve = Math.max(0, protectedStoneLikeReserve);
-            routeContract = java.util.Objects.requireNonNull(routeContract, "routeContract");
+            routeConstraints = java.util.Objects.requireNonNull(routeConstraints, "routeConstraints");
         }
     }
 

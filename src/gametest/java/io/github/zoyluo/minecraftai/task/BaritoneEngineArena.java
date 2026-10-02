@@ -109,14 +109,14 @@ final class BaritoneEngineArena {
         return origin.offset(dx, dy, dz);
     }
 
-    /** Spawns a bot at {@code feet} and points it at the Baritone engine (per-bot override; the global engine stays legacy). */
+    /** Spawns a bot at {@code feet} and explicitly selects the only supported engine, Baritone. */
     AIPlayerEntity spawnOnBaritone(String name, BlockPos feet) {
         AIPlayerEntity bot = spawn(name, feet);
         NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
         return bot;
     }
 
-    /** Spawns a bot that follows the ordinary (legacy) engine: what the tests use for the followed player. */
+    /** Spawns a bot without assigning it a navigation task; course holders use this before their HoldTask is assigned. */
     AIPlayerEntity spawn(String name, BlockPos feet) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL)

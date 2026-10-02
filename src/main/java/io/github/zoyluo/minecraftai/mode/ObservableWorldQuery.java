@@ -9,6 +9,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
@@ -41,6 +42,43 @@ public final class ObservableWorldQuery {
      */
     public static boolean canObserveBlock(AIPlayerEntity bot, BlockPos pos) {
         return canObserveBlockWithin(bot, pos, 0);
+    }
+
+    /**
+     * State-free preliminary proof that the eye ray first strikes a face of {@code pos}'s unit
+     * cell. This deliberately does not inspect the target's state or shape: callers that must
+     * earn a later shape-aware query (for example direct mining) use it first, then confirm the
+     * real outline with {@link #canObserveBlock} or {@link #canObserveBlockWithInsetFaces}.
+     *
+     * <p>The unit-cell face is intentionally conservative for a partial block whose real outline
+     * does not meet that face. It never turns a hidden target into a visible one; it merely says
+     * that a player-facing ray reached this cell before any target-state read.</p>
+     */
+    public static boolean canObserveBlockCellFace(AIPlayerEntity bot, BlockPos pos) {
+        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                "observable_block_cell_face_query").allowed()) {
+            return true;
+        }
+        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        double radiusSquared = (double) radius * radius;
+        Vec3 eye = bot.getEyePosition();
+        AABB cell = new AABB(pos);
+        for (Direction face : Direction.values()) {
+            for (double[] offset : FACE_SAMPLE_OFFSETS) {
+                Vec3 endpoint = FaceAim.facePoint(cell, face, FaceAim.OBSERVE_DEPTH, offset[0], offset[1]);
+                if (eye.distanceToSqr(endpoint) > radiusSquared) {
+                    continue;
+                }
+                BlockHitResult hit = bot.level().clip(new ClipContext(
+                        eye, endpoint, ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
+                if (hit.getType() == HitResult.Type.BLOCK
+                        && pos.equals(hit.getBlockPos())
+                        && hit.getDirection() == face) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -414,6 +452,22 @@ public final class ObservableWorldQuery {
      */
     public static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,
                                       double range, ViewShape shape) {
+        return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.ANY);
+    }
+
+    /**
+     * As {@link #castViewRay(AIPlayerEntity, double, double, double, double, ViewShape)}, but
+     * treats water as transparent. This is only appropriate for a route whose policy explicitly
+     * permits swimming: a player underwater can see a nearby shore through water, while solid
+     * terrain, range and unloaded chunks remain exactly as restrictive as the ordinary view ray.
+     */
+    public static ViewHit castViewRayThroughFluids(AIPlayerEntity bot, double dx, double dy, double dz,
+                                                   double range, ViewShape shape) {
+        return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.NONE);
+    }
+
+    private static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,
+                                        double range, ViewShape shape, ClipContext.Fluid fluid) {
         double limit = Math.min(range, Math.max(1, MinecraftAiConfig.get().perception().radius()));
         double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (!(limit > 0.0D) || !(length > 1.0E-9D)) {
@@ -431,7 +485,7 @@ public final class ObservableWorldQuery {
                 eye, end,
                 shape == ViewShape.OUTLINE
                         ? ClipContext.Block.OUTLINE : ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.ANY,
+                fluid,
                 bot));
         if (hit.getType() != HitResult.Type.BLOCK) {
             return new ViewHit(false, null, null, limit, null);

@@ -523,7 +523,7 @@ public final class NavSafetyNet {
                 throttledLog(server, bot, "navsafe_water_step", feet);
                 return true;
             }
-            // Legacy local fallback: use the cached shore if it is still valid, otherwise search
+            // Privileged local rescue path: use the cached shore if it is still valid, otherwise search
             // again (the nearest landing spot that is both standable and has air at feet and head).
             if (hiddenWaterScan) {
                 BlockPos shore = waterRescueShore.get(bot.getUUID());
@@ -1808,6 +1808,9 @@ public final class NavSafetyNet {
         final io.github.zoyluo.minecraftai.action.BlockMiner miner = new io.github.zoyluo.minecraftai.action.BlockMiner();
         /** Exact guarded ActionPack lease for the physical PUSH_OUT/adjacent successor. */
         ActionPack.StepLease stepLease;
+        /** Immutable source/destination provenance for that one physical successor. */
+        BlockPos stepOrigin;
+        BlockPos stepDestination;
         int lastLogTick = -1000;
 
         private SuffocationEscape(AIPlayerEntity bot) {
@@ -1837,19 +1840,46 @@ public final class NavSafetyNet {
         }
         bot.getActionPack().releaseStepLease(lease);
         state.stepLease = null;
+        state.stepOrigin = null;
+        state.stepDestination = null;
         return false;
     }
 
-    /** A guarded emergency step needs no terrain scan beyond WalkedStep's own physical checks. */
-    private static boolean canContinueSuffocationStep(AIPlayerEntity bot, WalkedStep step) {
-        return true;
+    /** Re-proves each strict local rescue before WalkedStep can issue another terrain read. */
+    private static boolean canContinueSuffocationStep(AIPlayerEntity bot, WalkedStep step,
+                                                       SuffocationEscape state) {
+        BlockPos origin = state.stepOrigin;
+        BlockPos destination = state.stepDestination;
+        if (origin == null || destination == null || !step.cell().equals(destination)) {
+            return false;
+        }
+        if (step.kind() == WalkedStep.Kind.PUSH_OUT) {
+            // A push-out only resolves the bot's own overlapping body; it has no remote terrain
+            // destination. Keep it in the original local envelope so a relocation cannot inherit
+            // emergency movement keys.
+            return Math.abs(bot.blockPosition().getX() - origin.getX()) <= 1
+                    && Math.abs(bot.blockPosition().getY() - origin.getY()) <= 1
+                    && Math.abs(bot.blockPosition().getZ() - origin.getZ()) <= 1;
+        }
+        if (!withinSuffocationStepEnvelope(bot.blockPosition(), origin, destination,
+                step.kind(), step.ticks())) {
+            return false;
+        }
+        return SwimRoute.observedCell(bot, bot.level(), destination, false)
+                == SwimRoute.Cell.DRY
+                && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, destination, step.kind());
     }
 
     /** Begins the exact, guarded successor that remains immune to generic ActionPack shutdown. */
     private boolean beginSuffocationEmergencyStep(AIPlayerEntity bot, SuffocationEscape state, WalkedStep step) {
+        state.stepOrigin = bot.blockPosition().immutable();
+        state.stepDestination = step.cell().immutable();
         ActionPack.StepLease lease = bot.getActionPack().runEmergencyStep(step,
-                NavSafetyNet::canContinueSuffocationStep);
+                (guardBot, guardedStep) -> canContinueSuffocationStep(
+                        guardBot, guardedStep, state));
         if (lease == null) {
+            state.stepOrigin = null;
+            state.stepDestination = null;
             return false;
         }
         state.stepLease = lease;
@@ -1867,6 +1897,8 @@ public final class NavSafetyNet {
             bot.getActionPack().cancelStep(state.stepLease);
             state.stepLease = null;
         }
+        state.stepOrigin = null;
+        state.stepDestination = null;
         if (state.miner.target() != null) {
             state.miner.cancel(bot);
         }
@@ -1907,7 +1939,7 @@ public final class NavSafetyNet {
                     WalkedStep.Kind.PUSH_OUT, "navsafe_suffocation"));
             return true;
         }
-        var walked = pack.adjacentStandableStep("navsafe_suffocation");
+        var walked = observedAdjacentSuffocationStep(bot, world, feet);
         if (walked != null) {
             pack.stopAll();
             beginSuffocationEmergencyStep(bot, state, walked);
@@ -1940,18 +1972,63 @@ public final class NavSafetyNet {
     /** The block to dig first: the one at the head, else the one at the feet, and only a block a view ray from the bot's eye reaches. */
     private static BlockPos escapeBreakTarget(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         for (BlockPos candidate : new BlockPos[]{feet.above(), feet}) {
-            BlockState state = world.getBlockState(candidate);
-            if (state.getCollisionShape(world, candidate).isEmpty() || state.getDestroySpeed(world, candidate) < 0.0F) {
-                continue;
-            }
             var center = candidate.getCenter().subtract(bot.getEyePosition());
             var view = io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.castViewRay(bot, center.x, center.y, center.z,
                     SUFFOCATION_VIEW_RANGE, io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.ViewShape.COLLIDER);
-            if (view.hit() && candidate.equals(view.pos())) {
+            if (!view.hit() || !candidate.equals(view.pos())) {
+                continue;
+            }
+            BlockState state = world.getBlockState(candidate);
+            if (!state.getCollisionShape(world, candidate).isEmpty()
+                    && state.getDestroySpeed(world, candidate) >= 0.0F) {
                 return candidate;
             }
         }
         return null;
+    }
+
+    /** Finds one observed dry escape cell without asking ActionPack to scan hidden neighbours. */
+    private static WalkedStep observedAdjacentSuffocationStep(AIPlayerEntity bot,
+                                                               ServerLevel world,
+                                                               BlockPos current) {
+        int[][] horizontalOffsets = {
+                {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+                {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+        };
+        for (int dy : new int[]{0, -1, 1}) {
+            for (int[] offset : horizontalOffsets) {
+                if (dy != 0 && Math.abs(offset[0]) + Math.abs(offset[1]) > 1) {
+                    continue;
+                }
+                BlockPos candidate = current.offset(offset[0], dy, offset[1]);
+                WalkedStep.Kind kind = dy > 0 ? WalkedStep.Kind.STEP_UP
+                        : dy < 0 ? WalkedStep.Kind.STEP_DOWN : WalkedStep.Kind.FLAT;
+                if (SwimRoute.observedCell(bot, world, candidate, false) != SwimRoute.Cell.DRY
+                        || !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, candidate, kind)
+                        || WalkedStep.refusal(bot, candidate, kind) != null) {
+                    continue;
+                }
+                return WalkedStep.begin(bot, candidate, kind, "navsafe_suffocation");
+            }
+        }
+        return null;
+    }
+
+    private static boolean withinSuffocationStepEnvelope(BlockPos feet, BlockPos origin,
+                                                         BlockPos destination, WalkedStep.Kind kind,
+                                                         int activeStepTicks) {
+        if (between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getY(), origin.getY(), destination.getY())
+                && between(feet.getZ(), origin.getZ(), destination.getZ())) {
+            return true;
+        }
+        return (kind == WalkedStep.Kind.FLAT
+                || kind == WalkedStep.Kind.STEP_UP
+                || kind == WalkedStep.Kind.STEP_DOWN)
+                && activeStepTicks >= 0 && activeStepTicks <= 1
+                && feet.getX() == origin.getX()
+                && feet.getZ() == origin.getZ()
+                && Math.abs(feet.getY() - origin.getY()) == 1;
     }
 
 
@@ -2078,12 +2155,13 @@ public final class NavSafetyNet {
     }
 
     private static void escapeLava(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
-        // Rush out toward the nearest horizontal direction that is "safe and standable" + jump
+        // Rush only toward a player-eye-proven dry neighbour. Emergency motion is not authority
+        // to inspect a hidden bank; if none is visible the caller still jumps and can use its
+        // own observed platform rescue.
         Direction best = null;
         for (Direction dir : Direction.Plane.HORIZONTAL) {
             BlockPos side = feet.relative(dir);
-            if (!inLava(world, side) && !inLava(world, side.below())
-                    && io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, side)) {
+            if (observedDryEmergencySide(bot, world, side)) {
                 best = dir;
                 break;
             }
@@ -2098,6 +2176,13 @@ public final class NavSafetyNet {
         // Jump to get out of the lava regardless of whether a direction was found
         bot.getActionPack().setJumping(true);
         bot.getActionPack().jumpOnce();
+    }
+
+    private static boolean observedDryEmergencySide(AIPlayerEntity bot, ServerLevel world,
+                                                    BlockPos side) {
+        return SwimRoute.observedCell(bot, world, side, false) == SwimRoute.Cell.DRY
+                && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, side, WalkedStep.Kind.FLAT)
+                && WalkedStep.refusal(bot, side, WalkedStep.Kind.FLAT) == null;
     }
 
     private static boolean inLava(ServerLevel world, BlockPos pos) {

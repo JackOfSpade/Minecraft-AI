@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -21,6 +22,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
@@ -37,6 +39,14 @@ public final class BuildAction {
             {-FACE_SAMPLE_INSET, FACE_SAMPLE_INSET},
             {FACE_SAMPLE_INSET, -FACE_SAMPLE_INSET},
             {FACE_SAMPLE_INSET, FACE_SAMPLE_INSET}
+    };
+    /**
+     * Shape-free discovery depths used before reading a support's state. One of these reaches
+     * the real face of common partial blocks (slabs, farmland, beds) while the exact first-hit
+     * check below prevents it from treating a neighbouring cell as the support.
+     */
+    private static final double[] FACE_PROOF_DEPTHS = {
+            FaceAim.OBSERVE_DEPTH, 0.25D, 0.5D, 0.75D
     };
 
     private BuildAction() {
@@ -79,6 +89,15 @@ public final class BuildAction {
         double reach = player.blockInteractionRange();
         double sampleRange = exactPlacementSampleRange(
                 MinecraftAiConfig.get().perception().radius(), reach);
+        // Prove the exact support face inside both physical interaction reach and configured
+        // perception before deciding anything about that support or the destination.
+        BlockHitResult hit = visibleSupportFaceHit(player, against, face, sampleRange);
+        if (hit == null) {
+            return ActionResult.failed("support_face_not_visible");
+        }
+        if (!player.isWithinBlockInteractionRange(against, 0.0D)) {
+            return ActionResult.failed("support_out_of_reach_or_sight");
+        }
         // Vanilla measures block interaction reach against the block's bounding box, not its
         // center. The center may be outside reach while a face inset is still a legal click.
         ItemStack stack = player.getItemInHand(hand);
@@ -86,15 +105,9 @@ public final class BuildAction {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed", "reason", "empty_hand");
             return ActionResult.failed("empty_hand");
         }
-
-        // Prove the exact support face inside both physical interaction reach and configured
-        // perception before deciding anything about that support or the destination (its shape was read only to aim).
-        BlockHitResult hit = visibleSupportFaceHit(player, against, face, sampleRange);
-        if (hit == null) {
-            return ActionResult.failed("support_face_not_visible");
-        }
-        if (!player.isWithinBlockInteractionRange(against, 0.0D)) {
-            return ActionResult.failed("support_out_of_reach_or_sight");
+        BlockState placementState = placementStateOf(stack);
+        if (placementState == null) {
+            return ActionResult.failed("not_a_block_item");
         }
         if (deferInteractive && isInteractiveSupport(player.level(), against)) {
             return ActionResult.failed(SUPPORT_INTERACTIVE_DEFERRED);
@@ -103,7 +116,13 @@ public final class BuildAction {
             return ActionResult.failed(PROTECTED_AREA);
         }
         BlockPos destination = against.relative(face);
-        Use use = useItemOnHitCrouching(player, hit, hand);
+        // A placement target is terrain too: direct BuildAction callers must have a fresh eye
+        // proof before vanilla is asked to inspect it. Baritone supplies the equivalent already
+        // admitted-fence proof through the explicit trusted result overload below.
+        if (!ObservableWorldQuery.canObserveCell(player, destination)) {
+            return ActionResult.failed("destination_not_visible");
+        }
+        Use use = useItemOnHitCrouching(player, hit, hand, placementState);
         net.minecraft.world.InteractionResult result = use.result();
         if (use.placed()) {
             player.swing(hand);
@@ -124,11 +143,12 @@ public final class BuildAction {
      * own hit (Baritone) calls {@link #useItemOnHit} directly and asks for sneak itself: a plain click there must still
      * be able to open a door or a gate, and a sneaking click opens nothing (the Baritone policy).
      */
-    private static Use useItemOnHitCrouching(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand) {
+    private static Use useItemOnHitCrouching(AIPlayerEntity player, BlockHitResult hit,
+                                               InteractionHand hand, BlockState placementState) {
         boolean wasShifting = player.isShiftKeyDown();
         player.setShiftKeyDown(true);
         try {
-            return useItemOnHit(player, hit, hand);
+            return useItemOnHit(player, hit, hand, placementState);
         } finally {
             player.setShiftKeyDown(wasShifting);
         }
@@ -138,10 +158,13 @@ public final class BuildAction {
      * Outcome of {@link #useItemOnHit}.
      *
      * @param result      what the vanilla interaction returned
-     * @param placed      the interaction consumed the click and changed the block next to the clicked face (a block was placed)
+     * @param placementState the already-proven block state the successful action placed, or null for a non-placement click
      * @param destination the cell a placement would have filled
      */
-    public record Use(net.minecraft.world.InteractionResult result, boolean placed, BlockPos destination) {
+    public record Use(net.minecraft.world.InteractionResult result, BlockState placementState, BlockPos destination) {
+        public boolean placed() {
+            return placementState != null;
+        }
     }
 
     /**
@@ -152,31 +175,64 @@ public final class BuildAction {
      * door or a gate) hands over its own hit and ends here too. It does not aim, check reach or swing: the caller owns those.
      */
     public static Use useItemOnHit(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand) {
+        return useItemOnHit(player, hit, hand, null);
+    }
+
+    /**
+     * Executes an already aimed block click. {@code placementState} is supplied only by a caller
+     * that has proved the destination (a visible direct placement or Baritone's admitted fence);
+     * it is never recovered by reading the live destination after the click.
+     */
+    public static Use useItemOnHit(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand,
+                                   BlockState placementState) {
         BlockPos destination = hit.getBlockPos().relative(hit.getDirection());
         if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
             // Baritone and other already-aimed callers have no ActionResult channel. PASS faithfully says
             // the click was not sent while the reactive shield owns the use key.
-            return new Use(net.minecraft.world.InteractionResult.PASS, false, destination);
+            return new Use(net.minecraft.world.InteractionResult.PASS, null, destination);
+        }
+        String supportFailure = supportFaceRefusal(player, hit);
+        if (supportFailure != null) {
+            return new Use(net.minecraft.world.InteractionResult.FAIL, null, destination);
         }
         ItemStack stack = player.getItemInHand(hand);
         var item = stack.getItem();
+        BlockState heldPlacementState = placementStateOf(stack);
         if (isProtectedArea(player, hit.getBlockPos())) {
-            return new Use(net.minecraft.world.InteractionResult.FAIL, false, destination);
+            return new Use(net.minecraft.world.InteractionResult.FAIL, null, destination);
         }
-        var before = player.level().getBlockState(destination);
         net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
                 player,
                 player.level(),
                 stack,
                 hand,
                 hit);
-        boolean placed = result.consumesAction() && !player.level().getBlockState(destination).equals(before);
-        if (placed) {
+        BlockState placed = confirmedPlacementState(heldPlacementState, placementState, result);
+        if (placed != null) {
             AStarPathfinder.invalidateCache("block_place");
             BotEdits.notePlaced(player, destination);
             BotLog.action(player, "place", "pos", LogFields.pos(destination), "face", hit.getDirection(), "item", item);
         }
         return new Use(result, placed, destination);
+    }
+
+    /** The state a simple block item contributes after a confirmed placement, without a destination read. */
+    private static BlockState placementStateOf(ItemStack stack) {
+        return stack.getItem() instanceof BlockItem item ? item.getBlock().defaultBlockState() : null;
+    }
+
+    /**
+     * A trusted action result is only publishable for the same ordinary block item whose state
+     * the policy proved before the click. In particular, a door/gate use has no placement state,
+     * and an arbitrary action that merely consumes the click cannot turn a caller-supplied state
+     * into terrain provenance.
+     */
+    private static BlockState confirmedPlacementState(BlockState heldItemState, BlockState expected,
+                                                      net.minecraft.world.InteractionResult result) {
+        if (expected == null || heldItemState == null || !result.consumesAction()) {
+            return null;
+        }
+        return expected.equals(heldItemState) ? expected : null;
     }
 
     /**
@@ -219,10 +275,6 @@ public final class BuildAction {
             // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
             return ActionResult.IN_PROGRESS;
         }
-        ItemStack stack = player.getItemInHand(hand);
-        if (stack.isEmpty()) {
-            return ActionResult.failed("empty_hand");
-        }
         double sampleRange = exactPlacementSampleRange(
                 MinecraftAiConfig.get().perception().radius(), player.blockInteractionRange());
         BlockHitResult hit = visibleSupportFaceHit(player, pos, face, sampleRange);
@@ -231,6 +283,10 @@ public final class BuildAction {
         }
         if (!player.isWithinBlockInteractionRange(pos, 0.0D)) {
             return ActionResult.failed("out_of_reach_or_sight");
+        }
+        ItemStack stack = player.getItemInHand(hand);
+        if (stack.isEmpty()) {
+            return ActionResult.failed("empty_hand");
         }
         if (isProtectedArea(player, pos)) {
             return ActionResult.failed(PROTECTED_AREA);
@@ -257,6 +313,12 @@ public final class BuildAction {
         if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
             // The use key holds the shield up: the client drops every other use click meanwhile (Minecraft.handleKeybinds).
             return ActionResult.IN_PROGRESS;
+        }
+        // shapeTopSamples reads the live state to aim at a crop's/field's actual outline. First
+        // establish that this exact cell is in current eye view, so it is not a hidden-world
+        // shape query.
+        if (!ObservableWorldQuery.canObserveCell(player, pos)) {
+            return ActionResult.failed("cell_not_visible");
         }
         ItemStack stack = player.getItemInHand(hand);
         if (stack.isEmpty()) {
@@ -453,13 +515,53 @@ public final class BuildAction {
                                                    Direction face,
                                                    double sampleRange,
                                                    boolean rotate) {
+        // A full-cell first-hit probe is intentionally state-free. It earns the right to read a
+        // partial support's actual outline only after the eye ray has struck this exact requested
+        // face; until then even shape lookup would be a hidden-world state read.
+        if (unshapedSupportFaceHit(player, against, face, sampleRange, rotate) == null) {
+            return null;
+        }
+        BlockState observed = player.level().getBlockState(against);
+        FaceAim.Target aim = FaceAim.aim(player.level(), against, observed,
+                ClipContext.Block.OUTLINE, CollisionContext.of(player));
+        return shapedSupportFaceHit(player, against, face, sampleRange, rotate, aim);
+    }
+
+    /** First-hit discovery against a cell box: no support state is consulted before this proof. */
+    private static BlockHitResult unshapedSupportFaceHit(AIPlayerEntity player,
+                                                         BlockPos against,
+                                                         Direction face,
+                                                         double sampleRange,
+                                                         boolean rotate) {
         double sampleRangeSquared = sampleRange * sampleRange;
         Vec3 eye = player.getEyePosition();
-        // Aim at the support's own shape (a chest, slab, farmland, bed or lever face is not the cell
-        // face): the click ray is the OUTLINE ray vanilla uses, so the sample points lie on the face plane
-        // of the outline shape's bounds and the inset grid is scaled to that face.
-        FaceAim.Target aim = FaceAim.aim(player.level(), against, player.level().getBlockState(against),
-                ClipContext.Block.OUTLINE, CollisionContext.of(player));
+        AABB cell = new AABB(against);
+        for (double depth : FACE_PROOF_DEPTHS) {
+            for (double[] offset : FACE_SAMPLE_OFFSETS) {
+                Vec3 target = FaceAim.facePoint(cell, face, depth, offset[0], offset[1]);
+                if (eye.distanceToSqr(target) > sampleRangeSquared) {
+                    continue;
+                }
+                BlockHitResult hit = rotate
+                        ? rotateAndRaycast(player, target, sampleRange)
+                        : rayTo(player, eye, target, sampleRange);
+                if (isExactSupportFace(hit, against, face)) {
+                    return hit;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Re-aims at the now-authorised support's real outline for the actual vanilla click. */
+    private static BlockHitResult shapedSupportFaceHit(AIPlayerEntity player,
+                                                       BlockPos against,
+                                                       Direction face,
+                                                       double sampleRange,
+                                                       boolean rotate,
+                                                       FaceAim.Target aim) {
+        double sampleRangeSquared = sampleRange * sampleRange;
+        Vec3 eye = player.getEyePosition();
         for (double[] offset : FACE_SAMPLE_OFFSETS) {
             Vec3 target = FaceAim.facePoint(aim.box(), face, 0.0D, offset[0], offset[1]);
             if (eye.distanceToSqr(target) > sampleRangeSquared) {
@@ -468,16 +570,19 @@ public final class BuildAction {
             BlockHitResult hit = rotate
                     ? rotateAndRaycast(player, target, sampleRange)
                     : rayTo(player, eye, target, sampleRange);
-            if (hit == null
-                    || hit.getType() != HitResult.Type.BLOCK
-                    || hit.getBlockPos() == null
-                    || !hit.getBlockPos().equals(against)
-                    || hit.getDirection() != face) {
+            if (!isExactSupportFace(hit, against, face)) {
                 continue;
             }
             return hit;
         }
         return null;
+    }
+
+    private static boolean isExactSupportFace(BlockHitResult hit, BlockPos against, Direction face) {
+        return hit != null
+                && hit.getType() == HitResult.Type.BLOCK
+                && against.equals(hit.getBlockPos())
+                && hit.getDirection() == face;
     }
 
     /** The real placement's ray: turn the head to {@code target}, then vanilla's own look-direction raycast. */

@@ -11,11 +11,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
 
 /**
- * Ledger of every block a bot's Baritone instance broke or placed, written by {@link ServerPlayerController} at the two places
- * where Baritone's execution touches the world: a completed break of {@code MiningController} and a placement of
- * {@code BuildAction}. Baritone has no other way to change a block (its {@code BlockBreakHelper}/{@code BlockPlaceHelper} call
- * only the player controller), so a world diff that is not covered by this ledger would mean an edit that bypassed the
- * mod's break/place primitives; the end-to-end GameTests compare exactly that.
+ * Ledger of every governed block edit a bot makes. A completed {@code MiningController} break is recorded by either
+ * {@code ActionPack.tickMining} (a directly admitted, observed interaction) or {@link ServerPlayerController}
+ * (a Baritone-driven break), and a placement is recorded by {@code BuildAction}. Consequently, a world diff that is not
+ * covered by this ledger would mean an edit that bypassed the mod's break/place primitives; the end-to-end GameTests compare
+ * exactly that.
  *
  * <p>Bounded (the newest {@value #CAPACITY} edits per bot) and dropped with the bot's instance. Server thread only for
  * writes; reads copy.</p>
@@ -51,6 +51,18 @@ public final class BaritoneEdits {
             }
             deque.addLast(edit);
         }
+    }
+
+    /**
+     * Records a successful governed break after its pre-break state and held tool have been captured. This is intentionally the
+     * only cross-package write seam: direct observed interactions and Baritone's server-player controller both use the same
+     * bounded audit ledger.
+     */
+    public static void recordBreak(AIPlayerEntity bot, BlockPos pos, String block, String tool, int ticks) {
+        if (bot == null || pos == null || block == null || tool == null || bot.getServer() == null) {
+            return;
+        }
+        record(bot, new Edit(Kind.BREAK, pos.immutable(), block, tool, ticks, bot.getServer().getTickCount()));
     }
 
     /** The bot's edits, oldest first. */

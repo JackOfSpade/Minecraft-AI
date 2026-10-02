@@ -31,7 +31,7 @@ import net.minecraft.core.BlockPos;
  *
  * <p>What a client player does on its own and a server-side bot does not, this class does:</p>
  * <ul>
- *   <li><b>Pace.</b> How fast the bot goes is the mod's one pace policy ({@link PacePolicy}), the same as for the legacy engine: the
+ *   <li><b>Pace.</b> How fast the bot goes is the mod's one pace policy ({@link PacePolicy}), shared with bounded local actions: the
  *       gait (sprint, walk, sneak) it resolves decides whether Baritone's sprint request is honoured and whether the bot sneaks.
  *       Baritone's own reasons stay in force: a parkour jump (and the run-up to one) sprints whatever the gait, since a jump made at
  *       a walk falls into the gap, and a sneak is lifted on a descent, a fall and a climbable (a sneaking player does not walk off

@@ -426,8 +426,7 @@ final class FollowSwimSourceContractTest {
                 "/**\n     * Whatever Baritone");
         String genericCancel = body(pack, "public void cancelStep()",
                 "/**\n     * Internal cancellation path");
-        String stopMovement = body(pack, "public void stopMovement()",
-                "/**\n     * Cancels the active path executor");
+        String stopMovement = body(pack, "public void stopMovement()", "public void stopNavigation()");
         String stopNavigation = body(pack, "public void stopNavigation()", "public void stopAll()");
         String stopAll = body(pack, "public void stopAll()", "public boolean hasActiveActions()");
         String forward = body(pack, "public void setForward(float value)", "public void setStrafing(float value)");
@@ -485,7 +484,9 @@ final class FollowSwimSourceContractTest {
                         && inFlight.contains("stepInFlightFor(lease)")
                         && inFlight.contains("releaseStepLease(lease)")
                         && beginEmergency.contains("runEmergencyStep(step,")
-                        && beginEmergency.contains("NavSafetyNet::canContinueSuffocationStep")
+                        && beginEmergency.contains("(guardBot, guardedStep) -> canContinueSuffocationStep(")
+                        && beginEmergency.contains("state.stepOrigin = bot.blockPosition().immutable();")
+                        && beginEmergency.contains("state.stepDestination = step.cell().immutable();")
                         && beginEmergency.contains("state.stepLease = lease;")
                         && beginEmergency.contains("awaitingEmergencySuccessors.add(bot.getUUID())")
                         && releaseEmergency.contains("cancelStep(state.stepLease)")
@@ -859,7 +860,7 @@ final class FollowSwimSourceContractTest {
                         && consumedCandidate > retainedVerticalWater,
                 "at full air a strict rescue must still consume observed dry and same-level water moves, while retaining an observed vertical water stroke until the shared air boundary becomes urgent");
         String waterCrisis = body(safety, "boolean surfaceAirUrgent = bot.getAirSupply() <= surfaceAirThreshold(bot, hiddenWaterScan);",
-                "// Legacy local fallback");
+                "// Privileged local rescue path");
         assertTrue(waterCrisis.contains("beginObservableWaterRescueStep(bot, world, feet,")
                         && waterCrisis.contains("strictWaterEscapeSearches.get(bot.getUUID()), surfaceAirUrgent")
                         && waterCrisis.contains("if (surfaceAirUrgent && physicalStepTowardAir"),
@@ -1059,25 +1060,21 @@ final class FollowSwimSourceContractTest {
     }
 
     @Test
-    void digOutIsTheLastRecoveryStepAndStaysInsideTheLegalDigEnvelope() throws IOException {
+    void stuckFollowUsesOnlyVerifiedStepsOrAnObservedBaritoneReplan() throws IOException {
         String recovery = read("task/FollowStuckRecovery.java");
         String dig = read("task/FollowDigOut.java");
 
         int adjacent = recovery.indexOf("beginStep(bot, current, best)");
-        int start = recovery.indexOf("digOut.start(bot, target)");
-        assertTrue(adjacent >= 0 && start > adjacent,
-                "dig-out must only be tried after every adjacent verified step failed");
-
-        assertTrue(dig.contains("NeighborEnumerator.isMineable(world, cell)"),
-                "only the pathfinder's natural dig whitelist may be broken");
-        assertTrue(dig.contains("ObservableWorldQuery.canObserveBlock(bot, cell)"),
-                "only currently observable blocks may be broken");
-        assertTrue(dig.contains("DigNav.adjacentHazardFluid("), "never through or beside an observed fluid");
-        assertTrue(dig.contains("isSolidFloor(world, stand.below())"),
-                "never dig into a cell that would leave the bot over an unknown drop");
-        assertTrue(dig.contains("instanceof FallingBlock"), "never under a suspended sand/gravel column");
-        assertTrue(dig.contains("hasSuitableTool"), "only with a tool that can actually break the block");
-        assertTrue(dig.contains("MAX_CELLS = 8"), "the tunnel is bounded");
+        int replan = recovery.indexOf("follow_recovery_baritone_required");
+        assertTrue(adjacent >= 0 && replan > adjacent,
+                "recovery must exhaust verified local steps before requesting a fresh Baritone route");
+        assertTrue(recovery.contains("forceRepathPending = true;")
+                        && !recovery.contains("FollowDigOut")
+                        && !recovery.contains("digOut.start("),
+                "follow recovery must never turn a blocked route into terrain excavation");
+        assertTrue(dig.contains("RetiredNavigationTask.legacyExcavationDisabled()")
+                        && dig.contains("legacy_navigation_retired"),
+                "the retained legacy entry point must fail closed and leave an audit record");
     }
 
     @Test
@@ -1103,7 +1100,7 @@ final class FollowSwimSourceContractTest {
     }
 
     @Test
-    void modeSwitchesAndPauseAbortResetLandRecoveryAndCancelTheDigOut() throws IOException {
+    void modeSwitchesAndPauseAbortResetLandRecoveryWithoutTerrainOwnership() throws IOException {
         String follow = read("task/FollowTask.java");
         assertTrue(follow.contains("private void suspendLandRecovery(AIPlayerEntity bot)")
                 && follow.contains("stuckRecovery.reset(bot, elapsed);"));
@@ -1112,14 +1109,16 @@ final class FollowSwimSourceContractTest {
             assertTrue(at >= 0, owner);
             int next = follow.indexOf("@Override", at);
             String body = follow.substring(at, next < 0 ? follow.length() : next);
-            assertTrue(body.contains("suspendLandRecovery(bot)"), owner + " must reset land recovery / cancel the dig-out");
+            assertTrue(body.contains("suspendLandRecovery(bot)"), owner + " must reset land recovery");
         }
         int tick = follow.indexOf("protected void onTick(");
         String onTick = follow.substring(tick, follow.indexOf("private void faceTarget"));
         assertTrue(count(onTick, "suspendLandRecovery(bot)") >= 5,
                 "offline, boat, swim, leave-boat and exit-water ticks must each suspend land recovery");
         String recovery = read("task/FollowStuckRecovery.java");
-        assertTrue(recovery.contains("digOut.cancel(bot);"), "reset must cancel an active dig-out");
+        assertTrue(recovery.contains("boolean isDigging() {\n        return false;\n    }")
+                        && !recovery.contains("FollowDigOut"),
+                "reset has no dig-out controller because follow recovery never owns terrain breaking");
     }
 
     @Test
@@ -1149,11 +1148,11 @@ final class FollowSwimSourceContractTest {
     }
 
     @Test
-    void followRechecksAHeldOwnCellGoalAsSoonAsThePlayerMoves() throws IOException {
+    void followRechecksItsBaritoneGoalAsSoonAsThePlayerMoves() throws IOException {
         String follow = read("task/FollowTask.java");
-        assertTrue(follow.contains("holdTargetPos = target.blockPosition().immutable();"));
-        assertTrue(follow.contains("!holdTargetPos.equals(target.blockPosition())")
-                && follow.contains("nextRepathTick = elapsed;"));
+        assertTrue(follow.contains("baritoneGoalPos = targetPos.immutable();"));
+        assertTrue(follow.contains("baritoneGoalPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ")
+                && follow.contains("nextRepathTick = elapsed + BARITONE_REGOAL_TICKS;"));
     }
 
     @Test

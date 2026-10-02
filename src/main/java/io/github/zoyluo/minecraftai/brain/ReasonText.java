@@ -88,7 +88,6 @@ public final class ReasonText {
             case "container" -> "organizing containers";
             case "stockpile" -> "storing supplies";
             case "resupply" -> "resupplying";
-            case "strip_mine" -> "strip mining";
             case "farm" -> "farming";
             case "breed" -> "breeding animals";
             case "fish" -> "fishing";

@@ -55,7 +55,10 @@ class BaritoneSurvivalContractTest {
         String context = read("baritone/ServerPlayerContext.java");
         assertTrue(body(context, "public boolean allowScanningProcess(").contains("BaritoneBreakPlacePolicy.allowScanningProcess("));
         String policy = read("baritone/BaritoneBreakPlacePolicy.java");
-        assertTrue(policy.contains("PrivilegedCapability.HIDDEN_BLOCK_SCAN"), "the scanning processes are gated by the hidden-scan privilege");
+        assertTrue(policy.contains("PrivilegedCapability.HIDDEN_BLOCK_SCAN"), "the scanning processes still cross the retired capability boundary");
+        String capabilityPolicy = read("mode/CapabilityPolicy.java");
+        assertTrue(capabilityPolicy.contains("DENIED_RETIRED_CAPABILITY"),
+                "hidden-world scanning must be retired for every operating profile");
         for (String process : new String[] {"mine", "get_to_block", "farm", "explore", "build"}) {
             assertTrue(policy.contains("\"" + process + "\""), "scanning process not listed: " + process);
         }
@@ -73,7 +76,9 @@ class BaritoneSurvivalContractTest {
     @Test
     void goalsThatReachBaritoneAreCoordinateGoals() throws IOException {
         String goals = read("baritone/BaritoneGoals.java");
-        assertTrue(goals.contains("goal_type_not_allowed") && goals.contains("target_not_observed"));
+        assertTrue(goals.contains("goal_type_not_allowed") && goals.contains("target_not_observed")
+                        && goals.contains("direct_goal_api_retired") && !goals.contains("setGoalAndPath("),
+                "coordinate helpers must enter the observed ActionPack seam, not submit raw Baritone goals");
         assertTrue(!goals.contains("getMineProcess()") && !goals.contains("getExploreProcess()") && !goals.contains("getFarmProcess()")
                 && !goals.contains("getGetToBlockProcess()"), "BaritoneGoals must not start a scanning process");
     }
@@ -149,7 +154,14 @@ class BaritoneSurvivalContractTest {
     void everyControllerEntryReturnsOnARefusal() throws IOException {
         String controller = read("baritone/ServerPlayerController.java");
         assertRefusalEndsTheEntry(body(controller, "public boolean clickBlock("), "BaritoneBreakPlacePolicy.checkBreak(", 1);
-        assertRefusalEndsTheEntry(body(controller, "public InteractionResult processRightClickBlock("), "BaritoneBreakPlacePolicy.checkClickBlock(", 1);
+        String blockClick = body(controller, "public InteractionResult processRightClickBlock(");
+        int checkedClick = blockClick.indexOf("BaritoneBreakPlacePolicy.checkClickBlock(");
+        int clickRefusal = blockClick.indexOf("if (!click.allowed())", checkedClick);
+        assertTrue(checkedClick >= 0 && clickRefusal > checkedClick,
+                "the checked click decision must be refused before the click is made");
+        assertEquals("return InteractionResult.FAIL;",
+                block(blockClick, clickRefusal).replaceAll("\\s+", " ").replaceAll("^\\{ | \\}$", ""),
+                "the named decision's refusal branch must leave the entry immediately");
         assertRefusalEndsTheEntry(body(controller, "public InteractionResult processRightClick("), "BaritoneBreakPlacePolicy.checkUseItem(", 1);
         assertRefusalEndsTheEntry(body(controller, "public void windowClick("), "BaritoneBreakPlacePolicy.checkWindowClick(", 1);
         // A break that is under way is re-checked when the cell changes under it, and that refusal aborts it.

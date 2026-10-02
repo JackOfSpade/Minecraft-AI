@@ -112,22 +112,17 @@ public final class GoalPlanner {
         // when there is no prey to hunt, berries are the last resort for "something to eat right now."
         boolean hasBerries = OreProspector.nearest(bot,
                 FOOD_GRASS_SCAN, state -> state.is(Blocks.SWEET_BERRY_BUSH)) != null;
-        // Nearby-ore perception: at planning time, check whether the target ore is already nearby
-        // (within 48 blocks). If so -> mine directly without descending to the ore layer
-        // (digging a 70-block shaft down to Y16 while standing next to iron ore would be silly; also
-        // a shaft through natural cave/water/gravel terrain is very prone to descend_blocked --
-        // measured runs show a burst of descend-type failures once the world became surface-heavy;
-        // the old Y6 spawn's botY<mineY simply never triggered this path, which is why it stayed
-        // hidden for so long).
+        // Planning may use an ore that the player can presently observe or that the bot previously
+        // recorded, but a remembered coordinate is only a candidate: OreDigTask must revalidate it
+        // through the observed-world Baritone fence before it can move or mine.
         java.util.function.Predicate<Set<Block>> oreNearby = ores -> {
             if (OreProspector.nearest(bot, 48,
                     state -> ores.contains(state.getBlock())) != null) {
                 return true;
             }
-            // Knowledge-base second opinion (semantic-memory consumption point): a live scan within
-            // 48 blocks found nothing, but this ore was seen within 96 blocks before -> also skip the
-            // descent; OreDigTask's prospect(64) + horizontal tunneling can reach it --
-            // "remembering where it was" covers more ground than "seeing it right now."
+            // Semantic memory is a permissible candidate source, not a terrain oracle. A later
+            // revalidation failure is reported as no_observed_ore_target; it never starts prospecting
+            // or tunneling toward this coordinate.
             for (Block ore : ores) {
                 String id = BuiltInRegistries.BLOCK.getKey(ore).toString();
                 if (io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
@@ -566,13 +561,11 @@ public final class GoalPlanner {
             // oreNearby is a fact about the position at which this plan was created. Once an
             // earlier planned step has changed layers, reusing it can suppress a required descent.
             boolean knownOreNearby = initialOrePerceptionValid && oreNearby.test(expanded);
-            boolean willDescend = plannedY - mineY > DESCEND_THRESHOLD
-                    && (longRareExpedition || !knownOreNearby);
             boolean ordinaryChannelMission = !rareOre
                     && budget.ordinaryChannelPickaxes() > 0;
             // An ordinary expedition owns the same four-pick service horizon after a mine-layer
-            // replan. Tying this flag to willDescend made a resumed coal/iron batch silently lose
-            // channel maintenance as soon as it was already standing at the target Y.
+            // replan. It remains an inventory service boundary, never authority to excavate a
+            // shaft toward an unobserved layer.
             boolean maintainTunnelingTools = longRareExpedition || ordinaryChannelMission;
             // A live descent-kit attestation is valid only if no dependency is appended after this
             // snapshot. Coal/iron/torch provisioning can consume slots or reserved materials even
@@ -649,12 +642,10 @@ public final class GoalPlanner {
                 // into DigDown/tree-chopping prerequisites, which would block the next batch instead;
                 // any underground shortfall is either resupplied from the depot at a service
                 // checkpoint or explicitly fails closed.
-                if (surfaceAcquisitionAllowed || willDescend) {
+                if (surfaceAcquisitionAllowed) {
                     if (longRareExpedition) {
-                        int descentTorchReserve = willDescend
-                                ? descendTorchBudget(plannedY, mineY) : 0;
                         int requiredTorches = roundUpToTorchRecipe(
-                                saturatedAdd(missionBudget.torchTarget(), descentTorchReserve));
+                                missionBudget.torchTarget());
                         if (missionBudget.targetCount() >= 64) {
                             requiredTorches = Math.max(requiredTorches,
                                     MiningBudget.DIAMOND_STACK_MIN_BOOTSTRAP_TORCHES);
@@ -708,73 +699,13 @@ public final class GoalPlanner {
             if (tier >= ToolTier.IRON && remaining < MiningBudget.EXPEDITION_THRESHOLD) {
                 ensureTorches(depth + 1, visiting); // a small quota follows the lightweight fast chain
             }
-            // Deep-ore mining rework P1: if the bot is far above the ore layer -> descend a shaft to
-            // the ore layer first, then mine. Otherwise, at the wrong height (measured at Y=48), it
-            // repeatedly "locks onto an out-of-reach ore diagonally below -> tunnels horizontally ->
-            // distance gets stuck -> no_progress," stalling for 11 minutes.
-            // Deep-dive durability fallback (root-cause fix for a real_diamond death observed by
-            // hand): once an iron pick wears out deep underground it cannot be resupplied in place --
-            // there are no trees down there for a furnace/fuel, so resupply's back-derivation of
-            // "gather oak -> craft furnace -> smelt iron ingot" is guaranteed to fail below Y<0
-            // (no trees within 96 blocks) -> repeated replans get stuck and the bot dies to mobs.
-            // Fix: before a deep dive, reserve 3 spare iron ingots (mined/smelted all at once at the
-            // surface). When the pick wears out deep down, craft a new one directly from the reserve
-            // + a portable crafting table + sticks (only needs a craft, no tree/furnace/smelting), so
-            // it is never trapped down there. Only reserved for deep dives (mining near the surface
-            // can resupply normally if the pick breaks).
-            if (tier >= ToolTier.IRON && willDescend
-                    && remaining < MiningBudget.EXPEDITION_THRESHOLD) {
-                ensureItem(Items.IRON_INGOT, SPARE_IRON_INGOTS, depth + 1, visiting);
-                // [Experiment reverted] Bringing along an iron-armor buff before diving for diamonds
-                // measured as a net drag (real_diamond 0/6 vs. a leaner baseline's 3/6): provisioning
-                // a helmet+chestplate (13 iron) before the dive stretched the chain too long -- the
-                // bot spent extra time within the 36000-tick budget mining 13 more iron, smelting and
-                // crafting armor, and timed out (5/6 timeout) before it even got to mining diamonds;
-                // and the armor was never once worn (the run failed in the earlier stage and never
-                // reached the dive). Survival benefit = 0, cost = the chain doubled. So the armor
-                // reservation was reverted; deep-dive survival now relies on reactive measures
-                // (self-rescue into lava/mud, burying near death, placing torches -- only pay the cost
-                // when actually in danger). Equipping armor on descent
-                // (DescendToYTask.onStart equipBestArmor) is kept: zero cost, and the background armor pass is best-first too.
-            }
             if (ordinaryChannelMission
                     && !ensureFreshOrdinaryChannelKit(budget, depth + 1, visiting)) {
                 return false;
             }
-            // Dependency planning above can itself move the simulated worker. Coal is the concrete
-            // case: provisioning torches for a larger coal batch recursively mines an initial coal
-            // batch and already descends to Y=48. Reusing the pre-dependency willDescend decision
-            // then emitted a second Y=48 hand-off; a vein ending at Y=47 made that redundant task
-            // fail as an overshoot even though the worker was already in the correct layer band.
-            // Keep DescendToYTask fail-closed for real pose drift and only suppress this stale step.
-            if (willDescend && plannedY - mineY > DESCEND_THRESHOLD) {
-                if (longRareExpedition) {
-                    boolean exactLiveKit = count == 64
-                            && bot != null
-                            && !missionId.isBlank()
-                            && steps.size() == rareBootstrapStart
-                            && MiningServiceTask.rareDescentKitReady(bot)
-                            && MiningServiceTask.ownedMissionDepot(bot, missionId);
-                    if (!exactLiveKit) {
-                        boolean kitReady = count == 64
-                                ? ensureRareDescentKit(expanded, count,
-                                missionBudget, depth + 1, visiting)
-                                : ensureDirectRareDescentKit(missionBudget,
-                                depth + 1, visiting);
-                        if (!kitReady) {
-                            return false;
-                        }
-                    }
-                }
-                // DescendToY may place one torch at the dark starting face and then every six
-                // vertical levels. Debit that worst-case use now so a later dependency cannot treat
-                // already-promised torches as its inventory baseline.
-                int descentTorches = descendTorchBudget(plannedY, mineY);
-                addStep(GoalStep.descendToY(mineY));
-                consumeItem(Items.TORCH, descentTorches);
-                plannedY = mineY;
-                initialOrePerceptionValid = false;
-            }
+            // Layer-directed descent was deliberately retired. An ore plan may prepare equipment,
+            // but the next mining task can proceed only when it has a freshly observed/revalidated
+            // target and a safe Baritone route; it never adds a shaft-digging step to discover one.
             int rareBatchOffset = longRareExpedition
                     ? Math.floorMod(owned, budget.batchSize()) : 0;
             if (longRareExpedition && rareBatchOffset == 0) {

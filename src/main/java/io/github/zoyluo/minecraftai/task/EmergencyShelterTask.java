@@ -121,6 +121,10 @@ public final class EmergencyShelterTask extends AbstractTask {
                                List<BlockPos> targets) {
     }
 
+    /** Exact player-eye evidence retained by the one physical doorway step. */
+    private record EgressAdmission(BlockPos origin, BlockPos destination, WalkedStep.Kind kind) {
+    }
+
     private final Queue<BlockPos> targets = new LinkedList<>();
     private final Map<BlockPos, BlockState> ownedPlacements = new LinkedHashMap<>();
     private final Set<Direction> rejectedEgress = EnumSet.noneOf(Direction.class);
@@ -694,7 +698,11 @@ public final class EmergencyShelterTask extends AbstractTask {
     /** Hands the bot to a walked step; false when the step cannot even start (the caller keeps its own failure semantics). */
     private boolean startMotion(AIPlayerEntity bot, Motion kind, WalkedStep step) {
         var pack = bot.getActionPack();
-        ActionPack.StepLease lease = pack.runStep(step);
+        EgressAdmission admission = kind == Motion.EGRESS
+                ? new EgressAdmission(bot.blockPosition().immutable(), step.cell().immutable(), step.kind()) : null;
+        ActionPack.StepLease lease = admission == null ? pack.runStep(step)
+                : pack.runStep(step, (guardBot, guardedStep) -> canContinueObservedEgress(
+                guardBot, guardedStep, admission));
         if (lease == null) {
             return false;
         }
@@ -1204,6 +1212,16 @@ public final class EmergencyShelterTask extends AbstractTask {
                 return;
             }
         }
+        // Every branch below either reads this doorway or acts on its owned block. Re-prove the
+        // entire feet/head/support envelope before continuing an old exit transaction.
+        if (!canObserveEgressCells(bot, egressFeet)) {
+            if (forcePressureExit) {
+                retryOrRejectEgress(bot, "shelter_exit_observation_lost", "egress_unobserved");
+            } else {
+                egressFeet = null;
+            }
+            return;
+        }
         if (exitMiningTarget != null) {
             BlockMiner.Status status = exitMiner.tick(bot);
             if (status == BlockMiner.Status.MINING) {
@@ -1235,8 +1253,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             exitMiner.tick(bot);
             return;
         }
-        Standability.clearCache();
-        if (!Standability.isStandable(bot.level(), egressFeet)) {
+        if (SwimRoute.observedCell(bot, bot.level(), egressFeet, false) != SwimRoute.Cell.DRY) {
             if (forcePressureExit) {
                 retryOrRejectEgress(bot, "shelter_exit_not_standable", "not_standable");
                 return;
@@ -1368,12 +1385,13 @@ public final class EmergencyShelterTask extends AbstractTask {
         // Out through the doorway on foot (a walked step onto the landing).  Forced egress treats
         // a preflight refusal as an attempt at this specific live doorway: otherwise an occupied
         // but terrain-standable landing would reopen and select itself forever.
-        Standability.clearCache();
         WalkedStep.Kind kind = WalkedStepRules.walkKindFor(egressFeet.getY() - bot.blockPosition().getY());
         String refusal = kind == null
                 ? "step_kind_unavailable"
-                : !Standability.isStandable(bot.level(), egressFeet)
-                ? "not_standable"
+                : SwimRoute.observedCell(bot, bot.level(), egressFeet, false) != SwimRoute.Cell.DRY
+                ? "egress_unobserved_or_unsafe"
+                : !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, egressFeet, kind)
+                ? "egress_refusal_envelope_unobserved"
                 : WalkedStep.refusal(bot, egressFeet, kind);
         if (refusal != null) {
             if (forcePressureExit) {
@@ -1385,6 +1403,44 @@ public final class EmergencyShelterTask extends AbstractTask {
             return;
         }
         startMotion(bot, Motion.EGRESS, WalkedStep.begin(bot, egressFeet, kind, "shelter_owned_egress"));
+    }
+
+    /**
+     * Re-proves the exact observed doorway before a later {@link WalkedStep} terrain validation.
+     * A stale shelter egress must release its lease rather than use an old observation after the
+     * player, dimension, or doorway has changed.
+     */
+    private static boolean canContinueObservedEgress(AIPlayerEntity bot, WalkedStep step,
+                                                      EgressAdmission admission) {
+        return step.kind() == admission.kind()
+                && step.cell().equals(admission.destination())
+                && withinEgressContinuationEnvelope(bot.blockPosition(), admission, step.ticks())
+                && SwimRoute.observedCell(bot, bot.level(), admission.destination(), false)
+                == SwimRoute.Cell.DRY
+                && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, admission.destination(), step.kind());
+    }
+
+    /** No-world-read provenance check matching WalkedStep's narrow first-tick normalization. */
+    private static boolean withinEgressContinuationEnvelope(BlockPos feet, EgressAdmission admission,
+                                                             int activeStepTicks) {
+        BlockPos origin = admission.origin();
+        BlockPos destination = admission.destination();
+        if (between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getY(), origin.getY(), destination.getY())
+                && between(feet.getZ(), origin.getZ(), destination.getZ())) {
+            return true;
+        }
+        return (admission.kind() == WalkedStep.Kind.FLAT
+                || admission.kind() == WalkedStep.Kind.STEP_UP
+                || admission.kind() == WalkedStep.Kind.STEP_DOWN)
+                && activeStepTicks >= 0 && activeStepTicks <= 1
+                && feet.getX() == origin.getX()
+                && feet.getZ() == origin.getZ()
+                && Math.abs(feet.getY() - origin.getY()) == 1;
+    }
+
+    private static boolean between(int value, int first, int second) {
+        return value >= Math.min(first, second) && value <= Math.max(first, second);
     }
 
     /**
@@ -2008,6 +2064,9 @@ public final class EmergencyShelterTask extends AbstractTask {
         // supported two-block doorway is available.
         for (Direction direction : HORIZONTAL) {
             BlockPos candidate = feet.relative(direction);
+            if (!canObserveEgressCells(bot, candidate)) {
+                continue;
+            }
             if (!isDryReplaceable(world.getBlockState(candidate))
                     || !isDryReplaceable(world.getBlockState(candidate.above()))) {
                 continue;
@@ -2019,6 +2078,9 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         for (Direction direction : HORIZONTAL) {
             BlockPos candidate = feet.relative(direction);
+            if (!canObserveEgressCells(bot, candidate)) {
+                continue;
+            }
             if (isDryReplaceable(world.getBlockState(candidate))
                     && isDryReplaceable(world.getBlockState(candidate.above()))
                     && isDryReplaceable(world.getBlockState(candidate.below()))) {
@@ -2094,12 +2156,14 @@ public final class EmergencyShelterTask extends AbstractTask {
 
     private boolean isRecoverableEgress(AIPlayerEntity bot, BlockPos candidate) {
         return candidate != null
+                && canObserveEgressCells(bot, candidate)
                 && isSafeSupport(bot, candidate.below())
                 && isOpenableEgress(bot, candidate);
     }
 
     private boolean isOpenableEgress(AIPlayerEntity bot, BlockPos candidate) {
         return candidate != null
+                && canObserveEgressCells(bot, candidate)
                 && (isOpenCell(bot, candidate) || ownsCurrentPlacement(bot, candidate))
                 && (isOpenCell(bot, candidate.above()) || ownsCurrentPlacement(bot, candidate.above()));
     }
@@ -2175,6 +2239,13 @@ public final class EmergencyShelterTask extends AbstractTask {
         return state.getFluidState().isEmpty()
                 && !state.getCollisionShape(world, pos).isEmpty()
                 && !Standability.isDangerous(state);
+    }
+
+    /** No doorway-state read is permitted until its feet, head, and support cells are in view. */
+    private static boolean canObserveEgressCells(AIPlayerEntity bot, BlockPos candidate) {
+        return ObservableWorldQuery.canObserveCell(bot, candidate)
+                && ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                && ObservableWorldQuery.canObserveCell(bot, candidate.below());
     }
 
     private static boolean isDryReplaceable(BlockState state) {

@@ -83,7 +83,7 @@ final class FollowFieldFixture {
         AIPlayerEntity bot = baritone ? arena.spawnOnBaritone(name, cell(dx, dz)) : arena.spawn(name, cell(dx, dz));
         botNames.add(name);
         if (!baritone) {
-            NavEngineSelector.setBotEngine(bot.getUUID(), io.github.zoyluo.minecraftai.navigation.NavEngine.LEGACY);
+            NavEngineSelector.setBotEngine(bot.getUUID(), io.github.zoyluo.minecraftai.navigation.NavEngine.BARITONE);
         }
         if (!bot.connection.hasClientLoaded()) {
             bot.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket());

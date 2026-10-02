@@ -71,43 +71,37 @@ class PathExecutorReplanGateTest {
     }
 
     @Test
-    void actionPackThreadsEachInitialMovementCeilingIntoItsExecutor() throws IOException {
+    void actionPackCarriesMovementLimitsIntoTheBaritoneRoute() throws IOException {
         String source = Files.readString(ACTION_PACK_SOURCE);
         String dig = between(source, "public ActionResult startDigPathTo", "public ActionResult startPathTo");
         String routed = between(source,
                 "private ActionResult startPathTo", "public BlockPos activePathGoal");
 
-        assertTrue(dig.contains("PathExecutor.hasPlaceableBlock(player, reserve)"),
+        assertTrue(dig.contains("hasPathSupport(player, protectedStoneLikeReserve)"),
                 "DIG planning must gate pillars with the caller's reserve");
-        assertTrue(dig.contains(
-                        "result.path(), resolvedGoal, canPillar, true, reserve"),
-                "DIG execution and replanning must retain the planning reserve");
-        assertTrue(routed.contains(
-                        "result.path(), resolvedGoal, canPillar, allowDigFallback, reserve"),
-                "ordinary and surface routes must persist their caller-specific reserve and ceiling");
+        assertTrue(dig.contains("routeOnBaritone(\"dig_path_to\""),
+                "DIG execution enters the Baritone-only route seam");
+        assertTrue(routed.contains("routeOnBaritone(\"path_to\""),
+                "ordinary and surface routes enter the same Baritone seam");
         assertTrue(source.contains(
                         "return startPathTo(goal, false, false, 0);"),
-                "surface and pickup paths must remain no-dig/no-pillar at startup and replan");
+                "surface and pickup paths remain no-dig/no-pillar");
         assertTrue(source.contains(
-                        "PathExecutor.RouteContract.constrainedSurface(minimumY, returnAnchor)"),
+                        "RouteConstraints.constrainedSurface(minimumY, returnAnchor)"),
                 "the constrained surface overload must build an immutable route contract");
-        assertTrue(routed.contains("PathExecutor.validateRouteContract")
-                        && routed.indexOf("PathExecutor.validateRouteContract")
-                        < routed.indexOf("this.pathExecutor ="),
-                "initial constrained routing must validate before installing an executor");
-        assertTrue(routed.contains("recenterPlayerInCurrentStandableCell")
-                        && routed.contains("walkFinder.findPathUncachedAtOrAbove")
-                        && routed.contains("findPathUncachedAtOrAbove"),
-                "constrained admission must stay in-cell and bypass TTL route results");
-        assertTrue(routed.contains("WALK_MAX_NODES, PATHFIND_MAX_MILLIS, false, false"),
-                "initial return proof must reuse the no-dig/no-pillar surface budget");
+        assertTrue(source.contains("routeConstraints.minimumY(), routeConstraints.returnAnchor()"),
+                "the immutable floor and return anchor are carried into NavRoute admission");
+        assertFalse(routed.contains("new AStarPathfinder(") || routed.contains("pathExecutor"),
+                "initial routing never installs the retired raw-world executor");
         assertTrue(source.contains("PathRequestIdentity")
-                        && source.contains("!request.equals(activePathRequest)"),
-                "path cooldown identity must include and replace the full active contract");
+                        && source.contains("identity.equals(lastPathRequest)"),
+                "path cooldown identity retains the full request contract");
+        assertFalse(source.contains("pathExecutor"),
+                "the Baritone route seam must not retain an alternate executor field");
         assertTrue(source.contains("return startPathTo(goal, 0);"),
-                "legacy ordinary paths must retain reserve=0 semantics");
+                "ordinary paths retain reserve=0 semantics");
         assertTrue(source.contains("return startDigPathTo(goal, 0);"),
-                "legacy DIG paths must retain reserve=0 semantics");
+                "DIG paths retain reserve=0 semantics");
     }
 
     @Test

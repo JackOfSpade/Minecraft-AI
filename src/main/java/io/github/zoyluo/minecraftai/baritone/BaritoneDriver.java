@@ -22,7 +22,7 @@ import java.util.function.BiFunction;
  *   beforePhysics
  *     1. refresh the observable entities       (server thread copy for the worker threads; no client counterpart)
  *     2. TickEvent PRE/IN                       Minecraft.tick, before the screen: PathingBehavior asks the processes for a command,
- *                                               PathExecutor runs the movement and sets the input keys and the look target,
+ *                                               Baritone's path executor runs the movement and sets the input keys and the look target,
  *                                               InputOverrideHandler clicks (BlockBreakHelper/BlockPlaceHelper), LookBehavior
  *                                               advances its aim processor
  *     3. input bridge                           PlayerMovementInput.tick + LocalPlayer.aiStep: zza/xxa/jump/sneak/sprint
@@ -38,7 +38,7 @@ import java.util.function.BiFunction;
  * block once the rotation it applied already points at it) hold unchanged.</p>
  *
  * <p>Single writer: a bot is <em>driven</em> from the first tick a process wants control (or a path is searched or run)
- * until the tick none does. While driven, the legacy {@code ActionPack} executes nothing and writes no inputs; when it is asked to
+ * until the tick none does. While driven, local {@code ActionPack} controllers execute nothing and write no inputs; when one is asked to
  * start something ({@code walkTo}, a path, mining, an input) it calls {@link BaritoneRegistry#preempt} first, which stops
  * Baritone and lets go of the inputs, so control changes hands with one tick of neutral input at most and never has two
  * writers. A bot that is not busy costs the driver one map lookup and a few field reads per tick.</p>
@@ -50,7 +50,7 @@ public final class BaritoneDriver {
     /**
      * Test seam (GameTests only): a fault raised from inside a driven tick, exactly where a Baritone call would raise it, to prove
      * the containment of {@link #beforePhysics}/{@link #afterPhysics} (a {@link NoClassDefFoundError} retires Baritone for the session
-     * and the bot carries on with the legacy executor in the same tick). Receives the phase name ({@code before_physics},
+     * and the affected route fails closed in the same tick). Receives the phase name ({@code before_physics},
      * {@code after_physics}). Always null in production.
      */
     static volatile java.util.function.Consumer<String> testFault;
@@ -64,7 +64,7 @@ public final class BaritoneDriver {
 
     /**
      * Runs steps 1-3 for the bot and reports whether Baritone owns its movement this tick. When it does the caller must skip
-     * every legacy input write for the tick. Server thread only. Never throws: a failing Baritone tick (any Throwable but a VM error) cancels Baritone for the
+     * every local-controller input write for the tick. Server thread only. Never throws: a failing Baritone tick (any Throwable but a VM error) cancels Baritone for the
      * bot (and is logged) instead of taking the bot's tick, and the server's, down with it.
      */
     public static boolean beforePhysics(AIPlayerEntity bot) {
@@ -89,6 +89,12 @@ public final class BaritoneDriver {
             if (guardedStepBlocksBaritone(bot, entry, baritone)) {
                 return false;
             }
+            // Publish a fresh immutable view cone before Baritone's PRE tick. A failed refresh
+            // revokes the route before it can produce movement input for a cell that has lost
+            // observation authority.
+            if (!BaritoneNavigator.refreshObservationFence(bot)) {
+                return false;
+            }
             if (entry.placedWater != null) {
                 BaritoneWaterFall.recover(bot, entry); // a water source a bucket fall left behind is taken back (also when not driven)
             }
@@ -101,6 +107,21 @@ public final class BaritoneDriver {
             // A callback in PRE may have changed controller ownership in this same tick; do
             // not let that turn into a bridge input below.
             if (guardedStepBlocksBaritone(bot, entry, baritone)) {
+                return false;
+            }
+            // Patch 0018 refuses an unsafe path inside PathExecutor before movement.update() can
+            // hand a click to InputOverrideHandler. Consume that exact reason here so the route
+            // is retired rather than allowing PathingBehavior to search for another executor.
+            String pathSafetyFailure = entry.context.consumeNavigationPathSafetyFailure();
+            if (pathSafetyFailure == null) {
+                // Defense in depth for an executor implementation that did not reach the patched
+                // callback: no key may reach physics for a dry partial path or unsafe fall.
+                pathSafetyFailure = BaritoneNavigator.activeObservedPathSafetyFailure(bot, baritone);
+            }
+            if (pathSafetyFailure != null) {
+                BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.PATH, bot, "baritone_observed_path_refused",
+                        "reason", pathSafetyFailure);
+                BaritoneRegistry.INSTANCE.revokeObservation(bot, pathSafetyFailure, false);
                 return false;
             }
             if (busy(baritone)) {
@@ -160,7 +181,7 @@ public final class BaritoneDriver {
     /**
      * Runs steps 4-7 for a bot that {@link #beforePhysics} reported as driven. Server thread only; never throws (see above).
      * Returns whether the steps ran to the end: false when the bot is no longer driven or a step failed (contained, and logged),
-     * in which case the caller lets the legacy executor take the rest of the tick.
+     * in which case the caller runs only its ordinary non-navigation bookkeeping for the rest of the tick.
      */
     public static boolean afterPhysics(AIPlayerEntity bot) {
         BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
@@ -170,7 +191,7 @@ public final class BaritoneDriver {
         IBaritone baritone = entry.baritone;
         try {
             // 4. The look target of this tick becomes the bot's rotation. LookBehavior writes yRot/xRot only; 5. the head and
-            // the body follow the way LookAction turns a bot, so what other players see and what the legacy aim reads agree.
+            // the body follow the way LookAction turns a bot, so what other players see and what local aiming reads agree.
             injectTestFault("after_physics");
             baritone.getGameEventHandler().onPlayerUpdate(new PlayerUpdateEvent(EventState.PRE));
             LookAction.setYawPitch(bot, bot.getYRot(), bot.getXRot());
@@ -180,7 +201,7 @@ public final class BaritoneDriver {
             double fallBefore = bot.fallDistance;
             float healthBefore = bot.getHealth();
             bot.doCheckFallDamage(bot.getX() - entry.startX, bot.getY() - entry.startY, bot.getZ() - entry.startZ, bot.onGround());
-            bot.markFallChecked(); // the bot's own per-tick check (every legacy tick) must not charge this tick again
+            bot.markFallChecked(); // the bot's own per-tick check (every non-Baritone tick) must not charge this tick again
             if (fallBefore > 0.0D && bot.onGround()) {
                 BotLog.danger(bot, "baritone_landing", "fall", fallBefore, "damage", healthBefore - bot.getHealth(), "fall_after", bot.fallDistance);
             }
@@ -201,7 +222,7 @@ public final class BaritoneDriver {
      * A Baritone call of a driven tick threw. Anything that is not a true VM error is contained here, so a bot's tick (and the
      * server) never dies of it: a linkage-type failure (a class that cannot load or initialise on this first driven tick: a mixin or
      * remap problem in some modpack; see {@link NavEngineSelector#isInitialisationFailure}) retires Baritone for the session, which
-     * lets go of every bot and hands all of them to the legacy navigator; any other failure only resets this bot's Baritone.
+     * lets go of every bot and stops their routes; any other failure only resets this bot's Baritone.
      */
     private static void tickFailed(AIPlayerEntity bot, String event, String reason, Throwable failure) {
         if (failure instanceof VirtualMachineError fatal && !(failure instanceof StackOverflowError)) {
@@ -209,7 +230,7 @@ public final class BaritoneDriver {
         }
         // beforePhysics contains failures itself and returns false, so AIPlayerEntity sees the
         // ordinary scheduler branch. Mark the actual Baritone failure here rather than relying on
-        // that later branch to have a legacy controller; otherwise a P3 Baritone row could be
+        // that later branch to have a local controller; otherwise a P3 Baritone row could be
         // mislabeled after a testFault or real driver failure.
         NavigationMeasurement.noteBaritoneFallback(bot);
         try {

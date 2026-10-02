@@ -15,8 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>These assertions read {@code HuntTask.java} (and, for the shared stateless route-proving
  * primitives extracted out of it, {@code HuntSurfaceRoutes.java}) as text on purpose: loading the
  * class would initialise its {@code EntityType}/{@code Item} constants, which needs a
- * bootstrapped Minecraft registry that plain unit tests do not have. The executable geometry
- * checks live in {@code PathExecutorRouteContractTest} instead.</p>
+ * bootstrapped Minecraft registry that plain unit tests do not have.</p>
  */
 class HuntConstrainedRouteSourceContractTest {
     private static final Path SOURCE = Path.of(
@@ -119,17 +118,21 @@ class HuntConstrainedRouteSourceContractTest {
     }
 
     @Test
-    void exactSurfaceProofDelegatesToTheSharedRouteContract() throws IOException {
+    void exactSurfaceProofUsesTheSameObservedAdmissionAsTheExecutedBaritoneRoute() throws IOException {
         String routes = Files.readString(ROUTES);
         String proof = between(
                 routes,
                 "private static HuntTask.SurfaceRouteProof proveExactSurfaceRoute",
                 "static HuntTask.SurfacePathStart startExactSurfacePath");
 
-        assertTrue(proof.contains("PathExecutor.isExactConstrainedRoute("),
-                "exactness must be decided by the shared route contract, not a local copy");
-        assertTrue(proof.contains("result, origin, destination, minimumY"),
-                "the shared contract must be given this proof's own origin and floor");
+        assertTrue(proof.contains("proveSurfaceRouteContract(bot, destination, minimumY, null, false)"),
+                "surface proof must defer to the observed route contract");
+        assertTrue(routes.contains("ObservedNavigationFence.admit("),
+                "hunt previews must use the immutable observed-terrain admission boundary");
+        assertFalse(routes.contains("new AStarPathfinder("),
+                "hunt must not query raw terrain with the retired A* planner before Baritone starts");
+        assertFalse(routes.contains("PathExecutor.isExactConstrainedRoute("),
+                "hunt must not retain the legacy raw-world route proof");
     }
 
     private static String between(String source, String startMarker, String endMarker) {

@@ -619,8 +619,8 @@ public final class CreatureSenses {
     }
 
     /**
-     * True when {@code bot}'s answers about projectiles are today's legacy line of sight, not the realistic perception: perception off,
-     * the strict capability bypass (HIDDEN_BLOCK_SCAN: the bot is allowed to know everything), or the fail-safe right after a scan
+     * True when {@code bot}'s answers about projectiles are today's legacy line of sight, not the realistic perception: perception off
+     * or the fail-safe right after a scan
      * threw. Then acting on a projectile takes no first-sighting reaction either (the shield guard asks this, not {@link #enabled}).
      */
     public boolean legacyProjectileAnswers(AIPlayerEntity bot) {
@@ -628,8 +628,9 @@ public final class CreatureSenses {
     }
 
     /**
-     * Whether visual-object questions use the legacy immediate answer: perception is off, the strict capability permits hidden scans,
-     * or this bot's scan has just failed open. Projectiles and visible non-creature hazards (for example primed TNT) share this policy.
+     * Whether visual-object questions use the legacy immediate answer: perception is off or this bot's scan has just failed open.
+     * The retired hidden-scan capability remains an explicit denied boundary in this method for audit coverage. Projectiles and visible
+     * non-creature hazards (for example primed TNT) share this policy.
      */
     public boolean legacyObservationAnswers(AIPlayerEntity bot) {
         return !enabled()

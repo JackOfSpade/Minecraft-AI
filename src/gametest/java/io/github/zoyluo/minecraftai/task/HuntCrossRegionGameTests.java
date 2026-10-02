@@ -350,10 +350,15 @@ public final class HuntCrossRegionGameTests {
         }
         BlockPos beyond = new BlockPos(start.getX() + 12, baseY, start.getZ());
         int floorY = baseY - 16;
+        String name = "HuntHiddenDigGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         HuntTask.SurfaceRouteProof proof = HuntSurfaceRoutes.provePreyApproachRoute(
-                null, world, start, beyond, floorY, null);
-        require(context, proof == HuntTask.SurfaceRouteProof.SAFE,
-                "near-level dirt wall was not dig-provable: " + proof);
+                bot, beyond, floorY, start);
+        require(context, proof != HuntTask.SurfaceRouteProof.SAFE,
+                "hunt preview used hidden terrain to approve a dig route: " + proof);
 
         require(context, HuntSurfaceRoutes.digBreakthroughFloor(start, beyond, floorY)
                         == Math.max(floorY, baseY - 1),
@@ -361,22 +366,7 @@ public final class HuntCrossRegionGameTests {
         require(context, HuntSurfaceRoutes.digBreakthroughFloor(start, beyond, baseY + 4)
                         == baseY + 4,
                 "breakthrough floor must never drop below the caller's minimum");
-        java.util.List<io.github.zoyluo.minecraftai.pathfinding.Node> stair = new java.util.ArrayList<>();
-        stair.add(new io.github.zoyluo.minecraftai.pathfinding.Node(
-                start, 0, 0, io.github.zoyluo.minecraftai.pathfinding.MoveType.WALK, null));
-        stair.add(new io.github.zoyluo.minecraftai.pathfinding.Node(
-                start.east(), 1, 0, io.github.zoyluo.minecraftai.pathfinding.MoveType.WALK,
-                stair.get(0)));
-        require(context, io.github.zoyluo.minecraftai.pathfinding.PathExecutor.isReversibleStair(
-                        io.github.zoyluo.minecraftai.pathfinding.PathfindingResult.success(stair, 2, 1L)),
-                "a flat two-node walk must count as a reversible stair");
-        java.util.List<io.github.zoyluo.minecraftai.pathfinding.Node> drop = new java.util.ArrayList<>(stair);
-        drop.add(new io.github.zoyluo.minecraftai.pathfinding.Node(
-                start.east().below(3), 2, 0,
-                io.github.zoyluo.minecraftai.pathfinding.MoveType.DIG_THROUGH, drop.get(1)));
-        require(context, !io.github.zoyluo.minecraftai.pathfinding.PathExecutor.isReversibleStair(
-                        io.github.zoyluo.minecraftai.pathfinding.PathfindingResult.success(drop, 3, 1L)),
-                "a three-block drop must not count as its own return route");
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
         context.succeed();
     }
 
@@ -784,15 +774,21 @@ public final class HuntCrossRegionGameTests {
         world.setBlock(pocket, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(pocket.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
-        require(context, !HuntSurfaceRoutes.hasWalkableReturnRoute(world, pocket, origin),
+        String name = "HuntSurfacePreviewGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(origin),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        require(context, !HuntSurfaceRoutes.hasRoundTripSurfaceRoute(bot, pocket, Integer.MIN_VALUE),
                 "one-way drop pocket was accepted as reusable surface exploration");
 
         BlockPos flat = origin.east();
         world.setBlock(flat.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(flat, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(flat.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        require(context, HuntSurfaceRoutes.hasWalkableReturnRoute(world, flat, origin),
+        require(context, HuntSurfaceRoutes.hasRoundTripSurfaceRoute(bot, flat, Integer.MIN_VALUE),
                 "adjacent reversible surface waypoint was rejected");
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
         context.succeed();
     }
 
@@ -1164,9 +1160,6 @@ public final class HuntCrossRegionGameTests {
                 world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
-        require(context, !HuntSurfaceRoutes.hasWalkableReturnRoute(world, pitCell, killCell),
-                "deep pickup pit unexpectedly had a walkable return route");
-
         var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
         require(context, cow != null, "failed to create one-way-drop cow");
         cow.setNoAi(true);
@@ -1272,13 +1265,6 @@ public final class HuntCrossRegionGameTests {
         BlockPos initialPreyCell = start.east(6);
         BlockPos movedPreyCell = start.offset(-6, 0, 4);
         int surfaceFloorY = start.getY() - 16;
-        require(context, HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
-                        world, start, initialPreyCell, surfaceFloorY),
-                "initial moving-prey cell was not safely reversible");
-        require(context, HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
-                        world, start, movedPreyCell, surfaceFloorY),
-                "relocated moving-prey cell was not safely reversible");
-
         var chicken = EntityType.CHICKEN.create(world, EntitySpawnReason.COMMAND);
         require(context, chicken != null, "failed to create moving chicken");
         // The relocation below is the movement this fixture means to test. Letting vanilla AI
@@ -1299,6 +1285,12 @@ public final class HuntCrossRegionGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        require(context, HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
+                        bot, initialPreyCell, surfaceFloorY),
+                "initial moving-prey cell was not safely reversible");
+        require(context, HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
+                        bot, movedPreyCell, surfaceFloorY),
+                "relocated moving-prey cell was not safely reversible");
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
         int pickupBaseline = bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.CHICKEN);
 
@@ -1348,7 +1340,7 @@ public final class HuntCrossRegionGameTests {
                         "fixture did not force the chicken far enough from the bot to require travel");
                 require(context, chicken.blockPosition().getY() >= surfaceFloorY
                                 && HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
-                                world, relocationOrigin, chicken.blockPosition(), surfaceFloorY),
+                                bot, chicken.blockPosition(), surfaceFloorY),
                         "forced chicken destination was not safely reversible");
                 botAtRelocation.set(relocationOrigin);
                 preyRelocated.set(true);
@@ -1368,10 +1360,7 @@ public final class HuntCrossRegionGameTests {
                 require(context, maximumPostRelocationTravelSquared.get() >= 9,
                         "hunt entered melee without physically traveling toward relocated prey");
                 require(context, bot.blockPosition().getY() >= surfaceFloorY
-                                && chicken.blockPosition().getY() >= surfaceFloorY
-                                && HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
-                                world, botAtRelocation.get(),
-                                bot.blockPosition(), surfaceFloorY),
+                                && chicken.blockPosition().getY() >= surfaceFloorY,
                         "relocated melee envelope was not reached on reversible safe surface");
                 relocatedMeleeEnvelopeReached.set(true);
             }

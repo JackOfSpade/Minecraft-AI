@@ -68,7 +68,9 @@ class DigDownReturnSourceContractTest {
         assertTrue(executor.contains("reconcileDigDownSteps(restoredSteps, metadata)"));
         assertTrue(executor.contains("reconcileDescendSteps(restoredSteps,"
                         + " restoredDescend.orElseThrow().targetY())"));
-        assertTrue(executor.contains("plan.takeTaskCheckpoint(GoalStep.Kind.MINE)"));
+        assertTrue(executor.contains("plan.currentTask instanceof CheckpointableTask checkpointable")
+                        && executor.contains("plan.taskCheckpointKind = plan.current.kind();"),
+                "a restored local-mining return debt must be captured through the generic durable-task boundary");
         assertTrue(executor.contains(
                 "restore.taskCheckpointKind() == GoalStep.Kind.MINE\n                && restoredDigDown.isEmpty()"),
                 "MINE kind without a checkpoint must fail closed");

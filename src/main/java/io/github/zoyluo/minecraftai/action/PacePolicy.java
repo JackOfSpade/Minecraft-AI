@@ -7,9 +7,9 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import java.util.function.Predicate;
 
 /**
- * The one walk/sprint/sneak policy of controller-driven travel (a legacy path or walk, or a Baritone route), the same for both
- * engines. Given what is going on it names the {@link Gait} of this tick; the enforcers ({@code ActionPack.onUpdate} for the legacy
- * engine, {@code BotInputBridge.apply} for Baritone) then write it into the bot, after the vanilla rules ({@link PaceRules}).
+ * The one walk/sprint/sneak policy of controller-driven travel (a bounded local action or a Baritone route). Given what is going on
+ * it names the {@link Gait} of this tick; the enforcers ({@code ActionPack.onUpdate} for local actions and
+ * {@code BotInputBridge.apply} for Baritone) then write it into the bot, after the vanilla rules ({@link PaceRules}).
  *
  * <p>Order of the rules (the first that applies decides; the ceilings are applied to whatever came out):</p>
  * <ol>
@@ -27,10 +27,10 @@ import java.util.function.Predicate;
  * </ol>
  * Then the ceilings: a <b>calm observed warden within 16 blocks</b> caps everything except a WARDEN lease to WALK (lifted while a
  * warden hunts the bot or the bot is taking damage), and a {@link ActionPack#capPace} ceiling (jump, drop, pillar, bridge and dig
- * nodes of the legacy executor) caps last: it beats pressure.
+ * nodes of a bounded local action) caps last: it beats pressure.
  *
- * <p>{@code pace.enabled=false} answers what the code did before this policy: the task's sprint flag, else a walk (the legacy
- * enforcer leaves the old sub-target sprint rule of {@code WalkToController} in charge, and the Baritone bridge skips the policy).</p>
+ * <p>{@code pace.enabled=false} answers what the code did before this policy: the task's sprint flag, else a walk (the local
+ * enforcer leaves the sub-target sprint rule of {@code WalkToController} in charge, and the Baritone bridge skips the policy).</p>
  *
  * <p>The decision itself ({@link #decide}) is pure; {@link #resolve} gathers its inputs from a bot.</p>
  */

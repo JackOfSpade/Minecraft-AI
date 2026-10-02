@@ -306,7 +306,7 @@ jar {
     }
 }
 
-// Vendored Baritone + our replayable patch series, compiled as the `baritone` source set (see tools/baritone/README.md).
+// Vendored Baritone + our replayable patch series, compiled as the `baritone` source set (see tools/baritone/patches/).
 apply from: 'tools/baritone/baritone.gradle'
 
 publishing {

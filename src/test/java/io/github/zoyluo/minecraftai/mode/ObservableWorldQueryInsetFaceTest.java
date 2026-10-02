@@ -43,16 +43,26 @@ class ObservableWorldQueryInsetFaceTest {
     void insetObservationIsExplicitShortRangeAndFluidAware() throws IOException {
         String source = Files.readString(SOURCE);
         int ordinary = source.indexOf("public static boolean canObserveBlock(");
+        int cellFace = source.indexOf("public static boolean canObserveBlockCellFace(");
         int inset = source.indexOf("public static boolean canObserveBlockWithInsetFaces(");
         int facePolicy = source.indexOf("private static boolean canObserveFaceAfterPolicy", inset);
-        assertTrue(ordinary >= 0 && inset > ordinary && facePolicy > inset);
+        assertTrue(ordinary >= 0 && cellFace > ordinary && inset > cellFace && facePolicy > inset);
         assertFalse(source.contains("insetFaceEndpoint") || source.contains("FACE_ENDPOINT_DEPTH"),
                 "the cell-face endpoint helper is gone; FaceAim.facePoint is the one point builder");
 
-        String ordinaryBody = source.substring(ordinary, inset);
+        int ordinaryEnd = source.indexOf("\n    }", ordinary) + "\n    }".length();
+        String ordinaryBody = source.substring(ordinary, ordinaryEnd);
         assertFalse(ordinaryBody.contains("FACE_SAMPLE_OFFSETS"),
                 "ordinary block observation must retain its six-ray cost");
         assertFalse(ordinaryBody.contains("canObserveBlockWithInsetFaces"));
+
+        int cellFaceEnd = source.indexOf("\n    }", cellFace) + "\n    }".length();
+        String cellFaceBody = source.substring(cellFace, cellFaceEnd);
+        assertTrue(cellFaceBody.contains("FaceAim.facePoint(cell, face"));
+        assertTrue(cellFaceBody.contains("ClipContext.Fluid.ANY"));
+        assertTrue(cellFaceBody.contains("pos.equals(hit.getBlockPos())"));
+        assertFalse(cellFaceBody.contains("getBlockState(") || cellFaceBody.contains("FaceAim.aim("),
+                "the preliminary cell-face proof must not read target state or shape before an action earns it");
 
         String insetBody = source.substring(inset, facePolicy);
         assertTrue(insetBody.contains("Math.min("));

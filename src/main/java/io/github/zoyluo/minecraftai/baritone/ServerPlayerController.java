@@ -107,20 +107,24 @@ public final class ServerPlayerController implements IPlayerController {
         if (ShieldGuard.usingShield(self)) {
             return InteractionResult.PASS;
         }
-        ItemStack inHand = self.getItemInHand(hand);
-        if ((inHand.isEmpty() || BaritoneWaterFall.isFallBucket(inHand.getItem())) && BaritoneWaterFall.runningFall(self) != null) {
+        if (BaritoneBreakPlacePolicy.allowsFallBucketBlockPass(self, result, hand)) {
             // A bucket does nothing on a block: its use is the item use that follows (processRightClick, checked by BaritoneWaterFall).
             // The empty other hand of the same click has nothing to place either. Neither is a refusal.
             return InteractionResult.PASS;
         }
-        if (!BaritoneBreakPlacePolicy.checkClickBlock(self, result, hand).allowed()) {
+        BaritoneBreakPlacePolicy.Decision click = BaritoneBreakPlacePolicy.checkClickBlock(self, result, hand);
+        if (!click.allowed()) {
             return InteractionResult.FAIL;
         }
         String item = BuiltInRegistries.ITEM.getKey(self.getItemInHand(hand).getItem()).toString();
-        BuildAction.Use use = BuildAction.useItemOnHit(self, result, hand);
+        BuildAction.Use use = BuildAction.useItemOnHit(self, result, hand, click.placementState());
         if (use.placed()) {
             BaritoneEdits.record(self, new BaritoneEdits.Edit(BaritoneEdits.Kind.PLACE, use.destination().immutable(), item, item, 0,
                     self.getServer().getTickCount()));
+            // The checked placement supplied this exact throwaway-block result. Publish that
+            // provenance fact only; a successful click never authorises a second live scan of
+            // its destination or any neighbour.
+            BaritoneRegistry.INSTANCE.recordObservedPlacement(self, use.destination(), use.placementState());
         }
         return use.result();
     }
@@ -139,9 +143,10 @@ public final class ServerPlayerController implements IPlayerController {
         if (used == Items.WATER_BUCKET) {
             HitResult ray = self.pick(self.blockInteractionRange(), 1.0F, false);
             if (ray instanceof BlockHitResult block) {
-                BlockPos first = block.getBlockPos();
-                BlockPos second = first.relative(block.getDirection());
-                boolean[] wasSource = {world.getFluidState(first).isSource(), world.getFluidState(second).isSource()};
+                boolean[] wasSource = BaritoneWaterFall.observedSourceStates(self, block);
+                if (wasSource == null) {
+                    return InteractionResult.FAIL;
+                }
                 InteractionResult result = self.gameMode.useItem(self, world, self.getItemInHand(hand), hand);
                 BaritoneWaterFall.afterWaterBucketUse(self, block, wasSource);
                 return result;
@@ -182,16 +187,18 @@ public final class ServerPlayerController implements IPlayerController {
     /** One tick of the current break: true while it goes on or just finished, false when it cannot be done. */
     private boolean step() {
         AIPlayerEntity self = bot.get();
+        // Re-prove this exact cell before every current-state read. A worker path may still be
+        // valid while a live block is replaced, covered, or leaves the bot's view between ticks.
+        if (!BaritoneBreakPlacePolicy.checkBreak(self, mining.pos()).allowed()) {
+            mining.abort(self);
+            mining = null;
+            hitting = false;
+            return false;
+        }
         BlockState now = self.level().getBlockState(mining.pos());
         if (!now.equals(checkedState)) {
             // The cell changed under the break (another block, a door swinging, a flow): the rules apply to what is there now.
             checkedState = now;
-            if (!BaritoneBreakPlacePolicy.checkBreak(self, mining.pos()).allowed()) {
-                mining.abort(self);
-                mining = null;
-                hitting = false;
-                return false;
-            }
         }
         ActionResult result = mining.tick(self.getActionPack());
         if (result.isSuccess()) {
@@ -220,7 +227,6 @@ public final class ServerPlayerController implements IPlayerController {
         String tool = held.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(held.getItem()).toString();
         BotLog.action(self, "mine_complete", "block", block, "pos", LogFields.pos(finished.pos()), "tool", tool,
                 "ticks", finished.elapsedTicks(), "driver", "baritone");
-        BaritoneEdits.record(self, new BaritoneEdits.Edit(BaritoneEdits.Kind.BREAK, finished.pos().immutable(), block, tool,
-                finished.elapsedTicks(), self.getServer().getTickCount()));
+        BaritoneEdits.recordBreak(self, finished.pos(), block, tool, finished.elapsedTicks());
     }
 }

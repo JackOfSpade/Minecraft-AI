@@ -16,15 +16,21 @@ class CapabilityPolicyTest {
 
             assertFalse(decision.allowed(), capability.name());
             org.junit.jupiter.api.Assertions.assertEquals(
-                    CapabilityDecision.Reason.DENIED_STRICT_SURVIVAL, decision.reason());
+                    capability == PrivilegedCapability.HIDDEN_BLOCK_SCAN
+                            ? CapabilityDecision.Reason.DENIED_RETIRED_CAPABILITY
+                            : CapabilityDecision.Reason.DENIED_STRICT_SURVIVAL,
+                    decision.reason());
         }
     }
 
     @Test
-    void operatorHonorsEachCapabilityFlagIndependently() {
+    void operatorCannotReenableTheRetiredHiddenWorldCapability() {
         OperatorCapabilities flags = new OperatorCapabilities(true, false, false);
 
-        assertTrue(decide(flags, PrivilegedCapability.HIDDEN_BLOCK_SCAN).allowed());
+        CapabilityDecision hidden = decide(flags, PrivilegedCapability.HIDDEN_BLOCK_SCAN);
+        assertFalse(hidden.allowed());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                CapabilityDecision.Reason.DENIED_RETIRED_CAPABILITY, hidden.reason());
         assertFalse(decide(flags, PrivilegedCapability.EMERGENCY_TELEPORT).allowed());
         assertFalse(decide(flags, PrivilegedCapability.MANUAL_TELEPORT).allowed());
     }
@@ -34,7 +40,7 @@ class CapabilityPolicyTest {
         assertFalse(CapabilityPolicy.decide(null, OperatorCapabilities.defaults(),
                 PrivilegedCapability.HIDDEN_BLOCK_SCAN).allowed());
         CapabilityDecision missing = CapabilityPolicy.decide(OperatingProfile.OPERATOR, null,
-                PrivilegedCapability.HIDDEN_BLOCK_SCAN);
+                PrivilegedCapability.EMERGENCY_TELEPORT);
         assertFalse(missing.allowed());
         org.junit.jupiter.api.Assertions.assertEquals(
                 CapabilityDecision.Reason.DENIED_MISSING_CONFIGURATION, missing.reason());

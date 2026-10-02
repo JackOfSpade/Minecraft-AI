@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
  * {@code ActionPack} without loading Baritone.
  *
  * <p>{@link Shape#BLOCK} is "stand in this cell" (a {@code GoalBlock}, or a {@code GoalNear} of radius 1 when the cell itself
- * cannot be stood in, which is what the legacy goal resolution did by moving the goal to the nearest standable cell);
+ * cannot be stood in, which is why Baritone resolves the request to a proven nearest standable cell);
  * {@link Shape#NEAR} is "get within {@code radius} blocks of this cell" (a {@code GoalNear}; follow, approach).</p>
  */
 public final class NavRoute {
@@ -28,23 +28,40 @@ public final class NavRoute {
         RUNNING,
         ARRIVED,
         ENDED_SHORT,
+        /** A target remembered from an earlier view could not be visibly re-proven on arrival. */
+        OBSERVATION_LOST,
         /** Baritone still drives it, but the strict-survival rules have refused its breaks/placements too many times in a row. */
         POLICY_REFUSED
     }
 
     /**
      * What the bot may do on the way. Breaking and placing are Baritone's own last-resort moves (its cost model always prefers
-     * walking around); they still go through the mod's {@code MiningController}/{@code BuildAction}. Water: a dry route never
-     * enters water (the follow rule "stay on the bank"); a swim route may, and is leased against the drowning safety net.
+     * walking around); they still go through the mod's {@code MiningController}/{@code BuildAction}. Water traversal is independent
+     * from goal resolution: a route may cross water on the way to its normal observed dry stance, while only an explicit swim
+     * request is satisfied in the actual observed water/shore cell and is leased against the drowning safety net.
      */
-    public record Options(boolean allowBreak, boolean allowPlace, boolean allowWater) {
+    public record Options(boolean allowBreak, boolean allowPlace, boolean allowWater, boolean exactWaterGoal) {
+        /** Source-compatible ordinary route constructor: water remains a traversal permission, never an exact goal. */
+        public Options(boolean allowBreak, boolean allowPlace, boolean allowWater) {
+            this(allowBreak, allowPlace, allowWater, false);
+        }
+
+        /** An exact water/shore goal cannot be meaningful on a route forbidden from entering water. */
+        public Options {
+            if (exactWaterGoal && !allowWater) {
+                throw new IllegalArgumentException("an exact water goal requires water traversal");
+            }
+        }
+
         /** Walk, climb and open doors only, on dry ground. */
-        public static final Options WALK_ONLY = new Options(false, false, false);
-        /** Water crossing allowed, no breaking, no placing. */
-        public static final Options SWIM = new Options(false, false, true);
+        public static final Options WALK_ONLY = new Options(false, false, false, false);
+        /** Water crossing allowed, no breaking or placing, while resolving an ordinary observed dry stance at the destination. */
+        public static final Options SWIM = new Options(false, false, true, false);
+        /** An internal/exact-water form for a route whose destination itself is an observed water or shore cell. */
+        public static final Options EXACT_SWIM = new Options(false, false, true, true);
 
         public Options withWater(boolean water) {
-            return water == allowWater ? this : new Options(allowBreak, allowPlace, water);
+            return water == allowWater ? this : new Options(allowBreak, allowPlace, water, exactWaterGoal && water);
         }
     }
 
@@ -54,17 +71,36 @@ public final class NavRoute {
     private final Options options;
     private final String label;
     private final int startTick;
+    /** A constrained surface route may never use a cell below this floor. */
+    private final int minimumY;
+    /** Optional observed-only return proof anchor for a constrained route. */
+    private final BlockPos returnAnchor;
+    /** Set by the observation admission boundary; remembered targets require a live proof before arrival. */
+    private boolean revalidateRememberedTarget;
+    /**
+     * Set only by observation admission for a visibly proven vertical placement column. The
+     * ordinary BLOCK form resolves to an already standable cell; this narrowly permits a
+     * Baritone pillar plan to create that footing from cells the bot has actually seen.
+     */
+    private boolean observedPillarGoal;
     private int deadlineTick;
     private BlockPos resolvedGoal;
     private Object goalHandle;
 
     public NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick) {
+        this(shape, target, radius, options, label, startTick, Integer.MIN_VALUE, null);
+    }
+
+    public NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick,
+                    int minimumY, BlockPos returnAnchor) {
         this.shape = shape;
         this.target = target.immutable();
         this.radius = Math.max(0, radius);
         this.options = options;
         this.label = label;
         this.startTick = startTick;
+        this.minimumY = minimumY;
+        this.returnAnchor = returnAnchor == null ? null : returnAnchor.immutable();
         this.deadlineTick = startTick + 600;
     }
 
@@ -91,6 +127,33 @@ public final class NavRoute {
 
     public int startTick() {
         return startTick;
+    }
+
+    /** The inclusive Y floor enforced by the observation fence, or {@link Integer#MIN_VALUE} when unconstrained. */
+    public int minimumY() {
+        return minimumY;
+    }
+
+    /** The optional surface-route anchor that must have an all-observed return corridor before admission. */
+    public BlockPos returnAnchor() {
+        return returnAnchor;
+    }
+
+    public boolean revalidateRememberedTarget() {
+        return revalidateRememberedTarget;
+    }
+
+    public void setRevalidateRememberedTarget(boolean revalidateRememberedTarget) {
+        this.revalidateRememberedTarget = revalidateRememberedTarget;
+    }
+
+    /** Whether admission proved an all-observed, vertical placement column for this BLOCK goal. */
+    public boolean observedPillarGoal() {
+        return observedPillarGoal;
+    }
+
+    public void setObservedPillarGoal(boolean observedPillarGoal) {
+        this.observedPillarGoal = observedPillarGoal;
     }
 
     /** The tick after which a route that is still running is abandoned with {@code path_timeout}. */

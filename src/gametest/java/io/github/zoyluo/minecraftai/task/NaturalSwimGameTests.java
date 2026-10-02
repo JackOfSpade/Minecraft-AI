@@ -66,7 +66,7 @@ public final class NaturalSwimGameTests {
     private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos where) {
         ServerLevel world = context.getLevel();
         AIPlayerEntity bot = FollowSwimGameTests.spawnBot(world, name, where);
-        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
         BotFixtureMoves.place(bot, where);
         bot.setHealth(bot.getMaxHealth());
         bot.getFoodData().setFoodLevel(20);

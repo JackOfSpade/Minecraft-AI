@@ -13,10 +13,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Engine selection and the fail-soft bootstrap: with the legacy engine Baritone work is never run; with the Baritone engine a
- * failure that means "this JVM cannot use Baritone" (a class that does not link or initialise: a mixin or remap problem in some
- * modpack) is logged once, marks Baritone unavailable for the session and answers with the legacy fallback from then on, while an
- * ordinary failure of one request only falls back for that request.
+ * Baritone-only selection and its fail-closed bootstrap. A failure that means this JVM cannot
+ * use Baritone is logged once and stops navigation for the session; an ordinary request failure
+ * returns only that request's typed stop result.
  */
 final class NavEngineSelectorTest {
     private MinecraftAiConfig original;
@@ -51,27 +50,29 @@ final class NavEngineSelectorTest {
 
     @Test
     void parsingAndThePureSelectionRule() {
-        assertEquals(NavEngine.LEGACY, NavEngine.parse(null));
-        assertEquals(NavEngine.LEGACY, NavEngine.parse("legacy"));
+        assertEquals(NavEngine.BARITONE, NavEngine.parse(null));
+        assertEquals(NavEngine.BARITONE, NavEngine.parse("legacy"));
         assertEquals(NavEngine.BARITONE, NavEngine.parse("Baritone"));
-        assertEquals(NavEngine.LEGACY, NavEngine.parse("something else"));
-        assertTrue(NavEngine.isKnown("baritone") && !NavEngine.isKnown("x") && !NavEngine.isKnown(null));
+        assertEquals(NavEngine.BARITONE, NavEngine.parse("something else"));
+        assertTrue(NavEngine.isKnown("baritone") && NavEngine.isKnown("legacy")
+                && !NavEngine.isKnown("x") && !NavEngine.isKnown(null));
         assertEquals(NavEngine.BARITONE, NavEngineSelector.effective(NavEngine.BARITONE, false));
-        assertEquals(NavEngine.LEGACY, NavEngineSelector.effective(NavEngine.BARITONE, true), "a failed Baritone is not selected");
-        assertEquals(NavEngine.LEGACY, NavEngineSelector.effective(NavEngine.LEGACY, true));
-        assertEquals(NavEngine.LEGACY, NavEngineSelector.effective(NavEngine.LEGACY, false));
+        assertEquals(NavEngine.BARITONE, NavEngineSelector.effective(NavEngine.BARITONE, true),
+                "identity remains Baritone even when requests are stopped");
+        assertEquals(NavEngine.BARITONE, NavEngineSelector.effective(NavEngine.LEGACY, true));
+        assertEquals(NavEngine.BARITONE, NavEngineSelector.effective(NavEngine.LEGACY, false));
     }
 
     @Test
-    void theDefaultConfigNeverEntersBaritone() {
+    void theDefaultConfigEntersBaritone() {
         AtomicInteger runs = new AtomicInteger();
         String answer = NavEngineSelector.attempt("test", () -> {
             runs.incrementAndGet();
             return "baritone";
-        }, () -> "legacy");
-        assertEquals("legacy", answer);
-        assertEquals(0, runs.get(), "with nav.engine=legacy no Baritone work may run");
-        assertFalse(NavEngineSelector.baritoneSelected());
+        }, () -> "stopped");
+        assertEquals("baritone", answer);
+        assertEquals(1, runs.get(), "the shipped config always asks Baritone");
+        assertTrue(NavEngineSelector.baritoneSelected());
         assertFalse(NavEngineSelector.baritoneLive(), "nothing marks Baritone live until an instance exists");
     }
 
@@ -79,32 +80,32 @@ final class NavEngineSelectorTest {
     void theBaritoneEngineRunsTheBaritoneWork() throws Exception {
         selectEngine(NavEngine.BARITONE);
         assertTrue(NavEngineSelector.baritoneSelected());
-        assertEquals("baritone", NavEngineSelector.attempt("test", () -> "baritone", () -> "legacy"));
+        assertEquals("baritone", NavEngineSelector.attempt("test", () -> "baritone", () -> "stopped"));
         assertFalse(NavEngineSelector.baritoneFailed());
     }
 
     @Test
-    void aLinkageFailureMarksBaritoneUnavailableOnceAndFallsBackForTheSession() throws Exception {
+    void aLinkageFailureMarksBaritoneUnavailableOnceAndStopsForTheSession() throws Exception {
         selectEngine(NavEngine.BARITONE);
         AtomicInteger runs = new AtomicInteger();
         String first = NavEngineSelector.attempt("path_to", () -> {
             runs.incrementAndGet();
             throw new NoClassDefFoundError("baritone/api/BaritoneAPI");
-        }, () -> "legacy");
-        assertEquals("legacy", first, "the failing request is answered by the fallback");
+        }, () -> "stopped");
+        assertEquals("stopped", first, "the failing request is answered by the typed stop result");
         assertEquals(1, runs.get());
         assertTrue(NavEngineSelector.baritoneFailed());
         assertTrue(NavEngineSelector.failureDescription().contains("path_to")
                 && NavEngineSelector.failureDescription().contains("BaritoneAPI"), NavEngineSelector.failureDescription());
-        // From now on the configured engine is still baritone, the effective one is not, and the work is not even attempted.
+        // From now on the configured/effective identity is still Baritone, but work is not even attempted.
         assertEquals(NavEngine.BARITONE, NavEngineSelector.configured());
-        assertEquals(NavEngine.LEGACY, NavEngineSelector.effective());
+        assertEquals(NavEngine.BARITONE, NavEngineSelector.effective());
         assertFalse(NavEngineSelector.baritoneSelected());
         String second = NavEngineSelector.attempt("path_to", () -> {
             runs.incrementAndGet();
             return "baritone";
-        }, () -> "legacy");
-        assertEquals("legacy", second);
+        }, () -> "stopped");
+        assertEquals("stopped", second);
         assertEquals(1, runs.get(), "Baritone is not asked again after it failed to initialise");
         // Marking is idempotent and keeps the first reason ("log once").
         assertFalse(NavEngineSelector.markBaritoneUnavailable("later", new LinkageError("later")));
@@ -124,25 +125,25 @@ final class NavEngineSelectorTest {
             NavEngineSelector.resetForTests();
             selectEngine(NavEngine.BARITONE);
             assertTrue(NavEngineSelector.isInitialisationFailure(failure), failure.toString());
-            assertEquals("legacy", NavEngineSelector.attempt("t", () -> {
+            assertEquals("stopped", NavEngineSelector.attempt("t", () -> {
                 NavEngineSelectorTest.<RuntimeException>sneakyThrow(failure);
                 return "baritone";
-            }, () -> "legacy"));
+            }, () -> "stopped"));
             assertTrue(NavEngineSelector.baritoneFailed(), failure.toString());
         }
     }
 
     @Test
-    void anOrdinaryFailureOnlyFallsBackForThatRequest() throws Exception {
+    void anOrdinaryFailureStopsOnlyThatRequest() throws Exception {
         selectEngine(NavEngine.BARITONE);
         assertFalse(NavEngineSelector.isInitialisationFailure(new IllegalStateException("bad request")));
         assertFalse(NavEngineSelector.isInitialisationFailure(new IllegalArgumentException("x", new NullPointerException())));
         String answer = NavEngineSelector.attempt("t", () -> {
             throw new IllegalStateException("one bad request");
-        }, () -> "legacy");
-        assertEquals("legacy", answer);
+        }, () -> "stopped");
+        assertEquals("stopped", answer);
         assertFalse(NavEngineSelector.baritoneFailed(), "an ordinary exception does not retire Baritone");
-        assertEquals("baritone", NavEngineSelector.attempt("t", () -> "baritone", () -> "legacy"), "the next request tries Baritone again");
+        assertEquals("baritone", NavEngineSelector.attempt("t", () -> "baritone", () -> "stopped"), "the next request tries Baritone again");
     }
 
     @Test
@@ -150,19 +151,19 @@ final class NavEngineSelectorTest {
         selectEngine(NavEngine.BARITONE);
         assertThrows(OutOfMemoryError.class, () -> NavEngineSelector.attempt("t", () -> {
             throw new OutOfMemoryError("test");
-        }, () -> "legacy"));
+        }, () -> "stopped"));
         assertFalse(NavEngineSelector.baritoneFailed());
     }
 
     @Test
-    void aBotCanRunOnTheOtherEngineWithoutChangingTheOthers() throws Exception {
+    void aBotCannotOptOutOfBaritone() throws Exception {
         java.util.UUID special = java.util.UUID.randomUUID();
         java.util.UUID ordinary = java.util.UUID.randomUUID();
         NavEngineSelector.setBotEngine(special, NavEngine.BARITONE);
         assertTrue(NavEngineSelector.baritoneSelectedFor(special));
-        assertFalse(NavEngineSelector.baritoneSelectedFor(ordinary), "the global engine is legacy");
-        assertEquals("baritone", NavEngineSelector.attempt(special, "t", () -> "baritone", () -> "legacy"));
-        assertEquals("legacy", NavEngineSelector.attempt(ordinary, "t", () -> "baritone", () -> "legacy"));
+        assertTrue(NavEngineSelector.baritoneSelectedFor(ordinary), "the global engine is Baritone");
+        assertEquals("baritone", NavEngineSelector.attempt(special, "t", () -> "baritone", () -> "stopped"));
+        assertEquals("baritone", NavEngineSelector.attempt(ordinary, "t", () -> "baritone", () -> "stopped"));
         // A failed Baritone retires the engine for the override too.
         NavEngineSelector.markBaritoneUnavailable("test", new LinkageError("x"));
         assertFalse(NavEngineSelector.baritoneSelectedFor(special));
@@ -172,7 +173,7 @@ final class NavEngineSelectorTest {
         selectEngine(NavEngine.BARITONE);
         assertTrue(NavEngineSelector.baritoneSelectedFor(ordinary));
         NavEngineSelector.setBotEngine(ordinary, NavEngine.LEGACY);
-        assertFalse(NavEngineSelector.baritoneSelectedFor(ordinary), "a bot can also opt out of a global baritone engine");
+        assertTrue(NavEngineSelector.baritoneSelectedFor(ordinary), "a legacy request cannot opt a bot out");
         NavEngineSelector.clearBotEngine(ordinary);
         assertTrue(NavEngineSelector.baritoneSelectedFor(ordinary));
         NavEngineSelector.setBotEngine(special, NavEngine.LEGACY);

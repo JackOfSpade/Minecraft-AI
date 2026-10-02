@@ -39,19 +39,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Runs one navigation course for one engine and measures it (reached, ticks, damage, blocks broken/placed, water entered, failure
- * reason). The bot is driven only through the real task API ({@code FollowTask} on a stand-in player, or {@code MoveTask}), the
- * engine is chosen per bot with {@link NavEngineSelector#setBotEngine}, so the two runs of a course differ in nothing but the
- * engine. The result is logged as one {@code NAVCOURSE} line (console and {@code <game dir>/nav_courses/results.tsv}) and in the
- * bot's own log (PATH category, {@code nav_course_result}).
- *
- * <p>With {@code assertOutcome} the run asserts the safety invariants both engines must meet (no damage at all, never in water
- * or lava, never dead) plus the course's expectation (reach, hold, no block broken while a walkable way exists, the Baritone
- * routes really were Baritone's). Without it (the {@code ...Measurement} tests) nothing but the harness itself is asserted: the
- * run records a known failure of one engine.</p>
+ * Runs one Baritone navigation course and measures it (reached, ticks, damage, blocks broken/placed, water entered, failure reason).
+ * The bot is driven only through the real task API ({@code FollowTask} on a stand-in player, or {@code MoveTask}) on a fresh arena.
+ * The result is logged as one {@code NAVCOURSE} line (console and {@code <game dir>/nav_courses/results.tsv}) and in the bot's own
+ * log (PATH category, {@code nav_course_result}). Each run asserts the strict-survival safety and outcome invariants.
  */
 final class NavigationCourseRun {
     private static final Logger LOGGER = LoggerFactory.getLogger("NavigationCourses");
+    private static final NavEngine ENGINE = NavEngine.BARITONE;
     /** {@code STOP_DISTANCE} (3.0) plus the arrival slack (0.5) of {@code FollowTask}. */
     private static final double ARRIVED = 3.6D;
     /** How far above or below the followed player the follower may stand and still count as having reached them. */
@@ -64,8 +59,6 @@ final class NavigationCourseRun {
 
     private final GameTestHelper context;
     private final Course course;
-    private final NavEngine engine;
-    private final boolean assertOutcome;
     private final BaritoneEngineArena arena;
     private final List<Runner> runners = new ArrayList<>();
     private final List<Integer> legTicks = new ArrayList<>();
@@ -110,11 +103,9 @@ final class NavigationCourseRun {
         }
     }
 
-    private NavigationCourseRun(GameTestHelper context, Course course, NavEngine engine, boolean assertOutcome) {
+    private NavigationCourseRun(GameTestHelper context, Course course) {
         this.context = context;
         this.course = course;
-        this.engine = engine;
-        this.assertOutcome = assertOutcome;
         ServerLevel world = context.getLevel();
         BlockPos origin = context.absolutePos(new BlockPos(8, 60 + 12 * course.layer, 8));
         forceChunks(world, origin, course.halfX + 2, course.halfZ + 2);
@@ -124,15 +115,15 @@ final class NavigationCourseRun {
         this.tracker = new Tracker(arena, course.halfX, course.halfZ, course.floorDepth);
     }
 
-    static void run(GameTestHelper context, Course course, NavEngine engine, boolean assertOutcome) {
-        NavigationCourseRun run = new NavigationCourseRun(context, course, engine, assertOutcome);
+    static void run(GameTestHelper context, Course course) {
+        NavigationCourseRun run = new NavigationCourseRun(context, course);
         run.start();
     }
 
     // ---------------------------------------------------------------------------------------------------------------
 
     private String botName(int index) {
-        return "Nc" + course.id + (engine == NavEngine.BARITONE ? "B" : "L") + (course.starts.length > 1 ? Integer.toString(index + 1) : "");
+        return "Nc" + course.id + "B" + (course.starts.length > 1 ? Integer.toString(index + 1) : "");
     }
 
     private void start() {
@@ -145,10 +136,7 @@ final class NavigationCourseRun {
         for (int i = 0; i < course.starts.length; i++) {
             int[] s = course.starts[i];
             BlockPos feet = arena.cell(s[0], s[1], s[2]);
-            AIPlayerEntity bot = engine == NavEngine.BARITONE ? arena.spawnOnBaritone(botName(i), feet) : arena.spawn(botName(i), feet);
-            if (engine == NavEngine.LEGACY) {
-                NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
-            }
+            AIPlayerEntity bot = arena.spawnOnBaritone(botName(i), feet);
             if (course.pickaxe) {
                 bot.getInventory().setItem(0, new ItemStack(Items.STONE_PICKAXE));
                 bot.getInventory().setSelectedSlot(0);
@@ -156,7 +144,7 @@ final class NavigationCourseRun {
             Runner runner = new Runner(bot, botName(i));
             runners.add(runner);
         }
-        measurement = NavigationMeasurement.startScaleOneGameTest(course.id, engine,
+        measurement = NavigationMeasurement.startScaleOneGameTest(course.id, ENGINE,
                 runners.stream().map(runner -> runner.bot.getUUID()).toList());
         if (measurement != null) {
             for (Runner runner : runners) {
@@ -422,7 +410,6 @@ final class NavigationCourseRun {
         int lava = 0;
         int baritoneStarts = 0;
         boolean baritoneInstance = true;
-        boolean legacyInstance = false;
         for (Runner r : runners) {
             damage += r.damage;
             water += r.waterTicks;
@@ -431,7 +418,6 @@ final class NavigationCourseRun {
                 baritoneStarts += r.follow.baritoneStarts();
             }
             baritoneInstance &= BaritoneRegistry.INSTANCE.find(r.bot.getUUID()) != null;
-            legacyInstance |= BaritoneRegistry.INSTANCE.find(r.bot.getUUID()) != null;
         }
         int ticks = reached ? tick : course.budget;
         String reason = reached ? "-" : failure;
@@ -449,13 +435,13 @@ final class NavigationCourseRun {
             extra.append(" within4_5=").append(loopTicksAfterCatchUp == 0 ? 0 : 100 * closeTicks / loopTicksAfterCatchUp).append('%');
             extra.append(" lostTicks=").append(lostTicks);
         }
-        String text = String.join("\t", "NAVCOURSE", course.id, engine.name().toLowerCase(Locale.ROOT), Boolean.toString(reached), Integer.toString(ticks),
+        String text = String.join("\t", "NAVCOURSE", course.id, ENGINE.name().toLowerCase(Locale.ROOT), Boolean.toString(reached), Integer.toString(ticks),
                 String.format(Locale.ROOT, "%.1f", damage), Integer.toString(tracker.broken), Integer.toString(tracker.placed),
                 Integer.toString(water), Integer.toString(lava), reason, (detail + " | " + extra).replace('\t', ' ').replace('\n', ' '));
         LOGGER.info(text);
         append(text);
         for (Runner r : runners) {
-            BotLog.path(r.bot, "nav_course_result", "course", course.id, "engine", engine.name(), "reached", reached, "ticks", ticks,
+            BotLog.path(r.bot, "nav_course_result", "course", course.id, "engine", ENGINE.name(), "reached", reached, "ticks", ticks,
                     "damage", r.damage, "broken", tracker.broken, "placed", tracker.placed, "water_ticks", r.waterTicks,
                     "reason", reason, "detail", describeTask(r));
         }
@@ -476,61 +462,55 @@ final class NavigationCourseRun {
         if (measurementSnapshot != null && !measurementSnapshot.hasRequiredEvidence()) {
             violations.add("incomplete scale-one navigation evidence: " + measurementSnapshot.evidenceProblem());
         }
-        if (assertOutcome) {
-            if (damage > 0.001D) {
-                violations.add("took " + damage + " damage");
+        if (damage > 0.001D) {
+            violations.add("took " + damage + " damage");
+        }
+        if (water > 0) {
+            violations.add("was in water for " + water + " ticks");
+        }
+        if (lava > 0) {
+            violations.add("was in lava for " + lava + " ticks");
+        }
+        if ("died".equals(failure)) {
+            violations.add("died");
+        }
+        if (course.expect == Expect.REACH && !reached) {
+            violations.add("did not reach the target (" + failure + "): " + detail);
+        }
+        if (course.expect == Expect.HOLD) {
+            if (reached) {
+                violations.add("reached a target that has no dry route");
             }
-            if (water > 0) {
-                violations.add("was in water for " + water + " ticks");
-            }
-            if (lava > 0) {
-                violations.add("was in lava for " + lava + " ticks");
-            }
-            if ("died".equals(failure)) {
-                violations.add("died");
-            }
-            if (course.expect == Expect.REACH && !reached) {
-                violations.add("did not reach the target (" + failure + "): " + detail);
-            }
-            if (course.expect == Expect.HOLD) {
-                if (reached) {
-                    violations.add("reached a target that has no dry route");
+            for (Runner r : runners) {
+                if (r.maxX >= 0.5D) {
+                    violations.add(r.name + " crossed the moat, max x offset " + r.maxX);
                 }
-                for (Runner r : runners) {
-                    if (r.maxX >= 0.5D) {
-                        violations.add(r.name + " crossed the moat, max x offset " + r.maxX);
-                    }
-                    if (course.notice && r.follow != null && r.follow.noRouteNotices() < 1) {
-                        violations.add("the player was never told there is no dry route");
-                    }
-                    if (course.notice && r.follow != null && r.follow.noRouteNotices() > 2) {
-                        violations.add("the no-route notice repeats: " + r.follow.noRouteNotices());
-                    }
+                if (course.notice && r.follow != null && r.follow.noRouteNotices() < 1) {
+                    violations.add("the player was never told there is no dry route");
+                }
+                if (course.notice && r.follow != null && r.follow.noRouteNotices() > 2) {
+                    violations.add("the no-route notice repeats: " + r.follow.noRouteNotices());
                 }
             }
-            if (course.moving && lostTicks > 0) {
-                violations.add("the follower fell more than 8 blocks behind for " + lostTicks + " ticks");
-            }
-            if (course.noBreak && tracker.broken > 0) {
-                violations.add("broke " + tracker.broken + " block(s) although a walkable way exists");
-            }
-            if (course.pickaxe && course.id.equals("sealed") && reached && tracker.broken < 1) {
-                violations.add("got through a sealed wall without breaking anything?");
-            }
-            if (engine == NavEngine.BARITONE) {
-                if (course.mode == Mode.FOLLOW && baritoneStarts < 1) {
-                    violations.add("no Baritone route was ever started");
-                }
-                if (!baritoneInstance) {
-                    violations.add("a bot has no Baritone instance");
-                }
-            } else if (legacyInstance) {
-                violations.add("a legacy-engine bot has a Baritone instance");
-            }
+        }
+        if (course.moving && lostTicks > 0) {
+            violations.add("the follower fell more than 8 blocks behind for " + lostTicks + " ticks");
+        }
+        if (course.noBreak && tracker.broken > 0) {
+            violations.add("broke " + tracker.broken + " block(s) although a walkable way exists");
+        }
+        if (course.pickaxe && course.id.equals("sealed") && reached && tracker.broken < 1) {
+            violations.add("got through a sealed wall without breaking anything?");
+        }
+        if (course.mode == Mode.FOLLOW && baritoneStarts < 1) {
+            violations.add("no Baritone route was ever started");
+        }
+        if (!baritoneInstance) {
+            violations.add("a bot has no Baritone instance");
         }
         cleanup();
         if (!violations.isEmpty()) {
-            String message = "course " + course.id + " on " + engine + ": " + String.join("; ", violations);
+            String message = "course " + course.id + " on " + ENGINE + ": " + String.join("; ", violations);
             context.fail(Component.nullToEmpty(message));
             throw new IllegalStateException(message);
         }
@@ -588,7 +568,7 @@ final class NavigationCourseRun {
                 Integer.toString(engineTick.count()), format(engineTick.avgMs()), format(engineTick.p95Ms()), format(engineTick.maxMs()),
                 Integer.toString(serverTick.count()), format(serverTick.avgMs()), format(serverTick.p95Ms()), format(serverTick.maxMs()),
                 Integer.toString(plannerStats.count()), format(plannerStats.avgMs()), format(plannerStats.p95Ms()), format(plannerStats.maxMs()),
-                Integer.toString(driver.baritoneDriverTicks()), Integer.toString(driver.legacyActionPackTicks()),
+                Integer.toString(driver.baritoneDriverTicks()), Integer.toString(driver.actionPackUpdateTicks()),
                 Integer.toString(driver.baritoneFallbacks()));
         LOGGER.info(summary);
         boolean persisted = appendTo("measurements.tsv", summary, "navigation measurement");

@@ -21,7 +21,7 @@ class BuildActionShiftPlacementSourceTest {
         int crouchEnd = source.indexOf("public record Use(", crouching);
         String wrapper = source.substring(crouching, crouchEnd);
         int shiftOn = wrapper.indexOf("player.setShiftKeyDown(true)");
-        int click = wrapper.indexOf("useItemOnHit(player, hit, hand)");
+        int click = wrapper.indexOf("useItemOnHit(player, hit, hand, placementState)");
         int finallyBlock = wrapper.indexOf("finally");
         int restore = wrapper.indexOf("player.setShiftKeyDown(wasShifting)");
         assertTrue(shiftOn > 0 && shiftOn < click, "shift is pressed before the vanilla placement click");
@@ -38,7 +38,7 @@ class BuildActionShiftPlacementSourceTest {
 
         int place = source.indexOf("private static ActionResult placeBlock(");
         int placeEnd = source.indexOf("private static Use useItemOnHitCrouching(", place);
-        assertTrue(source.substring(place, placeEnd).contains("useItemOnHitCrouching(player, hit, hand)"),
+        assertTrue(source.substring(place, placeEnd).contains("useItemOnHitCrouching(player, hit, hand, placementState)"),
                 "placeBlock (and so placeBlockAt) clicks crouching");
     }
 

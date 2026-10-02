@@ -1,6 +1,5 @@
 package io.github.zoyluo.minecraftai.baritone;
 
-import baritone.api.IBaritone;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalComposite;
@@ -9,23 +8,20 @@ import baritone.api.pathing.goals.GoalTwoBlocks;
 import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.pathing.goals.GoalYLevel;
 import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * The only door through which a goal reaches a bot's Baritone instance: <b>coordinate goals built from targets the mod's own
- * observation layer produced</b>. Baritone can also find targets itself (its mine, get-to-block, farm and explore processes scan
- * every loaded chunk), which would let a strict-survival bot walk to an ore it has never seen; those processes are refused by
- * {@link BaritoneBreakPlacePolicy#allowScanningProcess} and this class never starts them. What it does start is the
- * {@code CustomGoalProcess} with a {@link GoalBlock}, {@link GoalNear}, {@link GoalTwoBlocks}, {@link GoalXZ}, {@link GoalYLevel}
- * or a {@link #composite} of those; any other goal type is refused with {@code goal_type_not_allowed}.
- *
- * <p>Walking to a coordinate needs no proof: the caller chose the coordinate from what it observed, and the path is planned
- * over the loaded chunks like every path of the legacy navigator. Digging to a coordinate ({@link #mineAt}) does: the block
- * there must be observable to the bot right now, be something a bot may break, and the bot must be allowed to break.</p>
+ * Compatibility helpers for callers that once submitted raw Baritone goals. Strict-survival
+ * navigation now enters only through {@link ActionPack}, which creates an immutable observed-cell
+ * fence before Baritone can plan or execute. Generic {@link Goal} submission is therefore refused;
+ * the coordinate helpers below translate to the audited ActionPack API instead.
  */
 public final class BaritoneGoals {
     private BaritoneGoals() {
@@ -62,7 +58,10 @@ public final class BaritoneGoals {
                 || goal instanceof GoalYLevel || goal instanceof CoordinateComposite;
     }
 
-    /** Gives the bot's Baritone a coordinate goal and starts walking there. Server thread. */
+    /**
+     * Raw Baritone-goal submission is retired: its general goal types cannot all be translated to
+     * an observation-backed route. Use {@link #walkTo}, {@link #walkNear}, or {@link #mineAt}.
+     */
     public static Outcome setGoal(AIPlayerEntity bot, Goal goal) {
         if (bot.getActionPack().baritoneControlBlocked()) {
             return Outcome.refused(ActionPack.GUARDED_STEP_FENCE);
@@ -71,22 +70,28 @@ public final class BaritoneGoals {
             BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, null, "goal_type_not_allowed", String.valueOf(goal));
             return Outcome.refused("goal_type_not_allowed");
         }
-        IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
-        baritone.getCustomGoalProcess().setGoalAndPath(goal);
-        return Outcome.ACCEPTED;
+        BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, null,
+                "direct_goal_api_retired", String.valueOf(goal));
+        return Outcome.refused("direct_goal_api_retired");
     }
 
     public static Outcome walkTo(AIPlayerEntity bot, BlockPos pos) {
-        return setGoal(bot, new GoalBlock(pos));
+        return fromRoute(bot.getActionPack().startPathTo(pos));
     }
 
     public static Outcome walkNear(AIPlayerEntity bot, BlockPos pos, int range) {
-        return setGoal(bot, new GoalNear(pos, range));
+        if (!ObservableWorldQuery.canObserveCell(bot, pos)) {
+            BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, pos,
+                    "target_not_observed", "walk_near");
+            return Outcome.refused("target_not_observed");
+        }
+        return fromRoute(bot.getActionPack().startApproachTo(pos, Math.max(0, range), false, false));
     }
 
     /**
-     * Digs to (and into) the block at {@code target}: refused unless the bot can observe that block right now (an ore behind rock
-     * that the bot has not seen is not a target), it is a kind of block a bot may break, and the bot may break at all.
+     * Starts a normal, immediately reachable mining action for an exposed target. Navigation to a
+     * farther block must be requested through the task-level observed-route API so a successful
+     * return cannot falsely imply that Baritone will mine the target after it arrives.
      */
     public static Outcome mineAt(AIPlayerEntity bot, BlockPos target) {
         if (bot.getActionPack().baritoneControlBlocked()) {
@@ -96,6 +101,17 @@ public final class BaritoneGoals {
             BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, "policy_no_break", "mine_at");
             return Outcome.refused("policy_no_break");
         }
+        // The shape-aware observation helpers read the target state to derive its outline. Earn
+        // that read with a shape-free current-cell ray first, as this direct public seam has no
+        // active route fence yet.
+        if (!ObservableWorldQuery.canObserveBlockCellFace(bot, target)
+                || (!ObservableWorldQuery.canObserveBlock(bot, target)
+                && !ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target))) {
+            BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, "target_not_observed", "mine_at");
+            return Outcome.refused("target_not_observed");
+        }
+        // The observation proof above authorises this one live read of the exact target, not a
+        // path scan or any neighbouring terrain read.
         BlockState state = bot.level().getBlockState(target);
         if (state.isAir()) {
             BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, "nothing_to_mine", "mine_at");
@@ -106,15 +122,21 @@ public final class BaritoneGoals {
             BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, denial, "mine_at");
             return Outcome.refused(denial);
         }
-        if (!ObservableWorldQuery.canObserveBlock(bot, target) && !ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target)) {
-            BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, "target_not_observed", "mine_at");
-            return Outcome.refused("target_not_observed");
+        if (!HarvestCore.canDirectMine(bot, target)) {
+            BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target,
+                    "target_out_of_interaction_range", "mine_at");
+            return Outcome.refused("target_out_of_interaction_range");
         }
-        return setGoal(bot, new GoalBlock(target));
+        Direction face = Direction.getApproximateNearest(bot.getEyePosition().subtract(target.getCenter()));
+        return fromRoute(bot.getActionPack().startMining(target, face));
     }
 
     /** For callers that build a set of stand cells around an observed target. */
     public static Goal nearAny(List<BlockPos> cells) {
         return composite(cells.stream().map(GoalBlock::new).toArray(Goal[]::new));
+    }
+
+    private static Outcome fromRoute(ActionResult result) {
+        return result.isFailed() ? Outcome.refused(result.reason()) : Outcome.ACCEPTED;
     }
 }

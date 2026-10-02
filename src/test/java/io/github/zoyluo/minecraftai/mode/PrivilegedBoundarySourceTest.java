@@ -171,9 +171,10 @@ class PrivilegedBoundarySourceTest {
                         && observation.contains("private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range)")
                         && observation.contains("canObserveCellWithinAfterPolicy(bot, pos, range, ClipContext.Fluid.ANY)"),
                 "ordinary block, collider, and interaction observers must retain Fluid.ANY occlusion");
-        assertEquals(Set.of("mode/ObservableWorldQuery.java", "task/NavSafetyNet.java", "task/SwimRoute.java"),
+        assertEquals(Set.of("baritone/BaritoneWaterFall.java", "baritone/ObservedNavigationFence.java", "mode/ObservableWorldQuery.java",
+                        "task/CreateObsidianTask.java", "task/NavSafetyNet.java", "task/SwimRoute.java"),
                 matchingSources(Pattern.compile("canObserve(?:Cell|Collider)ThroughFluids\\s*\\(")).keySet(),
-                "fluid-transparent observation must stay scoped to the reviewed water-navigation helpers");
+                "fluid-transparent observation must stay scoped to reviewed water-navigation helpers, observed own-bucket recovery, obsidian pickup, and the Baritone fence");
 
         int crisisEnd = safety.indexOf("/** Memoized front", crisis);
         int routeSearchEnd = safety.indexOf("private static int cellsFromOrigin", candidate);
@@ -388,8 +389,7 @@ class PrivilegedBoundarySourceTest {
         String sprinting = body(pack, "public void setSprinting(boolean sprinting)", "public void setJumping(boolean jumping)");
         String jumping = body(pack, "public void setJumping(boolean jumping)", "public void jumpOnce()");
         String jumpOnce = body(pack, "public void jumpOnce()", "// ==================== Pace");
-        String stopMovement = body(pack, "public void stopMovement()",
-                "/**\n     * Cancels the active path executor");
+        String stopMovement = body(pack, "public void stopMovement()", "public void stopNavigation()");
         String stopNavigation = body(pack, "public void stopNavigation()", "public void stopAll()");
         String stopAll = body(pack, "public void stopAll()", "public boolean hasActiveActions()");
         assertTrue(controllerFence.contains("return guardedStepLease != null;")
@@ -450,24 +450,24 @@ class PrivilegedBoundarySourceTest {
                 "public static Outcome walkTo");
         int goalFence = setGoal.indexOf("if (bot.getActionPack().baritoneControlBlocked())");
         int goalRefusal = setGoal.indexOf("Outcome.refused(ActionPack.GUARDED_STEP_FENCE)", goalFence);
-        int goalMutation = setGoal.indexOf("setGoalAndPath(goal)");
-        assertTrue(goalFence >= 0 && goalRefusal > goalFence && goalMutation > goalRefusal,
-                "direct Baritone setGoal admission must refuse a guarded lease before mutating the process");
+        assertTrue(goalFence >= 0 && goalRefusal > goalFence && setGoal.contains("direct_goal_api_retired")
+                        && !setGoal.contains("setGoalAndPath("),
+                "the retired direct-goal adapter must refuse a guarded lease before any process mutation");
         String mineAt = body(goals, "public static Outcome mineAt(AIPlayerEntity bot, BlockPos target)",
                 "/** For callers that build a set of stand cells");
         int mineFence = mineAt.indexOf("if (bot.getActionPack().baritoneControlBlocked())");
         int minePolicy = mineAt.indexOf("BaritoneRegistry.INSTANCE.policy(bot)");
-        int mineGoal = mineAt.indexOf("return setGoal(bot, new GoalBlock(target));");
-        assertTrue(mineFence >= 0 && minePolicy > mineFence && mineGoal > minePolicy
+        int mineAction = mineAt.indexOf("bot.getActionPack().startMining(target, face)");
+        assertTrue(mineFence >= 0 && minePolicy > mineFence && mineAction > minePolicy
                         && mineAt.contains("Outcome.refused(ActionPack.GUARDED_STEP_FENCE)"),
-                "direct Baritone mine admission must likewise refuse the guarded lease before policy/world work or goal creation");
+                "the exposed-block mining adapter must refuse the guarded lease before policy/world work or action creation");
 
         String navigatorStart = body(navigator, "public static Admission start(AIPlayerEntity bot, NavRoute route, boolean admit)",
                 "/** A start that was refused or failed");
         int navigatorFence = navigatorStart.indexOf("if (bot.getActionPack().baritoneControlBlocked())");
         int navigatorRefusal = navigatorStart.indexOf("Admission.refused(ActionPack.GUARDED_STEP_FENCE)", navigatorFence);
         int registry = navigatorStart.indexOf("BaritoneRegistry registry = BaritoneRegistry.INSTANCE;", navigatorRefusal);
-        int policy = navigatorStart.indexOf("registry.setPolicy(bot, policyOf(options));", registry);
+        int policy = navigatorStart.indexOf("registry.setPolicy(bot, routePolicy);", registry);
         int navigatorGoalMutation = navigatorStart.indexOf("setGoalAndPath(goal)", policy);
         assertTrue(navigatorFence >= 0 && navigatorRefusal > navigatorFence && registry > navigatorRefusal
                         && policy > registry && navigatorGoalMutation > policy,
@@ -475,16 +475,21 @@ class PrivilegedBoundarySourceTest {
     }
 
     @Test
-    void digDownAndDigNavMoveByWalkedStepsNeverByTeleportPrimitives() throws IOException {
-        // R5: the stair descent, the horizontal advance and the return up the trail of DigDownTask, and the descent of DigNav, are
-        // input-driven WalkedSteps whose landing is verified on a later tick; neither calls a teleport primitive.
+    void digDownAndDigNavAvoidTeleportAndBlindExcavation() throws IOException {
+        // The historical DigDown task is retired at its entry boundary; its retained checkpoint
+        // reader still must not use a teleport primitive. DigNav is a Baritone adapter, not a
+        // walked-step excavator.
+        String digNav = read("action/DigNav.java");
         for (String file : new String[]{"task/DigDownTask.java", "action/DigNav.java"}) {
             String source = read(file);
             assertFalse(source.contains("FakePlayerMotion"), file + " must not use a FakePlayerMotion primitive");
             assertFalse(source.contains(".descendInto("), file + " must not use the teleporting descendInto");
             assertFalse(source.contains("teleportTo("), file + " must not teleport");
-            assertTrue(source.contains("beginDescend(") || source.contains("WalkedStep"), file + " moves by walked steps");
         }
+        assertTrue(digNav.contains("pack.startPathTo(target)")
+                        && !digNav.contains("TerrainProbe.firstNonAir")
+                        && !digNav.contains("beginDescend("),
+                "DigNav must delegate to observed Baritone routing rather than excavating a hidden step");
         String digDown = read("task/DigDownTask.java");
         int launch = digDown.indexOf("private boolean launchStep(");
         int settle = digDown.indexOf("private void settleStep(");
@@ -611,7 +616,8 @@ class PrivilegedBoundarySourceTest {
                 "face-center observation must not pre-empt the exact inset click sampler");
         assertTrue(build.contains("player.pick(sampleRange, 1.0F, false)"),
                 "exact placement rays must use the perception-and-interaction bounded range");
-        assertTrue(build.contains("hit.getDirection() != face"));
+        assertTrue(build.contains("hit.getDirection() == face"),
+                "the exact observed support face must still be matched before a placement click");
         assertFalse(build.contains("OperatingProfile"),
                 "no profile may use a placement path a survival player lacks");
         assertFalse(build.contains("setBlock("),

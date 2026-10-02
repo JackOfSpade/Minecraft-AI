@@ -5,11 +5,12 @@ import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.baritone.BaritoneDriver;
+import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavigationControllerOwner;
 import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
@@ -47,7 +48,7 @@ public class AIPlayerEntity extends ServerPlayer {
     @Override
     public void tick() {
         // Opt-in P3 evidence: this brackets the whole bot tick, including the engine-owned
-        // pre/post-physics Baritone driver or the legacy ActionPack update. It is a no-op unless
+        // pre/post-physics Baritone driver or the local ActionPack update. It is a no-op unless
         // the scale-one navigation-course fixture has registered this exact bot.
         long navigationMeasurementStarted = NavigationMeasurement.beginBotTick(this);
         // A real client resyncs this ~20x/sec via its own movement packets; this bot has no client to
@@ -67,7 +68,7 @@ public class AIPlayerEntity extends ServerPlayer {
 
         try {
             // While a Baritone process drives this bot it writes the inputs (before the physics tick below, like a client's
-            // input handling) and aims; the legacy executor is idle and writes nothing. See BaritoneDriver.
+            // input handling) and aims; competing local actions are idle and write nothing. See BaritoneDriver.
             // (Nothing Baritone-shaped is even loaded until an instance exists: the hooks below start with NavEngineSelector.baritoneActive().)
             boolean baritoneDrives = baritoneBeforePhysics();
             super.tick();
@@ -78,32 +79,32 @@ public class AIPlayerEntity extends ServerPlayer {
                     baritoneCompleted = baritoneAfterPhysics();
                 } finally {
                     // This is the actual driver branch, unlike NavEngineSelector's requested/effective
-                    // configuration. Keep it in finally: the legacy ActionPack fallback can itself
-                    // throw, but that must still invalidate an opt-in P3 Baritone row.
+                    // configuration. Keep it in finally: a local ActionPack update can itself
+                    // throw, but that must still invalidate an opt-in Baritone diagnostic row.
                     if (navigationMeasurementStarted > 0L) {
-                        NavEngine owner = baritoneCompleted ? null : this.actionPack.navigationOwnerForMeasurement();
+                        NavigationControllerOwner owner = baritoneCompleted ? null : this.actionPack.controllerOwnerForMeasurement();
                         NavigationMeasurement.noteDriver(this, true, !baritoneCompleted, owner);
                     }
                 }
                 checkFallDamageOnce(); // a no-op when the driver checked
             } else {
                 checkFallDamageOnce();
-                // A direct legacy walk/mining/step may clear itself during this update. Observe
-                // both sides while P3 capture is active so that one-tick fallback cannot be
-                // mislabeled as an idle Baritone scheduler tick.
-                NavEngine ownerBeforeUpdate = null;
+                // A direct local walk/mining/step may clear itself during this update. Observe
+                // both sides while diagnostic capture is active so that one-tick local control
+                // cannot be mislabeled as an idle Baritone scheduler tick.
+                NavigationControllerOwner ownerBeforeUpdate = null;
                 if (navigationMeasurementStarted > 0L) {
-                    ownerBeforeUpdate = this.actionPack.navigationOwnerForMeasurement();
+                    ownerBeforeUpdate = this.actionPack.controllerOwnerForMeasurement();
                 }
                 try {
                     this.actionPack.onUpdate();
                 } finally {
                     // The scheduler also admits a newly requested Baritone route from this branch, so
                     // it is recorded for provenance but is not by itself a Baritone fallback. The
-                    // post-update owner distinguishes it from actual legacy path/direct-dig control.
-                    // Finally preserves a one-tick legacy controller even when its update throws.
+                    // post-update owner distinguishes it from an actual local path/direct-dig control.
+                    // Finally preserves a one-tick local controller even when its update throws.
                     if (navigationMeasurementStarted > 0L) {
-                        NavEngine ownerAfterUpdate = this.actionPack.navigationOwnerForMeasurement();
+                        NavigationControllerOwner ownerAfterUpdate = this.actionPack.controllerOwnerForMeasurement();
                         NavigationMeasurement.noteDriver(this, false, true, ownerBeforeUpdate, ownerAfterUpdate);
                     }
                 }
@@ -148,7 +149,7 @@ public class AIPlayerEntity extends ServerPlayer {
      * The driver hook before the physics tick. Reached only while Baritone is active (initialised and not given up on). A failure
      * that escapes the driver (a class of Baritone that cannot even be loaded on this first driven tick) must not end the bot's tick:
      * it is classified by NavEngineSelector.handleFailure, which retires Baritone for the session when it is a linkage-type
-     * failure, and the tick carries on on the legacy path.
+     * failure, and the tick carries on only with independently owned local physical actions.
      */
     private boolean baritoneBeforePhysics() {
         if (!NavEngineSelector.baritoneActive()) {
@@ -158,7 +159,7 @@ public class AIPlayerEntity extends ServerPlayer {
             return BaritoneDriver.beforePhysics(this);
         } catch (Throwable failure) {
             // A linkage/load failure can escape before the driver gets to its own containment.
-            // The tick then looks like the ordinary legacy branch, so record the real Baritone
+            // The tick then looks like the ordinary ActionPack branch, so record the real Baritone
             // failure before fail-soft routing hands control over.
             NavigationMeasurement.noteBaritoneFallback(this);
             NavEngineSelector.handleFailure("baritone_before_physics", failure);
@@ -168,8 +169,8 @@ public class AIPlayerEntity extends ServerPlayer {
 
     /**
      * The driver hook after the physics tick, for a bot the hook before it reported as driven (same containment). If the hook did not
-     * complete (it failed, or the bot was no longer driven) or Baritone was retired by the failure, the legacy executor takes this
-     * tick over in the same tick: nobody else would advance its mining, walk or route bookkeeping until the next one.
+     * complete (it failed, or the bot was no longer driven) or Baritone was retired by the failure, the ordinary ActionPack update
+     * may advance independently owned local mining, walk, or safety bookkeeping in the same tick. It never starts another navigator.
      */
     private boolean baritoneAfterPhysics() {
         boolean completed = false;
@@ -178,7 +179,7 @@ public class AIPlayerEntity extends ServerPlayer {
                 completed = BaritoneDriver.afterPhysics(this);
             } catch (Throwable failure) {
                 // An exception can escape before BaritoneDriver's own containment. Record it
-                // before the legacy fallback below, because that fallback may throw too.
+                // before the local ActionPack update below, because that update may throw too.
                 NavigationMeasurement.noteBaritoneFallback(this);
                 NavEngineSelector.handleFailure("baritone_after_physics", failure);
             }
@@ -274,6 +275,16 @@ public class AIPlayerEntity extends ServerPlayer {
             TeleportAudit.record(this, this.position(), to);
         } catch (RuntimeException ignored) {
             // An audit line must never stop a teleport.
+        }
+        // A teleport is a discontinuity in both body position and what the bot has actually seen.
+        // Stop Baritone before vanilla relocates the entity so no old worker snapshot can issue one
+        // more input at the destination; this also clears bounded memory across a dimension or
+        // same-world safety relocation. The context independently denies a dimension mismatch for
+        // the worker-thread race until this server-thread cleanup has completed.
+        try {
+            BaritoneRegistry.INSTANCE.revokeObservation(this, "teleport", true);
+        } catch (RuntimeException ignored) {
+            // A navigation cleanup failure must never block a vanilla teleport.
         }
     }
 

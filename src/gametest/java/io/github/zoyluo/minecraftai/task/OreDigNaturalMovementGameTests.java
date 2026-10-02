@@ -78,7 +78,7 @@ public final class OreDigNaturalMovementGameTests {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(feet), yaw, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
         BotFixtureMoves.place(bot, feet);
         bot.setOnGround(true);
         bot.setHealth(bot.getMaxHealth());

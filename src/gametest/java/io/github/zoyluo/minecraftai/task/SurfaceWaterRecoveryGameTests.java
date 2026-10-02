@@ -711,7 +711,7 @@ public final class SurfaceWaterRecoveryGameTests {
         int routeDz = hiddenRouteFirst.getZ() - start.getZ();
         // Walk two cells forward before turning: diagonal strokes are valid physical water moves,
         // so a one-cell bend would make a later route cell directly adjacent to the origin and
-        // spoil the operator-versus-strict first-step differential.
+        // keep the hidden shore outside one direct observed step from the origin.
         BlockPos forwardTwo = hiddenRouteFirst.offset(routeDx, 0, routeDz);
         // Turn clockwise from the route's first horizontal edge, leaving a solid corner that
         // blocks a direct line from the bot's eye to the eventual shore.
@@ -745,20 +745,20 @@ public final class SurfaceWaterRecoveryGameTests {
         bot.setAirSupply(260);
         MinecraftAiConfig original = MinecraftAiConfig.get();
         try {
-            // The differential has to establish a real route for the old/raw side first. An
-            // otherwise disconnected world could make strict rejection look correct for the wrong
-            // reason. The operator rescue must choose the hidden route's first physical step.
+            // Neither profile may take the raw hidden route. Exercise operator first so an old
+            // configuration spelling cannot reintroduce it, then prove strict takes the same
+            // visible local exploration step.
             installConfig(withProfile(original, OperatingProfile.OPERATOR));
-            require(context, CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                             "operator_water_observation_gametest").allowed(),
-                    "operator control did not allow the raw water rescue route");
+                    "operator unexpectedly enabled hidden water scans");
             TeleportAudit.reset(bot);
             NavSafetyNet.INSTANCE.requestWaterRescue(bot);
             require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
                     "operator water rescue did not take control");
             require(context, bot.getActionPack().stepInFlightFor(
-                            "navsafe_water_rescue", hiddenRouteFirst, WalkedStep.Kind.SWIM),
-                    "operator rescue did not choose the physical hidden-route first step");
+                            "navsafe_water_rescue", visibleDeadEnd, WalkedStep.Kind.SWIM),
+                    "operator rescue did not choose its visible local exploration step");
             bot.getActionPack().cancelStep();
             NavSafetyNet.INSTANCE.clear(bot);
 
@@ -1410,9 +1410,9 @@ public final class SurfaceWaterRecoveryGameTests {
     }
 
     /**
-     * NavSafetyNet owns its own in-flight steps, so it must latch the capability state separately
-     * from FollowSwimming. An operator-rescue step made invalid before the next strict tick must be
-     * cancelled before the action pack can advance it.
+     * NavSafetyNet owns its own in-flight observed steps. A rescue step made invalid before the
+     * next strict tick must be cancelled before the action pack can advance it; no profile can
+     * make the hidden-world capability valid.
      */
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_operator_rescue_step_is_cancelled_before_strict_reproof", maxTicks = 30)
     public void operatorRescueStepIsCancelledBeforeStrictReproof(GameTestHelper context) {
@@ -1448,13 +1448,13 @@ public final class SurfaceWaterRecoveryGameTests {
         MinecraftAiConfig original = MinecraftAiConfig.get();
         try {
             installConfig(withProfile(original, OperatingProfile.OPERATOR));
-            require(context, CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                             "operator_rescue_step_provenance").allowed(),
-                    "operator fixture did not enable the hidden-world capability");
+                    "operator fixture unexpectedly enabled hidden-world scanning");
             TeleportAudit.reset(bot);
             NavSafetyNet.INSTANCE.requestWaterRescue(bot);
             require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
-                    "operator rescue did not start its provenance-bearing route step");
+                    "operator-profile rescue did not start its observation-bearing route step");
             require(context, bot.getActionPack().stepInFlightFor(
                             "navsafe_water_rescue", next, WalkedStep.Kind.SWIM),
                     "operator rescue did not begin its physical next step");
@@ -1474,7 +1474,7 @@ public final class SurfaceWaterRecoveryGameTests {
             require(context, bot.getActionPack().stepIdle()
                             && preOwner != null && preOwner.failed()
                             && "continuation_guard".equals(preOwner.reason()),
-                    "the ActionPack pre-owner tick did not reject the operator rescue step: "
+                    "the ActionPack pre-owner tick did not reject the invalidated observed rescue step: "
                             + (preOwner == null ? "no result" : preOwner.status() + " " + preOwner.reason()));
             require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
                     "the pre-owner rescue guard advanced the bot: " + before + " -> " + bot.position());
@@ -1482,7 +1482,7 @@ public final class SurfaceWaterRecoveryGameTests {
             require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
                     "strict rescue did not retain ownership for the reproof tick");
             require(context, bot.getActionPack().stepIdle(),
-                    "strict rescue let an operator-admitted in-flight step continue after reproof failed");
+                    "strict rescue let an invalidated observed step continue after reproof failed");
             require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
                     "rescue profile transition advanced the bot before strict reproof: "
                             + before + " -> " + bot.position());

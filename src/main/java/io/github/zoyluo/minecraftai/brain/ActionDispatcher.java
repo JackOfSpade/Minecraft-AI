@@ -16,13 +16,13 @@ public final class ActionDispatcher {
     // water/lava/mob piles, killing it) -> block these for a short time after a failure, forcing it to
     // retry with a high-level goal (mine_ore/gather) or stop.
     private static final java.util.Set<String> MANUAL_MINING_TOOLS =
-            java.util.Set.of("strip_mine", "mine_block", "move_to");
+            java.util.Set.of("mine_block", "move_to");
     // Gap fix (a death chain confirmed in testing): the brain can also use
-    // assign_task{task_type=move/mine/strip_mine} to bypass the tool-name block above (going through
+    // assign_task{task_type=move/mine} to bypass the tool-name block above (going through
     // assign_task still creates a MoveTask/mining task) -> block these dangerous subtypes as well;
     // high-level goals like mine_ore/gather are allowed through.
     private static final java.util.Set<String> MANUAL_MINING_TASK_TYPES =
-            java.util.Set.of("move", "mine", "strip_mine");
+            java.util.Set.of("move", "mine");
     private static final int GOAL_FAIL_GUARD_TICKS = 600; // 30s
     private static final java.util.Set<String> USER_PAUSED_ALLOWED_TOOLS = java.util.Set.of(
             "say", "get_task_status", "goal_status", "recall", "list_jobs", "pause", "resume", "stop", "cancel_all");
@@ -83,7 +83,7 @@ public final class ActionDispatcher {
                 return new ToolDefinition.ToolResult(false, "blocked: mission_user_paused");
             }
             // Optimization 2: right after a goal fails, the brain often switches to
-            // strip_mine/mine_block/move_to (or assign_task{move/mine/strip_mine}) to manually mine
+            // mine_block/move_to (or assign_task{move/mine}) to manually mine
             // block-by-block or move blindly, instantly burning through turns, and can dig the bot into
             // water/lava/mob piles, killing it (confirmed two deaths in testing).
             // Block it here to force it to retry with a high-level goal (mine_ore auto-locates ore /
@@ -155,7 +155,7 @@ public final class ActionDispatcher {
     }
 
     // Whether this is a "manual mining/blind movement" type call -- includes direct low-level tools
-    // (strip_mine/mine_block/move_to) and assign_task{task_type=move/mine/strip_mine} (closing the gap
+    // (mine_block/move_to) and assign_task{task_type=move/mine} (closing the gap
     // where the latter bypasses the tool-name block; high-level goals like mine_ore/gather are allowed
     // through).
     private static boolean isManualMiningOrMove(ChatToolCall call) {

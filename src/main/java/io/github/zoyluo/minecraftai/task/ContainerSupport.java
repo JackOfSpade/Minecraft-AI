@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -23,7 +24,14 @@ final class ContainerSupport {
         }
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos candidate = pos.relative(direction);
-            if (bot.level().hasChunkAt(candidate) && Standability.isStandable(bot.level(), candidate)) {
+            // A remembered container may nominate a route target, but its adjacent terrain is
+            // not remembered as fact. Prove feet, head, and support before Standability reads
+            // any collision state; Baritone will independently prove the route corridor.
+            if (bot.level().hasChunkAt(candidate)
+                    && ObservableWorldQuery.canObserveCell(bot, candidate)
+                    && ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                    && ObservableWorldQuery.canObserveCollider(bot, candidate.below())
+                    && Standability.isStandable(bot.level(), candidate)) {
                 return candidate.immutable();
             }
         }

@@ -28,7 +28,6 @@ import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
@@ -59,7 +58,6 @@ import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.StockpileTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
-import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
@@ -107,9 +105,7 @@ public final class ToolRegistry {
                                       boolean exposeLowLevelTools,
                                       boolean memoryToolsEnabled,
                                       boolean coordinationToolsEnabled) {
-        OperatingProfile profile = MinecraftAiConfig.get().profile();
         return tools.values().stream()
-                .filter(tool -> publishTool(profile, tool.name()))
                 .filter(tool -> switch (tool.group()) {
                     case CORE -> true;
                     case MEMORY -> memoryToolsEnabled;
@@ -151,23 +147,23 @@ public final class ToolRegistry {
             return ok("looked");
         });
 
-        register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
+        register("move_to", "Navigate to a coordinate through Baritone. If the full path request cannot be admitted, retries the same observed goal through Baritone's walk-goal entry point.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             BlockPos goal = blockPos(args);
             io.github.zoyluo.minecraftai.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
             if (pathResult.isInProgress() || pathResult.isSuccess()) {
-                return ok("pathfinding_started");
+                return ok("baritone_path_started");
             }
-            io.github.zoyluo.minecraftai.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3.atCenterOf(goal));
-            if (fallback.isInProgress() || fallback.isSuccess()) {
-                return ok("fallback_walk_started: " + pathResult.reason());
+            io.github.zoyluo.minecraftai.action.ActionResult walkGoal = MovementAction.startWalkTo(bot, Vec3.atCenterOf(goal));
+            if (walkGoal.isInProgress() || walkGoal.isSuccess()) {
+                return ok("baritone_walk_goal_started: " + pathResult.reason());
             }
-            return fail("path_and_walk_both_failed: " + pathResult.reason());
+            return fail("baritone_navigation_failed: " + pathResult.reason());
         });
 
-        register("mine_block", "Low-level single-block break at given coords. Bot must already be within reach. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
+        register("mine_block", "Low-level single-block break at given coords. The block must be visible and within reach; hidden coordinates are refused. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             BlockPos pos = blockPos(args);
-            MiningAction.startMining(bot, pos, Direction.getApproximateNearest(bot.getEyePosition().subtract(pos.getCenter())));
-            return ok("started");
+            return result(MiningAction.startMining(bot, pos,
+                    Direction.getApproximateNearest(bot.getEyePosition().subtract(pos.getCenter()))));
         });
 
         register("place_block", "Low-level manual placement of the currently held block at given coords. For crafting table placement during recipes, prefer craft because it can place a held crafting table automatically.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
@@ -302,42 +298,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("strip_mine", "Legacy operator-only branch tunnel task; unavailable in strict_survival. Mines a 2-high branch tunnel, follows veins, places torches, and can return to a depot chest when nearly full. Strict survival must use mine_ore or achieve_goal.", objectSchema()
-                .property("direction", stringSchema("north, south, east, or west"))
-                .property("length", integerSchema("main tunnel length"))
-                .property("spacing", integerSchema("branch spacing and branch depth"))
-                .property("depot_x", integerSchema("optional depot chest x"))
-                .property("depot_y", integerSchema("optional depot chest y"))
-                .property("depot_z", integerSchema("optional depot chest z"))
-                .property("target_ores", stringSchema("optional comma separated ore block ids; default is common ores"))
-                .build(), (bot, args) -> {
-            Optional<String> rejection = legacyMiningTaskRejection("strip_mine");
-            if (rejection.isPresent()) {
-                return fail(rejection.orElseThrow());
-            }
-            Task task = new StripMineTask(
-                    optionalDirection(args, "direction", Direction.NORTH),
-                    optionalInt(args, "length", 16),
-                    optionalInt(args, "spacing", 4),
-                    optionalBlockPos(args, "depot_x", "depot_y", "depot_z"),
-                    optionalBlocksCsv(args, "target_ores"));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
-
-        register("mine_vein", "Legacy operator-only nearby-vein task; unavailable in strict_survival. Optional target_ores is a comma separated list of ore block ids. Strict survival must use mine_ore.", objectSchema()
-                .property("target_ores", stringSchema("optional comma separated ore block ids; default is common ores"))
-                .build(), (bot, args) -> {
-            Optional<String> rejection = legacyMiningTaskRejection("mine_vein");
-            if (rejection.isPresent()) {
-                return fail(rejection.orElseThrow());
-            }
-            Task task = StripMineTask.mineNearbyVein(optionalBlocksCsv(args, "target_ores"));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
-
-        register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine the ore. For non-ore inventory items such as minecraft:obsidian, use achieve_goal instead. Do not manually break this into gather/craft/mine steps. Two modes: mode=count (default) mines `count` ore blocks and will strip-mine to find more. mode=vein is for 'mine the whole/entire vein', 'this vein', 'all of this ore', 'until the vein is gone': it mines exactly the connected vein of the nearest ore of that type the bot can see (or of the ore at x/y/z), then STOPS and reports how many were mined -- no branch mining, no digging down, no other veins. count is ignored in vein mode. Vein mode needs a suitable pickaxe already in the inventory and a visible ore.", objectSchema()
+        register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine only observed ore. For non-ore inventory items such as minecraft:obsidian, use achieve_goal instead. Do not manually break this into gather/craft/mine steps. Two modes: mode=count (default) mines `count` observed ore blocks and never tunnels toward an unseen target. mode=vein is for 'mine the whole/entire vein', 'this vein', 'all of this ore', 'until the vein is gone': it mines exactly the connected, observed vein of the nearest ore of that type the bot can see (or of the ore at x/y/z), then STOPS and reports how many were mined -- no branch mining, no digging down, no other veins. count is ignored in vein mode. Vein mode needs a suitable pickaxe already in the inventory and a visible ore.", objectSchema()
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore or minecraft:raw_iron"))
                 .property("count", integerSchema("how many ore blocks to mine (mode=count only)"))
                 .property("mode", enumStringSchema("count (default): mine `count` ores, searching further if needed. vein: mine the whole connected vein of one visible ore and stop when it is exhausted", MINE_ORE_MODES.toArray(new String[0])))
@@ -1005,18 +966,14 @@ public final class ToolRegistry {
 
     /** assign_task and the task lifecycle tools it shares status/cancellation with. */
     private void registerTaskLifecycleTools() {
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, and container work. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which auto-locates the nearest ore and mines it directly. Legacy strip_mine and mine_vein routes are operator-only and are rejected in strict_survival. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw; legacy operator-only: strip_mine, mine_vein"))
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, and container work. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which only selects observed targets. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+                .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
                 .build(), (bot, args) -> {
             String taskType = requiredString(args, "task_type");
             JsonObject params = args.getAsJsonObject("params");
-            Optional<String> legacyMiningRejection = legacyMiningTaskRejection(taskType);
-            if (legacyMiningRejection.isPresent()) {
-                return fail(legacyMiningRejection.orElseThrow());
-            }
             if (params == null) {
                 return fail("missing_or_bad_arg: params");
             }
@@ -1127,13 +1084,6 @@ public final class ToolRegistry {
                 yield new FarmTask(blockPos(params), optionalInt(params, "radius", 3), spec.seed(), spec.crop(), false, true);
             }
             case "breed" -> new BreedTask(requiredEntityType(params, "entity_type"), optionalInt(params, "pairs", 1));
-            case "strip_mine" -> new StripMineTask(
-                    optionalDirection(params, "direction", Direction.NORTH),
-                    optionalInt(params, "length", 16),
-                    optionalInt(params, "spacing", 4),
-                    optionalBlockPos(params, "depot_x", "depot_y", "depot_z"),
-                    optionalBlocksCsv(params, "target_ores"));
-            case "mine_vein" -> StripMineTask.mineNearbyVein(optionalBlocksCsv(params, "target_ores"));
             case "deposit" -> optionalBoolean(params, "junk", false)
                     ? ContainerTask.depositJunk(optionalBlockPos(params, "chest_x", "chest_y", "chest_z"))
                     : ContainerTask.deposit(
@@ -1231,22 +1181,6 @@ public final class ToolRegistry {
 
     private static ToolDefinition.ToolResult fail(String message) {
         return new ToolDefinition.ToolResult(false, message);
-    }
-
-    static boolean publishTool(OperatingProfile profile, String toolName) {
-        return !isLegacyMiningTask(toolName)
-                || StripMineTask.profileRejectionReason(profile).isEmpty();
-    }
-
-    private static Optional<String> legacyMiningTaskRejection(String taskType) {
-        if (!isLegacyMiningTask(taskType)) {
-            return Optional.empty();
-        }
-        return StripMineTask.profileRejectionReason(MinecraftAiConfig.get().profile());
-    }
-
-    private static boolean isLegacyMiningTask(String taskType) {
-        return "strip_mine".equals(taskType) || "mine_vein".equals(taskType);
     }
 
     private static void assignLlm(AIPlayerEntity bot, Task task) {

@@ -32,8 +32,8 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p>Strict survival expands only water and dry cells that the bot can currently observe: feet and
  * head are proved before their state is read, and a dry cell's support collider is proved before its
  * fresh standability check. Its visibility-filtered frontier is deliberately a local exploration
- * aid, not a hidden-world route planner. The explicit {@link PrivilegedCapability#HIDDEN_BLOCK_SCAN} capability
- * retains the established full bounded route planner for operator work. Every returned cell is also
+ * aid, not a hidden-world route planner. The retained {@link PrivilegedCapability#HIDDEN_BLOCK_SCAN} enum value
+ * is centrally retired in every profile, so no route may use the full-world planner. Every returned cell is also
  * re-verified against the live world by the {@code WalkedStep} rules as it is taken (a route is
  * dropped after repeated refused steps).
  */

@@ -15,25 +15,29 @@ class StripMineStrictSurvivalBoundaryTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
-    void strictSurvivalFailsClosedWhileOperatorKeepsLegacyCompatibility() {
-        assertEquals(StripMineTask.STRICT_SURVIVAL_REJECTION,
+    void retirementFailsClosedInEveryProfile() {
+        assertEquals(StripMineTask.RETIRED_REJECTION,
                 StripMineTask.profileRejectionReason(OperatingProfile.STRICT_SURVIVAL).orElseThrow());
-        assertEquals(StripMineTask.STRICT_SURVIVAL_REJECTION,
+        assertEquals(StripMineTask.RETIRED_REJECTION,
                 StripMineTask.profileRejectionReason(null).orElseThrow());
-        assertTrue(StripMineTask.profileRejectionReason(OperatingProfile.OPERATOR).isEmpty());
+        assertEquals(StripMineTask.RETIRED_REJECTION,
+                StripMineTask.profileRejectionReason(OperatingProfile.OPERATOR).orElseThrow());
     }
 
     @Test
     void taskGateRunsBeforeAnyLegacyWorldInitialization() throws IOException {
         String source = read("task/StripMineTask.java");
         int onStart = source.indexOf("protected void onStart");
-        int profileGate = source.indexOf("profileRejectionReason(MinecraftAiConfig.get().profile())", onStart);
-        int originRead = source.indexOf("origin = bot.blockPosition()", onStart);
+        int onTick = source.indexOf("protected void onTick", onStart);
+        String start = source.substring(onStart, onTick);
 
-        assertTrue(onStart >= 0 && profileGate > onStart && originRead > profileGate,
-                "strict profile gate must run before StripMine initializes from the world");
-        assertTrue(source.substring(profileGate, originRead).contains("return;"),
-                "strict rejection must return before any legacy raw reads");
+        assertTrue(onStart >= 0 && onTick > onStart
+                        && start.contains("profileRejectionReason(MinecraftAiConfig.get().profile())")
+                        && start.contains("fail(reason)")
+                        && start.contains("legacy_strip_mining_retired"),
+                "retirement must fail before the legacy task can initialize from world state");
+        assertFalse(start.contains("getBlockState") || start.contains("origin =") || start.contains("resolveDepotChest"),
+                "the retired entry point must not perform a legacy world read");
     }
 
     @Test

@@ -32,8 +32,10 @@ class BuildActionVisibilitySourceTest {
         assertTrue(body.indexOf("visibleSupportFaceHit")
                         < body.indexOf("player.isWithinBlockInteractionRange"),
                 "external support interaction checks require exact perception proof first");
-        assertTrue(body.indexOf("visibleSupportFaceHit") < body.indexOf("getBlockState(destination)"),
-                "destination reads require an exact visible support-face proof first");
+        assertTrue(body.indexOf("visibleSupportFaceHit") < body.indexOf("ObservableWorldQuery.canObserveCell(player, destination)"),
+                "destination observation requires an exact visible support-face proof first");
+        assertFalse(body.contains("getBlockState(destination)"),
+                "placement must not read the live destination to infer that a block was placed");
     }
 
     @Test

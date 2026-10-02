@@ -61,7 +61,7 @@ import net.minecraft.world.phys.BlockHitResult;
  *
  * <p><b>Scanning processes</b> (mine, get-to-block, farm, explore, build) choose their targets by scanning loaded chunks, that
  * is, they know where an ore is without having seen it. They may only start when the bot holds the hidden-scan privilege
- * ({@link PrivilegedCapability#HIDDEN_BLOCK_SCAN}, never granted in strict survival); Baritone only ever receives coordinate goals
+ * ({@link PrivilegedCapability#HIDDEN_BLOCK_SCAN}, retired in every profile); Baritone only ever receives coordinate goals
  * ({@link BaritoneGoals}) that the caller has already proven observable.</p>
  */
 public final class BaritoneBreakPlacePolicy {
@@ -80,12 +80,20 @@ public final class BaritoneBreakPlacePolicy {
     private BaritoneBreakPlacePolicy() {
     }
 
-    /** A decision: {@code reason} is null when allowed. */
-    public record Decision(boolean allowed, String reason) {
-        static final Decision ALLOWED = new Decision(true, null);
+    /**
+     * A decision: {@code reason} is null when allowed. {@code placementState} is non-null only
+     * for a checked throwaway-block placement, and is the action result the controller may publish
+     * without looking up the destination again.
+     */
+    public record Decision(boolean allowed, String reason, BlockState placementState) {
+        static final Decision ALLOWED = new Decision(true, null, null);
 
         static Decision refused(String reason) {
-            return new Decision(false, reason);
+            return new Decision(false, reason, null);
+        }
+
+        static Decision placement(BlockState state) {
+            return new Decision(true, null, state);
         }
     }
 
@@ -114,6 +122,12 @@ public final class BaritoneBreakPlacePolicy {
         if (!BaritoneRegistry.INSTANCE.policy(bot).allowBreak()) {
             return refuse(bot, BaritoneRefusals.Op.BREAK, pos, "policy_no_break", "-");
         }
+        // The direct first-hit proof and the active immutable fence both precede every current
+        // block-state or block-entity read. A visible loaded cell outside this route's evidence is
+        // not authority for Baritone to learn or change it.
+        if (!currentObservedNavigationCell(bot, pos)) {
+            return refuse(bot, BaritoneRefusals.Op.BREAK, pos, "not_observable", "-");
+        }
         BlockState state = bot.level().getBlockState(pos);
         if (state.isAir()) {
             return Decision.ALLOWED;
@@ -126,14 +140,13 @@ public final class BaritoneBreakPlacePolicy {
         if (bot.level().getBlockEntity(pos) != null) {
             return refuse(bot, BaritoneRefusals.Op.BREAK, pos, "block_entity", block);
         }
-        if (!observable(bot, pos)) {
-            return refuse(bot, BaritoneRefusals.Op.BREAK, pos, "not_observable", block);
-        }
         return Decision.ALLOWED;
     }
 
-    private static boolean observable(AIPlayerEntity bot, BlockPos pos) {
-        return ObservableWorldQuery.canObserveBlock(bot, pos) || ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos);
+    /** A current eye-ray proof is deliberately required in addition to the immutable route snapshot. */
+    private static boolean currentObservedNavigationCell(AIPlayerEntity bot, BlockPos pos) {
+        return BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, pos)
+                && ObservableWorldQuery.canObserveCell(bot, pos);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -143,17 +156,25 @@ public final class BaritoneBreakPlacePolicy {
     /** Whether a right click on the block of {@code hit} with the item in {@code hand} may go ahead (server thread). */
     public static Decision checkClickBlock(AIPlayerEntity bot, BlockHitResult hit, InteractionHand hand) {
         BlockPos against = hit.getBlockPos();
+        // Use the context rather than the raw fence: it rejects a same-coordinate snapshot from
+        // a previous dimension before the support-face proof is allowed to consult live terrain.
+        if (!BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, against)) {
+            return refuse(bot, BaritoneRefusals.Op.PLACE, against, "not_observable", "-");
+        }
+        String seen = BuildAction.supportFaceRefusal(bot, hit);
+        if (seen != null) {
+            return refuse(bot, BaritoneRefusals.Op.PLACE, against, seen, "-");
+        }
+        ObservedNavigationFence fence = BaritoneRegistry.INSTANCE.observationFence(bot);
+        // The exact support face is now freshly ray-proven and belongs to the active route, so
+        // its current state and the held tool may be consulted.
         BlockState support = bot.level().getBlockState(against);
         ItemStack held = bot.getItemInHand(hand);
         String detail = BuiltInRegistries.ITEM.getKey(held.getItem()) + "@" + BuiltInRegistries.BLOCK.getKey(support.getBlock());
-        String seen = BuildAction.supportFaceRefusal(bot, hit);
-        if (seen != null) {
-            return refuse(bot, BaritoneRefusals.Op.PLACE, against, seen, detail);
-        }
         if (opensOnClick(support, itemUseWinsOverBlock(bot))) {
             return Decision.ALLOWED; // a wooden door, a trapdoor, a fence gate: the click opens it, whatever the hand holds
         }
-        if (!(held.getItem() instanceof BlockItem)) {
+        if (!(held.getItem() instanceof BlockItem blockItem)) {
             return refuse(bot, BaritoneRefusals.Op.PLACE, against, "not_a_block_item", detail);
         }
         if (!BaritoneAPI.getSettings().acceptableThrowawayItems.value.contains(held.getItem())) {
@@ -165,7 +186,34 @@ public final class BaritoneBreakPlacePolicy {
         if (isUseInteractive(support)) {
             return refuse(bot, BaritoneRefusals.Op.PLACE, against, "support_is_interactive", detail);
         }
-        return Decision.ALLOWED;
+        BlockPos destination = against.relative(hit.getDirection());
+        // Planning may only have proposed a placement into already-observed air. The immutable
+        // state is the provenance proof here: do not peek at the live destination before the
+        // physical click. Vanilla may still reject a cell that changed since the snapshot.
+        if (!BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, destination)) {
+            return refuse(bot, BaritoneRefusals.Op.PLACE, destination, "destination_not_observed", detail);
+        }
+        BlockState destinationState = fence.stateAt(destination);
+        if (destinationState == null || !destinationState.isAir()) {
+            return refuse(bot, BaritoneRefusals.Op.PLACE, destination, "destination_not_observed", detail);
+        }
+        return Decision.placement(blockItem.getBlock().defaultBlockState());
+    }
+
+    /**
+     * A bucket-fall block click is deliberately passed through so Baritone can issue its paired
+     * item use. Even this no-op block click proves the exact cell first, before it reads the held
+     * item to decide whether the special fall rule applies.
+     */
+    static boolean allowsFallBucketBlockPass(AIPlayerEntity bot, BlockHitResult hit, InteractionHand hand) {
+        BlockPos against = hit.getBlockPos();
+        if (!BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, against)
+                || BuildAction.supportFaceRefusal(bot, hit) != null) {
+            return false;
+        }
+        ItemStack held = bot.getItemInHand(hand);
+        return (held.isEmpty() || BaritoneWaterFall.isFallBucket(held.getItem()))
+                && BaritoneWaterFall.runningFall(bot) != null;
     }
 
     /**

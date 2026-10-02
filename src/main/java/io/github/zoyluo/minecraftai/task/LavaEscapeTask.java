@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -90,22 +91,31 @@ public final class LavaEscapeTask extends AbstractTask {
         // Keep rising: hold jump in lava to slowly ascend.
         bot.getActionPack().setJumping(true);
 
-        // Find/reuse the nearest non-lava foothold (rescan on arrival or when it becomes invalid).
+        // Find/reuse a player-eye-proven dry foothold. Loaded terrain is not an escape route: the
+        // actual route is still admitted by the observed Baritone boundary below.
         if (target == null
                 || bot.blockPosition().closerThan(target, 1.6D)
-                || !Standability.isStandable(world, target)) {
-            Optional<BlockPos> bank = Standability.findNearestStandable(world, bot.blockPosition(), ESCAPE_RADIUS, 2, 3);
+                || !observedStandable(bot, world, target)) {
+            Optional<BlockPos> bank = nearestObservedStandable(bot, world, bot.blockPosition());
             target = bank.orElse(null);
         }
 
         if (target != null) {
-            // Rush toward the bank edge: look at it + walk straight there (use walk for
-            // short-distance lava escape, not pathfinding -- A* through lava would fail).
-            LookAction.lookAt(bot, Vec3.atCenterOf(target));
-            if (bot.getActionPack().isWalkToIdle()) {
-                bot.getActionPack().startWalkTo(Vec3.atCenterOf(target));
+            // A named bank is only a visible destination candidate. Baritone re-proves every
+            // route/action cell, so this cannot turn the rescue into a straight-line traversal
+            // through unobserved lava or stone.
+            if (bot.getActionPack().isPathExecutorIdle()) {
+                ActionResult route = bot.getActionPack().startPathTo(target);
+                if (route.isSuccess() || route.isInProgress()) {
+                    return;
+                }
+                BotLog.action(bot, "lava_escape_baritone_refused",
+                        "target", target.toShortString(), "reason", route.reason());
+                target = null;
             }
-            return;
+            if (target != null) {
+                return;
+            }
         }
 
         // No bank within 5 blocks around -> self-rescue by placing a block: place one block
@@ -131,5 +141,34 @@ public final class LavaEscapeTask extends AbstractTask {
             }
             lastPlaceTick = elapsed;
         }
+    }
+
+    private static boolean observedStandable(AIPlayerEntity bot, net.minecraft.server.level.ServerLevel world,
+                                             BlockPos candidate) {
+        return ObservableWorldQuery.canObserveCell(bot, candidate)
+                && ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                && ObservableWorldQuery.canObserveBlockCellFace(bot, candidate.below())
+                && Standability.isStandableFresh(world, candidate);
+    }
+
+    private static Optional<BlockPos> nearestObservedStandable(AIPlayerEntity bot,
+                                                                 net.minecraft.server.level.ServerLevel world,
+                                                                 BlockPos origin) {
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dy = -2; dy <= 3; dy++) {
+            for (int dx = -ESCAPE_RADIUS; dx <= ESCAPE_RADIUS; dx++) {
+                for (int dz = -ESCAPE_RADIUS; dz <= ESCAPE_RADIUS; dz++) {
+                    BlockPos candidate = origin.offset(dx, dy, dz);
+                    double distance = candidate.distSqr(origin);
+                    if (distance >= bestDistance || !observedStandable(bot, world, candidate)) {
+                        continue;
+                    }
+                    best = candidate.immutable();
+                    bestDistance = distance;
+                }
+            }
+        }
+        return Optional.ofNullable(best);
     }
 }

@@ -12,9 +12,9 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Source-contract pins for the lazy, fail-soft Baritone bootstrap and the routing table of the navigator seam: with the legacy
- * engine no hook that runs for every bot or every lifecycle event may reach a Baritone class, only the engine seam may enter
- * Baritone (through {@code NavEngineSelector.attempt}), and the legacy executor is dropped before Baritone moves the bot.
+ * Source-contract pins for the lazy, fail-closed Baritone bootstrap and the routing table of the
+ * sole navigator seam. Only that seam may enter Baritone (through {@code NavEngineSelector.attempt}),
+ * and any retired controller is dropped before Baritone moves the bot.
  */
 final class NavEngineLazyBootstrapContractTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
@@ -84,7 +84,7 @@ final class NavEngineLazyBootstrapContractTest {
             assertTrue(pack.substring(Math.max(0, at - 120), at).contains("NavEngineSelector.attempt("),
                     "startBaritoneRoute call at offset " + at + " is not inside NavEngineSelector.attempt");
         }
-        assertEquals(4, calls, "path_to, approach, swim_route and run_away are the entries of the Baritone engine");
+        assertEquals(5, calls, "walk_to, path_to, approach, swim_route and run_away are the Baritone entries");
         // Nothing else in the mod starts Baritone routes.
         try (Stream<Path> files = Files.walk(MAIN)) {
             List<Path> users = files.filter(p -> p.toString().endsWith(".java"))
@@ -118,31 +118,36 @@ final class NavEngineLazyBootstrapContractTest {
     }
 
     @Test
-    void theRoutingTableKeepsContractRoutesDigApproachesAndStraightWalksLegacy() throws IOException {
+    void theRoutingTableSendsEveryNavigationRequestToBaritone() throws IOException {
         String pack = read("action/ActionPack.java");
         int route = pack.indexOf("private ActionResult routeOnBaritone(");
-        int constrained = pack.indexOf("if (routeContract.constrained()) {", route);
-        int attempt = pack.indexOf("NavEngineSelector.attempt(player.getUUID(), kind", constrained);
-        assertTrue(route > 0 && constrained > route && attempt > constrained, "a contract route is answered (as not routed) before Baritone is asked");
+        int request = pack.indexOf("new NavRoute(NavRoute.Shape.BLOCK", route);
+        int attempt = pack.indexOf("NavEngineSelector.attempt(player.getUUID(), kind", request);
+        assertTrue(route > 0 && request > route && attempt > request,
+                "contract constraints become a Baritone route before the sole navigation attempt");
         int dig = pack.indexOf("public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {");
         int digEnd = pack.indexOf("public ActionResult startPathTo(BlockPos goal) {", dig);
-        assertFalse(pack.substring(dig, digEnd).contains("routeOnBaritone("), "dig approaches stay legacy in P1");
+        assertTrue(pack.substring(dig, digEnd).contains("routeOnBaritone(\"dig_path_to\""),
+                "dig approaches use Baritone admission");
         int walk = pack.indexOf("public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {");
         int walkEnd = pack.indexOf("// Unified entry point", walk);
-        assertFalse(pack.substring(walk, walkEnd).contains("routeOnBaritone("), "straight-line walks stay legacy in P1");
+        assertTrue(pack.substring(walk, walkEnd).contains("NavEngineSelector.attempt(")
+                        && pack.substring(walk, walkEnd).contains("startBaritoneRoute("),
+                "straight-line walks use a block-goal Baritone admission");
+        assertFalse(pack.contains("new AStarPathfinder("), "the action pack has no raw-world navigation fallback");
     }
 
     @Test
-    void theLegacyExecutorIsDroppedBeforeBaritoneMovesTheBot() throws IOException {
+    void retiredControllerStateIsDroppedBeforeBaritoneMovesTheBot() throws IOException {
         String pack = read("action/ActionPack.java");
         int start = pack.indexOf("private ActionResult startBaritoneRoute(");
         int yield = pack.indexOf("yieldToBaritone();", start);
         int admit = pack.indexOf("BaritoneNavigator.start(player, request, admit)", start);
-        assertTrue(start > 0 && yield > start && admit > yield, "single writer: legacy state is dropped first");
+        assertTrue(start > 0 && yield > start && admit > yield, "single writer: retired controller state is dropped first");
         String handoff = pack.substring(start, yield);
         assertTrue(handoff.contains("step != null"),
                 "an in-flight WalkedStep must be yielded before Baritone is admitted as the sole input writer");
-        // A legacy order cancels the recorded Baritone route through the shared claim.
+        // A physical action cancels the recorded Baritone route through the shared claim.
         assertTrue(pack.contains("private void claim(String why) {\n        releaseBaritone(why);"));
         assertTrue(pack.contains("cancelBaritoneRoute(\"stop_navigation\")"), "stopNavigation ends a Baritone route too");
     }

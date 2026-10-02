@@ -107,7 +107,7 @@ class NavigationMeasurementTest {
         NavigationMeasurement.Run missingDriver = NavigationMeasurement.startScaleOneGameTest(
                 "wall", NavEngine.BARITONE, List.of(bot));
         NavigationMeasurement.noteEffectiveEngine(bot, NavEngine.BARITONE);
-        // The scheduler can admit a Baritone route from its legacy branch before the first
+        // The ActionPack scheduler can admit a Baritone route before the first
         // driver tick. That is provenance, but it cannot prove a Baritone-labelled run drove.
         NavigationMeasurement.noteDriver(bot, false, true);
         NavigationMeasurement.recordBotTick(bot, 1_000_000L);
@@ -117,10 +117,10 @@ class NavigationMeasurementTest {
         NavigationMeasurement.Snapshot admissionOnly = NavigationMeasurement.finish(missingDriver,
                 new NavigationMeasurement.Outcome(true, 1, 0.0D, 0, 0, 0, 0, "-"));
         assertEquals(0, admissionOnly.driver().baritoneDriverTicks());
-        assertEquals(1, admissionOnly.driver().legacyActionPackTicks());
+        assertEquals(1, admissionOnly.driver().actionPackUpdateTicks());
         // A sealed/no-route course can truthfully consist of Baritone inline admissions plus a
         // holding scheduler tick. Its no-driver count is explicit in the artifact; it is not a
-        // legacy fallback while the matching Baritone planner row is present.
+        // local-action fallback while the matching Baritone planner row is present.
         assertTrue(admissionOnly.hasRequiredEvidence());
         assertEquals("", admissionOnly.evidenceProblem());
 
@@ -143,7 +143,7 @@ class NavigationMeasurementTest {
     }
 
     @Test
-    void legacyControllerAfterABaritoneRouteInvalidatesTheRow() {
+    void localActionAfterABaritoneRouteInvalidatesTheRow() {
         System.setProperty(NavigationMeasurement.MODE_PROPERTY, NavigationMeasurement.SCALE_ONE_GAMETEST);
         AStarPathfinder.setHarnessTimeScale(1L);
         UUID bot = UUID.randomUUID();
@@ -151,11 +151,11 @@ class NavigationMeasurementTest {
                 "wall", NavEngine.BARITONE, List.of(bot));
         NavigationMeasurement.noteEffectiveEngine(bot, NavEngine.BARITONE);
         NavigationMeasurement.noteDriver(bot, true, false);
-        // Models an ended Baritone route followed by MoveTask's legacy direct-dig/path controller:
-        // no selector exception or new A* invocation is needed for this to be a mislabeled row.
+        // Models an ended Baritone route followed by a direct local mining/input controller:
+        // no selector exception or retired navigator is needed for this to be a mislabeled row.
         // The controller may finish in the same ActionPack update; observing its pre-update
         // owner is enough to invalidate the otherwise Baritone-labelled row.
-        NavigationMeasurement.noteDriver(bot, false, true, NavEngine.LEGACY, null);
+        NavigationMeasurement.noteDriver(bot, false, true, NavigationControllerOwner.LOCAL_ACTION, null);
         NavigationMeasurement.recordBotTick(bot, 1_000_000L);
         NavigationMeasurement.endServerTick(System.nanoTime() - 1_000_000L);
         NavigationMeasurement.recordPlanner(bot, NavEngine.BARITONE, "admission", 1_000_000L, 1L, 1, 1, "SUCCESS");
@@ -181,7 +181,7 @@ class NavigationMeasurementTest {
         // tick's finally-based driver record. It must invalidate the row without inflating the
         // artifact's actual fallback count to two.
         NavigationMeasurement.noteBaritoneFallback(bot);
-        NavigationMeasurement.noteDriver(bot, true, true, NavEngine.LEGACY, null);
+        NavigationMeasurement.noteDriver(bot, true, true, NavigationControllerOwner.LOCAL_ACTION, null);
 
         NavigationMeasurement.Snapshot snapshot = NavigationMeasurement.finish(run,
                 new NavigationMeasurement.Outcome(true, 1, 0.0D, 0, 0, 0, 0, "-"));

@@ -14,7 +14,7 @@ final class NavRouteRulesTest {
     void requestFlagsBecomeRoutePermissions() {
         // ordinary walk: breaking is the legacy dig fallback, placing the legacy "can pillar"
         NavRoute.Options ordinary = NavRouteRules.optionsFor(true, true, 0, false);
-        assertTrue(ordinary.allowBreak() && ordinary.allowPlace() && !ordinary.allowWater());
+        assertTrue(ordinary.allowBreak() && ordinary.allowPlace() && !ordinary.allowWater() && !ordinary.exactWaterGoal());
         // surface-only walk (startSurfacePathTo): neither
         assertEquals(NavRoute.Options.WALK_ONLY, NavRouteRules.optionsFor(false, false, 0, false));
         // a caller that keeps a stone reserve never has it spent by the planner
@@ -22,9 +22,15 @@ final class NavRouteRulesTest {
         assertTrue(NavRouteRules.optionsFor(true, true, 4, false).allowBreak());
         // cannot pillar -> cannot place
         assertFalse(NavRouteRules.optionsFor(true, false, 0, false).allowPlace());
-        // a bot that stands in water may cross water (the way out is the first part of the route)
-        assertTrue(NavRouteRules.optionsFor(false, false, 0, true).allowWater());
-        assertEquals(NavRoute.Options.SWIM, NavRouteRules.optionsFor(false, false, 0, true));
+        // A bot that stands in water may cross water (the way out is the first part of the route),
+        // but that ordinary request still resolves its BLOCK goal to an observed dry stance.
+        NavRoute.Options waterTraversal = NavRouteRules.optionsFor(false, false, 0, true);
+        assertTrue(waterTraversal.allowWater());
+        assertFalse(waterTraversal.exactWaterGoal());
+        assertTrue(NavRoute.Options.SWIM.allowWater() && !NavRoute.Options.SWIM.exactWaterGoal(),
+                "a normal swim route may traverse water without turning its dry destination into a water goal");
+        assertTrue(NavRoute.Options.EXACT_SWIM.exactWaterGoal(),
+                "only the dedicated exact-water preset uses the actual water/shore cell as its goal");
     }
 
     @Test

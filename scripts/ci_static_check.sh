@@ -146,7 +146,7 @@ bash scripts/mining_evidence_aggregate.sh --self-test >/dev/null \
 bash scripts/lib/env_parse.sh --self-test >/dev/null \
   || fail 'deploy_profile.sh .env parser self-test failed'
 bash scripts/dev/nav_measurement.sh --self-test >/dev/null \
-  || fail 'P3 navigation measurement artifact snapshot self-test failed'
+  || fail 'Baritone navigation measurement artifact snapshot self-test failed'
 bash scripts/dev/unittest.sh --self-test >/dev/null \
   || fail 'portable unit-test runner self-test failed'
 bash scripts/dev/gametest.sh --self-test >/dev/null \

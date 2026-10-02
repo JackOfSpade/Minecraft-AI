@@ -66,10 +66,13 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("isSafePickupCollisionCell"),
                 "exact pickup microsteps must validate their final collision cell");
         assertTrue(task.contains("create_obsidian_pickup_no_progress_endpoint"));
-        assertTrue(task.contains("!Standability.isStandable(bot.level(), target)"),
-                "pickup pathing must reject a raw non-standable endpoint before A* can snap it");
+        assertTrue(task.contains("SwimRoute.observedCell(bot, bot.level(), target, false)"),
+                "pickup pathing must observe and classify its endpoint before Baritone can route to it");
         assertTrue(task.contains("resolved.equals(current)"),
                 "pickup pathing must reject a resolved no-op endpoint");
+        assertTrue(task.contains("canObservePickupTransitEnvelope")
+                        && task.contains("canContinueObservedPickupStep"),
+                "pickup microsteps must prove their cells before raw validation and on every continuation tick");
         assertTrue(task.contains("Phase.RETURN_TO_RIM"));
         assertTrue(task.contains("return_rim"),
                 "restart recovery must preserve the dry rim before clearing work targets");

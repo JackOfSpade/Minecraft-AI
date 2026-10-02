@@ -8,6 +8,7 @@ import baritone.api.event.listener.AbstractGameEventListener;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import java.util.List;
 import java.util.Map;
@@ -59,11 +60,21 @@ public final class BaritoneRegistry {
          * (see {@code NavSafetyNet#renewBaritoneWater}), and the lease ends with the drive.
          */
         volatile boolean waterAllowed;
+        /** The route whose immutable observation boundary is currently exposed to this instance. */
+        volatile NavRoute observedRoute;
+        /**
+         * A route was stopped because its terrain authority disappeared, rather than because
+         * Baritone merely ended its path. Kept until the owning ActionPack records the typed
+         * outcome or a newly admitted route replaces it.
+         */
+        volatile String observationRevocationReason;
         /** The last path event Baritone reported and the server tick it arrived in (how a route that ended short of its goal failed). */
         volatile PathEvent lastEvent;
         volatile int lastEventTick = -1;
         /** The water source a bucket fall placed and has not taken back yet, and the server tick it was placed in ({@link BaritoneWaterFall}). */
         volatile net.minecraft.core.BlockPos placedWater;
+        /** Dimension of {@link #placedWater}; own-action provenance never crosses a teleport. */
+        volatile String placedWaterDimension;
         volatile int placedWaterTick;
         /** Where the bot stood when its last driven physics tick began (for the fall-damage check after it). */
         double startX;
@@ -151,6 +162,120 @@ public final class BaritoneRegistry {
         return entry == null ? BaritonePolicy.UNRESTRICTED : entry.context.policy();
     }
 
+    /** Publishes an immutable route fence before Baritone is allowed to warm up, plan, or execute. */
+    public void setObservationFence(AIPlayerEntity bot, ObservedNavigationFence fence) {
+        setObservationFence(bot, fence, null);
+    }
+
+    /** Publishes an immutable fence together with the route the tick driver must refresh. */
+    public void setObservationFence(AIPlayerEntity bot, ObservedNavigationFence fence, NavRoute route) {
+        get(bot);
+        Entry entry = entries.get(bot.getUUID());
+        entry.context.setObservationFence(fence);
+        entry.observedRoute = route;
+        entry.observationRevocationReason = null;
+    }
+
+    /**
+     * Publishes the result of this bot's own confirmed placement to the active immutable fence.
+     * The fence method refuses a cell that was not already admitted, so this cannot become an
+     * alternate terrain-observation path or reveal a neighbour behind the placement.
+     */
+    void recordObservedPlacement(AIPlayerEntity bot, net.minecraft.core.BlockPos pos,
+                                 net.minecraft.world.level.block.state.BlockState state) {
+        Entry entry = entries.get(bot.getUUID());
+        // The action result is trustworthy only for a cell in the live context's current
+        // dimension fence. In particular, do not let a click that raced a teleport update a
+        // same-coordinate fence from the old dimension.
+        if (entry == null || entry.observedRoute == null || !entry.context.allowNavigationActionCell(pos)) {
+            return;
+        }
+        ObservedNavigationFence before = entry.context.observationFence();
+        ObservedNavigationFence after = before.withTrustedActionResult(pos, state, bot.getServer().getTickCount());
+        if (after == before) {
+            return;
+        }
+        entry.context.setObservationFence(after);
+        BotLog.path(bot, "nav_observed_placement_result", "pos", pos, "generation", after.generation());
+    }
+
+    /** The active worker-visible fence, or an empty deny-all boundary before an admission. */
+    public ObservedNavigationFence observationFence(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        return entry == null ? ObservedNavigationFence.empty() : entry.context.observationFence();
+    }
+
+    /**
+     * Dimension-aware final admission for a live Baritone block action. The immutable fence by
+     * itself carries no player/dimension identity, so callers that are about to inspect the live
+     * world must use the owning context rather than calling {@link ObservedNavigationFence#allows}
+     * directly.
+     */
+    boolean allowNavigationActionCell(AIPlayerEntity bot, net.minecraft.core.BlockPos pos) {
+        Entry entry = entries.get(bot.getUUID());
+        return entry != null && entry.context.allowNavigationActionCell(pos);
+    }
+
+    /** Bounded per-bot memory, kept separate from the active worker-visible fence. */
+    public ObservedNavigationFence observationMemory(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        return entry == null ? ObservedNavigationFence.empty() : entry.context.observationMemory();
+    }
+
+    /** Releases active terrain authority while retaining only bounded per-bot memory for a future observed route. */
+    public void clearObservationFence(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry != null) {
+            entry.context.clearObservationFence();
+            entry.observedRoute = null;
+        }
+    }
+
+    /**
+     * Revokes an active route because its immutable world view is no longer valid. This differs
+     * from an ordinary preemption: {@link BaritoneNavigator#progress(AIPlayerEntity, NavRoute)}
+     * can preserve the typed observation-loss outcome for the ActionPack instead of reporting a
+     * misleading generic incomplete path. A teleport/dimension boundary also clears memory.
+     */
+    public void revokeObservation(AIPlayerEntity bot, String reason, boolean clearMemory) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry == null) {
+            return;
+        }
+        if (hopToServerThread(bot, () -> revokeObservation(bot, reason, clearMemory))) {
+            return;
+        }
+        entry.observationRevocationReason = reason == null || reason.isBlank()
+                ? "observation_revoked" : reason;
+        halt(entry, bot);
+        if (clearMemory) {
+            entry.context.clearObservationMemory();
+        }
+        BotLog.lifecycle(bot, "baritone_observation_revoked", "reason", entry.observationRevocationReason,
+                "clear_memory", clearMemory);
+    }
+
+    /** The pending typed reason for a route stopped by {@link #revokeObservation}, or null. */
+    String observationRevocationReason(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        return entry == null ? null : entry.observationRevocationReason;
+    }
+
+    /** Same release operation for a navigator completion path that only has the bot id. */
+    public void clearObservationFence(UUID botId) {
+        Entry entry = entries.get(botId);
+        if (entry != null) {
+            entry.context.clearObservationFence();
+            entry.observedRoute = null;
+        }
+    }
+
+    /** Active route metadata for the server-thread observation refresh boundary. */
+    NavRoute observedRoute(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        return entry == null ? null : entry.observedRoute;
+    }
+
     /**
      * Runs one raw Baritone game tick for the bot: refreshes the observable-entity list, then dispatches the tick event.
      * This is the middle of {@link BaritoneDriver#beforePhysics}, which is what the bot's own tick calls; on its own it
@@ -165,7 +290,7 @@ public final class BaritoneRegistry {
 
     /**
      * Whether Baritone is doing something with the bot: it drives it this tick, or a process wants control, or a path is being
-     * searched or executed. Legacy code asks this before deciding the bot is idle.
+     * searched or executed. Local physical-action code asks this before deciding the bot is idle.
      */
     public boolean isBusy(AIPlayerEntity bot) {
         Entry entry = entries.get(bot.getUUID());
@@ -177,7 +302,7 @@ public final class BaritoneRegistry {
     }
 
     /**
-     * The legacy action executor is about to give the bot its own orders: whatever Baritone is doing stops (goal, path, search,
+     * A local physical action is about to give the bot its own orders: whatever Baritone is doing stops (goal, path, search,
      * held keys, the block being broken) and the inputs it wrote are let go, before the caller writes its own. No-op when
      * Baritone is not busy with the bot. Server thread only.
      */
@@ -203,6 +328,7 @@ public final class BaritoneRegistry {
             return;
         }
         halt(entry, bot);
+        entry.context.clearObservationMemory();
         BotLog.lifecycle(bot, "baritone_reset", "reason", reason);
     }
 
@@ -222,6 +348,7 @@ public final class BaritoneRegistry {
         try {
             halt(entry, bot);
         } finally {
+            entry.context.clearObservationMemory();
             BaritoneEdits.clear(bot.getUUID());
             BaritoneHost.destroy(entry.baritone);
             BotLog.lifecycle(bot, "baritone_destroyed", "reason", reason, "instances", entries.size());
@@ -237,6 +364,7 @@ public final class BaritoneRegistry {
                 cancelAll(entry);
             } finally {
                 entry.driven = false;
+                entry.context.clearObservationMemory();
                 BaritoneHost.destroy(entry.baritone);
             }
         }
@@ -250,7 +378,7 @@ public final class BaritoneRegistry {
     /**
      * Baritone was given up on ({@link NavEngineSelector#markBaritoneUnavailable}): every bot is let go of and every instance,
      * route and ledger is dropped, each step best effort (the classes involved may be the very ones that failed). From here on
-     * the hooks skip Baritone ({@link NavEngineSelector#baritoneActive}) and the legacy navigator owns every bot.
+     * the hooks skip Baritone ({@link NavEngineSelector#baritoneActive}) and every active route remains stopped.
      */
     static void abandonAll() {
         INSTANCE.abandon();
@@ -264,6 +392,7 @@ public final class BaritoneRegistry {
             boolean wasDriven = entry.driven;
             entry.driven = false;
             entry.waterAllowed = false;
+            entry.context.clearObservationMemory();
             bestEffort(() -> cancelAll(entry));
             bestEffort(() -> NavSafetyNet.INSTANCE.clearBaritoneWater(bot));
             if (wasDriven) {
@@ -289,6 +418,8 @@ public final class BaritoneRegistry {
         boolean wasDriven = entry.driven;
         entry.driven = false;
         entry.waterAllowed = false;
+        entry.observedRoute = null;
+        entry.context.clearObservationFence();
         try {
             cancelAll(entry);
         } finally {

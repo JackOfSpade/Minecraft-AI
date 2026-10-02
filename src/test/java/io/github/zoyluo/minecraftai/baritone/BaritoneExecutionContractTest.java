@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Source-contract pins for how Baritone's execution is wired into the bot: the order inside the bot's tick, the single-writer
- * hand-over with the legacy executor, and the two rules that keep break/place routed through the mod's primitives. These are
+ * hand-over with local physical actions, and the two rules that keep break/place routed through the mod's primitives. These are
  * the properties the end-to-end GameTests rely on and that a careless edit would break without failing a compile.
  */
 class BaritoneExecutionContractTest {
@@ -31,21 +31,21 @@ class BaritoneExecutionContractTest {
         int physics = source.indexOf("super.tick()", before);
         int doTick = source.indexOf("this.doTick()", physics);
         int after = source.indexOf("baritoneCompleted = baritoneAfterPhysics();", doTick);
-        int legacy = source.indexOf("this.actionPack.onUpdate()", doTick);
-        assertTrue(tick >= 0 && before > tick && physics > before && doTick > physics && after > doTick && legacy > doTick,
-                "beforePhysics must precede the physics tick; afterPhysics and the legacy update follow it");
+        int localUpdate = source.indexOf("this.actionPack.onUpdate()", doTick);
+        assertTrue(tick >= 0 && before > tick && physics > before && doTick > physics && after > doTick && localUpdate > doTick,
+                "beforePhysics must precede the physics tick; afterPhysics and the local-action update follow it");
         String tickBody = method(source, "public void tick() {");
         assertTrue(tickBody.contains("if (baritoneDrives) {\n                boolean baritoneCompleted = false;\n                try {\n                    baritoneCompleted = baritoneAfterPhysics();")
                         && tickBody.contains("} finally {")
                         && tickBody.contains("NavigationMeasurement.noteDriver(this, true, !baritoneCompleted, owner);"),
-                "the measured branch must retain whether Baritone actually completed its post-physics drive even when its legacy fallback throws");
-        int legacyBranch = tickBody.indexOf("} else {");
-        int beforeOwner = tickBody.indexOf("ownerBeforeUpdate = this.actionPack.navigationOwnerForMeasurement();", legacyBranch);
-        int legacyUpdate = tickBody.indexOf("this.actionPack.onUpdate();", legacyBranch);
-        int afterOwner = tickBody.indexOf("ownerAfterUpdate = this.actionPack.navigationOwnerForMeasurement();", legacyUpdate);
-        assertTrue(legacyBranch >= 0 && beforeOwner > legacyBranch && legacyUpdate > beforeOwner && afterOwner > legacyUpdate
+                "the measured branch must retain whether Baritone actually completed its post-physics drive even when a local-action update throws");
+        int localBranch = tickBody.indexOf("} else {");
+        int beforeOwner = tickBody.indexOf("ownerBeforeUpdate = this.actionPack.controllerOwnerForMeasurement();", localBranch);
+        int localActionUpdate = tickBody.indexOf("this.actionPack.onUpdate();", localBranch);
+        int afterOwner = tickBody.indexOf("ownerAfterUpdate = this.actionPack.controllerOwnerForMeasurement();", localActionUpdate);
+        assertTrue(localBranch >= 0 && beforeOwner > localBranch && localActionUpdate > beforeOwner && afterOwner > localActionUpdate
                         && tickBody.contains("try {\n                    this.actionPack.onUpdate();\n                } finally {"),
-                "a non-driven tick must preserve the legacy scheduler branch and observe its owner on both sides of the update, even on failure");
+                "a non-driven tick must preserve the local-action scheduler branch and observe its owner on both sides of the update, even on failure");
     }
 
     @Test
@@ -62,7 +62,7 @@ class BaritoneExecutionContractTest {
         assertTrue(after.contains("catch (Throwable failure)") && after.contains("NavigationMeasurement.noteBaritoneFallback(this)")
                         && after.contains("this.actionPack.onUpdate()")
                         && after.contains("return false;") && after.contains("return true;"),
-                "when the post-physics hook does not complete, the same tick falls back to legacy and reports false");
+                "when the post-physics hook does not complete, the same tick runs only the local-action update and reports false");
     }
 
     @Test
@@ -80,28 +80,29 @@ class BaritoneExecutionContractTest {
     }
 
     @Test
-    void everyLegacyEntryThatMakesTheBotActClaimsItFirst() throws IOException {
+    void everyNavigationEntryUsesTheBaritoneOnlySeam() throws IOException {
         String source = read("action/ActionPack.java");
-        for (String entry : new String[]{
-                "public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {\n        if (controllerStartBlocked()) {\n            return ActionResult.failed(GUARDED_STEP_FENCE);\n        }\n        claim(",
-                "public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {\n        if (controllerStartBlocked()) {\n            return ActionResult.failed(GUARDED_STEP_FENCE);\n        }\n        claim(",
-                "public ActionResult startMining(BlockPos pos, Direction face) {\n        if (controllerStartBlocked()) {\n            return ActionResult.failed(GUARDED_STEP_FENCE);\n        }\n        claim(",
-                "public void stopAll() {\n        if (emergencyInputBlocked()) {\n            return;\n        }\n        releaseBaritone(\"stop_all\");"}) {
-            assertTrue(source.contains(entry), "missing hand-over in ActionPack: " + entry.split("\n")[0]);
-        }
-        // The private path entry refuses a guarded fence before it can start either engine. It may hand an admitted request to
-        // Baritone first (which is not the legacy executor and needs no hand-over), but legacy work after a null answer claims it.
-        int entry = source.indexOf("PathExecutor.RouteContract routeContract) {");
+        String walk = between(source, "public ActionResult startWalkTo(Vec3 target, double arrivalThreshold)", "// Unified entry point");
+        String dig = between(source, "public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve)",
+                "public ActionResult startPathTo(BlockPos goal)");
+        String path = between(source, "private ActionResult startPathTo(BlockPos goal, boolean canPillar,",
+                "public BlockPos activePathGoal()");
+        assertTrue(walk.contains("NavEngineSelector.attempt(") && walk.contains("startBaritoneRoute("),
+                "ordinary coordinate walks use the Baritone seam");
+        assertTrue(dig.contains("routeOnBaritone(\"dig_path_to\"") && !dig.contains("new AStarPathfinder("),
+                "dig approaches are Baritone-only and have no raw A* tunnel fallback");
+        assertTrue(path.contains("routeOnBaritone(\"path_to\"") && !path.contains("pathExecutor"),
+                "ordinary and contract routes have no executor fallback");
+        int entry = source.indexOf("RouteConstraints routeConstraints) {");
         int fence = source.indexOf("if (controllerStartBlocked())", entry);
         int refusal = source.indexOf("return ActionResult.failed(GUARDED_STEP_FENCE);", fence);
         int routed = source.indexOf("routeOnBaritone(\"path_to\"", refusal);
-        int claim = source.indexOf("claim(\"path_to\");", routed);
-        int legacyWork = source.indexOf("int reserve = Math.max(0, protectedStoneLikeReserve);", claim);
-        assertTrue(entry > 0 && fence > entry && refusal > fence && routed > refusal && claim > routed && legacyWork > claim,
-                "startPathTo: the guarded refusal must precede the engine seam, and the legacy claim must precede legacy work");
-        assertTrue(source.contains("if (routed != null) {\n            return routed;\n        }\n        claim(\"path_to\")"),
-                "only a routed (non-null) answer may skip the claim");
-        // The claim and stopAll go through releaseBaritone, which is what preempts Baritone (and ends a recorded route).
+        assertTrue(entry > 0 && fence > entry && refusal > fence && routed > refusal,
+                "startPathTo refuses a guarded step before entering the sole navigation seam");
+        assertFalse(source.contains("pathfinding.PathExecutor") || source.contains("PathExecutor.RouteContract")
+                        || source.contains("pathExecutor"),
+                "ActionPack must not retain retired executor wiring");
+        // Claim and stopAll both preempt an already-driven Baritone route before an incompatible physical action.
         int release = source.indexOf("private void releaseBaritone(String why) {");
         assertTrue(release > 0 && source.indexOf("BaritoneRegistry.INSTANCE.preempt(player, why)", release) > release
                         && source.indexOf("cancelBaritoneRoute(why)", release) > release,
@@ -140,6 +141,14 @@ class BaritoneExecutionContractTest {
             count++;
         }
         return count;
+    }
+
+    private static String between(String source, String startMarker, String endMarker) {
+        int start = source.indexOf(startMarker);
+        assertTrue(start >= 0, startMarker + " must exist");
+        int end = source.indexOf(endMarker, start + startMarker.length());
+        assertTrue(end > start, endMarker + " must follow " + startMarker);
+        return source.substring(start, end);
     }
 
     private static String method(String source, String signature) {

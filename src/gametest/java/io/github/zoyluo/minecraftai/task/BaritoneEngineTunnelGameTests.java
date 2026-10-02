@@ -5,84 +5,67 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.baritone.BaritoneBreakPlacePolicy;
 import io.github.zoyluo.minecraftai.baritone.BaritoneEdits;
 import io.github.zoyluo.minecraftai.baritone.BaritoneNavigator;
-import io.github.zoyluo.minecraftai.baritone.BaritoneRefusals;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.baritone.PolicyRefusalStreak;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
-import java.util.List;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 
 /**
- * Digging on the Baritone engine under strict-survival observability, and the route lifecycle around it. Position-level rules
- * (the block must be observable from the bot's eyes) are enforced only when Baritone clicks, because a search runs on a worker
- * thread against a snapshot; these courses prove that a route the planner builds through natural stone is one the bot can also
- * carry out (no {@code not_observable} refusal for the next dig cell of a staircase or of a diagonal tunnel), and that a route the
- * rules keep refusing ends as a typed failure instead of being re-planned for ever.
+ * Baritone route lifecycle under strict-survival observability. Hidden stone must never become a
+ * tunnel merely because it is in a loaded chunk: the first two courses pin admission refusal and
+ * zero edits. The remaining courses cover ordinary policy refusal and route replacement.
  */
 public final class BaritoneEngineTunnelGameTests {
     private static final double AT_GOAL = 1.7D;
 
     /**
-     * A solid mass of natural stone (x 0..6, the whole width, up to the ceiling) with a two-cell pocket at height three behind it:
-     * the only way to the goal is a staircase up through the stone, and every cell of it is dug from inside the stair as it grows.
+     * A solid mass of natural stone hides a pocket behind it. The previously accepted staircase
+     * tunnel would discover terrain through excavation, so the hidden goal now refuses before
+     * Baritone can mine a single block.
      */
     @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_staircase_up_through_natural_stone_needs_no_unobservable_break", maxTicks = 1500)
-    public void staircaseUpThroughNaturalStoneNeedsNoUnobservableBreak(GameTestHelper context) {
+    public void hiddenStaircaseGoalIsRefusedWithoutExcavation(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 22, 14, 6);
         stoneMass(arena, 0, 6);
         arena.set(4, 3, 0, Blocks.AIR);
         arena.set(4, 4, 0, Blocks.AIR);
         AIPlayerEntity bot = arena.spawnOnBaritone("BeStairDig", arena.cell(-4, 0, 0));
-        giveTools(bot);
         BlockPos goal = arena.cell(4, 3, 0);
-        digCourse(context, arena, bot, goal, "staircase");
+        refuseHiddenTunnelGoal(context, arena, bot, goal, "staircase");
     }
 
-    /** As above, along a diagonal of the floor: the goal is four blocks to the side and eight ahead, all through stone. */
+    /** The same policy holds for a diagonal hidden goal: geometry cannot turn it into a scan. */
     @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_diagonal_tunnel_through_natural_stone_needs_no_unobservable_break", maxTicks = 1500)
-    public void diagonalTunnelThroughNaturalStoneNeedsNoUnobservableBreak(GameTestHelper context) {
+    public void hiddenDiagonalGoalIsRefusedWithoutExcavation(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 25, 14, 6);
         stoneMass(arena, 0, 6);
         arena.set(5, 0, 4, Blocks.AIR);
         arena.set(5, 1, 4, Blocks.AIR);
         AIPlayerEntity bot = arena.spawnOnBaritone("BeDiagDig", arena.cell(-3, 0, -3));
-        giveTools(bot);
         BlockPos goal = arena.cell(5, 0, 4);
-        digCourse(context, arena, bot, goal, "diagonal");
+        refuseHiddenTunnelGoal(context, arena, bot, goal, "diagonal");
     }
 
-    private static void digCourse(GameTestHelper context, BaritoneEngineArena arena, AIPlayerEntity bot, BlockPos goal, String what) {
+    private static void refuseHiddenTunnelGoal(GameTestHelper context, BaritoneEngineArena arena,
+                                                AIPlayerEntity bot, BlockPos goal, String what) {
         ActionPack pack = bot.getActionPack();
         ActionResult started = pack.startPathTo(goal);
-        arena.require(started.isInProgress(), "the " + what + " route was not accepted: " + started.status() + " " + started.reason());
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            arena.require(now < 1400, "the " + what + " route never ended: " + bot.position() + " edits=" + BaritoneEdits.of(bot.getUUID()).size());
-            if (pack.hasBaritoneRoute()) {
-                return;
-            }
-            NavOutcome outcome = pack.lastRouteOutcome();
-            // (Baritone asks for its mine process once when a route starts; that scanning-process refusal is expected background.)
-            List<BaritoneRefusals.Refusal> refusals = BaritoneRefusals.of(bot.getUUID()).stream()
-                    .filter(refusal -> refusal.op() == BaritoneRefusals.Op.BREAK || refusal.op() == BaritoneRefusals.Op.PLACE).toList();
-            arena.require(outcome != null && outcome.status() == NavOutcome.Status.SUCCESS,
-                    "the " + what + " route did not succeed: " + outcome + " refusals=" + refusals);
-            arena.require(refusals.stream().noneMatch(refusal -> "not_observable".equals(refusal.reason())),
-                    "a dig cell of the " + what + " was refused as not observable: " + refusals);
-            arena.require(refusals.isEmpty(), "a break or placement of the " + what + " was refused: " + refusals);
-            List<BaritoneEdits.Edit> breaks = BaritoneEdits.of(bot.getUUID(), BaritoneEdits.Kind.BREAK);
-            arena.require(breaks.size() >= 4, "too few blocks were dug for a " + what + ": " + breaks.size());
-            arena.require(bot.position().distanceTo(goal.getCenter()) <= AT_GOAL, "not at the goal: " + bot.position());
-            BotLog.path(bot, "gametest_tunnel_course", "what", what, "breaks", breaks.size(), "ticks", outcome.ticks(), "refusals", refusals.size());
+        arena.require(started.isFailed() && "navigation_goal_unobserved".equals(started.reason()),
+                "the hidden " + what + " goal was not refused at admission: " + started.status() + " " + started.reason());
+        arena.require(!pack.hasBaritoneRoute() && !BaritoneNavigator.hasRoute(bot.getUUID()),
+                "the refused hidden " + what + " goal left a route active");
+        arena.require(BaritoneEdits.of(bot.getUUID()).isEmpty(),
+                "the hidden " + what + " goal edited terrain at admission: " + BaritoneEdits.of(bot.getUUID()));
+        context.runAfterDelay(20, () -> {
+            arena.require(!pack.hasBaritoneRoute() && !BaritoneNavigator.hasRoute(bot.getUUID()),
+                    "the refused hidden " + what + " goal started a route later");
+            arena.require(BaritoneEdits.of(bot.getUUID()).isEmpty(),
+                    "the hidden " + what + " goal later edited terrain: " + BaritoneEdits.of(bot.getUUID()));
             arena.finish(bot);
         });
     }
@@ -95,9 +78,11 @@ public final class BaritoneEngineTunnelGameTests {
     @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_a_route_that_is_vetoed_again_and_again_ends_as_policy_refused", maxTicks = 600)
     public void aRouteThatIsVetoedAgainAndAgainEndsAsPolicyRefused(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, -1, 14, 6);
-        AIPlayerEntity bot = arena.spawnOnBaritone("BePolicyCap", arena.cell(-12, 0, 0));
+        // Keep the goal inside the strict player-observation radius: this course exercises
+        // repeated policy vetoes, not blind waypoint admission.
+        AIPlayerEntity bot = arena.spawnOnBaritone("BePolicyCap", arena.cell(-3, 0, 0));
         BlockPos goal = arena.cell(12, 0, 0);
-        BlockPos veto = arena.cell(-12, -1, 0);
+        BlockPos veto = arena.cell(-3, -1, 0);
         ActionPack pack = bot.getActionPack();
         ActionResult started = pack.startSurfacePathTo(goal);
         arena.require(started.isInProgress(), "the walk was not accepted: " + started.status() + " " + started.reason());
@@ -128,7 +113,9 @@ public final class BaritoneEngineTunnelGameTests {
     @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_a_route_replaced_by_anewer_request_is_recorded_as_cancelled", maxTicks = 600)
     public void aRouteReplacedByANewerRequestIsRecordedAsCancelled(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, -2, 14, 6);
-        AIPlayerEntity bot = arena.spawnOnBaritone("BeReplaced", arena.cell(-12, 0, 0));
+        // Both replacement goals are genuinely visible from this start. A rejected hidden
+        // replacement would only test the observation fence, not route lifecycle bookkeeping.
+        AIPlayerEntity bot = arena.spawnOnBaritone("BeReplaced", arena.cell(-3, 0, 0));
         BlockPos first = arena.cell(12, 0, -4);
         BlockPos second = arena.cell(12, 0, 4);
         ActionPack pack = bot.getActionPack();
@@ -207,9 +194,4 @@ public final class BaritoneEngineTunnelGameTests {
         }
     }
 
-    private static void giveTools(AIPlayerEntity bot) {
-        bot.getInventory().setItem(1, new ItemStack(Items.IRON_AXE));
-        bot.getInventory().setItem(2, new ItemStack(Items.IRON_PICKAXE));
-        bot.getInventory().setSelectedSlot(1);
-    }
 }

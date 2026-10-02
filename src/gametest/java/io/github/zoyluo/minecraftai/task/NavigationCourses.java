@@ -14,10 +14,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 
 /**
- * The obstacle courses of the navigation comparison (docs/NAVIGATION_COURSES.md): each one is a geometry (built into a
+ * The Baritone navigation obstacle courses (docs/NAVIGATION_COURSES.md): each one is a geometry (built into a
  * {@link BaritoneEngineArena}), a start cell for the bot(s), and one or more target cells (legs). Cells are relative to the
- * arena origin (x east, y up, z south). Every course is run for the legacy engine and for the Baritone engine on a fresh arena
- * with identical geometry by {@link NavigationCourseRun}.
+ * arena origin (x east, y up, z south). Every course runs on a fresh strict-survival Baritone arena through
+ * {@link NavigationCourseRun}.
  */
 final class NavigationCourses {
     enum Mode {
@@ -28,7 +28,7 @@ final class NavigationCourses {
     }
 
     enum Expect {
-        /** Both engines are expected to get there. */
+        /** Baritone is expected to get there. */
         REACH,
         /** There is no dry/safe way: the bot must hold on the near side (and say so, when {@code notice} is set). */
         HOLD,

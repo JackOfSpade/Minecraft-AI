@@ -59,7 +59,7 @@ public final class ActionPackPhysicalSnapGameTests {
                         world.getServer(), name, world, Vec3.atBottomCenterOf(anchor),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
         BotFixtureMoves.place(bot, new Vec3(anchor.getX() + 0.5D, anchor.getY(), anchor.getZ() + 0.15D));
         bot.setOnGround(true);
         Standability.clearCache();
@@ -820,7 +820,7 @@ public final class ActionPackPhysicalSnapGameTests {
                         world.getServer(), name, world, Vec3.atBottomCenterOf(invalid),
                         0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
         BotFixtureMoves.place(bot, invalid);
         Standability.clearCache();
 

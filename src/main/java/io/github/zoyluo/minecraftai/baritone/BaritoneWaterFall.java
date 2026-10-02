@@ -13,6 +13,8 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
@@ -99,9 +101,6 @@ final class BaritoneWaterFall {
             return "not_in_fall_movement";
         }
         BetterBlockPos dest = fall.getDest();
-        if (waterEvaporates(bot, dest)) {
-            return "water_evaporates";
-        }
         HitResult hit = bot.pick(bot.blockInteractionRange(), 1.0F, item == Items.BUCKET);
         if (hit.getType() != HitResult.Type.BLOCK) {
             return "no_target";
@@ -109,22 +108,71 @@ final class BaritoneWaterFall {
         BlockPos target = ((BlockHitResult) hit).getBlockPos();
         boolean inColumn = target.getX() == dest.getX() && target.getZ() == dest.getZ()
                 && target.getY() >= dest.getY() - 1 && target.getY() <= dest.getY() + 1;
-        return inColumn ? null : "target_outside_landing_column";
+        if (!inColumn) {
+            return "target_outside_landing_column";
+        }
+        // The pick is the fresh physical proof; the context adds the active-fence dimension
+        // check before any later fluid lookup may inspect this landing cell.
+        if (!currentFallActionCell(bot, target)) {
+            return "target_not_observed";
+        }
+        if (item == Items.WATER_BUCKET
+                && !currentFallActionCell(bot,
+                target.relative(((BlockHitResult) hit).getDirection()))) {
+            return "destination_not_observed";
+        }
+        return waterEvaporates(bot, dest) ? "water_evaporates" : null;
+    }
+
+    /**
+     * Reads the two possible bucket cells only after both are in the current dimension's action
+     * fence and freshly visible. A water bucket's exact final cell is a vanilla detail (waterlog
+     * versus adjacent air), so this is deliberately a proven observation rather than a guessed
+     * trusted placement result.
+     */
+    static boolean[] observedSourceStates(AIPlayerEntity bot, BlockHitResult ray) {
+        BlockPos first = ray.getBlockPos();
+        BlockPos second = first.relative(ray.getDirection());
+        if (!currentFallActionCell(bot, first) || !currentFallActionCell(bot, second)) {
+            return null;
+        }
+        return new boolean[] {bot.level().getFluidState(first).isSource(), bot.level().getFluidState(second).isSource()};
+    }
+
+    private static boolean currentFallActionCell(AIPlayerEntity bot, BlockPos pos) {
+        // The source can already be in the bot's freshly placed water by the time vanilla
+        // returns from useItem. Water is transparent to the player's physical view, so retain
+        // the immutable action-cell fence and use the route's fluid-transparent eye proof rather
+        // than treating the bot's own source as an opaque, unconfirmed world change.
+        return BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, pos)
+                && ObservableWorldQuery.canObserveCellThroughFluids(bot, pos);
     }
 
     /** Called after the bot used the water bucket: remembers the water source the use made, if any. */
     static void afterWaterBucketUse(AIPlayerEntity bot, BlockHitResult ray, boolean[] wasSource) {
         BlockPos first = ray.getBlockPos();
         BlockPos second = first.relative(ray.getDirection());
+        boolean[] now = observedSourceStates(bot, ray);
+        if (now == null) {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ACTION, bot,
+                    "baritone_water_unconfirmed", "reason", "action_cell_not_visible");
+            return;
+        }
         BlockPos placed = null;
-        if (!wasSource[0] && bot.level().getFluidState(first).isSource()) {
+        if (!wasSource[0] && now[0]) {
             placed = first;
-        } else if (!wasSource[1] && bot.level().getFluidState(second).isSource()) {
+        } else if (!wasSource[1] && now[1]) {
             placed = second;
         }
         BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
         if (placed != null && entry != null) {
+            // Both possible result cells were admitted before the click and freshly re-proven
+            // above. Publish the exact confirmed state back into that same immutable fence so
+            // the active MovementFall/replan sees water rather than its pre-click AIR snapshot.
+            // recordObservedPlacement cannot extend the fence or reveal a neighbouring cell.
+            BaritoneRegistry.INSTANCE.recordObservedPlacement(bot, placed, bot.level().getBlockState(placed));
             entry.placedWater = placed.immutable();
+            entry.placedWaterDimension = BotEdits.dimensionKey(bot.level());
             entry.placedWaterTick = bot.getServer().getTickCount();
             BotLog.action(bot, "baritone_water_placed", "pos", LogFields.pos(placed));
         }
@@ -133,9 +181,18 @@ final class BaritoneWaterFall {
     /** Called after the bot used the empty bucket: forgets the water source when it is gone. */
     static void afterEmptyBucketUse(AIPlayerEntity bot) {
         BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
-        if (entry != null && entry.placedWater != null && !bot.level().getFluidState(entry.placedWater).isSource()) {
+        if (entry != null && entry.placedWater != null
+                && knownPlacedWaterIsVisible(bot, entry, entry.placedWater)
+                && !bot.level().getFluidState(entry.placedWater).isSource()) {
+            // This is the paired pickup of the bot's own confirmed fall source. The same fenced,
+            // freshly visible cell is now its exact post-pickup state rather than stale WATER;
+            // publishing it lets a continuation replan stand on the real landing floor without
+            // turning an item action into a way to observe any adjacent terrain.
+            BaritoneRegistry.INSTANCE.recordObservedPlacement(bot, entry.placedWater,
+                    bot.level().getBlockState(entry.placedWater));
             BotLog.action(bot, "baritone_water_picked_up", "pos", LogFields.pos(entry.placedWater));
             entry.placedWater = null;
+            entry.placedWaterDimension = null;
         }
     }
 
@@ -149,15 +206,10 @@ final class BaritoneWaterFall {
             return;
         }
         int now = bot.getServer().getTickCount();
-        FluidState fluid = bot.level().getFluidState(water);
-        if (!fluid.isSource()) {
-            BotLog.action(bot, "baritone_water_picked_up", "pos", LogFields.pos(water), "by", "baritone");
-            entry.placedWater = null;
-            return;
-        }
         if (now - entry.placedWaterTick >= GIVE_UP_TICKS) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ACTION, bot, "baritone_water_left", "pos", LogFields.pos(water), "ticks", now - entry.placedWaterTick);
             entry.placedWater = null;
+            entry.placedWaterDimension = null;
             return;
         }
         if (now - entry.placedWaterTick < RECOVER_AFTER_TICKS || runningFall(bot) != null) {
@@ -173,6 +225,19 @@ final class BaritoneWaterFall {
         if (eye.distanceTo(target) > bot.blockInteractionRange() - 0.5D) {
             return; // out of reach: the bot is elsewhere now, this is retried while it stays within the give-up window
         }
+        // Route completion clears the active navigation fence, but this exact cell has separate
+        // provenance from our own prior bucket action. It still needs a current eye-ray and the
+        // recorded dimension before recovery is allowed to inspect it.
+        if (!knownPlacedWaterIsVisible(bot, entry, water)) {
+            return;
+        }
+        FluidState fluid = bot.level().getFluidState(water);
+        if (!fluid.isSource()) {
+            BotLog.action(bot, "baritone_water_picked_up", "pos", LogFields.pos(water), "by", "baritone");
+            entry.placedWater = null;
+            entry.placedWaterDimension = null;
+            return;
+        }
         int previous = inventory.getSelectedSlot();
         inventory.setSelectedSlot(slot);
         Rotation aim = RotationUtils.calcRotationFromVec3d(eye, target, new Rotation(bot.getYRot(), bot.getXRot()));
@@ -183,5 +248,12 @@ final class BaritoneWaterFall {
         if (entry.placedWater != null) {
             inventory.setSelectedSlot(previous);
         }
+    }
+
+    /** Own-action provenance is useful only in the same dimension and only while the bot sees the exact cell again. */
+    private static boolean knownPlacedWaterIsVisible(AIPlayerEntity bot, BaritoneRegistry.Entry entry, BlockPos water) {
+        return entry.placedWaterDimension != null
+                && entry.placedWaterDimension.equals(BotEdits.dimensionKey(bot.level()))
+                && ObservableWorldQuery.canObserveCellThroughFluids(bot, water);
     }
 }

@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.cache.IWorldData;
+import baritone.api.pathing.calc.IPath;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.IPlayerController;
@@ -12,6 +13,7 @@ import baritone.behavior.LookBehavior;
 import baritone.utils.accessor.IClientChunkProvider;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +58,18 @@ public final class ServerPlayerContext implements IPlayerContext {
     private int observedAtTick = -1;
     /** What this bot may do to the world; read by the cost model on the server thread and on workers. */
     private volatile BaritonePolicy policy = BaritonePolicy.UNRESTRICTED;
+    /**
+     * The only terrain snapshot Baritone is allowed to inspect for an active route. It is immutable
+     * and replaced atomically, so search workers never see a partly-filled observation map.
+     */
+    private volatile ObservedNavigationFence observationFence = ObservedNavigationFence.empty();
+    /** Bounded same-dimension memory retained between routes; it is never exposed to Baritone while idle. */
+    private volatile ObservedNavigationFence observationMemory = ObservedNavigationFence.empty();
+    /**
+     * A pre-execution fence refusal emitted by the vendored executor. The driver consumes it in
+     * the same PRE tick and revokes the route before another executor can take over.
+     */
+    private volatile String navigationPathSafetyFailure;
 
     public ServerPlayerContext(IBaritone baritone, Supplier<? extends AIPlayerEntity> bot) {
         this.baritone = baritone;
@@ -160,12 +174,105 @@ public final class ServerPlayerContext implements IPlayerContext {
     }
 
     private BlockState blockStateAt(BlockPos pos) {
-        Level level = world();
-        if (minecraft().isSameThread()) {
-            return level.getBlockState(pos);
+        // This method is called by playerFeet from both server and Baritone worker threads. It
+        // therefore uses the same immutable evidence boundary as the planner rather than doing a
+        // special direct chunk lookup that could leak a hidden slab/floor into navigation.
+        ObservedNavigationFence fence = observationFence;
+        BlockState observed = fenceMatchesCurrentDimension(fence) ? fence.stateAt(pos) : null;
+        return observed == null ? Blocks.BEDROCK.defaultBlockState() : observed;
+    }
+
+    /** Installs an admitted route's immutable observed terrain. Server thread only. */
+    public void setObservationFence(ObservedNavigationFence fence) {
+        observationFence = java.util.Objects.requireNonNull(fence, "fence");
+        observationMemory = fence;
+        navigationPathSafetyFailure = null;
+    }
+
+    /** The active fence; safe to hand to the server-thread refresh boundary. */
+    public ObservedNavigationFence observationFence() {
+        return observationFence;
+    }
+
+    /** The last bounded observation memory, used to admit a later remembered route. */
+    public ObservedNavigationFence observationMemory() {
+        return observationMemory;
+    }
+
+    /** Stops every future planner/executor lookup immediately while retaining bounded evidence for a later route. */
+    public void clearObservationFence() {
+        observationFence = ObservedNavigationFence.empty();
+        navigationPathSafetyFailure = null;
+    }
+
+    /** Lifecycle boundary (death, dimension change, bot removal): no observation crosses it. */
+    public void clearObservationMemory() {
+        observationFence = ObservedNavigationFence.empty();
+        observationMemory = ObservedNavigationFence.empty();
+        navigationPathSafetyFailure = null;
+    }
+
+    /**
+     * Patch 0018 calls this before consulting a loaded chunk or Baritone's cache. The check is
+     * pure and O(log n): it never touches a Level from a worker thread.
+     */
+    @Override
+    public boolean allowNavigationCell(int x, int y, int z) {
+        ObservedNavigationFence fence = observationFence;
+        return fenceMatchesCurrentDimension(fence) && fence.allows(x, y, z);
+    }
+
+    /** Patch 0018 consumes this immutable state instead of re-reading a past observation from the live world. */
+    @Override
+    public BlockState navigationCellState(int x, int y, int z) {
+        ObservedNavigationFence fence = observationFence;
+        return fenceMatchesCurrentDimension(fence) ? fence.stateAt(x, y, z) : null;
+    }
+
+    /**
+     * Patch 0018 calls this on the server PRE tick before {@code PathExecutor} updates a movement
+     * or its input handler can click. The pure navigator check covers an asynchronously installed
+     * path as well as the inline admission path.
+     */
+    @Override
+    public boolean allowNavigationPath(IPath path, int firstMovement) {
+        if (navigationPathSafetyFailure != null) {
+            return false;
         }
-        LevelChunk chunk = ((IClientChunkProvider) level.getChunkSource()).createThreadSafeCopy().getChunk(pos.getX() >> 4, pos.getZ() >> 4, false);
-        return chunk == null ? Blocks.AIR.defaultBlockState() : chunk.getBlockState(pos);
+        String failure = BaritoneNavigator.observedExecutionPathSafetyFailure(player(), path, firstMovement);
+        if (failure == null) {
+            return true;
+        }
+        navigationPathSafetyFailure = failure;
+        return false;
+    }
+
+    /**
+     * The final gate for an actual block click. Static movement footprints are checked earlier,
+     * but a ray may select a dynamic support or an in-wall block that was not part of that list.
+     */
+    @Override
+    public boolean allowNavigationActionCell(BlockPos pos) {
+        if (navigationPathSafetyFailure != null) {
+            return false;
+        }
+        if (pos != null && allowNavigationCell(pos.getX(), pos.getY(), pos.getZ())) {
+            return true;
+        }
+        navigationPathSafetyFailure = "navigation_action_cell_unobserved";
+        return false;
+    }
+
+    /** Returns and clears the pre-execution refusal recorded by {@link #allowNavigationPath}. Server thread only. */
+    String consumeNavigationPathSafetyFailure() {
+        String failure = navigationPathSafetyFailure;
+        navigationPathSafetyFailure = null;
+        return failure;
+    }
+
+    /** A same-coordinate snapshot must never survive a dimension change or external teleport. */
+    private boolean fenceMatchesCurrentDimension(ObservedNavigationFence fence) {
+        return fence != null && fence.dimension().equals(BotEdits.dimensionKey(player().level()));
     }
 
     /** The bot's break/place permission. Applies to the next plan (a running path re-validates its costs every tick). */

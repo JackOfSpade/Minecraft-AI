@@ -90,6 +90,12 @@ final class FollowDigOut {
      * @return true when a dig-out is now active
      */
     boolean start(AIPlayerEntity bot, ServerPlayer target) {
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            BotLog.action(bot, "legacy_navigation_retired",
+                    "operation", "follow_dig_out",
+                    "reason", RetiredNavigationTask.OBSERVED_TARGET_REQUIRED);
+            return false;
+        }
         if (active) {
             return true;
         }

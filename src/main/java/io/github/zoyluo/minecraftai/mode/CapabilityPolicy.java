@@ -13,6 +13,13 @@ public final class CapabilityPolicy {
         Objects.requireNonNull(capability, "capability");
         OperatingProfile effectiveProfile = profile == null
                 ? OperatingProfile.STRICT_SURVIVAL : profile;
+        // Keep the enum/config spelling readable for old profiles, but never let a profile make
+        // hidden world data observable.  This must precede the profile matrix so the logged
+        // decision is an auditable retirement rather than an ambiguous operator-flag denial.
+        if (capability == PrivilegedCapability.HIDDEN_BLOCK_SCAN) {
+            return new CapabilityDecision(effectiveProfile, capability, false,
+                    CapabilityDecision.Reason.DENIED_RETIRED_CAPABILITY);
+        }
         if (effectiveProfile == OperatingProfile.STRICT_SURVIVAL) {
             return new CapabilityDecision(effectiveProfile, capability, false,
                     CapabilityDecision.Reason.DENIED_STRICT_SURVIVAL);

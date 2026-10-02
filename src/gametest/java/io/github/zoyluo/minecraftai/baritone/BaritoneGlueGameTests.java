@@ -120,7 +120,7 @@ public final class BaritoneGlueGameTests {
         AIPlayerEntity bot = BaritoneServerGameTests.spawn(context, "BaritoneResetGT", feet);
         try {
             IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
-            baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(feet.offset(4, 0, 0)));
+            ObservedBaritoneTestRoutes.block(bot, feet.offset(4, 0, 0), "reset_fixture");
             for (int i = 0; i < 3; i++) {
                 BaritoneRegistry.INSTANCE.tick(bot);
             }

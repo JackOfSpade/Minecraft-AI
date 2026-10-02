@@ -267,7 +267,7 @@ class ShieldGuardSourceContractTest {
                         && placeAtPreamble.contains("return ActionResult.IN_PROGRESS;"),
                 "placeBlockAt defers before it can turn a busy hand into no_adjacent_block");
         assertTrue(build.contains("public static Use useItemOnHit")
-                        && build.contains("InteractionResult.PASS, false, destination"),
+                        && build.contains("InteractionResult.PASS, null, destination"),
                 "already-aimed clicks are not sent through Baritone while the shield owns use");
 
         String farm = read("action/FarmAction.java");

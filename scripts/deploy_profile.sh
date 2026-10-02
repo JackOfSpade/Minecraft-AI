@@ -8,7 +8,8 @@
 #   3. copies build/libs/Minecraft-AI-*.jar into <profile>/mods, replacing any older Minecraft-AI-*.jar
 #      (and any older minecraftai-*.jar left over from before the jar was renamed);
 #   4. applies the LLM settings from the gitignored .env to <profile>/config/minecraftai.json (the "llm"
-#      section; the pre-rename "deepseek" section is migrated) and makes sure logging is enabled
+#      section; the pre-rename "deepseek" section is migrated), pins strict-survival Baritone navigation,
+#      and makes sure logging is enabled
 #      (skipped with --no-config). The API key is never printed;
 #   5. verifies the result and prints a summary. --check-key also asks the provider whether the key
 #      is accepted (prints only the HTTP status).
@@ -103,7 +104,7 @@ if [ "$DO_CONFIG" = 1 ]; then
     $ErrorActionPreference = "Stop"
     $path = $env:MINECRAFTAI_DEPLOY_CONFIG_PATH
     if (Test-Path -LiteralPath $path) { $j = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
-    else { $j = [pscustomobject]@{ profile = "strict_survival" } }
+    else { $j = [pscustomobject]@{} }
     if ($null -eq $j) { throw "minecraftai.json is empty" }
     $names = @($j.PSObject.Properties.Name)
     if ($names -contains "llm") { $llm = $j.llm }
@@ -114,11 +115,29 @@ if [ "$DO_CONFIG" = 1 ]; then
     }
     if ($names -contains "deepseek") { $j.PSObject.Properties.Remove("deepseek") }
     $j | Add-Member -NotePropertyName "llm" -NotePropertyValue $llm -Force
-    $log = "logging: absent (the mod defaults to enabled)"
-    if ($names -contains "logging" -and $null -ne $j.logging) {
-      if ($j.logging.enabled -ne $true) { $j.logging.enabled = $true; $log = "logging: was disabled, now enabled" }
-      else { $log = "logging: enabled" }
+    # A deployed player profile is deliberately companion-safe: no hidden-world scans or privileged
+    # teleports, and every ordinary navigation request uses the observation-fenced Baritone engine.
+    $j | Add-Member -NotePropertyName "profile" -NotePropertyValue "strict_survival" -Force
+    $j | Add-Member -NotePropertyName "operatorCapabilities" -NotePropertyValue ([pscustomobject]@{
+      hiddenBlockScan = $false; emergencyTeleport = $false; manualTeleport = $false
+    }) -Force
+    $nav = $null
+    if ($names -contains "nav" -and $j.nav -is [pscustomobject]) { $nav = $j.nav }
+    if ($null -eq $nav) { $nav = [pscustomobject]@{} }
+    $nav | Add-Member -NotePropertyName "engine" -NotePropertyValue "baritone" -Force
+    $j | Add-Member -NotePropertyName "nav" -NotePropertyValue $nav -Force
+    $logging = $null
+    if ($names -contains "logging" -and $j.logging -is [pscustomobject]) { $logging = $j.logging }
+    if ($null -eq $logging) {
+      $logging = [pscustomobject]@{}
+      $log = "logging: created and enabled"
+    } elseif ($logging.enabled -eq $true) {
+      $log = "logging: enabled"
+    } else {
+      $log = "logging: was disabled, now enabled"
     }
+    $logging | Add-Member -NotePropertyName "enabled" -NotePropertyValue $true -Force
+    $j | Add-Member -NotePropertyName "logging" -NotePropertyValue $logging -Force
     [IO.File]::WriteAllText($path, ($j | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
     $log
   ' | tr -d '\r' | sed 's/^/deploy: /'
@@ -129,7 +148,7 @@ if [ "$DO_CONFIG" = 1 ]; then
     $l = $j.llm
     $host_ = ""; try { $host_ = ([uri]$l.baseUrl).Host } catch { $host_ = "(invalid url)" }
     $key = if ([string]::IsNullOrEmpty($l.apiKey)) { "NOT SET" } else { "set (" + $l.apiKey.Length + " chars)" }
-    "config: profile=" + $j.profile + " | llm host=" + $host_ + " model=" + $l.model + " apiKey=" + $key
+    "config: profile=" + $j.profile + " nav.engine=" + $j.nav.engine + " | llm host=" + $host_ + " model=" + $l.model + " apiKey=" + $key
     "config: legacy deepseek section present: " + ($j.PSObject.Properties.Name -contains "deepseek")
   ' | tr -d '\r' | sed 's/^/deploy: /'
 fi

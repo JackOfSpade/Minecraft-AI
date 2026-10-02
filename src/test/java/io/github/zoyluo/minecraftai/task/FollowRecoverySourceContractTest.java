@@ -14,23 +14,21 @@ final class FollowRecoverySourceContractTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
-    void landFollowUsesAuthorizedPlayerTrackingAndDoesNotResetItsFallbackEveryTick() throws IOException {
+    void landFollowUsesBaritoneAndDoesNotRetryEveryTick() throws IOException {
         String follow = read("task/FollowTask.java");
 
-        assertTrue(follow.contains(
-                "BlockPos standNear = standOffsetFrom(target.blockPosition(), bot.blockPosition(), STOP_DISTANCE)"),
-                "the walk/path destination must stand off from the player, not target their own block");
-        assertTrue(follow.contains("startPathTo(standNear)"));
-        assertTrue(follow.contains("boolean walkIdle = pack.isWalkToIdle()"));
-        assertTrue(follow.contains("if (!walkIdle)"));
-        assertTrue(follow.contains("waiting = pathIdle && walkIdle;"),
-                "an idle navigation cooldown must be a deliberate waiting/reacquire state");
+        assertTrue(follow.contains("private boolean followLandBaritone(AIPlayerEntity bot, ServerPlayer target)"));
+        assertTrue(follow.contains("pack.startApproachTo(targetPos, baritoneRadius, false, true)"));
+        assertTrue(follow.contains("pack.startApproachTo(targetPos, baritoneRadius, true, true)"),
+                "a moving player is re-goaled through Baritone, not a second navigator");
+        assertTrue(follow.contains("if (repathBackoff && elapsed < nextRepathTick)"),
+                "a failed admission becomes an explicit hold/backoff rather than an every-tick retry");
         assertFalse(follow.contains("ObservableWorldQuery"),
                 "following an explicitly selected owner/player must not become an entity scan");
     }
 
     @Test
-    void landFollowNeverFightsItsOwnNavigationOrWalksUnverifiedSegments() throws IOException {
+    void landFollowNeverFightsItsOwnNavigationOrFallsBackToDirectWalking() throws IOException {
         String follow = read("task/FollowTask.java");
         String pack = read("action/ActionPack.java");
 
@@ -42,21 +40,16 @@ final class FollowRecoverySourceContractTest {
         assertTrue(steeringBranch >= 0 && fullLook > steeringBranch
                         && fullLook == follow.lastIndexOf("CombatCore.lookAt(bot, target)"),
                 "the full body-yaw look-at is only allowed when nothing is navigating");
-        // Arrival must cancel the executor, not merely release the keys.
-        int arrival = follow.indexOf("distance <= STOP_DISTANCE + STOP_ARRIVAL_SLACK");
+        // Arrival must cancel the Baritone route, not merely release the keys.
+        int arrival = follow.indexOf("bot.distanceTo(target) <= STOP_DISTANCE + STOP_ARRIVAL_SLACK");
         int arrivalStop = follow.indexOf("pack.stopNavigation();", arrival);
         assertTrue(arrival >= 0 && arrivalStop > arrival && arrivalStop < follow.indexOf("waiting = true;", arrival),
-                "the arrived branch must cancel the path executor and the walk");
+                "the arrived branch must cancel the active route before holding position");
         assertTrue(pack.contains("public void stopNavigation()")
-                        && pack.contains("clearActivePathExecutor();\n        this.walkTo = null;"),
-                "stopNavigation must really stop the executor and the walk");
-        // A throttled request is "keep the current plan", never a failed route.
-        assertTrue(follow.contains("ActionPack.PATHFINDING_THROTTLED.equals(path.reason())"));
-        // The straight-line fallback is verified along its whole length and logged.
-        int direct = follow.indexOf("pack.startWalkTo(standNear.getCenter())");
-        int verify = follow.indexOf("FollowDirectWalk.verify(");
-        assertTrue(verify >= 0 && direct > verify && follow.contains("\"follow_direct_walk\""),
-                "startWalkTo may only follow a verified segment");
+                        && pack.contains("cancelBaritoneRoute(\"stop_navigation\")"),
+                "stopNavigation must end the Baritone route");
+        assertFalse(follow.contains("FollowDirectWalk.verify(") && !follow.contains("follow_direct_walk"),
+                "dry-land follow has no direct-walk fallback behind Baritone");
         assertTrue(follow.contains("private static final double BOAT_SHORE_STANDOFF = 2.0D;")
                         && follow.contains("BOAT_SHORE_STANDOFF, BOAT_TURN_ONLY_ANGLE"),
                 "the boat shore approach keeps its own standoff instead of the land STOP_DISTANCE");
@@ -70,11 +63,10 @@ final class FollowRecoverySourceContractTest {
         String tools = read("brain/ToolRegistry.java");
 
         assertTrue(follow.contains("private static final double STOP_DISTANCE = 3.0D;"));
-        assertTrue(follow.contains("distance <= STOP_DISTANCE + STOP_ARRIVAL_SLACK"),
+        assertTrue(follow.contains("bot.distanceTo(target) <= STOP_DISTANCE + STOP_ARRIVAL_SLACK"),
                 "arrival threshold must keep the one-sided slack");
-        assertTrue(follow.contains("stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)"),
-                "follow must own its stall recovery instead of letting StuckWatcher abort it");
-        assertTrue(follow.contains("stuckRecovery.consumeForcedRepath()"));
+        assertTrue(follow.contains("baritoneProgress.stalled(elapsed, bot.distanceTo(target), bot.getX(), bot.getZ())"),
+                "follow owns a Baritone no-progress recovery instead of handing off to another navigator");
         assertTrue(follow.contains("private static final double SWIM_STOP_DISTANCE = 3.5D;"),
                 "swim distance is unchanged by the land stop-distance change");
         assertFalse(follow.contains("startSurfacePathTo"),

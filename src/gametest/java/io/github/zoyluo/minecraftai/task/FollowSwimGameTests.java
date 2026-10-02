@@ -659,20 +659,17 @@ public final class FollowSwimGameTests {
         poseWaterObserver(bot, start);
         MinecraftAiConfig original = MinecraftAiConfig.get();
         try {
-            // This must be a genuinely useful differential fixture, rather than merely proving
-            // that strict mode returns no route in an accidentally disconnected maze.  The raw
-            // operator planner knows the complete physical route and selects its hidden first
-            // water step; strict survival must reject exactly that hidden knowledge.
+            // No profile may revive the old raw planner. Exercise operator explicitly so this
+            // fixture catches a configuration-only regression, then repeat the same observed
+            // route proof under the deployed strict profile.
             installConfig(withProfile(original, OperatingProfile.OPERATOR));
-            require(context, CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                             "operator_follow_route_gametest").allowed(),
-                    "operator control did not allow the raw water planner");
+                    "operator unexpectedly enabled hidden water scans");
             Optional<List<BlockPos>> operatorRoute = SwimRoute.search(
                     bot, world, start, shore, SwimRoute.Goal.EXIT, 0.0D);
-            require(context, operatorRoute.isPresent() && !operatorRoute.get().isEmpty(),
-                    "operator planner did not find the physical hidden-shore route: " + operatorRoute);
-            require(context, operatorRoute.get().get(0).equals(hiddenRouteFirst),
-                    "operator planner did not choose the route's hidden first water step: " + operatorRoute);
+            require(context, operatorRoute.isEmpty(),
+                    "operator profile planned through an unseen shore: " + operatorRoute);
 
             installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
             require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
@@ -1077,9 +1074,9 @@ public final class FollowSwimGameTests {
     }
 
     /**
-     * An in-flight FollowSwimming step has a capability provenance just like a cached route. If an
-     * operator step loses that provenance mid-step, strict survival must cancel it before it can
-     * advance and then require a new live observation proof.
+     * An in-flight FollowSwimming step has an observation provenance just like a cached route. A
+     * blocked next cell must cancel it before it can advance, regardless of an operator/strict
+     * profile change because hidden scans are retired in both profiles.
      */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_operator_step_is_cancelled_before_strict_reproof", maxTicks = 30)
     public void operatorStepIsCancelledBeforeStrictReproof(GameTestHelper context) {
@@ -1109,18 +1106,18 @@ public final class FollowSwimGameTests {
         MinecraftAiConfig original = MinecraftAiConfig.get();
         try {
             installConfig(withProfile(original, OperatingProfile.OPERATOR));
-            require(context, CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                             "operator_follow_step_provenance").allowed(),
-                    "operator fixture did not enable the hidden-world capability");
+                    "operator fixture unexpectedly enabled hidden-world scanning");
             TeleportAudit.reset(bot);
             follower.follow(bot, target, 1, 0.25D);
             require(context, bot.getActionPack().stepInFlightFor("follow_swim", next, WalkedStep.Kind.SWIM),
-                    "operator follow did not start its provenance-bearing swim step");
+                    "operator-profile follow did not start its observation-bearing swim step");
             Vec3 before = bot.position();
 
-            // The old operator admission is deliberately made invalid before strict gets a turn.
-            // A continued action would either pass into this new blocker or carry privileged state
-            // across the profile boundary; a correct strict tick cancels and re-proves first.
+            // The observed admission is deliberately made invalid before strict gets a turn.
+            // A continued action would pass into the new blocker; a correct next tick cancels and
+            // re-proves first.
             world.setBlock(next, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             world.setBlock(next.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             Standability.clearCache();
@@ -1146,7 +1143,7 @@ public final class FollowSwimGameTests {
             require(context, bot.getActionPack().stepIdle()
                             && preOwner != null && preOwner.failed()
                             && "continuation_guard".equals(preOwner.reason()),
-                    "the ActionPack pre-owner tick did not reject the operator step: "
+                    "the ActionPack pre-owner tick did not reject the invalidated observed step: "
                             + (preOwner == null ? "no result" : preOwner.status() + " " + preOwner.reason()));
             require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
                     "the pre-owner profile guard advanced the bot: " + before + " -> " + bot.position());
@@ -1155,7 +1152,7 @@ public final class FollowSwimGameTests {
             // fresh strict action, never resurrect the just-refused privileged step.
             follower.follow(bot, target, 2, 0.25D);
             require(context, bot.getActionPack().stepIdle(),
-                    "strict follow let an operator-admitted in-flight step continue after reproof failed");
+                    "strict follow let an invalidated observed step continue after reproof failed");
             require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
                     "profile transition advanced the bot before strict reproof: " + before + " -> " + bot.position());
             require(context, TeleportAudit.corrections(bot) == 0,

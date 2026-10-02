@@ -103,7 +103,7 @@ class MiningPlanningSourceContractTest {
     }
 
     @Test
-    void longRareExpeditionReadinessPrecedesSealedDescentHandoff() throws IOException {
+    void longRareExpeditionReadinessNeverCreatesAHiddenLayerDescent() throws IOException {
         String planner = read("goal/GoalPlanner.java");
         String executor = read("goal/GoalExecutor.java");
         int mining = planner.indexOf("private boolean ensureMineOre");
@@ -111,47 +111,20 @@ class MiningPlanningSourceContractTest {
                 "ensureMiningFoodReserveTo(", mining);
         int targetTool = planner.indexOf("ensurePickaxeTier(tier", hardFood);
         int hardTorches = planner.indexOf("ensureTorchesTo(requiredTorches", targetTool);
-        int finalSealedKit = planner.indexOf(
-                "ensureRareDescentKit(expanded, count", hardTorches);
-        int descend = planner.indexOf("addStep(GoalStep.descendToY(mineY))", finalSealedKit);
 
         assertTrue(mining >= 0 && hardFood > mining && targetTool > hardFood
-                        && hardTorches > targetTool && finalSealedKit > hardTorches
-                        && descend > finalSealedKit,
-                "food, target tools and torches must finish before the sealed KIT/descent");
-        assertTrue(planner.contains("count == 64")
-                        && planner.contains("? ensureRareDescentKit(expanded, count")
-                        && planner.contains(": ensureDirectRareDescentKit(missionBudget"),
-                "only target64 may enter the mission-depot KIT; smaller rare targets retain direct craft");
-        assertTrue(planner.contains("steps.size() == rareBootstrapStart")
-                        && planner.contains("MiningServiceTask.rareDescentKitReady(bot)")
-                        && planner.contains("MiningServiceTask.ownedMissionDepot(bot, missionId)"),
-                "live KIT omission must bind no-new-bootstrap work, exact readiness and mission ownership");
-        assertTrue(planner.contains("budget.spareToolSticks(), craftSticks"),
-                "final craft inputs must leave the complete 228-stick reserve");
-        assertTrue(planner.contains("budget.emergencyBlocks(), craftStone"),
-                "final craft inputs must leave the complete 60-stone reserve");
-        int rareKit = planner.indexOf("private boolean ensureRareDescentKit");
-        int rareStone = planner.indexOf("ensureItem(Items.COBBLESTONE, requiredStone", rareKit);
-        int rareSticks = planner.indexOf("ensureItem(Items.STICK, requiredSticks", rareKit);
-        int rareService = planner.indexOf("steps.add(GoalStep.rareDescentKitService", rareKit);
-        assertTrue(rareKit >= 0 && rareStone > rareKit && rareSticks > rareStone
-                        && rareService > rareSticks,
-                "target64 hand-off must finish stone acquisition before sealing sticks and KIT");
-        String rareBody = planner.substring(rareKit,
-                planner.indexOf("private boolean ensureDirectRareDescentKit", rareKit));
-        assertTrue(rareBody.contains("consumeItem(Items.CHEST, 1)")
-                        && rareBody.contains(
-                        "consumeItem(Items.COBBLESTONE, saturatedAdd(craftStone, 2))")
-                        && rareBody.contains("consumeItem(Items.STICK, craftSticks)")
-                        && rareBody.contains(
-                        "counts.merge(Items.STONE_PICKAXE, freshPickaxes, Integer::sum)"),
-                "KIT must mirror chest/seal/handle consumption and five fresh picks symbolically");
-        int directKit = planner.indexOf("private boolean ensureDirectRareDescentKit");
-        int directCraft = planner.indexOf(
-                "appendFreshStonePickaxeCraft(freshPickaxes", directKit);
-        assertTrue(directKit > rareKit && directCraft > directKit,
-                "targets 8..63 must retain the direct incremental five-pick craft");
+                        && hardTorches > targetTool,
+                "food, target tools and torches must be provisioned before an observed mining attempt");
+        assertTrue(planner.contains("Layer-directed descent was deliberately retired")
+                        && planner.contains("no_observed_ore_target"),
+                "the planner must document that readiness never grants discovery-by-excavation authority");
+        assertFalse(planner.substring(mining).contains("addStep(GoalStep.descendToY("),
+                "new mining plans must not create a shaft-digging handoff toward an unobserved layer");
+        assertFalse(planner.substring(mining).contains("ensureRareDescentKit(expanded, count"),
+                "new mining plans must not revive a sealed descent kit through a rare-ore branch");
+        assertTrue(executor.contains(
+                        "case DESCEND_TO_Y -> Optional.of(new RetiredNavigationTask(\"descend_to_y\"))"),
+                "an old persisted descent step must fail closed instead of regaining navigation authority");
         assertTrue(planner.contains("longRareExpedition || ordinaryChannelMission"),
                 "ordinary mine-layer replans must retain channel-tool service maintenance");
         assertTrue(planner.contains("budget.ordinaryChannelRepairSticks()"),

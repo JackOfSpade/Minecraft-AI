@@ -68,11 +68,11 @@ final class PerceptionFollowupSourceContractTest {
                 "/** The place {@code bot} should turn");
         int off = projectile.indexOf("if (!enabled())");
         assertTrue(off >= 0 && projectile.indexOf("ObservableWorldQuery.canObserveEntity(bot, projectile)") > off,
-                "enabled=false answers with the old canObserveEntity (which honours HIDDEN_BLOCK_SCAN) before anything else");
+                "enabled=false answers with the observable entity proof before anything else");
         assertTrue(projectile.indexOf("PrivilegedCapability.HIDDEN_BLOCK_SCAN") > off,
-                "with perception on, a bot with the strict capability bypass still sees what the bypass lets it see");
+                "with perception on, the former bypass still crosses the centrally retired capability boundary");
         assertTrue(projectile.indexOf("PrivilegedCapability.HIDDEN_BLOCK_SCAN") < projectile.indexOf("scanFailedRecently(bot)"),
-                "the capability bypass is asked before the scan state");
+                "the retired capability boundary is checked before scan state");
     }
 
     @Test

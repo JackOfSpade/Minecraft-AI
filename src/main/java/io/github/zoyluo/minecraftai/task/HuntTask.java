@@ -620,7 +620,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 continue;
             }
             SurfaceRouteProof outbound = HuntSurfaceRoutes.provePreyApproachRoute(
-                    bot, bot.level(), current, candidate, floorY, null);
+                    bot, candidate, floorY, null);
             if (outbound == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
@@ -628,8 +628,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             if (outbound != SurfaceRouteProof.SAFE) {
                 continue;
             }
-            SurfaceRouteProof dropRecovery = HuntSurfaceRoutes.proveRoundTripSurfaceRoute(
-                    bot.level(), candidate, preyCell, floorY);
+            SurfaceRouteProof dropRecovery = HuntSurfaceRoutes.proveSurfaceRoute(
+                    bot, preyCell, floorY, candidate);
             if (dropRecovery == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
@@ -814,7 +814,6 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             fail("hunt_search_capacity_exhausted sectors=" + searchCursor.visitedCount());
             return RoamResult.RETRY;
         }
-        ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
         String dimension = dimension(bot);
         long claimedOrdinal;
@@ -835,7 +834,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             for (int i = 0; i < dirs.length; i++) {
                 int[] d = dirs[(start + i) % dirs.length];
                 BlockPos column = HuntSurfaceRoutes.rotatedRoamColumn(feet, d[0], d[1], dist, attemptSerial);
-                BlockPos ground = findGround(world, column.getX(), column.getZ());
+                BlockPos ground = findObservedGround(bot, column.getX(), column.getZ(), surfaceFloorY(bot));
                 if (ground == null
                         || ground.getY() < surfaceFloorY(bot)
                         || searchCursor.contains(
@@ -851,7 +850,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 // back to the current surface. This rejects seed-3000's chained safe drops into a
                 // Y=53 pocket whose only reverse path consumed pillar blocks and stranded the bot.
                 if (!HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
-                        world, feet, ground, surfaceFloorY(bot))) {
+                        bot, ground, surfaceFloorY(bot))) {
                     EpisodeMemory.INSTANCE.exclude(bot.getUUID(), ground,
                             bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
                     BotLog.action(bot, "hunt_roam_one_way_rejected",
@@ -956,23 +955,25 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         roamCredited = false;
     }
 
-    // In the (x,z) column, scan top-down for the first open-air standable spot (a surface landing point).
-    private static BlockPos findGround(ServerLevel world, int x, int z) {
-        // Use the heightmap to read that column's surface directly, so this holds at any altitude.
-        // The old hard cap of y=110 meant a bot standing on terrain/hills above y=110 could never
-        // find a landing point -> roaming was completely broken -> hunt_stuck_no_escape even with
-        // prey nearby (observed: at y=111 with a chicken 13 blocks away, it still failed).
-        // Canopy penetration: the old MOTION_BLOCKING top surface lands on the tree canopy in
-        // forests (tall spruce can be 20+ blocks, so a fixed descent count is a losing bet), and the
-        // ground under the canopy never sees sky -> every sampled point comes back null -> every
-        // roam gets rejected, a quick death (observed: spawning in a spruce forest).
-        // The fix: the MOTION_BLOCKING_NO_LEAVES heightmap natively skips leaves, so its top surface
-        // is terrain/trunk; then descend a few more blocks to reach the ground.
-        int surfaceY = world.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-        for (int y = surfaceY; y >= surfaceY - 24 && y > world.getMinY() + 1; y--) {
-            BlockPos p = new BlockPos(x, y, z);
-            if (Standability.isStandable(world, p)) {
-                return p;
+    /**
+     * Finds a surface pose only where the bot can separately see its feet, head, and support.
+     * Heightmaps and top-down column scans would turn a loaded but unseen hillside into a roam
+     * waypoint; the following Baritone admission must be the first component that decides
+     * whether that observed pose has a navigable corridor.
+     */
+    private static BlockPos findObservedGround(AIPlayerEntity bot, int x, int z, int minimumY) {
+        int currentY = bot.blockPosition().getY();
+        int highest = Math.min(bot.level().getMaxY() - 2, currentY + 6);
+        int lowest = Math.max(Math.max(bot.level().getMinY() + 1, minimumY), currentY - 24);
+        for (int y = highest; y >= lowest; y--) {
+            BlockPos candidate = new BlockPos(x, y, z);
+            if (!ObservableWorldQuery.canObserveCell(bot, candidate)
+                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                    || !ObservableWorldQuery.canObserveCollider(bot, candidate.below())) {
+                continue;
+            }
+            if (Standability.isStandable(bot.level(), candidate)) {
+                return candidate;
             }
         }
         return null;
@@ -1427,7 +1428,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private boolean safePickupCellRoute(AIPlayerEntity bot, BlockPos destination) {
         if (destination == null || pickupReturnAnchor == null
-                || destination.getY() < surfaceFloorY(bot)) {
+                || destination.getY() < surfaceFloorY(bot)
+                || !isObservablePickupStand(bot, destination)) {
             return false;
         }
         ServerLevel world = bot.level();
@@ -1435,12 +1437,9 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (!Standability.isStandable(world, destination)) {
             return false;
         }
-        BlockPos current = bot.blockPosition();
-        if (!HuntSurfaceRoutes.hasExactSurfaceRoute(world, current, destination, surfaceFloorY(bot))) {
-            return false;
-        }
-        return HuntSurfaceRoutes.hasExactSurfaceRoute(
-                world, destination, pickupReturnAnchor, surfaceFloorY(bot));
+        return HuntSurfaceRoutes.proveSurfaceRoute(
+                bot, destination, surfaceFloorY(bot), pickupReturnAnchor)
+                == SurfaceRouteProof.SAFE;
     }
 
     private boolean approachKnownPickupCell(

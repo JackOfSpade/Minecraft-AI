@@ -50,6 +50,11 @@ final class HarvestCoreCorridorTest {
 
         int corridor = source.indexOf("public static boolean isSafeWalkCorridor");
         String check = source.substring(corridor, source.indexOf("public static void sweepPickup(", corridor));
+        assertTrue(check.contains("canObserveWalkCorridorEnvelope(bot, box)")
+                        && check.indexOf("canObserveWalkCorridorEnvelope(bot, box)") < check.indexOf("world.noCollision(bot, body)"),
+                "the pickup corridor must prove its complete observation envelope before raw collision reads");
+        assertTrue(check.contains("ObservableWorldQuery.canObserveCell(bot, cell)"),
+                "unoccupied corridor cells must have state-free ray evidence before hazard reads");
         assertTrue(check.contains("Standability.isDangerous(state)"), "fire / lava / cactus / magma fail the corridor");
         assertTrue(check.contains("getFluidState().isEmpty()"), "water and lava cells fail the corridor");
         assertTrue(check.contains("noCollision(bot, box.expandTowards(0.0D, -CORRIDOR_MAX_FALL"),

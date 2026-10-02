@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@code startBaritoneRoute} hands the bot over from the legacy executor before the Baritone admission
+ * {@code startBaritoneRoute} hands the bot over from local physical controllers before the Baritone admission
  * ({@code yieldToBaritone}, which keeps the route lease for the route that is about to start). A request that is refused or throws with
- * no Baritone route behind it must take that lease back, or a stale clockless ROUTE lease of the dropped legacy route stays in force
+ * no Baritone route behind it must take that lease back, or a stale clockless ROUTE lease stays in force
  * for an idle bot. The behaviour is pinned by {@code NaturalMovementGameTests.aRefusedBaritoneRequestDropsTheStaleRouteLease}; this pins
  * the structure.
  */
@@ -36,11 +36,12 @@ class ActionPackRouteLeaseSourceContractTest {
                 "a start that throws with no Baritone route behind it must drop the old route's lease");
         assertTrue(refusedBranch.contains("cancelBaritoneRoute(\"rejected_request\")") && refusedBranch.contains("dropStaleRouteLease()"),
                 "a refused request with no Baritone route behind it must drop the old route's lease");
-        // A route that DOES start still owns the lease the legacy route left for it (yieldToBaritone keeps it).
+        // A route that DOES start still owns the lease left for it (yieldToBaritone keeps it).
         int keep = source.indexOf("public void yieldToBaritone()");
         String yieldBody = source.substring(keep, source.indexOf("public void setForward", keep));
-        assertTrue(yieldBody.contains("dropPathExecutor();") && !yieldBody.contains("clearRouteLease()"),
-                "the hand-over itself keeps the lease for the route that is about to start");
+        assertTrue(yieldBody.contains("cancelStep();") && yieldBody.contains("stopMining();")
+                        && yieldBody.contains("this.walkTo = null;") && !yieldBody.contains("clearRouteLease()"),
+                "the local-controller hand-over keeps the lease for the route that is about to start");
         int drop = source.indexOf("private void dropStaleRouteLease()");
         assertTrue(drop >= 0);
         String dropBody = source.substring(drop, source.indexOf("/** The route lease ends with the route it was requested for. */", drop));

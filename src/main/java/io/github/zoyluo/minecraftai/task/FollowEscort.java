@@ -17,8 +17,8 @@ import net.minecraft.world.entity.LivingEntity;
  * calls hostile (a MARKED foreign bot included, a SUSPECT one never), what the bot's own eyes see ({@link ObservableWorldQuery}) and
  * what melee is allowed against ({@link CombatCore#isMeleeForbiddenThreat}: no creeper, no warden...), within
  * {@value #CANDIDATE_RANGE} blocks. A swing is made only on a READY tick (the cooldown is full, no item is in use and the legal melee
- * reach is met): {@link CombatCore#strikeIfReady} turns the bot toward its target first, and on the legacy engine that yaw steers the
- * next physics tick, so it must not be called on ticks without a swing. The weapon is chosen when a candidate is near (at most every
+ * reach is met): {@link CombatCore#strikeIfReady} turns the bot toward its target first, and that yaw steers the next physics tick,
+ * so it must not be called on ticks without a swing. The weapon is chosen when a candidate is near (at most every
  * {@value #WEAPON_SWAP_INTERVAL_TICKS} ticks). Next to a calm warden the escort is silent: no swing, no weapon swap (the sound of a
  * fight wakes it), unless the bot has just been hurt.</p>
  */

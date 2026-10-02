@@ -98,7 +98,7 @@ public final class MinecraftAiVerifySubcommand {
             240_000 + 32 * 2_400;
     // prepared isolated pipeline: the 32 version's 24,000-tick contract, doubled at the same per-block rate.
     private static final int OBSIDIAN_STACK_64_PREPARED_TIMEOUT = 48_000;
-    static final String STRICT_STRIP_MINE_REJECTION_FEATURE = "strip_mine_strict_rejection";
+    static final String RETIRED_LEGACY_MINING_FEATURE = "retired_legacy_mining";
 
     private static final List<String> ALL_FEATURES = List.of(
             "capability_profile",
@@ -109,7 +109,7 @@ public final class MinecraftAiVerifySubcommand {
             "container",
             "combat",
             "farm",
-            "strip_mine",
+            RETIRED_LEGACY_MINING_FEATURE,
             "build",
             "memory",
             "job",
@@ -396,7 +396,7 @@ public final class MinecraftAiVerifySubcommand {
     // cheaper and stronger than duplicating its polling semantics in a unit-test facade.
     static boolean startForGameTest(CommandSourceStack source, AIPlayerEntity bot, String feature) {
         boolean supportedFeature = MINING_ACCEPTANCE_FROM_ZERO_SUITE.contains(feature)
-                || STRICT_STRIP_MINE_REJECTION_FEATURE.equals(feature);
+                || RETIRED_LEGACY_MINING_FEATURE.equals(feature);
         if (!supportedFeature || RUNS.containsKey(bot.getUUID())) {
             return false;
         }
@@ -501,10 +501,6 @@ public final class MinecraftAiVerifySubcommand {
     private static void addFeatureForProfile(List<String> destination,
                                              String feature,
                                              OperatingProfile profile) {
-        if ("strip_mine".equals(feature) && profile == OperatingProfile.STRICT_SURVIVAL) {
-            destination.add(STRICT_STRIP_MINE_REJECTION_FEATURE);
-            return;
-        }
         destination.add(feature);
     }
 
@@ -527,8 +523,7 @@ public final class MinecraftAiVerifySubcommand {
             case "container" -> assignContainer(bot);
             case "combat" -> assignCombat(bot);
             case "farm" -> assignFarm(bot);
-            case "strip_mine" -> assignStripMine(bot);
-            case STRICT_STRIP_MINE_REJECTION_FEATURE -> assignStripMineStrictRejection(bot);
+            case RETIRED_LEGACY_MINING_FEATURE -> assignRetiredLegacyMining(bot);
             case "build" -> assignBuild(bot);
             case "craft_chain" -> assignCraftChain(bot);
             case "drowning" -> verifyDrowning(bot);
@@ -761,43 +756,25 @@ public final class MinecraftAiVerifySubcommand {
                 ignored -> bot.level().getBlockState(farm.above()).is(Blocks.WHEAT));
     }
 
-    private static Result assignStripMine(AIPlayerEntity bot) {
-        prepareArea(bot);
-        clearInventory(bot);
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
-        Direction direction = Direction.NORTH;
-        for (int distance = 1; distance <= 2; distance++) {
-            bot.level().setBlock(bot.blockPosition().relative(direction, distance), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            bot.level().setBlock(bot.blockPosition().relative(direction, distance).above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        return assignTask(bot, "strip_mine", new StripMineTask(direction, 2, 0, null, java.util.Set.of()),
-                800,
-                status -> status.progress() >= 1.0D);
-    }
-
-    /**
-     * Strict-survival still verifies the legacy boundary instead of silently dropping it from
-     * {@code verify all}: the real task must fail immediately with the exact typed reason. The
-     * operator profile never expands to this scenario and continues to run {@link #assignStripMine}.
-     */
-    private static Result assignStripMineStrictRejection(AIPlayerEntity bot) {
+    /** Verifies that the retained in-process compatibility class fails closed in every profile. */
+    private static Result assignRetiredLegacyMining(AIPlayerEntity bot) {
         OperatingProfile profile = MinecraftAiConfig.get().profile();
         Optional<String> declaredRejection = StripMineTask.profileRejectionReason(profile);
-        if (!declaredRejection.filter(StripMineTask.STRICT_SURVIVAL_REJECTION::equals).isPresent()) {
-            return Result.fail(STRICT_STRIP_MINE_REJECTION_FEATURE,
+        if (!declaredRejection.filter(StripMineTask.RETIRED_REJECTION::equals).isPresent()) {
+            return Result.fail(RETIRED_LEGACY_MINING_FEATURE,
                     "profile_contract_mismatch profile=" + profile
-                            + " expected=" + StripMineTask.STRICT_SURVIVAL_REJECTION
+                            + " expected=" + StripMineTask.RETIRED_REJECTION
                             + " actual=" + declaredRejection.orElse("allowed"));
         }
         TaskManager.INSTANCE.assign(bot,
                 new StripMineTask(Direction.NORTH, 2, 0, null, java.util.Set.of()),
                 io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(
                         io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY,
-                        "strict_strip_mine_rejection"));
+                        "retired_legacy_mining"));
         return Result.runningExpectTypedFail(
-                STRICT_STRIP_MINE_REJECTION_FEATURE,
+                RETIRED_LEGACY_MINING_FEATURE,
                 20,
-                StripMineTask.STRICT_SURVIVAL_REJECTION);
+                StripMineTask.RETIRED_REJECTION);
     }
 
     private static Result assignBuild(AIPlayerEntity bot) throws IOException {

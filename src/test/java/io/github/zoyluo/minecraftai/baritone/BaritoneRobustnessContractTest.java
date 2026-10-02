@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Source-contract pins for the failure paths of the Baritone layer (it ships in the user's jar whatever the engine is, so a failing
- * Baritone must never take a bot's tick, the legacy navigator or the server down): what runs on a driven tick, what a route
+ * Baritone must never take a bot's tick or the server down): what runs on a driven tick, what a route
  * lifecycle does with the water bookkeeping, and what the mixins that inject into vanilla unconditionally may and may not do.
  */
 class BaritoneRobustnessContractTest {
@@ -44,16 +44,17 @@ class BaritoneRobustnessContractTest {
         assertTrue(failed.contains("NavigationMeasurement.noteBaritoneFallback(bot)"),
                 "a contained driver failure (including the existing testFault seam) invalidates an active Baritone measurement");
         String gameTest = Files.readString(Path.of("src/gametest/java/io/github/zoyluo/minecraftai/baritone/BaritoneNavigationGameTests.java"));
-        assertTrue(gameTest.contains("aLinkageFailureInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy")
-                        && gameTest.contains("aLinkageFailureAfterPhysicsInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy")
+        assertTrue(gameTest.contains("aLinkageFailureInsideADrivenTickStopsNavigation")
+                        && gameTest.contains("aLinkageFailureAfterPhysicsInsideADrivenTickStopsNavigation")
                         && gameTest.contains("\"before_physics\"") && gameTest.contains("\"after_physics\"")
-                        && gameTest.contains("linkageFailureInsideADrivenTick(context,"),
+                        && gameTest.contains("linkageFailureInsideADrivenTickStopsNavigation(context,"),
                 "separate linkage-failure GameTests must retain beforePhysics and afterPhysics contained-driver coverage");
-        String afterEnvironment = "baritone_navigation_game_tests_a_linkage_failure_after_physics_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy";
+        String beforeEnvironment = "baritone_navigation_game_tests_a_linkage_failure_inside_adriven_tick_stops_navigation";
+        String afterEnvironment = "baritone_navigation_game_tests_a_linkage_failure_after_physics_inside_adriven_tick_stops_navigation";
         assertTrue(gameTest.contains("environment = \"minecraftai-gametest:" + afterEnvironment + "\""),
                 "the afterPhysics linkage-failure GameTest must name its registered test environment");
         Path environments = Path.of("src/gametest/resources/data/minecraftai-gametest/test_environment");
-        assertEquals(Files.readString(environments.resolve("baritone_navigation_game_tests_a_linkage_failure_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy.json")),
+        assertEquals(Files.readString(environments.resolve(beforeEnvironment + ".json")),
                 Files.readString(environments.resolve(afterEnvironment + ".json")),
                 "the afterPhysics linkage-failure GameTest must carry the same minimal test environment as beforePhysics");
     }

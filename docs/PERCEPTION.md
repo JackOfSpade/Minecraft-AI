@@ -124,9 +124,9 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   shooter the bot is tracking was anticipated and is answered at once; any other is a first sighting and waits the reaction time of the
   formula (angle factor 1 when only its ordinary ballistic shot was heard), so a shot from a shooter nobody noticed normally just hits,
   and a shot from behind that nobody heard or saw always does.
-* **Strict-survival decision.** `HIDDEN_BLOCK_SCAN` remains an explicit operator capability, not a companion-survival shortcut. When it
-  is explicitly granted, the documented legacy observation answer is allowed; under strict survival it is denied and projectile
-  awareness uses only sight/cone/line-of-sight or the vibration facts above. `scanFailedRecently` is the separate one-tick fail-open
+* **No hidden-scan decision.** `HIDDEN_BLOCK_SCAN` is retired in every profile. Existing configuration values are parsed only for
+  migration and every runtime request is denied and logged, so projectile awareness uses only sight/cone/line-of-sight or the
+  vibration facts above. `scanFailedRecently` is the separate one-tick fail-open
   safety net for an actual perception-scan exception: it uses the old line-of-sight answer so a broken scan does not blind the bot; it
   neither grants a hidden scan nor turns a heard event into knowledge of a hidden shooter or future trajectory.
 * **The owner's sight** still nominates: `SharedVision.seenByBotOrOwner` is "the bot noticed it, or its owner sees it" (foreign

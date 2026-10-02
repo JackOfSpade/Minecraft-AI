@@ -48,6 +48,14 @@ The design deliberately avoids logging everything — it only records the inform
 determine whether a given category of request completed normally. Log volume is inversely related
 to debugging cost: logging too much actually slows down investigation.
 
+## Baritone observation navigation
+
+Navigation is Baritone-only and every route produces enough PATH/lifecycle evidence to distinguish an ordinary route failure from a no-cheat refusal. Startup's `config_loaded` record includes `nav_engine=baritone`. A route admission records `nav_goal_rejected` or `nav_observation_fence_updated` before Baritone can plan; the latter includes the target, fence generation, cell count, ray count, and whether the target was live or remembered. `baritone_admission` then records the planner result, time, node/movement counts, applied survival policy, and fence size.
+
+For remembered targets, look for `observed_target_route_started`, followed by `observed_target_revalidated`. A failed live re-proof is `observed_target_memory_revoked`; a lost active corridor is `route_observation_lost` followed by `baritone_observation_revoked`. Those paths end as `path_failed` with `navigation_observation_lost`; they never route through the old navigator. Config migration is separately visible as `nav_engine_legacy_migrated` or `nav_engine_invalid_migrated`.
+
+When investigating a rejected ore or movement request, filter one bot's session log for the route target and these event names. The `reason`, `rays`, `fresh_cells`, `provenance`, `generation`, and `clear_memory` fields show whether the refusal came from hidden terrain, an expired observation, a teleport/dimension boundary, or a normal planner result without logging terrain outside the bot's permitted view.
+
 ## Expected Workflow
 
 After a player has played for a while, hand the logs to an AI (not limited to Claude — any
@@ -74,7 +82,7 @@ gap; that would defeat the purpose of "log only what's needed".
 `task_failed` (including `failureReason()`) — so even a task that doesn't write a single log line
 of its own still has start/end records. Following the self-improvement principle above, we went
 through the task classes that had zero logging or noticeably thin logging at the time
-(`FarmTask`, `FollowTask`, `GuardTask`, `StripMineTask`, `CraftTask`, and about 29
+(`FarmTask`, `FollowTask`, `GuardTask`, `CraftTask`, and about 29
 others in total), using the standard "if this request actually failed, can you tell which step and
 why from the logs alone, without reading the source?" Conclusions were handled case by case: where
 a single generic failure-reason string was being reused across multiple distinct causes, the
@@ -163,14 +171,14 @@ from the logs alone that those logs were actually broken and physically picked u
 reconstructed indirectly — `mine_complete` carried no fields at all, `GatherQuotaTask` logged
 individual pickup events but no per-unit gain record or end-of-task summary, inventory only showed
 up inside the periodic `diag_snapshot` line (truncated in practice), and privileged capability
-decisions (`HIDDEN_BLOCK_SCAN`, ...) were logged individually but never summarized per
+decisions (including retired `HIDDEN_BLOCK_SCAN` denials) were logged individually but never summarized per
 task. Per the self-improvement principle above, this was a genuine gap: the events below close it.
 Every one of them is observation only — none of it changes what a task actually counts, decides, or
 does; see the "Constraints" note against each event.
 
 | Category | event | When it's written | Key fields |
 |---|---|---|---|
-| ACTION | `mine_complete` | `MiningController` finishes breaking a block successfully (see `ActionPack.tickMining`) | `block` (registry id of the block, captured before the break), `pos`, `tool` (held item id, or `empty`), `ticks` (break duration) |
+| ACTION | `mine_complete` | `MiningController` finishes breaking a block successfully (see `ActionPack.tickMining`) | `block` (registry id of the block, captured before the break), `pos`, `tool` (held item id, or `empty`), `ticks` (break duration). A Baritone-driven break additionally carries `driver=baritone`; a directly admitted observed interaction has the same physical evidence and deliberately no route-driver label. |
 | ACTION | `gather_unit` | `GatherQuotaTask`'s counted total for an accepted item increases | `item`, `delta`, `total`, `target`, `source` (`pickup` when attributable to a block this task broke, with that block's `pos` included; `unattributed` otherwise, e.g. a player handed the bot an item mid-task) |
 | ACTION | `gather_summary` | Exactly one line whenever a `GatherQuotaTask` ends, for any reason (complete, fail, abort, cancel) | `item`/family, `target`, `baseline` (accepted-item inventory count at task start), `final` (at task end), `gained` (sum of `gather_unit` deltas), `breaks` (blocks of the family this task itself broke), `pickups` (confirmed physical pickups), `pickup_misses`, `unattributed_gains`, `capability_denials` (privileged decisions denied during this task), `elapsed_ticks`, `outcome`, `consistent` (see below) |
 | ACTION | `inventory_delta` | A bot's inventory differs from the previous sample, sampled at the same cadence as `diag_snapshot` (every ~2s, driven from the same per-tick call site — see `log/InventoryAudit.java`); only written when something actually changed | `task` (active task name), `viewer` (name of a player with this bot's inventory screen open, or `none`), `gained` (e.g. `minecraft:spruce_log+1`), `lost` (e.g. `minecraft:torch-1`); both are bounded to a handful of items with a `+N more` tail if more changed at once |

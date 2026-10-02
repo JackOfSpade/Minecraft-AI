@@ -66,7 +66,7 @@ class PerceptionCallSiteClassificationTest {
         m.put("action/MilkCowAction.java", Counts.of(0, 1, 0));                // deliberate search for a cow
         m.put("brain/ToolRegistry.java", Counts.of(1, 0, 0));                  // attack_entity: candidates are creatures the bot has NOTICED (animals and villagers stay omnidirectional inside canNoticeCreature)
         m.put("mining/assist/PoiDetector.java", Counts.of(0, 1, 0));           // landmark evidence (habitation, warden) for the assist's scoring, not a threat notice
-        m.put("task/BoatSupport.java", Counts.of(0, 1, 0));                    // boats
+        m.put("task/BoatSupport.java", Counts.of(0, 3, 0));                    // boat and each boarding/dismount candidate
         m.put("task/BreedTask.java", Counts.of(0, 1, 0));                      // deliberate search for animals
         m.put("task/CreateObsidianTask.java", Counts.of(0, 1, 0));             // dropped items
         m.put("task/HuntTask.java", Counts.of(0, 5, 1));                       // prey and its drops; physical: strike legality

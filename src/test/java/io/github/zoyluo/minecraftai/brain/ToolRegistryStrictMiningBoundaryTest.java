@@ -1,6 +1,5 @@
 package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -12,32 +11,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolRegistryStrictMiningBoundaryTest {
     @Test
-    void strictProfileDoesNotPublishLegacyMiningTools() {
-        assertFalse(ToolRegistry.publishTool(OperatingProfile.STRICT_SURVIVAL, "strip_mine"));
-        assertFalse(ToolRegistry.publishTool(OperatingProfile.STRICT_SURVIVAL, "mine_vein"));
-        assertFalse(ToolRegistry.publishTool(null, "strip_mine"));
-        assertTrue(ToolRegistry.publishTool(OperatingProfile.STRICT_SURVIVAL, "mine_ore"));
-        assertTrue(ToolRegistry.publishTool(OperatingProfile.STRICT_SURVIVAL, "assign_task"));
-
-        assertTrue(ToolRegistry.publishTool(OperatingProfile.OPERATOR, "strip_mine"));
-        assertTrue(ToolRegistry.publishTool(OperatingProfile.OPERATOR, "mine_vein"));
+    void retiredMiningToolsAreAbsentInEveryProfile() {
+        ToolRegistry registry = new ToolRegistry();
+        assertTrue(registry.get("strip_mine").isEmpty());
+        assertTrue(registry.get("mine_vein").isEmpty());
+        assertTrue(registry.get("mine_ore").isPresent());
+        assertTrue(registry.get("assign_task").isPresent());
     }
 
     @Test
-    void everyPublicRouteRejectsBeforeReplacingTheCurrentTask() throws IOException {
+    void noPublicRouteRegistersTheRetiredMiningTasks() throws IOException {
         String registry = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/brain/ToolRegistry.java"));
         String command = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/command/MinecraftAiTaskSubcommand.java"));
 
-        assertTrue(occurrences(registry, "legacyMiningTaskRejection(\"") >= 2,
-                "direct strip_mine and mine_vein handlers must both reject strict mode");
-        int assignTaskGate = registry.indexOf("legacyMiningTaskRejection(taskType)");
-        int createTask = registry.indexOf("Task task = createTask(bot, taskType, params)");
-        assertTrue(assignTaskGate >= 0 && createTask > assignTaskGate,
-                "assign_task must reject legacy mining before task assignment");
-        assertTrue(occurrences(command, "requireLegacyMiningProfile();") == 2,
-                "both player command routes must reject before constructing legacy mining work");
+        assertFalse(registry.contains("register(\"strip_mine\"") || registry.contains("register(\"mine_vein\""));
+        assertFalse(registry.contains("case \"strip_mine\"") || registry.contains("case \"mine_vein\""));
+        assertFalse(command.contains("literal(\"strip_mine\"") || command.contains("literal(\"mine_vein\""));
+        assertFalse(command.contains("StripMineTask"));
     }
 
     @Test
@@ -56,13 +48,4 @@ class ToolRegistryStrictMiningBoundaryTest {
                 "an alias that is not in the tool schema must not be honoured silently");
     }
 
-    private static int occurrences(String value, String needle) {
-        int count = 0;
-        int offset = 0;
-        while ((offset = value.indexOf(needle, offset)) >= 0) {
-            count++;
-            offset += needle.length();
-        }
-        return count;
-    }
 }

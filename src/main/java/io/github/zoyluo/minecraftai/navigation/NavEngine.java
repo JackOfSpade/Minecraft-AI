@@ -3,13 +3,16 @@ package io.github.zoyluo.minecraftai.navigation;
 import java.util.Locale;
 
 /**
- * Which navigator answers an ordinary walk request: the mod's own pathfinder ({@link #LEGACY}, the default) or the vendored
- * Baritone ({@link #BARITONE}). Configured by {@code nav.engine} in {@code minecraftai.json}; see {@code docs/NAVIGATION_ENGINE.md}.
+ * Navigation engine identity. Shipping navigation is Baritone-only; {@link #LEGACY} remains only
+ * as a historical label for archived measurements and old config migration, never as a selectable
+ * runtime executor. See {@code docs/NAVIGATION_ENGINE.md}.
  *
  * <p>This type and everything else in this package is deliberately free of {@code baritone.*} references, so that reading the
  * configured engine (which happens on every path request) can never be what initialises Baritone.</p>
  */
 public enum NavEngine {
+    /** Historical measurement/config-migration label; production parsing canonicalises it to {@link #BARITONE}. */
+    @Deprecated
     LEGACY("legacy"),
     BARITONE("baritone");
 
@@ -24,27 +27,26 @@ public enum NavEngine {
         return configValue;
     }
 
-    /** Whether {@code value} names an engine (case-insensitive, surrounding blanks ignored). */
+    /** Whether {@code value} is a recognised current value or the one-time legacy migration alias. */
     public static boolean isKnown(String value) {
-        return parseOrNull(value) != null;
+        return isBaritoneValue(value) || isLegacyAlias(value);
     }
 
-    /** The engine {@code value} names; anything missing or unknown is {@link #LEGACY}, the safe default. */
+    /** Shipping policy: missing, old, and unknown values all canonicalise to the only runtime engine, Baritone. */
     public static NavEngine parse(String value) {
-        NavEngine parsed = parseOrNull(value);
-        return parsed == null ? LEGACY : parsed;
+        return BARITONE;
     }
 
-    private static NavEngine parseOrNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalised = value.trim().toLowerCase(Locale.ROOT);
-        for (NavEngine engine : values()) {
-            if (engine.configValue.equals(normalised)) {
-                return engine;
-            }
-        }
-        return null;
+    /** True for an old config value that is accepted only to make migration non-breaking. */
+    public static boolean isLegacyAlias(String value) {
+        return normalise(value).equals(LEGACY.configValue);
+    }
+
+    private static boolean isBaritoneValue(String value) {
+        return normalise(value).equals(BARITONE.configValue);
+    }
+
+    private static String normalise(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 }

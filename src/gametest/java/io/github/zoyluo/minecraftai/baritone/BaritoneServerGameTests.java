@@ -1,13 +1,11 @@
 package io.github.zoyluo.minecraftai.baritone;
 
-import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.BlockOptionalMeta;
-import baritone.api.utils.BlockOptionalMetaLookup;
 import baritone.api.utils.PathCalculationResult;
 import baritone.api.utils.accessor.IItemStack;
 import baritone.api.utils.accessor.ILootTable;
@@ -64,7 +62,7 @@ public final class BaritoneServerGameTests {
     }
 
     @GameTest(maxTicks = 100)
-    public void oreScanFindsBlocksThroughTheSnapshotAndTheRawPalettes(GameTestHelper context) {
+    public void hiddenOreIsDeniedBeforeAnyScannerCanUseIt(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(8, 40, 8));
         preparePlatform(world, feet, 7);
@@ -72,13 +70,17 @@ public final class BaritoneServerGameTests {
         world.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
         String name = "BaritoneScanGT";
         AIPlayerEntity bot = spawn(context, name, feet);
-        IBaritone baritone = BaritoneHost.create(bot);
+        IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
         try {
-            List<BlockPos> found = BaritoneAPI.getProvider().getWorldScanner()
-                    .scanChunkRadius(baritone.getPlayerContext(), new BlockOptionalMetaLookup(Blocks.DIAMOND_ORE), 64, 10, 2);
-            require(context, found.contains(ore), "the scan did not report the ore at " + ore + ", found " + found);
+            ServerPlayerContext playerContext = (ServerPlayerContext) baritone.getPlayerContext();
+            require(context, !playerContext.allowNavigationCell(ore.getX(), ore.getY(), ore.getZ()),
+                    "unobserved ore cell was exposed to Baritone navigation");
+            require(context, playerContext.navigationCellState(ore.getX(), ore.getY(), ore.getZ()) == null,
+                    "unobserved ore leaked a block state into the navigation context");
+            require(context, !playerContext.allowScanningProcess("mine"),
+                    "the strict context allowed Baritone's loaded-world mining scanner");
         } finally {
-            BaritoneHost.destroy(baritone);
+            BaritoneRegistry.INSTANCE.forget(bot, "gametest_hidden_ore");
             AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
         }
         context.succeed();
@@ -131,11 +133,14 @@ public final class BaritoneServerGameTests {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(4, 40, 4));
         preparePlatform(world, feet, 6);
-        BlockPos marker = feet.offset(3, -1, 2);
+        BlockPos marker = feet.below(2);
         world.setBlock(marker, Blocks.GOLD_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
         String name = "BaritoneSnapshotGT";
         AIPlayerEntity bot = spawn(context, name, feet);
-        IBaritone baritone = BaritoneHost.create(bot);
+        IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
+        // Admit a genuinely visible, ordinary route. Its snapshot exposes the bot's body and
+        // nearby observed corridor, but never the gold hidden under the stone floor.
+        ObservedBaritoneTestRoutes.block(bot, feet.east(2), "server_snapshot_visible_route");
 
         // Built on the server thread (BlockStateInterface insists on it), read from a worker: this is what every path search does.
         BlockStateInterface bsi = new BlockStateInterface(baritone.getPlayerContext(), true);
@@ -149,12 +154,13 @@ public final class BaritoneServerGameTests {
             try {
                 require(context, read.isDone(), "the worker did not finish reading the snapshot");
                 List<Object> values = read.join();
-                require(context, values.get(0) == Blocks.GOLD_BLOCK.defaultBlockState(), "snapshot read " + values.get(0) + " at the marker");
+                require(context, values.get(0) == Blocks.BEDROCK.defaultBlockState(),
+                        "hidden floor ore leaked through snapshot: " + values.get(0));
                 require(context, ((BlockState) values.get(1)).isAir(), "snapshot read " + values.get(1) + " at the bot's feet");
                 require(context, Boolean.TRUE.equals(values.get(2)), "isLoaded is false for a loaded chunk");
                 require(context, Boolean.FALSE.equals(values.get(3)), "isLoaded is true for a chunk that is not loaded");
             } finally {
-                BaritoneHost.destroy(baritone);
+                BaritoneRegistry.INSTANCE.forget(bot, "gametest_snapshot");
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
             }
             context.succeed();
@@ -162,24 +168,16 @@ public final class BaritoneServerGameTests {
     }
 
     @GameTest(maxTicks = 600)
-    public void aStarPlansAcrossThePlatformAndThroughAWallOnAnotherThread(GameTestHelper context) {
+    public void aStarFailsClosedWithoutAnObservedRouteOnAnotherThread(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(8, 40, 8));
         preparePlatform(world, feet, 7);
         BlockPos openGoal = feet.offset(6, 0, -4);
-        // A full-width wall two blocks east of the start, three high: the only way east is through it.
-        BlockPos wallGoal = feet.offset(-6, 0, 0);
-        for (int dz = -7; dz <= 7; dz++) {
-            for (int dy = 0; dy < 3; dy++) {
-                world.setBlock(feet.offset(-3, dy, dz), Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
-            }
-        }
         String name = "BaritoneAStarGT";
         AIPlayerEntity bot = spawn(context, name, feet);
-        IBaritone baritone = BaritoneHost.create(bot);
+        IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
 
         CompletableFuture<PathCalculationResult> open = search(baritone, feet, openGoal);
-        CompletableFuture<PathCalculationResult> wall = search(baritone, feet, wallGoal);
         // The workers need real server time and may consume snapshot work while GameTest ticks
         // continue. Poll without blocking the server thread, leaving 40 ticks for framework
         // cleanup after the 560-tick bounded worker window.
@@ -189,18 +187,17 @@ public final class BaritoneServerGameTests {
             if (settled[0]) {
                 return;
             }
-            if (!open.isDone() || !wall.isDone()) {
+            if (!open.isDone()) {
                 if (++waited[0] < 560) {
                     return;
                 }
                 settled[0] = true;
                 try {
                     open.cancel(true);
-                    wall.cancel(true);
-                    require(context, false, "the searches did not finish in 560 ticks (open="
-                            + open.isDone() + " wall=" + wall.isDone() + ")");
+                    require(context, false, "the fenced search did not finish in 560 ticks (open="
+                            + open.isDone() + ")");
                 } finally {
-                    BaritoneHost.destroy(baritone);
+                    BaritoneRegistry.INSTANCE.forget(bot, "gametest_fenced_search_timeout");
                     AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
                 }
                 return;
@@ -208,21 +205,10 @@ public final class BaritoneServerGameTests {
             settled[0] = true;
             try {
                 PathCalculationResult openResult = open.join();
-                require(context, openResult.getType() == PathCalculationResult.Type.SUCCESS_TO_GOAL,
-                        "open-floor search: " + openResult.getType());
-                var openPath = openResult.getPath().orElseThrow();
-                require(context, openPath.getDest().equals(new BetterBlockPos(openGoal)), "open path ends at " + openPath.getDest());
-                require(context, openPath.positions().size() <= 12, "open path is not direct: " + openPath.positions().size() + " nodes");
-
-                PathCalculationResult wallResult = wall.join();
-                require(context, wallResult.getType() == PathCalculationResult.Type.SUCCESS_TO_GOAL,
-                        "through-the-wall search: " + wallResult.getType());
-                var wallPath = wallResult.getPath().orElseThrow();
-                require(context, wallPath.getDest().equals(new BetterBlockPos(wallGoal)), "wall path ends at " + wallPath.getDest());
-                boolean crossesWall = wallPath.positions().stream().anyMatch(p -> p.getX() == feet.getX() - 3);
-                require(context, crossesWall, "the path to the far side never enters the wall column");
+                require(context, openResult.getType() != PathCalculationResult.Type.SUCCESS_TO_GOAL,
+                        "a worker planned through raw terrain without an observed navigation fence");
             } finally {
-                BaritoneHost.destroy(baritone);
+                BaritoneRegistry.INSTANCE.forget(bot, "gametest_fenced_search");
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
             }
             context.succeed();
@@ -237,8 +223,8 @@ public final class BaritoneServerGameTests {
         BlockPos goal = feet.offset(6, 0, 3);
         String name = "BaritoneStackGT";
         AIPlayerEntity bot = spawn(context, name, feet);
-        IBaritone baritone = BaritoneHost.create(bot);
-        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
+        IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
+        ObservedBaritoneTestRoutes.block(bot, goal, "server_behavior_stack");
 
         AtomicInteger ticks = new AtomicInteger();
         AtomicInteger forwardTicks = new AtomicInteger();
@@ -256,7 +242,7 @@ public final class BaritoneServerGameTests {
                             "no path was ever planned/executed after 100 ticks");
                     require(context, forwardTicks.get() > 0, "the path executor never asked to walk forward");
                 } finally {
-                    BaritoneHost.destroy(baritone);
+                    BaritoneRegistry.INSTANCE.forget(bot, "gametest_behavior_stack");
                     AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
                 }
                 context.succeed();

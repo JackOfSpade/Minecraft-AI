@@ -15,7 +15,7 @@ import net.minecraft.world.level.chunk.PalettedContainer;
  * with every engine, and a mod that changes {@code PalettedContainer} must not be able to crash that. The scan now runs only when
  * Baritone is first configured ({@link BaritoneHost#configure}, through {@link #verify}) or first reads a palette, and a scan that
  * finds no single {@code Data} field fails as a {@link LinkageError}, which is what {@code NavEngineSelector} treats as "Baritone
- * cannot be used in this JVM": it is retired for the session and the legacy navigator carries on.
+ * cannot be used in this JVM": it is retired for the session, active routes are stopped, and no alternate navigator starts.
  */
 public final class PaletteAccess {
     /** The palette layout of this JVM does not match what Baritone reads. */

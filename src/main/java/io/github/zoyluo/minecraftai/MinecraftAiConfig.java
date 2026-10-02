@@ -103,6 +103,30 @@ public record MinecraftAiConfig(
         return found;
     }
 
+    /** Emits an explicit audit line when an old or invalid engine spelling is normalised to Baritone. */
+    private static void logNavigationMigration(JsonObject root) {
+        JsonElement nav = root.get("nav");
+        if (nav == null || !nav.isJsonObject()) {
+            return;
+        }
+        JsonElement engine = nav.getAsJsonObject().get("engine");
+        if (engine == null || !engine.isJsonPrimitive()) {
+            return;
+        }
+        String value;
+        try {
+            value = engine.getAsString();
+        } catch (RuntimeException ignored) {
+            return;
+        }
+        if (NavEngine.isLegacyAlias(value)) {
+            BotLog.config("nav_engine_legacy_migrated", "from", value, "to", NavEngine.BARITONE.configValue());
+        } else if (!NavEngine.isKnown(value)) {
+            BotLog.warn(LogCategory.CONFIG, null, "nav_engine_invalid_migrated",
+                    "from", value, "to", NavEngine.BARITONE.configValue());
+        }
+    }
+
     private static final List<String> REMOVED_KEYS = List.of(
             "behaviour.pace.itemUseSlowdown",
             "behaviour.pace.movementExhaustion",
@@ -144,6 +168,7 @@ public record MinecraftAiConfig(
                 }
                 MinecraftAiConfig parsed = parse(root, profileResolution.profile());
                 if (parsed != null) {
+                    logNavigationMigration(root);
                     loaded = parsed;
                 }
             } catch (IOException | RuntimeException exception) {
@@ -251,7 +276,7 @@ public record MinecraftAiConfig(
                 new Night(true, 8),
                 new Mining(2, true),
                 new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
-                new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue(), BaritoneCaps.defaults()),
+                new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.BARITONE.configValue(), BaritoneCaps.defaults()),
                 new Pickup(8.0D),
                 new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100),
                 new Storage(64, 16, 3, 24, true),
@@ -279,6 +304,13 @@ public record MinecraftAiConfig(
             }
         }
         OperatorCapabilities configured = capabilities == null ? OperatorCapabilities.none() : capabilities;
+        if (Boolean.TRUE.equals(configured.hiddenBlockScan())) {
+            BotLog.warn(LogCategory.CONFIG, null, "hidden_block_scan_retired",
+                    "path", path,
+                    "configured_value", true,
+                    "effective_value", false,
+                    "migration", "remove_operatorCapabilities.hiddenBlockScan");
+        }
         List<String> effectiveCapabilities = Arrays.stream(PrivilegedCapability.values())
                 .filter(capability -> CapabilityPolicy.decide(
                         resolution.profile(), configured, capability).allowed())
@@ -577,7 +609,7 @@ public record MinecraftAiConfig(
                       int nodeRetry,
                       double sprintMinDist,
                       int maxSafeFall,
-                      // "legacy" (default) or "baritone": which navigator answers ordinary walk requests. See docs/NAVIGATION_ENGINE.md.
+                      // Baritone is the only runtime navigator. "legacy" is accepted once as a migration alias. See docs/NAVIGATION_ENGINE.md.
                       String engine,
                       // The Baritone movement capabilities (parkour, water-bucket falls, vines, mob avoidance). See docs/NAVIGATION_ENGINE.md.
                       BaritoneCaps baritone) {
@@ -588,7 +620,7 @@ public record MinecraftAiConfig(
                     BaritoneCaps.defaults());
         }
 
-        /** The configured engine; a missing or unknown value is {@link NavEngine#LEGACY}. */
+        /** The configured engine; every input canonicalises to the Baritone-only runtime. */
         public NavEngine engineChoice() {
             return NavEngine.parse(engine);
         }
@@ -615,7 +647,7 @@ public record MinecraftAiConfig(
 
     /**
      * Moves the Baritone navigation engine may use ({@code nav.baritone}); each is a legitimate move of a player and stays inside
-     * the survival rules (see tools/baritone/README.md). They are applied to Baritone's global settings at every plan request
+     * the survival rules (see {@code docs/NAVIGATION_ENGINE.md}). They are applied to Baritone's global settings at every plan request
      * ({@code BaritoneSettings.applyNavLimits}), so a reload takes effect at the next plan.
      *
      * <ul>

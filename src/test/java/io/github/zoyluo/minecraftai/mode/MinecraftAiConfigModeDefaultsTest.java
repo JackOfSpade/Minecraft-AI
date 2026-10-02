@@ -19,7 +19,7 @@ class MinecraftAiConfigModeDefaultsTest {
         assertEquals("strict_survival", json.get("profile").getAsString());
         assertTrue(json.has("operatorCapabilities"));
         JsonObject flags = json.getAsJsonObject("operatorCapabilities");
-        assertTrue(flags.get("hiddenBlockScan").getAsBoolean());
+        assertTrue(!flags.get("hiddenBlockScan").getAsBoolean());
         assertTrue(flags.get("emergencyTeleport").getAsBoolean());
         assertTrue(flags.get("manualTeleport").getAsBoolean());
     }

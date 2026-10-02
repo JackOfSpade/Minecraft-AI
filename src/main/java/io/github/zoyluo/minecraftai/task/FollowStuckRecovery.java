@@ -34,9 +34,9 @@ import net.minecraft.server.level.ServerPlayer;
  * steps: a detour that first has to move AWAY from the target (around a wall, out of a pit whose
  * only exit faces away) can never be found by a routine that only accepts steps which shorten the
  * distance. Recovery now alternates {@link RecoveryClock#alternateWindowTicks}-tick windows of
- * step attempts with windows that instead force a genuine fresh {@code AStarPathfinder} replan
- * (see {@link #tick}'s {@code FORCE_REPATH} handling) -- unlike the old jump-blocked corridor,
- * a real A* search already looks for any legal detour, not only ones that get closer every step.
+ * step attempts with windows that instead force a genuine fresh observed Baritone replan
+ * (see {@link #tick}'s {@code FORCE_REPATH} handling) -- the route is constrained to what the
+ * bot can actually see, rather than creating a tunnel through an unseen wall.
  * The give-up/backoff phase, similarly, now forces a repath every
  * {@link RecoveryClock#lowCostRetryTicks} ticks instead of only ever retrying a single step.
  * Recovery resolves the instant the bot's real position changes OR the target itself closes the
@@ -53,13 +53,8 @@ import net.minecraft.server.level.ServerPlayer;
  * outright on a waiting task either way, so it can never fire while this class still owns the
  * problem, and no change to {@code StuckWatcher} itself was needed or made.
  *
- * <p><b>Dig-out (the last step):</b> {@link #attemptStep} is the single place that enumerates and
- * executes a recovery move. It tries the verified-standable adjacent walk/step-up/step-down first;
- * only when none of those got anywhere does it hand over to {@link FollowDigOut}, which tunnels
- * through observable natural whitelist blocks with a tool that can break them (see its header for
- * the full safety envelope). A dig-out owns its ticks until it has gone through or given up; it is a
- * new kind of step, not a parallel state machine -- {@link RecoveryClock} still owns all the
- * timing/backoff decisions and needed no change.
+ * <p>{@link #attemptStep} tries a verified adjacent walk/step-up/step-down first. If none is
+ * available, recovery requests a fresh observed Baritone route instead of breaking terrain.
  */
 final class FollowStuckRecovery {
     /** Real position/target-distance improvement, in blocks, that resolves recovery outright. */
@@ -74,20 +69,23 @@ final class FollowStuckRecovery {
     private BlockPos lastPos;
     private double recoveryStartDistance = Double.NaN;
     private boolean forceRepathPending;
-    private final FollowDigOut digOut = new FollowDigOut();
     /** A recovery step is running on the bot's action pack (it is a real walk, hop or drop over several ticks). */
     private boolean stepOwned;
     /** Exact admission for the recovery step; stale recovery state must not observe or cancel a successor. */
     private ActionPack.StepLease stepLease;
     private WalkedStep step;
+    /** Immutable observed-world proof retained by the exact physical recovery lease. */
+    private StepAdmission stepAdmission;
 
-    /** True while a dig-out owns the bot (it is breaking blocks toward the player). */
+    private record StepAdmission(BlockPos origin, BlockPos destination) {
+    }
+
+    /** Legacy dig-out recovery is retired; follow recovery never owns a terrain break. */
     boolean isDigging() {
-        return digOut.isActive();
+        return false;
     }
 
     void reset(AIPlayerEntity bot, int nowTick) {
-        digOut.cancel(bot);
         if (stepOwned) {
             ActionPack pack = bot.getActionPack();
             if (pack.stepInFlightFor(stepLease)) {
@@ -96,6 +94,7 @@ final class FollowStuckRecovery {
             stepOwned = false;
             stepLease = null;
             step = null;
+            stepAdmission = null;
         }
         lastPos = bot.blockPosition().immutable();
         recoveryStartDistance = Double.NaN;
@@ -116,18 +115,6 @@ final class FollowStuckRecovery {
         if (positionChanged) {
             lastPos = current;
         }
-        if (digOut.isActive()) {
-            // A dig-out is deliberate progress in its own right (cells being broken and entered):
-            // it owns the tick, and the stall clock must not count it as being stuck.
-            clock.tick(elapsed, true);
-            if (digOut.tick(bot)) {
-                return true;
-            }
-            // Finished or abandoned this tick: hand it back to the ordinary path logic.
-            lastPos = bot.blockPosition().immutable();
-            forceRepathPending = true;
-            return false;
-        }
         if (stepOwned) {
             ActionPack pack = bot.getActionPack();
             ActionPack.StepLease lease = stepLease;
@@ -142,6 +129,7 @@ final class FollowStuckRecovery {
                 stepOwned = false;
                 stepLease = null;
                 step = null;
+                stepAdmission = null;
                 return true;
             }
             // A terminal recovery step is reconciled through its exact admission. A failed or
@@ -152,6 +140,7 @@ final class FollowStuckRecovery {
             stepOwned = false;
             stepLease = null;
             step = null;
+            stepAdmission = null;
             if (result == null || !result.succeeded()) {
                 forceRepathPending = true;
                 return false;
@@ -236,7 +225,11 @@ final class FollowStuckRecovery {
         for (int dy = -1; dy <= 1; dy++) {
             for (Direction direction : Direction.Plane.HORIZONTAL) {
                 BlockPos candidate = current.relative(direction).offset(0, dy, 0);
-                if (!Standability.isStandableFresh(world, candidate)) {
+                // SwimRoute's dry-cell admission proves feet, head, and support before its
+                // standability read. A follow recovery is a local physical escape, not an
+                // exception to the shared observed-terrain boundary.
+                if (SwimRoute.observedCell(bot, world, candidate, false)
+                        != SwimRoute.Cell.DRY) {
                     continue;
                 }
                 double distSq = candidate.distSqr(targetPos);
@@ -259,13 +252,12 @@ final class FollowStuckRecovery {
                 return;
             }
         }
-        // LAST recovery step before "I am stuck": no adjacent verified step got any closer (or the
-        // one found was refused), so with a tool that can break it, tunnel through the natural
-        // terrain in the way. FollowDigOut is deliberately narrow (see its header): observable
-        // natural whitelist blocks only, horizontal only, never near fluid, never onto a drop.
-        if (digOut.start(bot, target)) {
-            digOut.tick(bot);
-        }
+        // No adjacent physical step is legal. Let FollowTask issue its next observed Baritone
+        // replan; recovering by mining through a wall would turn a follow route into terrain
+        // discovery and bypass the shared navigation fence.
+        BotLog.action(bot, "follow_recovery_baritone_required",
+                "from", LogFields.pos(current), "target", LogFields.pos(targetPos));
+        forceRepathPending = true;
     }
 
     /**
@@ -281,17 +273,62 @@ final class FollowStuckRecovery {
 
     private StepStart beginStep(AIPlayerEntity bot, BlockPos current, BlockPos best) {
         WalkedStep.Kind kind = WalkedStepRules.walkKindFor(best.getY() - current.getY());
-        if (kind == null || WalkedStep.refusal(bot, best, kind) != null) {
+        if (kind == null
+                || SwimRoute.observedCell(bot, bot.level(), best, false) != SwimRoute.Cell.DRY
+                || !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, best, kind)
+                || WalkedStep.refusal(bot, best, kind) != null) {
             return StepStart.REFUSED;
         }
+        StepAdmission admission = new StepAdmission(current.immutable(), best.immutable());
         WalkedStep next = WalkedStep.begin(bot, best, kind, "follow_recovery_step");
-        ActionPack.StepLease lease = bot.getActionPack().runStep(next);
+        ActionPack.StepLease lease = bot.getActionPack().runStep(next,
+                (guardBot, guardedStep) -> canContinueObservedStep(
+                        guardBot, guardedStep, admission));
         if (lease == null) {
             return StepStart.ADMISSION_DENIED;
         }
         step = next;
         stepLease = lease;
+        stepAdmission = admission;
         stepOwned = true;
         return StepStart.STARTED;
+    }
+
+    /** Re-proves this exact one-cell recovery before each later WalkedStep terrain read. */
+    private static boolean canContinueObservedStep(AIPlayerEntity bot, WalkedStep step,
+                                                   StepAdmission admission) {
+        if (!step.cell().equals(admission.destination())
+                || !withinStepContinuationEnvelope(bot.blockPosition(), admission,
+                step.kind(), step.ticks())) {
+            return false;
+        }
+        return SwimRoute.observedCell(bot, bot.level(), step.cell(), false)
+                == SwimRoute.Cell.DRY
+                && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
+    }
+
+    private static boolean withinStepContinuationEnvelope(BlockPos feet, StepAdmission admission,
+                                                          WalkedStep.Kind kind, int activeStepTicks) {
+        if (withinStepCorridor(feet, admission.origin(), admission.destination())) {
+            return true;
+        }
+        BlockPos origin = admission.origin();
+        return (kind == WalkedStep.Kind.FLAT
+                || kind == WalkedStep.Kind.STEP_UP
+                || kind == WalkedStep.Kind.STEP_DOWN)
+                && activeStepTicks >= 0 && activeStepTicks <= 1
+                && feet.getX() == origin.getX()
+                && feet.getZ() == origin.getZ()
+                && Math.abs(feet.getY() - origin.getY()) == 1;
+    }
+
+    private static boolean withinStepCorridor(BlockPos feet, BlockPos origin, BlockPos destination) {
+        return between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getY(), origin.getY(), destination.getY())
+                && between(feet.getZ(), origin.getZ(), destination.getZ());
+    }
+
+    private static boolean between(int value, int first, int second) {
+        return value >= Math.min(first, second) && value <= Math.max(first, second);
     }
 }

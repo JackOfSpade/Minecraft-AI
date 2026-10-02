@@ -9,21 +9,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /**
- * Chooses the navigator for a request and makes Baritone fail soft.
+ * Owns the Baritone-only navigation availability state.
  *
  * <ul>
- *   <li>{@link #configured()} is what {@code nav.engine} says; {@link #effective()} is what is actually used: the configured
- *       engine, except that a Baritone that has failed once this session is never asked again (the mod then behaves exactly
- *       as it does with the legacy engine). The {@code ...For(botId)} forms honour a per-bot override ({@link #setBotEngine}).</li>
+ *   <li>{@link #configured()} and {@link #effective()} are always {@link NavEngine#BARITONE}. A session failure makes requests
+ *       fail closed; it never selects the old executor. The {@code ...For(botId)} forms remain only as source-compatible test
+ *       seams and also canonicalise to Baritone.</li>
  *   <li>{@link #attempt} is the only way callers enter Baritone. It runs the Baritone-side work of one request; if that work
  *       throws a linkage-type failure (a class that cannot load or initialise: a mixin or remap problem in some modpack, a
  *       missing library, a static initialiser that throws) it logs once, marks Baritone unavailable for the session and answers
- *       with the fallback. Any other exception is logged and answers with the fallback for that request only.</li>
+ *       with the caller's typed failure. Any other exception is logged and answers with the caller's typed failure for that request.</li>
  *   <li>{@link #baritoneActive()} is the cheap "Baritone was initialised by us and has not been given up on" flag ({@link #baritoneLive()}
  *       alone only says it was initialised). Hooks that run for every bot on every tick or on every lifecycle event go through it:
  *       {@link #hook} runs a Baritone-side action and {@link #query} asks a question, both only while it is true and both
- *       containing a failure ({@link #handleFailure}), so with the legacy engine no {@code baritone.*} class is even loaded by
- *       them, and a Baritone that failed once is never touched again.</li>
+ *       containing a failure ({@link #handleFailure}); a Baritone that failed once is never touched again.</li>
  * </ul>
  *
  * <p>Nothing here names a Baritone type.</p>
@@ -41,25 +40,26 @@ public final class NavEngineSelector {
 
     /** The engine the config asks for. */
     public static NavEngine configured() {
-        return MinecraftAiConfig.get().nav().engineChoice();
+        return NavEngine.BARITONE;
     }
 
     /** The engine asked for bot {@code botId}: its override if one was set ({@link #setBotEngine}), else {@link #configured()}. */
     public static NavEngine configuredFor(UUID botId) {
-        NavEngine override = botId == null ? null : BOT_OVERRIDES.get(botId);
-        return override != null ? override : configured();
+        return NavEngine.BARITONE;
     }
 
     /**
-     * Per-bot override of {@code nav.engine} (null clears it). There is no user-facing switch for it: the config's global value is
-     * the setting, and this is the hook for code that must run one bot on the other engine without changing the engine of the
-     * others (the GameTests, and later a per-bot command). Cleared when the bot is forgotten.
+     * Compatibility seam for old tests. A legacy value is deliberately ignored: production has no
+     * per-bot legacy mode and every override canonicalises to Baritone.
      */
     public static void setBotEngine(UUID botId, NavEngine engine) {
-        if (engine == null) {
+        if (botId == null) {
+            return;
+        }
+        if (engine != NavEngine.BARITONE) {
             BOT_OVERRIDES.remove(botId);
         } else {
-            BOT_OVERRIDES.put(botId, engine);
+            BOT_OVERRIDES.put(botId, NavEngine.BARITONE);
         }
     }
 
@@ -73,7 +73,7 @@ public final class NavEngineSelector {
         BOT_OVERRIDES.clear();
     }
 
-    /** The engine to use right now: {@link #configured()} unless Baritone has failed to initialise. */
+    /** The only configured engine; availability is represented by {@link #baritoneSelected()}. */
     public static NavEngine effective() {
         return effective(configured(), FAILED.get());
     }
@@ -83,19 +83,19 @@ public final class NavEngineSelector {
         return effective(configuredFor(botId), FAILED.get());
     }
 
-    /** Pure form of {@link #effective()} (unit-testable without a config). */
+    /** Pure compatibility form: navigation identity stays Baritone even when it is unavailable. */
     public static NavEngine effective(NavEngine configured, boolean baritoneFailed) {
-        return configured == NavEngine.BARITONE && baritoneFailed ? NavEngine.LEGACY : configured;
+        return NavEngine.BARITONE;
     }
 
     /** True when requests are currently answered by Baritone. */
     public static boolean baritoneSelected() {
-        return effective() == NavEngine.BARITONE;
+        return !FAILED.get();
     }
 
     /** True when requests of bot {@code botId} are currently answered by Baritone. */
     public static boolean baritoneSelectedFor(UUID botId) {
-        return effectiveFor(botId) == NavEngine.BARITONE;
+        return !FAILED.get();
     }
 
     /** True once Baritone has failed to initialise or run; sticky until {@link #resetForTests()}. */
@@ -120,8 +120,7 @@ public final class NavEngineSelector {
 
     /**
      * Whether the hooks that run for every bot / every lifecycle event may call into Baritone: it was initialised and has not been
-     * given up on since. A Baritone that failed once is never touched again by them, so a broken class cannot break the legacy
-     * fallback too.
+     * given up on since. A Baritone that failed once is never touched again by them.
      */
     public static boolean baritoneActive() {
         return live && !FAILED.get();
@@ -198,9 +197,9 @@ public final class NavEngineSelector {
         }
         failure = where + ": " + cause;
         try {
-            BotLog.error("nav_baritone_unavailable", cause, "where", where, "fallback", NavEngine.LEGACY.configValue());
+            BotLog.error("nav_baritone_unavailable", cause, "where", where, "action", "navigation_stopped");
         } catch (Throwable loggingFailed) {
-            System.err.println("[minecraftai] Baritone navigation unavailable (" + failure + "); falling back to the legacy navigator");
+            System.err.println("[minecraftai] Baritone navigation unavailable (" + failure + "); navigation stopped");
         }
         Runnable teardown = unavailableHook;
         if (teardown != null) {
@@ -214,29 +213,27 @@ public final class NavEngineSelector {
     }
 
     /**
-     * Runs the Baritone-side work of one request. Returns {@code fallback.get()} when the effective engine is not Baritone,
-     * and when the work failed (see the class comment for what marks Baritone unavailable). The fallback of a route request is
-     * "not routed, the legacy code carries on".
+     * Runs the Baritone-side work of one request. {@code whenUnavailable} must be a typed failure
+     * result; it must never start an alternate navigator.
      */
-    public static <T> T attempt(String what, Supplier<T> baritoneWork, Supplier<T> fallback) {
-        return attempt(null, what, baritoneWork, fallback);
+    public static <T> T attempt(String what, Supplier<T> baritoneWork, Supplier<T> whenUnavailable) {
+        return attempt(null, what, baritoneWork, whenUnavailable);
     }
 
     /** As {@link #attempt(String, Supplier, Supplier)} for a request of bot {@code botId} (which may have its own engine). */
-    public static <T> T attempt(UUID botId, String what, Supplier<T> baritoneWork, Supplier<T> fallback) {
+    public static <T> T attempt(UUID botId, String what, Supplier<T> baritoneWork, Supplier<T> whenUnavailable) {
         if (!baritoneSelectedFor(botId)) {
-            // A scale-one P3 row that requested Baritone must never silently retain its label if
-            // this request instead takes the legacy fallback (for example after a sticky init
-            // failure). The helper is inert outside an active measurement session.
+            // A scale-one P3 row records the unavailable Baritone request rather than silently
+            // turning into a legacy movement.
             NavigationMeasurement.noteBaritoneFallback(botId);
-            return fallback.get();
+            return whenUnavailable.get();
         }
         try {
             return baritoneWork.get();
         } catch (Throwable failed) {
             handleFailure(what, failed);
             NavigationMeasurement.noteBaritoneFallback(botId);
-            return fallback.get();
+            return whenUnavailable.get();
         }
     }
 

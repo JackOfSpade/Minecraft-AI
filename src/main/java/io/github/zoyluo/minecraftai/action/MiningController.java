@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistHooks;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -15,6 +16,8 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public final class MiningController {
     private static final int MAX_TICKS = 600;
+    /** A direct break may inspect or affect only a block the player can currently see. */
+    static final String TARGET_NOT_OBSERVED = "target_not_observed";
 
     private final BlockPos pos;
     private final Direction face;
@@ -68,9 +71,46 @@ public final class MiningController {
         return elapsed + 1;
     }
 
+    /**
+     * Current, state-free-first evidence for a direct break target. The shape-aware observers
+     * necessarily inspect the target state to derive its outline, so the unit-cell first-hit
+     * proof must remain first. This is deliberately live rather than a remembered sighting:
+     * mining exposes terrain, and a stale target must never keep a break packet alive.
+     */
+    static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos) {
+        return player != null
+                && pos != null
+                && ObservableWorldQuery.canObserveBlockCellFace(player, pos)
+                && (ObservableWorldQuery.canObserveBlock(player, pos)
+                || ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos));
+    }
+
+    /**
+     * The one no-block exception to {@link #currentObservedTarget}: after a player-visible block
+     * has gone away, callers may settle their own mining state as complete. The cell ray is still
+     * state-free and exact, and this helper performs no tool choice or break packet.
+     */
+    static boolean visiblyAir(AIPlayerEntity player, BlockPos pos) {
+        return player != null
+                && pos != null
+                && ObservableWorldQuery.canObserveCell(player, pos)
+                && player.level().getBlockState(pos).isAir();
+    }
+
     public ActionResult tick(ActionPack pack) {
         AIPlayerEntity player = pack.player();
         var world = player.level();
+        // Do not read the target state merely because a caller retained a coordinate. The
+        // state-free cell-face ray earns the shape-aware proof and this exact live read.
+        // A visibly empty cell is the narrowly safe completion case (for example the controller
+        // finished on the preceding scheduler tick); it cannot start a new break.
+        if (visiblyAir(player, pos)) {
+            resetProgress(player);
+            return ActionResult.SUCCESS;
+        }
+        if (!currentObservedTarget(player, pos)) {
+            return visibilityRefused(player);
+        }
         BlockState state = world.getBlockState(pos);
         if (state.isAir()) {
             resetProgress(player);
@@ -91,17 +131,17 @@ public final class MiningController {
 
         if (!started) {
             if (driven) {
+                if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK)) {
+                    return visibilityRefused(player);
+                }
                 BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face, "driver", "baritone");
             } else {
                 ToolSelector.equipBestTool(player, state);
+                if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK)) {
+                    return visibilityRefused(player);
+                }
                 BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face);
             }
-            player.gameMode.handleBlockBreakAction(
-                    pos,
-                    ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
-                    face,
-                    Level.MAX_ENTITY_SPAWN_Y,
-                    -1);
             state.attack(world, pos, player);
             started = true;
             targetState = state;
@@ -113,12 +153,9 @@ public final class MiningController {
         player.resetLastActionTime();
 
         if (progress >= 1.0F) {
-            player.gameMode.handleBlockBreakAction(
-                    pos,
-                    ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
-                    face,
-                    Level.MAX_ENTITY_SPAWN_Y,
-                    -1);
+            if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK)) {
+                return visibilityRefused(player);
+            }
             world.destroyBlockProgress(player.getId(), pos, -1);
             AStarPathfinder.invalidateCache("block_break");
             MiningAssistHooks.onBotBreak(player, pos);
@@ -137,28 +174,47 @@ public final class MiningController {
         if (!started) {
             return;
         }
+        // An ABORT packet is still a packet naming a world cell. It is safe to clear the local
+        // indicator unconditionally, but only send the packet while the target is freshly seen.
+        sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK);
+        clearProgress(player);
+    }
+
+    private void resetProgress(AIPlayerEntity player) {
+        if (started) {
+            sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK);
+        }
+        clearProgress(player);
+    }
+
+    /** Re-proves the live cell immediately before each vanilla break packet. */
+    private boolean sendBreakActionIfObserved(AIPlayerEntity player,
+                                              ServerboundPlayerActionPacket.Action action) {
+        if (!currentObservedTarget(player, pos)) {
+            return false;
+        }
         player.gameMode.handleBlockBreakAction(
                 pos,
-                ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK,
+                action,
                 face,
                 Level.MAX_ENTITY_SPAWN_Y,
                 -1);
+        return true;
+    }
+
+    private ActionResult visibilityRefused(AIPlayerEntity player) {
+        // Reset only our local progress marker. If sight was lost, do not send an unproved ABORT
+        // packet as part of the cleanup.
         player.level().destroyBlockProgress(player.getId(), pos, -1);
         started = false;
         targetState = null;
         progress = 0.0F;
         elapsed = 0;
+        BotLog.action(player, "mine_visibility_refused", "pos", LogFields.pos(pos), "reason", TARGET_NOT_OBSERVED);
+        return ActionResult.failed(TARGET_NOT_OBSERVED);
     }
 
-    private void resetProgress(AIPlayerEntity player) {
-        if (started) {
-            player.gameMode.handleBlockBreakAction(
-                    pos,
-                    ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK,
-                    face,
-                    Level.MAX_ENTITY_SPAWN_Y,
-                    -1);
-        }
+    private void clearProgress(AIPlayerEntity player) {
         player.level().destroyBlockProgress(player.getId(), pos, -1);
         started = false;
         targetState = null;

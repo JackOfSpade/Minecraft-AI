@@ -13,9 +13,7 @@ import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
-import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
-import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayDeque;
 import java.util.Comparator;
@@ -36,16 +34,13 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 
 public final class StripMineTask extends AbstractTask {
-    public static final String STRICT_SURVIVAL_REJECTION =
-            "legacy_strip_mine_unavailable_in_strict_survival:use_mine_ore_or_achieve_goal";
     /**
-     * The coarse {@link #profileRejectionReason} check only looks at the operating profile enum.
-     * An operator who enables OPERATOR mode for something unrelated (e.g. manual teleport) but has
-     * not explicitly turned on hidden-block-scan capability must still be denied this legacy task's
-     * unguarded {@code OreScan.adjacentHazard(ServerLevel, BlockPos)} raw-world hazard reads.
+     * This task remains as a fail-closed compatibility boundary for saved/in-process task
+     * references. It is no longer exposed through tools or commands because its legacy raw-world
+     * tunnel planning cannot meet the observed-world navigation contract.
      */
-    public static final String HIDDEN_BLOCK_SCAN_REJECTION =
-            "legacy_strip_mine_requires_hidden_block_scan_capability:use_mine_ore_or_achieve_goal";
+    public static final String RETIRED_REJECTION =
+            "legacy_strip_mining_retired:use_mine_ore_or_achieve_goal";
 
     private enum Phase {
         PREP,
@@ -110,15 +105,11 @@ public final class StripMineTask extends AbstractTask {
     }
 
     /**
-     * The legacy implementation still contains raw world reads that have not crossed the
-     * observable-world boundary. Keep the public constructors for operator/legacy callers, but
-     * fail closed whenever a strict-survival entry reaches the task directly.
+     * The signature is retained for saved/in-process callers, but no profile may revive the
+     * retired raw-world tunnel implementation.
      */
     public static Optional<String> profileRejectionReason(OperatingProfile profile) {
-        OperatingProfile effective = profile == null ? OperatingProfile.STRICT_SURVIVAL : profile;
-        return effective == OperatingProfile.STRICT_SURVIVAL
-                ? Optional.of(STRICT_SURVIVAL_REJECTION)
-                : Optional.empty();
+        return Optional.of(RETIRED_REJECTION);
     }
 
     private StripMineTask(Direction direction,
@@ -181,48 +172,13 @@ public final class StripMineTask extends AbstractTask {
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
-        Optional<String> profileRejection = profileRejectionReason(MinecraftAiConfig.get().profile());
-        if (profileRejection.isPresent()) {
-            String reason = profileRejection.orElseThrow();
-            fail(reason);
-            BotLog.action(bot, "strip_mine_profile_gate",
-                    "result", "rejected",
-                    "profile", OperatingProfile.STRICT_SURVIVAL.configValue(),
-                    "reason", reason,
-                    "task", name());
-            return;
-        }
-        // The coarse profile gate above only fails closed under STRICT_SURVIVAL. This task's
-        // mineBlock/mineVein/safeStandTarget legacy paths still call the raw, un-gated
-        // OreScan.adjacentHazard(ServerLevel, BlockPos) overload, so an OPERATOR-profile bot must
-        // also hold the fine-grained HIDDEN_BLOCK_SCAN capability before this task may run at all;
-        // otherwise an operator who enabled OPERATOR mode for something unrelated (e.g. manual
-        // teleport) while leaving hiddenBlockScan unset/false would still get unguarded hazard
-        // x-ray from this file.
-        var hiddenBlockScanDecision = CapabilityRuntime.decide(
-                bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "strip_mine_onStart");
-        if (!hiddenBlockScanDecision.allowed()) {
-            fail(HIDDEN_BLOCK_SCAN_REJECTION);
-            BotLog.action(bot, "strip_mine_capability_gate",
-                    "result", "rejected",
-                    "capability", PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                    "reason", HIDDEN_BLOCK_SCAN_REJECTION,
-                    "decision_reason", hiddenBlockScanDecision.reason(),
-                    "task", name());
-            return;
-        }
-        phase = Phase.PREP;
-        origin = bot.blockPosition().immutable();
-        activeDepotChest = resolveDepotChest(bot);
-        steps.clear();
-        blocksToMine.clear();
-        veinBlocks.clear();
-        queuedVeinBlocks.clear();
-        currentStep = null;
-        currentMiningBlock = null;
-        currentVeinBlock = null;
-        miningStarted = false;
-        descentStepsPlanned = 0;
+        String reason = profileRejectionReason(MinecraftAiConfig.get().profile()).orElseThrow();
+        fail(reason);
+        BotLog.action(bot, "legacy_strip_mining_retired",
+                "result", "rejected",
+                "profile", MinecraftAiConfig.get().profile().configValue(),
+                "reason", reason,
+                "task", name());
     }
 
     @Override

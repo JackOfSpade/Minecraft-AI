@@ -1400,8 +1400,9 @@ public final class CreateObsidianMissionRecoveryGameTests {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupMicroGT", 0, true);
         BlockPos start = fixture.start();
         BlockPos target = start.offset(2, 0, 1);
+        CreateObsidianTask pickup = new CreateObsidianTask(1);
 
-        require(context, CreateObsidianTask.stepTowardPickupCell(fixture.bot(), target),
+        require(context, pickup.stepTowardPickupCell(fixture.bot(), target),
                 "first bounded pickup microstep was not issued");
         // The microsteps are walked (movement keys, a few ticks each), never a teleport: the bot has not arrived in the same tick,
         // it passes through the exact adjacent transit cell, and the next step starts only after it has arrived.
@@ -1423,7 +1424,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 return;
             }
             if (bot.getActionPack().stepIdle()) {
-                require(context, CreateObsidianTask.stepTowardPickupCell(bot, target),
+                require(context, pickup.stepTowardPickupCell(bot, target),
                         "bounded pickup collision step was not issued at " + bot.blockPosition().toShortString());
             }
             require(context, tick[0] < 100,

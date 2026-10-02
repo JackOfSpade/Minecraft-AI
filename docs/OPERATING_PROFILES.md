@@ -43,11 +43,11 @@ The only valid values are `strict_survival` and `operator`. Configuration is par
 
 | Capability | `strict_survival` | `operator` default | `operator` explicitly disabled |
 |---|---:|---:|---:|
-| `hiddenBlockScan` | Deny | Allow | Deny |
+| `hiddenBlockScan` (retired; parsed for migration) | Deny | Deny | Deny |
 | `emergencyTeleport` | Deny | Allow | Deny |
 | `manualTeleport` | Deny | Allow | Deny |
 
-The three `operator` defaults are `true`, to preserve legacy behavior; they are three independent switches, not one master switch. For example, to allow only manual teleport:
+The two teleport defaults in `operator` are `true`; `hiddenBlockScan` defaults to `false` and is denied even if an older config still sets it to `true`. The old field remains parseable so a profile can be migrated safely rather than rejected. For example, to allow only manual teleport:
 
 ```json
 {
@@ -62,7 +62,7 @@ The three `operator` defaults are `true`, to preserve legacy behavior; they are 
 
 ### Meaning of the Three Capabilities
 
-- `hiddenBlockScan`: Allows bypassing strict's observability filtering to probe for resources. In strict mode, blocks must be within the configured radius, exposed, and hit by a line-of-sight raycast; entities must be within radius and visible.
+- `hiddenBlockScan`: Retired. The field is accepted only for configuration migration and is never granted in either profile. Blocks must be within the configured radius, exposed, and hit by a line-of-sight raycast; entities must be within radius and visible. A retained `true` value produces a `hidden_block_scan_retired` configuration warning, and runtime requests log `DENIED_RETIRED_CAPABILITY`.
 - `emergencyTeleport`: Allows hazard handling (the suffocation climb, the drowning rescue, dark-trap surfacing and gather surfacing) to perform a long-distance emergency teleport. In strict mode, the relevant code paths instead attempt normal actions and fail explicitly when they cannot be handled safely; the capability decision is made first, so nothing is scanned that the bot cannot see. No profile teleports a bot to correct its path: a route start that is not standable is left by a walked step (`WalkedStep`), a stalled hop or pillar jump is retried with inputs, and a bot inside a block is shoved, walked or dug out (`NavSafetyNet.escapeSuffocationByInputs`).
 - `manualTeleport`: Allows initiating a manual teleport via the control panel/network action. When not in effect, the UI button is disabled, and the server still rejects the request again on its own.
 
@@ -79,7 +79,7 @@ The server's own bot creation, persistence recovery, and normal death lifecycle 
 
 ## Mining Assist and Profiles
 
-Mining Assist ([MINING_ASSIST.md](MINING_ASSIST.md)) does not add any new operator capability and does not relax any profile. Its line-of-sight ray (`castViewRay`) only casts a first-hit ray from the bot's own eyes, with a length not exceeding the perception radius, and it never calls `CapabilityRuntime.decide`, so it behaves identically under both profiles. The post-mining neighbor-cell peek and entity evidence reuse the existing `OreScan.observe` / `canObserveEntity` observation proofs, whose results follow the current profile's capability decision, the same as other mining tasks (under `operator`, if `hiddenBlockScan` is enabled, these observations are relaxed accordingly too). It does not use structure queries, teleport, or forced pickup.
+Mining Assist ([MINING_ASSIST.md](MINING_ASSIST.md)) does not add any new operator capability and does not relax any profile. Its line-of-sight ray (`castViewRay`) only casts a first-hit ray from the bot's own eyes, with a length not exceeding the perception radius, and it never calls `CapabilityRuntime.decide`, so it behaves identically under both profiles. The post-mining neighbor-cell peek and entity evidence reuse the existing `OreScan.observe` / `canObserveEntity` observation proofs, which remain observation-bound in both profiles because hidden scanning is retired. It does not use structure queries, teleport, or forced pickup.
 
 The default mode is still `sense` (it only records shadow logs and does not change any bot behavior); the switch to `detour` will happen only once GameTest and the four-bot cost gate are passing green, which is the orchestrator's final step and is not part of this repo's current change. Disable it with `MINECRAFTAI_MINING_ASSIST=off` or `miningAssist.mode`; GameTest, verify, and evidence runs default to disabled (scripts other than `assist_mine_lane` are always pinned to `off`). Like the profile, it is resolved at startup, and the server should be restarted after changing it. P1's opportunistic detour (`detour`/`all` modes) likewise adds no capability and relaxes no profile — it only uses the existing `OreScan.observe`/`ObservableWorldQuery` observation proofs and the existing waypoint pathfinding, with no teleport, no forced pickup, and no hidden scanning; behavior is identical under both profiles.
 

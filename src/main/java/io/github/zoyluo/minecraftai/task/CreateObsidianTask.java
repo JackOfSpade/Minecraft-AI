@@ -118,6 +118,22 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
     }
 
+    /** Exact observed local movement admitted while closing collision range to this task's own drop. */
+    private record PickupStepAdmission(BlockPos origin, BlockPos destination, WalkedStep.Kind kind) {
+        private PickupStepAdmission {
+            origin = origin.immutable();
+            destination = destination.immutable();
+        }
+    }
+
+    /** Exact observed recovery move that gets the bot out of its own temporary water cell. */
+    private record RecoveryStepAdmission(BlockPos origin, BlockPos destination, WalkedStep.Kind kind) {
+        private RecoveryStepAdmission {
+            origin = origin.immutable();
+            destination = destination.immutable();
+        }
+    }
+
     private final int targetCount;
     private final int maxElapsed;
     private final ObsidianCheckpoint restoredCheckpoint;
@@ -168,6 +184,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private String recoveryWalk;
     /** Exact ActionPack admission for {@link #recoveryWalk}; never infer our outcome from a later owner. */
     private ActionPack.StepLease recoveryWalkLease;
+    /** Exact guarded admission for a local, observed pickup collision step. */
+    private ActionPack.StepLease pickupStepLease;
     private BlockPos standPos;
     private PourPlan pourPlan;
     private BlockPos activeBreakPos;
@@ -388,7 +406,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         miner.cancel(bot);
-        clearRecoveryWalk();
+        cancelPickupStep(bot);
+        releaseRecoveryWalk(bot);
         bot.getActionPack().stopAll();
         // A replacement may retain already committed conversions, but it must never inherit an
         // open placement candidate. Reconcile factual obsidian at the interruption boundary and
@@ -704,34 +723,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         enter(Phase.APPROACH_LAVA_VIEW);
     }
 
-    /**
-     * Leaves LOS-only surveying through a persisted, physical branch mine instead of treating an
-     * empty view as proof that the world has no lava.
-     */
+    /** Stops when the current player view contains no usable lava; it never excavates to find one. */
     private void beginSearch(AIPlayerEntity bot, String reason) {
         miner.cancel(bot);
         bot.getActionPack().stopAll();
-        lavaClue = null;
-        lavaTarget = null;
-        obsidian = null;
-        standPos = null;
-        pourPlan = null;
-        rejectedPourDestinations.clear();
-        lastSearchMotionPos = bot.blockPosition().immutable();
-        if (!bot.blockPosition().equals(searchCursor.face())) {
-            BotLog.action(bot, "create_obsidian_search_return",
-                    "reason", reason,
-                    "from", bot.blockPosition().toShortString(),
-                    "to", searchCursor.face().toShortString());
-            enter(Phase.RETURN_TO_SEARCH_FACE);
-            return;
-        }
-        BotLog.action(bot, "create_obsidian_search_resume",
-                "reason", reason,
-                "face", searchCursor.face().toShortString(),
-                "leg", searchCursor.legIndex(),
-                "remaining", searchCursor.stepsLeft());
-        enter(Phase.SEARCH);
+        BotLog.action(bot, "create_obsidian_observed_lava_required", "reason", reason);
+        fail("create_obsidian_no_observed_lava");
     }
 
     private void returnToScanFace(AIPlayerEntity bot) {
@@ -758,6 +755,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void returnToSearchFace(AIPlayerEntity bot) {
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            miner.cancel(bot);
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "create_obsidian_observed_lava_required", "reason", "legacy_search_checkpoint");
+            fail("create_obsidian_no_observed_lava");
+            return;
+        }
+
         BlockPos current = bot.blockPosition().immutable();
         if (!current.equals(lastSearchMotionPos)) {
             lastSearchMotionPos = current;
@@ -777,6 +782,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void search(AIPlayerEntity bot) {
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            miner.cancel(bot);
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "create_obsidian_observed_lava_required", "reason", "legacy_search_checkpoint");
+            fail("create_obsidian_no_observed_lava");
+            return;
+        }
+
         ServerLevel world = bot.level();
         BlockPos current = bot.blockPosition().immutable();
 
@@ -1331,12 +1344,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             // A later safety successor is not this task's surface/rim result. Forget only the
             // local admission and leave that owner uninterrupted until its own next tick.
             if (!pack.stepIdle()) {
-                clearRecoveryWalk();
+                releaseRecoveryWalk(bot);
                 return;
             }
             String walk = recoveryWalk;
-            clearRecoveryWalk();
             WalkedStep.Result walked = pack.stepResultFor(lease);
+            releaseRecoveryWalk(bot);
             if (walked != null && walked.failed()) {
                 fail("surface".equals(walk)
                         ? "create_obsidian_water_recovery_surface_blocked"
@@ -1349,25 +1362,25 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 fail("create_obsidian_bucket_lost_after_pour");
                 return;
             }
-            if (bot.blockPosition().getY() < waterSource.getY()
-                    || (bot.blockPosition().getY() == waterSource.getY()
-                    && !bot.level().getFluidState(bot.blockPosition()).isEmpty()
-                    && bot.isUnderWater())) {
+            BlockPos recoveryFeet = bot.blockPosition().immutable();
+            boolean needsSurface = recoveryFeet.getY() < waterSource.getY();
+            if (!needsSurface && recoveryFeet.getY() == waterSource.getY()
+                    && SwimRoute.canObserveColumn(bot, recoveryFeet)) {
+                needsSurface = !bot.level().getFluidState(recoveryFeet).isEmpty() && bot.isUnderWater();
+            }
+            if (needsSurface) {
                 // (A body standing in a shallow flowing sheet at the source's level already has its head in the air: a swim stroke
                 // cannot lift it a whole cell there, and it has no reason to.)
                 // Fake players have no client buoyancy. After collecting in the protected hole,
                 // make one collision-validated adjacent rise so the eye is above the flowing
                 // sheet and the retained source face becomes ray-visible again.
                 // A swim stroke (the jump key in water), not a hop: the step ends when the body is in the cell above.
-                ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(
-                        bot, bot.blockPosition().above(), WalkedStep.Kind.SWIM, "obsidian_surface"));
-                if (lease != null) {
-                    recoveryWalk = "surface";
-                    recoveryWalkLease = lease;
-                }
+                beginRecoveryStep(bot, recoveryFeet.above(), WalkedStep.Kind.SWIM,
+                        "obsidian_surface", "surface");
                 return;
             }
             if (obsidianStandHint != null
+                    && canObserveRecoveryTransitEnvelope(bot, obsidianStandHint)
                     && bot.level().getFluidState(obsidianStandHint).isEmpty()
                     && bot.level().getFluidState(obsidianStandHint.above()).isEmpty()
                     && !bot.blockPosition().equals(obsidianStandHint)
@@ -1375,12 +1388,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 // Leave the water column while it still provides the legitimate upward movement,
                 // then recover from the dry remembered rim. Removing the source while suspended
                 // over the hole drops the fake player straight back to the pool floor.
-                ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(
-                        bot, obsidianStandHint, WalkedStep.Kind.FLAT, "obsidian_return_rim"));
-                if (lease != null) {
-                    recoveryWalk = "rim";
-                    recoveryWalkLease = lease;
-                }
+                beginRecoveryStep(bot, obsidianStandHint, WalkedStep.Kind.FLAT,
+                        "obsidian_return_rim", "rim");
                 return;
             }
             if (bot.getEyePosition().distanceToSqr(waterSource.getCenter()) <= REACH_MARGIN_SQUARED) {
@@ -1432,6 +1441,69 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 enter(Phase.WAIT_DRAIN);
             }
         }
+    }
+
+    /**
+     * Starts a one-cell, observed recovery move from this task's own temporary water placement.
+     * The action is intentionally local, but it still proves every cell that the vanilla movement
+     * validator may inspect and retains that proof for every later tick.
+     */
+    private boolean beginRecoveryStep(AIPlayerEntity bot, BlockPos cell, WalkedStep.Kind kind,
+                                      String reason, String recoveryKind) {
+        if (!canObserveRecoveryTransitEnvelope(bot, cell)
+                || !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, cell, kind)
+                || WalkedStep.refusal(bot, cell, kind) != null) {
+            BotLog.action(bot, "create_obsidian_recovery_step_refused",
+                    "kind", recoveryKind, "target", cell.toShortString(), "reason", "unobserved_or_unsafe");
+            return false;
+        }
+        RecoveryStepAdmission admission = new RecoveryStepAdmission(bot.blockPosition(), cell, kind);
+        ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason),
+                (guardBot, guardedStep) -> canContinueObservedRecoveryStep(
+                        guardBot, guardedStep, admission));
+        if (lease == null) {
+            return false;
+        }
+        recoveryWalk = recoveryKind;
+        recoveryWalkLease = lease;
+        return true;
+    }
+
+    /** State-free proof for the current, destination, and support cells of a recovery step. */
+    private static boolean canObserveRecoveryTransitEnvelope(AIPlayerEntity bot, BlockPos cell) {
+        return SwimRoute.canObserveColumn(bot, bot.blockPosition())
+                && SwimRoute.canObserveColumn(bot, cell)
+                && ObservableWorldQuery.canObserveCellThroughFluids(bot, cell.below());
+    }
+
+    /** Re-proves this exact recovery move before WalkedStep may perform another terrain read. */
+    private static boolean canContinueObservedRecoveryStep(AIPlayerEntity bot, WalkedStep step,
+                                                            RecoveryStepAdmission admission) {
+        return step.kind() == admission.kind()
+                && step.cell().equals(admission.destination())
+                && withinRecoveryStepContinuationEnvelope(bot.blockPosition(), admission, step.ticks())
+                && canObserveRecoveryTransitEnvelope(bot, admission.destination())
+                && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, admission.destination(), step.kind());
+    }
+
+    /** No-world-read source/destination envelope matching WalkedStep's first-tick normalization. */
+    private static boolean withinRecoveryStepContinuationEnvelope(BlockPos feet,
+                                                                  RecoveryStepAdmission admission,
+                                                                  int activeStepTicks) {
+        BlockPos origin = admission.origin();
+        BlockPos destination = admission.destination();
+        if (between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getY(), origin.getY(), destination.getY())
+                && between(feet.getZ(), origin.getZ(), destination.getZ())) {
+            return true;
+        }
+        return (admission.kind() == WalkedStep.Kind.FLAT
+                || admission.kind() == WalkedStep.Kind.STEP_UP
+                || admission.kind() == WalkedStep.Kind.STEP_DOWN)
+                && activeStepTicks >= 0 && activeStepTicks <= 1
+                && feet.getX() == origin.getX()
+                && feet.getZ() == origin.getZ()
+                && Math.abs(feet.getY() - origin.getY()) == 1;
     }
 
     private void waitForDrain(AIPlayerEntity bot) {
@@ -1877,6 +1949,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void pickup(AIPlayerEntity bot) {
+        if (awaitPickupStep(bot)) {
+            return;
+        }
         int inventoryNow = HarvestCore.countInventoryItems(bot, Set.of(Items.OBSIDIAN));
         if (inventoryNow > pickupInventoryBaseline && pickupGainTick < 0) {
             pickupGainTick = totalBudget();
@@ -2003,14 +2078,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 below,
                 below.north(), below.east(), below.south(), below.west()
         };
-        ServerLevel world = bot.level();
         for (BlockPos candidate : candidates) {
-            if (!ObservableWorldQuery.canObserveCell(bot, candidate)
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())) {
-                continue;
-            }
-            if (Standability.isStandable(world, candidate)) {
+            // SwimRoute proves feet, head and support before it performs its standability read.
+            // A pickup pose may be remembered, but it is never a license to inspect unseen ground.
+            if (SwimRoute.observedCell(bot, bot.level(), candidate, false) == SwimRoute.Cell.DRY) {
                 return candidate.immutable();
             }
         }
@@ -2042,7 +2113,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * step (real movement keys, see {@link WalkedStep}; the bot arrives a few ticks later, and the
      * caller asks again while the step is in flight, which answers true without starting another).</p>
      */
-    static boolean stepTowardPickupCell(AIPlayerEntity bot, BlockPos target) {
+    boolean stepTowardPickupCell(AIPlayerEntity bot, BlockPos target) {
+        if (awaitPickupStep(bot)) {
+            return true;
+        }
         if (!bot.getActionPack().stepIdle()) {
             return true;
         }
@@ -2079,8 +2153,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 ? new BlockPos[]{first}
                 : new BlockPos[]{first, second};
         for (BlockPos candidate : candidates) {
-            Standability.clearCache();
-            if (!Standability.isStandable(bot.level(), candidate)) {
+            // This combines ray-proven feet/head/support with the only permitted standability
+            // read.  Do not use a raw terrain query to line up with a remembered pickup cell.
+            if (SwimRoute.observedCell(bot, bot.level(), candidate, false) != SwimRoute.Cell.DRY) {
                 continue;
             }
             bot.getActionPack().stopAll();
@@ -2095,18 +2170,34 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * Starts the walked step onto one adjacent pickup cell: a swim stroke into a water-filled cell, else a walk, hop or drop onto the
      * standable one. False when the step is not legal (no adjacent kind covers it, or the landing is refused).
      */
-    private static boolean beginPickupStep(AIPlayerEntity bot, BlockPos cell, String reason) {
+    private boolean beginPickupStep(AIPlayerEntity bot, BlockPos cell, String reason) {
+        if (!canObservePickupTransitEnvelope(bot, cell)) {
+            return false;
+        }
         ServerLevel world = bot.level();
         BlockPos from = bot.blockPosition();
         boolean wet = world.getFluidState(cell).is(FluidTags.WATER) || world.getFluidState(cell.above()).is(FluidTags.WATER);
         WalkedStep.Kind kind = wet ? WalkedStep.Kind.SWIM : WalkedStepRules.walkKindFor(cell.getY() - from.getY());
-        if (kind == null || WalkedStep.refusal(bot, cell, kind) != null) {
+        if (kind == null
+                || !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, cell, kind)
+                || WalkedStep.refusal(bot, cell, kind) != null) {
             return false;
         }
-        return bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason)) != null;
+        PickupStepAdmission admission = new PickupStepAdmission(from, cell, kind);
+        ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason),
+                (guardBot, guardedStep) -> canContinueObservedPickupStep(
+                        guardBot, guardedStep, admission));
+        if (lease == null) {
+            return false;
+        }
+        pickupStepLease = lease;
+        return true;
     }
 
     private static boolean isSafePickupCollisionCell(AIPlayerEntity bot, BlockPos target) {
+        if (!canObservePickupTransitEnvelope(bot, target)) {
+            return false;
+        }
         ServerLevel world = bot.level();
         BlockState feet = world.getBlockState(target);
         BlockState head = world.getBlockState(target.above());
@@ -2119,6 +2210,80 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 && !Standability.isDangerous(feet)
                 && !Standability.isDangerous(head)
                 && !Standability.isDangerous(below);
+    }
+
+    /**
+     * Proves every world cell that pickup collision admission and a later {@link WalkedStep} may
+     * inspect.  The water-transparent rays deliberately model a player looking through a visible
+     * pickup pool; they do not turn an occluded remembered break position into terrain knowledge.
+     */
+    private static boolean canObservePickupTransitEnvelope(AIPlayerEntity bot, BlockPos cell) {
+        return SwimRoute.canObserveColumn(bot, cell)
+                && ObservableWorldQuery.canObserveCellThroughFluids(bot, cell.below());
+    }
+
+    /** Re-proves the exact one-cell pickup transit before WalkedStep performs another terrain read. */
+    private static boolean canContinueObservedPickupStep(AIPlayerEntity bot, WalkedStep step,
+                                                          PickupStepAdmission admission) {
+        return step.kind() == admission.kind()
+                && step.cell().equals(admission.destination())
+                && withinPickupStepContinuationEnvelope(bot.blockPosition(), admission, step.ticks())
+                && canObservePickupTransitEnvelope(bot, admission.destination())
+                && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, admission.destination(), step.kind());
+    }
+
+    /** No-world-read envelope matching WalkedStep's one-tick source-settling normalization. */
+    private static boolean withinPickupStepContinuationEnvelope(BlockPos feet, PickupStepAdmission admission,
+                                                                int activeStepTicks) {
+        BlockPos origin = admission.origin();
+        BlockPos destination = admission.destination();
+        if (between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getY(), origin.getY(), destination.getY())
+                && between(feet.getZ(), origin.getZ(), destination.getZ())) {
+            return true;
+        }
+        return (admission.kind() == WalkedStep.Kind.FLAT
+                || admission.kind() == WalkedStep.Kind.STEP_UP
+                || admission.kind() == WalkedStep.Kind.STEP_DOWN)
+                && activeStepTicks >= 0 && activeStepTicks <= 1
+                && feet.getX() == origin.getX()
+                && feet.getZ() == origin.getZ()
+                && Math.abs(feet.getY() - origin.getY()) == 1;
+    }
+
+    private static boolean between(int value, int first, int second) {
+        return value >= Math.min(first, second) && value <= Math.max(first, second);
+    }
+
+    /** Reconciles only this task's guarded collision move; a successor controller is left alone. */
+    private boolean awaitPickupStep(AIPlayerEntity bot) {
+        ActionPack.StepLease lease = pickupStepLease;
+        if (lease == null) {
+            return false;
+        }
+        ActionPack pack = bot.getActionPack();
+        if (pack.stepInFlightFor(lease)) {
+            return true;
+        }
+        if (!pack.stepIdle()) {
+            pickupStepLease = null;
+            return true;
+        }
+        WalkedStep.Result result = pack.stepResultFor(lease);
+        pack.releaseStepLease(lease);
+        pickupStepLease = null;
+        if (result != null && result.failed()) {
+            BotLog.action(bot, "create_obsidian_pickup_step_refused", "reason", result.reason());
+        }
+        return false;
+    }
+
+    /** Cancels/releases only this task's strict pickup move before an abort hands control away. */
+    private void cancelPickupStep(AIPlayerEntity bot) {
+        if (pickupStepLease != null) {
+            bot.getActionPack().cancelStep(pickupStepLease);
+            pickupStepLease = null;
+        }
     }
 
     private BlockMiner.Status beginMine(AIPlayerEntity bot, BlockPos pos) {
@@ -2349,7 +2514,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private void resetForNextScan(AIPlayerEntity bot) {
         miner.cancel(bot);
         bot.getActionPack().stopAll();
-        clearRecoveryWalk();
+        releaseRecoveryWalk(bot);
         if (waterSource != null) {
             // A placed source is a transactional resource obligation. Do not forget its position
             // merely because the target/pose became invalid; recover the real bucket first.
@@ -2393,7 +2558,21 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         rejectedPourDestinations.clear();
     }
 
-    /** Clears only this task's remembered admission; it never cancels a replacement owner. */
+    /** Releases or cancels only this task's guarded recovery lease before dropping its state. */
+    private void releaseRecoveryWalk(AIPlayerEntity bot) {
+        ActionPack.StepLease lease = recoveryWalkLease;
+        if (lease != null) {
+            ActionPack pack = bot.getActionPack();
+            if (pack.stepInFlightFor(lease)) {
+                pack.cancelStep(lease);
+            } else {
+                pack.releaseStepLease(lease);
+            }
+        }
+        clearRecoveryWalk();
+    }
+
+    /** Clears only the remembered admission after it has been released or before task start. */
     private void clearRecoveryWalk() {
         recoveryWalk = null;
         recoveryWalkLease = null;
@@ -2441,10 +2620,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return;
         }
         BlockPos current = bot.blockPosition();
-        Standability.clearCache();
-        if (current.equals(target) || !Standability.isStandable(bot.level(), target)) {
+        if (current.equals(target) || SwimRoute.observedCell(bot, bot.level(), target, false)
+                != SwimRoute.Cell.DRY) {
             BotLog.action(bot, "create_obsidian_pickup_no_progress_endpoint",
-                    "reason", current.equals(target) ? "current_cell" : "non_standable",
+                    "reason", current.equals(target) ? "current_cell" : "unobserved_or_non_standable",
                     "target", target.toShortString());
             return;
         }

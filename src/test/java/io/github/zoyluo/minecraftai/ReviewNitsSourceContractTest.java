@@ -63,7 +63,10 @@ final class ReviewNitsSourceContractTest {
     void theExplicitBestFirstEntryPointsSayTheAutomaticChoiceIsBestFirstToo() throws IOException {
         assertTrue(read("brain/ToolRegistry.java").contains("The automatic choice for armor, weapons, shields and bows is best-first too"),
                 "the equip_armor tool description must say what the automatic choice is");
-        assertTrue(read("goal/GoalPlanner.java").contains("the background armor pass is best-first too"));
+        assertTrue(read("MinecraftAiConfig.java").contains("NON-TOOLS (melee weapons, bows, crossbows, shields, armour, elytra) are always best-first"),
+                "the global configuration must keep non-tool selection best-first even though automatic descent is retired");
+        assertTrue(read("action/EquipAction.java").contains("public static int equipBestArmor(AIPlayerEntity bot)"),
+                "the shared automatic armor action must remain available outside retired navigation tasks");
         assertTrue(read("task/DescendToYTask.java").contains("Armor is a non-tool, so it is best-first everywhere"));
     }
 

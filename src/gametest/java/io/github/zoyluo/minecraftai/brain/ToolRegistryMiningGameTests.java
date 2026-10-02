@@ -1,7 +1,7 @@
 package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.mojang.brigadier.tree.CommandNode;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
@@ -9,21 +9,17 @@ import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.AbstractTask;
-import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.commands.CommandSource;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
-import java.util.ArrayList;
 import java.util.List;
 
 /** Runtime registry coverage for the public mine_ore argument contract. */
@@ -51,16 +47,13 @@ public final class ToolRegistryMiningGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void strictDirectHandlersRejectWithoutDisturbingActiveWork(GameTestHelper context) {
+    public void retiredDirectToolsAreAbsentWithoutDisturbingActiveWork(GameTestHelper context) {
         ActiveFixture fixture = activeFixture(context, "StripDirectGT");
         try {
             ToolRegistry registry = new ToolRegistry();
-            requireToolRejected(context, fixture, registry, "strip_mine",
-                    JsonParser.parseString("{\"direction\":\"north\",\"length\":8,\"spacing\":4}")
-                            .getAsJsonObject());
-            requireToolRejected(context, fixture, registry, "mine_vein",
-                    JsonParser.parseString("{\"target_ores\":\"minecraft:diamond_ore\"}")
-                            .getAsJsonObject());
+            require(context, registry.get("strip_mine").isEmpty(), "strip_mine remained publicly registered");
+            require(context, registry.get("mine_vein").isEmpty(), "mine_vein remained publicly registered");
+            requireUndisturbed(context, fixture, "retired direct tools");
         } finally {
             cleanupFixture(context, fixture);
         }
@@ -68,22 +61,12 @@ public final class ToolRegistryMiningGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void strictAssignTaskRejectsWithoutDisturbingActiveWork(GameTestHelper context) {
+    public void retiredAssignTaskTypesRejectWithoutDisturbingActiveWork(GameTestHelper context) {
         ActiveFixture fixture = activeFixture(context, "StripAssignGT");
         try {
             ToolRegistry registry = new ToolRegistry();
-            requireToolRejected(context, fixture, registry, "assign_task",
-                    JsonParser.parseString("""
-                            {"task_type":"strip_mine","params":{
-                              "direction":"north","length":8,"spacing":4
-                            }}
-                            """).getAsJsonObject());
-            requireToolRejected(context, fixture, registry, "assign_task",
-                    JsonParser.parseString("""
-                            {"task_type":"mine_vein","params":{
-                              "target_ores":"minecraft:diamond_ore"
-                            }}
-                            """).getAsJsonObject());
+            requireUnknownTaskType(context, fixture, registry, "strip_mine");
+            requireUnknownTaskType(context, fixture, registry, "mine_vein");
         } finally {
             cleanupFixture(context, fixture);
         }
@@ -120,18 +103,21 @@ public final class ToolRegistryMiningGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void strictPlayerCommandsRejectWithoutDisturbingActiveWork(GameTestHelper context) {
+    public void retiredPlayerCommandsAreAbsentWithoutDisturbingActiveWork(GameTestHelper context) {
         ActiveFixture fixture = activeFixture(context, "StripCmdGT");
         try {
-            RecordingCommandOutput output = new RecordingCommandOutput();
-            CommandSourceStack playerSource = fixture.bot().createCommandSourceStack()
-                    .withPermission(LevelBasedPermissionSet.OWNER)
-                    .withSource(output);
-
-            runRejectedCommand(context, fixture, playerSource, output,
-                    "minecraftai task assign StripCmdGT strip_mine north 8 4");
-            runRejectedCommand(context, fixture, playerSource, output,
-                    "minecraftai task assign StripCmdGT mine_vein minecraft:diamond_ore");
+            CommandNode<CommandSourceStack> root = fixture.bot().level().getServer().getCommands()
+                    .getDispatcher().getRoot();
+            CommandNode<CommandSourceStack> minecraftAi = root.getChild("minecraftai");
+            CommandNode<CommandSourceStack> task = minecraftAi == null ? null : minecraftAi.getChild("task");
+            CommandNode<CommandSourceStack> assign = task == null ? null : task.getChild("assign");
+            CommandNode<CommandSourceStack> botName = assign == null ? null : assign.getChild("name");
+            require(context, botName != null, "minecraftai task assign command tree was not registered");
+            require(context, botName == null || botName.getChild("strip_mine") == null,
+                    "strip_mine remained in the player command tree");
+            require(context, botName == null || botName.getChild("mine_vein") == null,
+                    "mine_vein remained in the player command tree");
+            requireUndisturbed(context, fixture, "retired player commands");
         } finally {
             cleanupFixture(context, fixture);
         }
@@ -230,35 +216,23 @@ public final class ToolRegistryMiningGameTests {
         }
     }
 
-    private static void requireToolRejected(GameTestHelper context,
-                                            ActiveFixture fixture,
-                                            ToolRegistry registry,
-                                            String toolName,
-                                            JsonObject args) {
-        ToolDefinition definition = registry.get(toolName).orElse(null);
-        require(context, definition != null, toolName + " was not registered");
-        ToolDefinition.ToolResult result = definition.handler().invoke(fixture.bot(), args);
-        require(context, result != null && !result.ok(), toolName + " did not reject strict mode");
-        require(context, StripMineTask.STRICT_SURVIVAL_REJECTION.equals(result.message()),
-                toolName + " returned the wrong typed reason: "
-                        + (result == null ? "null" : result.message()));
-        requireUndisturbed(context, fixture, toolName);
-    }
-
-    private static void runRejectedCommand(GameTestHelper context,
-                                           ActiveFixture fixture,
-                                           CommandSourceStack playerSource,
-                                           RecordingCommandOutput output,
-                                           String command) {
-        output.clear();
-        fixture.bot().level().getServer().getCommands().performPrefixedCommand(playerSource, command);
-        require(context, output.messages().stream().anyMatch(message ->
-                        message.contains(StripMineTask.STRICT_SURVIVAL_REJECTION)),
-                command + " did not publish the typed rejection: " + output.messages());
-        require(context, output.messages().stream().noneMatch(message ->
-                        message.contains("task assigned")),
-                command + " published a false assignment: " + output.messages());
-        requireUndisturbed(context, fixture, command);
+    private static void requireUnknownTaskType(GameTestHelper context,
+                                               ActiveFixture fixture,
+                                               ToolRegistry registry,
+                                               String taskType) {
+        ToolDefinition definition = registry.get("assign_task").orElse(null);
+        require(context, definition != null, "assign_task was not registered");
+        JsonObject args = new JsonObject();
+        args.addProperty("task_type", taskType);
+        args.add("params", new JsonObject());
+        try {
+            definition.handler().invoke(fixture.bot(), args);
+            context.fail(Component.nullToEmpty(taskType + " was accepted by assign_task"));
+        } catch (IllegalArgumentException expected) {
+            require(context, ("unknown_task_type: " + taskType).equals(expected.getMessage()),
+                    taskType + " returned the wrong rejection: " + expected.getMessage());
+        }
+        requireUndisturbed(context, fixture, "assign_task " + taskType);
     }
 
     private static ActiveFixture activeFixture(GameTestHelper context, String botName) {
@@ -272,7 +246,7 @@ public final class ToolRegistryMiningGameTests {
 
         BotRuntimeOptions.INSTANCE.setVerboseReportsEnabled(bot, true);
         SentinelTask sentinel = new SentinelTask();
-        TaskOrigin origin = TaskOrigin.of(TaskOrigin.Kind.VERIFY, "strip_mine_strict_gate_sentinel");
+        TaskOrigin origin = TaskOrigin.of(TaskOrigin.Kind.VERIFY, "retired_mining_gate_sentinel");
         TaskManager.INSTANCE.assign(bot, sentinel, origin);
         ActionResult action = bot.getActionPack().startWalkTo(bot.position().add(2.0D, 0.0D, 0.0D));
         require(context, action.isInProgress(), "sentinel walk action did not start");
@@ -280,8 +254,10 @@ public final class ToolRegistryMiningGameTests {
         long reportSequence = BotReporter.INSTANCE.taskReportSequence(bot);
         require(context, reportSequence > 0L, "sentinel assignment did not activate report sequencing");
         ActionSnapshot actionSnapshot = ActionSnapshot.capture(bot);
-        require(context, actionSnapshot.hasActiveActions() && !actionSnapshot.walkToIdle(),
-                "sentinel walk action was not observable");
+        require(context, actionSnapshot.hasActiveActions()
+                        && !actionSnapshot.pathExecutorIdle()
+                        && actionSnapshot.activePathGoal() != null,
+                "sentinel Baritone route was not observable");
         return new ActiveFixture(
                 botName,
                 bot,
@@ -313,7 +289,7 @@ public final class ToolRegistryMiningGameTests {
     private static void cleanupFixture(GameTestHelper context, ActiveFixture fixture) {
         IntentController.INSTANCE.cancelAll(
                 fixture.bot(), IntentController.ControlOrigin.SYSTEM,
-                "strip_mine_strict_gate_gametest_cleanup");
+                "retired_mining_gate_gametest_cleanup");
         AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), fixture.botName());
     }
 
@@ -385,35 +361,4 @@ public final class ToolRegistryMiningGameTests {
         }
     }
 
-    private static final class RecordingCommandOutput implements CommandSource {
-        private final List<String> messages = new ArrayList<>();
-
-        @Override
-        public void sendSystemMessage(Component message) {
-            messages.add(message.getString());
-        }
-
-        @Override
-        public boolean acceptsSuccess() {
-            return true;
-        }
-
-        @Override
-        public boolean acceptsFailure() {
-            return true;
-        }
-
-        @Override
-        public boolean shouldInformAdmins() {
-            return false;
-        }
-
-        private List<String> messages() {
-            return List.copyOf(messages);
-        }
-
-        private void clear() {
-            messages.clear();
-        }
-    }
 }

@@ -58,6 +58,8 @@ final class BoatSupport {
     private static final double[][] WATER_SURFACE_SAMPLES = {
             {0.0D, 0.0D}, {-0.3D, 0.0D}, {0.3D, 0.0D}, {0.0D, -0.3D}, {0.0D, 0.3D}
     };
+    /** State-free ray endpoints: a successful fluid hit proves the actual liquid height. */
+    private static final double[] WATER_SURFACE_HEIGHTS = {0.15D, 0.35D, 0.55D, 0.75D, 0.86D};
 
     private BoatSupport() {
     }
@@ -104,17 +106,17 @@ final class BoatSupport {
         ServerLevel world = bot.level();
         BlockPos origin = bot.blockPosition();
         Standability.clearCache();
-        // Cheap block-state tests first; the (raycast) visibility test only runs for the few
-        // cells that are already real open-water launch candidates.
+        // Ray-prove the liquid before any hull, water, or shore state is read. A loaded chunk is
+        // not evidence that the player can see a launch site.
         return BlockPos.betweenClosedStream(
                         origin.offset(-LOCAL_WATER_SEARCH_RADIUS, -LAUNCH_SEARCH_DOWN, -LOCAL_WATER_SEARCH_RADIUS),
                         origin.offset(LOCAL_WATER_SEARCH_RADIUS, LAUNCH_SEARCH_UP, LOCAL_WATER_SEARCH_RADIUS))
                 .map(BlockPos::immutable)
-                .filter(water -> isOpenWater(world, water))
-                .map(water -> launchSite(world, water))
+                .filter(water -> canObserveWater(bot, water))
+                .filter(water -> isOpenWater(bot, world, water))
+                .map(water -> launchSite(bot, world, water))
                 .flatMap(Optional::stream)
                 .sorted(Comparator.comparingDouble(site -> site.shore().distSqr(origin)))
-                .filter(site -> canObserveWater(bot, site.water()))
                 .findFirst();
     }
 
@@ -131,11 +133,11 @@ final class BoatSupport {
                         origin.offset(-LOCAL_WATER_SEARCH_RADIUS, -LAUNCH_SEARCH_DOWN, -LOCAL_WATER_SEARCH_RADIUS),
                         origin.offset(LOCAL_WATER_SEARCH_RADIUS, LAUNCH_SEARCH_UP, LOCAL_WATER_SEARCH_RADIUS))
                 .map(BlockPos::immutable)
-                .filter(cell -> isOpenWater(world, cell))
-                .sorted(Comparator.comparingDouble(cell -> cell.distSqr(origin)))
                 .filter(cell -> canObserveWater(bot, cell))
+                .filter(cell -> isOpenWater(bot, world, cell))
+                .sorted(Comparator.comparingDouble(cell -> cell.distSqr(origin)))
                 .findFirst();
-        return water.flatMap(cell -> Standability.findNearestStandable(world, cell, 6, 4, 4));
+        return water.flatMap(cell -> nearestObservedStandable(bot, world, cell, 6, 4, 4));
     }
 
     /**
@@ -146,21 +148,20 @@ final class BoatSupport {
      * aim at points just under the water surface, which is exactly what a player looking at the lake sees.
      */
     static boolean canObserveWater(AIPlayerEntity bot, BlockPos water) {
-        if (ObservableWorldQuery.canObserveBlock(bot, water)) {
-            return true;
-        }
         ServerLevel world = bot.level();
-        double surface = water.getY() + world.getFluidState(water).getHeight(world, water) - 0.05D;
         double reach = LOCAL_WATER_SEARCH_RADIUS;
-        for (double[] offset : WATER_SURFACE_SAMPLES) {
-            Vec3 target = new Vec3(water.getX() + 0.5D + offset[0], surface, water.getZ() + 0.5D + offset[1]);
-            if (bot.getEyePosition().distanceToSqr(target) > reach * reach) {
-                continue;
-            }
-            BlockHitResult hit = world.clip(new ClipContext(bot.getEyePosition(), target,
-                    ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
-            if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(water)) {
-                return true;
+        for (double height : WATER_SURFACE_HEIGHTS) {
+            for (double[] offset : WATER_SURFACE_SAMPLES) {
+                Vec3 target = new Vec3(water.getX() + 0.5D + offset[0],
+                        water.getY() + height, water.getZ() + 0.5D + offset[1]);
+                if (bot.getEyePosition().distanceToSqr(target) > reach * reach) {
+                    continue;
+                }
+                BlockHitResult hit = world.clip(new ClipContext(bot.getEyePosition(), target,
+                        ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
+                if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(water)) {
+                    return true;
+                }
             }
         }
         return false;
@@ -170,12 +171,15 @@ final class BoatSupport {
         if (boat == null || !boat.isAlive()) {
             return Optional.empty();
         }
+        if (!ObservableWorldQuery.canObserveEntity(bot, boat)) {
+            return Optional.empty();
+        }
         ServerLevel world = bot.level();
         BlockPos center = boat.blockPosition();
         Standability.clearCache();
         return BlockPos.betweenClosedStream(center.offset(-2, -1, -2), center.offset(2, 1, 2))
                 .map(BlockPos::immutable)
-                .filter(pos -> Standability.isStandable(world, pos))
+                .filter(pos -> observedStandable(bot, world, pos))
                 .filter(pos -> pos.distSqr(boat.blockPosition()) <= BOARD_REACH * BOARD_REACH)
                 .min(Comparator.comparingDouble(pos -> pos.distSqr(bot.blockPosition())));
     }
@@ -185,12 +189,15 @@ final class BoatSupport {
         if (boat == null || !boat.isAlive()) {
             return Optional.empty();
         }
+        if (!ObservableWorldQuery.canObserveEntity(bot, boat)) {
+            return Optional.empty();
+        }
         ServerLevel world = bot.level();
         BlockPos center = boat.blockPosition();
         Standability.clearCache();
         return BlockPos.betweenClosedStream(center.offset(-3, -1, -3), center.offset(3, 1, 3))
                 .map(BlockPos::immutable)
-                .filter(pos -> Standability.isStandable(world, pos))
+                .filter(pos -> observedStandable(bot, world, pos))
                 .filter(pos -> world.getFluidState(pos).isEmpty() && world.getFluidState(pos.above()).isEmpty())
                 .filter(pos -> pos.distSqr(center) <= BOARD_REACH * BOARD_REACH)
                 .min(Comparator.comparingDouble(pos -> pos.distSqr(bot.blockPosition())));
@@ -280,15 +287,18 @@ final class BoatSupport {
         return true;
     }
 
-    private static boolean isOpenWater(ServerLevel world, BlockPos water) {
-        if (!isWater(world, water)
+    private static boolean isOpenWater(AIPlayerEntity bot, ServerLevel world, BlockPos water) {
+        if (!canObserveWater(bot, water)
+                || !ObservableWorldQuery.canObserveCell(bot, water.above())
+                || !isWater(world, water)
                 || !world.getFluidState(water.above()).isEmpty()
                 || !world.getBlockState(water.above()).getCollisionShape(world, water.above()).isEmpty()) {
             return false;
         }
         int connectedWater = 0;
         for (Direction direction : Direction.Plane.HORIZONTAL) {
-            if (isWater(world, water.relative(direction))) {
+            BlockPos neighbor = water.relative(direction);
+            if (canObserveWater(bot, neighbor) && isWater(world, neighbor)) {
                 connectedWater++;
             }
         }
@@ -302,11 +312,14 @@ final class BoatSupport {
      * fails this (the hull would overlap the bank block: vanilla answers FAIL), so the launch
      * water is picked a cell or two out from the shore.
      */
-    private static boolean holdsBoat(ServerLevel world, BlockPos water) {
+    private static boolean holdsBoat(AIPlayerEntity bot, ServerLevel world, BlockPos water) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 for (int dy = 0; dy <= 1; dy++) {
                     BlockPos pos = water.offset(dx, dy, dz);
+                    if (!ObservableWorldQuery.canObserveCell(bot, pos)) {
+                        return false;
+                    }
                     if (!world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()) {
                         return false;
                     }
@@ -317,8 +330,9 @@ final class BoatSupport {
     }
 
     /** Nearest standable shore cell (level with or one above the water) that can reach {@code water}. */
-    private static Optional<LaunchSite> launchSite(ServerLevel world, BlockPos water) {
-        if (!holdsBoat(world, water)) {
+    private static Optional<LaunchSite> launchSite(AIPlayerEntity bot, ServerLevel world,
+                                                    BlockPos water) {
+        if (!holdsBoat(bot, world, water)) {
             return Optional.empty();
         }
         for (int radius = 1; radius <= LAUNCH_SHORE_RADIUS; radius++) {
@@ -331,7 +345,8 @@ final class BoatSupport {
                         BlockPos shore = water.offset(dx, dy, dz);
                         double eyeToWater = Math.sqrt(dx * dx + dz * dz
                                 + Math.pow(dy + 1.62D - 0.5D, 2));
-                        if (eyeToWater <= LAUNCH_REACH && Standability.isStandable(world, shore)) {
+                        if (eyeToWater <= LAUNCH_REACH
+                                && observedStandable(bot, world, shore)) {
                             return Optional.of(new LaunchSite(water, shore));
                         }
                     }
@@ -339,5 +354,27 @@ final class BoatSupport {
             }
         }
         return Optional.empty();
+    }
+
+    /** A dry standing envelope may be inspected only after the player-eye ray has proved it. */
+    private static boolean observedStandable(AIPlayerEntity bot, ServerLevel world, BlockPos pos) {
+        return ObservableWorldQuery.canObserveCell(bot, pos)
+                && ObservableWorldQuery.canObserveCell(bot, pos.above())
+                && ObservableWorldQuery.canObserveBlockCellFace(bot, pos.below())
+                && Standability.isStandableFresh(world, pos);
+    }
+
+    private static Optional<BlockPos> nearestObservedStandable(AIPlayerEntity bot,
+                                                                ServerLevel world,
+                                                                BlockPos origin,
+                                                                int horizontalRadius,
+                                                                int verticalDown,
+                                                                int verticalUp) {
+        return BlockPos.betweenClosedStream(
+                        origin.offset(-horizontalRadius, -verticalDown, -horizontalRadius),
+                        origin.offset(horizontalRadius, verticalUp, horizontalRadius))
+                .map(BlockPos::immutable)
+                .filter(pos -> observedStandable(bot, world, pos))
+                .min(Comparator.comparingDouble(pos -> pos.distSqr(origin)));
     }
 }

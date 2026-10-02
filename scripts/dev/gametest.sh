@@ -21,7 +21,7 @@
 #   `free -g` shows the room. An ALL run takes every slot (it runs alone).
 # Env: GT_HEAP (default 2560m); GT_TIMEOUT (seconds per filter, default 1500; ALL gets 7200); GT_DAEMON=1 to use a Gradle
 # daemon (faster repeated runs, more resident memory). GT_JAVA_OPTS appends explicit JVM properties for a specialised fixture;
-# scripts/dev/nav_measurement.sh uses it for its opt-in, scale-one P3 capture.
+# scripts/dev/nav_measurement.sh uses it for its opt-in Baritone diagnostic capture.
 set -u
 SELF_TEST=0
 if [ "${1:-}" = "--self-test" ]; then SELF_TEST=1; shift; fi

@@ -103,7 +103,7 @@ public final class PaceGameTests {
             AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                             world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL)
                     .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-            NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+            NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
             BotFixtureMoves.place(bot, feet);
             bot.setOnGround(true);
             bot.setHealth(bot.getMaxHealth());

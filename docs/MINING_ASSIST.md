@@ -58,7 +58,7 @@ It never consumes the tick and never throws. The checks run cheapest first:
 1. Mode off (or harness default off with no opted-in bot): return after one static read.
 2. The danger scan handled this bot this tick: skip (design 2.3, step 3d).
 3. The active task is `OreDigTask`, `DigDownTask`, `DescendToYTask`, `MineTask` or `MineValuablesTask`.
-   `StripMineTask` is legacy and rejected in strict survival, so it is not covered. `DigDownTask` is sensed in
+   The retired `StripMineTask` is not publicly reachable, so it is not covered. `DigDownTask` is sensed in
    both of its phases in P0.
 4. The gate is open (below).
 5. The bot is underground: `!world.isSkyVisible(feet)`, an own-cell read.
@@ -341,9 +341,8 @@ to by number are restated here (design section 1):
   id (`PoiDetector`, the F3 equivalent) and the sky-visibility flag (`MiningAssistCoordinator`, the
   underground test, the same call `DangerWatcher` and `MineValuablesTask` already make). The design text
   names only the biome; this is the corrected statement. The break peek and the entity evidence reuse the
-  existing `OreScan.observe` and `canObserveEntity` helpers, whose answers follow the active profile like
-  every other mining task's (under `operator` with `hiddenBlockScan` enabled they are as permissive as
-  those tasks are); `castViewRay` itself is profile independent.
+  existing `OreScan.observe` and `canObserveEntity` helpers, whose answers remain observation-bound in
+  every profile because hidden scanning is retired; `castViewRay` itself is profile independent.
   The palette prefilter of the observable block scans (`SectionPrefilter`: `LevelChunkSection.maybeHas` and
   one state read, run before the ray proof in `OreProspector` and `WorkshopLocator`) is a cost-only conjunct:
   it only puts the cheaper test first, a cell is still returned only when it matches AND is observable, the

@@ -44,7 +44,7 @@ import java.util.UUID;
  *       first statement returns after one static read. After that: a handled tick, then the task class, then
  *       the gate (cached 20 ticks per bot), then one own-cell sky read (design 2.3 3e).</li>
  *   <li><b>Senses only underground, only for mining classes.</b> OreDig, DigDown, DescendToY, MineTask and
- *       MineValuables (StripMineTask is legacy and rejected in strict survival, so it is not covered).
+ *       MineValuables (the retired legacy StripMineTask is not covered).
  *       DigDown is sensed in both of its phases in P0 because nothing acts on what is sensed.</li>
  *   <li><b>No behaviour change.</b> The sensor and the shadow POI scorer only fill the bot's own memories and
  *       write log lines. This class never pauses, walks, chats, calls a model or assigns work (G1, G2, I5).</li>

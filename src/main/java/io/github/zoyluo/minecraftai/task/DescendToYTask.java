@@ -406,6 +406,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            RetiredNavigationTask.refuse(bot, "descend_to_y");
+            fail(RetiredNavigationTask.OBSERVED_TARGET_REQUIRED);
+            return;
+        }
+
         if (restoredCheckpoint == null) {
             budgetOffset = 0;
             budgetLimit = budgetLimitFor(bot.blockPosition().getY(), targetY);

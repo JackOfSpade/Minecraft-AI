@@ -103,10 +103,11 @@ class AssistObservationSourceContractTest {
 
     private static String castViewRayBody() throws IOException {
         String source = read(MAIN.resolve("mode/ObservableWorldQuery.java"));
-        int start = source.indexOf("public static ViewHit castViewRay(");
-        assertTrue(start >= 0, "castViewRay must exist");
+        int start = source.indexOf("private static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,\n"
+                + "                                        double range, ViewShape shape, ClipContext.Fluid fluid) {");
+        assertTrue(start >= 0, "the shared castViewRay implementation must exist");
         int end = source.indexOf("\n    }\n", start);
-        assertTrue(end > start, "castViewRay must end with a method-level closing brace");
+        assertTrue(end > start, "the shared castViewRay implementation must end with a method-level closing brace");
         return source.substring(start, end);
     }
 
@@ -147,6 +148,7 @@ class AssistObservationSourceContractTest {
 
     @Test
     void castViewRayClampsToPerceptionRadiusAndReadsStateOnlyAfterTheBlockTypeCheck() throws IOException {
+        String source = read(MAIN.resolve("mode/ObservableWorldQuery.java"));
         String body = castViewRayBody();
         assertTrue(body.contains("perception().radius()"), "range must be clamped to the live perception radius");
         assertTrue(body.contains("Math.min(range, Math.max(1, MinecraftAiConfig.get().perception().radius()))"),
@@ -154,7 +156,10 @@ class AssistObservationSourceContractTest {
         assertFalse(body.contains("CapabilityRuntime.decide"), "no privileged read exists here");
         assertFalse(body.contains("CapabilityRuntime"), "not even a mention");
         assertTrue(body.contains("bot.getEyePosition()"), "the ray starts at the bot's own eye");
-        assertTrue(body.contains("ClipContext.Fluid.ANY"));
+        assertTrue(source.contains("return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.ANY);"),
+                "the ordinary view ray must preserve its opaque-fluid policy");
+        assertTrue(source.contains("return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.NONE);"),
+                "the explicitly named water-route view ray may share only the same bounded first-hit implementation");
 
         int typeCheck = body.indexOf("HitResult.Type.BLOCK");
         int stateRead = body.indexOf("getBlockState(");

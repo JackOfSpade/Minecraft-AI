@@ -6,7 +6,6 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
@@ -31,17 +30,14 @@ import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.StockpileTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
-import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
 import java.io.IOException;
 import java.util.Optional;
-import java.util.Set;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -81,25 +77,6 @@ public final class MinecraftAiTaskSubcommand {
                                                 .executes(context -> assignGather(context, 1))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignGather(context, IntegerArgumentType.getInteger(context, "count"))))))
-                                .then(literal("strip_mine")
-                                        .then(argument("direction", StringArgumentType.word())
-                                                .executes(context -> assignStripMine(context, 16, 4, null))
-                                                .then(argument("length", IntegerArgumentType.integer(1))
-                                                        .executes(context -> assignStripMine(context, IntegerArgumentType.getInteger(context, "length"), 4, null))
-                                                        .then(argument("spacing", IntegerArgumentType.integer(0))
-                                                                .executes(context -> assignStripMine(context,
-                                                                        IntegerArgumentType.getInteger(context, "length"),
-                                                                        IntegerArgumentType.getInteger(context, "spacing"),
-                                                                        null))
-                                                                .then(literal("depot")
-                                                                        .then(blockPosArgs(context -> assignStripMine(context,
-                                                                                IntegerArgumentType.getInteger(context, "length"),
-                                                                                IntegerArgumentType.getInteger(context, "spacing"),
-                                                                                getBlockPos(context)))))))))
-                                .then(literal("mine_vein")
-                                        .executes(context -> assignMineVein(context, null))
-                                        .then(argument("ore", IdentifierArgument.id())
-                                                .executes(context -> assignMineVein(context, BuiltInRegistries.BLOCK.getValue(IdentifierArgument.getId(context, "ore"))))))
                                 .then(literal("craft")
                                         .then(argument("item", IdentifierArgument.id())
                                                 .executes(context -> assignCraft(context, 1))
@@ -247,27 +224,6 @@ public final class MinecraftAiTaskSubcommand {
         return assign(context, bot -> GatherQuotaTask.collectAdditional(
                 BuiltInRegistries.ITEM.getValue(IdentifierArgument.getId(context, "item")),
                 count));
-    }
-
-    private static int assignStripMine(CommandContext<CommandSourceStack> context, int length, int spacing, BlockPos depot) {
-        return assign(context, bot -> {
-            requireLegacyMiningProfile();
-            return new StripMineTask(direction(context), length, spacing, depot, Set.of());
-        });
-    }
-
-    private static int assignMineVein(CommandContext<CommandSourceStack> context, Block ore) {
-        return assign(context, bot -> {
-            requireLegacyMiningProfile();
-            return StripMineTask.mineNearbyVein(ore == null ? Set.of() : Set.of(ore));
-        });
-    }
-
-    private static void requireLegacyMiningProfile() {
-        StripMineTask.profileRejectionReason(MinecraftAiConfig.get().profile())
-                .ifPresent(reason -> {
-                    throw new IllegalArgumentException(reason);
-                });
     }
 
     private static int assignCraft(CommandContext<CommandSourceStack> context, int count) {
@@ -438,19 +394,6 @@ public final class MinecraftAiTaskSubcommand {
     private static FarmAction.CropSpec cropSpec(CommandContext<CommandSourceStack> context) {
         Identifier id = IdentifierArgument.getId(context, "crop");
         return FarmAction.cropSpec(id.toString());
-    }
-
-    private static Direction direction(CommandContext<CommandSourceStack> context) {
-        String value = StringArgumentType.getString(context, "direction").toLowerCase(java.util.Locale.ROOT);
-        return switch (value) {
-            case "north", "n" -> Direction.NORTH;
-            case "south", "s" -> Direction.SOUTH;
-            case "east", "e" -> Direction.EAST;
-            case "west", "w" -> Direction.WEST;
-            case "down", "d" -> Direction.DOWN;
-            case "up", "u" -> Direction.UP;
-            default -> throw new IllegalArgumentException("unknown_direction: " + value);
-        };
     }
 
     @FunctionalInterface

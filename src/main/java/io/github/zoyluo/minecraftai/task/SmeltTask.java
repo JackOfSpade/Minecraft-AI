@@ -4,13 +4,13 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.ContainerAction;
-import io.github.zoyluo.minecraftai.action.DigNav;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.craft.SmeltChain;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -42,6 +42,8 @@ public final class SmeltTask extends AbstractTask {
     private static final Map<Item, Integer> FUEL_TICKS = new LinkedHashMap<>();
     private static final int BASE_FUEL_RADIUS = 8;
     private static final double REACH_SQUARED = 20.25D;
+    /** A carried furnace may clear only a block the bot can currently see; never probe an enclosed wall for a placement. */
+    private static final String CLEAR_OBSERVATION_REQUIRED = "clear_space_requires_observed_target";
     /**
      * A remembered furnace is useful only while reaching it is cheaper than carrying eight
      * cobblestone.  In a mining expedition the old surface furnace can be fifty blocks above the
@@ -82,7 +84,8 @@ public final class SmeltTask extends AbstractTask {
     private int walkStallSince;                       // elapsed time at the last approach toward the furnace; too long without approaching = path stuck -> escalate
     private int collected;
     private final BlockMiner clearMiner = new BlockMiner(); // when boxed in with nowhere to place the furnace, mine one adjacent block to clear space
-    private boolean walkDigging; // when pure pathfinding can't reach the existing furnace, fall back to digging toward the furnace (reuses clearMiner)
+    /** The first adjacent cell rejected solely because it is not presently visible, retained for an auditable refusal. */
+    private BlockPos unobservedClearCandidate;
     private CraftTask furnaceCraftSub; // when stuck heading to the furnace with no backup furnace, craft a new one in place (reuses CraftTask, no duplicate material-deduction logic)
     private boolean furnaceCraftRequired; // when no usable furnace exists at all, a failed sub-craft must terminate the task instead of spinning between FINDING and CRAFTING
     private boolean furnaceCraftFailed;   // one failure disables repeat sub-crafting for this task; falling back to a remote furnace can still succeed
@@ -128,11 +131,9 @@ public final class SmeltTask extends AbstractTask {
 
     @Override
     public boolean isWaiting() {
-        // While dig-navigating toward the furnace the bot stands and mines with position roughly unchanged -> treat as waiting to avoid a StuckWatcher false positive (this task's own overall timeout is the backstop).
-        // Clearing a horizontal placement space for the furnace inside an enclosed mine tunnel likewise mines continuously in place. That progress
+        // Clearing a horizontal placement space for a carried furnace can mine continuously in place. That progress
         // is managed by BlockMiner's own 200-tick per-block timeout and should not be cut short early by StuckWatcher, which only observes displacement.
         return phase == Phase.SMELTING
-                || (phase == Phase.WALKING_TO_FURNACE && walkDigging)
                 || (phase == Phase.PLACING_FURNACE && clearMiner.target() != null);
     }
 
@@ -141,6 +142,7 @@ public final class SmeltTask extends AbstractTask {
         phase = Phase.FINDING_FURNACE;
         furnaceCraftRequired = false;
         furnaceCraftFailed = false;
+        unobservedClearCandidate = null;
         rejectedFurnaces.clear();
     }
 
@@ -215,7 +217,6 @@ public final class SmeltTask extends AbstractTask {
             fail("missing " + BuiltInRegistries.ITEM.getKey(input) + " x1");
             return;
         }
-        walkDigging = false;
         furnacePos = nearestFurnace(bot, input, output,
                 Math.max(1, targetCount - collected), rejectedFurnaces).orElse(null);
         if (furnacePos == null) {
@@ -279,11 +280,13 @@ public final class SmeltTask extends AbstractTask {
             return;
         }
         ActionResult result = bot.getActionPack().startPathTo(stand);
-        // Pure pathfinding can't reach the existing furnace (boxed in underground / self-dug tunnel too
-        // complex; observed in testing that GOAL_UNREACHABLE makes the whole goal replan back to
-        // surface wood-chopping, leaving the bot stuck deep underground unable to get back) -> don't
-        // fail, fall back to digging toward the furnace instead.
-        walkDigging = result.isFailed();
+        if (result.isFailed()) {
+            // Do not excavate toward a remembered or occluded station.  Try another observed
+            // station or craft/place a portable one through the ordinary task flow instead.
+            rejectCurrentFurnace(bot, "baritone_route_unavailable:" + result.reason());
+            phase = Phase.FINDING_FURNACE;
+            return;
+        }
         walkBestDist2 = Double.MAX_VALUE; // entering WALKING: reset the proximity monitor
         walkStallSince = elapsed;
         phase = Phase.WALKING_TO_FURNACE;
@@ -307,44 +310,21 @@ public final class SmeltTask extends AbstractTask {
             phase = Phase.LOADING;
             return;
         }
-        // Proximity monitor (fixes stuck: smelt WALKING_TO_FURNACE: observed in testing on 9/18 the bot
-        // froze on a cliff edge with on_ground=false, pure pathfinding active-but-stuck, isPathExecutorIdle
-        // permanently false so it went undetected, until the external 200-tick watchdog failed and
-        // triggered a replan, burning the budget). Too long without approaching -> escalate pure
-        // pathfinding to dig-navigation; if dig-navigation also can't get closer -> abandon this furnace,
-        // go back to FINDING to reselect/craft a replacement. The displacement threshold is very low, so
-        // normal movement easily keeps it fed.
+        // A stalled or ended Baritone route never falls through to raw dig-navigation. Abandon this
+        // station and let the existing observed-station/portable-furnace flow choose the next option.
         if (dist2 < walkBestDist2 - 0.5D) {
             walkBestDist2 = dist2;
             walkStallSince = elapsed;
         } else if (elapsed - walkStallSince > 40) {
-            walkStallSince = elapsed;
-            if (!walkDigging) {
-                bot.getActionPack().stopAll();
-                walkDigging = true;
-                BotLog.action(bot, "smelt_walk_stall_dig", "furnace", furnacePos.toShortString());
-            } else {
-                rejectCurrentFurnace(bot, "path_unreachable");
-                walkBestDist2 = Double.MAX_VALUE;
-                // A failed fast station must not prevent a reachable normal furnace from being
-                // selected. FINDING falls back to a portable normal furnace only after all local
-                // compatible candidates have been excluded.
-                phase = Phase.FINDING_FURNACE;
-                BotLog.action(bot, "smelt_walk_stall_refind", "dist2", String.format("%.0f", dist2));
-            }
-            return;
-        }
-        if (walkDigging) {
-            // Dig toward the furnace (reaches it even when boxed in underground); if the target block is blocked by adjacent lava -> go back to FINDING and pick another (the LOADING check stops within 4.5 blocks, so it never digs into the furnace itself)
-            if (!DigNav.digStep(bot, clearMiner, furnacePos)) {
-                rejectCurrentFurnace(bot, "dig_navigation_failed");
-                phase = Phase.FINDING_FURNACE;
-            }
+            rejectCurrentFurnace(bot, "baritone_route_stalled");
+            walkBestDist2 = Double.MAX_VALUE;
+            phase = Phase.FINDING_FURNACE;
+            BotLog.action(bot, "smelt_walk_stall_refind", "dist2", String.format("%.0f", dist2));
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle() && elapsed > 10) {
-            // Pure pathfinding can't get there -> fall back to dig-navigation, instead of repeatedly re-searching until it eventually fails with smelt_timeout and triggers a replan
-            walkDigging = true;
+            rejectCurrentFurnace(bot, "baritone_route_ended_short");
+            phase = Phase.FINDING_FURNACE;
         }
     }
 
@@ -357,7 +337,6 @@ public final class SmeltTask extends AbstractTask {
         clearMiner.cancel(bot);
         bot.getActionPack().stopAll();
         furnacePos = null;
-        walkDigging = false;
     }
 
     private void craftFurnace(AIPlayerEntity bot) {
@@ -432,6 +411,14 @@ public final class SmeltTask extends AbstractTask {
         // the furnace mid-clear would degrade a stone-pickaxe iron-ore clear to bare-hand speed and
         // it would never finish within the watchdog window.
         if (clearMiner.target() != null) {
+            BlockPos activeClearTarget = clearMiner.target();
+            // BlockMiner reads the live target state on every tick. Re-prove the target cell first
+            // so a wall that became occluded cannot keep being mined just because this task started
+            // the local clear while it was visible.
+            if (!canObserveFurnaceClearCell(bot, activeClearTarget)) {
+                refuseUnobservedFurnaceClear(bot, activeClearTarget);
+                return;
+            }
             BlockMiner.Status status = clearMiner.tick(bot);
             if (status == BlockMiner.Status.FAILED) {
                 fail("no_place_for_furnace:clear_failed:" + clearMiner.failureReason());
@@ -460,6 +447,11 @@ public final class SmeltTask extends AbstractTask {
         BlockPos origin = bot.blockPosition();
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos candidate = origin.relative(direction);
+            // The air test is a live terrain read. Earn it with an eye-ray proof first rather
+            // than learning which adjacent wall happens to be empty through server state.
+            if (!canObserveFurnaceClearCell(bot, candidate)) {
+                continue;
+            }
             if (!bot.level().getBlockState(candidate).isAir()) {
                 continue;
             }
@@ -489,6 +481,10 @@ public final class SmeltTask extends AbstractTask {
 
         // Boxed in on all sides, or none of the existing empty spaces have valid visible support: mine an adjacent breakable block and retry.
         if (!clearSpaceForFurnace(bot)) {
+            if (unobservedClearCandidate != null) {
+                refuseUnobservedFurnaceClear(bot, unobservedClearCandidate);
+                return;
+            }
             fail(foundAir
                     ? "place_furnace_failed: " + lastFailure.reason()
                     : "no_place_for_furnace");
@@ -697,12 +693,22 @@ public final class SmeltTask extends AbstractTask {
         return WorkshopLocator.nearestCompatibleFurnace(bot, input, output, requestedItems, excluded);
     }
 
-    // When boxed in: mine one horizontally adjacent breakable block to clear a space for the furnace. Returns false = no breakable block on any side (e.g. bedrock/fluid).
+    // When boxed in: mine one horizontally adjacent, currently visible breakable block to clear a space for the furnace.
+    // Returns false when no observed breakable block is available (e.g. bedrock/fluid or an occluded wall).
     private boolean clearSpaceForFurnace(AIPlayerEntity bot) {
+        unobservedClearCandidate = null;
         var world = bot.level();
         BlockPos origin = bot.blockPosition();
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos candidate = origin.relative(direction);
+            // This is deliberately before every target-state/property query below. An adjacent
+            // cell is not automatically known merely because it is loaded around the player.
+            if (!canObserveFurnaceClearCell(bot, candidate)) {
+                if (unobservedClearCandidate == null) {
+                    unobservedClearCandidate = candidate.immutable();
+                }
+                continue;
+            }
             var s = world.getBlockState(candidate);
             if (s.isAir() || !s.getFluidState().isEmpty() || s.getDestroySpeed(world, candidate) < 0.0F
                     || world.getBlockEntity(candidate) != null) {
@@ -717,8 +723,33 @@ public final class SmeltTask extends AbstractTask {
     }
 
     private BlockMiner.Status beginClear(AIPlayerEntity bot, BlockPos pos) {
+        // Keep this check at the last possible boundary as well as in the candidate loop: a
+        // dynamic obstruction or a changed look direction must not turn a once-visible local
+        // placement choice into an unobserved mining action.
+        if (!canObserveFurnaceClearCell(bot, pos)) {
+            unobservedClearCandidate = pos.immutable();
+            return BlockMiner.Status.FAILED;
+        }
         clearMiner.begin(bot, pos);
         return clearMiner.tick(bot);
+    }
+
+    /**
+     * State-free proof for a local furnace-clear target. A full block is normally proven by the
+     * exact unit-cell face hit; the cell proof also permits the normal post-break AIR transition
+     * so BlockMiner can observe its own completed action without a blind final state read.
+     */
+    private static boolean canObserveFurnaceClearCell(AIPlayerEntity bot, BlockPos pos) {
+        return ObservableWorldQuery.canObserveBlockCellFace(bot, pos)
+                || ObservableWorldQuery.canObserveCell(bot, pos);
+    }
+
+    private void refuseUnobservedFurnaceClear(AIPlayerEntity bot, BlockPos target) {
+        clearMiner.cancel(bot);
+        BotLog.action(bot, "smelt_clear_observation_refused",
+                "target", target.toShortString(),
+                "reason", CLEAR_OBSERVATION_REQUIRED);
+        fail("no_place_for_furnace:" + CLEAR_OBSERVATION_REQUIRED);
     }
 
     private static FuelChoice chooseFuel(AIPlayerEntity bot, int smeltCount) {

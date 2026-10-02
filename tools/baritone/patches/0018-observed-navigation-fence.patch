@@ -1,0 +1,506 @@
+Observed navigation fence: expose default-permissive context hooks, route all planner terrain reads through immutable observed state, and reject unobserved execution paths/clicks before they can mutate the world.
+
+diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
+index 826b0ad..2c6fe54 100644
+--- a/src/api/java/baritone/api/utils/IPlayerContext.java
++++ b/src/api/java/baritone/api/utils/IPlayerContext.java
+@@ -19,12 +19,15 @@ package baritone.api.utils;
+
+ import baritone.api.BaritoneAPI;
+ import baritone.api.cache.IWorldData;
++import baritone.api.pathing.calc.IPath;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.util.thread.BlockableEventLoop;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.Level;
++import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.SlabBlock;
++import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
+@@ -142,6 +145,55 @@ public interface IPlayerContext {
+         return BaritoneAPI.getSettings().allowWaterBucketFall.value;
+     }
+
++    /**
++     * Provides an immutable state previously observed for this navigation cell, or {@code null} when none is known.
++     * Hosts that return a state must make it safe to read from Baritone worker threads and must not read a live chunk.
++     */
++    default BlockState navigationCellState(int x, int y, int z) {
++        return null;
++    }
++
++    /**
++     * Whether this player may inspect the cell at {@code (x, y, z)} while planning navigation. A host that limits
++     * navigation to terrain the player has observed overrides this; denied cells are presented to the planner as
++     * an unbreakable barrier before their real state is read from a loaded chunk or cache. The default preserves
++     * upstream's unrestricted view of loaded terrain.
++     */
++    default boolean allowNavigationCell(int x, int y, int z) {
++        return true;
++    }
++
++    /**
++     * Reads a navigation cell through this context's observation fence. A supplied immutable state wins; a denied
++     * cell becomes unbreakable bedrock; and an unrestricted host retains upstream's live-world lookup.
++     */
++    default BlockState navigationCellStateForNavigation(BlockPos pos) {
++        BlockState state = navigationCellState(pos.getX(), pos.getY(), pos.getZ());
++        if (state != null) {
++            return state;
++        }
++        if (!allowNavigationCell(pos.getX(), pos.getY(), pos.getZ())) {
++            return Blocks.BEDROCK.defaultBlockState();
++        }
++        return world().getBlockState(pos);
++    }
++
++    /**
++     * Whether this executor path may execute from {@code firstMovement}. This is called on the game thread before a
++     * movement updates or dispatches inputs; a host may reject a stale, partial, or otherwise unsafe path.
++     */
++    default boolean allowNavigationPath(IPath path, int firstMovement) {
++        return true;
++    }
++
++    /**
++     * Whether an actual navigation click may act on {@code pos}. Unlike a movement's static footprint, this final
++     * callback receives the real ray hit. The default follows the existing navigation-cell permission.
++     */
++    default boolean allowNavigationActionCell(BlockPos pos) {
++        return pos != null && allowNavigationCell(pos.getX(), pos.getY(), pos.getZ());
++    }
++
+     default Rotation playerRotations() {
+         return new Rotation(player().getYRot(), player().getXRot());
+     }
+diff --git a/src/api/java/baritone/api/utils/RotationUtils.java b/src/api/java/baritone/api/utils/RotationUtils.java
+index a998ce3..7efd834 100644
+--- a/src/api/java/baritone/api/utils/RotationUtils.java
++++ b/src/api/java/baritone/api/utils/RotationUtils.java
+@@ -207,8 +207,11 @@ public final class RotationUtils {
+             return possibleRotation;
+         }
+
+-        BlockState state = ctx.world().getBlockState(pos);
+-        VoxelShape shape = state.getShape(ctx.world(), pos);
++        boolean navigationSnapshot = ctx.navigationCellState(pos.getX(), pos.getY(), pos.getZ()) != null;
++        BlockState state = ctx.navigationCellStateForNavigation(pos);
++        VoxelShape shape = navigationSnapshot || !ctx.allowNavigationCell(pos.getX(), pos.getY(), pos.getZ())
++                ? Shapes.block()
++                : state.getShape(ctx.world(), pos);
+         if (shape.isEmpty()) {
+             shape = Shapes.block();
+         }
+@@ -245,7 +248,7 @@ public final class RotationUtils {
+             if (((BlockHitResult) result).getBlockPos().equals(pos)) {
+                 return Optional.of(rotation);
+             }
+-            if (ctx.world().getBlockState(pos).getBlock() instanceof BaseFireBlock && ((BlockHitResult) result).getBlockPos().equals(pos.below())) {
++            if (ctx.navigationCellStateForNavigation(pos).getBlock() instanceof BaseFireBlock && ((BlockHitResult) result).getBlockPos().equals(pos.below())) {
+                 return Optional.of(rotation);
+             }
+         }
+@@ -262,7 +265,7 @@ public final class RotationUtils {
+      * @return The optional rotation
+      */
+     public static Optional<Rotation> reachableCenter(IPlayerContext ctx, BlockPos pos, double blockReachDistance, boolean wouldSneak) {
+-        return reachableOffset(ctx, pos, VecUtils.calculateBlockCenter(ctx.world(), pos), blockReachDistance, wouldSneak);
++        return reachableOffset(ctx, pos, VecUtils.calculateBlockCenter(ctx, pos), blockReachDistance, wouldSneak);
+     }
+
+     @Deprecated
+diff --git a/src/api/java/baritone/api/utils/VecUtils.java b/src/api/java/baritone/api/utils/VecUtils.java
+index 7037afc..a208e2f 100644
+--- a/src/api/java/baritone/api/utils/VecUtils.java
++++ b/src/api/java/baritone/api/utils/VecUtils.java
+@@ -68,6 +68,18 @@ public final class VecUtils {
+         );
+     }
+
++    /**
++     * Calculates a block center without bypassing an {@link IPlayerContext}'s navigation observation fence. A
++     * snapshot-backed or denied cell uses its ordinary center rather than consulting a live collision shape.
++     */
++    public static Vec3 calculateBlockCenter(IPlayerContext ctx, BlockPos pos) {
++        if (ctx.navigationCellState(pos.getX(), pos.getY(), pos.getZ()) != null
++                || !ctx.allowNavigationCell(pos.getX(), pos.getY(), pos.getZ())) {
++            return getBlockPosCenter(pos);
++        }
++        return calculateBlockCenter(ctx.world(), pos);
++    }
++
+     /**
+      * Gets the assumed center position of the given block position.
+      * This is done by adding 0.5 to the X, Y, and Z axes.
+diff --git a/src/main/java/baritone/pathing/movement/Movement.java b/src/main/java/baritone/pathing/movement/Movement.java
+index 739c8ee..f8884fe 100644
+--- a/src/main/java/baritone/pathing/movement/Movement.java
++++ b/src/main/java/baritone/pathing/movement/Movement.java
+@@ -211,6 +211,19 @@ public abstract class Movement implements IMovement, MovementHelper {
+         return dest;
+     }
+
++    /**
++     * Preflights this movement's declared world-action cells before it may update or issue input. Dynamic ray hits
++     * still go through the final helper callback immediately before the controller call.
++     */
++    public boolean navigationActionCellsAllowed() {
++        for (BetterBlockPos pos : positionsToBreak) {
++            if (!ctx.allowNavigationActionCell(pos)) {
++                return false;
++            }
++        }
++        return positionToPlace == null || ctx.allowNavigationActionCell(positionToPlace);
++    }
++
+     @Override
+     public void reset() {
+         currentState = new MovementState().setStatus(MovementStatus.PREPPING);
+diff --git a/src/main/java/baritone/pathing/movement/MovementHelper.java b/src/main/java/baritone/pathing/movement/MovementHelper.java
+index 1b5b597..0f21e0d 100644
+--- a/src/main/java/baritone/pathing/movement/MovementHelper.java
++++ b/src/main/java/baritone/pathing/movement/MovementHelper.java
+@@ -275,7 +275,16 @@ public interface MovementHelper extends ActionCosts, Helper {
+     }
+
+     static boolean fullyPassable(IPlayerContext ctx, BlockPos pos) {
+-        BlockState state = ctx.world().getBlockState(pos);
++        int x = pos.getX();
++        int y = pos.getY();
++        int z = pos.getZ();
++        if (!ctx.allowNavigationCell(x, y, z)) {
++            return false;
++        }
++        BlockState state = ctx.navigationCellState(x, y, z);
++        if (state == null) {
++            state = ctx.navigationCellStateForNavigation(pos);
++        }
+         Ternary fullyPassable = fullyPassableBlockState(state);
+         if (fullyPassable == YES) {
+             return true;
+@@ -395,6 +404,9 @@ public interface MovementHelper extends ActionCosts, Helper {
+      * @return Whether or not the specified block can be walked on
+      */
+     static boolean canWalkOn(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
++        if (!bsi.isNavigationCellAllowed(x, y, z)) {
++            return false;
++        }
+         Ternary canWalkOn = canWalkOnBlockState(state);
+         if (canWalkOn == YES) {
+             return true;
+@@ -565,6 +577,9 @@ public interface MovementHelper extends ActionCosts, Helper {
+     }
+
+     static boolean canPlaceAgainst(BlockStateInterface bsi, int x, int y, int z) {
++        if (!bsi.isNavigationCellAllowed(x, y, z)) {
++            return false;
++        }
+         return canPlaceAgainst(bsi, x, y, z, bsi.get0(x, y, z));
+     }
+
+@@ -577,6 +592,9 @@ public interface MovementHelper extends ActionCosts, Helper {
+     }
+
+     static boolean canPlaceAgainst(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
++        if (!bsi.isNavigationCellAllowed(x, y, z)) {
++            return false;
++        }
+         if (!bsi.worldBorder.canPlaceAt(x, z)) {
+             return false;
+         }
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementDescend.java b/src/main/java/baritone/pathing/movement/movements/MovementDescend.java
+index 0052efe..58b6f3f 100644
+--- a/src/main/java/baritone/pathing/movement/movements/MovementDescend.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementDescend.java
+@@ -257,7 +257,7 @@ public class MovementDescend extends Movement {
+         double z = ctx.player().position().z - (src.getZ() + 0.5);
+         double fromStart = Math.sqrt(x * x + z * z);
+
+-        state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.world().getBlockState(ctx.player().blockPosition().below()).is(Blocks.MAGMA_BLOCK));
++        state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.navigationCellStateForNavigation(ctx.player().blockPosition().below()).is(Blocks.MAGMA_BLOCK));
+
+         if (!playerFeet.equals(dest) || ab > 0.25) {
+             if (numTicks++ < 20 && fromStart < 1.25) {
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java b/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
+index 25e3f0c..0b526f4 100644
+--- a/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
+@@ -277,7 +277,7 @@ public class MovementDiagonal extends Movement {
+         if (sprint()) {
+             state.setInput(Input.SPRINT, true);
+         }
+-        state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && MovementHelper.steppingOnBlocks(ctx).stream().anyMatch(block -> ctx.world().getBlockState(block).is(Blocks.MAGMA_BLOCK)));
++        state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && MovementHelper.steppingOnBlocks(ctx).stream().anyMatch(block -> ctx.navigationCellStateForNavigation(block).is(Blocks.MAGMA_BLOCK)));
+         MovementHelper.moveTowards(ctx, state, dest);
+         return state;
+     }
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementFall.java b/src/main/java/baritone/pathing/movement/movements/MovementFall.java
+index cbcf755..78c057e 100644
+--- a/src/main/java/baritone/pathing/movement/movements/MovementFall.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementFall.java
+@@ -93,10 +93,10 @@ public class MovementFall extends Movement {
+         BlockPos playerFeet = ctx.playerFeet();
+         Rotation toDest = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(dest), ctx.playerRotations());
+         Rotation targetRotation = null;
+-        BlockState destState = ctx.world().getBlockState(dest);
++        BlockState destState = ctx.navigationCellStateForNavigation(dest);
+         Block destBlock = destState.getBlock();
+
+-        if (ctx.world().getBlockState(dest.below()).is(Blocks.MAGMA_BLOCK) && MovementHelper.steppingOnBlocks(ctx).stream().allMatch(block -> MovementHelper.canWalkThrough(ctx, block))) {
++        if (ctx.navigationCellStateForNavigation(dest.below()).is(Blocks.MAGMA_BLOCK) && MovementHelper.steppingOnBlocks(ctx).stream().allMatch(block -> MovementHelper.canWalkThrough(ctx, block))) {
+             state.setInput(Input.SNEAK, true);
+         }
+
+@@ -166,7 +166,7 @@ public class MovementFall extends Movement {
+
+     private Direction avoid() {
+         for (int i = 0; i < 15; i++) {
+-            BlockState state = ctx.world().getBlockState(ctx.playerFeet().below(i));
++            BlockState state = ctx.navigationCellStateForNavigation(ctx.playerFeet().below(i));
+             if (state.getBlock() == Blocks.LADDER) {
+                 return state.getValue(LadderBlock.FACING);
+             }
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+index 7cf4395..7232742 100644
+--- a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+@@ -262,7 +262,7 @@ public class MovementParkour extends Movement {
+         if (dist >= 4 || ascend) {
+             state.setInput(Input.SPRINT, true);
+         }
+-        if (Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.world().getBlockState(ctx.playerFeet().below()).is(Blocks.MAGMA_BLOCK)) {
++        if (Baritone.settings().allowWalkOnMagmaBlocks.value && ctx.navigationCellStateForNavigation(ctx.playerFeet().below()).is(Blocks.MAGMA_BLOCK)) {
+             state.setInput(Input.SNEAK, true);
+         }
+
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java b/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
+index 1be8277..aa3c685 100644
+--- a/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
+@@ -205,7 +205,7 @@ public class MovementTraverse extends Movement {
+
+             // combine the yaw to the center of the destination, and the pitch to the specific block we're trying to break
+             // it's safe to do this since the two blocks we break (in a traverse) are right on top of each other and so will have the same yaw
+-            float yawToDest = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.calculateBlockCenter(ctx.world(), dest), ctx.playerRotations()).getYaw();
++            float yawToDest = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.calculateBlockCenter(ctx, dest), ctx.playerRotations()).getYaw();
+             float pitchToBreak = state.getTarget().getRotation().get().getPitch();
+             if ((MovementHelper.isBlockNormalCube(pb0) || pb0.getBlock() instanceof AirBlock && (MovementHelper.isBlockNormalCube(pb1) || pb1.getBlock() instanceof AirBlock))) {
+                 // in the meantime, before we're right up against the block, we can break efficiently at this angle
+@@ -221,14 +221,14 @@ public class MovementTraverse extends Movement {
+         boolean ladder = MovementHelper.isClimbable(fd);
+
+         //sneak may have been set to true in the PREPPING state while mining an adjacent block, but we still want it to be true if the player is about to go on magma
+-        state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && MovementHelper.steppingOnBlocks(ctx).stream().anyMatch(block -> ctx.world().getBlockState(block).is(Blocks.MAGMA_BLOCK)));
++        state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && MovementHelper.steppingOnBlocks(ctx).stream().anyMatch(block -> ctx.navigationCellStateForNavigation(block).is(Blocks.MAGMA_BLOCK)));
+
+         if (pb0.getBlock() instanceof DoorBlock || pb1.getBlock() instanceof DoorBlock) {
+             boolean notPassable = pb0.getBlock() instanceof DoorBlock && !MovementHelper.isDoorPassable(ctx, src, dest) || pb1.getBlock() instanceof DoorBlock && !MovementHelper.isDoorPassable(ctx, dest, src);
+             boolean canOpen = !(Blocks.IRON_DOOR.equals(pb0.getBlock()) || Blocks.IRON_DOOR.equals(pb1.getBlock()));
+
+             if (notPassable && canOpen) {
+-                return state.setTarget(new MovementState.MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.calculateBlockCenter(ctx.world(), positionsToBreak[0]), ctx.playerRotations()), true))
++                return state.setTarget(new MovementState.MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.calculateBlockCenter(ctx, positionsToBreak[0]), ctx.playerRotations()), true))
+                         .setInput(Input.CLICK_RIGHT, true);
+             }
+         }
+diff --git a/src/main/java/baritone/pathing/path/PathExecutor.java b/src/main/java/baritone/pathing/path/PathExecutor.java
+index 09c4eb6..0561f5f 100644
+--- a/src/main/java/baritone/pathing/path/PathExecutor.java
++++ b/src/main/java/baritone/pathing/path/PathExecutor.java
+@@ -75,6 +75,7 @@ public class PathExecutor implements IPathExecutor, Helper {
+     private final IPlayerContext ctx;
+
+     private boolean sprintNextTick;
++    private boolean navigationRefused;
+
+     public PathExecutor(PathingBehavior behavior, IPath path) {
+         this.behavior = behavior;
+@@ -90,6 +91,12 @@ public class PathExecutor implements IPathExecutor, Helper {
+      * not sneaking out over lava), false otherwise
+      */
+     public boolean onTick() {
++        if (navigationRefused) {
++            return refuseNavigation();
++        }
++        if (!ctx.allowNavigationPath(path, pathPosition)) {
++            return refuseNavigation();
++        }
+         if (pathPosition == path.length() - 1) {
+             pathPosition++;
+         }
+@@ -97,6 +104,11 @@ public class PathExecutor implements IPathExecutor, Helper {
+             return true; // stop bugging me, I'm done
+         }
+         Movement movement = (Movement) path.movements().get(pathPosition);
++        if (!ctx.allowNavigationActionCell(movement.getSrc())
++                || !ctx.allowNavigationActionCell(movement.getDest())
++                || !movement.navigationActionCellsAllowed()) {
++            return refuseNavigation();
++        }
+         BetterBlockPos whereAmI = ctx.playerFeet();
+         if (!movement.getValidPositions().contains(whereAmI)) {
+             for (int i = 0; i < pathPosition && i < path.length(); i++) {//this happens for example when you lag out and get teleported back a couple blocks
+@@ -232,7 +244,7 @@ public class PathExecutor implements IPathExecutor, Helper {
+             pathPosition++;
+             onChangeInPathPosition();
+             onTick();
+-            return true;
++            return !navigationRefused;
+         } else {
+             sprintNextTick = shouldSprintNextTick();
+             if (!sprintNextTick) {
+@@ -321,7 +333,7 @@ public class PathExecutor implements IPathExecutor, Helper {
+      * @return Whether or not it was possible to snap to the current player feet
+      */
+     public boolean snipsnapifpossible() {
+-        if (!ctx.player().onGround() && ctx.world().getFluidState(ctx.playerFeet()).isEmpty()) {
++        if (!ctx.player().onGround() && ctx.navigationCellStateForNavigation(ctx.playerFeet()).getFluidState().isEmpty()) {
+             // if we're falling in the air, and not in water, don't splice
+             return false;
+         } else {
+@@ -558,10 +570,10 @@ public class PathExecutor implements IPathExecutor, Helper {
+                 }
+             }
+         }
+-        if (MovementHelper.avoidWalkingInto(ctx.world().getBlockState(current.getSrc().above(3)))) {
++        if (MovementHelper.avoidWalkingInto(ctx.navigationCellStateForNavigation(current.getSrc().above(3)))) {
+             return false;
+         }
+-        return !MovementHelper.avoidWalkingInto(ctx.world().getBlockState(next.getDest().above(2))); // codacy smh my head
++        return !MovementHelper.avoidWalkingInto(ctx.navigationCellStateForNavigation(next.getDest().above(2))); // codacy smh my head
+     }
+
+     private static boolean canSprintFromDescendInto(IPlayerContext ctx, IMovement current, IMovement next) {
+@@ -587,6 +599,13 @@ public class PathExecutor implements IPathExecutor, Helper {
+         behavior.baritone.getInputOverrideHandler().clearAllKeys();
+     }
+
++    private boolean refuseNavigation() {
++        navigationRefused = true;
++        clearKeys();
++        behavior.baritone.getInputOverrideHandler().getBlockBreakHelper().stopBreakingBlock();
++        return false;
++    }
++
+     private void cancel() {
+         clearKeys();
+         behavior.baritone.getInputOverrideHandler().getBlockBreakHelper().stopBreakingBlock();
+diff --git a/src/main/java/baritone/pathing/precompute/PrecomputedData.java b/src/main/java/baritone/pathing/precompute/PrecomputedData.java
+index 954da81..fc92685 100644
+--- a/src/main/java/baritone/pathing/precompute/PrecomputedData.java
++++ b/src/main/java/baritone/pathing/precompute/PrecomputedData.java
+@@ -70,6 +70,9 @@ public class PrecomputedData {
+     }
+
+     public boolean canWalkOn(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
++        if (!bsi.isNavigationCellAllowed(x, y, z)) {
++            return false;
++        }
+         int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+         int blockData = data[id];
+
+diff --git a/src/main/java/baritone/utils/BlockBreakHelper.java b/src/main/java/baritone/utils/BlockBreakHelper.java
+index b62cd45..f929992 100644
+--- a/src/main/java/baritone/utils/BlockBreakHelper.java
++++ b/src/main/java/baritone/utils/BlockBreakHelper.java
+@@ -57,13 +57,18 @@ public final class BlockBreakHelper {
+         boolean isBlockTrace = trace != null && trace.getType() == HitResult.Type.BLOCK;
+
+         if (isLeftClick && isBlockTrace) {
++            BlockHitResult blockHit = (BlockHitResult) trace;
++            if (!ctx.allowNavigationActionCell(blockHit.getBlockPos())) {
++                stopBreakingBlock();
++                return;
++            }
+             ctx.playerController().setHittingBlock(wasHitting);
+             if (ctx.playerController().hasBrokenBlock()) {
+                 ctx.playerController().syncHeldItem();
+-                ctx.playerController().clickBlock(((BlockHitResult) trace).getBlockPos(), ((BlockHitResult) trace).getDirection());
++                ctx.playerController().clickBlock(blockHit.getBlockPos(), blockHit.getDirection());
+                 ctx.player().swing(InteractionHand.MAIN_HAND);
+             } else {
+-                if (ctx.playerController().onPlayerDamageBlock(((BlockHitResult) trace).getBlockPos(), ((BlockHitResult) trace).getDirection())) {
++                if (ctx.playerController().onPlayerDamageBlock(blockHit.getBlockPos(), blockHit.getDirection())) {
+                     ctx.player().swing(InteractionHand.MAIN_HAND);
+                 }
+                 if (ctx.playerController().hasBrokenBlock()) { // block broken this tick
+diff --git a/src/main/java/baritone/utils/BlockPlaceHelper.java b/src/main/java/baritone/utils/BlockPlaceHelper.java
+index b36e780..56d9272 100644
+--- a/src/main/java/baritone/utils/BlockPlaceHelper.java
++++ b/src/main/java/baritone/utils/BlockPlaceHelper.java
+@@ -44,9 +44,13 @@ public class BlockPlaceHelper {
+         if (!rightClickRequested || ctx.player().isPassenger() || mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
+             return;
+         }
++        BlockHitResult blockHit = (BlockHitResult) mouseOver;
++        if (!ctx.allowNavigationActionCell(blockHit.getBlockPos())) {
++            return;
++        }
+         rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
+         for (InteractionHand hand : InteractionHand.values()) {
+-            if (ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), hand, (BlockHitResult) mouseOver) == InteractionResult.SUCCESS) {
++            if (ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), hand, blockHit) == InteractionResult.SUCCESS) {
+                 ctx.player().swing(hand);
+                 return;
+             }
+diff --git a/src/main/java/baritone/utils/BlockStateInterface.java b/src/main/java/baritone/utils/BlockStateInterface.java
+index 5c94514..b87cad2 100644
+--- a/src/main/java/baritone/utils/BlockStateInterface.java
++++ b/src/main/java/baritone/utils/BlockStateInterface.java
+@@ -41,6 +41,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
+  */
+ public class BlockStateInterface {
+
++    private final IPlayerContext ctx;
+     private final ChunkSource provider;
+     private final WorldData worldData;
+     protected final Level world;
+@@ -54,12 +55,14 @@ public class BlockStateInterface {
+     private final boolean useTheRealWorld;
+
+     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
++    private static final BlockState BLOCKED = Blocks.BEDROCK.defaultBlockState();
+
+     public BlockStateInterface(IPlayerContext ctx) {
+         this(ctx, false);
+     }
+
+     public BlockStateInterface(IPlayerContext ctx, boolean copyLoadedChunks) {
++        this.ctx = ctx;
+         this.world = ctx.world();
+         this.worldBorder = new BetterWorldBorder(world.getWorldBorder());
+         this.worldData = (WorldData) ctx.worldData();
+@@ -80,6 +83,14 @@ public class BlockStateInterface {
+         return provider.hasChunk(blockX >> 4, blockZ >> 4);
+     }
+
++    /**
++     * Returns whether navigation is permitted to treat this cell as world data.
++     * This distinguishes a denied cell from the virtual bedrock returned by {@link #get0(int, int, int)}.
++     */
++    public boolean isNavigationCellAllowed(int x, int y, int z) {
++        return ctx.allowNavigationCell(x, y, z);
++    }
++
+     public static Block getBlock(IPlayerContext ctx, BlockPos pos) { // won't be called from the pathing thread because the pathing thread doesn't make a single blockpos pog
+         return get(ctx, pos).getBlock();
+     }
+@@ -95,6 +106,15 @@ public class BlockStateInterface {
+     }
+
+     public BlockState get0(int x, int y, int z) { // Mickey resigned
++        BlockState navigationState = ctx.navigationCellState(x, y, z);
++        if (navigationState != null) {
++            return navigationState;
++        }
++
++        if (!ctx.allowNavigationCell(x, y, z)) {
++            return BLOCKED;
++        }
++
+         y -= world.dimensionType().minY();
+         // Invalid vertical position
+         if (y < 0 || y >= world.dimensionType().height()) {

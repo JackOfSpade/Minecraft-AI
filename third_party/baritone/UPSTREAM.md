@@ -37,4 +37,4 @@ docs, and `src/schematica_api/` (compile stubs for the Schematica/Litematica mod
 
 ## Upgrading
 
-See `tools/baritone/README.md` ("Upgrading Baritone").
+See the replayable patch series in `tools/baritone/patches/` and `docs/NAVIGATION_ENGINE.md`.

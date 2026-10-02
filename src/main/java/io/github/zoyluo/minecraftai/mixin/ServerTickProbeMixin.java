@@ -21,7 +21,7 @@ public abstract class ServerTickProbeMixin {
 
     @Inject(method = "tickServer(Ljava/util/function/BooleanSupplier;)V", at = @At("HEAD"))
     private void minecraftai$onTick(BooleanSupplier shouldKeepTicking, CallbackInfo ci) {
-        // The measurement helper returns zero outside an explicit P3 capture, so ordinary server
+        // The measurement helper returns zero outside an explicit Baritone diagnostic capture, so ordinary server
         // ticks pay only one cheap inactive check here. The RETURN hook below then measures the
         // whole MinecraftServer tick rather than just the mod's END_SERVER_TICK callbacks.
         minecraftai$navigationMeasurementStarted = NavigationMeasurement.beginServerTick();

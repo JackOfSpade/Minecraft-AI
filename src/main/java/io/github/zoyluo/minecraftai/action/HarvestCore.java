@@ -8,7 +8,6 @@ import io.github.zoyluo.minecraftai.mode.CapabilityDecision;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
-import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.Comparator;
 import java.util.List;
@@ -28,11 +27,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 public final class HarvestCore {
-    // NAV-OPT (layer 0B): reachability that's actually reachable -- verify only the nearest N candidates,
-    // using a small-budget pure-walk A* run, balancing accuracy against performance.
+    // A bounded number of nearby, fully observed candidates is enough to keep a large harvest
+    // scan responsive.  Route reachability itself belongs to the observed Baritone admission
+    // boundary; this selection phase must not inspect loaded-but-unseen terrain with A*.
     private static final int REACH_VERIFY_LIMIT = 8;
-    private static final int REACH_MAX_NODES = 3_000;
-    private static final long REACH_MAX_MILLIS = 30L;
     /** Vanilla item bounces can leave a drop just above a block edge without setting onGround. */
     private static final double PICKUP_SUPPORT_PROBE_DEPTH = 0.26D;
     /** Maximum observed, collision-free fall column that pickup recovery may wait beneath. */
@@ -108,10 +106,9 @@ public final class HarvestCore {
      * Resumable nearest-reachable-block search. Phase 1 walks the cube and collects candidate positions that pass
      * the unchanged observability rules (the capability-denied sphere pre-filter, then the observation check, and
      * only then the block-state read, exactly as the old stream did). Phase 2 orders them near to far and verifies
-     * the nearest {@link #REACH_VERIFY_LIMIT} usable ones with the walk-reachability A*; one A* (up to
-     * {@link #REACH_MAX_MILLIS} ms) is the most any single {@link #step} spends there, and it always ends the step.
-     * The result equals the old synchronous stream: the same filters, the same x-fastest/z-slowest tie order, the
-     * same 8-candidate verification limit (counting only positions that produced a usable standing choice).
+     * the nearest {@link #REACH_VERIFY_LIMIT} usable ones have an individually observed standing pose. The
+     * subsequent Baritone request performs the only route-reachability decision against its immutable observed
+     * terrain fence; harvest selection never probes hidden loaded terrain to rank a target.
      */
     public static final class NearestScan {
         private static final int CLOCK_CHECK_MASK = 63; // read the clock every 64 positions
@@ -255,7 +252,7 @@ public final class HarvestCore {
                     continue;
                 }
                 verified++;
-                if (isWalkReachable(bot, choice)) { // the expensive unit: one A*, up to REACH_MAX_MILLIS
+                if (isWalkReachable(bot, choice)) {
                     result = choice;
                     done = true;
                     return;
@@ -264,9 +261,14 @@ public final class HarvestCore {
         }
     }
 
-    public static void startMining(AIPlayerEntity bot, BlockPos targetPos) {
-        ToolSelector.equipBestTool(bot, bot.level().getBlockState(targetPos));
-        MiningAction.startMining(bot, targetPos, Direction.getApproximateNearest(bot.getEyePosition().subtract(targetPos.getCenter())));
+    /**
+     * Starts a single observed-block mining action. Tool selection is deliberately owned by the
+     * controller after its per-tick observation proof; pre-reading this target here would turn a
+     * stale harvest candidate into a loaded-but-unseen terrain query.
+     */
+    public static ActionResult startMining(AIPlayerEntity bot, BlockPos targetPos) {
+        return MiningAction.startMining(bot, targetPos,
+                Direction.getApproximateNearest(bot.getEyePosition().subtract(targetPos.getCenter())));
     }
 
     public static Optional<ItemEntity> nearestDrop(AIPlayerEntity bot, Item item, double radius) {
@@ -365,6 +367,11 @@ public final class HarvestCore {
             // 15/16 farmland row is still reached; interpolating the height would scrape the floor it stands on).
             AABB box = base.move(sample.x - from.x, 0.0D, sample.z - from.z).deflate(0.01D, 0.0D, 0.01D);
             AABB body = box.inflate(0.0D, -0.01D, 0.0D);
+            // This is a safety prefilter, not a loaded-world route oracle. Prove every cell it
+            // will ask collision/fluid questions about before any of those raw reads occur.
+            if (!canObserveWalkCorridorEnvelope(bot, box)) {
+                return false;
+            }
             // Blocked unless the obstacle is something a walking player steps onto (farmland next to a path,
             // a slab, a carpet): free once the box is lifted by the step height.
             if (!world.noCollision(bot, body) && !world.noCollision(bot, body.move(0.0D, CORRIDOR_STEP_UP, 0.0D))) {
@@ -408,6 +415,36 @@ public final class HarvestCore {
             }
         }
         return true;
+    }
+
+    /**
+     * State-free observation envelope for one straight-walk sample. It includes the normal and
+     * step-height body boxes plus the complete harmless-fall column inspected below, so the
+     * collision and hazard prefilter cannot turn loaded but unseen terrain into a pickup decision.
+     */
+    private static boolean canObserveWalkCorridorEnvelope(AIPlayerEntity bot, AABB box) {
+        int minX = net.minecraft.util.Mth.floor(box.minX);
+        int maxX = net.minecraft.util.Mth.floor(box.maxX);
+        int minZ = net.minecraft.util.Mth.floor(box.minZ);
+        int maxZ = net.minecraft.util.Mth.floor(box.maxZ);
+        int belowY = net.minecraft.util.Mth.floor(box.minY - 0.01D);
+        int raisedHeadY = net.minecraft.util.Mth.floor(box.maxY + CORRIDOR_STEP_UP - 0.01D);
+        int floorLimit = belowY - (int) Math.ceil(CORRIDOR_MAX_FALL) - 1;
+        for (BlockPos cell : BlockPos.betweenClosed(minX, floorLimit, minZ, maxX, raisedHeadY, maxZ)) {
+            if (!canObserveWalkCorridorCell(bot, cell)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** The bot's occupied feet/head/support are immediate physical knowledge; all other cells need a ray proof. */
+    private static boolean canObserveWalkCorridorCell(AIPlayerEntity bot, BlockPos cell) {
+        BlockPos feet = bot.blockPosition();
+        return cell.equals(feet)
+                || cell.equals(feet.above())
+                || cell.equals(feet.below())
+                || ObservableWorldQuery.canObserveCell(bot, cell);
     }
 
     public static void sweepPickup(AIPlayerEntity bot, Item item, double radius, int maxTargets) {
@@ -463,6 +500,7 @@ public final class HarvestCore {
         int horizontal = Math.abs(shaftBase.getX() - current.getX())
                 + Math.abs(shaftBase.getZ() - current.getZ());
         if (vertical == -1 && horizontal == 0
+                && canObserveStand(bot, shaftBase)
                 && Standability.isStandable(bot.level(), shaftBase)
                 && walkDownInto(bot, shaftBase)) {
             return true;
@@ -471,22 +509,20 @@ public final class HarvestCore {
     }
 
     /**
-     * Drops the bot into the open cell directly below it as a walked step ({@link ActionPack#beginDescend}).
-     * An in-flight step counts only when it is this pickup's own drop; another owner retains its
-     * movement and the pickup ledger retries later. False when the world refuses the step.
+     * Requests the exact observed cell below through the Baritone-owned surface route. A pickup
+     * must not create an unguarded local descent: Baritone re-proves the route's observed terrain
+     * on every execution tick, while a hidden or stale landing simply remains pickup debt.
      */
     private static boolean walkDownInto(AIPlayerEntity bot, BlockPos cell) {
         ActionPack pack = bot.getActionPack();
-        if (!pack.stepIdle()) {
-            return pack.stepInFlightFor("physical_drop_pickup", cell, WalkedStep.Kind.DROP);
-        }
-        WalkedStep step = pack.beginDescend(cell, "physical_drop_pickup");
-        if (step == null) {
+        if (!canObserveStand(bot, cell)) {
             return false;
         }
-        // A completed guarded owner can retain the pack's admission fence briefly after its
-        // physical step ends.  Only report this pickup drop as under way once it owns a lease.
-        return pack.runStep(step) != null;
+        BlockPos activeGoal = pack.activePathGoal();
+        if (cell.equals(activeGoal) && !pack.isPathExecutorIdle()) {
+            return true;
+        }
+        return startExactPickupPath(bot, cell);
     }
 
     /**
@@ -548,9 +584,11 @@ public final class HarvestCore {
                 + Math.abs(stand.getZ() - current.getZ());
 
         if (vertical == -1 && horizontal == 0
+                && canObserveStand(bot, stand)
                 && Standability.isStandable(bot.level(), stand)) {
-            // The drop is a walked step: no key is needed, gravity lands the bot in the open cell below it once it is
-            // centred over it. A refused step (something in the way) falls through to the exact route below.
+            // The exact observed route may include a one-cell descent, but its planner and
+            // executor remain Baritone-owned rather than turning this remembered pickup into a
+            // raw local movement exception.
             if (walkDownInto(bot, stand)) {
                 return true;
             }
@@ -589,6 +627,11 @@ public final class HarvestCore {
      * requested cell itself, or report failure so the caller's ledger keeps owning the retry.
      */
     public static boolean startExactPickupPath(AIPlayerEntity bot, BlockPos stand) {
+        if (!canObserveStand(bot, stand)) {
+            BotLog.action(bot, "pickup_path_unobserved_endpoint",
+                    "requested", stand.toShortString());
+            return false;
+        }
         ActionResult result = bot.getActionPack().startSurfacePathTo(stand);
         if (result.isFailed()) {
             return false;
@@ -703,11 +746,13 @@ public final class HarvestCore {
         // that is useful for an elevated drop on a pedestal, but it cannot close an ordinary
         // one-block horizontal gap reliably under vanilla pickup collision.
         if (itemPos.getY() == current.getY()
+                && canObserveStand(bot, itemPos)
                 && Standability.isStandable(bot.level(), itemPos)) {
             return itemPos.immutable();
         }
         BlockPos below = itemPos.below();
         if (itemPos.getY() == current.getY() + 1
+                && canObserveStand(bot, below)
                 && Standability.isStandable(bot.level(), below)) {
             // A launch-drifted drop one block above and one block sideways can be visible while
             // the nearest generic candidate is the current lower-ring cell. Nudging inside that
@@ -732,7 +777,8 @@ public final class HarvestCore {
                 below.west()
         };
         for (BlockPos candidate : candidates) {
-            if (!Standability.isStandable(bot.level(), candidate)) {
+            if (!canObserveStand(bot, candidate)
+                    || !Standability.isStandable(bot.level(), candidate)) {
                 continue;
             }
             double distance = candidate.distSqr(current);
@@ -768,7 +814,8 @@ public final class HarvestCore {
                     || !world.getBlockState(cell).getCollisionShape(world, cell).isEmpty()) {
                 return null;
             }
-            if (depth >= 2 && Standability.isStandable(world, cell)) {
+            if (depth >= 2 && canObserveStand(bot, cell)
+                    && Standability.isStandable(world, cell)) {
                 return cell.immutable();
             }
         }
@@ -809,11 +856,9 @@ public final class HarvestCore {
         return allowObservableCellFallback && ObservableWorldQuery.canObserveCell(bot, pos);
     }
 
-    // NAV-OPT (layer 0B): candidates sorted near-to-far, returns the first one the bot can **actually
-    // walk to on foot**; only the nearest REACH_VERIFY_LIMIT candidates are verified (small-budget
-    // pure-walk A*), balancing accuracy against performance. The old logic only checked "an empty
-    // cell is adjacent to the target" without verifying the bot could actually walk there, causing
-    // GOTO to repeatedly fail and get stuck.
+    // Candidates are ordered near-to-far, but only individually observed target/stance cells may
+    // influence the choice.  Baritone's route admission supplies the actual all-observed corridor
+    // check immediately before movement, so this helper never becomes a hidden-map path oracle.
     private static TargetChoice firstWalkReachable(AIPlayerEntity bot, BlockPos origin, java.util.stream.Stream<TargetChoice> candidates) {
         return candidates
                 .sorted(Comparator.comparingDouble(choice -> choice.pos().distSqr(origin)))
@@ -826,13 +871,20 @@ public final class HarvestCore {
     public static boolean isWalkReachable(AIPlayerEntity bot, TargetChoice choice) {
         BlockPos stand = choice.stand();
         if (stand == null || bot.blockPosition().equals(stand)) {
-            return true; // Within reach, mine directly / already at the stand position, no pathfinding needed
+            return true; // Within reach, mine directly / already at the physically occupied stance.
         }
-        return new AStarPathfinder(bot, bot.level(), bot.blockPosition(), stand,
-                REACH_MAX_NODES, REACH_MAX_MILLIS, false, false).findPath().success();
+        return canObserveStand(bot, stand);
     }
 
     public static TargetChoice targetChoice(AIPlayerEntity bot, BlockPos target) {
+        // A caller may only turn a target into a movement request after seeing its actual cell.
+        // This keeps a remembered/visible target useful without accepting an arbitrary raw
+        // coordinate as a route-discovery hint.
+        BlockPos feet = bot.blockPosition();
+        if (!target.equals(feet) && !target.equals(feet.below())
+                && !canObserveHarvestTarget(bot, target, true)) {
+            return null;
+        }
         // No longer rejects a block for being lower than the bot itself: if it's within reach, mine it
         // directly (mine underfoot -> fall -> keep mining downward, so drops land right next to the
         // bot's feet for easy pickup).
@@ -849,11 +901,25 @@ public final class HarvestCore {
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos candidate = target.relative(direction);
-            if (Standability.isStandable(bot.level(), candidate)) {
+            if (canObserveStand(bot, candidate) && Standability.isStandable(bot.level(), candidate)) {
                 return candidate;
             }
         }
         return null;
+    }
+
+    /**
+     * Guard every standability read that can feed a navigation request. The current occupied
+     * cell is physically known; every other pose needs observed feet, head, and support cells
+     * before {@link Standability} is allowed to inspect their collision states.
+     */
+    private static boolean canObserveStand(AIPlayerEntity bot, BlockPos stand) {
+        if (stand.equals(bot.blockPosition())) {
+            return true;
+        }
+        return ObservableWorldQuery.canObserveCell(bot, stand)
+                && ObservableWorldQuery.canObserveCell(bot, stand.above())
+                && ObservableWorldQuery.canObserveCollider(bot, stand.below());
     }
 
     private static boolean matches(ItemStack stack, Set<Item> items) {

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# P3 navigation evidence capture. This is intentionally a scale-one *unpaced GameTest* runner:
+# Baritone navigation regression evidence capture. This is intentionally an *unpaced GameTest* runner:
 # it records elapsed sections on the server thread but does NOT establish production wall-clock route performance.
 #
 # usage: scripts/dev/nav_measurement.sh <repo-or-worktree> <outdir> [repetitions=5] [course-id ...]
 # course ids: wall wallpick sealed steps pit stairs lakedry lakenone lava cactus cliff3 cliff6
 #             house gate ladder forest moving twobots long
 #
-# For every selected fixed geometry, the script alternates L/B then B/L on the next repetition.
-# It keeps every new NAVCOURSE, NAVMEASURE and NAVPLAN row in a per-run directory rather than
-# reducing repeated evidence to the final row as nav_courses_table.sh does.
+# Every selected fixed geometry runs once per repetition on Baritone. The script keeps every new
+# NAVCOURSE, NAVMEASURE and NAVPLAN row in a per-run directory rather than reducing repeated
+# evidence to the final row as nav_courses_table.sh does.
 set -euo pipefail
 
 JAVA_COMMAND=()
@@ -37,7 +37,7 @@ resolve_java_command() {
     done
   fi
 
-  echo "P3 capture requires Java: add java to PATH or set JAVA_HOME to a JDK/JRE root with bin/java" >&2
+  echo "Baritone measurement capture requires Java: add java to PATH or set JAVA_HOME to a JDK/JRE root with bin/java" >&2
   return 1
 }
 
@@ -71,7 +71,7 @@ self_test_snapshot_current_artifacts() {
   first="$NAV_MEASUREMENT_SELF_TEST_TMP/first"
   second="$NAV_MEASUREMENT_SELF_TEST_TMP/second"
   mkdir -p "$source" "$first" "$second"
-  printf 'NAVCOURSE\told\tlegacy\n' > "$source/results.tsv"
+  printf 'NAVCOURSE\told\tbaritone\n' > "$source/results.tsv"
   printf 'NAVMEASURE\told\n' > "$source/measurements.tsv"
   printf 'NAVPLAN\told\n' > "$source/planner.tsv"
   snapshot_current_artifacts "$source/results.tsv" "$source/measurements.tsv" "$source/planner.tsv" "$first"
@@ -166,7 +166,7 @@ case "$OUT" in
     ;;
 esac
 if [ -n "$(git -C "$REPO" status --porcelain=v1)" ]; then
-  echo "P3 capture requires a clean source tree before creating its output directory" >&2
+  echo "Baritone measurement capture requires a clean source tree before creating its output directory" >&2
   exit 1
 fi
 mkdir -p "$OUT"
@@ -183,53 +183,34 @@ if [ ${#COURSES[@]} -eq 0 ]; then
 fi
 
 filter_for() {
-  local course=$1 engine=$2 suffix=""
-  case "$course:$engine" in
-    wall:legacy) suffix=wall_detour_legacy ;;
-    wall:baritone) suffix=wall_detour_baritone ;;
-    wallpick:legacy) suffix=wall_detour_pickaxe_legacy ;;
-    wallpick:baritone) suffix=wall_detour_pickaxe_baritone ;;
-    sealed:legacy) suffix=sealed_wall_legacy ;;
-    sealed:baritone) suffix=sealed_wall_baritone ;;
-    steps:legacy) suffix=steps_legacy ;;
-    steps:baritone) suffix=steps_baritone ;;
-    pit:legacy) suffix=pit_crevasse_legacy ;;
-    pit:baritone) suffix=pit_crevasse_baritone ;;
-    stairs:legacy) suffix=staircase_legacy ;;
-    stairs:baritone) suffix=staircase_baritone ;;
-    lakedry:legacy) suffix=lake_dry_path_legacy ;;
-    lakedry:baritone) suffix=lake_dry_path_baritone ;;
-    lakenone:legacy) suffix=lake_no_dry_path_legacy_measurement ;;
-    lakenone:baritone) suffix=lake_no_dry_path_baritone ;;
-    lava:legacy) suffix=lava_moat_bridge_legacy ;;
-    lava:baritone) suffix=lava_moat_bridge_baritone ;;
-    cactus:legacy) suffix=cactus_field_legacy_measurement ;;
-    cactus:baritone) suffix=cactus_field_baritone ;;
-    cliff3:legacy) suffix=cliff_safe_drop_legacy ;;
-    cliff3:baritone) suffix=cliff_safe_drop_baritone ;;
-    cliff6:legacy) suffix=cliff_unsafe_drop_legacy ;;
-    cliff6:baritone) suffix=cliff_unsafe_drop_baritone ;;
-    house:legacy) suffix=house_door_legacy_measurement ;;
-    house:baritone) suffix=house_door_baritone ;;
-    gate:legacy) suffix=fence_gate_legacy_measurement ;;
-    gate:baritone) suffix=fence_gate_baritone ;;
-    ladder:legacy) suffix=ladder_shaft_legacy_measurement ;;
-    ladder:baritone) suffix=ladder_shaft_baritone ;;
-    forest:legacy) suffix=forest_legacy ;;
-    forest:baritone) suffix=forest_baritone ;;
-    moving:legacy) suffix=moving_target_legacy ;;
-    moving:baritone) suffix=moving_target_baritone ;;
-    twobots:legacy) suffix=two_bots_legacy ;;
-    twobots:baritone) suffix=two_bots_baritone ;;
-    long:legacy) suffix=long_path_legacy ;;
-    long:baritone) suffix=long_path_baritone ;;
+  local course=$1 suffix=""
+  case "$course" in
+    wall) suffix=wall_detour_baritone ;;
+    wallpick) suffix=wall_detour_pickaxe_baritone ;;
+    sealed) suffix=sealed_wall_baritone ;;
+    steps) suffix=steps_baritone ;;
+    pit) suffix=pit_crevasse_baritone ;;
+    stairs) suffix=staircase_baritone ;;
+    lakedry) suffix=lake_dry_path_baritone ;;
+    lakenone) suffix=lake_no_dry_path_baritone ;;
+    lava) suffix=lava_moat_bridge_baritone ;;
+    cactus) suffix=cactus_field_baritone ;;
+    cliff3) suffix=cliff_safe_drop_baritone ;;
+    cliff6) suffix=cliff_unsafe_drop_baritone ;;
+    house) suffix=house_door_baritone ;;
+    gate) suffix=fence_gate_baritone ;;
+    ladder) suffix=ladder_shaft_baritone ;;
+    forest) suffix=forest_baritone ;;
+    moving) suffix=moving_target_baritone ;;
+    twobots) suffix=two_bots_baritone ;;
+    long) suffix=long_path_baritone ;;
     *) return 1 ;;
   esac
   printf 'navigation_course_game_tests_%s\n' "$suffix"
 }
 
 for course in "${COURSES[@]}"; do
-  filter_for "$course" legacy >/dev/null || { echo "unknown course id: $course" >&2; exit 2; }
+  filter_for "$course" >/dev/null || { echo "unknown course id: $course" >&2; exit 2; }
 done
 
 line_count() {
@@ -250,18 +231,18 @@ git -C "$REPO" rev-parse HEAD > "$OUT/revision.txt"
 git -C "$REPO" status --porcelain=v1 > "$OUT/status-start.txt"
 git -C "$REPO" diff --check > "$OUT/diff-check-start.txt"
 if [ -s "$OUT/status-start.txt" ]; then
-  echo "P3 capture requires a clean source tree; see $OUT/status-start.txt" >&2
+  echo "Baritone measurement capture requires a clean source tree; see $OUT/status-start.txt" >&2
   exit 1
 fi
 "${JAVA_COMMAND[@]}" -version > "$OUT/java-version.txt" 2>&1
 cat > "$OUT/README.txt" <<'EOF'
-P3 navigation measurement capture
+Baritone navigation measurement capture
 
 This bundle is scale-one, unpaced Fabric GameTest evidence. The NAVMEASURE rows contain actual
 elapsed server-thread durations for the complete AIPlayerEntity tick and complete MinecraftServer tick while the
-course is active, plus NAVPLAN rows for the legacy pathfinder call or Baritone inline admission.
+course is active, plus NAVPLAN rows for Baritone inline admission.
 It is not production wall-clock/pace proof: GameTests run ticks back-to-back and lack a normal
-server driver/RCON fixture. Do not use it by itself to flip nav.engine.
+server driver/RCON fixture. It is a Baritone regression diagnostic, not an engine-selection gate.
 EOF
 
 RESULTS="$REPO/build/run/gameTest/nav_courses/results.tsv"
@@ -271,11 +252,11 @@ mkdir -p "$OUT/runs"
 sequence=0
 
 run_one() {
-  local course=$1 engine=$2 repeat=$3 filter before_runner run_dir run_id
-  filter=$(filter_for "$course" "$engine")
+  local course=$1 repeat=$2 filter before_runner run_dir run_id
+  filter=$(filter_for "$course")
   before_runner=$(line_count "$OUT/runner.txt")
   sequence=$((sequence + 1))
-  run_dir=$(printf '%s/runs/%03d-%s-%s-r%02d' "$OUT" "$sequence" "$course" "$engine" "$repeat")
+  run_dir=$(printf '%s/runs/%03d-%s-baritone-r%02d' "$OUT" "$sequence" "$course" "$repeat")
   mkdir -p "$run_dir"
   # The common runner serialises this worktree; retain any caller-supplied JVM flags while forcing
   # the fixture's only supported measurement mode.
@@ -290,10 +271,9 @@ run_one() {
     echo "the just-run filter did not report exactly one PASS: $filter (see $run_dir/runner-status.txt)" >&2
     exit 1
   fi
-  if ! run_id=$(awk -F '\t' -v course="$course" -v engine="$engine" '
-    $1 == "NAVMEASURE" && $3 == "gametest_unpaced" && $4 == course && $5 == engine &&
-    $7 == "1" && $8 == "true" && $17 > 0 && $21 > 0 && $25 > 0 &&
-    ((engine == "baritone" && $31 == 0) || (engine == "legacy" && $29 == 0)) {
+  if ! run_id=$(awk -F '\t' -v course="$course" '
+    $1 == "NAVMEASURE" && $3 == "gametest_unpaced" && $4 == course && $5 == "baritone" &&
+    $7 == "1" && $8 == "true" && $17 > 0 && $21 > 0 && $25 > 0 && $31 == 0 {
       count++; run_id = $6
     }
     END {
@@ -301,42 +281,36 @@ run_one() {
       print run_id
     }
   ' "$run_dir/measurements.tsv"); then
-    echo "missing or incomplete scale-one evidence for $course/$engine; see $run_dir and $OUT/runner.txt" >&2
+    echo "missing or incomplete Baritone measurement evidence for $course; see $run_dir and $OUT/runner.txt" >&2
     exit 1
   fi
-  if ! awk -F '\t' -v course="$course" -v engine="$engine" '
-    $1 == "NAVCOURSE" && $2 == course && $3 == engine { count++ }
+  if ! awk -F '\t' -v course="$course" '
+    $1 == "NAVCOURSE" && $2 == course && $3 == "baritone" { count++ }
     END { exit count == 1 ? 0 : 1 }
   ' "$run_dir/results.tsv"; then
-    echo "missing or ambiguous NAVCOURSE row for $course/$engine; see $run_dir/results.tsv" >&2
+    echo "missing or ambiguous NAVCOURSE row for $course/baritone; see $run_dir/results.tsv" >&2
     exit 1
   fi
-  if ! awk -F '\t' -v course="$course" -v engine="$engine" -v run_id="$run_id" '
-    $1 == "NAVPLAN" && $3 == "gametest_unpaced" && $4 == course && $5 == engine && $6 == run_id { found = 1 }
+  if ! awk -F '\t' -v course="$course" -v run_id="$run_id" '
+    $1 == "NAVPLAN" && $3 == "gametest_unpaced" && $4 == course && $5 == "baritone" && $6 == run_id { found = 1 }
     END { exit found ? 0 : 1 }
   ' "$run_dir/planner.tsv"; then
-    echo "missing raw planner/admission row joined to NAVMEASURE run $run_id for $course/$engine; see $run_dir" >&2
+    echo "missing raw Baritone planner/admission row joined to NAVMEASURE run $run_id for $course; see $run_dir" >&2
     exit 1
   fi
 }
 
-echo "P3 capture: scale-one unpaced GameTests only; this is not production wall-clock evidence."
+echo "Baritone capture: unpaced GameTests only; this is not production wall-clock evidence."
 for course in "${COURSES[@]}"; do
   for ((repeat = 1; repeat <= REPEATS; repeat++)); do
-    if (( repeat % 2 )); then
-      run_one "$course" legacy "$repeat"
-      run_one "$course" baritone "$repeat"
-    else
-      run_one "$course" baritone "$repeat"
-      run_one "$course" legacy "$repeat"
-    fi
+    run_one "$course" "$repeat"
   done
 done
 
 git -C "$REPO" status --porcelain=v1 > "$OUT/status-end.txt"
 git -C "$REPO" diff --check > "$OUT/diff-check-end.txt"
 if ! cmp -s "$OUT/status-start.txt" "$OUT/status-end.txt"; then
-  echo "source tree changed during P3 capture; evidence is not comparable (see status-*.txt)" >&2
+  echo "source tree changed during Baritone measurement capture; evidence is not comparable (see status-*.txt)" >&2
   exit 1
 fi
 echo "P3 raw capture complete: $OUT"

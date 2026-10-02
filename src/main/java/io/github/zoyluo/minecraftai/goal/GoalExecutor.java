@@ -48,6 +48,7 @@ import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.PlaceStationsTask;
+import io.github.zoyluo.minecraftai.task.RetiredNavigationTask;
 import io.github.zoyluo.minecraftai.task.ServicePolicy;
 import io.github.zoyluo.minecraftai.task.ServiceProfile;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
@@ -3719,12 +3720,11 @@ public final class GoalExecutor {
             // 29 existing logs is misread as an already-satisfied absolute target of 3.
             case GATHER -> Optional.of(new GatherQuotaTask(step.item(), gatherTargetCount(
                     GatherQuotaTask.acceptedInventoryCount(bot, step.item()), step.count())));
-            // DIGDOWN (observed in test #8): the MINE step switches to DigDownTask -- digs straight down from wherever it's standing, no positioning/no pathfinding,
-            // so it never idles with "can't reach it/can't walk there". Replaces the old OreSeekTask.digBlocks (which would lock up stuck on stone it couldn't reach vertically).
-            case MINE -> Optional.of(new DigDownTask(
-                    step.block(), step.count(), plan.takeTaskCheckpoint(GoalStep.Kind.MINE)));
-            // OREDIG (observed in test #10): the MINE_ORE step switches to OreDigTask (a BlockMiner-controlled direct tunnel dig),
-            // replacing OreSeekTask -- whose "A* approach to buried ore" got stuck repeatedly across tests #6/#8/#10.
+            // Generic mining may select only a visible, reachable block; MineTask's movement is
+            // Baritone-owned and it never opens a shaft to discover one.
+            case MINE -> Optional.of(new MineTask(step.block(), step.count()));
+            // OreDig owns only currently observed/revalidated finite ore targets. It has no
+            // layer-seeking or blind-tunnel fallback behind this task boundary.
             case MINE_ORE -> {
                 Map<String, String> oreCheckpoint =
                         plan.checkpointForMineOre(step.ores());
@@ -3782,9 +3782,9 @@ public final class GoalExecutor {
             case PLACE_STATIONS -> Optional.of(new PlaceStationsTask());
             // Phase 3: the STOCKPILE step -> store inventory resources into a nearby chest (store everything that isn't a tool).
             case STOCKPILE -> Optional.of(new StockpileTask(true));
-            // Deep mining: the DESCEND_TO_Y step -> continuously dig a shaft down to the ore layer.
-            case DESCEND_TO_Y -> Optional.of(new DescendToYTask(
-                    step.pos().getY(), plan.takeTaskCheckpoint(GoalStep.Kind.DESCEND_TO_Y)));
+            // Kept only to fail safely when resuming a pre-migration mission checkpoint. New
+            // plans no longer emit layer-seeking excavation steps.
+            case DESCEND_TO_Y -> Optional.of(new RetiredNavigationTask("descend_to_y"));
             case ACQUIRE_WATER -> Optional.of(new io.github.zoyluo.minecraftai.task.AcquireWaterTask(
                     plan.origin, plan.peekTaskCheckpoint(GoalStep.Kind.ACQUIRE_WATER)));
             case MAKE_OBSIDIAN -> Optional.of(new CreateObsidianTask(

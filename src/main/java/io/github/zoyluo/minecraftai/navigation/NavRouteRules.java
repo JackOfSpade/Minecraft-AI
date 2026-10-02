@@ -2,7 +2,7 @@ package io.github.zoyluo.minecraftai.navigation;
 
 /**
  * The pure rules of the navigator seam (no Minecraft, no Baritone): how a walk request maps onto what a Baritone route may do,
- * and how the state of a running route maps onto the legacy result vocabulary. {@code ActionPack} applies them; the unit tests
+ * and how the state of a running route maps onto the established route result vocabulary. {@code ActionPack} applies them; the unit tests
  * pin them.
  */
 public final class NavRouteRules {
@@ -15,9 +15,11 @@ public final class NavRouteRules {
     public static final String PATH_TIMEOUT = "path_timeout";
     /** Failure reason of a route the strict-survival rules kept vetoing (see PolicyRefusalStreak): the caller should choose another way. */
     public static final String POLICY_REFUSED = "policy_refused";
+    /** A memory-only target reached its saved stance but was not visibly re-proven. */
+    public static final String OBSERVATION_LOST = "navigation_observation_lost";
     /** Cancel reason of a route that a newer request replaced. */
     public static final String REPLACED = "replaced";
-    /** Failure reason of a route that was running when Baritone was given up on (the legacy navigator owns the bot now). */
+    /** Failure reason of a route that was running when Baritone was given up on; navigation has stopped. */
     public static final String BARITONE_UNAVAILABLE = "baritone_unavailable";
     /** Failure reason of a route whose state Baritone could not report (an error inside Baritone). */
     public static final String BARITONE_ERROR = "baritone_error";
@@ -26,8 +28,8 @@ public final class NavRouteRules {
     }
 
     /**
-     * What an ordinary request from the ActionPack path API may do. Breaking is the legacy "dig fallback" permission; placing is
-     * the legacy "can pillar" one, but never while the caller keeps a stone reserve (the planner cannot see the reserve); a bot
+     * What an ordinary request from the ActionPack path API may do. Breaking is the request's dig-fallback permission; placing is
+     * its pillar permission, but never while the caller keeps a stone reserve (the planner cannot see the reserve); a bot
      * that stands in water when asked is allowed to cross water, since the way out of it is the first thing the route has to do.
      */
     public static NavRoute.Options optionsFor(boolean allowDigFallback, boolean canPillar, int protectedStoneLikeReserve,
@@ -66,6 +68,7 @@ public final class NavRouteRules {
         return switch (progress) {
             case ARRIVED -> new Verdict(NavOutcome.Status.SUCCESS, "");
             case ENDED_SHORT -> new Verdict(NavOutcome.Status.FAILED, shortFailureReason(searchFailed));
+            case OBSERVATION_LOST -> new Verdict(NavOutcome.Status.FAILED, OBSERVATION_LOST);
             case POLICY_REFUSED -> new Verdict(NavOutcome.Status.FAILED, POLICY_REFUSED);
             case RUNNING -> dryRouteWet
                     ? new Verdict(NavOutcome.Status.FAILED, ROUTE_ENTERED_WATER)

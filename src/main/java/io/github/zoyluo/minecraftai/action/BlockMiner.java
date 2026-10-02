@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.BreakRule;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -95,6 +96,20 @@ public final class BlockMiner {
             return Status.IDLE;
         }
         ServerLevel world = bot.level();
+        // The target may have been broken by this miner on the preceding scheduler tick. A
+        // player-visible empty cell is a safe terminal observation, not a reason to retry or
+        // inspect hidden terrain.
+        if (MiningController.visiblyAir(bot, target)) {
+            bot.getActionPack().stopMining();
+            target = null;
+            started = false;
+            return Status.DONE;
+        }
+        // A BlockMiner may be restored from a task checkpoint, so its retained coordinate is not
+        // evidence. Prove the exact exposed target before every raw state read below.
+        if (!MiningController.currentObservedTarget(bot, target)) {
+            return targetNotObserved(bot);
+        }
         // Target already broken (air / replaced with something else is the caller's concern; here we only recognize "no longer minable" = air).
         BlockState targetState = world.getBlockState(target);
         if (targetState.isAir()) {
@@ -140,12 +155,18 @@ public final class BlockMiner {
                     "dist", String.format(java.util.Locale.ROOT, "%.1f", dist),
                     "mining_idle", bot.getActionPack().isMiningIdle(),
                     "started", started,
-                    "block", world.getBlockState(target).getBlock().toString());
+                    "block", targetState.getBlock().toString());
         }
         // Issue startMining exactly once, only while mining is idle (not yet started on this block /
         // the previous block finished); after that, let MiningController accumulate progress on its own.
         // Never resend startMining every tick — that resets progress to zero and the block never breaks.
         if (bot.getActionPack().isMiningIdle()) {
+            // The earlier state may have changed while this task tick selected a tool. Re-prove
+            // before the second state read and the tool choice, then let ActionPack repeat the
+            // same admission immediately before it creates the controller.
+            if (!MiningController.currentObservedTarget(bot, target)) {
+                return targetNotObserved(bot);
+            }
             BlockState equipTarget = world.getBlockState(target);
             if (miningChannelToolPolicy) {
                 ToolSelector.Selection selection = ToolSelector.equipMiningChannelTool(bot, equipTarget);
@@ -165,7 +186,13 @@ public final class BlockMiner {
                 ToolSelector.equipBestTool(bot, equipTarget);
             }
             Direction face = faceToward(bot, target);
-            MiningAction.startMining(bot, target, face);
+            ActionResult startedAction = MiningAction.startMining(bot, target, face);
+            if (startedAction.isFailed()) {
+                failureReason = startedAction.reason();
+                target = null;
+                started = false;
+                return Status.FAILED;
+            }
             started = true;
         }
         return Status.MINING;
@@ -187,5 +214,17 @@ public final class BlockMiner {
                 pos.getX() + 0.5 - bot.getEyePosition().x,
                 pos.getY() + 0.5 - bot.getEyePosition().y,
                 pos.getZ() + 0.5 - bot.getEyePosition().z);
+    }
+
+    /** Refusal is terminal for this retained coordinate; callers may only nominate a new visible target. */
+    private Status targetNotObserved(AIPlayerEntity bot) {
+        BlockPos refused = target;
+        bot.getActionPack().stopMining();
+        failureReason = MiningController.TARGET_NOT_OBSERVED;
+        started = false;
+        target = null;
+        BotLog.action(bot, "miner_target_unobserved", "target", refused.toShortString(),
+                "reason", failureReason);
+        return Status.FAILED;
     }
 }

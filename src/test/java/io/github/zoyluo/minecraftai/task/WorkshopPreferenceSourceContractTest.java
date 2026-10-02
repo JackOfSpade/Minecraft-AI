@@ -49,7 +49,9 @@ final class WorkshopPreferenceSourceContractTest {
         assertTrue(locator.contains("Set<BlockPos> excluded"));
         assertTrue(smelt.contains("private final Set<BlockPos> rejectedFurnaces"));
         assertTrue(smelt.contains("rejectedFurnaces).orElse(null)"));
-        assertTrue(smelt.contains("rejectCurrentFurnace(bot, \"path_unreachable\")"));
+        assertTrue(smelt.contains("rejectCurrentFurnace(bot, \"baritone_route_unavailable:"));
+        assertTrue(smelt.contains("rejectCurrentFurnace(bot, \"baritone_route_stalled\")"));
+        assertTrue(smelt.contains("rejectCurrentFurnace(bot, \"baritone_route_ended_short\")"));
         assertTrue(smelt.contains("rejectCurrentFurnace(bot, \"no_stand_position\")"));
     }
 

@@ -74,11 +74,9 @@ class DeadlineCreditTest {
         int start = pack.indexOf("public void yieldToBaritone()");
         int end = pack.indexOf("\n    }\n", start);
         String body = pack.substring(start, end);
-        assertTrue(body.contains("dropPathExecutor();"), "yieldToBaritone must drop the executor without the lease");
-        assertTrue(!body.contains("clearActivePathExecutor()") && !body.contains("clearRouteLease()"),
+        assertTrue(body.contains("cancelStep();") && body.contains("stopMining();") && body.contains("this.walkTo = null;"),
+                "yieldToBaritone must drop every local controller without the lease");
+        assertTrue(!body.contains("clearRouteLease()"),
                 "yieldToBaritone must not end the route lease");
-        int wrapper = pack.indexOf("private void clearActivePathExecutor()");
-        String wrapperBody = pack.substring(wrapper, pack.indexOf("\n    }\n", wrapper));
-        assertTrue(wrapperBody.contains("dropPathExecutor();") && wrapperBody.contains("clearRouteLease();"));
     }
 }

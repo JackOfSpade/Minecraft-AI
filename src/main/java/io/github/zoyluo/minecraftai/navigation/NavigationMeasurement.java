@@ -143,41 +143,44 @@ public final class NavigationMeasurement {
 
     /**
      * Records what actually drove a measured bot's tick. A non-driven tick can still run the
-     * legacy task scheduler to admit a Baritone route, so the legacy-update counter is evidence
-     * rather than an automatic Baritone mismatch. A driven Baritone tick that then falls through
-     * to {@code ActionPack.onUpdate()} is an actual fallback and invalidates a Baritone capture.
+     * ActionPack scheduler to admit a Baritone route, so the update counter is evidence rather
+     * than an automatic Baritone mismatch. A driven Baritone tick that then falls through to
+     * {@code ActionPack.onUpdate()} is an actual fallback and invalidates a Baritone capture.
      */
-    public static void noteDriver(AIPlayerEntity bot, boolean baritoneDrove, boolean legacyUpdated,
-                                  NavEngine actionPackOwner) {
+    public static void noteDriver(AIPlayerEntity bot, boolean baritoneDrove, boolean actionPackUpdated,
+                                  NavigationControllerOwner controllerOwner) {
         if (bot != null) {
-            noteDriver(bot.getUUID(), baritoneDrove, legacyUpdated, actionPackOwner, actionPackOwner);
+            noteDriver(bot.getUUID(), baritoneDrove, actionPackUpdated, controllerOwner, controllerOwner);
         }
     }
 
     /**
-     * As {@link #noteDriver(AIPlayerEntity, boolean, boolean, NavEngine)}, while preserving the
-     * ActionPack owner on both sides of its update. A direct legacy walk, mining action, or step
+     * As {@link #noteDriver(AIPlayerEntity, boolean, boolean, NavigationControllerOwner)}, while preserving the
+     * ActionPack controller owner on both sides of its update. A direct local walk, mining action, or step
      * can finish in one update, so checking only after it would turn a real fallback into an
      * apparently idle Baritone-labelled row.
      */
-    public static void noteDriver(AIPlayerEntity bot, boolean baritoneDrove, boolean legacyUpdated,
-                                  NavEngine actionPackOwnerBeforeUpdate, NavEngine actionPackOwnerAfterUpdate) {
+    public static void noteDriver(AIPlayerEntity bot, boolean baritoneDrove, boolean actionPackUpdated,
+                                  NavigationControllerOwner controllerOwnerBeforeUpdate,
+                                  NavigationControllerOwner controllerOwnerAfterUpdate) {
         if (bot != null) {
-            noteDriver(bot.getUUID(), baritoneDrove, legacyUpdated,
-                    actionPackOwnerBeforeUpdate, actionPackOwnerAfterUpdate);
+            noteDriver(bot.getUUID(), baritoneDrove, actionPackUpdated,
+                    controllerOwnerBeforeUpdate, controllerOwnerAfterUpdate);
         }
     }
 
-    static void noteDriver(UUID botId, boolean baritoneDrove, boolean legacyUpdated) {
-        noteDriver(botId, baritoneDrove, legacyUpdated, null, null);
+    static void noteDriver(UUID botId, boolean baritoneDrove, boolean actionPackUpdated) {
+        noteDriver(botId, baritoneDrove, actionPackUpdated, null, null);
     }
 
-    static void noteDriver(UUID botId, boolean baritoneDrove, boolean legacyUpdated, NavEngine actionPackOwner) {
-        noteDriver(botId, baritoneDrove, legacyUpdated, actionPackOwner, actionPackOwner);
+    static void noteDriver(UUID botId, boolean baritoneDrove, boolean actionPackUpdated,
+                           NavigationControllerOwner controllerOwner) {
+        noteDriver(botId, baritoneDrove, actionPackUpdated, controllerOwner, controllerOwner);
     }
 
-    static void noteDriver(UUID botId, boolean baritoneDrove, boolean legacyUpdated,
-                           NavEngine actionPackOwnerBeforeUpdate, NavEngine actionPackOwnerAfterUpdate) {
+    static void noteDriver(UUID botId, boolean baritoneDrove, boolean actionPackUpdated,
+                           NavigationControllerOwner controllerOwnerBeforeUpdate,
+                           NavigationControllerOwner controllerOwnerAfterUpdate) {
         Session session = active;
         if (session == null || !session.botIds.contains(botId)) {
             return;
@@ -192,20 +195,20 @@ public final class NavigationMeasurement {
                     active.engineIsolated = false;
                 }
             }
-            if (legacyUpdated) {
-                active.legacyActionPackTicks++;
+            if (actionPackUpdated) {
+                active.actionPackUpdateTicks++;
             }
             // An ActionPack update can be a harmless scheduler tick that admits a new Baritone
-            // route. It is a real legacy fallback only when that update owns a legacy controller
-            // (path executor/direct walk/mining/step), or when a Baritone-driven tick fell
+            // route. It invalidates a Baritone-only capture only when that update owns a direct
+            // local controller (walk/mining/step/raw input), or when a Baritone-driven tick fell
             // through to ActionPack after its post-physics half failed.
-            boolean legacyOwnerObserved = actionPackOwnerBeforeUpdate == NavEngine.LEGACY
-                    || actionPackOwnerAfterUpdate == NavEngine.LEGACY;
-            boolean baritoneOwnerObserved = actionPackOwnerBeforeUpdate == NavEngine.BARITONE
-                    || actionPackOwnerAfterUpdate == NavEngine.BARITONE;
+            boolean localActionObserved = controllerOwnerBeforeUpdate == NavigationControllerOwner.LOCAL_ACTION
+                    || controllerOwnerAfterUpdate == NavigationControllerOwner.LOCAL_ACTION;
+            boolean baritoneOwnerObserved = controllerOwnerBeforeUpdate == NavigationControllerOwner.BARITONE
+                    || controllerOwnerAfterUpdate == NavigationControllerOwner.BARITONE;
             boolean directFallbackAlreadyCounted = active.directBaritoneFallbacksThisTick.remove(botId);
-            if ((baritoneDrove && legacyUpdated)
-                    || (active.engine == NavEngine.BARITONE && legacyUpdated && legacyOwnerObserved)) {
+            if ((baritoneDrove && actionPackUpdated)
+                    || (active.engine == NavEngine.BARITONE && actionPackUpdated && localActionObserved)) {
                 if (!directFallbackAlreadyCounted) {
                     active.baritoneFallbacks++;
                 }
@@ -218,7 +221,7 @@ public final class NavigationMeasurement {
     }
 
     /**
-     * Records a Baritone-to-legacy fallback from a path that owns the bot rather than the
+     * Records a Baritone controller-loss fallback from a path that owns the bot rather than the
      * selector's UUID-only request seam. This deliberately shares the selector fallback counter:
      * either condition means a Baritone-labelled capture is no longer engine-isolated. The
      * volatile session check keeps ordinary per-tick failure paths allocation-, lock-, and
@@ -378,7 +381,7 @@ public final class NavigationMeasurement {
     }
 
     /** Actual tick ownership recorded by {@code AIPlayerEntity}, not merely the configured selector value. */
-    public record DriverStats(int baritoneDriverTicks, int legacyActionPackTicks, int baritoneFallbacks) {
+    public record DriverStats(int baritoneDriverTicks, int actionPackUpdateTicks, int baritoneFallbacks) {
     }
 
     /** Immutable, self-contained summary written beside the existing NAVCOURSE outcome row. */
@@ -389,7 +392,7 @@ public final class NavigationMeasurement {
             planners = List.copyOf(planners);
         }
 
-        /** Whether this row has every required P3 capture, not whether either engine was faster. */
+        /** Whether this row has every required unpaced diagnostic capture, not whether it is faster than a historical engine. */
         public boolean hasRequiredEvidence() {
             return pathfinderBudgetScale == 1L && engineIsolated
                     && engineTick.count() > 0 && serverTick.count() > 0 && planner.count() > 0
@@ -445,7 +448,7 @@ public final class NavigationMeasurement {
         private final List<Long> serverTicks = new ArrayList<>();
         private final List<PlannerSample> planners = new ArrayList<>();
         private int baritoneDriverTicks;
-        private int legacyActionPackTicks;
+        private int actionPackUpdateTicks;
         private int baritoneFallbacks;
         private boolean engineIsolated = true;
 
@@ -459,7 +462,7 @@ public final class NavigationMeasurement {
         private Snapshot snapshot(Outcome outcome) {
             return new Snapshot(course, engine, run.id(), ENVIRONMENT, AStarPathfinder.harnessTimeScaleForDiagnostics(),
                     engineIsolated, Stats.fromNanos(engineTicks), Stats.fromNanos(serverTicks), Stats.fromPlanner(planners),
-                    new DriverStats(baritoneDriverTicks, legacyActionPackTicks, baritoneFallbacks), planners, outcome);
+                    new DriverStats(baritoneDriverTicks, actionPackUpdateTicks, baritoneFallbacks), planners, outcome);
         }
     }
 }

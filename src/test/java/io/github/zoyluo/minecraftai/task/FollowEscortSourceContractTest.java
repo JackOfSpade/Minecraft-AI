@@ -28,9 +28,9 @@ final class FollowEscortSourceContractTest {
         int land = onTick.indexOf("followLand(bot, target);");
         int yaw = onTick.indexOf("float yawBeforeEscort = bot.getYRot();");
         int escort = onTick.indexOf("escort.tick(bot, target);");
-        int preserve = onTick.indexOf("reprojectLegacyInputsForYawChange(yawBeforeEscort);");
+        int preserve = onTick.indexOf("reprojectControllerInputsForYawChange(yawBeforeEscort);");
         assertTrue(pace >= 0 && land > pace && yaw > land && escort > yaw && preserve > escort,
-                "publishPace, then followLand, then escort aim preserves its already-issued legacy movement");
+                "publishPace, then followLand, then escort aim preserves its already-issued local movement");
         assertTrue(onTick.substring(escort, preserve).contains("!bot.getActionPack().hasBaritoneRoute()"),
                 "the FollowTask fast path must not touch an ActionPack-owned Baritone route");
         assertTrue(follow.contains("requestPace(gait, PaceOwner.FOLLOW)"), "the follow pace is a FOLLOW tick lease");
@@ -54,7 +54,7 @@ final class FollowEscortSourceContractTest {
         assertTrue(escort.contains("calmWardenObservedWithin(bot, CALM_WARDEN_RANGE)"), "silent next to a calm warden");
 
         String pack = read("action/ActionPack.java");
-        int projection = pack.indexOf("public void reprojectLegacyInputsForYawChange(float yawBefore)");
+        int projection = pack.indexOf("public void reprojectControllerInputsForYawChange(float yawBefore)");
         int next = pack.indexOf("private boolean baritoneOwnsBot()", projection);
         assertTrue(projection >= 0 && next > projection);
         String projectionBody = pack.substring(projection, next);

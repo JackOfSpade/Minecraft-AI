@@ -39,12 +39,15 @@ class NavigationMeasurementWiringTest {
         assertTrue(entity.contains("NavigationMeasurement.beginBotTick")
                         && entity.contains("NavigationMeasurement.endBotTick")
                         && entity.contains("NavigationMeasurement.noteDriver")
-                        && entity.contains("NavEngine ownerBeforeUpdate = null;")
-                        && entity.contains("ownerBeforeUpdate = this.actionPack.navigationOwnerForMeasurement();")
-                        && entity.contains("NavEngine ownerAfterUpdate = this.actionPack.navigationOwnerForMeasurement();")
+                        && entity.contains("NavigationControllerOwner ownerBeforeUpdate = null;")
+                        && entity.contains("ownerBeforeUpdate = this.actionPack.controllerOwnerForMeasurement();")
+                        && entity.contains("NavigationControllerOwner ownerAfterUpdate = this.actionPack.controllerOwnerForMeasurement();")
                         && entity.contains("try {\n                    this.actionPack.onUpdate();\n                } finally {")
                         && entity.contains("noteDriver(this, false, true, ownerBeforeUpdate, ownerAfterUpdate)"),
-                "the metric must bracket the full AIPlayerEntity tick and preserve a one-tick legacy controller on both sides of ActionPack.update, including an update exception");
+                "the metric must bracket the full AIPlayerEntity tick and preserve a one-tick local physical controller on both sides of ActionPack.update, including an update exception");
+        assertTrue(actionPack.contains("return NavigationControllerOwner.LOCAL_ACTION;")
+                        && !actionPack.contains("return NavEngine.LEGACY;"),
+                "a direct physical action must not be mislabeled as the retired navigation engine");
         assertTrue(serverTick.contains("NavigationMeasurement.beginServerTick")
                         && serverTick.contains("@At(\"RETURN\")"),
                 "the metric must include the complete MinecraftServer tick");
@@ -59,8 +62,8 @@ class NavigationMeasurementWiringTest {
                         && entity.indexOf("NavigationMeasurement.noteBaritoneFallback(this)")
                                 != entity.lastIndexOf("NavigationMeasurement.noteBaritoneFallback(this)")
                         && entity.contains("try {\n                    baritoneCompleted = baritoneAfterPhysics();\n                } finally {")
-                        && entity.contains("baritoneCompleted") && actionPack.contains("navigationOwnerForMeasurement"),
-                "a Baritone-labelled row must record actual driver behavior and invalidate selector, both outer-driver catches, driver-fault, progress-fault, or legacy-controller fallback even when its update throws");
+                        && entity.contains("baritoneCompleted") && actionPack.contains("controllerOwnerForMeasurement"),
+                "a Baritone-labelled row must record actual driver behavior and invalidate selector, both outer-driver catches, driver-fault, progress-fault, or local-action fallback even when its update throws");
         assertTrue(baritone.contains("NavigationMeasurement.recordPlanner") && baritone.contains("admission"),
                 "Baritone's inline admission must be captured with the same artifact schema");
         assertTrue(runner.contains("-Dminecraftai.nav.measurement=scale1")

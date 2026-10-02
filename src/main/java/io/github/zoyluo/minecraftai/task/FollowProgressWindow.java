@@ -6,7 +6,7 @@ package io.github.zoyluo.minecraftai.task;
  * {@link #WINDOW_TICKS} ticks is stuck (a door it cannot open, a ledge it cannot leave, a replan loop) and is abandoned with a
  * back-off, so the follower neither spins in place for the whole route deadline nor restarts the same route at once.
  *
- * <p>This is the Baritone-route counterpart of {@code FollowStuckRecovery}, which watches the legacy executor's real position; a
+ * <p>This is the Baritone-route counterpart of {@code FollowStuckRecovery}, which watches a local action's real position; a
  * bot that moves (a long detour around a wall) is making progress even while it gets no closer. The best distance survives a
  * re-arm by movement, so only a real approach resets the "closer" test. Pure (numbers only).</p>
  */

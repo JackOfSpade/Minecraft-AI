@@ -162,7 +162,7 @@ public final class NaturalMovementGameTests {
             AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                             world.getServer(), name, world, Vec3.atBottomCenterOf(where), 0.0F, 0.0F, GameType.SURVIVAL)
                     .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-            NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+            NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
             BotFixtureMoves.place(bot, where);
             bot.setOnGround(true);
             bot.setHealth(bot.getMaxHealth());

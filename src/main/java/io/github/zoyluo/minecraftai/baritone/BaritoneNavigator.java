@@ -4,12 +4,16 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.event.events.PathEvent;
+import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.pathing.goals.GoalRunAway;
 import baritone.api.pathing.goals.GoalXZ;
+import baritone.api.pathing.movement.IMovement;
+import baritone.api.pathing.path.IPathExecutor;
 import baritone.api.utils.PathCalculationResult;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -24,19 +28,22 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 
 /**
  * The Baritone side of the navigator seam in {@code ActionPack}: turns a walk request ({@link NavRoute}) into a Baritone goal,
  * admits or refuses it, and answers where the route stands. Everything in here may initialise Baritone, so {@code ActionPack}
- * only reaches it through {@code NavEngineSelector.attempt} and only while the engine is {@code baritone}.
+ * only reaches it through {@code NavEngineSelector.attempt} while Baritone is available.
  *
  * <p>Admission is synchronous, because the ~40 callers of the ActionPack path API get their answer in the same tick and choose
  * their fallback from it (waypoint relay, digging, another candidate cell): Baritone's own A* runs once inline with a small
  * budget ({@value #ADMISSION_PRIMARY_MS}/{@value #ADMISSION_FAILURE_MS} ms). No path at all is {@code pathfinding_failed:
- * GOAL_UNREACHABLE}; a partial path (the goal is far, or only reachable in stages) is accepted, which is Baritone's answer to the
- * legacy "straight-line fallback". The route itself is then executed by {@code CustomGoalProcess} through the tick driver and
+ * GOAL_UNREACHABLE}; a partial path (the goal is far, or only reachable in stages) is accepted where it is safe to continue. A dry
+ * route forbidden from placing is the exception: it must have a complete observed path before it can put physical momentum near an
+ * edge. The route itself is then executed by {@code CustomGoalProcess} through the tick driver and
  * re-planned by Baritone as it goes (its own search runs on the worker pool, so the server thread only pays for the admission).</p>
  *
  * <p>Water: a route that does not swim must stay dry. Baritone's cost model has no per-request switch for that, so the global
@@ -47,6 +54,9 @@ public final class BaritoneNavigator {
     /** Budget of the inline admission search. */
     static final long ADMISSION_PRIMARY_MS = 40L;
     static final long ADMISSION_FAILURE_MS = 100L;
+    /** One bounded retry when an observed hostile makes the strict, frozen-terrain search wider. */
+    private static final long OBSERVED_HOSTILE_RETRY_PRIMARY_MS = 200L;
+    private static final long OBSERVED_HOSTILE_RETRY_FAILURE_MS = 250L;
 
     /** Budget of the one-off warm-up search (loads and JITs the movement and search classes before the first admission is timed). */
     private static final long WARM_UP_MS = 2000L;
@@ -85,13 +95,34 @@ public final class BaritoneNavigator {
         }
         BaritoneRegistry registry = BaritoneRegistry.INSTANCE;
         IBaritone baritone = registry.get(bot);
+        // The route must earn an immutable observation snapshot before even the one-off warm-up
+        // search exists. That ordering is the hard boundary that prevents Baritone from inspecting
+        // a merely loaded chunk while deciding whether a route is possible.
+        ObservedNavigationFence.Capture observed = ObservedNavigationFence.admit(
+                bot, route, registry.observationMemory(bot), registry.observationFence(bot).generation() + 1L);
+        if (!observed.accepted()) {
+            BotLog.path(bot, "nav_goal_rejected", "goal", route.target(), "reason", observed.failure(),
+                    "rays", observed.rays(), "fresh_cells", observed.freshCells());
+            return Admission.refused(observed.failure());
+        }
+        registry.setObservationFence(bot, observed.fence(), route);
+        route.setRevalidateRememberedTarget(observed.provenance() == ObservedNavigationFence.TargetProvenance.REMEMBERED);
+        route.setObservedPillarGoal(observed.pillarGoal());
+        BotLog.path(bot, "nav_observation_fence_updated", "goal", route.target(), "generation",
+                observed.fence().generation(), "cells", observed.fence().cellCount(), "rays", observed.rays(),
+                "fresh_cells", observed.freshCells(), "provenance", observed.provenance());
+        if (route.revalidateRememberedTarget()) {
+            BotLog.path(bot, "observed_target_route_started", "target", route.target(), "policy", "walk_only",
+                    "memory_age", Math.max(0, bot.getServer().getTickCount() - observed.fence().lastObservationTick()));
+        }
         BaritoneSettings.applyNavLimits();
         warmUp(baritone, bot);
         NavRoute.Options options = route.options();
         // What a refused start puts back: the permission of the route that is still running (a re-target that fails leaves it running),
         // or walk-only when nothing runs, so a refused start never leaves a bot that just failed to route with the new route's break/place rights.
         BaritonePolicy previousPolicy = registry.isBusy(bot) ? registry.policy(bot) : BaritonePolicy.WALK_ONLY;
-        registry.setPolicy(bot, policyOf(options));
+        BaritonePolicy routePolicy = route.revalidateRememberedTarget() ? BaritonePolicy.WALK_ONLY : policyOf(options);
+        registry.setPolicy(bot, routePolicy);
         registry.setWaterAllowed(bot, options.allowWater());
         // The route's permissions and its water rule shape the admission search itself (Baritone's cost model reads them), so they
         // are in place before it; but they belong to a route that exists, so a refusal or a failure takes them back out again.
@@ -113,18 +144,67 @@ public final class BaritoneNavigator {
                             plan.movements().size(), plan.type().name());
                 }
                 PathCalculationResult.Type type = plan.type();
+                int observedHostiles = observedHostileCount(baritone);
+                long primaryBudgetMs = ADMISSION_PRIMARY_MS;
+                long failureBudgetMs = ADMISSION_FAILURE_MS;
+                // Baritone checks its timeout only in batches of nodes. A visible hostile makes a
+                // genuine detour graph wider, so one 40ms segment can end before the same frozen
+                // observation fence has yielded a complete safe route. Re-run only in that case;
+                // it receives no new world/entity reads and a partial retry remains refused below.
+                if (needsObservedHostileAdmissionRetry(route, type, observedHostiles, plan.searchMillis())) {
+                    BaritonePlanner.Plan firstPlan = plan;
+                    long retryStarted = capturePlanner ? System.nanoTime() : 0L;
+                    plan = BaritonePlanner.planNow(baritone, goal,
+                            OBSERVED_HOSTILE_RETRY_PRIMARY_MS, OBSERVED_HOSTILE_RETRY_FAILURE_MS);
+                    primaryBudgetMs = OBSERVED_HOSTILE_RETRY_PRIMARY_MS;
+                    failureBudgetMs = OBSERVED_HOSTILE_RETRY_FAILURE_MS;
+                    if (capturePlanner) {
+                        NavigationMeasurement.recordPlanner(bot, io.github.zoyluo.minecraftai.navigation.NavEngine.BARITONE,
+                                "admission_observed_hostile_retry", System.nanoTime() - retryStarted,
+                                plan.searchMillis(), plan.nodesConsidered(), plan.movements().size(), plan.type().name());
+                    }
+                    BotLog.action(bot, "baritone_observed_hostile_admission_retry",
+                            "hostiles", observedHostiles,
+                            "first_type", firstPlan.type(),
+                            "first_nodes", firstPlan.nodesConsidered(),
+                            "first_moves", firstPlan.movements().size(),
+                            "first_search_ms", firstPlan.searchMillis(),
+                            "retry_primary_ms", OBSERVED_HOSTILE_RETRY_PRIMARY_MS,
+                            "retry_failure_ms", OBSERVED_HOSTILE_RETRY_FAILURE_MS,
+                            "retry_type", plan.type(),
+                            "retry_nodes", plan.nodesConsidered(),
+                            "retry_moves", plan.movements().size(),
+                            "retry_search_ms", plan.searchMillis());
+                    type = plan.type();
+                }
                 BotLog.path(bot, "baritone_admission", "goal", goal, "type", type, "nodes", plan.nodesConsidered(),
-                        "moves", plan.movements().size(), "search_ms", plan.searchMillis(), "policy", policyOf(options));
-                String refusal = admissionFailure(type, plan.searchMillis(), ADMISSION_FAILURE_MS);
+                        "moves", plan.movements().size(), "search_ms", plan.searchMillis(), "policy", routePolicy,
+                        "observation_cells", observed.fence().cellCount(), "observed_hostiles", observedHostiles);
+                // A no-place route cannot safely use Baritone's ordinary partial-path
+                // continuation: a segment that stops at a visible gap can carry the bot's
+                // momentum over the edge before a later replan has an answer. A complete
+                // observed break route remains valid; only the partial result is fenced.
+                String refusal = observedAdmissionSafetyFailure(route, plan);
+                if (refusal == null) {
+                    refusal = admissionFailure(type, plan.searchMillis(), failureBudgetMs);
+                }
                 if (refusal == null && route.shape() == NavRoute.Shape.BLOCK
-                        && exhaustedPartial(type, plan.searchMillis(), ADMISSION_PRIMARY_MS, goalColumnLoaded(bot, route))) {
+                        && exhaustedPartial(type, plan.searchMillis(), primaryBudgetMs, goalColumnLoaded(bot, route))) {
                     // An exact-cell request whose search ran out of places to look (before its budget) without reaching the goal: the
-                    // cell cannot be reached over the loaded terrain. The legacy answer is "unreachable", which is what callers (waypoint
+                    // cell cannot be reached over the admitted terrain. The route answer is "unreachable", which is what callers (waypoint
                     // relay, digging, the next candidate cell) switch strategy on; Baritone's partial path to the closest point is
                     // only wanted for approach requests (follow), where walking as far as possible is the point.
                     refusal = NavRouteRules.GOAL_UNREACHABLE;
                 }
                 if (refusal != null) {
+                    BotLog.action(bot, "baritone_admission_refused",
+                            "reason", refusal,
+                            "goal", route.target().toShortString(),
+                            "type", type,
+                            "nodes", plan.nodesConsidered(),
+                            "moves", plan.movements().size(),
+                            "observation_cells", observed.fence().cellCount(),
+                            "policy", routePolicy);
                     return Admission.refused(refusal);
                 }
                 if (plan.reachesGoal() && plan.path() != null) {
@@ -150,6 +230,9 @@ public final class BaritoneNavigator {
     /** A start that was refused or failed: the route's break/place permission, its water rule, its swim permission and its lease are taken back. */
     private static void abandonStart(AIPlayerEntity bot, BaritonePolicy previousPolicy) {
         BaritoneRegistry.INSTANCE.setPolicy(bot, previousPolicy);
+        // ActionPack makes a refused replacement fail closed by cancelling the prior route too;
+        // restoring its old fence only to release it immediately was misleading and risked a
+        // future caller accidentally treating stale terrain authority as live.
         releaseRoute(bot.getUUID());
         BaritoneRegistry.INSTANCE.setWaterAllowed(bot, false);
         NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
@@ -167,12 +250,20 @@ public final class BaritoneNavigator {
         warmedUp = true;
         long started = System.nanoTime();
         BlockPos feet = bot.blockPosition();
-        BaritonePlanner.Plan plan = BaritonePlanner.planNow(baritone, new GoalXZ(feet.getX() + 12, feet.getZ()), WARM_UP_MS, WARM_UP_MS);
+        // Do not probe an arbitrary loaded column for warm-up. The bot's physical current stance
+        // is already part of the admitted snapshot and is enough to initialise the planner safely.
+        BaritonePlanner.Plan plan = BaritonePlanner.planNow(baritone, new GoalBlock(feet), WARM_UP_MS, WARM_UP_MS);
         BotLog.path(bot, "baritone_warm_up", "type", plan.type(), "ms", (System.nanoTime() - started) / 1_000_000L);
     }
 
     /** Whether Baritone still owns the bot, has arrived at the route's goal, or ended short of it. */
     public static NavRoute.Progress progress(AIPlayerEntity bot, NavRoute route) {
+        // A refresh or teleport may have revoked the immutable terrain authority before the
+        // process naturally stopped. Preserve that distinction for ActionPack rather than
+        // flattening it to an ordinary incomplete Baritone path.
+        if (BaritoneRegistry.INSTANCE.observationRevocationReason(bot) != null) {
+            return NavRoute.Progress.OBSERVATION_LOST;
+        }
         if (BaritoneRegistry.INSTANCE.isBusy(bot)) {
             // Position-level rules (observability, the bot's break permission) are only enforced at execution, so a route through
             // blocks the bot may not touch is vetoed at its first break, and Baritone may re-plan the same route for ever.
@@ -180,6 +271,16 @@ public final class BaritoneNavigator {
         }
         IBaritone baritone = BaritoneRegistry.INSTANCE.find(bot.getUUID());
         if (baritone != null && route.goalHandle() instanceof Goal goal && goal.isInGoal(baritone.getPlayerContext().playerFeet())) {
+            if (route.revalidateRememberedTarget()) {
+                ObservedNavigationFence fence = BaritoneRegistry.INSTANCE.observationFence(bot);
+                boolean revalidated = ObservedNavigationFence.revalidateRememberedTarget(bot, route, fence);
+                BotLog.path(bot, "observed_target_revalidated", "target", route.target(), "result", revalidated);
+                if (!revalidated) {
+                    BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, bot, "observed_target_memory_revoked",
+                            "target", route.target(), "reason", "live_reproof_failed");
+                    return NavRoute.Progress.OBSERVATION_LOST;
+                }
+            }
             return NavRoute.Progress.ARRIVED;
         }
         return NavRoute.Progress.ENDED_SHORT;
@@ -199,13 +300,35 @@ public final class BaritoneNavigator {
         return type == PathCalculationResult.Type.SUCCESS_SEGMENT && goalColumnLoaded && searchMillis + 5L < primaryBudgetMillis;
     }
 
+    /** Whether a seen hostile turned the bounded strict route into a larger, but still observed, search. */
+    static boolean needsObservedHostileAdmissionRetry(NavRoute route, PathCalculationResult.Type type,
+                                                      int observedHostiles, long searchMillis) {
+        return observedHostiles > 0 && searchMillis + 5L >= ADMISSION_PRIMARY_MS
+                && type == PathCalculationResult.Type.SUCCESS_SEGMENT
+                && requiresCompleteObservedGoal(route);
+    }
+
+    /** Counts only Baritone's perception-filtered hostile list; it never queries the level. */
+    private static int observedHostileCount(IBaritone baritone) {
+        if (!MinecraftAiConfig.get().nav().baritoneCaps().mobAvoidanceEnabled()) {
+            return 0;
+        }
+        int count = 0;
+        for (var entity : baritone.getPlayerContext().entities()) {
+            if (entity instanceof Mob mob && mob instanceof Enemy && mob.isAlive()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private static boolean goalColumnLoaded(AIPlayerEntity bot, NavRoute route) {
         BlockPos target = route.target();
         return bot.level().getChunkSource().hasChunk(target.getX() >> 4, target.getZ() >> 4);
     }
 
     /**
-     * The admission verdict of an inline search in the legacy vocabulary: null when the route may start (a complete path, or a
+     * The admission verdict of an inline search in the established route vocabulary: null when the route may start (a complete path, or a
      * partial one that gets the bot moving), else the {@code pathfinding_failed: ...} reason.
      */
     static String admissionFailure(PathCalculationResult.Type type, long searchMillis, long failureBudgetMillis) {
@@ -219,6 +342,79 @@ public final class BaritoneNavigator {
         };
     }
 
+    /**
+     * Fail-closed admission rule for dry, no-place routes. A full path may include an already
+     * observed natural-block break; a partial one is not an authority to walk up to an edge and
+     * discover the continuation with physical momentum. Water and construction routes have their
+     * own explicitly modelled movement rules, and flee goals deliberately have no fixed endpoint.
+     */
+    static String observedAdmissionSafetyFailure(NavRoute route, BaritonePlanner.Plan plan) {
+        if (plan == null) {
+            return requiresCompleteObservedGoal(route) ? "navigation_observed_corridor_unavailable" : null;
+        }
+        if (plan.type() == PathCalculationResult.Type.EXCEPTION || plan.type() == PathCalculationResult.Type.CANCELLATION) {
+            return null;
+        }
+        String movementFailure = observedPathSafetyFailure(route, plan.path(), 0);
+        if (movementFailure != null) {
+            return movementFailure;
+        }
+        return requiresCompleteObservedGoal(route) && plan.type() != PathCalculationResult.Type.SUCCESS_TO_GOAL
+                ? "navigation_observed_corridor_unavailable" : null;
+    }
+
+    /**
+     * Rechecks the path Baritone is about to execute after every PRE tick, so a worker replan
+     * cannot bypass the admission's no-partial and maximum-fall boundaries.
+     */
+    static String activeObservedPathSafetyFailure(AIPlayerEntity bot, IBaritone baritone) {
+        IPathExecutor executor = baritone.getPathingBehavior().getCurrent();
+        if (executor == null) {
+            return null;
+        }
+        return observedExecutionPathSafetyFailure(bot, executor.getPath(), executor.getPosition());
+    }
+
+    /**
+     * The host callback used by the vendored executor before it evaluates a movement. A Baritone
+     * path without an admitted route is never allowed to execute on this server; upstream contexts
+     * retain their permissive callback default.
+     */
+    static String observedExecutionPathSafetyFailure(AIPlayerEntity bot, IPath path, int firstMovement) {
+        NavRoute route = BaritoneRegistry.INSTANCE.observedRoute(bot);
+        return route == null ? "navigation_observation_fence_unavailable"
+                : observedPathSafetyFailure(route, path, firstMovement);
+    }
+
+    /** Pure path proof: it reads only Baritone's already-built movement list and route permissions. */
+    static String observedPathSafetyFailure(NavRoute route, IPath path, int firstMovement) {
+        if (route == null) {
+            return null;
+        }
+        if (!route.options().allowWater() && path != null) {
+            int safeFall = Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
+            List<IMovement> movements = path.movements();
+            for (int index = Math.max(0, firstMovement); index < movements.size(); index++) {
+                IMovement movement = movements.get(index);
+                if (movement != null && movement.getSrc().getY() - movement.getDest().getY() > safeFall) {
+                    return "navigation_unsafe_fall";
+                }
+            }
+        }
+        if (!requiresCompleteObservedGoal(route)) {
+            return null;
+        }
+        if (path == null || path.getGoal() == null || !path.getGoal().isInGoal(path.getDest())) {
+            return "navigation_observed_corridor_unavailable";
+        }
+        return null;
+    }
+
+    private static boolean requiresCompleteObservedGoal(NavRoute route) {
+        return route != null && route.shape() != NavRoute.Shape.RUN_AWAY
+                && !route.options().allowWater() && !route.options().allowPlace();
+    }
+
     /** Stops whatever Baritone is doing for the bot (goal, path, search, inputs, block being broken) and lets go of it. */
     public static void cancel(AIPlayerEntity bot, String why) {
         BaritoneRegistry.INSTANCE.preempt(bot, why);
@@ -230,6 +426,7 @@ public final class BaritoneNavigator {
         if (changed) {
             syncWaterAvoidance();
         }
+        BaritoneRegistry.INSTANCE.clearObservationFence(botId);
     }
 
     /** Whether the navigator still counts a route (dry or swimming) for the bot: false once it ended, was cancelled or the bot was removed. */
@@ -251,10 +448,50 @@ public final class BaritoneNavigator {
             // Baritone's own flee goal: satisfied at radius blocks (horizontally) from the observed source cell; its search
             // picks the way, this mod does not project a flee target by hand.
             case RUN_AWAY -> new GoalRunAway(route.radius(), route.target());
-            case BLOCK -> Standability.isStandable(bot.level(), route.target())
-                    ? new GoalBlock(route.target())
-                    : new GoalNear(route.target(), 1);
+            case BLOCK -> {
+                if (route.options().exactWaterGoal()) {
+                    // An explicit swim route was admitted against the actual observed water/shore cell.
+                    // Snapping that goal to a dry neighbour would make a bot claim arrival
+                    // before it crossed the water it was asked to traverse.
+                    yield new GoalBlock(route.target());
+                }
+                if (route.observedPillarGoal()) {
+                    // Admission captured a visible, air-only placement column from a proven base.
+                    // The usual stance resolution would reject it precisely because Baritone has
+                    // not placed that footing yet; all planner cells remain fence-backed.
+                    yield new GoalBlock(route.target());
+                }
+                BlockPos stance = BaritoneRegistry.INSTANCE.observationFence(bot).nearestObservedStance(route.target());
+                if (stance == null) {
+                    // Admission guarantees this cannot happen; throwing here makes a lifecycle
+                    // regression fail closed instead of asking Standability to read live terrain.
+                    throw new IllegalStateException("observed navigation goal lost its stance");
+                }
+                yield new GoalBlock(stance);
+            }
         };
+    }
+
+    /** Refreshes the active route's view cone before a Baritone PRE tick. Server thread only. */
+    public static boolean refreshObservationFence(AIPlayerEntity bot) {
+        BaritoneRegistry registry = BaritoneRegistry.INSTANCE;
+        NavRoute route = registry.observedRoute(bot);
+        if (route == null) {
+            return true;
+        }
+        ObservedNavigationFence prior = registry.observationFence(bot);
+        ObservedNavigationFence.Capture refreshed = ObservedNavigationFence.refresh(
+                bot, route, prior, prior.generation() + 1L);
+        if (refreshed.accepted()) {
+            if (refreshed.fence() != prior) {
+                registry.setObservationFence(bot, refreshed.fence(), route);
+            }
+            return true;
+        }
+        BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, bot, "route_observation_lost",
+                "goal", route.target(), "reason", refreshed.failure(), "rays", refreshed.rays());
+        registry.revokeObservation(bot, refreshed.failure(), false);
+        return false;
     }
 
     /** The per-bot break/place permission that matches the request's options (using the presets, never a new combination). */

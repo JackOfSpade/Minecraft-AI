@@ -147,6 +147,8 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private BlockPos unreachableAnchor;
     private int lastScanBudget = -SCAN_INTERVAL;
     private int lastPathAttemptBudget = -PATH_RETRY_INTERVAL;
+    /** Logged once per live task when an old checkpoint tries to resume raw stair excavation. */
+    private boolean surfaceStairRetirementLogged;
     private BlockPos ascentTarget;
     private EdgePlacement edge;
     private WalkedStep ascentSettle;
@@ -456,10 +458,10 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             NavSafetyNet.INSTANCE.requestWaterRescue(bot);
             return;
         }
-        // The sneak-bridge in flight (lean, place, walk back) has the bot to itself: nothing else may start a route or a break.
+        // A pre-migration checkpoint can only have an in-flight local stair/bridge in memory. It
+        // cannot resume that raw navigation ownership; restart the return through Baritone instead.
         if (edge != null) {
-            tickEdgePlacement(bot);
-            return;
+            clearReturnSurfaceWork(bot, "acquire_water_surface_baritone_required");
         }
         // A strict return stair can expose a real aquifer before it reaches the remembered
         // surface.  When that source is already visible and reachable from the current dry
@@ -485,18 +487,35 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             fail("acquire_water_surface_return_unreachable anchor=" + surfaceAnchor.toShortString());
             return;
         }
-        // A single A* from a deep mine to the old surface origin expands a large three-dimensional
-        // dig graph and repeatedly hits TIMEOUT/SEARCH_LIMIT.  When the vertical gap is substantial,
-        // carve a normal two-block-high diagonal staircase instead: every block is mined through the
-        // vanilla mining controller and every rise is one validated adjacent jump.  Once close to
-        // surface level the ordinary pathfinder can handle the remaining horizontal approach.
+        // Navigation is exclusively owned by the observed-terrain Baritone boundary. The former
+        // local stair miner is deliberately not a fallback: opening a return shaft would discover
+        // terrain by excavation even when each individual break happened to be visible.
         boolean needsDrySurfaceExit = bot.blockPosition().getY() < surfaceAnchor.getY()
                 || !hasReusableSurfaceEgress(bot, bot.level(), bot.blockPosition(), true)
                 && bot.blockPosition().getY() < surfaceAnchor.getY() + MAX_SURFACE_OVERSHOOT;
-        if (needsDrySurfaceExit && ascendOneStair(bot)) {
+        if (needsDrySurfaceExit) {
+            requireBaritoneSurfaceRoute(bot);
             return;
         }
         retryPath(bot, surfaceAnchor, false);
+    }
+
+    private void requireBaritoneSurfaceRoute(AIPlayerEntity bot) {
+        clearReturnSurfaceWork(bot, "acquire_water_surface_baritone_required");
+        if (!surfaceStairRetirementLogged) {
+            surfaceStairRetirementLogged = true;
+            BotLog.action(bot, "acquire_water_surface_baritone_required",
+                    "from", bot.blockPosition().toShortString(),
+                    "target", surfaceAnchor.toShortString(),
+                    "reason", "local_stair_excavation_retired");
+        }
+        retryPath(bot, surfaceAnchor, false);
+        if (pathAttempts >= 3 && bot.getActionPack().isPathExecutorIdle()) {
+            BotLog.action(bot, "acquire_water_surface_baritone_refused",
+                    "from", bot.blockPosition().toShortString(),
+                    "target", surfaceAnchor.toShortString());
+            fail("acquire_water_surface_baritone_required");
+        }
     }
 
     private boolean fillReachableReturnWater(AIPlayerEntity bot) {
@@ -645,6 +664,12 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
      * lets the caller fall back to ordinary pathfinding.
      */
     private boolean ascendOneStair(AIPlayerEntity bot) {
+        // Kept only to make old in-memory/checkpoint call paths fail closed. RETURN_SURFACE now
+        // owns movement through requireBaritoneSurfaceRoute, never via a raw mined stair.
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            clearReturnSurfaceWork(bot, "acquire_water_surface_baritone_required");
+            return false;
+        }
         ServerLevel world = bot.level();
         BlockPos current = bot.blockPosition();
         if (edge != null) {

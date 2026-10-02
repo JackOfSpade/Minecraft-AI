@@ -294,7 +294,7 @@ public final class FollowTask extends AbstractTask {
             escort.disengage();
             suspendLandRecovery(bot);
             abandonBoatChild(bot);
-            // Swim-follow stays the legacy controller's (Baritone swimming is not what follows a swimmer in P1); a land route
+            // Swim-follow uses a bounded, individually observed physical-survival routine; a land route
             // that was still running must not keep writing the bot's inputs next to it.
             dropBaritoneRoute(bot);
             followSwimming(bot, target);
@@ -327,9 +327,9 @@ public final class FollowTask extends AbstractTask {
         float yawBeforeEscort = bot.getYRot();
         escort.tick(bot, target);
         if (!bot.getActionPack().hasBaritoneRoute()) {
-            // Combat aim runs after this bot has already written the next legacy input. Re-express that same world-space movement
+            // Combat aim runs after this bot has already written the next local input. Re-express that same world-space movement
             // under the new combat yaw so the next physics tick keeps following rather than stepping toward the hostile.
-            bot.getActionPack().reprojectLegacyInputsForYawChange(yawBeforeEscort);
+            bot.getActionPack().reprojectControllerInputsForYawChange(yawBeforeEscort);
         }
     }
 
@@ -547,9 +547,8 @@ public final class FollowTask extends AbstractTask {
      * Land follow on Baritone: {@code GoalNear(player, radius)} (no stand-off cell, no goal snapping), re-targeted as the player
      * moves (throttled, and only once they have moved a couple of blocks, so Baritone keeps favouring the path it is on). A
      * player on the far side of water with no dry route leaves the route ending short: the bot stays on its bank, says so once
-     * ({@code follow_no_dry_route}) and re-plans on the normal schedule. Swimming players and boats are the legacy modes.
-     *
-     * @return false when Baritone is not (or no longer) the engine, and the legacy land follow must run this tick
+     * ({@code follow_no_dry_route}) and re-plans on the normal schedule. Swimming players and boats retain only their
+     * bounded physical safety routines; dry-land follow has no alternate navigation engine.
      */
     private boolean followLandBaritone(AIPlayerEntity bot, ServerPlayer target) {
         ActionPack pack = bot.getActionPack();
@@ -568,7 +567,7 @@ public final class FollowTask extends AbstractTask {
             waiting = false;
             if (baritoneProgress.stalled(elapsed, bot.distanceTo(target), bot.getX(), bot.getZ())) {
                 // A route that gets the bot nowhere (a door it cannot open, a replan loop) is abandoned with a back-off, the way
-                // the legacy follow abandons a frozen executor, instead of spinning until the route deadline.
+                // the prior local controller abandoned a frozen executor, instead of spinning until the route deadline.
                 BotLog.action(bot, "follow_route_no_progress", "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.blockPosition()),
                         "distance", bot.distanceTo(target));
                 pack.cancelBaritoneRoute("follow_no_progress");
@@ -584,12 +583,13 @@ public final class FollowTask extends AbstractTask {
                     && baritoneGoalPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ) {
                 ActionResult regoal = pack.startApproachTo(targetPos, baritoneRadius, true, true);
                 baritoneRegoals++;
-                if (ActionPack.ENGINE_NOT_BARITONE.equals(regoal.reason())) {
-                    return false;
-                }
                 nextRepathTick = elapsed + BARITONE_REGOAL_TICKS;
                 if (!regoal.isFailed()) {
                     baritoneGoalPos = targetPos.immutable();
+                } else {
+                    announceNoRoute(bot, targetPos, regoal.reason(), FollowNoRoute.messageFor(regoal.reason()));
+                    repathBackoff = true;
+                    waiting = true;
                 }
             }
             return true;
@@ -617,9 +617,6 @@ public final class FollowTask extends AbstractTask {
         }
         ActionResult started = pack.startApproachTo(targetPos, baritoneRadius, false, true);
         baritoneStarts++;
-        if (ActionPack.ENGINE_NOT_BARITONE.equals(started.reason())) {
-            return false;
-        }
         nextRepathTick = elapsed + (started.isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);
         if (started.isFailed()) {
             announceNoRoute(bot, targetPos, started.reason(), FollowNoRoute.messageFor(started.reason()));
@@ -643,153 +640,9 @@ public final class FollowTask extends AbstractTask {
     }
 
     private void followLand(AIPlayerEntity bot, ServerPlayer target) {
-        if (NavEngineSelector.baritoneSelectedFor(bot.getUUID()) && followLandBaritone(bot, target)) {
-            return;
-        }
-        ActionPack pack = bot.getActionPack();
-        double distance = bot.distanceTo(target);
-        if (distance <= STOP_DISTANCE + STOP_ARRIVAL_SLACK) {
-            // stopMovement() alone only releases the keys: a live PathExecutor re-presses forward
-            // on its next tick and keeps walking its stale route for up to WalkToController's
-            // MAX_TICKS with no replan.  Arriving must cancel the navigation itself.
-            pack.stopNavigation();
-            waiting = true;
-            noRouteAnnounced = false;
-            repeatedFailures.reset();
-            stuckRecovery.reset(bot, elapsed);
-            return;
-        }
-        // A standing follow order must survive path/goal-resolution quirks that report bogus
-        // "success" without the bot's real position ever changing (see FollowStuckRecovery's
-        // header). This runs before -- and, while active, instead of -- the ordinary repath
-        // logic below; StuckWatcher never sees a frozen sample because isWaiting() stays true for
-        // every tick this owns.
-        if (stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)) {
-            waiting = true;
-            return;
-        }
-        // Recovery may have just decided this specific tick needs an immediate fresh repath
-        // (see FollowStuckRecovery's forced-replan window) rather than either handling the tick
-        // itself or waiting for the ordinary schedule below -- honour that by pulling the
-        // schedule forward instead of adding a second, parallel path-triggering codepath.
-        if (stuckRecovery.consumeForcedRepath()) {
-            nextRepathTick = elapsed;
-        }
-        boolean pathIdle = pack.isPathExecutorIdle();
-        boolean walkIdle = pack.isWalkToIdle();
-
-        // The actual walk/path destination is offset STOP_DISTANCE from the player -- never the
-        // player's own block -- so the bot's own arrival condition stops it at the requested
-        // distance instead of relying solely on the check above to interrupt an in-flight
-        // walk/path at exactly the right instant. Real pathfinding (not a direct walk) is used at
-        // every distance now, close range included: a direct walk has no obstacle-planning of its
-        // own, so a single step-up block right in the way was only ever discovered reactively,
-        // after WalkToController's own multi-second stuck/sidle ladder gave up on walking through
-        // it -- by then the player had already pulled well ahead. A* plans the jump immediately.
-        BlockPos standNear = standOffsetFrom(target.blockPosition(), bot.blockPosition(), STOP_DISTANCE);
-        // The goal collapsed onto the bot's own cell earlier and the bot is holding: as soon as the player
-        // has moved (rate-limited), that answer is stale -- re-evaluate now instead of idling the full
-        // REPATH_TICKS while they walk away.
-        if (holdTargetPos != null && elapsed >= nextHoldReevalTick
-                && !holdTargetPos.equals(target.blockPosition())) {
-            holdTargetPos = null;
-            nextRepathTick = elapsed;
-            repathBackoff = false;
-        }
-        // Besides the periodic retarget schedule, also re-path the instant the controller goes
-        // idle on its own (a short leg toward a close, moving target often finishes well before
-        // nextRepathTick) -- unless we're deliberately backing off a just-failed distant search.
-        if (elapsed >= nextRepathTick || (pathIdle && walkIdle && !repathBackoff)) {
-            // One ordinary search per repath. A goal that used to resolve down into the bot's own
-            // old mining staircase (2026-09-28 session log) is fixed at the source, in goal
-            // resolution (AStarPathfinder.resolveEndpoint / Standability.findNearestStandableForGoal:
-            // nearby cell first, then a bounded fluid-refusing deep fallback), so no second
-            // "surface-first" search is layered on top here.
-            holdTargetPos = null;
-            ActionResult path = pack.startPathTo(standNear);
-            nextRepathTick = elapsed + REPATH_TICKS;
-            if (ActionPack.PATHFINDING_THROTTLED.equals(path.reason()) && path.isFailed()) {
-                // An identical request inside ActionPack's cooldown is not a failed route: it means
-                // "the plan you already have stands".  Treating it as a failure drove the
-                // straight-line fallback and ~1,090 one-node walk_complete spins in the session
-                // log.  Keep whatever is running; when nothing is, just retry once the cooldown ends.
-                nextRepathTick = elapsed + THROTTLED_RETRY_TICKS;
-                if (pathIdle && walkIdle) {
-                    repathBackoff = true;
-                    waiting = true;
-                } else {
-                    waiting = false;
-                }
-                return;
-            }
-            if (!path.isFailed()) {
-                // A route exists again: a later loss of it is a new no-route episode worth announcing.
-                noRouteAnnounced = false;
-                repeatedFailures.reset();
-                if (pack.activePathGoal() != null && pack.activePathGoal().equals(bot.blockPosition())) {
-                    // The goal resolved onto the very cell the bot stands in (the nearest standable
-                    // cell to the stand-off point IS this one): a zero-length route that "completes"
-                    // instantly and would be re-requested every tick.  This is as close as ordinary
-                    // walking gets; hold here and re-evaluate on the normal schedule.
-                    pack.stopNavigation();
-                    BotLog.action(bot, "follow_at_nearest_standable",
-                            "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.blockPosition()),
-                            "stand_near", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
-                    repathBackoff = true;
-                    holdTargetPos = target.blockPosition().immutable();
-                    nextHoldReevalTick = elapsed + THROTTLED_RETRY_TICKS;
-                    waiting = true;
-                    return;
-                }
-                repathBackoff = false;
-                waiting = false;
-                return;
-            }
-
-            // A failed route must not recreate WalkToController every tick: doing so resets its
-            // progress/stuck accounting forever.  Keep an existing walker alive, otherwise use a
-            // short, bounded fallback and wait to replan when the target is too far away.
-            if (!walkIdle) {
-                waiting = false;
-                return;
-            }
-            if (distance <= MAX_DIRECT_FALLBACK_DISTANCE) {
-                FollowDirectWalk.Verdict verdict = FollowDirectWalk.verify(
-                        bot.level(), bot.blockPosition(), standNear);
-                if (verdict.safe()) {
-                    directWalkCount++;
-                    BotLog.action(bot, "follow_direct_walk",
-                            "reason", "path_failed:" + path.reason(),
-                            "verified", verdict.reason(),
-                            "to", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
-                    pack.startWalkTo(standNear.getCenter());
-                    repeatedFailures.reset();
-                    repathBackoff = false;
-                    waiting = false;
-                    return;
-                }
-                BotLog.action(bot, "follow_direct_walk_refused",
-                        "reason", verdict.reason(),
-                        "path_reason", path.reason(),
-                        "to", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
-            }
-            pack.stopNavigation();
-            repathBackoff = true;
-            waiting = true;
-            if (FollowNoRoute.isGenuine(path.reason())) {
-                repeatedFailures.reset();
-                announceNoRoute(bot, standNear, path.reason(), FollowNoRoute.messageFor(path.reason()));
-            } else if (repeatedFailures.recordFailure(elapsed)) {
-                // Budget/transient/unstandable-goal failures alone say nothing definite, but a follower that keeps failing
-                // to plan for 10+ seconds owes the player one honest line (specific for an unstandable goal, else generic).
-                announceNoRoute(bot, standNear, path.reason(), FollowNoRoute.messageFor(path.reason()));
-            }
-            return;
-        }
-
-        // A completed/failed controller waits for the scheduled replan rather than looking active
-        // while idle.  This is intentional reacquisition, so StuckWatcher must not abort it.
-        waiting = pathIdle && walkIdle;
+        // An unavailable/refused Baritone route is a visible follow hold, never a second
+        // navigator. The swimming branch above retains its bounded physical safety moves.
+        followLandBaritone(bot, target);
     }
 
     /**

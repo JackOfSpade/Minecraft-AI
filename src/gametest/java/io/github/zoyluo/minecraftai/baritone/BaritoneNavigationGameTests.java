@@ -1,9 +1,6 @@
 package io.github.zoyluo.minecraftai.baritone;
 
 import baritone.api.IBaritone;
-import baritone.api.pathing.goals.Goal;
-import baritone.api.pathing.goals.GoalBlock;
-import baritone.api.pathing.goals.GoalNear;
 import baritone.api.utils.input.Input;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
@@ -12,6 +9,8 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavOutcome;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,11 +39,11 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * End-to-end navigation: real bots on real (built) terrain are given a {@code GoalNear}/{@code GoalBlock} through Baritone's
- * {@code CustomGoalProcess} and must get there by Baritone's own execution, driven through the mod's input and look bridge
- * ({@link BaritoneDriver}): walking and sprinting, a wall that has to be walked around, a step up and a drop, a closed wooden
- * door, a ladder, a gap that has to be bridged and a column that has to be pillared (only when placing is allowed), a wall
- * that has to be broken through with the right tool, and the hand-over with the legacy action executor.
+ * End-to-end navigation: real bots on real (built) terrain are given observed block/near goals through the production
+ * navigator and must get there by Baritone's own execution, driven through the mod's input and look bridge
+ * ({@link BaritoneDriver}): walking and sprinting, a wall that has to be walked around, and a step up and a drop. Goals
+ * deliberately hidden behind doors, cliffs, solid walls, or unsupported air are instead pinned as strict observation
+ * refusals; an observed gap remains the placement exercise. Public ActionPack route replacement is covered too.
  *
  * <p>Every course is sealed by a bedrock ring, so the only ways to the goal are the ones the test builds. Every course gets
  * its own world slab (17 blocks apart in height), because all tests of a batch run at once and their structures overlap in
@@ -69,13 +68,15 @@ public final class BaritoneNavigationGameTests {
     public void walksTwentyBlocksOnFlatGroundAndSprintsThere(GameTestHelper context) {
         Course c = Course.begin(context, "NavFlatGT", 0, -2, 24, 4);
         c.snapshot();
-        BlockPos goal = c.feet.offset(20, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        // Keep the direct walking fixture within the honest observation radius. Long-range
+        // navigation is exercised through the public waypoint/ActionPack routes below.
+        BlockPos goal = c.feet.offset(12, 0, 0);
+        c.goalNear(goal, 1);
         c.await(300, run -> {
             run.requireNear(goal, 1.6, 0.6, "flat walk");
-            require(context, run.ticks <= 200, "20 blocks took " + run.ticks + " ticks");
-            require(context, run.sprintTicks >= 20, "the bot sprinted for only " + run.sprintTicks + " ticks");
-            double speed = 20.0D / Math.max(1, run.movingTicks) * 20.0D;
+            require(context, run.ticks <= 200, "12 blocks took " + run.ticks + " ticks");
+            require(context, run.sprintTicks >= 12, "the bot sprinted for only " + run.sprintTicks + " ticks");
+            double speed = 12.0D / Math.max(1, run.movingTicks) * 20.0D;
             System.out.println("BARITONE_SPEED flat_walk blocks_per_second=" + String.format("%.2f", speed) + " moving_ticks=" + run.movingTicks);
             require(context, speed > 4.0D && speed < 6.6D, "average speed " + speed + " blocks/s is not that of a walking/sprinting player");
             float yaw = Mth.wrapDegrees(c.bot.getYRot() + 90.0F);
@@ -93,14 +94,10 @@ public final class BaritoneNavigationGameTests {
         }
         c.snapshot();
         BlockPos goal = c.feet.offset(10, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(400, run -> {
-            run.requireNear(goal, 1.6, 0.6, "wall detour");
-            require(context, run.maxZ >= c.feet.getZ() + 3.5, "the bot never used the gap (max z offset " + (run.maxZ - c.feet.getZ()) + ")");
-            require(context, run.trail.stream().noneMatch(p -> Math.abs(p.x - (c.feet.getX() + 5.5)) < 0.8 && p.z < c.feet.getZ() + 3.0),
-                    "the bot went through the wall");
-            run.requireNoEdits();
-        });
+        // The far side is deliberately hidden by the wall. A caller must first choose and reach
+        // a visible observation point at the gap; it may not submit a raw detour goal through
+        // terrain it has never seen.
+        c.expectGoalNearRefusal(goal, 1, NavRoute.Options.WALK_ONLY, "navigation_goal_unobserved");
     }
 
     @GameTest(maxTicks = 500)
@@ -119,52 +116,59 @@ public final class BaritoneNavigationGameTests {
         }
         c.snapshot();
         BlockPos goal = c.feet.offset(12, -2, 0);
-        float health = c.bot.getHealth();
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(400, run -> {
-            run.requireNear(goal, 1.6, 0.8, "step and drop");
-            require(context, run.maxY >= c.feet.getY() + 0.95, "the bot never stood on the step (max y offset " + (run.maxY - c.feet.getY()) + ")");
-            require(context, run.minY <= c.feet.getY() - 1.9, "the bot never reached the lower floor");
-            require(context, c.bot.getHealth() >= health, "the three-block drop cost health: " + health + " -> " + c.bot.getHealth());
-            run.requireNoEdits();
-        });
+        // The lower floor is occluded by the raised step. It must be discovered from a real
+        // intermediate stance rather than inferred from loaded fixture terrain.
+        c.expectGoalNearRefusal(goal, 1, NavRoute.Options.WALK_ONLY, "navigation_goal_unobserved");
     }
 
     @GameTest(maxTicks = 400)
     public void drivenBotTakesVanillaFallDamageAndKeepsGoing(GameTestHelper context) {
         Course c = Course.begin(context, "NavFallGT", 13, -2, 44, 4);
         c.snapshot();
-        BlockPos goal = c.feet.offset(40, 0, 0);
+        BlockPos goal = c.feet.offset(12, 0, 0);
         float health = c.bot.getHealth();
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        // Start after fake-client immunity ends, using a goal inside the honest observation
+        // radius. The former forty-block fixture relied on an unseen long-range target merely
+        // to keep Baritone active through tick 70.
         // A server player only checks a fall when a client's move packet arrives, so a bot that moves on its own gets no fall damage
         // at all; the driver's per-tick check is what applies it. While Baritone is walking the bot, six blocks of accumulated fall
         // distance (what a six-block drop leaves on landing; Baritone cannot be kept busy through a real fall, it gives up on a path
         // that starts in mid-air) must be paid at the next tick on the ground: 6 - 3 safe = 3 hit points, exactly as vanilla.
         int[] tick = {0};
+        int[] injectedAt = {-1};
+        boolean[] routeStarted = {false};
         float[] damageSeen = {0.0F};
         context.onEachTick(() -> {
-            if (++tick[0] == 70) {
-                // A fake-connection bot counts as "client not loaded" (and takes no damage) for its first 60 ticks; wait that out.
-                require(context, c.bot.connection.hasClientLoaded(), "the bot is still protected as a not-yet-loaded client");
-                require(context, BaritoneRegistry.INSTANCE.isBusy(c.bot) && c.bot.onGround(), "the bot is not being driven on the ground at tick 70");
+            int now = ++tick[0];
+            // A fake-connection bot counts as "client not loaded" (and takes no damage) for
+            // its first 60 ticks. Once that period ends, inject only while a visible relay leg
+            // is actively driving on ground; unlike the former fixed tick this does not depend
+            // on a hidden 40-block goal remaining active.
+            if (routeStarted[0] && injectedAt[0] < 0 && now >= 60 && c.bot.connection.hasClientLoaded()
+                    && BaritoneRegistry.INSTANCE.isBusy(c.bot) && c.bot.onGround()) {
                 c.bot.fallDistance = 6.0D;
-            } else if (tick[0] == 72) {
+                injectedAt[0] = now;
+            } else if (injectedAt[0] >= 0 && now == injectedAt[0] + 2) {
                 // The landing check ran in the bot's tick right after the injection; natural regeneration may already have given one point back.
                 damageSeen[0] = health - c.bot.getHealth();
                 require(context, damageSeen[0] >= 2.0F, "six blocks of fall distance must cost 3 hit points, the bot lost " + damageSeen[0]);
             }
         });
-        c.await(300, run -> {
-            run.requireNear(goal, 1.6, 0.6, "walk with a fall");
-            System.out.println("BARITONE_FALL damage_two_ticks_after_landing=" + damageSeen[0]);
-            require(context, c.bot.fallDistance == 0.0D, "the fall distance was not reset by the landing check: " + c.bot.fallDistance);
-            run.requireNoEdits();
+        context.runAfterDelay(61, () -> {
+            routeStarted[0] = true;
+            c.goalNear(goal, 1);
+            c.await(260, run -> {
+                run.requireNear(goal, 1.6, 0.6, "walk with a fall");
+                require(context, injectedAt[0] >= 0, "the bot was never visibly driven after its connection loaded");
+                System.out.println("BARITONE_FALL damage_two_ticks_after_landing=" + damageSeen[0]);
+                require(context, c.bot.fallDistance == 0.0D, "the fall distance was not reset by the landing check: " + c.bot.fallDistance);
+                run.requireNoEdits();
+            });
         });
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Doors and ladders (no placing, no breaking: Baritone may only walk, open and climb)
+    // Doors and ladders: a sealed destination stays unavailable until it has been observed
     // ---------------------------------------------------------------------------------------------------------------
 
     @GameTest(maxTicks = 500)
@@ -176,18 +180,11 @@ public final class BaritoneNavigationGameTests {
         BlockPos door = c.feet.offset(4, 0, 0);
         placeClosedDoor(c.world, door, Blocks.OAK_DOOR.defaultBlockState());
         c.snapshot();
-        BaritoneRegistry.INSTANCE.setPolicy(c.bot, BaritonePolicy.WALK_ONLY);
         BlockPos goal = c.feet.offset(8, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(400, run -> {
-            run.requireNear(goal, 1.6, 0.6, "door");
-            BlockState after = c.world.getBlockState(door);
-            require(context, after.getBlock() instanceof DoorBlock, "the door is gone: " + after);
-            require(context, after.getValue(DoorBlock.OPEN), "the door was not opened by the bot: " + after);
-            require(context, run.trail.stream().anyMatch(p -> Math.abs(p.x - (door.getX() + 0.5)) < 0.5 && Math.abs(p.z - (door.getZ() + 0.5)) < 0.5),
-                    "the bot never stood in the doorway");
-            run.requireNoEdits(); // not placing, not breaking: the door was opened, that is all
-        });
+        // The sealed far side is not yet visible through a closed door. Opening it toward an
+        // unobserved destination would turn the navigator into a wall scanner, so this fixture
+        // pins the strict refusal rather than fabricating a route snapshot behind the door.
+        c.expectGoalNearRefusal(goal, 1, NavRoute.Options.WALK_ONLY, "navigation_goal_unobserved");
     }
 
     @GameTest(maxTicks = 700)
@@ -203,18 +200,14 @@ public final class BaritoneNavigationGameTests {
             c.world.setBlock(c.feet.offset(2, dy, 0), Blocks.LADDER.defaultBlockState().setValue(LadderBlock.FACING, Direction.WEST), Block.UPDATE_ALL);
         }
         c.snapshot();
-        BaritoneRegistry.INSTANCE.setPolicy(c.bot, BaritonePolicy.WALK_ONLY);
         BlockPos goal = c.feet.offset(7, 6, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(600, run -> {
-            run.requireNear(goal, 1.6, 0.6, "ladder");
-            require(context, run.maxY >= c.feet.getY() + 5.9, "the bot never got to the top (max y offset " + (run.maxY - c.feet.getY()) + ")");
-            run.requireNoEdits();
-        });
+        // The platform above the cliff has not been seen from the starting side. The ladder
+        // itself may be visible, but it cannot authorise a route to unseen terrain at its top.
+        c.expectGoalNearRefusal(goal, 1, NavRoute.Options.WALK_ONLY, "navigation_goal_unobserved");
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Placing: bridge a gap, pillar up; only when the policy allows it
+    // Placing: an observed gap may be bridged; a visibly proven vertical column may be pillared
     // ---------------------------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_bridges_gap_when_placing_is_allowed", maxTicks = 1000)
@@ -222,7 +215,7 @@ public final class BaritoneNavigationGameTests {
         Course c = gapCourse(context, "NavBridgeGT", 5);
         c.giveBlocks(Items.COBBLESTONE, 16);
         BlockPos goal = c.feet.offset(10, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        c.goalNear(goal, 1, new NavRoute.Options(false, true, false));
         c.await(900, run -> {
             run.requireNear(goal, 1.6, 0.6, "bridge");
             List<BaritoneEdits.Edit> placed = BaritoneEdits.of(c.bot.getUUID(), BaritoneEdits.Kind.PLACE);
@@ -244,15 +237,11 @@ public final class BaritoneNavigationGameTests {
     public void doesNotBridgeGapWhenPlacingIsForbidden(GameTestHelper context) {
         Course c = gapCourse(context, "NavNoBridgeGT", 6);
         c.giveBlocks(Items.COBBLESTONE, 16);
-        BaritoneRegistry.INSTANCE.setPolicy(c.bot, BaritonePolicy.NO_PLACING);
         BlockPos goal = c.feet.offset(10, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(400, run -> {
-            require(context, c.bot.getX() < c.feet.getX() + 4.0D, "the bot crossed to x offset " + (c.bot.getX() - c.feet.getX()) + " without being allowed to place");
-            require(context, run.minY >= c.feet.getY() - 0.1, "the bot fell into the gap");
-            require(context, c.count(Items.COBBLESTONE) == 16, "blocks were placed although placing is forbidden");
-            run.requireNoEdits();
-        });
+        // Exercise NO_PLACING rather than WALK_ONLY: allowing observed breaking must not turn
+        // a partial path up to this visible gap into a physical fall before any input is sent.
+        c.expectGoalNearRefusal(goal, 1, new NavRoute.Options(true, false, false),
+                "navigation_observed_corridor_unavailable");
     }
 
     @GameTest(maxTicks = 800)
@@ -261,15 +250,25 @@ public final class BaritoneNavigationGameTests {
         c.snapshot();
         c.giveBlocks(Items.COBBLESTONE, 16);
         BlockPos goal = c.feet.offset(0, 4, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
+        // This is a clear, in-range vertical air column over a collision-bearing observed base.
+        // The production fence must prove every future body/place cell by a real eye ray; it may
+        // then permit the one legitimate use of a placement-created stance.
+        c.goalBlock(goal, new NavRoute.Options(false, true, false));
         c.await(700, run -> {
-            require(context, c.bot.getY() >= c.feet.getY() + 3.95, "the bot did not get up: y offset " + (c.bot.getY() - c.feet.getY()));
+            run.requireNear(goal, 0.8D, 0.6D, "pillar");
             List<BaritoneEdits.Edit> placed = BaritoneEdits.of(c.bot.getUUID(), BaritoneEdits.Kind.PLACE);
-            Set<BlockPos> cells = new HashSet<>();
-            placed.forEach(edit -> cells.add(edit.pos()));
-            for (int dy = 0; dy <= 3; dy++) {
-                require(context, cells.contains(c.feet.offset(0, dy, 0)), "no block was placed at y offset " + dy + ": " + placed);
+            require(context, placed.size() >= 4 && placed.size() <= 6,
+                    "four-block pillar should use 4-6 placements, got " + placed.size() + ": " + placed);
+            for (BaritoneEdits.Edit edit : placed) {
+                require(context, edit.pos().getX() == c.feet.getX() && edit.pos().getZ() == c.feet.getZ()
+                                && edit.pos().getY() >= c.feet.getY() && edit.pos().getY() < goal.getY(),
+                        "pillar placed outside its ray-proven column: " + edit);
+                require(context, edit.block().equals("minecraft:cobblestone"), "pillar placed " + edit.block());
             }
+            require(context, BaritoneEdits.of(c.bot.getUUID(), BaritoneEdits.Kind.BREAK).isEmpty(),
+                    "something was broken while pillaring");
+            require(context, c.count(Items.COBBLESTONE) == 16 - placed.size(),
+                    "inventory lost " + (16 - c.count(Items.COBBLESTONE)) + " blocks for " + placed.size() + " placements");
             run.requireEditsExplainTheWorldDiff();
             run.requireLogged("place", placed.size());
         });
@@ -280,29 +279,22 @@ public final class BaritoneNavigationGameTests {
         Course c = Course.begin(context, "NavNoPillarGT", 8, -3, 3, 3);
         c.snapshot();
         c.giveBlocks(Items.COBBLESTONE, 16);
-        BaritoneRegistry.INSTANCE.setPolicy(c.bot, BaritonePolicy.NO_PLACING);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(c.feet.offset(0, 4, 0)));
-        c.await(300, run -> {
-            require(context, c.bot.getY() < c.feet.getY() + 1.0D, "the bot got up to y offset " + (c.bot.getY() - c.feet.getY()) + " without placing");
-            require(context, c.count(Items.COBBLESTONE) == 16, "blocks were placed although placing is forbidden");
-            run.requireNoEdits();
-        });
+        // The same visible air is still not a stance when the route is not allowed to create
+        // the footing. This keeps the no-invented-support refusal beside the positive column.
+        c.expectGoalBlockRefusal(c.feet.offset(0, 4, 0), NavRoute.Options.WALK_ONLY,
+                "navigation_goal_without_observed_stance");
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Breaking: through MiningController, with the right tool
+    // Breaking: a hidden far-side goal must not turn into an inferred tunnel
     // ---------------------------------------------------------------------------------------------------------------
 
     @GameTest(maxTicks = 1000)
     public void breaksThroughWallWithThePickaxeAndEveryBreakGoesThroughMiningController(GameTestHelper context) {
         Course c = Course.begin(context, "NavBreakGT", 9, -2, 14, 3);
-        Set<BlockPos> wall = new HashSet<>();
         for (int dx = 4; dx <= 6; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 c.fill(dx, dz, Blocks.STONE, 0, 3);
-                for (int dy = 0; dy <= 3; dy++) {
-                    wall.add(c.feet.offset(dx, dy, dz));
-                }
             }
         }
         c.snapshot();
@@ -310,25 +302,12 @@ public final class BaritoneNavigationGameTests {
         c.bot.getInventory().setItem(0, new ItemStack(Items.WOODEN_SHOVEL));
         c.bot.getInventory().setItem(1, new ItemStack(Items.IRON_PICKAXE));
         c.bot.getInventory().setSelectedSlot(0);
-        BaritoneRegistry.INSTANCE.setPolicy(c.bot, BaritonePolicy.NO_PLACING);
         BlockPos goal = c.feet.offset(10, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(900, run -> {
-            run.requireNear(goal, 1.6, 0.6, "break through");
-            List<BaritoneEdits.Edit> breaks = BaritoneEdits.of(c.bot.getUUID(), BaritoneEdits.Kind.BREAK);
-            System.out.println("BARITONE_BREAKS " + breaks);
-            require(context, breaks.size() >= 6 && breaks.size() <= 10, "a 3-thick, 2-high tunnel is 6 cells; " + breaks.size() + " were broken: " + breaks);
-            for (BaritoneEdits.Edit edit : breaks) {
-                require(context, wall.contains(edit.pos()), "a block outside the wall was broken: " + edit);
-                require(context, edit.block().equals("minecraft:stone"), "broke " + edit.block());
-                require(context, edit.tool().equals("minecraft:iron_pickaxe"), "broke " + edit.block() + " with " + edit.tool() + " instead of the pickaxe");
-                require(context, edit.ticks() >= 1, "a break that took no time: " + edit);
-            }
-            require(context, BaritoneEdits.of(c.bot.getUUID(), BaritoneEdits.Kind.PLACE).isEmpty(), "something was placed although placing is forbidden");
-            run.requireEditsExplainTheWorldDiff();
-            run.requireLogged("mine_start", breaks.size());
-            run.requireLogged("mine_complete", breaks.size());
-        });
+        // The far side of a three-thick wall is intentionally hidden. A break-capable request
+        // must not tunnel toward it merely because the chunks are loaded; dedicated observed
+        // mining/controller tests cover the exposed-block path separately.
+        c.expectGoalNearRefusal(goal, 1, new NavRoute.Options(true, false, false),
+                "navigation_goal_unobserved");
     }
 
     @GameTest(maxTicks = 20)
@@ -349,11 +328,11 @@ public final class BaritoneNavigationGameTests {
             require(context, c.bot.getInventory().getSelectedSlot() == 0, "the driven controller changed the tool to slot " + c.bot.getInventory().getSelectedSlot());
             driven.abort(c.bot);
 
-            MiningController legacy = new MiningController(target, Direction.WEST);
-            legacy.tick(pack);
-            require(context, Math.abs(Mth.wrapDegrees(c.bot.getYRot() + 90.0F)) < 5.0F, "the legacy controller did not aim at the block: yaw " + c.bot.getYRot());
-            require(context, c.bot.getInventory().getSelectedSlot() == 1, "the legacy controller did not pick the pickaxe: slot " + c.bot.getInventory().getSelectedSlot());
-            legacy.abort(c.bot);
+            MiningController ordinary = new MiningController(target, Direction.WEST);
+            ordinary.tick(pack);
+            require(context, Math.abs(Mth.wrapDegrees(c.bot.getYRot() + 90.0F)) < 5.0F, "the ordinary controller did not aim at the block: yaw " + c.bot.getYRot());
+            require(context, c.bot.getInventory().getSelectedSlot() == 1, "the ordinary controller did not pick the pickaxe: slot " + c.bot.getInventory().getSelectedSlot());
+            ordinary.abort(c.bot);
         } finally {
             AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
         }
@@ -361,87 +340,109 @@ public final class BaritoneNavigationGameTests {
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // The legacy executor and Baritone take turns
+    // Public ActionPack navigation remains Baritone-owned
     // ---------------------------------------------------------------------------------------------------------------
 
     @GameTest(maxTicks = 500)
-    public void legacyNavigationStillWorksWhileBaritoneInstanceIsIdle(GameTestHelper context) {
-        Course c = Course.begin(context, "NavLegacyGT", 11, -2, 14, 5);
+    public void ordinaryActionPackRoutesStayBaritoneOwned(GameTestHelper context) {
+        Course c = Course.begin(context, "NavActionPackGT", 11, -2, 14, 5);
         c.snapshot();
         ActionPack pack = c.bot.getActionPack();
         BlockPos first = c.feet.offset(8, 0, 3);
         BlockPos second = c.feet.offset(1, 0, -2);
         ActionResult started = pack.startPathTo(first);
-        require(context, started == ActionResult.IN_PROGRESS, "the legacy path did not start: " + started);
+        require(context, started == ActionResult.IN_PROGRESS && pack.hasBaritoneRoute()
+                        && BaritoneRegistry.INSTANCE.find(c.bot.getUUID()) != null,
+                "the initial ActionPack path did not start on Baritone: " + started);
+        require(context, pack.isWalkToIdle() && pack.isMiningIdle(),
+                "an ordinary controller started beside the initial Baritone route");
         int[] phase = {0};
         int[] ticks = {0};
         context.onEachTick(() -> {
             ticks[0]++;
-            require(context, !BaritoneRegistry.INSTANCE.isBusy(c.bot), "an idle Baritone instance claims the bot");
-            if (phase[0] == 0 && pack.isPathExecutorIdle()) {
-                require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(first)) < 1.5, "the legacy path ended at " + c.bot.position());
-                phase[0] = 1;
-                ActionResult walk = pack.startWalkTo(Vec3.atBottomCenterOf(second));
-                require(context, walk == ActionResult.IN_PROGRESS, "the legacy walk did not start: " + walk);
-            } else if (phase[0] == 1 && pack.isWalkToIdle()) {
-                require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(second)) < 1.5, "the legacy walk ended at " + c.bot.position());
+            try {
+                require(context, pack.isWalkToIdle() && pack.isMiningIdle(),
+                        "an ordinary controller wrote while a Baritone route was active");
+                if (phase[0] == 0 && !pack.hasBaritoneRoute()) {
+                    require(context, succeeded(pack), "the first ActionPack Baritone route ended as " + pack.lastRouteOutcome());
+                    require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(first)) < 1.5,
+                            "the first ActionPack route ended at " + c.bot.position());
+                    ActionResult walk = pack.startWalkTo(Vec3.atBottomCenterOf(second));
+                    require(context, walk == ActionResult.IN_PROGRESS && pack.hasBaritoneRoute(),
+                            "the second ActionPack route did not start on Baritone: " + walk);
+                    phase[0] = 1;
+                } else if (phase[0] == 1 && !pack.hasBaritoneRoute()) {
+                    require(context, succeeded(pack), "the second ActionPack Baritone route ended as " + pack.lastRouteOutcome());
+                    require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(second)) < 1.5,
+                            "the second ActionPack route ended at " + c.bot.position());
+                    require(context, pack.isPathExecutorIdle(), "a local path executor survived after the Baritone route ended");
+                    phase[0] = 2;
+                    AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
+                    context.succeed();
+                } else if (ticks[0] > 400 && phase[0] < 2) {
+                    require(context, false, "ActionPack Baritone navigation stalled in phase " + phase[0] + " at " + c.bot.position());
+                }
+            } catch (RuntimeException failure) {
                 AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
-                context.succeed();
-                phase[0] = 2;
-            } else if (ticks[0] > 400 && phase[0] < 2) {
-                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
-                require(context, false, "legacy navigation stalled in phase " + phase[0] + " at " + c.bot.position());
+                throw failure;
             }
         });
     }
 
     @GameTest(maxTicks = 700)
-    public void controlChangesHandsBetweenBaritoneAndLegacyExecutorWithSingleWriter(GameTestHelper context) {
-        Course c = Course.begin(context, "NavHandGT", 12, -2, 26, 4);
+    public void actionPackRegoalsStayBaritoneOwnedWithSingleWriter(GameTestHelper context) {
+        Course c = Course.begin(context, "NavReGoalGT", 12, -2, 26, 4);
         c.snapshot();
         ActionPack pack = c.bot.getActionPack();
-        BlockPos far = c.feet.offset(22, 0, 0);
+        BlockPos far = c.feet.offset(12, 0, 0);
         BlockPos back = c.feet.offset(2, 0, 0);
-        BlockPos again = c.feet.offset(12, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(far, 1));
+        BlockPos again = c.feet.offset(10, 0, 0);
+        ActionResult started = pack.startPathTo(far);
+        require(context, started == ActionResult.IN_PROGRESS && pack.hasBaritoneRoute(),
+                "the first ActionPack Baritone route did not start: " + started);
         int[] phase = {0};
         int[] ticks = {0};
         int[] driven = {0};
         context.onEachTick(() -> {
             ticks[0]++;
             boolean baritoneDrives = BaritoneRegistry.INSTANCE.isBusy(c.bot);
-            boolean legacyActs = !pack.isPathExecutorIdle() || !pack.isWalkToIdle() || !pack.isMiningIdle();
-            require(context, !(baritoneDrives && legacyActs), "two writers at tick " + ticks[0] + " phase " + phase[0]);
             try {
+                require(context, !(baritoneDrives && (!pack.isWalkToIdle() || !pack.isMiningIdle())),
+                        "an ordinary controller wrote beside Baritone at tick " + ticks[0] + " phase " + phase[0]);
                 switch (phase[0]) {
                     case 0 -> { // Baritone runs east
-                        // Counted from the first tick Baritone executes a path, not from setGoalAndPath: the path itself is
-                        // computed on Baritone's own thread in wall-clock time, and the GameTest server runs ticks back to back,
-                        // so under load 25 busy ticks could pass before any path existed (one full-suite run: x offset 0.5).
+                        // Count from the first execution tick, rather than from route submission: planning happens on a worker
+                        // while the GameTest server runs ticks back to back.
                         if (baritoneDrives && c.baritone.getPathingBehavior().isPathing()) {
                             driven[0]++;
                         }
                         if (driven[0] == 25) {
                             require(context, c.bot.getX() > c.feet.getX() + 3.0D, "Baritone did not get the bot moving: x offset " + (c.bot.getX() - c.feet.getX()));
-                            // The legacy executor is given an order: it takes the bot, Baritone stops.
-                            pack.startWalkTo(Vec3.atBottomCenterOf(back));
-                            require(context, !BaritoneRegistry.INSTANCE.isBusy(c.bot), "Baritone still busy right after the legacy order");
-                            require(context, !c.baritone.getCustomGoalProcess().isActive() && !c.baritone.getPathingBehavior().isPathing(),
-                                    "Baritone kept its goal process or path after being preempted");
+                            ActionResult reGoal = pack.startWalkTo(Vec3.atBottomCenterOf(back));
+                            require(context, reGoal == ActionResult.IN_PROGRESS && pack.hasBaritoneRoute(),
+                                    "the ActionPack re-goal did not start on Baritone: " + reGoal);
+                            require(context, pack.isWalkToIdle() && pack.isMiningIdle(),
+                                    "the ActionPack re-goal started an ordinary controller");
                             phase[0] = 1;
                         }
                     }
-                    case 1 -> { // the legacy walk runs back
-                        require(context, !baritoneDrives, "Baritone took the bot back on its own");
-                        if (pack.isWalkToIdle()) {
-                            require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(back)) < 1.5, "the legacy walk ended at " + c.bot.position());
-                            c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(again, 1));
+                    case 1 -> { // Baritone completes the re-goal
+                        if (!pack.hasBaritoneRoute()) {
+                            require(context, succeeded(pack), "the ActionPack re-goal ended as " + pack.lastRouteOutcome());
+                            require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(back)) < 1.5,
+                                    "the ActionPack re-goal ended at " + c.bot.position());
+                            ActionResult finalGoal = pack.startPathTo(again);
+                            require(context, finalGoal == ActionResult.IN_PROGRESS && pack.hasBaritoneRoute(),
+                                    "the final ActionPack route did not start on Baritone: " + finalGoal);
                             phase[0] = 2;
                         }
                     }
-                    case 2 -> { // Baritone again
-                        if (!baritoneDrives) {
-                            require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(again)) < 1.6, "Baritone's second run ended at " + c.bot.position());
+                    case 2 -> { // Baritone completes the final route
+                        if (!pack.hasBaritoneRoute()) {
+                            require(context, succeeded(pack), "the final ActionPack route ended as " + pack.lastRouteOutcome());
+                            require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(again)) < 1.6,
+                                    "the final ActionPack route ended at " + c.bot.position());
+                            require(context, pack.isPathExecutorIdle(), "a local path executor survived after the final Baritone route");
                             require(context, !c.bot.isSprinting() && c.bot.zza == 0.0F, "the inputs were not released at the end");
                             phase[0] = 3;
                             AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
@@ -461,29 +462,29 @@ public final class BaritoneNavigationGameTests {
     }
 
     /**
-     * A linkage failure that escapes a Baritone call in the middle of a driven tick (the seam raises a {@link NoClassDefFoundError}
-     * exactly where Baritone would): the bot's tick completes (the server does not die of it), Baritone is retired for the session
-     * and every instance torn down, and the bot's next order is carried out by the legacy executor, which gets the bot in the
-     * same tick the driver gave up. The two fixtures deliberately cover both contained driver halves: before-physics returns to
-     * the ordinary scheduler branch, while after-physics returns false to the driven branch's same-tick legacy fallback.
+     * A linkage failure inside a driven tick is contained: the bot survives, Baritone is retired for the session, the active
+     * route ends with a typed unavailable outcome, and later navigation refuses rather than starting the removed local navigator.
+     * The fixtures cover both contained driver halves.
      */
-    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_a_linkage_failure_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy", maxTicks = 500)
-    public void aLinkageFailureInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy(GameTestHelper context) {
-        linkageFailureInsideADrivenTick(context, "NavFaultPreGT", "before_physics");
+    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_a_linkage_failure_inside_adriven_tick_stops_navigation", maxTicks = 500)
+    public void aLinkageFailureInsideADrivenTickStopsNavigation(GameTestHelper context) {
+        linkageFailureInsideADrivenTickStopsNavigation(context, "NavFaultPreGT", "before_physics");
     }
 
-    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_a_linkage_failure_after_physics_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy", maxTicks = 500)
-    public void aLinkageFailureAfterPhysicsInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy(GameTestHelper context) {
-        linkageFailureInsideADrivenTick(context, "NavFaultPostGT", "after_physics");
+    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_a_linkage_failure_after_physics_inside_adriven_tick_stops_navigation", maxTicks = 500)
+    public void aLinkageFailureAfterPhysicsInsideADrivenTickStopsNavigation(GameTestHelper context) {
+        linkageFailureInsideADrivenTickStopsNavigation(context, "NavFaultPostGT", "after_physics");
     }
 
-    private void linkageFailureInsideADrivenTick(GameTestHelper context, String botName, String faultPhase) {
+    private void linkageFailureInsideADrivenTickStopsNavigation(GameTestHelper context, String botName, String faultPhase) {
         Course c = Course.begin(context, botName, 0, -2, 30, 4);
         c.snapshot();
         ActionPack pack = c.bot.getActionPack();
-        BlockPos far = c.feet.offset(26, 0, 0);
-        BlockPos legacyGoal = c.feet.offset(10, 0, 2);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(far, 1));
+        BlockPos far = c.feet.offset(12, 0, 0);
+        BlockPos retryGoal = c.feet.offset(7, 0, 2);
+        ActionResult started = pack.startPathTo(far);
+        require(context, started == ActionResult.IN_PROGRESS && pack.hasBaritoneRoute(),
+                "the failure fixture did not start a Baritone route: " + started);
         // Whatever happens, neither the fault nor the failure flag is left behind for the tests that follow.
         context.runAfterDelay(480, () -> {
             BaritoneDriver.testFault = null;
@@ -502,9 +503,7 @@ public final class BaritoneNavigationGameTests {
                         }
                         if (driven[0] == 12) {
                             require(context, NavEngineSelector.baritoneActive(), "fixture: Baritone is not active");
-                            // Exercise exactly one contained driver half. beforePhysics returns false to the
-                            // ordinary scheduler branch; afterPhysics returns false to the driven branch's
-                            // same-tick legacy fallback. Both must retire Baritone without killing the bot.
+                            // Exercise exactly one contained driver half. Both must retire Baritone without killing the bot.
                             BaritoneDriver.testFault = where -> {
                                 if (where.equals(faultPhase)) {
                                     throw new NoClassDefFoundError("baritone/pathing/movement/MovementHelper");
@@ -520,22 +519,32 @@ public final class BaritoneNavigationGameTests {
                             require(context, !NavEngineSelector.baritoneActive(), "Baritone is still active after a linkage failure");
                             require(context, BaritoneRegistry.INSTANCE.find(c.bot.getUUID()) == null, "the instance outlived the failure");
                             require(context, !BaritoneRegistry.INSTANCE.isBusy(c.bot), "Baritone still drives the bot");
-                            ActionResult started = pack.startPathTo(legacyGoal);
-                            require(context, started.isInProgress() && !pack.hasBaritoneRoute() && !pack.isPathExecutorIdle(),
-                                    "the legacy executor did not take the order: " + started.status() + " " + started.reason());
+                            require(context, !pack.hasBaritoneRoute() && pack.isPathExecutorIdle()
+                                            && pack.isWalkToIdle() && pack.isMiningIdle(),
+                                    "the failed route left a navigation controller behind");
+                            NavOutcome outcome = pack.lastRouteOutcome();
+                            require(context, outcome != null && outcome.status() == NavOutcome.Status.FAILED
+                                            && "baritone_unavailable".equals(outcome.reason()),
+                                    "the Baritone route did not end as unavailable: " + outcome);
+                            ActionResult refused = pack.startPathTo(retryGoal);
+                            require(context, !refused.isInProgress() && "baritone_unavailable".equals(refused.reason())
+                                            && !pack.hasBaritoneRoute() && pack.isPathExecutorIdle(),
+                                    "a later navigation request did not fail closed: " + refused.status() + " " + refused.reason());
                             phase[0] = 2;
                         }
                     }
                     case 2 -> {
-                        require(context, BaritoneRegistry.INSTANCE.size() == 0, "something created a Baritone instance after the failure");
-                        if (pack.isPathExecutorIdle()) {
-                            require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(legacyGoal)) < 1.6,
-                                    "the legacy route ended at " + c.bot.position());
-                            phase[0] = 3;
-                            NavEngineSelector.clearFailureForTests();
-                            AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
-                            context.succeed();
-                        }
+                        require(context, BaritoneRegistry.INSTANCE.find(c.bot.getUUID()) == null,
+                                "a Baritone instance reappeared after the failure");
+                        require(context, !pack.hasBaritoneRoute() && pack.isPathExecutorIdle()
+                                        && pack.isWalkToIdle() && pack.isMiningIdle(),
+                                "navigation resumed after the Baritone failure");
+                        require(context, c.bot.zza == 0.0F && c.bot.xxa == 0.0F && !c.bot.isSprinting(),
+                                "navigation inputs were not released after the Baritone failure");
+                        phase[0] = 3;
+                        NavEngineSelector.clearFailureForTests();
+                        AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
+                        context.succeed();
                     }
                     default -> { }
                 }
@@ -579,6 +588,11 @@ public final class BaritoneNavigationGameTests {
 
     private static void require(GameTestHelper context, boolean condition, String message) {
         BaritoneServerGameTests.require(context, condition, message);
+    }
+
+    private static boolean succeeded(ActionPack pack) {
+        NavOutcome outcome = pack.lastRouteOutcome();
+        return outcome != null && outcome.status() == NavOutcome.Status.SUCCESS;
     }
 
     /** A sealed, flat course with one bot and its Baritone instance; the test builds its obstacles on it. */
@@ -633,6 +647,56 @@ public final class BaritoneNavigationGameTests {
 
         void set(int dx, int dy, int dz, Block block) {
             world.setBlock(feet.offset(dx, dy, dz), block.defaultBlockState(), Block.UPDATE_ALL);
+        }
+
+        void goalNear(BlockPos goal, int radius) {
+            goalNear(goal, radius, NavRoute.Options.WALK_ONLY);
+        }
+
+        void goalNear(BlockPos goal, int radius, NavRoute.Options options) {
+            ObservedBaritoneTestRoutes.near(bot, goal, radius, options, "gametest_" + name);
+        }
+
+        void goalBlock(BlockPos goal) {
+            goalBlock(goal, NavRoute.Options.WALK_ONLY);
+        }
+
+        void goalBlock(BlockPos goal, NavRoute.Options options) {
+            ObservedBaritoneTestRoutes.block(bot, goal, options, "gametest_" + name);
+        }
+
+        BaritoneNavigator.Admission admitGoalNear(BlockPos goal, int radius, NavRoute.Options options) {
+            return ObservedBaritoneTestRoutes.admitNear(bot, goal, radius, options, "gametest_" + name);
+        }
+
+        BaritoneNavigator.Admission admitGoalBlock(BlockPos goal, NavRoute.Options options) {
+            return ObservedBaritoneTestRoutes.admitBlock(bot, goal, options, "gametest_" + name);
+        }
+
+        /** Verifies that a deliberately hidden fixture goal fails at the production observation boundary. */
+        void expectGoalNearRefusal(BlockPos goal, int radius, NavRoute.Options options, String expectedReason) {
+            expectRefusal(admitGoalNear(goal, radius, options), expectedReason, goal);
+        }
+
+        /** Verifies that a target without an actually observed stance cannot invent one by placing blocks. */
+        void expectGoalBlockRefusal(BlockPos goal, NavRoute.Options options, String expectedReason) {
+            expectRefusal(admitGoalBlock(goal, options), expectedReason, goal);
+        }
+
+        private void expectRefusal(BaritoneNavigator.Admission admission, String expectedReason, BlockPos goal) {
+            try {
+                require(context, !admission.accepted(), name + ": hidden goal was admitted: " + goal);
+                require(context, expectedReason.equals(admission.failure()), name + ": hidden goal " + goal
+                        + " was refused as " + admission.failure() + ", expected " + expectedReason);
+                require(context, !BaritoneRegistry.INSTANCE.isBusy(bot), name + ": a refused goal still drives the bot");
+                new Run(this).requireNoEdits();
+            } finally {
+                AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+                BaritoneCapabilityGameTests.restoreConfig();
+            }
+            require(context, BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null,
+                    "the refused route's Baritone instance outlived the bot");
+            context.succeed();
         }
 
         /** {@code block} in the column at ({@code dx}, {@code dz}) for heights {@code fromDy..toDy}. */

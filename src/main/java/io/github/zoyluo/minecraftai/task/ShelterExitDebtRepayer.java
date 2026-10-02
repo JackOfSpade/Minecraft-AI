@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.HashSet;
 import java.util.Set;
@@ -76,6 +77,14 @@ final class ShelterExitDebtRepayer {
             return true;
         }
         activeShelterEgress = egress;
+        // Every egress cell is durable shelter metadata, not a present-tense terrain fact.  A
+        // cancelled shelter may therefore wait for a visible doorway, but must not turn its
+        // recorded side list into a scan of the world beyond the shell.
+        if (!canObserveEgressEnvelope(bot, egress)) {
+            bot.getActionPack().stopMovement();
+            waiting = true;
+            return true;
+        }
         BlockPos obstruction = firstShelterExitObstruction(bot, egress);
         if (obstruction != null) {
             if (!shelterExitDebt.ownsCurrentPlacement(bot, obstruction)) {
@@ -97,7 +106,11 @@ final class ShelterExitDebtRepayer {
         }
         Standability.clearCache();
         WalkedStep.Kind kind = WalkedStepRules.walkKindFor(egress.getY() - bot.blockPosition().getY());
-        if (!Standability.isStandable(bot.level(), egress) || kind == null
+        // The destination's feet/head/support were proved above.  Prove every extra validator
+        // cell before WalkedStep reads it too (corners, hop headroom, or a descent column).
+        if (kind == null
+                || !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, egress, kind)
+                || !Standability.isStandable(bot.level(), egress)
                 || WalkedStep.refusal(bot, egress, kind) != null) {
             rejectedShelterEgress.add(egress);
             activeShelterEgress = null;
@@ -106,7 +119,9 @@ final class ShelterExitDebtRepayer {
         }
         // The bot walks out through the opened doorway with its own keys (never placed there); the walk runs over the next ticks.
         WalkedStep next = WalkedStep.begin(bot, egress, kind, "follow_shelter_exit");
-        ActionPack.StepLease lease = bot.getActionPack().runStep(next);
+        ExitStepAdmission admission = new ExitStepAdmission(bot.blockPosition(), egress, kind);
+        ActionPack.StepLease lease = bot.getActionPack().runStep(next,
+                (guardBot, guardedStep) -> canContinueObservedEgressStep(guardBot, guardedStep, admission));
         if (lease == null) {
             // A guarded controller still owns the handoff. Keep this exact egress selected and
             // retry it, rather than marking it bad from another controller's outcome.
@@ -170,6 +185,7 @@ final class ShelterExitDebtRepayer {
         double bestDistance = Double.MAX_VALUE;
         for (BlockPos candidate : shelterExitDebt.egressCandidates()) {
             if (rejectedShelterEgress.contains(candidate)
+                    || !canObserveEgressEnvelope(bot, candidate)
                     || !hasSafeShelterExitSupport(bot, candidate)) {
                 continue;
             }
@@ -185,6 +201,56 @@ final class ShelterExitDebtRepayer {
             }
         }
         return best;
+    }
+
+    /**
+     * State-free proof for every world cell the egress selector and its walked-step validator may
+     * inspect.  The side may be an owned wall (rather than open air), so use cell visibility that
+     * accepts the target block itself as the first ray hit; do not infer openness before reading
+     * its state.
+     */
+    private static boolean canObserveEgressEnvelope(AIPlayerEntity bot, BlockPos egress) {
+        return egress != null
+                && ObservableWorldQuery.canObserveCell(bot, egress)
+                && ObservableWorldQuery.canObserveCell(bot, egress.above())
+                && ObservableWorldQuery.canObserveCell(bot, egress.below());
+    }
+
+    /**
+     * Re-proves the complete visible egress before {@link WalkedStep} performs its next terrain
+     * validation.  A later occlusion or controller relocation therefore releases the guarded
+     * step rather than letting a remembered shelter side retain movement input.
+     */
+    private static boolean canContinueObservedEgressStep(AIPlayerEntity bot, WalkedStep step,
+                                                          ExitStepAdmission admission) {
+        return step.kind() == admission.kind()
+                && step.cell().equals(admission.destination())
+                && withinEgressStepEnvelope(bot.blockPosition(), admission, step.ticks())
+                && canObserveEgressEnvelope(bot, admission.destination())
+                && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, admission.destination(), step.kind());
+    }
+
+    /** No-world-read provenance check matching WalkedStep's narrow first-tick source normalization. */
+    private static boolean withinEgressStepEnvelope(BlockPos feet, ExitStepAdmission admission,
+                                                    int activeStepTicks) {
+        BlockPos origin = admission.origin();
+        BlockPos destination = admission.destination();
+        if (between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getY(), origin.getY(), destination.getY())
+                && between(feet.getZ(), origin.getZ(), destination.getZ())) {
+            return true;
+        }
+        return (admission.kind() == WalkedStep.Kind.FLAT
+                || admission.kind() == WalkedStep.Kind.STEP_UP
+                || admission.kind() == WalkedStep.Kind.STEP_DOWN)
+                && activeStepTicks >= 0 && activeStepTicks <= 1
+                && feet.getX() == origin.getX()
+                && feet.getZ() == origin.getZ()
+                && Math.abs(feet.getY() - origin.getY()) == 1;
+    }
+
+    private static boolean between(int value, int first, int second) {
+        return value >= Math.min(first, second) && value <= Math.max(first, second);
     }
 
     private static BlockPos firstShelterExitObstruction(AIPlayerEntity bot, BlockPos egress) {
@@ -211,6 +277,14 @@ final class ShelterExitDebtRepayer {
         return state.getFluidState().isEmpty()
                 && state.getCollisionShape(world, position).isEmpty()
                 && !Standability.isDangerous(state);
+    }
+
+    /** Immutable provenance held by the ActionPack continuation closure for one exit step. */
+    private record ExitStepAdmission(BlockPos origin, BlockPos destination, WalkedStep.Kind kind) {
+        private ExitStepAdmission {
+            origin = origin.immutable();
+            destination = destination.immutable();
+        }
     }
 
     private void finish(AIPlayerEntity bot) {

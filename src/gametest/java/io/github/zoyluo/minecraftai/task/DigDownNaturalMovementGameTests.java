@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.baritone.BaritoneEdits;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
@@ -69,7 +70,7 @@ public final class DigDownNaturalMovementGameTests {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+        NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
         BotFixtureMoves.place(bot, feet);
         bot.setOnGround(true);
         bot.setHealth(bot.getMaxHealth());
@@ -162,33 +163,36 @@ public final class DigDownNaturalMovementGameTests {
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Dig navigation: straight down through stone by drops, then one block sideways
+    // Historical DigNav compatibility boundary
     // ---------------------------------------------------------------------------------------------------------------
 
     /**
-     * {@code DigNav.digStep} (the dig-through fallback of MoveTask and SmeltTask) digs the cell under the bot and drops into it three
-     * times, then digs and walks one block north: every move is a walked step or a walk, none is a teleport, and it takes no damage.
+     * The old DigNav fallback could turn a target embedded in stone into a blind descent. Its
+     * compatibility adapter now submits only an observed Baritone route, so this unseen target
+     * is refused without a break, a route, or a teleport.
      */
     @GameTest(environment = "minecraftai-gametest:dig_down_natural_movement_game_tests_dig_nav_drops_into_the_hole_it_dug", maxTicks = 1200)
-    public void digNavDropsIntoTheHoleItDug(GameTestHelper context) {
+    public void hiddenDigNavTargetIsRefusedWithoutExcavation(GameTestHelper context) {
         BlockPos start = buildShaftArena(context, 3);
         AIPlayerEntity bot = spawn(context, "DigNavDropGT", start);
         BlockPos target = start.offset(0, -3, -1);
         io.github.zoyluo.minecraftai.action.BlockMiner miner = new io.github.zoyluo.minecraftai.action.BlockMiner();
-        int[] ticks = {0};
-        context.onEachTick(() -> {
-            ticks[0]++;
-            requireUntouched(context, bot, "dig nav, tick " + ticks[0] + " at " + bot.blockPosition().toShortString());
-            require(context, ticks[0] < 1150, "dig nav did not reach its target: at " + bot.blockPosition().toShortString());
-            if (bot.blockPosition().equals(target) && WalkedStep.supported(bot)) {
-                bot.getActionPack().stopAll();
-                NavEngineSelector.clearBotEngine(bot.getUUID());
-                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), bot.getGameProfile().name());
-                context.succeed();
-                return;
-            }
-            require(context, io.github.zoyluo.minecraftai.action.DigNav.digStep(bot, miner, target),
-                    "dig nav gave up at " + bot.blockPosition().toShortString());
+        require(context, !io.github.zoyluo.minecraftai.action.DigNav.digStep(bot, miner, target),
+                "the hidden DigNav target was admitted for movement");
+        require(context, !bot.getActionPack().hasBaritoneRoute(),
+                "the hidden DigNav target left a Baritone route active");
+        require(context, BaritoneEdits.of(bot.getUUID()).isEmpty(),
+                "the hidden DigNav target excavated terrain: " + BaritoneEdits.of(bot.getUUID()));
+        context.runAfterDelay(20, () -> {
+            requireUntouched(context, bot, "hidden DigNav target");
+            require(context, !bot.getActionPack().hasBaritoneRoute(),
+                    "the hidden DigNav target began a route later");
+            require(context, BaritoneEdits.of(bot.getUUID()).isEmpty(),
+                    "the hidden DigNav target later excavated terrain: " + BaritoneEdits.of(bot.getUUID()));
+            bot.getActionPack().stopAll();
+            NavEngineSelector.clearBotEngine(bot.getUUID());
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), bot.getGameProfile().name());
+            context.succeed();
         });
     }
 

@@ -4,7 +4,7 @@
 //   build/baritone-src is compiled as the 'baritone' source set of this project (Mojang names, server classes only:
 //   the classpath is the common Minecraft jar, so any reference to net.minecraft.client fails the build).
 //   The mod source sets depend on its output and it is packed into the mod jar. Upstream's own JUnit 4 tests
-//   run as the 'baritoneTest' source set. See tools/baritone/README.md.
+//   run as the 'baritoneTest' source set. See tools/baritone/patches/.
 
 def baritoneGenerated = layout.buildDirectory.dir('baritone-src')
 

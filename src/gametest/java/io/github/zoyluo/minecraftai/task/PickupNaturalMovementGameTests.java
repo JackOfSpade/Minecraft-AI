@@ -79,7 +79,7 @@ public final class PickupNaturalMovementGameTests {
             AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                             world.getServer(), name, world, Vec3.atBottomCenterOf(where), 0.0F, 0.0F, GameType.SURVIVAL)
                     .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-            NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.LEGACY);
+            NavEngineSelector.setBotEngine(bot.getUUID(), NavEngine.BARITONE);
             BotFixtureMoves.place(bot, where);
             bot.setOnGround(true);
             bot.setHealth(bot.getMaxHealth());
@@ -159,6 +159,7 @@ public final class PickupNaturalMovementGameTests {
         arena.set(3, -2, 0, Blocks.STONE);
         arena.set(3, -1, 0, Blocks.WATER);
         AIPlayerEntity bot = arena.spawn("PickupObsidianWalkGT", arena.at(0, 0, 0));
+        CreateObsidianTask pickup = new CreateObsidianTask(1);
         int[] tick = {0};
         context.onEachTick(() -> {
             tick[0]++;
@@ -170,7 +171,7 @@ public final class PickupNaturalMovementGameTests {
             }
             if (pack.stepIdle() && tick[0] > 2) {
                 // The two-cell gap first (a dry transit cell, then the pool), asked again as long as the bot is not in the pool.
-                boolean started = CreateObsidianTask.stepTowardPickupCell(bot, pool);
+                boolean started = pickup.stepTowardPickupCell(bot, pool);
                 require(context, started, "no pickup step could be started from " + bot.blockPosition().toShortString());
             }
             require(context, tick[0] < 280, "timed out at " + bot.blockPosition().toShortString());

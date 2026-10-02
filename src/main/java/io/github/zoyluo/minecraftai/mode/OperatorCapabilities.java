@@ -7,8 +7,10 @@ public record OperatorCapabilities(
         Boolean manualTeleport
 ) {
     public static OperatorCapabilities defaults() {
-        // Operator is the compatibility profile, so its defaults retain the existing enhanced behavior.
-        return new OperatorCapabilities(true, true, true);
+        // Keep hiddenBlockScan in the record only so older minecraftai.json files parse without
+        // disruption.  The no-cheat capability was retired, so it defaults off and policy denies
+        // it even if an old configuration still spells it true.
+        return new OperatorCapabilities(false, true, true);
     }
 
     public static OperatorCapabilities none() {
@@ -25,7 +27,7 @@ public record OperatorCapabilities(
 
     public boolean enabled(PrivilegedCapability capability) {
         return switch (capability) {
-            case HIDDEN_BLOCK_SCAN -> Boolean.TRUE.equals(hiddenBlockScan);
+            case HIDDEN_BLOCK_SCAN -> false;
             case EMERGENCY_TELEPORT -> Boolean.TRUE.equals(emergencyTeleport);
             case MANUAL_TELEPORT -> Boolean.TRUE.equals(manualTeleport);
         };

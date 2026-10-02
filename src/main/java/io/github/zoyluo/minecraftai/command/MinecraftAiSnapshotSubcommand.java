@@ -69,7 +69,7 @@ public final class MinecraftAiSnapshotSubcommand {
         }
         AIPlayerEntity bot = botOpt.get();
         if (!CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "admin_snapshot").allowed()) {
-            source.sendFailure(Component.literal("[MinecraftAi Snapshot] unavailable in strict_survival; enable operator hiddenBlockScan explicitly"));
+            source.sendFailure(Component.literal("[MinecraftAi Snapshot] unavailable: hidden-world snapshots are retired"));
             return 0;
         }
         ServerLevel world = bot.level();

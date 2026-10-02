@@ -4,14 +4,13 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.event.events.PathEvent;
 import baritone.api.event.listener.AbstractGameEventListener;
-import baritone.api.pathing.goals.GoalBlock;
-import baritone.api.pathing.goals.GoalNear;
 import baritone.api.pathing.goals.GoalRunAway;
 import baritone.api.utils.BlockOptionalMeta;
 import baritone.api.utils.BlockOptionalMetaLookup;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,9 +41,8 @@ import net.minecraft.world.phys.Vec3;
  * wall, bridging, pillaring, a wooden door) live in {@link BaritoneNavigationGameTests} and must keep passing next to these.
  *
  * <ul>
- *   <li>A bed, a chest, a crafting table or a player-built plank wall on the shortest route: Baritone takes the longer open route
- *       (even though breaking through would be cheaper with the axe in the hotbar), and when there is no other route it ends
- *       without a path and without having touched a block.</li>
+ *   <li>A coordinate approach whose target is hidden behind a bed, chest, crafting table, player-built planks, or even natural
+ *       stone is refused before Baritone may use loaded-world knowledge to plan through the wall; no terrain is touched.</li>
  *   <li>The controller, asked directly, refuses to break any of them (and bedrock, a spawner, glass) and a natural stone that the
  *       bot cannot see, and logs it; a visible natural stone is broken.</li>
  *   <li>A placement whose support face is hidden, out of reach, interactive (a chest), of a wrong item or forbidden by the bot's
@@ -89,26 +87,17 @@ public final class BaritoneSurvivalGameTests {
         detourCourse(context, "SurvPlanksGT", 4, (world, at) -> world.setBlock(at, Blocks.OAK_PLANKS.defaultBlockState(), Block.UPDATE_ALL));
     }
 
-    /**
-     * The control of the four tests above: the very same wall, gap and tools with natural stone in the blocked column. Breaking
-     * through is cheaper than the walk to the far gap, so the bot must take the shortcut: what kept it out of the bed, the chest,
-     * the table and the planks is the rule and not the geometry.
-     */
+    /** The natural-stone control: a break-capable request still cannot use a goal hidden behind the wall as a map oracle. */
     @GameTest(maxTicks = 900)
     public void takesTheShortcutThroughNaturalStoneOnTheSameGeometry(GameTestHelper context) {
-        detourCourse(context, "SurvStoneGT", 6, (world, at) -> world.setBlock(at, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL), true);
+        detourCourse(context, "SurvStoneGT", 6, (world, at) -> world.setBlock(at, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL));
     }
 
     /**
-     * A wall with one blocked column (the protected block, two cells deep and two high) at the bot's own row and one open gap far
-     * away. The bot holds an iron axe and pickaxe, so breaking through would be cheaper than the walk: only the rule keeps it out.
+     * A wall with one blocked column (two cells deep and two high) at the bot's own row and one open gap far away. The target is
+     * deliberately hidden behind it, so strict observed navigation must reject the request before searching the loaded course.
      */
     private static void detourCourse(GameTestHelper context, String name, int slab, Filler obstacle) {
-        detourCourse(context, name, slab, obstacle, false);
-    }
-
-    /** {@code control}: the same geometry with a natural block that may be broken; the bot must then take the shortcut. */
-    private static void detourCourse(GameTestHelper context, String name, int slab, Filler obstacle, boolean control) {
         Course c = Course.begin(context, name, slab, -2, 14, HALF_Z);
         for (int dz = -HALF_Z; dz <= HALF_Z; dz++) {
             for (int dx = 5; dx <= 6; dx++) {
@@ -142,22 +131,16 @@ public final class BaritoneSurvivalGameTests {
         c.moveBot(0, -HALF_Z + 1);
         c.snapshot();
         BlockPos goal = c.feet.offset(10, 0, -HALF_Z + 1);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(800, true, run -> {
-            run.requireNear(goal, 1.8, 0.8, control ? "shortcut" : "detour");
-            List<BaritoneEdits.Edit> breaks = BaritoneEdits.of(c.bot.getUUID(), BaritoneEdits.Kind.BREAK);
-            if (control) {
-                require(context, run.maxZ < c.feet.getZ() - HALF_Z + 4.5, "the bot walked to the far gap instead of breaking through (max z offset " + (run.maxZ - c.feet.getZ()) + ")");
-                require(context, breaks.size() >= 4 && breaks.stream().allMatch(edit -> intact.containsKey(edit.pos())),
-                        "expected the four cells of the blocked column to be broken, got " + breaks);
-                run.requireEditsExplainTheWorldDiff();
-                return;
-            }
-            require(context, run.maxZ >= c.feet.getZ() + HALF_Z - 1.5, "the bot never used the open gap (max z offset " + (run.maxZ - c.feet.getZ()) + ")");
+        BaritoneNavigator.Admission admission = admitHiddenWallGoal(c, goal);
+        require(context, !admission.accepted() && "navigation_goal_unobserved".equals(admission.failure()),
+                "the hidden wall goal was not refused by observation admission: " + admission);
+        c.await(20, true, run -> {
+            require(context, run.trail.stream().noneMatch(p -> p.x > c.feet.getX() + 4.6), "the rejected route moved through the wall");
             requireIntact(context, c, intact);
-            require(context, breaks.isEmpty(), "a protected block was broken: " + breaks);
+            require(context, BaritoneEdits.of(c.bot.getUUID()).isEmpty(), "the rejected route edited terrain: " + BaritoneEdits.of(c.bot.getUUID()));
             run.requireEditsExplainTheWorldDiff();
-            require(context, !run.events.contains(PathEvent.CALC_FAILED), "the planner reported a failure although there is a route: " + run.events);
+            require(context, !BaritoneRegistry.INSTANCE.isBusy(c.bot) && !c.baritone.getCustomGoalProcess().isActive(),
+                    "a refused hidden goal left Baritone active: " + c.describe());
         });
     }
 
@@ -205,14 +188,23 @@ public final class BaritoneSurvivalGameTests {
         c.giveTools();
         c.snapshot();
         BlockPos goal = c.feet.offset(10, 0, 0);
-        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
-        c.await(500, false, run -> {
+        BaritoneNavigator.Admission admission = admitHiddenWallGoal(c, goal);
+        require(context, !admission.accepted() && "navigation_goal_unobserved".equals(admission.failure()),
+                "the sealed hidden goal was not refused by observation admission: " + admission);
+        c.await(20, true, run -> {
             require(context, run.trail.stream().noneMatch(p -> p.x > c.feet.getX() + 4.6), "the bot got through the wall");
             requireIntact(context, c, intact);
             require(context, BaritoneEdits.of(c.bot.getUUID()).isEmpty(), "the terrain was edited: " + BaritoneEdits.of(c.bot.getUUID()));
-            require(context, !run.events.contains(PathEvent.AT_GOAL), "Baritone claims to be at the goal: " + run.events);
-            System.out.println("BARITONE_SURVIVAL sealed events=" + run.events + " ended_by_itself=" + run.endedByItself);
+            require(context, !BaritoneRegistry.INSTANCE.isBusy(c.bot) && !c.baritone.getCustomGoalProcess().isActive(),
+                    "a refused hidden goal left Baritone active: " + c.describe());
         });
+    }
+
+    /** Uses the production admission seam, retaining break permission to prove target visibility is the refusal cause. */
+    private static BaritoneNavigator.Admission admitHiddenWallGoal(Course c, BlockPos goal) {
+        NavRoute route = new NavRoute(NavRoute.Shape.NEAR, goal, 1,
+                new NavRoute.Options(true, false, false), "survival_hidden_wall", c.bot.getServer().getTickCount());
+        return BaritoneNavigator.start(c.bot, route, true);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -517,14 +509,18 @@ public final class BaritoneSurvivalGameTests {
 
         BaritoneGoals.Outcome accepted = BaritoneGoals.mineAt(s.bot, visibleOre);
         require(context, accepted.accepted(), "the visible ore was refused: " + accepted);
+        require(context, !s.baritone.getCustomGoalProcess().isActive() && !BaritoneRegistry.INSTANCE.isBusy(s.bot),
+                "a direct observed interaction unexpectedly started a Baritone navigation route");
         int[] ticks = {0};
         context.onEachTick(() -> {
             if (s.done) {
                 return;
             }
             ticks[0]++;
-            boolean busy = BaritoneRegistry.INSTANCE.isBusy(s.bot);
-            if (ticks[0] > 2 && !busy) {
+            // Direct mining is a physical player action admitted by BaritoneGoals; it is not a
+            // long-running Baritone route, so registry "busy" is intentionally false here.
+            // Complete only after the observed target has actually changed in the world.
+            if (s.world.getBlockState(visibleOre).isAir()) {
                 s.done = true;
                 try {
                     List<BaritoneEdits.Edit> breaks = BaritoneEdits.of(s.bot.getUUID(), BaritoneEdits.Kind.BREAK);
@@ -532,6 +528,8 @@ public final class BaritoneSurvivalGameTests {
                             "the visible ore was not broken: " + breaks + " " + BaritoneRefusals.of(s.bot.getUUID()));
                     require(context, s.world.getBlockState(hiddenOre).is(Blocks.DIAMOND_ORE), "the buried ore was touched");
                     require(context, breaks.stream().noneMatch(edit -> edit.pos().equals(hiddenOre)), "the buried ore was broken");
+                    s.requireLogged("mine_start", 1);
+                    s.requireLogged("mine_complete", 1);
                 } finally {
                     s.finish();
                 }
@@ -584,8 +582,9 @@ public final class BaritoneSurvivalGameTests {
     /** Observation as the rules see it, for the test setup's own sanity checks. */
     private static final class Sight {
         static boolean sees(AIPlayerEntity bot, BlockPos pos) {
-            return io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
-                    || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos);
+            return io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlockCellFace(bot, pos)
+                    && (io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
+                    || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos));
         }
     }
 

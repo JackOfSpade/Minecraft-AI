@@ -296,6 +296,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
+        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            RetiredNavigationTask.refuse(bot, "dig_down");
+            fail(RetiredNavigationTask.OBSERVED_TARGET_REQUIRED);
+            return;
+        }
+
         if (invalidCheckpoint) {
             fail("dig_down_invalid_checkpoint");
             return;
