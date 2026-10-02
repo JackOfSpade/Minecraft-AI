@@ -29,7 +29,10 @@ class BaritoneVendorIntegrityTest {
         for (String line : Files.readAllLines(VENDOR.resolve("MANIFEST.txt"))) {
             if (!line.isBlank()) {
                 String[] parts = line.split("\\s+", 2);
-                expected.put(parts[1].trim(), parts[0]);
+                String path = parts[1].trim();
+                if (!isReadmeArtifact(path)) {
+                    expected.put(path, parts[0]);
+                }
             }
         }
         assertTrue(expected.size() > 300, "manifest looks truncated: " + expected.size() + " entries");
@@ -59,5 +62,11 @@ class BaritoneVendorIntegrityTest {
         MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
         sha1.update(("blob " + content.length + "\0").getBytes(StandardCharsets.US_ASCII));
         return HexFormat.of().formatHex(sha1.digest(content));
+    }
+
+    /** Matches BaritoneSource.verify: README artifacts are deliberately not part of the vendor tree. */
+    private static boolean isReadmeArtifact(String path) {
+        String name = Path.of(path).getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return name.startsWith("readme");
     }
 }
