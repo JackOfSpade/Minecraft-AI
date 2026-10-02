@@ -240,4 +240,4 @@ Completion result: `scripts/evidence_run.sh`, `evidence_batch.sh`, `evidence_val
 - No unauthorized P0/P1 control paths remain;
 - The stale-response, cancel, restart, and postcondition suites are all green;
 - The capability matrix can be auto-generated from a pinned manifest;
-- ROADMAP, the installation docs, and the README no longer contradict actual behavior.
+- The installation and project documentation no longer contradict actual behavior.
