@@ -26,7 +26,7 @@ import java.util.stream.Stream;
  * Builds the Baritone source tree that the mod compiles, from the pristine vendored copy:
  *
  * <pre>
- *   third_party/baritone (byte-identical upstream)
+ *   third_party/baritone (byte-identical upstream source files; README artifacts are omitted)
  *     -> copy src/api, src/main, src/test
  *     -> remove everything listed in tools/baritone/exclude.txt
  *     -> add tools/baritone/overlay/** (new files only; a file that shadows upstream must be excluded first)
@@ -94,7 +94,7 @@ public final class BaritoneSource {
 
     // ------------------------------------------------------------------ verify
 
-    /** Recomputes the git blob SHA-1 of every vendored file and compares it with MANIFEST.txt. */
+    /** Recomputes the git blob SHA-1 of every vendored source file and compares it with MANIFEST.txt. */
     private static void verify() throws Exception {
         Path manifest = upstream.resolve("MANIFEST.txt");
         if (!Files.isRegularFile(manifest)) {
@@ -105,7 +105,8 @@ public final class BaritoneSource {
         for (String line : Files.readAllLines(manifest)) {
             if (line.isBlank()) continue;
             String[] p = line.split("\\s+", 2);
-            expected.put(p[1].trim(), p[0]);
+            String path = p[1].trim();
+            if (!isReadmeArtifact(path)) expected.put(path, p[0]);
         }
         List<String> problems = new ArrayList<>();
         for (Map.Entry<String, String> e : expected.entrySet()) {
@@ -130,6 +131,11 @@ public final class BaritoneSource {
                     + "Never edit third_party/baritone: put changes in tools/baritone/patches instead.");
         }
         System.out.println("vendor OK: " + expected.size() + " files match the upstream blob hashes");
+    }
+
+    private static boolean isReadmeArtifact(String path) {
+        String name = Path.of(path).getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return name.startsWith("readme");
     }
 
     private static String blobSha(byte[] content) throws Exception {

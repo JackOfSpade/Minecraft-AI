@@ -5,7 +5,7 @@
 # core.autocrlf the clone uses. Afterwards update third_party/baritone/UPSTREAM.md (tag, commit, tree) by hand.
 set -eu
 CLONE="$1"; REV="$2"; DEST="${3:-$(cd "$(dirname "$0")/../.." && pwd)/third_party/baritone}"
-PATHS="src/api src/main src/launch src/test LICENSE README.md"
+PATHS="src/api src/main src/launch src/test LICENSE"
 COMMIT="$(git -C "$CLONE" rev-parse --verify "$REV^{commit}")"
 mkdir -p "$DEST"
 find "$DEST" -mindepth 1 -maxdepth 1 ! -name UPSTREAM.md -exec rm -rf {} +
