@@ -17,6 +17,7 @@ import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskState;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -93,24 +94,63 @@ public final class NaturalMovementGameTests {
          * request behave like every later one. Results are cached per budget, so the tests' own 50 ms requests are not short-cut.
          */
         private static boolean pathfinderWarm;
+        private static final int WARMUP_ROUTE_LENGTH = 3;
+        private static final int WARMUP_SEARCH_RADIUS = 4;
+        private static final Direction[] WARMUP_DIRECTIONS = {
+                Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
+        };
 
         private static void warmPathfinder(AIPlayerEntity bot, BlockPos where) {
             if (pathfinderWarm) {
                 return;
             }
             ServerLevel level = bot.level();
-            BlockPos goal = where.east(3);
-            if (!Standability.isStandableFresh(level, where) || !Standability.isStandableFresh(level, goal)) {
-                throw new IllegalStateException("warm-up fixture has no standable two-cell route: " + where.toShortString()
-                        + " -> " + goal.toShortString());
+            WarmRoute route = findWarmRoute(level, where);
+            if (route == null) {
+                throw new IllegalStateException("warm-up fixture has no clear standable route near: " + where.toShortString());
             }
-            PathfindingResult walk = new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, false).findPath();
-            PathfindingResult dig = new AStarPathfinder(bot, level, where, goal, 10_000, 5_000L, true, true).findPath();
+            PathfindingResult walk = new AStarPathfinder(bot, level, route.start(), route.goal(), 10_000, 5_000L, true, false).findPath();
+            PathfindingResult dig = new AStarPathfinder(bot, level, route.start(), route.goal(), 10_000, 5_000L, true, true).findPath();
             if (!didRealPathfindingWork(walk) || !didRealPathfindingWork(dig)) {
                 throw new IllegalStateException("warm-up did not search a real route: walk=" + walk.reason() + "/" + walk.nodesExplored()
                         + ", dig=" + dig.reason() + "/" + dig.nodesExplored());
             }
             pathfinderWarm = true;
+        }
+
+        /** Finds a short, intact lane beside a fixture rather than assuming any particular altered spawn cell is usable. */
+        private static WarmRoute findWarmRoute(ServerLevel level, BlockPos around) {
+            for (int radius = 0; radius <= WARMUP_SEARCH_RADIUS; radius++) {
+                for (int dy = -2; dy <= 2; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        for (int dz = -radius; dz <= radius; dz++) {
+                            if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
+                                continue;
+                            }
+                            BlockPos start = around.offset(dx, dy, dz);
+                            for (Direction direction : WARMUP_DIRECTIONS) {
+                                if (!hasStandableLane(level, start, direction)) {
+                                    continue;
+                                }
+                                return new WarmRoute(start, start.relative(direction, WARMUP_ROUTE_LENGTH));
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static boolean hasStandableLane(ServerLevel level, BlockPos start, Direction direction) {
+            for (int distance = 0; distance <= WARMUP_ROUTE_LENGTH; distance++) {
+                if (!Standability.isStandableFresh(level, start.relative(direction, distance))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private record WarmRoute(BlockPos start, BlockPos goal) {
         }
 
         private static boolean didRealPathfindingWork(PathfindingResult result) {

@@ -148,6 +148,10 @@ public final class OreDigNaturalMovementGameTests {
         BlockPos ore = start.east(3).below();
         world.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(ore.east(), Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        // The one-lower upper-lateral work pose west of this ore is a legal route in general,
+        // but this fixture specifically exercises the controlled physical descent. Remove only
+        // that pose's support; the bedrock one block below remains the lower corridor's floor.
+        world.setBlock(ore.west(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         // A broken ore's drop pops up about half a block: walls around the first ore's open top and a roof over the second keep it
         // in its cell or the miner's tunnel, where a walking bot picks it up (a drop that lands on top of a neighbouring block is
         // a pickup scene of its own, covered by the pickup tests).
@@ -176,6 +180,9 @@ public final class OreDigNaturalMovementGameTests {
         BlockPos start = buildArena(context, 4);
         AIPlayerEntity bot = spawn(context, "OreDigWalkGT", start, 270.0F);
         BlockPos landing = buildLedgeScene(context, start);
+        BlockPos ore = start.east(3).below();
+        require(context, OreDigTask.inspectApproachGoalFor(bot, context.getLevel(), ore) == null,
+                "ledge fixture left a legal upper work pose instead of forcing its lower descent");
         OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 2, openCheckpoint(start, 2, Set.of(Blocks.DIAMOND_ORE)));
         task.start(bot);
         int[] ticks = {0};
@@ -310,6 +317,9 @@ public final class OreDigNaturalMovementGameTests {
         BlockPos start = buildArena(context, 7);
         AIPlayerEntity bot = spawn(context, "OreDigPauseGT", start, 270.0F);
         buildLedgeScene(context, start);
+        BlockPos ore = start.east(3).below();
+        require(context, OreDigTask.inspectApproachGoalFor(bot, context.getLevel(), ore) == null,
+                "pause fixture left a legal upper work pose instead of forcing its lower descent");
         OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 2, openCheckpoint(start, 2, Set.of(Blocks.DIAMOND_ORE)));
         task.start(bot);
         int[] phase = {0};

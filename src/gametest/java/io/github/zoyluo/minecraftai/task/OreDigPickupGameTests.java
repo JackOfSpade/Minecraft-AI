@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.entity.TeleportAudit;
 import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
@@ -3545,6 +3546,12 @@ public final class OreDigPickupGameTests {
                 supported, supported.above(), supported.above(2)}) {
             world.setBlock(body, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
+        // A physical STEP_DOWN stays in flight for several world ticks. spawnMiner owns through
+        // start + 3 only, so seal the first unowned cell above each descent column: otherwise a
+        // pre-existing gravity block can fall into this fixture mid-step and falsely look like the
+        // task opened the rejected west column.
+        world.setBlock(unsupported.above(5), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(supported.above(5), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(supported.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
         for (BlockPos blockedApproach : new BlockPos[]{
@@ -3569,9 +3576,16 @@ public final class OreDigPickupGameTests {
         task.tick(bot); // acquire the observed diagonal ore
         TeleportAudit.reset(bot);
         task.tick(bot); // choose north instead of the unsupported preferred west stair (a walked step)
+        require(context, bot.getActionPack().stepInFlightFor(
+                        "ore_dig_stair_descent", supported, WalkedStep.Kind.STEP_DOWN),
+                "stair approach did not start the exact supported north descent");
 
         tickUntil(context, task, bot,
-                () -> encode(supported).equals(task.checkpoint().get("face")),
+                () -> {
+                    require(context, !bot.blockPosition().equals(unsupported),
+                            "stair approach entered the unsupported preferred column");
+                    return encode(supported).equals(task.checkpoint().get("face"));
+                },
                 60, "supported stair descent", () -> {
                     require(context, task.state() == TaskState.RUNNING && bot.blockPosition().equals(supported),
                             "stair approach did not choose its supported alternate: "
@@ -3612,10 +3626,20 @@ public final class OreDigPickupGameTests {
                     ore.below().relative(direction),
                     Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
         }
+        // A one-lower ore may now also have a safe upper-lateral walk-only pose. Mirror the
+        // natural ledge fixture: cap the north/east/south poses and remove the west pose's
+        // support, leaving the factual east lower landing as the only legal approach.
+        for (Direction direction : new Direction[]{
+                Direction.NORTH, Direction.EAST, Direction.SOUTH}) {
+            world.setBlock(ore.above().relative(direction),
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        world.setBlock(ore.west(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
         require(context, Standability.isStandable(world, landing)
                         && !Standability.isStandable(world, start.east())
-                        && ObservableWorldQuery.canObserveBlock(bot, ore),
+                        && ObservableWorldQuery.canObserveBlock(bot, ore)
+                        && OreDigTask.inspectApproachGoalFor(bot, world, ore) == null,
                 "fixture did not expose one strict lower target stair");
 
         Map<String, String> checkpoint = new LinkedHashMap<>(openCheckpoint(

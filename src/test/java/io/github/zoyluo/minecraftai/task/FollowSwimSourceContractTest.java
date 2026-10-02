@@ -31,6 +31,11 @@ final class FollowSwimSourceContractTest {
         String predicateBody = safety.substring(predicate, safety.indexOf("    /**", predicate + 1));
         assertTrue(predicateBody.contains("bot.getAirSupply() <= surfaceAirThreshold(bot)"),
                 "Follow and NavSafetyNet must share the depth-aware rescue threshold");
+        int yieldPredicate = swim.indexOf("private static boolean mustYieldToWaterRescue(AIPlayerEntity bot)");
+        assertTrue(yieldPredicate >= 0);
+        String yieldPredicateBody = swim.substring(yieldPredicate, swim.indexOf("    /**", yieldPredicate + 1));
+        assertTrue(yieldPredicateBody.contains("NavSafetyNet.INSTANCE.rescueStepOwnsMovement(bot)"),
+                "Follow must preserve Nav's live rescue stroke even after the swimmer reaches the surface");
         assertTrue(count(swim, "mustYieldToWaterRescue(bot)") == 3,
                 "swim-after, water exit, and an in-flight step must all yield at the same boundary");
         String swimAfter = body(swim, "private boolean swimAfter", "private boolean ascendWhileSubmerged");
@@ -42,7 +47,15 @@ final class FollowSwimSourceContractTest {
         int yield = swimAfter.indexOf("if (mustYieldToWaterRescue(bot))");
         int renew = swimAfter.indexOf("NavSafetyNet.INSTANCE.renewFollowSwim(bot)");
         String yieldBlock = swimAfter.substring(yield, renew);
-        assertTrue(yieldBlock.contains("clearFollowSwim(bot)") && yieldBlock.contains("stopMovement()"));
+        assertTrue(yieldBlock.contains("yieldMovementToWaterRescue(bot)"),
+                "the low-air yield must delegate its exact ownership handoff to the shared helper");
+        String yieldHelper = body(swim, "private static void yieldMovementToWaterRescue(AIPlayerEntity bot)",
+                "private void clearRoute");
+        int clearFollowLease = yieldHelper.indexOf("NavSafetyNet.INSTANCE.clearFollowSwim(bot)");
+        int rescueOwner = yieldHelper.indexOf("if (!NavSafetyNet.INSTANCE.rescueStepOwnsMovement(bot))");
+        int stopMovement = yieldHelper.indexOf("bot.getActionPack().stopMovement()");
+        assertTrue(clearFollowLease >= 0 && rescueOwner > clearFollowLease && stopMovement > rescueOwner,
+                "the yield helper must drop Follow's lease, but zero inputs only when Nav does not own a live rescue stroke");
         assertFalse(yieldBlock.contains("swimStepTo") || yieldBlock.contains("stepAlongRoute")
                 || yieldBlock.contains("ascendStep"),
                 "the yield block must not move the bot");
@@ -60,6 +73,12 @@ final class FollowSwimSourceContractTest {
         int publishFollowLease = renew.indexOf("followSwimLeaseUntil.put");
         assertTrue(releaseRescue >= 0 && publishFollowLease > releaseRescue,
                 "renewing Follow's high-air lease must cancel and release an old exact rescue lease before publishing Follow ownership");
+        assertTrue(renew.contains("strictAutomaticWaterRescueSessions.remove(bot.getUUID())"),
+                "renewing Follow's high-air lease must clear an automatic strict rescue session before it can re-latch");
+        String renewBaritone = body(safety, "public void renewBaritoneWater(AIPlayerEntity bot)",
+                "/** Ends the Baritone water lease");
+        assertTrue(renewBaritone.contains("strictAutomaticWaterRescueSessions.remove(bot.getUUID())"),
+                "renewing Baritone's high-air lease must clear an automatic strict rescue session before expiry can revive it");
 
         String targetMissing = body(follow, "if (target == null || target.level() != bot.level())",
                 "lastTarget = target;");
@@ -380,6 +399,21 @@ final class FollowSwimSourceContractTest {
         assertTrue(rescueGuard.contains("step.kind() == WalkedStep.Kind.SWIM ? observed != WaterEscapeCell.WATER")
                         && rescueGuard.contains("observed != WaterEscapeCell.DRY"),
                 "NavSafetyNet's strict continuation guard must reject dry/water kind changes, not only total occlusion");
+        assertTrue(rescueGuard.contains("if (observed == null) {")
+                        && !rescueGuard.contains("probeWaterEscapeCell(bot, bot.level(), step.cell(), false).unknown()"),
+                "late strict SWIM continuation must reject a newly unobservable target instead of retaining stale admission proof");
+        String publicRescueOwnership = body(safety, "public boolean isWaterRescueActive(AIPlayerEntity bot)",
+                "/**\n     * True only while NavSafetyNet still owns the exact live guarded stroke");
+        assertTrue(publicRescueOwnership.contains("waterRescueShore.containsKey(id)")
+                        && publicRescueOwnership.contains("strictAutomaticWaterRescueSessions.contains(id)")
+                        && publicRescueOwnership.contains("rescueStepOwnsMovement(bot)"),
+                "cross-task water ownership must remain visible throughout a strict automatic rescue, including the gap between guarded strokes");
+        String rescueEnvelope = body(safety, "private static boolean withinRescueStepContinuationEnvelope",
+                "private static boolean withinRescueStepSwimSettlingEnvelope");
+        assertTrue(rescueEnvelope.contains("kind == WalkedStep.Kind.SWIM")
+                        && rescueEnvelope.contains("admission.origin().getY() == admission.destination().getY()")
+                        && rescueEnvelope.contains("withinRescueStepSwimSettlingEnvelope"),
+                "the strict swim-settling allowance must be limited to a horizontal stroke, never widen a vertical rescue corridor");
     }
 
     @Test
@@ -834,6 +868,38 @@ final class FollowSwimSourceContractTest {
                         && strictRescue.contains("if (probe.unknown())")
                         && strictRescue.contains("rememberUnknown(candidate, current)"),
                 "Nav rescue must retain only truly unobserved edges; visible walls and hazards must complete rather than stall its session");
+        String fallback = body(strictRescue, "private BlockPos nextObservableFallback",
+                "private boolean isImmediateWaterBacktrack");
+        String frontier = body(strictRescue, "private WaterEscapeStep advanceOneFrontierOperation",
+                "/** Retries one formerly unknown edge");
+        String rescueAdmission = body(safety, "private boolean beginRescueStep(",
+                "/**\n     * A strict automatic rescue");
+        String rescueGuard = body(safety, "private static boolean canContinueRescueStep(",
+                "/** The axis-aligned corridor");
+        String cachedReproof = body(safety, "private static boolean reproveWaterEscapeStep(",
+                "private static int observableWaterStepPriority");
+        int cornerGate = frontier.indexOf("hasVisibleSolidDiagonalWaterCorner");
+        int admittedAfterCorner = frontier.indexOf("visited.add(candidate);", cornerGate);
+        assertTrue(fallback.contains("hasVisibleSolidDiagonalWaterCorner(bot, fallbackFeet, candidate)")
+                        && cornerGate > frontier.indexOf("WaterEscapeCell cell = probe.cell()")
+                        && admittedAfterCorner > cornerGate
+                        && retryUnknown.contains("hasVisibleSolidDiagonalWaterCorner(bot, unknown.parent(), unknown.cell())")
+                        && retryUnknown.contains("visited.remove(unknown.cell())")
+                        && rescueAdmission.contains("hasVisibleSolidDiagonalWaterCorner(bot, bot.blockPosition(), cell)")
+                        && rescueGuard.contains("hasVisibleSolidDiagonalWaterCorner(bot, admission.origin(), admission.destination())")
+                        && cachedReproof.contains("hasVisibleSolidDiagonalWaterCorner(bot, bot.blockPosition(), escape.next())"),
+                "strict diagonal water edges must reject a visibly solid two-cell side column at fallback, retained-frontier, admission, reproof, and guarded-continuation boundaries without permanently visiting a parent-specific rejection");
+        int reverseDeferral = fallback.indexOf("else if (!exhausted && !immediateWaterBacktrackDeferred)");
+        int armReverseDeferral = fallback.indexOf("immediateWaterBacktrackDeferred = true;", reverseDeferral);
+        int clearReverseDeferral = fallback.indexOf("immediateWaterBacktrackDeferred = false;", armReverseDeferral);
+        int consumeReverse = fallback.indexOf("nextFallbackCandidate++;", clearReverseDeferral);
+        int movedFeet = strictRescue.indexOf("if (moved) {");
+        int resetAfterMove = strictRescue.indexOf("immediateWaterBacktrackDeferred = false;", movedFeet);
+        assertTrue(strictRescue.contains("private boolean immediateWaterBacktrackDeferred;")
+                        && reverseDeferral >= 0 && armReverseDeferral > reverseDeferral
+                        && clearReverseDeferral > armReverseDeferral && consumeReverse > clearReverseDeferral
+                        && resetAfterMove > movedFeet,
+                "a retained UNKNOWN may defer an immediate strict-water reversal for one bounded slice, but must never indefinitely veto the only already-proved retreat");
     }
 
     @Test
@@ -936,10 +1002,16 @@ final class FollowSwimSourceContractTest {
                 "surface_water_recovery_game_tests_strict_in_flight_rescue_guard_rejects_new_occluder");
         assertGameTestEnvironment(
                 "task/SurfaceWaterRecoveryGameTests.java",
+                "surface_water_recovery_game_tests_strict_in_flight_rescue_guard_rejects_late_interposing_wall");
+        assertGameTestEnvironment(
+                "task/SurfaceWaterRecoveryGameTests.java",
                 "surface_water_recovery_game_tests_strict_in_flight_dry_step_rejects_flooded_target");
         assertGameTestEnvironment(
                 "task/SurfaceWaterRecoveryGameTests.java",
                 "surface_water_recovery_game_tests_strict_rescue_uses_visible_diagonal_water_step");
+        assertGameTestEnvironment(
+                "task/SurfaceWaterRecoveryGameTests.java",
+                "surface_water_recovery_game_tests_strict_diagonal_rescue_rejects_visible_solid_corner");
         assertGameTestEnvironment(
                 "task/SurfaceWaterRecoveryGameTests.java",
                 "surface_water_recovery_game_tests_strict_clear_water_shaft_starts_physical_oxygen_ascent");

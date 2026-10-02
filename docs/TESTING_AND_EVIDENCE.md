@@ -6,18 +6,20 @@ Minecraft-AI treats “code passes tests,” “the scenario passes locally,” 
 
 | Layer | Entry point | Current scale | Purpose |
 |---|---|---:|---|
-| JUnit | `./gradlew test` | 19 test classes, 68 tests | Verifies pure Java strategy, permissions, Goal predicate/result, serialization, and atomic storage boundaries. |
-| Fabric GameTest | `./gradlew runGameTest` | 3 tests | Verifies deterministic smoke cases in a real Minecraft world context. |
+| JUnit | `./gradlew test` | Runner-counted; see `scripts/dev/unittest.sh` | Verifies pure Java strategy, permissions, Goal predicate/result, serialization, and atomic storage boundaries. |
+| Fabric GameTest | `./gradlew runGameTest` | Runner-counted; see `scripts/dev/gametest.sh` | Verifies deterministic smoke cases in a real Minecraft world context. |
 | Interactive harness | `./gradlew runHarnessServer` | test-only commands | Provides the `/minecraftai test`, `/minecraftai verify`, and restart probe commands. |
-| Single-run evidence | `scripts/evidence_run.sh` | One scenario/seed/profile | Starts an isolated server and seals an immutable run bundle. |
+| Single-run evidence | `scripts/evidence_run.sh` | One scenario/seed/profile | Starts an isolated server and seals a tamper-evident run bundle. |
 | Batch evidence | `scripts/evidence_batch.sh` | Explicit seed/run matrix | Aggregates multiple independent bundles; does not automatically select a baseline. |
 | Two-JVM restart | `scripts/persistence_restart_test.sh` | Two consecutive server processes | Verifies non-default checkpoints, exact Mission/queue/pause recovery, stale Job lease reopening, and reaching `COMPLETED 4/4` after resume. |
 
-The current source test inventory is 19 JUnit classes, 68 tests, and 3 GameTests. In the current local diagnostics, the strict/operator capability + runtime-control suite is `7/7 PASS` for both; the two-JVM persistence probe recovers the checkpoint map exactly, and reaches the original Mission's `COMPLETED 4/4` after resume. These numbers describe verification of this working tree and do not substitute for the clean-commit evidence gate.
+The source suites grow continuously, so this guide does not hard-code a test inventory. Treat the counted `UNIT ... PASS tests=...` and GameTest `PASS ran=... tests=...` lines emitted by `scripts/dev/unittest.sh` and `scripts/dev/gametest.sh` as authoritative for the checked revision, and record the final root and wrapper counts in the verification handoff. In the current local diagnostics, the strict/operator capability + runtime-control suite is `7/7 PASS` for both; the two-JVM persistence probe recovers the checkpoint map exactly, and reaches the original Mission's `COMPLETED 4/4` after resume. These facts do not substitute for the clean-commit evidence gate.
 
 ## Developer Test Runners (`scripts/dev`)
 
 Use the Bash runners for repeatable local verification. Run them from Linux, WSL, or Git Bash; on this Windows machine the maintained local runners under `C:\mcw\_tools` are an equivalent transport when they are available. Do not run two GameTest servers in one worktree, and keep `GT_SLOTS=1` unless the machine has been deliberately provisioned for more memory.
+
+The evidence tools require a real Python 3.8+ interpreter for their sealed-file and JSON checks. The resolver deliberately does not invoke a direct per-user Windows App Execution Alias because it can open a Store prompt instead of an interpreter; use `py -3` or set `HARNESS_PYTHON_BIN` to a directly executable interpreter path (for example, `/c/tools/Python/python.exe`) when Git Bash cannot resolve `python3`, `python`, or `py -3`. This applies to `evidence_run.sh`, `evidence_batch.sh`, `evidence_validate.sh`, `pin_baseline.sh`, `mining_evidence_shard.sh`, `mining_evidence_aggregate.sh`, and `persistence_restart_test.sh`.
 
 ```bash
 # Root or wrapper unit tests. The runner serializes unit-test Gradle processes,
@@ -189,7 +191,7 @@ LOCKED
 - `checksums.sha256` and `LOCKED`: the integrity boundary established after sealing;
 - `server.log`: the server log, after credential-pattern checks and necessary redaction have been applied.
 
-Once a bundle is published it is treated as immutable. Do not manually edit results or metadata inside the directory; re-run instead if a fix is needed.
+Once a bundle is published it is sealed and tamper-evident: validation checks its checksums and `LOCKED` marker. Advisory read-only modes are also applied where the filesystem supports them, but do not manually edit results or metadata inside the directory; re-run instead if a fix is needed.
 
 ## `PASS` vs. `VERIFIED`
 
@@ -256,7 +258,7 @@ The pin process also verifies:
 - the run scenario matches that capability's registered scenario;
 - the profile is `strict_survival` and the mode is `deterministic`;
 - by default, only `PASS` is accepted;
-- the immutable bundle's hash matches `LOCKED`.
+- the sealed bundle's hash matches `LOCKED`.
 
 The script copies the bundle to `reports/baselines/<capability-id>/<run-id>/`, then atomically updates `reports/baselines/index.tsv`. Old runs are not deleted when re-pinned.
 

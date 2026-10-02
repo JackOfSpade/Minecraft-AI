@@ -448,7 +448,7 @@ fi
 # Secrets are never part of a sealed log. Redaction is byte-for-byte and is
 # explicitly recorded; the exact key is read from the existing environment,
 # never passed on a command line or written to metadata.
-LOG_SECRET_REDACTIONS="$(python3 - "$STAGING/server.log" <<'PY'
+LOG_SECRET_REDACTIONS="$(harness_python - "$STAGING/server.log" <<'PY'
 import os
 import re
 import sys
@@ -540,7 +540,7 @@ case "$SCENARIO" in
   diamond_stack_64_from_zero|obsidian_half_stack_32_from_zero|obsidian_stack_64_from_zero)
     MINING_PROVENANCE_SCHEMA=2
     MINING_PROVENANCE_VERDICT=FAIL
-    provenance_record="$(python3 - "$STAGING/server.log" "$SCENARIO" <<'PY'
+    provenance_record="$(harness_python - "$STAGING/server.log" "$SCENARIO" <<'PY'
 import re
 import sys
 

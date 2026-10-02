@@ -161,7 +161,7 @@ public final class BaritoneServerGameTests {
         });
     }
 
-    @GameTest(maxTicks = 200)
+    @GameTest(maxTicks = 600)
     public void aStarPlansAcrossThePlatformAndThroughAWallOnAnotherThread(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(8, 40, 8));
@@ -180,9 +180,33 @@ public final class BaritoneServerGameTests {
 
         CompletableFuture<PathCalculationResult> open = search(baritone, feet, openGoal);
         CompletableFuture<PathCalculationResult> wall = search(baritone, feet, wallGoal);
-        context.runAfterDelay(60, () -> {
+        // The workers need real server time and may consume snapshot work while GameTest ticks
+        // continue. Poll without blocking the server thread, leaving 40 ticks for framework
+        // cleanup after the 560-tick bounded worker window.
+        int[] waited = {0};
+        boolean[] settled = {false};
+        context.onEachTick(() -> {
+            if (settled[0]) {
+                return;
+            }
+            if (!open.isDone() || !wall.isDone()) {
+                if (++waited[0] < 560) {
+                    return;
+                }
+                settled[0] = true;
+                try {
+                    open.cancel(true);
+                    wall.cancel(true);
+                    require(context, false, "the searches did not finish in 560 ticks (open="
+                            + open.isDone() + " wall=" + wall.isDone() + ")");
+                } finally {
+                    BaritoneHost.destroy(baritone);
+                    AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+                }
+                return;
+            }
+            settled[0] = true;
             try {
-                require(context, open.isDone() && wall.isDone(), "the searches did not finish (open=" + open.isDone() + " wall=" + wall.isDone() + ")");
                 PathCalculationResult openResult = open.join();
                 require(context, openResult.getType() == PathCalculationResult.Type.SUCCESS_TO_GOAL,
                         "open-floor search: " + openResult.getType());

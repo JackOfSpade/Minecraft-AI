@@ -236,11 +236,11 @@ validate_one() {
     return 1
   }
   [[ "$config_hash" == "$calculated_config" ]] || { validation_fail config_hash_mismatch; return 1; }
-  if ! command -v python3 >/dev/null 2>&1; then
+  if ! harness_python_available; then
     validation_fail python3_required_for_config_validation
     return 1
   fi
-  config_facts="$(python3 - "$canonical/effective-config.redacted.json" <<'PY'
+  config_facts="$(harness_python - "$canonical/effective-config.redacted.json" <<'PY'
 import json
 import sys
 
@@ -507,7 +507,7 @@ EOF
       diamond_stack_64_from_zero|obsidian_half_stack_32_from_zero|obsidian_stack_64_from_zero)
         [[ "$provenance_schema" == 2 ]] || { validation_fail invalid_mining_provenance_schema; return 1; }
         case "$provenance_verdict" in PASS|FAIL) ;; *) validation_fail invalid_mining_provenance_verdict; return 1 ;; esac
-        provenance_record="$(python3 - "$canonical/server.log" "$scenario" <<'PY'
+        provenance_record="$(harness_python - "$canonical/server.log" "$scenario" <<'PY'
 import re
 import sys
 
@@ -901,7 +901,17 @@ run_self_test() (
   generated=()
   cleanup_self_test() {
     local path
-    rm -f -- "$fixture" "$mining_fixture" "$downgrade_fixture" "${link:-}"
+    # A Windows Git Bash symlink attempt can materialize as a normal directory. Never let that
+    # cleanup oddity abort the EXIT trap before it removes the generated sealed fixtures.
+    rm -f -- "$fixture" "$mining_fixture" "$downgrade_fixture" "${link:-}" 2>/dev/null || true
+    case "${link:-}" in
+      "$HARNESS_ARTIFACT_ROOT"/.self-test-link-*)
+        if [[ -d "$link" && ! -L "$link" ]]; then
+          chmod -R u+w "$link" 2>/dev/null || true
+          rm -rf -- "$link" 2>/dev/null || true
+        fi
+        ;;
+    esac
     # macOS still ships Bash 3.2, where expanding an empty local array under
     # `set -u` raises an unbound-variable error and hides the real self-test
     # failure (for example, an evidence lock held by another run).
@@ -910,7 +920,7 @@ run_self_test() (
         "$HARNESS_ARTIFACT_ROOT"/*|"$HARNESS_BATCH_ROOT"/*)
           if [[ -d "$path" && ! -L "$path" ]]; then
             chmod -R u+w "$path" 2>/dev/null || true
-            rm -rf -- "$path"
+            rm -rf -- "$path" 2>/dev/null || true
           fi
           ;;
       esac
@@ -981,7 +991,7 @@ run_self_test() (
   [[ -d "$legacy_evidence" ]]
   generated+=("$legacy_evidence")
   chmod -R u+w "$legacy_evidence"
-  python3 - "$legacy_evidence/effective-config.redacted.json" <<'PY'
+  harness_python - "$legacy_evidence/effective-config.redacted.json" <<'PY'
 import json
 import sys
 path = sys.argv[1]
@@ -1164,13 +1174,26 @@ PY
     exit 1
   fi
 
-  link="$HARNESS_ARTIFACT_ROOT/.self-test-link-$$"
-  ln -s "$evidence" "$link"
-  if "$ROOT/scripts/evidence_validate.sh" "$link" >/dev/null 2>&1; then
-    printf 'evidence-self-test: symlink evidence was accepted\n' >&2
-    exit 1
+  link="$HARNESS_ARTIFACT_ROOT/.self-test-link-$$.$RANDOM"
+  if ln -s "$evidence" "$link" 2>/dev/null && [[ -L "$link" ]]; then
+    if "$ROOT/scripts/evidence_validate.sh" "$link" >/dev/null 2>&1; then
+      printf 'evidence-self-test: symlink evidence was accepted\n' >&2
+      exit 1
+    fi
+  else
+    # Some Windows Git Bash installations lack symlink privilege and emulate this request as a
+    # normal directory. The validator's symlink rejection is still exercised where the platform
+    # can create one; do not make its self-test fail solely because the fixture is unavailable.
+    case "$link" in
+      "$HARNESS_ARTIFACT_ROOT"/.self-test-link-*)
+        if [[ -d "$link" && ! -L "$link" ]]; then
+          chmod -R u+w "$link" 2>/dev/null || true
+          rm -rf -- "$link" 2>/dev/null || true
+        fi
+        ;;
+    esac
   fi
-  rm -f -- "$link"
+  rm -f -- "$link" 2>/dev/null || true
   traversal="$HARNESS_ARTIFACT_ROOT/../evidence/$(basename "$evidence")"
   if "$ROOT/scripts/evidence_validate.sh" "$traversal" >/dev/null 2>&1; then
     printf 'evidence-self-test: traversal path was accepted\n' >&2
@@ -1192,7 +1215,7 @@ PY
     exit 1
   fi
   harness_write_locked_marker "$evidence"
-  python3 - "$evidence/effective-config.redacted.json" <<'PY'
+  harness_python - "$evidence/effective-config.redacted.json" <<'PY'
 import sys
 path = sys.argv[1]
 value = open(path, encoding="utf-8").read()

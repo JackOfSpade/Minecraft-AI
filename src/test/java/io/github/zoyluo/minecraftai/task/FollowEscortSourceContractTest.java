@@ -26,9 +26,13 @@ final class FollowEscortSourceContractTest {
         String onTick = follow.substring(tick, end);
         int pace = onTick.indexOf("publishPace(bot, target);");
         int land = onTick.indexOf("followLand(bot, target);");
+        int yaw = onTick.indexOf("float yawBeforeEscort = bot.getYRot();");
         int escort = onTick.indexOf("escort.tick(bot, target);");
-        assertTrue(pace >= 0 && land > pace && escort > land,
-                "publishPace, then followLand, then escort.tick: a swing never decides a movement");
+        int preserve = onTick.indexOf("reprojectLegacyInputsForYawChange(yawBeforeEscort);");
+        assertTrue(pace >= 0 && land > pace && yaw > land && escort > yaw && preserve > escort,
+                "publishPace, then followLand, then escort aim preserves its already-issued legacy movement");
+        assertTrue(onTick.substring(escort, preserve).contains("!bot.getActionPack().hasBaritoneRoute()"),
+                "the FollowTask fast path must not touch an ActionPack-owned Baritone route");
         assertTrue(follow.contains("requestPace(gait, PaceOwner.FOLLOW)"), "the follow pace is a FOLLOW tick lease");
         assertFalse(follow.contains("requestRoutePace"), "a route lease would outlive the follow's own dwell");
     }
@@ -48,6 +52,28 @@ final class FollowEscortSourceContractTest {
                         || escort.contains("startApproachTo") || escort.contains("startWalkTo"),
                 "the escort never stops or redirects the follow");
         assertTrue(escort.contains("calmWardenObservedWithin(bot, CALM_WARDEN_RANGE)"), "silent next to a calm warden");
+
+        String pack = read("action/ActionPack.java");
+        int projection = pack.indexOf("public void reprojectLegacyInputsForYawChange(float yawBefore)");
+        int next = pack.indexOf("private boolean baritoneOwnsBot()", projection);
+        assertTrue(projection >= 0 && next > projection);
+        String projectionBody = pack.substring(projection, next);
+        int paceOwnerEnd = pack.indexOf("public void setSneaking", next);
+        assertTrue(paceOwnerEnd > next);
+        String baritoneOwner = pack.substring(next, paceOwnerEnd);
+        assertTrue(projectionBody.contains("player.zza = applied.forward()")
+                        && projectionBody.contains("player.xxa = applied.strafing()"),
+                "the next physics tick must receive the reprojected inputs, not only ActionPack's later update");
+        assertTrue(projectionBody.contains("forward == 0.0F && strafing == 0.0F && player.zza == 0.0F && player.xxa == 0.0F"),
+                "a stale already-applied input must still be reprojected even after its controller cleared raw fields");
+        assertTrue(projectionBody.contains("if (baritoneOwnsBot())")
+                        && baritoneOwner.contains("route != null")
+                        && baritoneOwner.contains("NavEngineSelector.query(\"baritone_busy\", () -> BaritoneRegistry.INSTANCE.isBusy(player), false)"),
+                "the writer boundary must leave inputs untouched for both ActionPack routes and direct busy Baritone callers");
+        assertFalse(projectionBody.contains("claim(") || projectionBody.contains("stopNavigation")
+                        || projectionBody.contains("startPathTo") || projectionBody.contains("BaritoneRegistry")
+                        || projectionBody.contains("NavEngineSelector"),
+                "the input projection is a passive legacy correction, not controller hand-over");
     }
 
     @Test

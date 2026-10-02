@@ -28,37 +28,81 @@ public final class FollowEscortGameTests {
     private static final String ENV = "minecraftai-gametest:follow_escort_game_tests_";
     private static final double MOVING = 0.03D;
 
-    @GameTest(environment = ENV + "follower_knocks_away_zombie_in_melee_range_and_keeps_following", maxTicks = 220)
+    @GameTest(environment = ENV + "follower_knocks_away_zombie_in_melee_range_and_keeps_following",
+            maxTicks = 250 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void followerKnocksAwayZombieInMeleeRangeAndKeepsFollowing(GameTestHelper context) {
         FollowFieldFixture f = new FollowFieldFixture(context, 40, 10);
         AIPlayerEntity bot = f.bot("FeKnock", -6, 0, false);
         f.give(bot, new ItemStack(Items.WOODEN_SWORD));
-        ServerPlayer target = f.target(2, 0);
-        Zombie zombie = f.zombie(-4.0D, 0.0D, false);
+        // Perception is on in the real suite. Stage a visible zombie well beyond the initial
+        // candidate radius while the owner waits at sprint distance. Once a live sprint is
+        // observed, wake the zombie so normal entity physics can carry a real knockback. The old
+        // fixture moved the owner immediately and sometimes carried the bot beyond escort range
+        // before it had noticed the mob.
+        ServerPlayer target = f.target(10, 0);
+        Zombie zombie = f.zombie(2.0D, 0.0D, true);
         Vec3 zombieStart = zombie.position();
-        FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_escort_knock");
-        int retreatHp = MinecraftAiConfig.get().combat().retreatHp();
-        int[] tick = {0};
-        boolean[] hurtBelowRetreat = {false};
-        double[] zombieMoved = {0.0D};
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            f.place(target, 2.0D + Math.min(now, 100) * 0.2D, 0.0D); // a brisk walk along +x for 100 ticks, then it stands
-            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
-            if (bot.getHealth() > retreatHp && !hurtBelowRetreat[0]) {
-                f.require(active == follow, "the follower left the follow for " + (active == null ? "nothing" : active.name()) + " at tick " + now);
-                f.require(follow.state() == TaskState.RUNNING, "the follow was " + follow.state());
-            } else {
-                hurtBelowRetreat[0] = true;
-            }
-            zombieMoved[0] = Math.max(zombieMoved[0], zombie.position().distanceTo(zombieStart));
-            if (now >= 170) {
-                f.require(follow.escortStrikes() >= 1, "the follower never swung at the zombie in its reach");
-                f.require(zombie.isRemoved() || zombie.getHealth() < zombie.getMaxHealth(), "the zombie took no damage");
-                f.require(zombieMoved[0] > 0.5D, "the zombie was never displaced: " + zombieMoved[0]);
-                f.require(bot.distanceTo(target) <= 8.0D, "the follower fell behind: " + bot.distanceTo(target));
-                f.finish();
-            }
+        PerceptionFixtures.faceToward(bot, zombie);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
+            FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_escort_knock");
+            int retreatHp = MinecraftAiConfig.get().combat().retreatHp();
+            int[] tick = {0};
+            int[] movementStartedAt = {-1};
+            boolean[] hurtBelowRetreat = {false};
+            boolean[] zombieActivated = {false};
+            double[] zombieMoved = {0.0D};
+            double[] zombieForward = {0.0D};
+            PerceptionFixtures.everyTick(context, () -> {
+                int now = ++tick[0];
+                if (movementStartedAt[0] < 0) {
+                    f.place(target, 10.0D, 0.0D);
+                } else {
+                    int movingFor = now - movementStartedAt[0];
+                    f.place(target, 10.0D + Math.min(movingFor, 100) * 0.2D, 0.0D);
+                }
+                Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+                if (bot.getHealth() > retreatHp && !hurtBelowRetreat[0]) {
+                    f.require(active == follow, "the follower left the follow for "
+                            + (active == null ? "nothing" : active.name()) + " at tick " + now);
+                    f.require(follow.state() == TaskState.RUNNING, "the follow was " + follow.state());
+                } else {
+                    hurtBelowRetreat[0] = true;
+                }
+                zombieMoved[0] = Math.max(zombieMoved[0], zombie.position().distanceTo(zombieStart));
+                zombieForward[0] = Math.max(zombieForward[0], zombie.getX() - zombieStart.x);
+                if (!zombieActivated[0]) {
+                    f.require(follow.escortStrikes() == 0, "the follower swung before the sprint fixture was armed");
+                    f.require(now < 80, "the follower never began the staged sprint");
+                    double zombieDistance = bot.distanceTo(zombie);
+                    // Keep normal zombie physics off until a live sprint has reached the narrow
+                    // pre-melee band. That leaves the zombie only a few ticks to react before
+                    // the first legal swing, while still making its post-hit motion real.
+                    if (!bot.isSprinting()
+                            || zombieDistance > FollowEscort.ENGAGED_RANGE
+                            || zombieDistance <= FollowEscort.CANDIDATE_RANGE) {
+                        return;
+                    }
+                    zombie.setNoAi(false);
+                    zombieActivated[0] = true;
+                }
+                if (movementStartedAt[0] < 0) {
+                    if (follow.escortStrikes() >= 1) {
+                        movementStartedAt[0] = now;
+                    } else {
+                        f.require(now < 80, "the follower never swung at the nearby, noticed zombie");
+                        return;
+                    }
+                }
+                if (now - movementStartedAt[0] >= 150) {
+                    f.require(zombieActivated[0], "fixture: the zombie was never released for physical knockback");
+                    f.require(follow.escortStrikes() >= 1, "the follower never swung at the zombie in its reach");
+                    f.require(zombie.isRemoved() || zombie.getHealth() < zombie.getMaxHealth(), "the zombie took no damage");
+                    f.require(zombieMoved[0] > 0.5D, "the zombie was never displaced: " + zombieMoved[0]);
+                    f.require(zombieForward[0] > 0.5D, "the zombie was never knocked forward: " + zombieForward[0]);
+                    f.require(bot.distanceTo(target) <= 8.0D, "the follower fell behind: " + bot.distanceTo(target));
+                    f.finish();
+                }
+            });
         });
     }
 

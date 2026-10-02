@@ -383,9 +383,9 @@ final class FollowSwimming {
         int air = bot.getAirSupply();
         if (mustYieldToWaterRescue(bot)) {
             // NavSafetyNet's drowning rescue owns the bot from here (its lease ends at this
-            // depth-aware air level); make no move that could undo one of its steps.
-            NavSafetyNet.INSTANCE.clearFollowSwim(bot);
-            bot.getActionPack().stopMovement();
+            // depth-aware air level). Clear Follow's lease, but never zero the keys of an
+            // already-admitted rescue stroke between its controller tick and vanilla physics.
+            yieldMovementToWaterRescue(bot);
             clearRoute();
             return true;
         }
@@ -446,9 +446,10 @@ final class FollowSwimming {
             // No known way to breathe: never dive on. Hand a low-air bot to the rescue.
             if (air <= FollowOxygen.SURFACE_FLOOR_AIR) {
                 NavSafetyNet.INSTANCE.requestWaterRescue(bot);
-                NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+                yieldMovementToWaterRescue(bot);
+            } else {
+                bot.getActionPack().stopMovement();
             }
-            bot.getActionPack().stopMovement();
             return true;
         }
         return !ascendStep(bot, world, elapsed);
@@ -974,8 +975,7 @@ final class FollowSwimming {
         boolean submerged = bot.isUnderWater();
         int air = bot.getAirSupply();
         if (mustYieldToWaterRescue(bot)) {
-            NavSafetyNet.INSTANCE.clearFollowSwim(bot);
-            bot.getActionPack().stopMovement();
+            yieldMovementToWaterRescue(bot);
             clearRoute();
             waiting = true;
             return true;
@@ -1781,8 +1781,7 @@ final class FollowSwimming {
     private boolean holdStep(AIPlayerEntity bot) {
         if (mustYieldToWaterRescue(bot)) {
             cancelStep(bot);
-            NavSafetyNet.INSTANCE.clearFollowSwim(bot);
-            bot.getActionPack().stopMovement();
+            yieldMovementToWaterRescue(bot);
             clearRoute();
             return true;
         }
@@ -1790,9 +1789,27 @@ final class FollowSwimming {
         return false;
     }
 
-    /** Follow only yields while submerged; a low-air swimmer who has reached the surface may refill normally. */
+    /**
+     * Follow only yields for low air while submerged, but it must always preserve a live Nav
+     * rescue stroke. A swimmer can bob out of the underwater state between Nav's controller tick
+     * and physics without making that already-admitted stroke safe to cancel.
+     */
     private static boolean mustYieldToWaterRescue(AIPlayerEntity bot) {
-        return bot.isUnderWater() && NavSafetyNet.followSwimMustYield(bot);
+        return NavSafetyNet.INSTANCE.rescueStepOwnsMovement(bot)
+                || (bot.isUnderWater() && NavSafetyNet.followSwimMustYield(bot));
+    }
+
+    /**
+     * Drops Follow's narrow water lease without clearing a rescue stroke that NavSafetyNet has
+     * already admitted. {@link ActionPack#stopMovement()} is normally a safe key release, but a
+     * guarded step writes its inputs before entity physics; a later Follow task tick must not
+     * erase that exact step's jump/forward input in the intervening window.
+     */
+    private static void yieldMovementToWaterRescue(AIPlayerEntity bot) {
+        NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+        if (!NavSafetyNet.INSTANCE.rescueStepOwnsMovement(bot)) {
+            bot.getActionPack().stopMovement();
+        }
     }
 
     private void clearRoute() {

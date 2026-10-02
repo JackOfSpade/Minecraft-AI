@@ -22,6 +22,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -232,6 +233,50 @@ public final class ActionPack {
             claim("set_strafing");
         }
         this.strafing = clampInput(value);
+    }
+
+    /**
+     * Keeps the world-space direction of an already-issued legacy movement input when a late task action changes the bot's yaw
+     * before the next physics tick. This rewrites only the legacy input fields (including the values physics will consume next); it
+     * never claims control, stops navigation, or replans. It leaves every input untouched while Baritone owns the bot, including a
+     * direct Baritone caller that has no ActionPack route to advertise.
+     */
+    public void reprojectLegacyInputsForYawChange(float yawBefore) {
+        if (baritoneOwnsBot()) {
+            return;
+        }
+        float yawAfter = player.getYRot();
+        if ((forward == 0.0F && strafing == 0.0F && player.zza == 0.0F && player.xxa == 0.0F)
+                || Math.abs(Mth.wrapDegrees(yawAfter - yawBefore)) < 1.0E-4F) {
+            return;
+        }
+        LegacyInputs raw = reprojectLegacyInputs(forward, strafing, yawBefore, yawAfter);
+        LegacyInputs applied = reprojectLegacyInputs(player.zza, player.xxa, yawBefore, yawAfter);
+        forward = raw.forward();
+        strafing = raw.strafing();
+        player.zza = applied.forward();
+        player.xxa = applied.strafing();
+    }
+
+    /** Converts forward/strafe inputs between two body yaws while retaining their world-space direction. */
+    static LegacyInputs reprojectLegacyInputs(float forward, float strafing, float yawBefore, float yawAfter) {
+        double beforeRadians = Math.toRadians(yawBefore);
+        double worldX = strafing * Math.cos(beforeRadians) - forward * Math.sin(beforeRadians);
+        double worldZ = forward * Math.cos(beforeRadians) + strafing * Math.sin(beforeRadians);
+        double afterRadians = Math.toRadians(yawAfter);
+        double projectedStrafing = worldX * Math.cos(afterRadians) + worldZ * Math.sin(afterRadians);
+        double projectedForward = -worldX * Math.sin(afterRadians) + worldZ * Math.cos(afterRadians);
+        // Diagonal vanilla input is normalized when it is applied. Preserve the rotated direction before bounding each key instead
+        // of independently clamping one component, which would bend an otherwise unchanged world-space movement vector.
+        double largest = Math.max(Math.abs(projectedForward), Math.abs(projectedStrafing));
+        if (largest > 1.0D) {
+            projectedForward /= largest;
+            projectedStrafing /= largest;
+        }
+        return new LegacyInputs(clampInput((float) projectedForward), clampInput((float) projectedStrafing));
+    }
+
+    record LegacyInputs(float forward, float strafing) {
     }
 
     /**

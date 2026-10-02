@@ -4579,18 +4579,39 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 : new Direction[]{preferred, preferred.getClockWise(), preferred.getCounterClockWise(), preferred.getOpposite()};
         for (Direction direction : order) {
             BlockPos candidate = ore.below().relative(direction);
-            if (!ObservableWorldQuery.canObserveCell(bot, candidate)
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())) {
-                continue;
-            }
-            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, candidate)
-                    && OreScan.adjacentHazard(bot, candidate)
-                    == OreScan.Observation.OBSERVED_GONE) {
+            if (isObservedSafeApproachPose(bot, world, candidate)) {
                 return candidate;
             }
         }
+        // A one-lower ore can also be worked from a fully observed, standable upper lateral
+        // pose. This is a walk-only fallback for the exact physical-drop envelope (one block
+        // down and one block sideways), not authority to tunnel toward an unseen lower cell.
+        // It matters for a stepped vein: the already-open upper ledge is safe while the old
+        // lower-ring-only search would dig the floor below the previous member first.
+        if (ore.getY() == bot.blockPosition().getY() - 1) {
+            for (Direction direction : order) {
+                BlockPos candidate = ore.above().relative(direction);
+                if (targetBreakEnvelope(candidate, ore)
+                        && isObservedSafeApproachPose(bot, world, candidate)) {
+                    return candidate;
+                }
+            }
+        }
         return null;
+    }
+
+    private static boolean isObservedSafeApproachPose(AIPlayerEntity bot,
+                                                       ServerLevel world,
+                                                       BlockPos candidate) {
+        // Do not ask the collision/standability code about an unobserved work pose.  This
+        // helper is shared by the ordinary lower ring and the one-lower upper-ledged route.
+        if (!ObservableWorldQuery.canObserveCell(bot, candidate)
+                || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())) {
+            return false;
+        }
+        return io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, candidate)
+                && OreScan.adjacentHazard(bot, candidate) == OreScan.Observation.OBSERVED_GONE;
     }
 
     /** Package-private deterministic geometry probe for strict-survival GameTests. */

@@ -432,14 +432,9 @@ public final class HuntCrossRegionGameTests {
     @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_unloaded_target_is_reacquired_instead_of_inventing_pickup_debt", maxTicks = 1200)
     public void unloadedTargetIsReacquiredInsteadOfInventingPickupDebt(GameTestHelper context) {
         var world = context.getLevel();
-        // This lane is 56 blocks beyond the nearest hunt arena, so the 16-block global
-        // chicken check below cannot inherit another fixture's still-live prey.
+        // GameTest arenas are not reset synchronously, so assertions below track only the two
+        // chickens this fixture creates rather than globally counting nearby animals.
         BlockPos start = context.absolutePos(new BlockPos(8, 5, -520));
-        AABB nearbyPrey = new AABB(start).inflate(16.0D);
-        require(context, world.getEntitiesOfClass(
-                        net.minecraft.world.entity.animal.chicken.Chicken.class, nearbyPrey, Entity::isAlive)
-                        .isEmpty(),
-                "fixture leaked a live chicken into the isolated reload lane before setup");
         for (int x = -4; x <= 4; x++) {
             for (int z = -4; z <= 12; z++) {
                 BlockPos feet = start.offset(x, 0, z);
@@ -456,10 +451,8 @@ public final class HuntCrossRegionGameTests {
                 start.getX() + 0.5D, start.getY(), start.getZ() + 5.5D,
                 180.0F, 0.0F);
         require(context, world.addFreshEntity(original), "failed to spawn original chicken");
-        require(context, world.getEntitiesOfClass(
-                        net.minecraft.world.entity.animal.chicken.Chicken.class, nearbyPrey, Entity::isAlive)
-                        .size() == 1,
-                "fixture did not isolate exactly its original chicken");
+        require(context, original.isAlive() && !original.isRemoved(),
+                "fixture did not retain its original chicken after spawn");
 
         String name = "HuntTargetReloadGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
@@ -499,10 +492,8 @@ public final class HuntCrossRegionGameTests {
                 sawReacquire.set(true);
             }
             if (description.contains("phase=PICKUP")) {
-                require(context, world.getEntitiesOfClass(
-                                net.minecraft.world.entity.animal.chicken.Chicken.class, nearbyPrey, Entity::isAlive)
-                                .isEmpty(),
-                        "hunt opened pickup debt while a nearby live chicken remained");
+                require(context, !original.isAlive() && (replacement.get() == null || !replacement.get().isAlive()),
+                        "hunt opened pickup debt while this fixture's named chicken remained alive");
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.fail(Component.nullToEmpty("target-reload hunt ended as " + task.state()
@@ -1290,14 +1281,16 @@ public final class HuntCrossRegionGameTests {
 
         var chicken = EntityType.CHICKEN.create(world, EntitySpawnReason.COMMAND);
         require(context, chicken != null, "failed to create moving chicken");
-        chicken.setNoAi(false);
+        // The relocation below is the movement this fixture means to test. Letting vanilla AI
+        // move the chicken as well can bring it back into melee before the bot travels to it.
+        chicken.setNoAi(true);
         chicken.setHealth(1.0F);
         chicken.snapTo(
                 initialPreyCell.getX() + 0.5D, initialPreyCell.getY(),
                 initialPreyCell.getZ() + 0.5D, 180.0F, 0.0F);
         require(context, world.addFreshEntity(chicken), "failed to spawn moving chicken");
-        require(context, !chicken.isNoAi(),
-                "moving-prey fixture accidentally disabled chicken AI");
+        require(context, chicken.isNoAi(),
+                "moving-prey fixture did not keep its scripted chicken still");
 
         String name = "HuntMovingPreyGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
@@ -1336,7 +1329,7 @@ public final class HuntCrossRegionGameTests {
                         Math.abs(chicken.blockPosition().getX() - start.getX()) < arenaRadius
                                 && Math.abs(chicken.blockPosition().getZ() - start.getZ())
                                 < arenaRadius,
-                        "AI-enabled chicken escaped the bounded arena: "
+                        "scripted chicken escaped the bounded arena: "
                                 + chicken.blockPosition().toShortString());
             }
 
@@ -1346,10 +1339,13 @@ public final class HuntCrossRegionGameTests {
                         movedPreyCell.getX() + 0.5D, movedPreyCell.getY(),
                         movedPreyCell.getZ() + 0.5D, chicken.getYRot(), chicken.getXRot());
                 chicken.setDeltaMovement(Vec3.ZERO);
-                require(context, !chicken.isNoAi(),
-                        "relocating the chicken disabled its AI");
+                require(context, chicken.isNoAi(),
+                        "relocating the scripted chicken enabled its AI");
                 require(context, chicken.blockPosition().distSqr(initialPreyCell) >= 100.0D,
                         "fixture did not force the chicken far enough to require reselection");
+                require(context, chicken.blockPosition().distSqr(relocationOrigin)
+                                >= Math.pow(CombatCore.ATTACK_RANGE + 3.0D, 2),
+                        "fixture did not force the chicken far enough from the bot to require travel");
                 require(context, chicken.blockPosition().getY() >= surfaceFloorY
                                 && HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
                                 world, relocationOrigin, chicken.blockPosition(), surfaceFloorY),

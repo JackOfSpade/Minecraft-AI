@@ -178,6 +178,59 @@ trap 'on_unit_signal INT' INT
 trap 'on_unit_signal TERM' TERM
 trap 'on_unit_signal HUP' HUP
 
+xml_summary() (
+  # Process one report at a time: Windows cannot spawn one grep with every root XML path, and a
+  # batched grep could silently omit a corrupt report when another file in that batch matched.
+  # Require exactly one root suite line per report before aggregating, so a successful Gradle run
+  # never turns a missing or malformed result file into a misleading PASS summary.
+  set -o pipefail
+  local report_dir=$1 reports report matches line
+  local -a suites
+  shopt -s nullglob
+  reports=("$report_dir"/*.xml)
+  if [ "${#reports[@]}" -eq 0 ]; then
+    printf '0 0 0 0\n'
+    return 0
+  fi
+  suites=()
+  for report in "${reports[@]}"; do
+    matches="$(grep -h -c '<testsuite ' "$report")" || return 1
+    [ "$matches" = 1 ] || return 1
+    line="$(grep -h -m 1 '<testsuite ' "$report")" || return 1
+    [ -n "$line" ] || return 1
+    suites+=("$line")
+  done
+  printf '%s\n' "${suites[@]}" | awk '
+      function value(attribute, prefix, digits) {
+        prefix = attribute "=\""
+        if (match($0, prefix "[0-9]+\"")) {
+          digits = RLENGTH - length(prefix) - 1
+          return substr($0, RSTART + length(prefix), digits) + 0
+        }
+        return 0
+      }
+      { tests += value("tests"); failures += value("failures"); errors += value("errors"); skipped += value("skipped") }
+      END { printf "%d %d %d %d\\n", tests, failures, errors, skipped }
+    '
+)
+
+unit_xml_summary_self_test() (
+  set -euo pipefail
+  local xml_dir summary index
+  xml_dir="$(mktemp -d "${TMPDIR:-/tmp}/minecraftai-unittest-xml.XXXXXX")" || return 1
+  trap 'rm -rf -- "$xml_dir"' EXIT
+  # More than the old 64-path batch proves that aggregation stays below Windows' argv limit.
+  for ((index = 0; index < 65; index++)); do
+    printf '<testsuite tests="1" failures="0" errors="0" skipped="0"></testsuite>\n' > "$xml_dir/report-$index.xml"
+  done
+  summary="$(xml_summary "$xml_dir")"
+  [ "$summary" = "65 0 0 0" ]
+  : > "$xml_dir/corrupt.xml"
+  if xml_summary "$xml_dir" >/dev/null; then
+    return 1
+  fi
+)
+
 unit_runner_self_test() {
   local child_pid_file stubborn_child attempt
   child_pid_file="$(mktemp "${TMPDIR:-/tmp}/minecraftai-unittest-child.XXXXXX")" || return 1
@@ -203,6 +256,7 @@ unit_runner_self_test() {
     return 1
   fi
   rm -f -- "$child_pid_file"
+  unit_xml_summary_self_test || return 1
 }
 
 if [ "$SELF_TEST" = 1 ]; then
@@ -224,6 +278,14 @@ done
 
 PYTHON=()
 python_works() {
+  # Windows Store execution aliases look executable to Git Bash but can open a Store
+  # activation request instead of running (and returning from) the probe.  The portable
+  # grep fallback below is intentionally sufficient in that case, so never invoke one.
+  local executable
+  executable="$(command -v "$1" 2>/dev/null || true)"
+  case "$executable" in
+    */WindowsApps/*) return 1 ;;
+  esac
   "$@" -c 'import xml.etree.ElementTree' >/dev/null 2>&1
 }
 if command -v python3 >/dev/null 2>&1 && python_works python3; then
@@ -235,6 +297,7 @@ elif command -v py >/dev/null 2>&1 && python_works py -3; then
 fi
 
 if [ "${#PYTHON[@]}" -gt 0 ]; then
+  PYTHON_SUMMARY_RC=0
   "${PYTHON[@]}" - "$DIR/build/test-results/test" "$KIND" "$RC" "$LOG" <<'EOF'
 import glob, sys, xml.etree.ElementTree as ET
 d, kind, rc, log = sys.argv[1:5]
@@ -242,32 +305,28 @@ t = f = e = s = 0
 for p in glob.glob(d + '/*.xml'):
     r = ET.parse(p).getroot()
     t += int(r.get('tests')); f += int(r.get('failures')); e += int(r.get('errors')); s += int(r.get('skipped'))
-ok = rc == '0' and f == 0 and e == 0
+ok = rc == '0' and t > 0 and f == 0 and e == 0
 print(f"UNIT {kind} {'PASS' if ok else 'FAIL'} tests={t} failures={f} errors={e} skipped={s} {'' if ok else log}")
+raise SystemExit(0 if ok else 1)
 EOF
+  PYTHON_SUMMARY_RC=$?
+  if [ "$RC" = 0 ] && [ "$PYTHON_SUMMARY_RC" -ne 0 ]; then RC=$PYTHON_SUMMARY_RC; fi
 else
   # Windows' Store execution aliases make `python3` appear on PATH without an interpreter.
   # Gradle writes one root <testsuite> per XML report, so retain a dependency-free summary
-  # rather than turning a successful test run into a shell error on Git Bash.
-  xml_total() {
-    local attribute=$1 total=0 report value
-    shopt -s nullglob
-    for report in "$DIR/build/test-results/test"/*.xml; do
-      value="$(grep -m 1 '<testsuite ' "$report" | sed -n -E "s/.*[[:space:]]${attribute}=\"([0-9]+)\".*/\\1/p")"
-      value="${value:-0}"
-      total=$((total + value))
-    done
-    shopt -u nullglob
-    printf '%s' "$total"
-  }
-  TESTS="$(xml_total tests)"
-  FAILURES="$(xml_total failures)"
-  ERRORS="$(xml_total errors)"
-  SKIPPED="$(xml_total skipped)"
-  if [ "$RC" = 0 ] && [ "$FAILURES" = 0 ] && [ "$ERRORS" = 0 ]; then
-    echo "UNIT $KIND PASS tests=$TESTS failures=$FAILURES errors=$ERRORS skipped=$SKIPPED"
+  # rather than turning a successful test run into a shell error on Git Bash. xml_summary
+  # batches paths safely and treats a missing/corrupt report stream as a failed runner.
+  if ! SUMMARY="$(xml_summary "$DIR/build/test-results/test")"; then
+    RC=1
+    echo "UNIT $KIND FAIL tests=0 failures=0 errors=0 skipped=0 $LOG"
   else
+    read -r TESTS FAILURES ERRORS SKIPPED <<< "$SUMMARY"
+    if [ "$RC" = 0 ] && [ "$TESTS" -gt 0 ] && [ "$FAILURES" = 0 ] && [ "$ERRORS" = 0 ]; then
+    echo "UNIT $KIND PASS tests=$TESTS failures=$FAILURES errors=$ERRORS skipped=$SKIPPED"
+    else
+      [ "$RC" = 0 ] && RC=1
     echo "UNIT $KIND FAIL tests=$TESTS failures=$FAILURES errors=$ERRORS skipped=$SKIPPED $LOG"
+    fi
   fi
 fi
 exit $RC

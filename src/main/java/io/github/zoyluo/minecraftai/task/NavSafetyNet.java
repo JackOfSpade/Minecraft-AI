@@ -17,7 +17,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -86,6 +90,14 @@ public final class NavSafetyNet {
     // breathable shore point) until the feet are actually on solid ground before releasing control
     // -- the goal of self-rescue is "reach shore", not "grab one breath".
     private final Map<UUID, BlockPos> waterRescueShore = new ConcurrentHashMap<>();
+    /**
+     * A strict automatic rescue that has actually admitted a physical Nav step. It carries the
+     * local strict search across that real stroke until dry ground, and remains part of the public
+     * ownership fence between strokes so another task cannot claim the surfaced controller gap.
+     * Follow and Baritone retain their explicit, verified high-air handoffs below, which clear
+     * this session before publishing their own narrow leases.
+     */
+    private final Set<UUID> strictAutomaticWaterRescueSessions = ConcurrentHashMap.newKeySet();
     // SAFE-DROWN3: A physically proved route gets a deadline proportional to its remaining swim
     // cells, rather than a flat ten seconds. An operator emergency teleport is therefore a last
     // resort for a route that demonstrably stopped making progress, never a shortcut for a long
@@ -132,6 +144,8 @@ public final class NavSafetyNet {
     private static final int STRICT_WATER_FALLBACK_WORK_PER_TICK = 26;
     private static final int STRICT_WATER_BFS_WORK_PER_TICK = STRICT_WATER_SEARCH_CANDIDATES_PER_TICK
             - STRICT_WATER_FALLBACK_WORK_PER_TICK;
+    /** A ray endpoint kept just inside the exposed lower face of an adjacent rescue cell. */
+    private static final double WATER_RESCUE_ADJACENT_FACE_INSET = 0.05D;
     /** A short-lived answer is reusable only under the perception context that proved it. */
     private record WaterSearchCache<T>(BlockPos feet, int computedTick, boolean hiddenBlockScan,
                                        int observationRadius, T result) {
@@ -166,6 +180,7 @@ public final class NavSafetyNet {
         UUID id = bot.getUUID();
         nextLogTick.remove(id);
         waterRescueShore.remove(id);
+        strictAutomaticWaterRescueSessions.remove(id);
         waterRescueDeadlines.remove(id);
         followSwimLeaseUntil.remove(id);
         baritoneWaterLeaseUntil.remove(id);
@@ -180,6 +195,7 @@ public final class NavSafetyNet {
     public void clearAll() {
         nextLogTick.clear();
         waterRescueShore.clear();
+        strictAutomaticWaterRescueSessions.clear();
         waterRescueDeadlines.clear();
         followSwimLeaseUntil.clear();
         baritoneWaterLeaseUntil.clear();
@@ -207,7 +223,20 @@ public final class NavSafetyNet {
     }
 
     public boolean isWaterRescueActive(AIPlayerEntity bot) {
-        return waterRescueShore.containsKey(bot.getUUID());
+        UUID id = bot.getUUID();
+        return waterRescueShore.containsKey(id)
+                || strictAutomaticWaterRescueSessions.contains(id)
+                || rescueStepOwnsMovement(bot);
+    }
+
+    /**
+     * True only while NavSafetyNet still owns the exact live guarded stroke it admitted. A
+     * yielding follower uses this to clear its own lease without zeroing the rescue's inputs
+     * between the ActionPack controller update and vanilla movement physics.
+     */
+    boolean rescueStepOwnsMovement(AIPlayerEntity bot) {
+        RescueStepAdmission admission = rescueSteps.get(bot.getUUID());
+        return admission != null && bot.getActionPack().stepInFlightFor(admission.lease());
     }
 
     /**
@@ -226,6 +255,7 @@ public final class NavSafetyNet {
         releaseRescueStep(bot, true);
         followSwimLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + FOLLOW_SWIM_LEASE_TICKS);
         waterRescueShore.remove(bot.getUUID());
+        strictAutomaticWaterRescueSessions.remove(bot.getUUID());
         waterRescueDeadlines.remove(bot.getUUID());
         strictWaterEscapeSearches.remove(bot.getUUID());
     }
@@ -248,6 +278,7 @@ public final class NavSafetyNet {
         }
         baritoneWaterLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + BARITONE_WATER_LEASE_TICKS);
         waterRescueShore.remove(bot.getUUID());
+        strictAutomaticWaterRescueSessions.remove(bot.getUUID());
         waterRescueDeadlines.remove(bot.getUUID());
         strictWaterEscapeSearches.remove(bot.getUUID());
     }
@@ -354,9 +385,14 @@ public final class NavSafetyNet {
             // Baritone is driving this bot through water on a route that was allowed to (same oxygen rule as above).
             return false;
         }
-        boolean inCrisis = waterRescueShore.containsKey(bot.getUUID());
+        UUID waterRescueId = bot.getUUID();
+        boolean inCrisis = waterRescueShore.containsKey(waterRescueId)
+                || strictAutomaticWaterRescueSessions.contains(waterRescueId);
         if (!inCrisis && bot.isUnderWater()) {
-            inCrisis = true; // newly triggered
+            // Treat the newly submerged bot as a crisis for this tick, but do not publish a
+            // placeholder shore latch yet. A high-air Follow recovery may yield to a real rescue
+            // step without turning that brief handoff into a persistent water-rescue state.
+            inCrisis = true;
         }
         if (inCrisis) {
             // Fluid blocks can disappear/spread from vanilla scheduled ticks without going
@@ -371,6 +407,7 @@ public final class NavSafetyNet {
             if (isDryStandable(bot, world, feet)) {
                 UUID id = bot.getUUID();
                 waterRescueShore.remove(id);
+                strictAutomaticWaterRescueSessions.remove(id);
                 waterRescueDeadlines.remove(id);
                 // A retained strict frontier is meaningful only for this water crisis. Do not
                 // let it survive a normal landing and later bias a nearby, unrelated entry.
@@ -396,6 +433,7 @@ public final class NavSafetyNet {
                 if (emergencyTeleportToAir(bot, world, feet, now)) {
                     UUID id = bot.getUUID();
                     waterRescueShore.remove(id);
+                    strictAutomaticWaterRescueSessions.remove(id);
                     waterRescueDeadlines.remove(id);
                     waterEscapeCache.remove(id);
                     strictWaterEscapeSearches.remove(id);
@@ -443,12 +481,19 @@ public final class NavSafetyNet {
                 escape = null;
             }
             if (escape != null) {
-                waterRescueShore.put(bot.getUUID(), escape.shore().immutable());
+                // An explicit request and an operator-proved route retain the public shore
+                // latch. A newly submerged strict bot gets that durable ownership only after
+                // beginRescueStep has admitted a real guarded stroke below: otherwise a brief
+                // high-air controller handoff can surface once and incorrectly stay latched.
+                if (hiddenWaterScan || waterRescueShore.containsKey(waterRescueId)) {
+                    waterRescueShore.put(waterRescueId, escape.shore().immutable());
+                }
                 scheduleWaterRescueDeadline(bot, feet, escape, now, hiddenWaterScan);
                 if (waterRescueDeadlineExceeded(bot, feet, now, hiddenWaterScan)) {
                     if (emergencyTeleportToAir(bot, world, feet, now)) {
-                        waterRescueShore.remove(bot.getUUID());
-                        waterRescueDeadlines.remove(bot.getUUID());
+                        waterRescueShore.remove(waterRescueId);
+                        strictAutomaticWaterRescueSessions.remove(waterRescueId);
+                        waterRescueDeadlines.remove(waterRescueId);
                         throttledLog(server, bot, "navsafe_drown_teleport", feet);
                         return true;
                     }
@@ -503,9 +548,10 @@ public final class NavSafetyNet {
                     bot.getActionPack().setForward(0.0F);
                 }
             } else {
-                // Do not turn or steer toward a shore learned from a hidden-world scan. Holding
-                // the crisis state leaves only visible walked steps and the physical air fallback.
-                waterRescueShore.put(bot.getUUID(), feet.immutable()); // no shore point (open deep water): placeholder to hold crisis state, surface for air first
+                // Do not turn or steer toward a shore learned from a hidden-world scan. A strict
+                // automatic rescue becomes durable only after a real guarded step is admitted;
+                // without one, this tick can yield back to a high-air controller rather than
+                // publishing a placeholder crisis latch.
                 bot.getActionPack().setForward(0.0F);
             }
             bot.getActionPack().setSprinting(false);
@@ -812,6 +858,10 @@ public final class NavSafetyNet {
         private List<BlockPos> currentNeighbors;
         private int nextNeighbor;
         private BlockPos lastFeet;
+        /** The preceding physical feet cell, used only to avoid an immediate observed water reversal. */
+        private BlockPos previousFeet;
+        /** An unfinished strict frontier may defer the sole observed reverse for one bounded slice, never forever. */
+        private boolean immediateWaterBacktrackDeferred;
         private int observationEpoch;
         /** Last server tick whose one stationary UNKNOWN retry allowance was reset. */
         private int lastObservationTick = Integer.MIN_VALUE;
@@ -833,6 +883,7 @@ public final class NavSafetyNet {
             enqueue(this.origin);
             visited.add(this.origin);
             lastFeet = this.origin;
+            previousFeet = this.origin;
         }
 
         private boolean accepts(BlockPos feet, int currentObservationRadius) {
@@ -845,13 +896,18 @@ public final class NavSafetyNet {
          * so attaching it contains no new world read or hidden route fact.
          */
         private boolean admitCurrentFeet(BlockPos feet) {
-            if (!feet.equals(lastFeet)) {
+            boolean moved = !feet.equals(lastFeet);
+            BlockPos formerFeet = lastFeet;
+            if (moved) {
                 // Every retained edge is connected to the last physical landing. A non-adjacent
                 // relocation (another controller, a command, or a teleport) must not inherit
                 // that tree merely because it happens to name an older visited cell.
                 if (!adjacent(lastFeet, feet)) {
                     return false;
                 }
+                // A real viewpoint change earns one fresh anti-ping-pong deferral. It must not
+                // inherit an old pending UNKNOWN edge as a permanent veto of its only known exit.
+                immediateWaterBacktrackDeferred = false;
                 // Do not synchronously revisit every occluded candidate here. The new epoch
                 // merely makes the retained unknown queue eligible for the normal work slice.
                 observationEpoch++;
@@ -868,6 +924,9 @@ public final class NavSafetyNet {
                 previous.put(feet.immutable(), lastFeet.immutable());
                 enqueue(feet.immutable());
                 exhausted = false;
+            }
+            if (moved) {
+                previousFeet = formerFeet.immutable();
             }
             lastFeet = feet.immutable();
             return true;
@@ -960,7 +1019,8 @@ public final class NavSafetyNet {
                 BlockPos candidate = fallbackNeighbors.get(nextFallbackNeighbor++);
                 work++;
                 WaterEscapeCell cell = observedWaterEscapeCell(bot, world, candidate, false);
-                if (cell != null) {
+                if (cell != null && !(cell == WaterEscapeCell.WATER
+                        && hasVisibleSolidDiagonalWaterCorner(bot, fallbackFeet, candidate))) {
                     fallbackCandidates.add(new ObservedWaterEscapeCell(candidate.immutable(), cell));
                 }
             }
@@ -983,8 +1043,45 @@ public final class NavSafetyNet {
                     && candidate.cell().getY() != fallbackFeet.getY()) {
                 return null;
             }
+            if (isImmediateWaterBacktrack(candidate)) {
+                int alternative = nextNonBacktrackingFallbackCandidate(
+                        nextFallbackCandidate + 1, allowWaterExploration);
+                if (alternative >= 0) {
+                    // The current candidate is an observed, legal escape hatch, but a different
+                    // observed stroke is available now. Consume the reversal rather than bouncing
+                    // between two surface cells and starving the retained BFS of a new viewpoint.
+                    nextFallbackCandidate = alternative;
+                    candidate = fallbackCandidates.get(alternative);
+                } else if (!exhausted && !immediateWaterBacktrackDeferred) {
+                    // A retained frontier (most often one formerly hidden forward edge) gets one
+                    // bounded chance to re-prove before the bot reverses. An UNKNOWN that remains
+                    // UNKNOWN is pending evidence, not a permanent veto of this only proved exit.
+                    immediateWaterBacktrackDeferred = true;
+                    return null;
+                }
+            }
+            immediateWaterBacktrackDeferred = false;
             nextFallbackCandidate++;
             return candidate.cell();
+        }
+
+        private boolean isImmediateWaterBacktrack(ObservedWaterEscapeCell candidate) {
+            return candidate.kind() == WaterEscapeCell.WATER
+                    && candidate.cell().equals(previousFeet);
+        }
+
+        /** Finds a currently usable observed fallback without bypassing the low-air vertical gate. */
+        private int nextNonBacktrackingFallbackCandidate(int first, boolean allowWaterExploration) {
+            for (int index = first; index < fallbackCandidates.size(); index++) {
+                ObservedWaterEscapeCell alternative = fallbackCandidates.get(index);
+                if (isImmediateWaterBacktrack(alternative)
+                        || (!allowWaterExploration && alternative.kind() != WaterEscapeCell.DRY
+                        && alternative.cell().getY() != fallbackFeet.getY())) {
+                    continue;
+                }
+                return index;
+            }
+            return -1;
         }
 
         private boolean hasEligibleUnknown() {
@@ -1012,12 +1109,13 @@ public final class NavSafetyNet {
                 return null;
             }
             BlockPos candidate = currentNeighbors.get(nextNeighbor++);
-            if (!withinRescueBounds(candidate, origin) || !visited.add(candidate)) {
+            if (!withinRescueBounds(candidate, origin) || visited.contains(candidate)) {
                 return null;
             }
             WaterEscapeProbe probe = probeWaterEscapeCell(bot, world, candidate, false);
             WaterEscapeCell cell = probe.cell();
             if (cell == null) {
+                visited.add(candidate);
                 // Retain only a true visibility miss for a later fresh observation (from a
                 // viewpoint change or the bounded next-tick retry); a visible physical rejection
                 // is known and must not keep this rescue PENDING forever.
@@ -1026,6 +1124,14 @@ public final class NavSafetyNet {
                 }
                 return null;
             }
+            // This is an edge fact, not a property of candidate.  Do not poison candidate's
+            // visited bit when a visible wall blocks only this diagonal parent: a cardinal parent
+            // may still reach the same observed water cell on a later frontier operation.
+            if (cell == WaterEscapeCell.WATER
+                    && hasVisibleSolidDiagonalWaterCorner(bot, current, candidate)) {
+                return null;
+            }
+            visited.add(candidate);
             return admitObservedCell(candidate, current, cell, feet);
         }
 
@@ -1046,6 +1152,13 @@ public final class NavSafetyNet {
                 if (probe.unknown()) {
                     rememberUnknown(unknown.cell(), unknown.parent());
                 }
+                return null;
+            }
+            if (cell == WaterEscapeCell.WATER
+                    && hasVisibleSolidDiagonalWaterCorner(bot, unknown.parent(), unknown.cell())) {
+                // The cell was visited only to retain its former UNKNOWN edge.  A fresh visible
+                // corner rejection belongs to that one parent, so let another parent retry it.
+                visited.remove(unknown.cell());
                 return null;
             }
             return admitObservedCell(unknown.cell(), unknown.parent(), cell, feet);
@@ -1154,8 +1267,82 @@ public final class NavSafetyNet {
     private static boolean canObserveWaterRescueColumn(AIPlayerEntity bot, BlockPos candidate) {
         return withinWaterRescueObservationRange(bot, candidate)
                 && withinWaterRescueObservationRange(bot, candidate.above())
-                && ObservableWorldQuery.canObserveCellThroughFluids(bot, candidate)
-                && ObservableWorldQuery.canObserveCellThroughFluids(bot, candidate.above());
+                && (ObservableWorldQuery.canObserveCellThroughFluids(bot, candidate)
+                || canObserveAdjacentWaterRescueCell(bot, candidate))
+                && (ObservableWorldQuery.canObserveCellThroughFluids(bot, candidate.above())
+                || canObserveAdjacentWaterRescueCell(bot, candidate.above()));
+    }
+
+    /**
+     * Strict water movement may keep vanilla's legal same-level diagonal strokes, but not through
+     * a visibly sealed two-block side column.  This is deliberately an edge predicate: a blocked
+     * diagonal parent must not erase a candidate that a cardinal parent can still reach.  Strict
+     * callers only use the transparent collider proofs below; they never inspect either side's
+     * BlockState just to decide whether that corner is closed.
+     */
+    private static boolean hasVisibleSolidDiagonalWaterCorner(AIPlayerEntity bot, BlockPos from, BlockPos to) {
+        int dx = to.getX() - from.getX();
+        int dy = to.getY() - from.getY();
+        int dz = to.getZ() - from.getZ();
+        if (dy != 0 || Math.abs(dx) != 1 || Math.abs(dz) != 1) {
+            return false;
+        }
+        return isVisibleSolidWaterColumn(bot, from.offset(dx, 0, 0),
+                dx > 0 ? Direction.WEST : Direction.EAST)
+                || isVisibleSolidWaterColumn(bot, from.offset(0, 0, dz),
+                dz > 0 ? Direction.NORTH : Direction.SOUTH);
+    }
+
+    /** A full player-body side column is known closed only when both near-facing cells are colliders. */
+    private static boolean isVisibleSolidWaterColumn(AIPlayerEntity bot, BlockPos feet, Direction faceTowardFrom) {
+        return canObserveWaterRescueSideCollider(bot, feet, faceTowardFrom)
+                && canObserveWaterRescueSideCollider(bot, feet.above(), faceTowardFrom);
+    }
+
+    /**
+     * A stacked side wall self-occludes its upper cell from a center ray through its lower one.
+     * For the exact diagonal edge instead prove each cell separately at the face exposed toward
+     * its source. The target lies just inside that collider; Fluid.NONE makes this a strict
+     * through-water first-hit proof without inspecting any BlockState.
+     */
+    private static boolean canObserveWaterRescueSideCollider(AIPlayerEntity bot, BlockPos side,
+                                                              Direction faceTowardFrom) {
+        double faceInset = 0.5D - WATER_RESCUE_ADJACENT_FACE_INSET;
+        Vec3 sample = new Vec3(side.getX() + 0.5D + faceTowardFrom.getStepX() * faceInset,
+                side.getY() + 0.5D,
+                side.getZ() + 0.5D + faceTowardFrom.getStepZ() * faceInset);
+        double radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        if (bot.getEyePosition().distanceToSqr(sample) > radius * radius) {
+            return false;
+        }
+        BlockHitResult hit = bot.level().clip(new ClipContext(
+                bot.getEyePosition(), sample, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(side);
+    }
+
+    /**
+     * A two-block-high adjacent bank can be physically open while the center ray to its head cell
+     * grazes the ceiling behind that opening. Preserve the normal center-ray proof first; only
+     * then let a direct horizontal neighbour use one real ray to the lower point of its near face.
+     * This is still an exact Fluid.NONE line-of-sight proof, not a terrain read or a wider search.
+     */
+    private static boolean canObserveAdjacentWaterRescueCell(AIPlayerEntity bot, BlockPos candidate) {
+        BlockPos feet = bot.blockPosition();
+        int dx = candidate.getX() - feet.getX();
+        int dy = candidate.getY() - feet.getY();
+        int dz = candidate.getZ() - feet.getZ();
+        if (Math.abs(dx) + Math.abs(dz) != 1 || Math.abs(dy) > 2) {
+            return false;
+        }
+        double sampleX = candidate.getX() + (dx > 0 ? WATER_RESCUE_ADJACENT_FACE_INSET
+                : dx < 0 ? 1.0D - WATER_RESCUE_ADJACENT_FACE_INSET : 0.5D);
+        double sampleZ = candidate.getZ() + (dz > 0 ? WATER_RESCUE_ADJACENT_FACE_INSET
+                : dz < 0 ? 1.0D - WATER_RESCUE_ADJACENT_FACE_INSET : 0.5D);
+        Vec3 sample = new Vec3(sampleX, candidate.getY() + WATER_RESCUE_ADJACENT_FACE_INSET, sampleZ);
+        BlockHitResult hit = bot.level().clip(new ClipContext(
+                bot.getEyePosition(), sample, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
+        return hit.getType() == HitResult.Type.MISS
+                || (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(candidate));
     }
 
     private static boolean withinWaterRescueObservationRange(AIPlayerEntity bot, BlockPos candidate) {
@@ -1285,13 +1472,26 @@ public final class NavSafetyNet {
         RescueStepAdmission admission = rescueSteps.get(bot.getUUID());
         if (admission != null) {
             if (!pack.stepInFlightFor(admission.lease())) {
-                // A generic cancellation cannot contribute a rescue result. Ordinary foreign
-                // starts are fenced while this lease is live; an active non-owned successor here
-                // is the higher-priority lava/suffocation handoff and must carry on untouched.
+                // A generic cancellation cannot contribute a rescue result. Read the exact
+                // owner's terminal result before releasing its fence: a completed strict stroke
+                // to its admitted cell is the one case where the retained observed frontier can
+                // be safely attached to the new physical feet on the next planning tick.
+                WalkedStep.Result result = pack.stepResultFor(admission.lease());
                 boolean emergencySuccessorActive = !pack.stepIdle();
+                boolean completedStrictLanding = !admission.hiddenWorldScan()
+                        && !hiddenWaterScan
+                        && !emergencySuccessorActive
+                        && result != null
+                        && result.succeeded()
+                        && bot.blockPosition().equals(admission.destination());
+                // Ordinary foreign starts are fenced while this lease is live; an active
+                // non-owned successor here is the higher-priority lava/suffocation handoff and
+                // must carry on untouched.
                 releaseRescueStep(bot, false);
                 waterEscapeCache.remove(bot.getUUID());
-                strictWaterEscapeSearches.remove(bot.getUUID());
+                if (!completedStrictLanding) {
+                    strictWaterEscapeSearches.remove(bot.getUUID());
+                }
                 waterRescueDeadlines.remove(bot.getUUID());
                 if (emergencySuccessorActive) {
                     awaitingEmergencySuccessors.add(bot.getUUID());
@@ -1338,6 +1538,7 @@ public final class NavSafetyNet {
             return false;
         }
         rescueSteps.put(bot.getUUID(), admission.withLease(lease));
+        beginStrictAutomaticWaterRescueSession(bot, hiddenWorldScan);
         return true;
     }
 
@@ -1350,6 +1551,10 @@ public final class NavSafetyNet {
         }
         WalkedStep.Kind kind = freshStepKindTo(bot, cell);
         if (kind == null) {
+            return false;
+        }
+        if (!hiddenWorldScan && kind == WalkedStep.Kind.SWIM
+                && hasVisibleSolidDiagonalWaterCorner(bot, bot.blockPosition(), cell)) {
             return false;
         }
         // The destination proof above covers the landing/water cell. The WalkedStep validator
@@ -1369,7 +1574,20 @@ public final class NavSafetyNet {
             return false;
         }
         rescueSteps.put(bot.getUUID(), admission.withLease(lease));
+        beginStrictAutomaticWaterRescueSession(bot, hiddenWorldScan);
         return true;
+    }
+
+    /**
+     * A strict automatic rescue gets durable local ownership only after it has actually leased a
+     * physical Nav step.  Explicit requests retain waterRescueShore instead; keeping that public
+     * intent separate prevents a one-tick high-air Follow or Baritone handoff from inheriting a
+     * surface/re-entry loop.
+     */
+    private void beginStrictAutomaticWaterRescueSession(AIPlayerEntity bot, boolean hiddenWorldScan) {
+        if (!hiddenWorldScan && !waterRescueShore.containsKey(bot.getUUID())) {
+            strictAutomaticWaterRescueSessions.add(bot.getUUID());
+        }
     }
 
     /**
@@ -1391,11 +1609,18 @@ public final class NavSafetyNet {
             return canUseHiddenWaterScan(bot);
         }
         WaterEscapeCell observed = observedWaterEscapeCell(bot, bot.level(), step.cell(), false);
+        // A strict target must remain currently observable for every guarded tick. A newly placed
+        // wall can turn the target into an UNKNOWN ray miss just as readily as it can make the
+        // target visibly invalid; retained admission proof must never bridge either world change.
         if (observed == null) {
             return false;
         }
         if (step.kind() == WalkedStep.Kind.SWIM ? observed != WaterEscapeCell.WATER
                 : observed != WaterEscapeCell.DRY) {
+            return false;
+        }
+        if (step.kind() == WalkedStep.Kind.SWIM
+                && hasVisibleSolidDiagonalWaterCorner(bot, admission.origin(), admission.destination())) {
             return false;
         }
         return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
@@ -1419,12 +1644,30 @@ public final class NavSafetyNet {
         if (withinRescueStepCorridor(feet, admission.origin(), admission.destination())) {
             return true;
         }
+        if (kind == WalkedStep.Kind.SWIM
+                && admission.origin().getY() == admission.destination().getY()
+                && withinRescueStepSwimSettlingEnvelope(feet, admission.origin(), admission.destination())) {
+            return true;
+        }
         BlockPos origin = admission.origin();
         return isNormalizableDryWalk(kind)
                 && activeStepTicks >= 0 && activeStepTicks <= 1
                 && feet.getX() == origin.getX()
                 && feet.getZ() == origin.getZ()
                 && Math.abs(feet.getY() - origin.getY()) == 1;
+    }
+
+    /**
+     * Swimming physics may bob the body one block above or below an otherwise exact horizontal
+     * stroke. Keep that admitted stroke alive only in its original one-cell X/Z corridor; this
+     * never permits a second horizontal cell, a new destination, or an unproved terrain read.
+     */
+    private static boolean withinRescueStepSwimSettlingEnvelope(BlockPos feet, BlockPos origin,
+                                                                 BlockPos destination) {
+        return between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getZ(), origin.getZ(), destination.getZ())
+                && feet.getY() >= Math.min(origin.getY(), destination.getY()) - 1
+                && feet.getY() <= Math.max(origin.getY(), destination.getY()) + 1;
     }
 
     private static boolean isNormalizableDryWalk(WalkedStep.Kind kind) {
@@ -1464,7 +1707,10 @@ public final class NavSafetyNet {
      */
     private static boolean reproveWaterEscapeStep(AIPlayerEntity bot, ServerLevel world,
                                                   WaterEscapeStep escape, boolean hiddenWaterScan) {
-        return observedWaterEscapeCell(bot, world, escape.next(), hiddenWaterScan) != null
+        WaterEscapeCell next = observedWaterEscapeCell(bot, world, escape.next(), hiddenWaterScan);
+        return next != null
+                && (hiddenWaterScan || next != WaterEscapeCell.WATER
+                || !hasVisibleSolidDiagonalWaterCorner(bot, bot.blockPosition(), escape.next()))
                 && observedWaterEscapeCell(bot, world, escape.shore(), hiddenWaterScan) == WaterEscapeCell.DRY;
     }
 

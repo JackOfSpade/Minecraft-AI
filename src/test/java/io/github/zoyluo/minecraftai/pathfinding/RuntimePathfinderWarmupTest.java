@@ -53,7 +53,10 @@ class RuntimePathfinderWarmupTest {
                 "only the explicit startup probe bypasses the GameTest multiplier; ordinary searches retain harness behavior");
         int checked = natural.indexOf("didRealPathfindingWork(walk)");
         int marked = natural.indexOf("pathfinderWarm = true;", checked);
-        assertTrue(checked >= 0 && marked > checked && natural.contains("warm-up fixture has no standable two-cell route"),
-                "the fixture does real work before it says the JVM is warm");
+        assertTrue(checked >= 0 && marked > checked
+                        && natural.contains("findWarmRoute(level, where)")
+                        && natural.contains("hasStandableLane(level, start, direction)")
+                        && natural.contains("warm-up fixture has no clear standable route"),
+                "the fixture must discover a real clear lane and do real work before it says the JVM is warm");
     }
 }

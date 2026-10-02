@@ -157,16 +157,19 @@ class OreDigObservationSourceContractTest {
                 "hidden lower-transition headroom must keep the target staged before any state read");
 
         int highPose = source.indexOf("private static BlockPos approachGoalFor");
+        int safePoseCall = source.indexOf("isObservedSafeApproachPose(bot, world, candidate)", highPose);
+        int safePose = source.indexOf("private static boolean isObservedSafeApproachPose", safePoseCall);
         int footObserve = source.indexOf(
-                "!ObservableWorldQuery.canObserveCell(bot, candidate)", highPose);
+                "!ObservableWorldQuery.canObserveCell(bot, candidate)", safePose);
         int headObserve = source.indexOf(
                 "!ObservableWorldQuery.canObserveCell(bot, candidate.above())", footObserve);
         int floorObserve = source.indexOf(
                 "!ObservableWorldQuery.canObserveBlock(bot, candidate.below())", headObserve);
         int standable = source.indexOf("Standability.isStandable(world, candidate)", floorObserve);
-        assertTrue(highPose >= 0 && footObserve > highPose && headObserve > footObserve
+        assertTrue(highPose >= 0 && safePoseCall > highPose && safePose > safePoseCall
+                        && footObserve > safePose && headObserve > footObserve
                         && floorObserve > headObserve && standable > floorObserve,
-                "a high target work pose must be fully observed before standability is read");
+                "every approach work pose must delegate to a fully observed standability gate");
 
         int raised = source.indexOf("private RaisedBoundaryLanding inspectRaisedBoundaryLanding");
         int supportObserve = source.indexOf("!canObserveWorldState(bot, support)", raised);

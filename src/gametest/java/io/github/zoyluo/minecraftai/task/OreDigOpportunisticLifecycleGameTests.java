@@ -396,6 +396,20 @@ public final class OreDigOpportunisticLifecycleGameTests {
         BlockPos ore = room.at(6, 1, 0);
         room.set(6, 1, 0, Blocks.DIAMOND_ORE);
         room.set(6, 2, 0, Blocks.STONE);
+        // Keep OreDig's ordinary ladder in this observed room until the detour selector has actually admitted
+        // the diamond. Without local coal, the age-60 selector check can correctly see a partial observed
+        // route as unreachable, exclude the seed for 600 ticks, and let the no-target strip search leave the
+        // room before a live re-proof. Keep that work west and off the diamond's dz=0 sightline: the earlier
+        // broad checkerboard could leave a coal/roof directly between the bot and every candidate diamond
+        // stance, correctly producing a strict no_pose skip based on timing. This fixture tests terminal orphan
+        // cleanup, not that transient sensor race. The high target leaves the mission alive; the exact
+        // diamond-claim assertion below still proves that the detour, rather than ordinary coal work, reached MINE.
+        for (int dx = -2; dx <= -1; dx++) {
+            for (int dz = -2; dz <= 2; dz += 4) {
+                room.set(dx, 1, dz, Blocks.COAL_ORE);
+                room.set(dx, 2, dz, Blocks.STONE);
+            }
+        }
         AIPlayerEntity bot = h.spawn(name, room, 0, 0);
         // A stone pick is mandatory for OreDig's own strip/channel through ordinary rock: the channel-tool
         // policy floors every mined block (including the mission's own coal/lapis target) at STONE tier and,
@@ -404,7 +418,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        h.enableDetourMode();
+        h.enableDetourMode(256);
         h.enableAssist(bot);
         UUID id = bot.getUUID();
         String dimensionKey = BotEdits.dimensionKey(room.world);
@@ -422,7 +436,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             if (p.assignedAt < 0) {
                 if (h.settle(bot, p)) {
                     h.assertStrict(bot);
-                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 1);
+                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 999);
                     TaskManager.INSTANCE.assign(bot, task[0], TaskOrigin.of(TaskOrigin.Kind.MISSION, reason));
                     p.assignedAt = p.tick;
                     stageStart[0] = p.tick;
@@ -929,6 +943,16 @@ public final class OreDigOpportunisticLifecycleGameTests {
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
         room.set(9, 1, 0, Blocks.DIAMOND_ORE);
         room.set(9, 2, 0, Blocks.STONE);
+        // Keep the ordinary coal mission in this observed room until the detour selector has actually admitted
+        // the diamond. With no local work, the no-target strip can leave through the north shell before the
+        // live route re-proof, correctly yielding unreachable_observed instead of exercising the degraded-TPS
+        // transition. Keep this work west and off the diamond's dz=0 sightline.
+        for (int dx = -2; dx <= -1; dx++) {
+            for (int dz = -2; dz <= 2; dz += 4) {
+                room.set(dx, 1, dz, Blocks.COAL_ORE);
+                room.set(dx, 2, dz, Blocks.STONE);
+            }
+        }
         AIPlayerEntity bot = h.spawn("DetourTpsGT", room, 0, 0);
         // A stone pick is mandatory for OreDig's own strip/channel through ordinary rock: the channel-tool
         // policy floors every mined block (including the mission's own coal/lapis target) at STONE tier and,
@@ -937,7 +961,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        h.enableDetourMode();
+        h.enableDetourMode(256);
         h.enableAssist(bot);
         UUID id = bot.getUUID();
         Progress p = new Progress();
@@ -953,7 +977,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             if (p.assignedAt < 0) {
                 if (h.settle(bot, p)) {
                     h.assertStrict(bot);
-                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 1);
+                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 999);
                     TaskManager.INSTANCE.assign(bot, task[0], TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_detour_tps"));
                     p.assignedAt = p.tick;
                     stageStart[0] = p.tick;
@@ -1000,6 +1024,16 @@ public final class OreDigOpportunisticLifecycleGameTests {
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
         room.set(9, 1, 0, Blocks.DIAMOND_ORE);
         room.set(9, 2, 0, Blocks.STONE);
+        // Keep the ordinary coal mission in this observed room until the detour has admitted the
+        // diamond. With no local work, the no-target strip can leave through the north shell before
+        // the live route re-proof, correctly yielding unreachable_observed instead of exercising the
+        // hurt-edge transition. Keep this work west and off the diamond's dz=0 sightline.
+        for (int dx = -2; dx <= -1; dx++) {
+            for (int dz = -2; dz <= 2; dz += 4) {
+                room.set(dx, 1, dz, Blocks.COAL_ORE);
+                room.set(dx, 2, dz, Blocks.STONE);
+            }
+        }
         AIPlayerEntity bot = h.spawn("DetourHurtGT", room, 0, 0);
         // A stone pick is mandatory for OreDig's own strip/channel through ordinary rock: the channel-tool
         // policy floors every mined block (including the mission's own coal/lapis target) at STONE tier and,
@@ -1008,7 +1042,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        h.enableDetourMode();
+        h.enableDetourMode(256);
         h.enableAssist(bot);
         UUID id = bot.getUUID();
         Progress p = new Progress();
@@ -1024,7 +1058,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             if (p.assignedAt < 0) {
                 if (h.settle(bot, p)) {
                     h.assertStrict(bot);
-                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 1);
+                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 999);
                     TaskManager.INSTANCE.assign(bot, task[0], TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_detour_hurt"));
                     p.assignedAt = p.tick;
                     stageStart[0] = p.tick;

@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -11,6 +12,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.zombie.Husk;
 import net.minecraft.world.entity.vehicle.boat.Boat;
@@ -31,6 +33,7 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.isSealed
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.preparePlatform;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.runLocked;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.runLockedHooked;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterShell;
 
 /** Physical regressions for the shelter's ordered build and sealed healing transaction. */
@@ -211,7 +214,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         finish(context, bot, "ShelterCenteredEntityGuardGT");
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_ai_enabled_close_pressure_uses_one_strike_and_low_health_bot_survives", maxTicks = 16000)
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_ai_enabled_close_pressure_uses_one_strike_and_low_health_bot_survives", maxTicks = 16000 + PerceptionFixtures.MAX_WAIT_TICKS)
     public void aiEnabledClosePressureUsesOneStrikeAndLowHealthBotSurvives(
             GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
@@ -220,62 +223,71 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD, 1));
 
-        EmergencyShelterTask task = new EmergencyShelterTask();
-        TaskManager.INSTANCE.assign(bot, task,
-                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_ai_pressure"));
-        Husk[] hostile = {null};
+        // The live husk must be noticed before it is used as a placement blocker. Its real AI
+        // remains enabled, while its zero movement and full knockback resistance keep the exact
+        // occupied wall cell stable long enough to prove the one-strike persistent-pressure path.
+        Husk hostile = spawnAiHusk(context, feet.east(), bot);
+        hostile.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.0D);
+        hostile.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(1.0D);
+        EmergencyShelterTask[] task = {null};
         float[] previousHostileHealth = {Float.NaN};
         int[] damageEvents = {0};
         int[] closePressureTicks = {0};
         boolean[] lowHealthInjected = {false};
 
-        runLocked(context, () -> {
-            context.getLevel().setDayTime(1000L);
-            if (hostile[0] == null
-                    && isSealed(context, feet.north())
-                    && isSealed(context, feet.north().above())) {
+        PerceptionFixtures.faceToward(bot, hostile);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(hostile), since -> {
+            require(context, !hostile.isNoAi()
+                            && PerceptionFixtures.noticedAll(bot, List.of(hostile))
+                            && new AABB(feet.east()).intersects(hostile.getBoundingBox()),
+                    "AI pressure fixture did not establish a noticed occupied east wall cell");
+            if (!lowHealthInjected[0]) {
                 bot.setHealth(8.0F);
                 lowHealthInjected[0] = true;
-                hostile[0] = spawnAiHusk(context, feet.east(), bot);
-                previousHostileHealth[0] = hostile[0].getHealth();
-                require(context, !hostile[0].isNoAi(),
-                        "close-pressure hostile unexpectedly had AI disabled");
-                return;
+                previousHostileHealth[0] = hostile.getHealth();
+                task[0] = new EmergencyShelterTask();
+                TaskManager.INSTANCE.assign(bot, task[0],
+                        TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_ai_pressure"));
             }
-            if (hostile[0] != null) {
-                hostile[0].setTarget(bot);
-                if (hostile[0].getHealth() < previousHostileHealth[0]) {
+            runLockedHooked(context, () -> {
+                context.getLevel().setDayTime(1000L);
+                hostile.setTarget(bot);
+                require(context, !hostile.isNoAi()
+                                && PerceptionFixtures.noticedAll(bot, List.of(hostile))
+                                && new AABB(feet.east()).intersects(hostile.getBoundingBox()),
+                        "AI pressure fixture lost its noticed occupied east wall cell");
+                if (hostile.getHealth() < previousHostileHealth[0]) {
                     damageEvents[0]++;
-                    previousHostileHealth[0] = hostile[0].getHealth();
+                    previousHostileHealth[0] = hostile.getHealth();
                 }
-                if (new AABB(feet.east()).intersects(hostile[0].getBoundingBox())
-                        || bot.distanceToSqr(hostile[0]) <= 2.25D) {
+                if (new AABB(feet.east()).intersects(hostile.getBoundingBox())
+                        || bot.distanceToSqr(hostile) <= 2.25D) {
                     closePressureTicks[0]++;
                 }
                 require(context, damageEvents[0] <= 1,
                         "AI pressure caused repeated shelter attacks");
-                require(context, hostile[0].isAlive(),
+                require(context, hostile.isAlive(),
                         "AI pressure test relied on killing the hostile");
-            }
-            require(context, bot.isAlive() && bot.getHealth() > 0.0F,
-                    "low-health bot died under close shelter pressure");
-            if (task.state() == TaskState.RUNNING) {
-                return;
-            }
-            require(context, task.state() == TaskState.FAILED
-                            && "shelter_wall_blocked_by_persistent_hostile"
-                            .equals(task.failureReason()),
-                    "AI pressure produced the wrong terminal: "
-                            + task.state() + ":" + task.failureReason());
-            require(context, lowHealthInjected[0]
-                            && damageEvents[0] == 1
-                            && closePressureTicks[0] >= 2,
-                    "fixture did not prove sustained close pressure with one strike");
-            require(context, bot.isAlive() && bot.getHealth() > 0.0F,
-                    "low-health bot did not survive its physical release");
-            assertPhysicalExit(context, bot, feet);
-            hostile[0].discard();
-            finish(context, bot, "ShelterAiPressureGT");
+                require(context, bot.isAlive() && bot.getHealth() > 0.0F,
+                        "low-health bot died under close shelter pressure");
+                if (task[0].state() == TaskState.RUNNING) {
+                    return;
+                }
+                require(context, task[0].state() == TaskState.FAILED
+                                && "shelter_wall_blocked_by_persistent_hostile"
+                                .equals(task[0].failureReason()),
+                        "AI pressure produced the wrong terminal: "
+                                + task[0].state() + ":" + task[0].failureReason());
+                require(context, lowHealthInjected[0]
+                                && damageEvents[0] == 1
+                                && closePressureTicks[0] >= 2,
+                        "fixture did not prove sustained close pressure with one strike");
+                require(context, bot.isAlive() && bot.getHealth() > 0.0F,
+                        "low-health bot did not survive its physical release");
+                assertPhysicalExit(context, bot, feet);
+                hostile.discard();
+                finish(context, bot, "ShelterAiPressureGT");
+            });
         });
     }
 

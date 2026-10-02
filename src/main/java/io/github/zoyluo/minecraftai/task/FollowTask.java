@@ -324,7 +324,13 @@ public final class FollowTask extends AbstractTask {
         }
         followLand(bot, target);
         // After the movement decisions of this tick: a swing never stops or redirects the follow.
+        float yawBeforeEscort = bot.getYRot();
         escort.tick(bot, target);
+        if (!bot.getActionPack().hasBaritoneRoute()) {
+            // Combat aim runs after this bot has already written the next legacy input. Re-express that same world-space movement
+            // under the new combat yaw so the next physics tick keeps following rather than stepping toward the hostile.
+            bot.getActionPack().reprojectLegacyInputsForYawChange(yawBeforeEscort);
+        }
     }
 
     /**

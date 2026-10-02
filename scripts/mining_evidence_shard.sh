@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run exactly one canonical Mining First from-zero shard and seal a descriptor
-# that binds its matrix coordinates to one immutable evidence bundle.
+# that binds its matrix coordinates to one sealed, tamper-evident evidence bundle.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"

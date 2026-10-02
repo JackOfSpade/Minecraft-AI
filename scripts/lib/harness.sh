@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared, portable primitives for the immutable evidence harness.
+# Shared, portable primitives for the sealed, tamper-evident evidence harness.
 # This file is sourced by scripts in ../; it does not execute a run by itself.
 
 if [[ -z "${HARNESS_REPO_ROOT:-}" ]]; then
@@ -15,6 +15,74 @@ HARNESS_LOCK_TOKEN=""
 harness_die() {
   printf 'evidence: %s\n' "$*" >&2
   return 1
+}
+
+# Evidence sealing needs a real Python interpreter for JSON parsing and atomic filesystem work.
+# Git Bash can expose a Windows Store app-execution alias as `python3`; exclude that launcher
+# before probing it. HARNESS_PYTHON_BIN lets Windows callers point at an installed interpreter
+# without hard-coding a machine-specific path in the repository.
+HARNESS_PYTHON=()
+
+# The Windows Store's per-user App Execution Alias looks like a Python executable, but opens the
+# Store instead of running an interpreter.  Do not reject the whole WindowsApps tree: a genuine
+# Store installation lives under Program Files\WindowsApps and is a usable interpreter.
+harness_is_windows_app_execution_alias() {
+  local candidate normalized parent base
+  candidate="$1"
+  normalized="${candidate//\\//}"
+  normalized="$(printf '%s' "$normalized" | tr '[:upper:]' '[:lower:]')"
+  parent="${normalized%/*}"
+  base="${normalized##*/}"
+  case "$parent" in
+    */appdata/local/microsoft/windowsapps) ;;
+    *) return 1 ;;
+  esac
+  case "$base" in
+    python*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+harness_python_candidate_works() {
+  local executable
+  executable="$(command -v "$1" 2>/dev/null || true)"
+  [[ -n "$executable" ]] && ! harness_is_windows_app_execution_alias "$executable" \
+    && "$@" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' \
+    >/dev/null 2>&1
+}
+
+harness_python_available() {
+  if [[ ${#HARNESS_PYTHON[@]} -gt 0 ]]; then
+    return 0
+  fi
+  if [[ -n "${HARNESS_PYTHON_BIN:-}" ]]; then
+    if harness_is_windows_app_execution_alias "$HARNESS_PYTHON_BIN"; then
+      harness_die "HARNESS_PYTHON_BIN points at a Windows App Execution Alias, not Python: $HARNESS_PYTHON_BIN"
+      return 1
+    fi
+    if "$HARNESS_PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' \
+        >/dev/null 2>&1; then
+      HARNESS_PYTHON=("$HARNESS_PYTHON_BIN")
+      return 0
+    fi
+    harness_die "HARNESS_PYTHON_BIN is not a working Python 3 interpreter: $HARNESS_PYTHON_BIN"
+    return 1
+  fi
+  if harness_python_candidate_works python3; then
+    HARNESS_PYTHON=(python3)
+  elif harness_python_candidate_works python; then
+    HARNESS_PYTHON=(python)
+  elif harness_python_candidate_works py -3; then
+    HARNESS_PYTHON=(py -3)
+  else
+    harness_die 'Python 3 is required; put python3/python/py -3 on PATH or set HARNESS_PYTHON_BIN'
+    return 1
+  fi
+}
+
+harness_python() {
+  harness_python_available || return 1
+  "${HARNESS_PYTHON[@]}" "$@"
 }
 
 harness_now_utc() {
@@ -103,11 +171,7 @@ harness_assert_no_tree_symlinks() {
 }
 
 harness_choose_port() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    harness_die 'python3 is required to allocate an isolated dynamic port'
-    return 1
-  fi
-  python3 - <<'PY'
+  harness_python - <<'PY'
 import socket
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     sock.bind(("127.0.0.1", 0))
@@ -119,8 +183,8 @@ harness_run_id() {
   local scenario="$1" revision="${2:-unknown}" stamp short nonce
   stamp="$(date -u '+%Y%m%dT%H%M%SZ')"
   short="${revision:0:8}"
-  if command -v python3 >/dev/null 2>&1; then
-    nonce="$(python3 -c 'import secrets; print(secrets.token_hex(6))')" || return 1
+  if harness_python_available >/dev/null 2>&1; then
+    nonce="$(harness_python -c 'import secrets; print(secrets.token_hex(6))')" || return 1
   else
     nonce="$$$(printf '%05d' "$RANDOM")"
   fi
@@ -162,7 +226,7 @@ harness_acquire_lock() {
     # be paused between mkdir and metadata writes; only an old ownerless lock
     # is stale. Numeric dead owners can be recovered immediately.
     if [[ ! "$owner" =~ ^[0-9]+$ ]]; then
-      age="$(python3 - "$lock" <<'PY'
+      age="$(harness_python - "$lock" <<'PY'
 import os
 import sys
 import time
@@ -360,6 +424,33 @@ harness_verify_bundle_files() {
   harness_verify_locked_marker "$dir/LOCKED" || return 1
 }
 
+harness_move_new_path() {
+  local source="$1" destination="$2"
+  harness_python_available || return 1
+  if harness_python -c 'import os; raise SystemExit(0 if os.name == "nt" else 1)' >/dev/null 2>&1; then
+    # Windows has no documented directory-fsync equivalent. MoveFileExW explicitly supports
+    # directories; request its documented write-through completion without COPY_ALLOWED so this
+    # same-volume move remains a rename, rather than a non-atomic copy-and-delete.
+    harness_python - "$source" "$destination" <<'PY'
+import ctypes
+import os
+import sys
+
+source, destination = sys.argv[1:]
+if os.path.lexists(destination):
+    raise SystemExit("destination already exists")
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+move = kernel32.MoveFileExW
+move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+move.restype = ctypes.c_int
+if not move(os.path.abspath(source), os.path.abspath(destination), 0x00000008):  # MOVEFILE_WRITE_THROUGH
+    raise ctypes.WinError(ctypes.get_last_error())
+PY
+  else
+    mv -n "$source" "$destination"
+  fi
+}
+
 harness_publish_staging() {
   local staging="$1" final="$2" staging_identity nested
   [[ -d "$staging" && ! -L "$staging" ]] || {
@@ -371,39 +462,42 @@ harness_publish_staging() {
     return 1
   fi
   harness_assert_no_tree_symlinks "$staging" || return 1
-  chmod 0444 "$staging"/* || return 1
-  python3 - "$staging" <<'PY' || return 1
+  # Sync each completed file while it is still writable.  On Windows fsync on the read-only
+  # handles used after chmod can return EBADF/EINVAL, which must not be mistaken for a durable seal.
+  chmod u+w "$staging"/* || return 1
+  harness_python - "$staging" <<'PY' || return 1
 import os
+import stat
 import sys
 
 root = sys.argv[1]
 for name in sorted(os.listdir(root)):
     path = os.path.join(root, name)
-    if not os.path.isfile(path) or os.path.islink(path):
+    mode = os.lstat(path).st_mode
+    if not stat.S_ISREG(mode) or os.path.islink(path):
         raise SystemExit("non-regular evidence entry")
-    descriptor = os.open(path, os.O_RDONLY)
+    descriptor = os.open(path, os.O_RDWR)
     try:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-try:
+if os.name != "nt":
     descriptor = os.open(root, os.O_RDONLY)
     try:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-except OSError:
-    pass
 PY
-  staging_identity="$(python3 - "$staging" <<'PY'
+  chmod 0444 "$staging"/* || return 1
+  staging_identity="$(harness_python - "$staging" <<'PY'
 import os
 import sys
 value = os.lstat(sys.argv[1])
 print(f"{value.st_dev}:{value.st_ino}")
 PY
 )" || return 1
-  mv -n "$staging" "$final" || return 1
-  if [[ -e "$staging" || ! -f "$final/LOCKED" ]] || ! python3 - "$final" "$staging_identity" <<'PY'
+  harness_move_new_path "$staging" "$final" || return 1
+  if [[ -e "$staging" || ! -f "$final/LOCKED" ]] || ! harness_python - "$final" "$staging_identity" <<'PY'
 import os
 import sys
 value = os.lstat(sys.argv[1])
@@ -411,7 +505,7 @@ raise SystemExit(0 if f"{value.st_dev}:{value.st_ino}" == sys.argv[2] else 1)
 PY
   then
     nested="$final/$(basename "$staging")"
-    if [[ -d "$nested" && ! -L "$nested" ]] && python3 - "$nested" "$staging_identity" <<'PY'
+    if [[ -d "$nested" && ! -L "$nested" ]] && harness_python - "$nested" "$staging_identity" <<'PY'
 import os
 import sys
 value = os.lstat(sys.argv[1])
@@ -425,25 +519,22 @@ PY
     return 1
   fi
   if ! chmod 0555 "$final"; then
-    # The inode check above proves this is the directory we just moved, so it
-    # is safe to roll back a publication whose read-only transition failed.
-    chmod -R u+w "$final" 2>/dev/null || true
-    rm -rf -- "$final"
-    harness_die "could not make published evidence read-only: $final"
+    # The content is already published. Preserve it for inspection rather than deleting a
+    # successfully sealed bundle merely because this filesystem cannot enforce advisory modes.
+    harness_die "published evidence could not be marked read-only: $final"
     return 1
   fi
-  python3 - "$final" "$(dirname "$final")" <<'PY' || return 1
+  harness_python - "$final" "$(dirname "$final")" <<'PY' || return 1
 import os
 import sys
-for path in sys.argv[1:]:
-    try:
+
+if os.name != "nt":
+    for path in sys.argv[1:]:
         descriptor = os.open(path, os.O_RDONLY)
         try:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-    except OSError:
-        pass
 PY
 }
 
@@ -455,11 +546,7 @@ harness_gradle_property() {
 
 harness_atomic_replace_file() {
   local source="$1" destination="$2"
-  command -v python3 >/dev/null 2>&1 || {
-    harness_die 'python3 is required for atomic file replacement'
-    return 1
-  }
-  python3 - "$source" "$destination" <<'PY'
+  harness_python - "$source" "$destination" <<'PY'
 import os
 import stat
 import sys
@@ -468,7 +555,7 @@ source, destination = sys.argv[1:]
 source_stat = os.lstat(source)
 if not stat.S_ISREG(source_stat.st_mode):
     raise SystemExit("source is not a regular file")
-descriptor = os.open(source, os.O_RDONLY)
+descriptor = os.open(source, os.O_RDWR)
 try:
     os.fsync(descriptor)
 finally:
@@ -483,14 +570,21 @@ except FileNotFoundError:
 else:
     if not stat.S_ISREG(destination_stat.st_mode):
         raise SystemExit("destination is not a regular file")
-os.replace(source, destination)
-try:
+if os.name == "nt":
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    move = kernel32.MoveFileExW
+    move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    move.restype = ctypes.c_int
+    if not move(os.path.abspath(source), os.path.abspath(destination), 0x00000001 | 0x00000008):
+        raise ctypes.WinError(ctypes.get_last_error())
+else:
+    os.replace(source, destination)
     descriptor = os.open(parent, os.O_RDONLY)
     try:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-except OSError:
-    pass
 PY
 }

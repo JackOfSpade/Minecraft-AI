@@ -143,6 +143,29 @@ class PrivilegedBoundarySourceTest {
                         && observation.contains("\"observable_water_cell_query\")")
                         && observation.contains("canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.NONE)"),
                 "only water navigation may use the fluid-transparent line-of-sight helpers");
+        String diagonalCorner = body(safety, "private static boolean hasVisibleSolidDiagonalWaterCorner",
+                "/** A full player-body side column");
+        String solidColumn = body(safety, "private static boolean isVisibleSolidWaterColumn",
+                "/**\n     * A stacked side wall self-occludes");
+        String sideCollider = body(safety, "private static boolean canObserveWaterRescueSideCollider",
+                "/**\n     * A two-block-high adjacent bank");
+        assertTrue(diagonalCorner.contains("dy != 0 || Math.abs(dx) != 1 || Math.abs(dz) != 1")
+                        && diagonalCorner.contains("from.offset(dx, 0, 0)")
+                        && diagonalCorner.contains("from.offset(0, 0, dz)")
+                        && diagonalCorner.contains("dx > 0 ? Direction.WEST : Direction.EAST")
+                        && diagonalCorner.contains("dz > 0 ? Direction.NORTH : Direction.SOUTH")
+                        && !diagonalCorner.contains("getBlockState") && !diagonalCorner.contains("getFluidState")
+                        && solidColumn.contains("canObserveWaterRescueSideCollider(bot, feet, faceTowardFrom)")
+                        && solidColumn.contains("canObserveWaterRescueSideCollider(bot, feet.above(), faceTowardFrom)")
+                        && sideCollider.contains("side.getY() + 0.5D")
+                        && sideCollider.contains("faceTowardFrom.getStepX()")
+                        && sideCollider.contains("faceTowardFrom.getStepZ()")
+                        && sideCollider.contains("ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE")
+                        && sideCollider.contains("hit.getType() == HitResult.Type.BLOCK")
+                        && sideCollider.contains("hit.getBlockPos().equals(side)")
+                        && !solidColumn.contains("getBlockState") && !solidColumn.contains("getFluidState")
+                        && !sideCollider.contains("getBlockState") && !sideCollider.contains("getFluidState"),
+                "a strict diagonal water corner must use two directional first-hit Fluid.NONE collider proofs per side column, never raw side-state reads");
         assertTrue(observation.contains("public static boolean canObserveCollider(AIPlayerEntity bot, BlockPos pos)")
                         && observation.contains("\"observable_block_query\", ClipContext.Fluid.ANY")
                         && observation.contains("private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range)")
@@ -204,15 +227,34 @@ class PrivilegedBoundarySourceTest {
                         && safety.contains("boolean hiddenWorldScan, BlockPos origin, BlockPos destination)"),
                 "NavSafetyNet must latch exact ActionPack ownership as well as capability provenance and the physical corridor of its rescue step");
         int exactLease = inFlight.indexOf("if (!pack.stepInFlightFor(admission.lease()))");
+        int exactResult = inFlight.indexOf("WalkedStep.Result result = pack.stepResultFor(admission.lease());", exactLease);
+        int strictLanding = inFlight.indexOf("boolean completedStrictLanding =", exactResult);
         int emergencyRelease = inFlight.indexOf("releaseRescueStep(bot, false);", exactLease);
         int capabilityMismatch = inFlight.indexOf("admission.hiddenWorldScan() != hiddenWaterScan");
         int corridorMismatch = inFlight.indexOf("!withinRescueStepContinuationEnvelope(");
         int ownerCancel = inFlight.indexOf("releaseRescueStep(bot, true);", corridorMismatch);
-        assertTrue(exactLease >= 0 && emergencyRelease > exactLease && capabilityMismatch > emergencyRelease
+        String strictCompletion = inFlight.substring(strictLanding, emergencyRelease);
+        String completionCleanup = inFlight.substring(emergencyRelease, capabilityMismatch);
+        int conditionalFrontierClear = completionCleanup.indexOf("if (!completedStrictLanding) {");
+        int conditionalFrontierClearEnd = completionCleanup.indexOf("}", conditionalFrontierClear);
+        int strictFrontierClear = completionCleanup.indexOf("strictWaterEscapeSearches.remove(bot.getUUID());",
+                conditionalFrontierClear);
+        assertTrue(exactLease >= 0 && exactResult > exactLease && strictLanding > exactResult
+                        && emergencyRelease > strictLanding && capabilityMismatch > emergencyRelease
                         && corridorMismatch > capabilityMismatch && ownerCancel > corridorMismatch
+                        && strictCompletion.contains("!admission.hiddenWorldScan()")
+                        && strictCompletion.contains("!hiddenWaterScan")
+                        && strictCompletion.contains("!emergencySuccessorActive")
+                        && strictCompletion.contains("result != null")
+                        && strictCompletion.contains("result.succeeded()")
+                        && strictCompletion.contains("bot.blockPosition().equals(admission.destination())")
+                        && conditionalFrontierClear >= 0 && strictFrontierClear > conditionalFrontierClear
+                        && strictFrontierClear < conditionalFrontierClearEnd
+                        && completionCleanup.indexOf("strictWaterEscapeSearches.remove(bot.getUUID());",
+                        conditionalFrontierClearEnd + 1) < 0
                         && !inFlight.substring(exactLease, capabilityMismatch).contains("pack.cancelStep()")
                         && inFlight.contains("pack.activeStepKind()") && inFlight.contains("pack.activeStepTicks()"),
-                "Nav rescue must recognize only its exact lease, leave an emergency-preempted successor running while it drops stale bookkeeping, and cancel its owned capability/corridor mismatch before it advances");
+                "Nav rescue must retain an observed frontier only after its exact strict lease succeeds at its admitted landing, leave an emergency-preempted successor running while it drops stale bookkeeping, and cancel its owned capability/corridor mismatch before it advances");
         String releaseRescue = body(safety, "private void releaseRescueStep(AIPlayerEntity bot, boolean cancel)",
                 "/**\n     * Whether a rescue step is still running");
         assertTrue(releaseRescue.contains("rescueSteps.remove(bot.getUUID())")

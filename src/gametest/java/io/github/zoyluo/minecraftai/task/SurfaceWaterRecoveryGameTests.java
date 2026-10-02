@@ -236,6 +236,192 @@ public final class SurfaceWaterRecoveryGameTests {
     }
 
     /**
+     * The strict SWIM settling allowance is only for vertical bobbing around a horizontal stroke.
+     * An external move to the next cell beyond an admitted vertical ascent must not retain the
+     * old rescue lease merely because that displaced feet cell is one block above its destination.
+     */
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_strict_vertical_rescue_guard_rejects_external_bob_outside_stroke", maxTicks = 30)
+    public void strictVerticalRescueGuardRejectsExternalBobOutsideStroke(GameTestHelper context) {
+        WaterShaftFixture fixture = sealedWaterShaftFixture(context, -143, 4);
+        var world = context.getLevel();
+        AIPlayerEntity bot = fixture.bot();
+        BlockPos start = fixture.lower();
+        BlockPos next = start.above();
+        BlockPos displaced = next.above();
+        bot.setAirSupply(100);
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_vertical_rescue_continuation").allowed(),
+                    "vertical-rescue fixture unexpectedly enabled hidden-world scanning");
+            require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, next)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, next.above()),
+                    "vertical-rescue fixture did not start with a visible strict water stroke");
+            NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+            require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
+                    "strict vertical rescue did not take control");
+            boolean admittedStroke = bot.getActionPack().stepInFlightFor(
+                    "navsafe_water_rescue", next, WalkedStep.Kind.SWIM)
+                    || bot.getActionPack().stepInFlightFor(
+                    "navsafe_water_surface", next, WalkedStep.Kind.SWIM);
+            require(context, admittedStroke,
+                    "strict vertical rescue did not start its visibly admitted upward stroke");
+
+            // This is deliberately one water cell beyond the exact start-to-next vertical
+            // corridor. It remains observable, so only provenance—not a changed terrain fact—
+            // may reject the retained action before WalkedStep reads its raw validator inputs.
+            poseWaterObserver(bot, displaced);
+            require(context, bot.blockPosition().equals(displaced)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, next),
+                    "fixture did not establish the visible externally displaced vertical pose");
+            TeleportAudit.reset(bot);
+            Vec3 before = bot.position();
+            bot.getActionPack().onUpdate();
+            WalkedStep.Result preOwner = bot.getActionPack().stepResult();
+            require(context, bot.getActionPack().stepIdle()
+                            && preOwner != null && preOwner.failed()
+                            && "continuation_guard".equals(preOwner.reason()),
+                    "strict vertical rescue retained an externally displaced swim step: "
+                            + (preOwner == null ? "no result" : preOwner.status() + " " + preOwner.reason()));
+            require(context, bot.blockPosition().equals(displaced)
+                            && bot.position().distanceToSqr(before) < 1.0E-12D
+                            && TeleportAudit.corrections(bot) == 0,
+                    "the vertical continuation guard advanced or corrected the displaced bot before rejection");
+        } finally {
+            NavSafetyNet.INSTANCE.clear(bot);
+            bot.getActionPack().cancelStep();
+            installConfig(original);
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), fixture.name());
+        }
+        context.succeed();
+    }
+
+    /**
+     * A retained strict UNKNOWN may earn one fresh proof slice, but cannot permanently suppress
+     * the only visible water retreat. This uses real A-to-B and B-to-A swim strokes: the forward
+     * diagonal stays water behind two solid side columns, so it remains UNKNOWN at B rather than
+     * becoming a visible-invalid cell or an invented route.
+     */
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_strict_unknown_frontier_allows_bounded_visible_backtrack", maxTicks = 120)
+    public void strictUnknownFrontierAllowsBoundedVisibleBacktrack(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -158));
+        BlockPos forward = start.east();
+        BlockPos hiddenDiagonal = forward.east().north();
+        for (int dx = -3; dx <= 5; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                for (int dy = -2; dy <= 3; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        // The complete surrounding fill leaves both forward side columns solid. They keep the
+        // diagonal water cell hidden from B while A is a directly observable same-level stroke.
+        for (BlockPos cell : List.of(start, forward, hiddenDiagonal)) {
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        Standability.clearCache();
+
+        String name = "StrictUnknownBacktrackGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        Runnable cleanup = () -> {
+            NavSafetyNet.INSTANCE.clear(bot);
+            bot.getActionPack().cancelStep();
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+        };
+        try {
+            poseWaterObserver(bot, start);
+            bot.setAirSupply(300);
+            require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                    "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_unknown_backtrack").allowed(),
+                    "unknown-backtrack fixture unexpectedly enabled hidden-world scanning");
+            require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, forward)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, forward.above()),
+                    "unknown-backtrack fixture did not expose the initial A-to-B water stroke");
+            TeleportAudit.reset(bot);
+            NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+            require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
+                    "strict unknown-backtrack rescue did not take control");
+            require(context, bot.getActionPack().stepInFlightFor(
+                            "navsafe_water_rescue", forward, WalkedStep.Kind.SWIM)
+                            && bot.blockPosition().equals(start),
+                    "strict unknown-backtrack rescue did not begin the physical A-to-B stroke");
+        } catch (RuntimeException | Error failure) {
+            cleanup.run();
+            throw failure;
+        }
+
+        boolean[] reachedForward = {false};
+        boolean[] backtrackAdmitted = {false};
+        boolean[] settled = {false};
+        int[] ticksAtForward = {0};
+        int[] ticksAfterBacktrackAdmission = {0};
+        int[] totalTicks = {0};
+        context.onEachTick(() -> {
+            if (settled[0]) {
+                return;
+            }
+            try {
+                totalTicks[0]++;
+                BlockPos feet = bot.blockPosition();
+                require(context, feet.equals(start) || feet.equals(forward),
+                        "strict unknown-backtrack rescue left its sealed physical corridor: " + feet);
+                require(context, TeleportAudit.corrections(bot) == 0,
+                        "strict unknown-backtrack rescue teleported the bot: " + TeleportAudit.lastCaller(bot));
+                if (!reachedForward[0] && feet.equals(forward)) {
+                    reachedForward[0] = true;
+                    require(context, navWaterProbeIsUnknown(bot, world, hiddenDiagonal),
+                            "the forward diagonal was not a retained strict UNKNOWN at the real B landing");
+                    require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, start)
+                                    && ObservableWorldQuery.canObserveCellThroughFluids(bot, start.above()),
+                            "the real B landing lost sight of its only visible water retreat");
+                    for (BlockPos neighbor : NavSafetyNet.waterEscapeNeighbors(forward)) {
+                        if (neighbor.equals(start) || neighbor.equals(hiddenDiagonal)) {
+                            continue;
+                        }
+                        require(context, navWaterProbeIsObservedInvalid(bot, world, neighbor)
+                                        || navWaterProbeIsUnknown(bot, world, neighbor),
+                                "fixture exposed an unaccounted legal fallback at B: " + neighbor);
+                    }
+                }
+                if (!reachedForward[0]) {
+                    require(context, totalTicks[0] < 60,
+                            "strict unknown-backtrack rescue never physically landed its admitted A-to-B stroke");
+                    return;
+                }
+                ticksAtForward[0]++;
+                if (!backtrackAdmitted[0]) {
+                    backtrackAdmitted[0] = bot.getActionPack().stepInFlightFor(
+                            "navsafe_water_rescue", start, WalkedStep.Kind.SWIM);
+                    require(context, backtrackAdmitted[0] || ticksAtForward[0] < 12,
+                            "a retained UNKNOWN permanently suppressed the only visible B-to-A retreat");
+                    return;
+                }
+                if (feet.equals(start)) {
+                    settled[0] = true;
+                    cleanup.run();
+                    context.succeed();
+                    return;
+                }
+                require(context, ++ticksAfterBacktrackAdmission[0] < 40,
+                        "the admitted B-to-A rescue stroke never physically landed");
+            } catch (RuntimeException | Error failure) {
+                settled[0] = true;
+                cleanup.run();
+                throw failure;
+            }
+        });
+    }
+
+    /**
      * Fluid-transparent observation is deliberately not wall-transparent. A solid in the shaft
      * must hide water beyond it and prevent the strict rescue from admitting an invented ascent.
      */
@@ -817,8 +1003,9 @@ public final class SurfaceWaterRecoveryGameTests {
 
     /**
      * The cache check above covers a cancelled action. This companion keeps the strict action in
-     * flight, changes its visible head cell, and drives the actual ActionPack pre-owner tick.
-     * The continuation proof must fail before WalkedStep re-reads the newly hidden terrain.
+     * flight beyond its first physical tick, changes its visible head cell, and drives the actual
+     * ActionPack pre-owner tick. The continuation proof must fail before WalkedStep re-reads the
+     * newly invalid terrain; late strict-SWIM proof retention is only for a genuine visibility miss.
      */
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_strict_in_flight_rescue_guard_rejects_new_occluder", maxTicks = 30)
     public void strictInFlightRescueGuardRejectsNewOccluder(GameTestHelper context) {
@@ -863,6 +1050,13 @@ public final class SurfaceWaterRecoveryGameTests {
             require(context, bot.getActionPack().stepInFlightFor(
                             "navsafe_water_rescue", next, WalkedStep.Kind.SWIM),
                     "strict rescue did not start its visibly admitted step");
+            // Advance the guarded step past tick one without moving its body. This exercises the
+            // late strict-SWIM continuation path rather than the first-tick admission proof.
+            bot.getActionPack().onUpdate();
+            bot.getActionPack().onUpdate();
+            require(context, bot.getActionPack().stepInFlightFor(
+                            "navsafe_water_rescue", next, WalkedStep.Kind.SWIM),
+                    "strict rescue did not remain in flight before the late occluder");
             Vec3 before = bot.position();
 
             // Remove the head-cell proof without changing the profile or feet.  Calling
@@ -1019,6 +1213,8 @@ public final class SurfaceWaterRecoveryGameTests {
             require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater)
                             && ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater.above()),
                     "diagonal rescue stroke was not visibly provable");
+            require(context, !navHasVisibleSolidDiagonalWaterCorner(bot, start, diagonalWater),
+                    "positive diagonal fixture accidentally made the north side a full solid body column");
             TeleportAudit.reset(bot);
             NavSafetyNet.INSTANCE.requestWaterRescue(bot);
             require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
@@ -1028,6 +1224,182 @@ public final class SurfaceWaterRecoveryGameTests {
                     "strict rescue did not start its only visible diagonal water stroke");
             require(context, bot.blockPosition().equals(start) && TeleportAudit.corrections(bot) == 0,
                     "diagonal rescue moved without a physical step or used a correction teleport");
+        } finally {
+            NavSafetyNet.INSTANCE.clear(bot);
+            bot.getActionPack().cancelStep();
+            installConfig(original);
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+        }
+        context.succeed();
+    }
+
+    /**
+     * A visible diagonal water target is not enough to cut through a full two-block side wall.
+     * The east column remains an open, unsupported sight gap, so this specifically distinguishes
+     * a solid orthogonal body column from the one-block north ledge retained by the positive test.
+     */
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_strict_diagonal_rescue_rejects_visible_solid_corner", maxTicks = 30)
+    public void strictDiagonalRescueRejectsVisibleSolidCorner(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -44));
+        for (int dx = -2; dx <= 4; dx++) {
+            for (int dz = -3; dz <= 1; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        BlockPos diagonalWater = start.east().north();
+        BlockPos sightGap = start.east();
+        // The east gap is not a landing or a water alternative. It only gives the observer a
+        // genuine line through to the diagonal target; NORTH stays a two-block solid wall.
+        world.setBlock(sightGap.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(sightGap, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(sightGap.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(sightGap.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        for (BlockPos cell : List.of(start, diagonalWater)) {
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        Standability.clearCache();
+
+        String name = "StrictDiagonalSolidCornerGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        poseWaterObserver(bot, start);
+        // Bias both target rays through the open east gap rather than along the shared corner.
+        bot.teleportTo(bot.level(), start.getX() + 0.625D, start.getY() + 0.125D,
+                start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        bot.setDeltaMovement(Vec3.ZERO);
+        bot.setAirSupply(260);
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                            "strict_diagonal_solid_corner").allowed(),
+                    "solid-corner fixture unexpectedly enabled a hidden scan");
+            require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater.above()),
+                    "solid-corner fixture did not leave the diagonal target visibly provable through east");
+            require(context, navHasVisibleSolidDiagonalWaterCorner(bot, start, diagonalWater),
+                    "solid-corner fixture did not satisfy the exact strict diagonal edge predicate");
+            Vec3 before = bot.position();
+            TeleportAudit.reset(bot);
+            NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+            require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
+                    "strict solid-corner rescue did not take control");
+            require(context, !bot.getActionPack().stepInFlightFor(
+                            "navsafe_water_rescue", diagonalWater, WalkedStep.Kind.SWIM),
+                    "strict rescue cut through a visibly solid diagonal side column");
+            require(context, bot.blockPosition().equals(start)
+                            && bot.position().distanceToSqr(before) < 1.0E-12D
+                            && TeleportAudit.corrections(bot) == 0,
+                    "solid-corner rejection moved or corrected the bot: " + TeleportAudit.lastCaller(bot));
+        } finally {
+            NavSafetyNet.INSTANCE.clear(bot);
+            bot.getActionPack().cancelStep();
+            installConfig(original);
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+        }
+        context.succeed();
+    }
+
+    /**
+     * The strict in-flight guard must not retain an admitted SWIM proof merely because a wall
+     * placed after tick one turns the unchanged diagonal target into an UNKNOWN ray miss.  The
+     * two-block wall is in the formerly open cardinal sight gap, not in the target water/head
+     * cells, so this specifically covers late interposing occlusion rather than visible-invalid
+     * terrain at the target.
+     */
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_strict_in_flight_rescue_guard_rejects_late_interposing_wall", maxTicks = 30)
+    public void strictInFlightRescueGuardRejectsLateInterposingWall(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -44));
+        for (int dx = -2; dx <= 4; dx++) {
+            for (int dz = -3; dz <= 1; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        BlockPos diagonalWater = start.east().north();
+        BlockPos sightGap = start.east();
+        world.setBlock(sightGap.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(sightGap, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(sightGap.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(sightGap.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.north().above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        for (BlockPos cell : List.of(start, diagonalWater)) {
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        Standability.clearCache();
+
+        String name = "StrictInFlightInterposingWallGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        poseWaterObserver(bot, start);
+        // Keep the observer in the source cell, but move it off the diagonal's shared corner so
+        // the later east wall genuinely intersects both current center-ray proofs.
+        bot.teleportTo(bot.level(), start.getX() + 0.625D, start.getY() + 0.125D,
+                start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        bot.setDeltaMovement(Vec3.ZERO);
+        bot.setAirSupply(260);
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        try {
+            installConfig(withProfile(original, OperatingProfile.STRICT_SURVIVAL));
+            require(context, ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater)
+                            && ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater.above()),
+                    "interposing-wall fixture did not begin with a visible diagonal target");
+            TeleportAudit.reset(bot);
+            NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+            require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
+                    "strict rescue did not begin the diagonal in-flight step");
+            require(context, bot.getActionPack().stepInFlightFor(
+                            "navsafe_water_rescue", diagonalWater, WalkedStep.Kind.SWIM),
+                    "strict rescue did not choose the only legal diagonal water step");
+
+            // Put the real guarded action beyond admission tick one before changing the current
+            // world. The target stays WATER with clear headroom throughout this regression.
+            bot.getActionPack().onUpdate();
+            bot.getActionPack().onUpdate();
+            require(context, bot.getActionPack().stepInFlightFor(
+                            "navsafe_water_rescue", diagonalWater, WalkedStep.Kind.SWIM),
+                    "strict diagonal step did not remain live through tick two");
+            Vec3 before = bot.position();
+
+            // This is an interposing cardinal wall, not a target edit. It converts the target
+            // observation to UNKNOWN, exactly the late continuation exception that must fail
+            // closed rather than treating a new obstruction as self-occlusion.
+            world.setBlock(sightGap, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(sightGap.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            Standability.clearCache();
+            require(context, world.getFluidState(diagonalWater).is(net.minecraft.tags.FluidTags.WATER)
+                            && world.getBlockState(diagonalWater.above()).is(Blocks.AIR),
+                    "interposing-wall fixture changed the diagonal target instead of only its sight line");
+            require(context, !ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater)
+                            && !ObservableWorldQuery.canObserveCellThroughFluids(bot, diagonalWater.above()),
+                    "interposing cardinal wall did not block the current strict center-ray proofs");
+            require(context, navWaterProbeIsUnknown(bot, world, diagonalWater),
+                    "interposing cardinal wall did not make the unchanged strict target UNKNOWN");
+
+            bot.getActionPack().onUpdate();
+            WalkedStep.Result preOwner = bot.getActionPack().stepResult();
+            require(context, bot.getActionPack().stepIdle()
+                            && preOwner != null && preOwner.failed()
+                            && "continuation_guard".equals(preOwner.reason()),
+                    "strict guard retained a late interposing-wall target: "
+                            + (preOwner == null ? "no result" : preOwner.status() + " " + preOwner.reason()));
+            require(context, bot.blockPosition().equals(start)
+                            && bot.position().distanceToSqr(before) < 1.0E-12D
+                            && TeleportAudit.corrections(bot) == 0,
+                    "late interposing wall advanced or corrected the strict rescue before rejection");
         } finally {
             NavSafetyNet.INSTANCE.clear(bot);
             bot.getActionPack().cancelStep();
@@ -1761,6 +2133,18 @@ public final class SurfaceWaterRecoveryGameTests {
         }
     }
 
+    /** Reads NavSafetyNet's private strict diagonal-edge predicate without exposing a production-only test seam. */
+    private static boolean navHasVisibleSolidDiagonalWaterCorner(AIPlayerEntity bot, BlockPos from, BlockPos to) {
+        try {
+            Method corner = NavSafetyNet.class.getDeclaredMethod("hasVisibleSolidDiagonalWaterCorner",
+                    AIPlayerEntity.class, BlockPos.class, BlockPos.class);
+            corner.setAccessible(true);
+            return Boolean.TRUE.equals(corner.invoke(null, bot, from, to));
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("failed to inspect strict Nav diagonal water edge", exception);
+        }
+    }
+
     /** Reads NavSafetyNet's private strict classifier without exposing a production-only test seam. */
     private static boolean navWaterProbeIsObservedInvalid(AIPlayerEntity bot, ServerLevel world, BlockPos candidate) {
         try {
@@ -1775,6 +2159,21 @@ public final class SurfaceWaterRecoveryGameTests {
             return Boolean.TRUE.equals(observed.invoke(probe)) && cell.invoke(probe) == null;
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("failed to inspect strict Nav water-cell classification", exception);
+        }
+    }
+
+    /** Confirms a late obstruction hid the target rather than changing its visible terrain class. */
+    private static boolean navWaterProbeIsUnknown(AIPlayerEntity bot, ServerLevel world, BlockPos candidate) {
+        try {
+            Method probeMethod = NavSafetyNet.class.getDeclaredMethod("probeWaterEscapeCell",
+                    AIPlayerEntity.class, ServerLevel.class, BlockPos.class, boolean.class);
+            probeMethod.setAccessible(true);
+            Object probe = probeMethod.invoke(null, bot, world, candidate, false);
+            Method unknown = probe.getClass().getDeclaredMethod("unknown");
+            unknown.setAccessible(true);
+            return Boolean.TRUE.equals(unknown.invoke(probe));
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("failed to inspect strict Nav water-cell visibility", exception);
         }
     }
 

@@ -37,6 +37,7 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -61,6 +62,12 @@ public final class FollowSwimGameTests {
     static final int LANE_Z = 8;
     private static final double SWIM_Y = -1.0D + 0.125D;
 
+    /**
+     * A routine pond crossing stays under Follow's control except for an exact guarded recovery
+     * stroke after an observed shared low-air handoff. The callback sees that physical stroke after
+     * vanilla surface breathing, so it must distinguish its exact owner from a persistent high-air
+     * water-crisis latch and from an unrelated premature rescue.
+     */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_bot_on_shore_swims_after_target_across_pond_without_boat", maxTicks = 1200)
     public void botOnShoreSwimsAfterTargetAcrossPondWithoutBoat(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 3, 26);
@@ -74,12 +81,36 @@ public final class FollowSwimGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_swim_cross"));
         double[] targetX = {9.5D};
         boolean[] sawWater = {false};
+        boolean[] recoveryHandoffArmed = {false};
+        int[] recoveryHandoffGrace = {0};
         AtomicInteger tick = new AtomicInteger();
         context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
-            require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
-                    "the safety net's water crisis took over a healthy swim follow at tick " + now);
+            boolean atSharedBoundary = NavSafetyNet.followSwimMustYield(bot);
+            boolean rescueActive = NavSafetyNet.INSTANCE.isWaterRescueActive(bot);
+            boolean ownedRecoveryStroke = NavSafetyNet.INSTANCE.rescueStepOwnsMovement(bot);
+            if (atSharedBoundary) {
+                recoveryHandoffArmed[0] = true;
+            }
+            boolean allowedLiveRecovery = ownedRecoveryStroke && recoveryHandoffArmed[0];
+            if (allowedLiveRecovery) {
+                recoveryHandoffGrace[0] = 1;
+            }
+            boolean allowedPostStrokeReconciliation = !ownedRecoveryStroke && recoveryHandoffGrace[0] > 0;
+            require(context, !rescueActive || atSharedBoundary || allowedLiveRecovery || allowedPostStrokeReconciliation,
+                    "the safety net took over a healthy swim follow without the shared oxygen boundary or a "
+                            + "live recovery stroke armed by its observed handoff at tick " + now + " air="
+                            + bot.getAirSupply());
+            if (!ownedRecoveryStroke && recoveryHandoffGrace[0] > 0) {
+                recoveryHandoffGrace[0]--;
+            }
+            if (!atSharedBoundary && !ownedRecoveryStroke) {
+                recoveryHandoffArmed[0] = false;
+            }
+            require(context, bot.getAirSupply() > FollowOxygen.RESCUE_AIR,
+                    "the pond crossing spent the emergency air reserve at tick " + now
+                            + ": air=" + bot.getAirSupply());
             require(context, bot.getVehicle() == null && noBoats(world, pond),
                     "follow used a boat for a swimming target");
             sawWater[0] |= bot.isInWater();
@@ -114,8 +145,9 @@ public final class FollowSwimGameTests {
 
     /**
      * Shared dive fixture: a 12-deep pond, the target dives to ~9 blocks and stays.  Without water
-     * breathing the bot must go down, resurface before drowning and go back down; with it the bot
-     * must simply stay near the target for the whole hold and never be forced up.
+     * breathing the bot must go down, resurface before drowning and go back down; an exact strict
+     * Nav recovery stroke is allowed only after an observed shared low-air handoff. With Water Breathing,
+     * it must simply stay near the target for the whole hold and never be forced up.
      */
     private static void runDive(GameTestHelper context, boolean waterBreathing, String botName, String targetName) {
         Pond pond = buildPond(context, 8, 17, 12, 22);
@@ -137,6 +169,8 @@ public final class FollowSwimGameTests {
         int[] stage = {0};
         int[] holdTicks = {0};
         int[] minAir = {Integer.MAX_VALUE};
+        boolean[] recoveryHandoffArmed = {false};
+        int[] recoveryHandoffGrace = {0};
         AtomicInteger tick = new AtomicInteger();
         context.failIfEver(() -> {
             int now = tick.incrementAndGet();
@@ -146,9 +180,33 @@ public final class FollowSwimGameTests {
             require(context, bot.getAirSupply() > 0 && bot.getHealth() >= bot.getMaxHealth(),
                     "the bot was drowning while following a diver: air=" + bot.getAirSupply()
                             + " health=" + bot.getHealth() + " y=" + botDepthY + " tick=" + now);
-            require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
-                    "the safety net had to rescue a healthy dive follow at tick " + now
-                            + " air=" + bot.getAirSupply() + " y=" + botDepthY);
+            boolean rescueActive = NavSafetyNet.INSTANCE.isWaterRescueActive(bot);
+            if (waterBreathing) {
+                require(context, !rescueActive,
+                        "the safety net had to rescue a Water Breathing dive follow at tick " + now
+                                + " air=" + bot.getAirSupply() + " y=" + botDepthY);
+            } else {
+                boolean atSharedBoundary = NavSafetyNet.followSwimMustYield(bot);
+                boolean ownedRecoveryStroke = NavSafetyNet.INSTANCE.rescueStepOwnsMovement(bot);
+                if (atSharedBoundary) {
+                    recoveryHandoffArmed[0] = true;
+                }
+                boolean allowedLiveRecovery = ownedRecoveryStroke && recoveryHandoffArmed[0];
+                if (allowedLiveRecovery) {
+                    recoveryHandoffGrace[0] = 1;
+                }
+                boolean allowedPostStrokeReconciliation = !ownedRecoveryStroke && recoveryHandoffGrace[0] > 0;
+                require(context, !rescueActive || atSharedBoundary || allowedLiveRecovery || allowedPostStrokeReconciliation,
+                        "the safety net took over a healthy dive follow without the shared oxygen boundary or a "
+                                + "live recovery stroke armed by its observed handoff at tick " + now + " air="
+                                + bot.getAirSupply() + " y=" + botDepthY);
+                if (!ownedRecoveryStroke && recoveryHandoffGrace[0] > 0) {
+                    recoveryHandoffGrace[0]--;
+                }
+                if (!atSharedBoundary && !ownedRecoveryStroke) {
+                    recoveryHandoffArmed[0] = false;
+                }
+            }
             if (stage[0] == 0) {
                 swimTo(world, pond, target, 12.5D, LANE_Z + 0.5D, SWIM_Y);
                 if (bot.isInWater() && bot.distanceTo(target) <= 6.0D) {
@@ -508,8 +566,10 @@ public final class FollowSwimGameTests {
 
     /**
      * Heading for land does not excuse holding one's breath: a bot on the pond floor with little air
-     * whose player has climbed out must still turn up for air first (the follow-first air floor),
-     * not dive on toward a distant landing.
+     * whose player has climbed out must still turn up for air first at the shared Follow/Nav air
+     * floor, not dive on toward a distant landing. Strict survival deliberately gives Nav the
+     * writer at that tie, so the proof observes the physical ascent rather than its implementation
+     * owner.
      */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_submerged_bot_heading_for_land_still_surfaces_for_air_first", maxTicks = 700)
     public void submergedBotHeadingForLandStillSurfacesForAirFirst(GameTestHelper context) {
@@ -524,16 +584,21 @@ public final class FollowSwimGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_exit_air"));
         AtomicInteger tick = new AtomicInteger();
         int[] minAir = {Integer.MAX_VALUE};
+        AtomicBoolean surfacedAndRefilled = new AtomicBoolean();
         context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
             minAir[0] = Math.min(minAir[0], bot.getAirSupply());
+            surfacedAndRefilled.compareAndSet(false,
+                    bot.blockPosition().getY() >= pond.feet().getY() - 1
+                            && bot.getAirSupply() > FollowOxygen.SURFACE_FLOOR_AIR + 2);
             require(context, bot.getAirSupply() > FollowOxygen.RESCUE_AIR,
-                    "the bot let the drowning rescue take over while climbing out: air=" + bot.getAirSupply()
+                    "the bot reached the emergency-air reserve while climbing out: air=" + bot.getAirSupply()
                             + " tick=" + now);
             if (now > 10 && !bot.isInWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
-                require(context, follow.swimAscendCount() >= 1,
-                        "the bot never turned up for breath while heading for land (min air " + minAir[0] + ")");
+                require(context, follow.swimAscendCount() >= 1 || surfacedAndRefilled.get(),
+                        "the bot never physically surfaced and refilled before heading for land (min air "
+                                + minAir[0] + ")");
                 finish(context, pond, bot, target);
             }
         });

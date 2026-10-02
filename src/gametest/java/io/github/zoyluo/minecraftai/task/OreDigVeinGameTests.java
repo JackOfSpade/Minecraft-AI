@@ -171,6 +171,7 @@ public final class OreDigVeinGameTests {
         LavaVein lava = lavaVein(world, start);
         Map<BlockPos, BlockState> before = snapshot(world, start);
         int deaths = deathCount(bot);
+        boolean[] sourceSealedWhileMemberIntact = {false};
 
         JsonObject args = JsonParser.parseString(
                 "{\"ore\":\"minecraft:iron_ore\",\"mode\":\"vein\",\"x\":" + start.getX()
@@ -182,6 +183,16 @@ public final class OreDigVeinGameTests {
             require(context, !bot.isInLava() && !bot.isOnFire(), "miner touched lava");
             require(context, world.getFluidState(lava.member()).isEmpty(),
                     "lava flowed into the lava-adjacent member's cell");
+            boolean memberMined = world.getBlockState(lava.member()).isAir();
+            boolean sourceSolidlySealed = isSolidSeal(world, lava.lava());
+            if (memberMined) {
+                require(context, sourceSealedWhileMemberIntact[0] && sourceSolidlySealed,
+                        "the lava-adjacent member was mined before a prior solid source seal");
+            } else if (sourceSolidlySealed) {
+                // Record only a seal visible while the member still exists: a same-tick
+                // mine-and-seal transition must not satisfy the temporal ordering proof.
+                sourceSealedWhileMemberIntact[0] = true;
+            }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 fail(context, "vein task ended as " + task.state() + ":" + task.failureReason());
             }
@@ -192,8 +203,7 @@ public final class OreDigVeinGameTests {
                     "vein mode mined " + task.veinMined() + " ores, expected 4 (lava member sealed first)");
             require(context, world.getBlockState(lava.member()).isAir(),
                     "the lava-adjacent member was not mined after sealing");
-            require(context, world.getFluidState(lava.lava()).isEmpty()
-                            && !world.getBlockState(lava.lava()).is(Blocks.LAVA),
+            require(context, sourceSealedWhileMemberIntact[0] && isSolidSeal(world, lava.lava()),
                     "the adjacent lava source was not sealed");
             Set<BlockPos> allowed = new HashSet<>(lava.ores());
             allowed.add(lava.lava());
@@ -400,6 +410,14 @@ public final class OreDigVeinGameTests {
                         + entry.getValue().getBlock() + " -> " + now.getBlock());
             }
         }
+    }
+
+    private static boolean isSolidSeal(net.minecraft.server.level.ServerLevel world, BlockPos source) {
+        BlockState state = world.getBlockState(source);
+        return world.getFluidState(source).isEmpty()
+                && !state.is(Blocks.LAVA)
+                && !state.isAir()
+                && !state.getCollisionShape(world, source).isEmpty();
     }
 
     private static int deathCount(AIPlayerEntity bot) {

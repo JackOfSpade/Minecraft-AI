@@ -858,9 +858,10 @@ public final class ActionPackPhysicalSnapGameTests {
     /**
      * Session log 01:51:50-01:53:02: 42 path_start_physical_snap events while the bot yo-yoed
      * between two cells -- a straight-line walk kept carrying it back into the invalid start cell
-     * and every failed search snapped it out again.  A second start out of the same cell inside the
-     * stall window must be refused (strict survival then reports NO_START) instead of repeating. The first start now plans a
-     * walked step and does not move the bot.
+     * and every failed search snapped it out again.  Once the first planned physical step is
+     * accepted by a controller, a second start out of the same cell inside the stall window must
+     * be refused (strict survival then reports NO_START) instead of repeating. Planning alone
+     * deliberately does not consume the retry window, because a failed search never moved the bot.
      */
     @GameTest(maxTicks = 20)
     public void secondPhysicalSnapOutOfTheSameCellIsRefusedInsteadOfYoYoing(GameTestHelper context) {
@@ -887,16 +888,25 @@ public final class ActionPackPhysicalSnapGameTests {
         BotFixtureMoves.place(bot, invalid);
         Standability.clearCache();
         TeleportAudit.reset(bot);
-        require(context, bot.getActionPack().snapPlayerToNearestStandable("gametest_first_snap")
-                        && bot.getActionPack().startCell().equals(landing)
+        var pack = bot.getActionPack();
+        require(context, pack.snapPlayerToNearestStandable("gametest_first_snap")
+                        && pack.startCell().equals(landing)
                         && bot.blockPosition().equals(invalid),
                 "the first start out of the invalid cell did not plan the adjacent cell without moving the bot: "
-                        + bot.getActionPack().startCell().toShortString() + " / " + bot.blockPosition().toShortString());
+                        + pack.startCell().toShortString() + " / " + bot.blockPosition().toShortString());
 
-        // Something (the old straight-line walk fallback) carries the bot back into the same cell.
+        // The guarded-admission boundary records the repeat guard only after a controller has
+        // accepted this exact prefix. A plan abandoned by a failed A* search must remain retryable.
+        WalkedStep firstStep = pack.takeStartStep();
+        require(context, firstStep != null && pack.runStep(firstStep) != null,
+                "the first physical start step was not admitted");
+        pack.cancelStep();
+
+        // Something (the old straight-line walk fallback) carries the bot back into the same cell
+        // after that accepted start step was cancelled/replaced.
         BotFixtureMoves.place(bot, invalid);
         Standability.clearCache();
-        require(context, !bot.getActionPack().snapPlayerToNearestStandable("gametest_second_snap"),
+        require(context, !pack.snapPlayerToNearestStandable("gametest_second_snap"),
                 "a second start out of the same cell inside the stall window was not refused");
         require(context, bot.blockPosition().equals(invalid),
                 "the refused start still moved the bot to " + bot.blockPosition().toShortString());

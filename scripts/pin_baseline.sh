@@ -128,7 +128,7 @@ else
   STAGING=""
 fi
 "$ROOT/scripts/evidence_validate.sh" --require-verified "$DESTINATION" >/dev/null || {
-  printf 'pin-baseline: post-copy validation failed; rerun can recover the immutable destination\n' >&2
+  printf 'pin-baseline: post-copy validation failed; rerun can recover the sealed destination\n' >&2
   exit 3
 }
 # Destination metadata is authoritative. Re-read after the copy/idempotent
@@ -154,7 +154,7 @@ if [[ "$DESTINATION_RESULT" != PASS && $ALLOW_FAILURE -ne 1 ]]; then
   exit 2
 fi
 
-# The index is the only selector. Old run directories remain immutable and are
+# The index is the only selector. Old run directories remain sealed and are
 # never deleted when the explicit pointer moves to a new run.
 INDEX="$HARNESS_BASELINE_ROOT/index.tsv"
 INDEX_TMP="$(mktemp "$HARNESS_BASELINE_ROOT/.index.${CAPABILITY_ID}.XXXXXX")" || exit 3

@@ -579,6 +579,11 @@ public final class CombatHardeningGameTests {
         AIPlayerEntity bot = spawnCorridor(context, "PeekabooGT", 122, -4, 16);
         var world = context.getLevel();
         BlockPos origin = bot.blockPosition().immutable();
+        // This test deliberately keeps both skeletons live, so vanilla arrow knockback is part of
+        // the run.  spawnCorridor's floor ends at z=+/-2; retain that narrow course before an
+        // unlucky outward knock can send the bot into the artificial GameTest void.  The U opens
+        // east toward both skeleton lanes and leaves the hide, cover, expose, and firing cells open.
+        buildPeekabooRetainingU(context, origin);
         bot.getInventory().clearContent();
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
         InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
@@ -1229,6 +1234,23 @@ public final class CombatHardeningGameTests {
                 context.getLevel().setBlock(column.offset(0, dy, dz), block.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
+    }
+
+    /** Two-block-high retaining U for the live-arrow peekaboo fixture, open toward its east-facing shooters. */
+    private static void buildPeekabooRetainingU(GameTestHelper context, BlockPos origin) {
+        var world = context.getLevel();
+        for (int dx = -4; dx <= 2; dx++) {
+            setTwoHighStone(world, origin.offset(dx, 0, -3));
+            setTwoHighStone(world, origin.offset(dx, 0, 3));
+        }
+        for (int dz = -2; dz <= 2; dz++) {
+            setTwoHighStone(world, origin.offset(-5, 0, dz));
+        }
+    }
+
+    private static void setTwoHighStone(net.minecraft.server.level.ServerLevel world, BlockPos feet) {
+        world.setBlock(feet, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(feet.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
     }
 
     private static AIPlayerEntity spawnPlatform(GameTestHelper context, String name, int relativeY) {
