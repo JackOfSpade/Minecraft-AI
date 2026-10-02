@@ -96,7 +96,7 @@ unchanged. What `prepareGameTestRun` does with it, always logged as `gametestExt
   test and the vein test fail because everything a bot breaks takes its neighbours with it). Our `minecraftai*`/`aibot*` files (they hold
   the LLM key), `*.bak` files and VeinMiner's folder are never copied; only file names are logged.
 - If VeinMiner is among the mods, the run dir gets `config/Veinminer/settings.json` with `permissionRestricted: true` (the setting the
-  deploy step sets in the profile, see `mod_list.txt`) and `config/Veinminer/update` as a plain file, as in the profile, so its
+  deploy step sets in the profile) and `config/Veinminer/update` as a plain file, as in the profile, so its
   auto-updater cannot write a download. Note that VeinMiner still asks Modrinth for the newest version at start-up (it logs
   "veinminer is up to date").
 - `gt_filter.sh` retries (at most twice) a run that dies with Fabric Loader's runtime-remap race (`Failed to remap mods!`,
