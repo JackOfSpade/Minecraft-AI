@@ -74,6 +74,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FallingBlock;
@@ -3201,7 +3202,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return true;
         }
         var state = world.getBlockState(support);
-        if (!state.getFluidState().isEmpty() || Standability.isDangerous(state)) {
+        // A water cell can flow into a shaft in the tick between the ore break and this
+        // settlement. It is still an exact, observed placement destination: vanilla replaces
+        // a replaceable water cell with the support block, which both stops the flow and catches
+        // the fresh drop. Lava and every other occupied cell remain a hard refusal.
+        boolean replaceableWater = state.getFluidState().is(FluidTags.WATER)
+                && state.canBeReplaced(Fluids.WATER);
+        if ((!state.getFluidState().isEmpty() && !replaceableWater)
+                || Standability.isDangerous(state)) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),
@@ -3211,7 +3219,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (!state.getCollisionShape(world, support).isEmpty()) {
             return true;
         }
-        if (!state.isAir()) {
+        if (!state.isAir() && !replaceableWater) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
                     "ore", ore.toShortString(),
                     "support", support.toShortString(),

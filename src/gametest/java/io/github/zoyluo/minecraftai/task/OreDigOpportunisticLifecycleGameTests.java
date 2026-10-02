@@ -941,8 +941,11 @@ public final class OreDigOpportunisticLifecycleGameTests {
         Harness h = new Harness(context);
         Room room = h.newRoom(38, -3, 12, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
-        room.set(9, 1, 0, Blocks.DIAMOND_ORE);
-        room.set(9, 2, 0, Blocks.STONE);
+        // Match the proven local-work geometry used by the terminal-exit lifecycle fixture:
+        // the candidate stays in the observed reach envelope while the initial coal work is
+        // consumed, so this test deterministically reaches the degraded-TPS transition.
+        room.set(6, 1, 0, Blocks.DIAMOND_ORE);
+        room.set(6, 2, 0, Blocks.STONE);
         // Keep the ordinary coal mission in this observed room until the detour selector has actually admitted
         // the diamond. With no local work, the no-target strip can leave through the north shell before the
         // live route re-proof, correctly yielding unreachable_observed instead of exercising the degraded-TPS

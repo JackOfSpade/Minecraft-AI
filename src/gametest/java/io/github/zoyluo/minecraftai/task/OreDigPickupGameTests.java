@@ -404,7 +404,11 @@ public final class OreDigPickupGameTests {
         world.setBlock(ore, Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(ore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(ore.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(support, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        // The ore hides this water cell until the physical break. A legitimate shaft can receive
+        // an incoming water flow during that same settlement window; the miner must replace the
+        // observed, replaceable water with its one real drop catch instead of abandoning the
+        // fresh ItemEntity to the shaft.
+        world.setBlock(support, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(anchor, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         InventoryAction.giveItem(bot, new ItemStack(
                 Items.COBBLESTONE, MiningBudget.EMERGENCY_STONE_LIKE + 1));
