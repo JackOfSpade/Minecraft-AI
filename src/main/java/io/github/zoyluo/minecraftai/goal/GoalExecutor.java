@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.goal;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.activeTaskCheckpoint;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.canonicalNonNegativeInt;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeBatchCheckpoint;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeCompletedDeliveries;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeHuntSearchCursorNamespace;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodePersistedMissionCounter;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodePos;
@@ -12,6 +13,7 @@ import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeSettle
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeSkippedTargetReceipts;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeStepKind;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodeBatchCheckpoint;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodeCompletedDeliveries;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodeHuntSearchCursorNamespace;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodePos;
 import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodePostconditionRepairCheckpoint;
@@ -38,6 +40,7 @@ import io.github.zoyluo.minecraftai.task.DescendToYTask;
 import io.github.zoyluo.minecraftai.task.DigDownTask;
 import io.github.zoyluo.minecraftai.task.FarmTask;
 import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
+import io.github.zoyluo.minecraftai.task.GiveItemTask;
 import io.github.zoyluo.minecraftai.task.HuntSearchCursor;
 import io.github.zoyluo.minecraftai.task.HuntPickupCheckpoint;
 import io.github.zoyluo.minecraftai.task.HuntTask;
@@ -102,6 +105,9 @@ public final class GoalExecutor {
     static final int MAX_SKIPPED_TARGET_RECEIPTS = 32;
     // Package-private: also read by GoalCheckpointCodec's canonical-text codec.
     static final int MAX_SKIPPED_TARGET_TEXT_BYTES = 8_192;
+    // Checkpoint parsing needs a finite anti-corruption bound, but fulfillment planning itself
+    // has no arbitrary small bundle-size or execution-call ceiling.
+    static final int MAX_DELIVERY_RECEIPTS = 65_536;
     private static final String AUXILIARY_MINING_CONTINUATION_KEY =
             "aux_mining_continuation";
     private static final String CAPACITY_PARENT_DELIVERED_KEY =
@@ -279,8 +285,9 @@ public final class GoalExecutor {
         if (restore != null && !restore.capacityParentNamespace().isBlank()
                 && decodedCapacityParent.isEmpty()) {
             queued.removeFirstOccurrence(goal);
-            GoalEvaluation invalidEvaluation = GoalPredicates.forGoal(goal).evaluate(
-                    GoalSnapshotCollector.collect(bot, goal, restore.context()));
+            GoalEvaluation invalidEvaluation = GoalPredicates.evaluate(goal,
+                    GoalSnapshotCollector.collect(bot, goal, restore.context()),
+                    restore.context().completedDeliveries());
             recordImmediateResult(bot, missionId, goal, startedTick, invalidEvaluation,
                     GoalResult.classify(invalidEvaluation, false),
                     "mission_restore_invalid_capacity_parent_namespace");
@@ -290,10 +297,14 @@ public final class GoalExecutor {
                 decodedCapacityParent.orElse(null);
         GoalPredicate predicate = GoalPredicates.forGoal(goal);
         GoalSnapshotCollector.Context context = restore == null ? initialContext(bot, goal) : restore.context();
-        GoalEvaluation initialEvaluation = predicate.evaluate(GoalSnapshotCollector.collect(bot, goal, context));
+        GoalEvaluation initialEvaluation = GoalPredicates.evaluate(goal,
+                GoalSnapshotCollector.collect(bot, goal, context),
+                context.completedDeliveries());
         if (restore != null && (!restore.validationFailure().isBlank()
                 || restore.huntSearchCursor() == null
                 || restore.skippedTargetReceipts() == null
+                || !completedDeliveriesAuthorized(
+                goal, restore.context().completedDeliveries())
                 || !skippedTargetReceiptsAuthorized(
                 goal, restore.skippedTargetReceipts()))) {
             queued.removeFirstOccurrence(goal);
@@ -302,6 +313,9 @@ public final class GoalExecutor {
                     restore.validationFailure().isBlank()
                             ? restore.huntSearchCursor() == null
                             ? "mission_restore_invalid_hunt_search_cursor"
+                            : !completedDeliveriesAuthorized(
+                            goal, restore.context().completedDeliveries())
+                            ? "mission_restore_invalid_completed_deliveries"
                             : "mission_restore_invalid_skipped_target_receipts"
                             : restore.validationFailure());
             return false;
@@ -1629,6 +1643,13 @@ public final class GoalExecutor {
                 settleRestoredHuntPickup(bot, plan);
                 return true;
             }
+            if (plan.current.kind() == GoalStep.Kind.GIVE_ITEM
+                    && !hasCommittedDelivery(plan, plan.current)) {
+                finishActive(bot, plan, evaluate(bot, plan),
+                        "fulfillment_delivery_receipt_invalid", false, true,
+                        GoalResult.Status.FAILED);
+                return true;
+            }
             if (plan.current.kind() == GoalStep.Kind.MINE_ORE
                     && rareMissionTargetForMiningStep(plan.goal, plan.current.ores()) > 0) {
                 int completedEpoch = plan.rareResourceRetriesUsed;
@@ -2329,6 +2350,9 @@ public final class GoalExecutor {
                 String.valueOf(active.snapHuntVisitedSectors));
         checkpoint.putAll(encodeHuntSearchCursorNamespace(active.huntSearchCursor));
         checkpoint.putAll(encodeSkippedTargetReceipts(active.skippedTargetReceipts));
+        if (active.goal instanceof Goal.Fulfill) {
+            checkpoint.putAll(encodeCompletedDeliveries(active.completedDeliveries));
+        }
         if (active.taskCheckpointKind != null && !active.taskCheckpoint.isEmpty()) {
             checkpoint.put("task_kind", active.taskCheckpointKind.name());
             active.taskCheckpoint.entrySet().stream()
@@ -2415,6 +2439,18 @@ public final class GoalExecutor {
                         goal, receipt.step(), receipt.reason()));
     }
 
+    /** A persisted handoff receipt may only satisfy an allocation explicitly declared by Fulfill. */
+    static boolean completedDeliveriesAuthorized(
+            Goal goal, Set<Goal.Allocation> receipts) {
+        if (receipts == null) {
+            return false;
+        }
+        if (!(goal instanceof Goal.Fulfill fulfill)) {
+            return receipts.isEmpty();
+        }
+        return fulfill.deliveries().containsAll(receipts);
+    }
+
     private static RestoreSeed restoreSeed(AIPlayerEntity bot, Goal goal, MissionRecord record) {
         Map<String, String> checkpoint = record.checkpoint() == null ? Map.of() : record.checkpoint();
         Optional<String> validationFailure =
@@ -2429,6 +2465,8 @@ public final class GoalExecutor {
                 decodeHuntSearchCursorNamespace(checkpoint);
         Optional<List<SkippedTargetReceipt>> skippedTargetReceipts =
                 decodeSkippedTargetReceipts(checkpoint);
+        Optional<Set<Goal.Allocation>> completedDeliveries =
+                decodeCompletedDeliveries(checkpoint);
         Optional<PostconditionRepairCheckpoint> postconditionRepair =
                 decodePostconditionRepairCheckpoint(checkpoint);
         Optional<GoalBatchCheckpoint> batchCheckpoint = decodeBatchCheckpoint(checkpoint);
@@ -2454,7 +2492,8 @@ public final class GoalExecutor {
         GoalSnapshotCollector.Context context = new GoalSnapshotCollector.Context(
                 origin, containers, blueprint, buildAnchor,
                 nonNegativeInt(checkpoint.get("build_placed")),
-                nonNegativeInt(checkpoint.get("build_skipped")));
+                nonNegativeInt(checkpoint.get("build_skipped")),
+                completedDeliveries.orElse(Set.of()));
         UUID missionId;
         try {
             missionId = UUID.fromString(record.missionId());
@@ -2505,6 +2544,12 @@ public final class GoalExecutor {
         GoalBatchCheckpoint restoredBatch = batchCheckpoint.orElse(
                 GoalBatchCheckpoint.legacy());
         String restoredValidation = validationFailure.orElse("");
+        if (restoredValidation.isBlank()
+                && (completedDeliveries.isEmpty()
+                || !completedDeliveriesAuthorized(goal,
+                completedDeliveries.orElse(Set.of())))) {
+            restoredValidation = "mission_restore_invalid_completed_deliveries";
+        }
         if (restoredValidation.isBlank() && batchCheckpoint.isEmpty()) {
             restoredValidation = "mission_restore_invalid_goal_batch_checkpoint";
         }
@@ -2574,6 +2619,9 @@ public final class GoalExecutor {
         }
         if (decodeSkippedTargetReceipts(values).isEmpty()) {
             return Optional.of("mission_restore_invalid_skipped_target_receipts");
+        }
+        if (decodeCompletedDeliveries(values).isEmpty()) {
+            return Optional.of("mission_restore_invalid_completed_deliveries");
         }
         if (hasAnyReplanSnapshotField(values)
                 && decodeReplanSnapshot(values).isEmpty()) {
@@ -2705,6 +2753,8 @@ public final class GoalExecutor {
             case Goal.Stockpile g -> "Stockpile " + itemLabel(g.item()) + " x" + g.count();
             case Goal.HavePickaxeTier g -> "Upgrade pickaxe (tier " + g.tier() + ")";
             case Goal.Build g -> "Build " + g.blueprint().replace('_', ' ');
+            case Goal.Fulfill g -> "Fulfill " + g.allocations().size() + " item allocation"
+                    + (g.allocations().size() == 1 ? "" : "s");
         };
     }
 
@@ -2815,6 +2865,12 @@ public final class GoalExecutor {
 
     /** Returns true when a committed step turned into a player-confirmation checkpoint. */
     private boolean requestBatchCheckpointIfDue(AIPlayerEntity bot, ActivePlan plan) {
+        // The declared Fulfill manifest is one explicit user-authorized transaction, including
+        // every prerequisite and named handoff.  Keep normal goals' review boundary unchanged,
+        // but never split this bundle solely because it crossed the ordinary ten-step threshold.
+        if (isBatchCheckpointExempt(plan.goal)) {
+            return false;
+        }
         if (!shouldCheckpointAfterCompletedStep(plan.completedAtLastBatchCheckpoint,
                 plan.completedSteps, plan.steps.size(), isSafeBatchCheckpointBoundary(plan))) {
             return false;
@@ -2832,6 +2888,11 @@ public final class GoalExecutor {
                 + batchCheckpointReplyInstruction(plan.steps.size()));
         markDirty(bot);
         return true;
+    }
+
+    /** Fulfill is one explicit bundle authorization; ordinary goals retain the consent policy. */
+    static boolean isBatchCheckpointExempt(Goal goal) {
+        return goal instanceof Goal.Fulfill;
     }
 
     /** Exact player-facing consent contract for bounded work; keep this concise enough for chat. */
@@ -2933,6 +2994,15 @@ public final class GoalExecutor {
         if (goal instanceof Goal.MineOre mo) {
             return io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot,
                     io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(mo.ores()));
+        }
+        if (goal instanceof Goal.Fulfill fulfill) {
+            int total = 0;
+            for (Item item : fulfill.inventoryRequired(Set.of()).keySet()) {
+                total = Math.addExact(total,
+                        io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
+                                bot, Set.of(item)));
+            }
+            return total;
         }
         return 0;
     }
@@ -3399,6 +3469,15 @@ public final class GoalExecutor {
             return;
         }
         GoalStep failedStep = plan.current;
+        // GiveItemTask can fail only after InventoryAction has made a physical debit in these
+        // two cases.  There is no trustworthy receipt to carry into a new plan, so replanning
+        // could craft and drop the allocation a second time.  Keep the mission terminal and
+        // surface the factual uncertainty instead.
+        if (isUnreceiptedPhysicalDeliveryFailure(failedStep, reason)) {
+            finishActive(bot, plan, evaluate(bot, plan), reason,
+                    false, true, GoalResult.Status.FAILED);
+            return;
+        }
         if (isUnsettledHuntPhysicalDebt(
                 failedStep == null ? null : failedStep.kind(), reason)) {
             // Meat in inventory cannot erase a return-to-surface debt. In particular, Goal.Food
@@ -3782,6 +3861,16 @@ public final class GoalExecutor {
             case PLACE_STATIONS -> Optional.of(new PlaceStationsTask());
             // Phase 3: the STOCKPILE step -> store inventory resources into a nearby chest (store everything that isn't a tool).
             case STOCKPILE -> Optional.of(new StockpileTask(true));
+            case GIVE_ITEM -> {
+                // A restored/replanned receipt is authoritative. Never construct a second
+                // physical drop task for an allocation already committed by this mission.
+                if (hasCommittedDelivery(plan, step)) {
+                    yield Optional.empty();
+                }
+                yield Optional.of(new GiveItemTask(
+                        step.item(), step.count(), step.giveRecipient(),
+                        () -> commitDeliveryReceipt(bot, plan, step)));
+            }
             // Kept only to fail safely when resuming a pre-migration mission checkpoint. New
             // plans no longer emit layer-seeking excavation steps.
             case DESCEND_TO_Y -> Optional.of(new RetiredNavigationTask("descend_to_y"));
@@ -4187,7 +4276,7 @@ public final class GoalExecutor {
     private GoalEvaluation evaluate(AIPlayerEntity bot, ActivePlan plan) {
         GoalSnapshot snapshot = GoalSnapshotCollector.collect(bot, plan.goal, snapshotContext(plan));
         plan.lastStructure = snapshot.structure().orElse(null);
-        return plan.predicate.evaluate(snapshot);
+        return GoalPredicates.evaluate(plan.goal, snapshot, plan.completedDeliveries);
     }
 
     // Package-private: also called by MissionRecoveryScheduler's rare-resource replanning.
@@ -4198,7 +4287,61 @@ public final class GoalExecutor {
                 plan.blueprint,
                 plan.buildAnchor,
                 plan.buildPlaced,
-                plan.buildSkipped);
+                plan.buildSkipped,
+                plan.completedDeliveries);
+    }
+
+    /**
+     * Commits the logical receipt only after GiveItemTask reached its exact completed state.  The
+     * receipt is intentionally scoped to an allocation present in this declared goal; a damaged
+     * or mismatched plan must not turn an arbitrary inventory loss into a satisfied delivery.
+     */
+    private static boolean commitDeliveryReceipt(AIPlayerEntity bot,
+                                                 ActivePlan plan,
+                                                 GoalStep step) {
+        if (plan == null || plan.current != step) {
+            return false;
+        }
+        try {
+            Goal.Allocation allocation = declaredDelivery(plan, step);
+            if (!plan.completedDeliveries.add(allocation)) {
+                return false;
+            }
+            // Capture the receipt while GiveItemTask is still running. A persistence snapshot
+            // taken after this exact verified inventory debit will therefore replan without a
+            // duplicate handoff even if the server stops before the executor's next tick.
+            try {
+                markDirty(bot);
+                return true;
+            } catch (RuntimeException persistenceFailure) {
+                plan.completedDeliveries.remove(allocation);
+                return false;
+            }
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private static boolean hasCommittedDelivery(ActivePlan plan, GoalStep step) {
+        try {
+            return plan != null && plan.completedDeliveries.contains(
+                    declaredDelivery(plan, step));
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private static Goal.Allocation declaredDelivery(ActivePlan plan, GoalStep step) {
+        if (plan == null || step == null || step.kind() != GoalStep.Kind.GIVE_ITEM
+                || !(plan.goal instanceof Goal.Fulfill fulfill)) {
+            throw new IllegalArgumentException("invalid_fulfillment_delivery_step");
+        }
+        Goal.Allocation allocation = new Goal.Allocation(
+                step.item(), step.count(), step.giveRecipient());
+        if (!fulfill.deliveries().contains(allocation)) {
+            throw new IllegalArgumentException("undeclared_fulfillment_delivery");
+        }
+        return allocation;
     }
 
     private static void captureTaskEvidence(AIPlayerEntity bot, ActivePlan plan) {
@@ -4524,6 +4667,17 @@ public final class GoalExecutor {
                 || reason.contains("no_reachable");
     }
 
+    /**
+     * These GiveItemTask outcomes occur after a vanilla drop attempt has altered inventory, but
+     * before a compound-mission receipt could prove the exact allocation. Replanning must not
+     * turn that ambiguity into a duplicate handoff.
+     */
+    static boolean isUnreceiptedPhysicalDeliveryFailure(GoalStep step, String reason) {
+        return step != null && step.kind() == GoalStep.Kind.GIVE_ITEM
+                && ("give_item_count_mismatch".equals(reason)
+                || "give_item_receipt_commit_failed".equals(reason));
+    }
+
     // Package-private (not public): MissionRecoveryScheduler needs the type to accept a plan
     // parameter, but every field stays private -- only the narrow accessors below are exposed.
     static final class ActivePlan {
@@ -4537,6 +4691,8 @@ public final class GoalExecutor {
         private final java.util.List<String> stepLabels; // full step descriptions (steps gets polled empty as execution proceeds; this keeps the full list for the panel's task-chain display)
         private final List<GoalResult.SkippedStep> skippedSteps = new ArrayList<>();
         private final List<SkippedTargetReceipt> skippedTargetReceipts = new ArrayList<>();
+        /** Committed GiveItemTask handoffs; persisted so recovery never re-drops an allocation. */
+        private final Set<Goal.Allocation> completedDeliveries = new HashSet<>();
         private GoalStep current;
         private Task currentTask;
         private BlueprintSchema blueprint;
@@ -4620,6 +4776,7 @@ public final class GoalExecutor {
             this.buildAnchor = context.buildAnchor();
             this.buildPlaced = context.buildPlaced();
             this.buildSkipped = context.buildSkipped();
+            this.completedDeliveries.addAll(context.completedDeliveries());
             this.steps = steps;
             this.totalSteps = totalSteps;
             this.stepLabels = new ArrayList<>(stepLabels);

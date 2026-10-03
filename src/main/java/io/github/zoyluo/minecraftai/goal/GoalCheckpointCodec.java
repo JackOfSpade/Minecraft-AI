@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.goal;
 
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT;
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_POSTCONDITION_REPLANS;
+import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_DELIVERY_RECEIPTS;
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_SETTLED_SERVICE_TOMBSTONES;
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_SKIPPED_TARGET_RECEIPTS;
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_SKIPPED_TARGET_TEXT_BYTES;
@@ -64,6 +65,9 @@ final class GoalCheckpointCodec {
     private static final Set<String> SKIPPED_TARGET_ENTRY_KEYS = Set.of(
             "kind", "item", "count", "block", "ores", "input", "output",
             "pos", "tag_present", "tag", "best_effort", "reason");
+    private static final String COMPLETED_DELIVERY_PREFIX = "completed_delivery.";
+    private static final Set<String> COMPLETED_DELIVERY_ENTRY_KEYS = Set.of(
+            "item", "count", "recipient");
     private static final Set<String> LEGACY_REPLAN_SNAPSHOT_KEYS = Set.of(
             "snap_steps", "snap_target", "snap_x", "snap_y", "snap_z");
     private static final Set<String> MODERN_REPLAN_SNAPSHOT_KEYS = Set.of(
@@ -275,6 +279,121 @@ final class GoalCheckpointCodec {
                 decoded.add(decodeSkippedTargetReceipt(entry).orElseThrow());
             }
             return Optional.of(List.copyOf(decoded));
+        } catch (RuntimeException exception) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Persists completed player handoffs independently of a physical task cursor.  A fulfilled
+     * allocation is a mission fact: recovery uses it to avoid rebuilding and dropping the same
+     * requested item again after a later recipe, navigation, or server-restart replan.
+     */
+    static Map<String, String> encodeCompletedDeliveries(
+            Set<Goal.Allocation> completedDeliveries) {
+        List<Goal.Allocation> values = (completedDeliveries == null
+                ? Set.<Goal.Allocation>of() : Set.copyOf(completedDeliveries)).stream()
+                .sorted(java.util.Comparator.comparing(Goal.Allocation::itemId)
+                        .thenComparing(Goal.Allocation::recipient))
+                .toList();
+        if (values.size() > MAX_DELIVERY_RECEIPTS) {
+            throw new IllegalArgumentException("too_many_completed_deliveries");
+        }
+        java.util.LinkedHashMap<String, String> encoded = new java.util.LinkedHashMap<>();
+        encoded.put(COMPLETED_DELIVERY_PREFIX + "schema", "1");
+        encoded.put(COMPLETED_DELIVERY_PREFIX + "count", String.valueOf(values.size()));
+        for (int index = 0; index < values.size(); index++) {
+            Goal.Allocation allocation = values.get(index);
+            if (!allocation.delivery()) {
+                throw new IllegalArgumentException("completed_delivery_requires_recipient");
+            }
+            String prefix = COMPLETED_DELIVERY_PREFIX + String.format("%05d.", index);
+            encoded.put(prefix + "item", allocation.itemId());
+            encoded.put(prefix + "count", String.valueOf(allocation.count()));
+            encoded.put(prefix + "recipient", allocation.recipient());
+        }
+        return Map.copyOf(encoded);
+    }
+
+    /**
+     * The collection is exact-key and canonical.  Missing is the legacy empty representation;
+     * any partial or malformed modern receipt namespace fails closed instead of silently
+     * reissuing (or accepting) an unproven player handoff.
+     */
+    static Optional<Set<Goal.Allocation>> decodeCompletedDeliveries(
+            Map<String, String> checkpoint) {
+        Map<String, String> source = checkpoint == null ? Map.of() : checkpoint;
+        java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
+        boolean present = false;
+        for (Map.Entry<String, String> entry : source.entrySet()) {
+            String key = entry.getKey();
+            if ("completed_delivery".equals(key)
+                    || COMPLETED_DELIVERY_PREFIX.equals(key)) {
+                return Optional.empty();
+            }
+            if (key != null && key.startsWith(COMPLETED_DELIVERY_PREFIX)) {
+                present = true;
+                String nested = key.substring(COMPLETED_DELIVERY_PREFIX.length());
+                if (nested.isBlank() || entry.getValue() == null
+                        || values.put(nested, entry.getValue()) != null) {
+                    return Optional.empty();
+                }
+            }
+        }
+        if (!present) {
+            return Optional.of(Set.of());
+        }
+        try {
+            if (!"1".equals(values.get("schema"))) {
+                return Optional.empty();
+            }
+            OptionalInt decodedCount = canonicalNonNegativeInt(values.get("count"));
+            if (decodedCount.isEmpty()
+                    || decodedCount.getAsInt() > MAX_DELIVERY_RECEIPTS) {
+                return Optional.empty();
+            }
+            int count = decodedCount.getAsInt();
+            Set<String> expected = new HashSet<>();
+            expected.add("schema");
+            expected.add("count");
+            for (int index = 0; index < count; index++) {
+                String prefix = String.format("%05d.", index);
+                for (String key : COMPLETED_DELIVERY_ENTRY_KEYS) {
+                    expected.add(prefix + key);
+                }
+            }
+            if (!values.keySet().equals(expected)) {
+                return Optional.empty();
+            }
+            java.util.LinkedHashSet<Goal.Allocation> decoded =
+                    new java.util.LinkedHashSet<>();
+            Goal.Allocation previous = null;
+            for (int index = 0; index < count; index++) {
+                String prefix = String.format("%05d.", index);
+                Item item = decodeRegistryItem(values.get(prefix + "item"));
+                OptionalInt allocationCount = canonicalNonNegativeInt(
+                        values.get(prefix + "count"));
+                if (item == null || allocationCount.isEmpty()
+                        || allocationCount.getAsInt() <= 0) {
+                    return Optional.empty();
+                }
+                Goal.Allocation allocation = new Goal.Allocation(item,
+                        allocationCount.getAsInt(), values.get(prefix + "recipient"));
+                if (!allocation.delivery()
+                        || !allocation.itemId().equals(values.get(prefix + "item"))
+                        || !String.valueOf(allocation.count()).equals(
+                        values.get(prefix + "count"))
+                        || !allocation.recipient().equals(values.get(prefix + "recipient"))
+                        || previous != null
+                        && java.util.Comparator.comparing(Goal.Allocation::itemId)
+                        .thenComparing(Goal.Allocation::recipient)
+                        .compare(previous, allocation) >= 0
+                        || !decoded.add(allocation)) {
+                    return Optional.empty();
+                }
+                previous = allocation;
+            }
+            return Optional.of(Set.copyOf(decoded));
         } catch (RuntimeException exception) {
             return Optional.empty();
         }

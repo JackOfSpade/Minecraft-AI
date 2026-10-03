@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class PlayerInstructionCallBudgetTest {
     @Test
-    void permitsInitialCallAndExactlyTwoRetries() {
+    void permitsTheConfiguredNumberOfCalls() {
         PlayerInstructionCallBudget budget = new PlayerInstructionCallBudget(3);
         budget.beginPlayerInstruction();
 
@@ -52,7 +52,7 @@ final class PlayerInstructionCallBudgetTest {
     }
 
     @Test
-    void recipientRoutingConsumesOneOfTheThreeAllowedModelCalls() {
+    void recipientRoutingConsumesOneOfTheConfiguredModelCalls() {
         PlayerInstructionCallBudget budget = new PlayerInstructionCallBudget(3);
 
         budget.beginPlayerInstruction(1);
@@ -73,13 +73,13 @@ final class PlayerInstructionCallBudgetTest {
     }
 
     @Test
-    void configuredValueCannotRaiseTheHardThreeCallCeiling() {
+    void configuredValueCanRaiseThePlanningBudget() {
         PlayerInstructionCallBudget budget = new PlayerInstructionCallBudget(12);
         budget.beginPlayerInstruction();
 
-        assertTrue(budget.tryAcquireModelCall());
-        assertTrue(budget.tryAcquireModelCall());
-        assertTrue(budget.tryAcquireModelCall());
+        for (int call = 0; call < 12; call++) {
+            assertTrue(budget.tryAcquireModelCall(), "configured call " + call + " should be available");
+        }
         assertFalse(budget.tryAcquireModelCall());
     }
 
@@ -112,7 +112,7 @@ final class PlayerInstructionCallBudgetTest {
     void failureReportsAreCappedSoAFailingTaskCannotLoopTheModel() {
         PlayerInstructionCallBudget budget = new PlayerInstructionCallBudget(3);
         budget.beginPlayerInstruction();
-        for (int call = 0; call < PlayerInstructionCallBudget.DEFAULT_MAX_CALLS; call++) {
+        for (int call = 0; call < 3; call++) {
             budget.tryAcquireModelCall();
         }
         for (int report = 0; report < PlayerInstructionCallBudget.MAX_FAILURE_REPORT_CALLS; report++) {

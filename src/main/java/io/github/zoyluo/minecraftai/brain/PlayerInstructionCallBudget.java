@@ -5,19 +5,20 @@ package io.github.zoyluo.minecraftai.brain;
  *
  * <p>The owner must call {@link #beginPlayerInstruction()} only when a new
  * player instruction supersedes the previous one. Autonomous task/goal
- * wake-ups deliberately reuse the same planner budget ({@link #DEFAULT_MAX_CALLS}),
- * so they cannot escape the cap by opening a new decision epoch. Task-failure
+ * wake-ups deliberately reuse the same planner budget, so they cannot escape the
+ * configured cap by opening a new decision epoch. Task-failure
  * reports are the one exception: they draw first from a separate small
  * allowance ({@link #MAX_FAILURE_REPORT_CALLS}) so a failure is still reported
  * after the planner spent its calls, falling back to the planner budget only
  * once that allowance is spent.</p>
  */
 final class PlayerInstructionCallBudget {
-    static final int DEFAULT_MAX_CALLS = 3;
+    /** Shipped budget for an ordinary player instruction. Config may raise or lower it. */
+    static final int DEFAULT_MAX_CALLS = 12;
     /**
      * Model calls per player instruction that exist only to report a task failure to the player.
-     * They are deliberately separate from {@link #DEFAULT_MAX_CALLS}: a follow that is aborted long
-     * after the planner spent its three calls must still be reported instead of silently vanishing,
+     * They are deliberately separate from the regular planner allowance: a follow that is aborted long
+     * after the planner spent its configured calls must still be reported instead of silently vanishing,
      * while the small cap keeps a repeatedly failing task from looping the model forever.
      */
     static final int MAX_FAILURE_REPORT_CALLS = 2;
@@ -38,9 +39,10 @@ final class PlayerInstructionCallBudget {
         if (maxCalls <= 0) {
             throw new IllegalArgumentException("maxCalls must be positive");
         }
-        // A config may opt into fewer calls, but a player instruction may never
-        // exceed its initial call plus two repair attempts.
-        this.maxCalls = Math.min(maxCalls, DEFAULT_MAX_CALLS);
+        // This is a real configuration boundary. Do not silently reduce a compound
+        // request back to three calls: task safety and typed failure handling still
+        // guard the execution loop.
+        this.maxCalls = maxCalls;
     }
 
     /** Starts a replacement player instruction and restores its full allowance. */

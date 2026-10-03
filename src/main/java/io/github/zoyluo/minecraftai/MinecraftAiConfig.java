@@ -258,7 +258,11 @@ public record MinecraftAiConfig(
                 // starting/finishing a task in natural language, so the templated "Starting X 0/4." /
                 // "Completed: X N/M." progress lines this flag adds are redundant, debug-phrased chat spam
                 // unless a player explicitly opts back in for blow-by-blow task telemetry.
-                new Brain(36, 6, 3, false, true, false, 3, false, ConversationMemory.defaults()),
+                // A player request can legitimately need several model decisions: interpreting a
+                // compound outcome, recovering from a world-state surprise, and handing results
+                // to the requested recipient are different decisions. This is a configurable
+                // operational budget, not a semantic three-step ceiling.
+                new Brain(36, 6, 12, false, true, false, 3, false, ConversationMemory.defaults()),
                 new Watchdog(200),
                 new Logging(true, "logs/minecraftai", true, "daily", 50, 30, 3, 10, true, Map.of(
                         "LIFECYCLE", "INFO",

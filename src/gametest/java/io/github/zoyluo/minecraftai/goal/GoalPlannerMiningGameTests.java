@@ -76,22 +76,21 @@ public final class GoalPlannerMiningGameTests {
         int bulkLogs = indexOf(plan, step -> step.kind() == GoalStep.Kind.GATHER
                 && (step.item() == Items.OAK_LOG || step.item() == Items.BIRCH_LOG)
                 && step.count() >= 8);
-        int firstStoneMine = indexOf(plan, step -> step.kind() == GoalStep.Kind.MINE
-                && step.block() == Blocks.STONE);
+        int firstStoneGather = indexOf(plan, GoalPlannerMiningGameTests::isCobblestoneGather);
         int bootstrapStonePick = indexOf(plan, step -> step.kind() == GoalStep.Kind.CRAFT
                 && step.item() == Items.STONE_PICKAXE);
         int furnace = indexOf(plan, step -> step.kind() == GoalStep.Kind.CRAFT
                 && step.item() == Items.FURNACE);
-        int furnaceStoneMine = indexOfFrom(plan, bootstrapStonePick + 1,
-                step -> step.kind() == GoalStep.Kind.MINE && step.block() == Blocks.STONE);
+        int furnaceStoneGather = indexOfFrom(plan, bootstrapStonePick + 1,
+                GoalPlannerMiningGameTests::isCobblestoneGather);
         int cook = indexOf(plan, step -> step.kind() == GoalStep.Kind.COOK_FOOD);
         int bucketIron = indexOf(plan, GoalPlannerMiningGameTests::isIronOreStep);
         int bucket = indexOf(plan, step -> step.kind() == GoalStep.Kind.CRAFT
                 && step.item() == Items.BUCKET);
         int stoneSword = indexOf(plan, step -> step.kind() == GoalStep.Kind.CRAFT
                 && step.item() == Items.STONE_SWORD);
-        int bulkReadinessStone = indexOf(plan, step -> step.kind() == GoalStep.Kind.MINE
-                && step.block() == Blocks.STONE && step.count() >= 64);
+        int bulkReadinessStone = indexOf(plan, step -> isCobblestoneGather(step)
+                && step.count() >= 64);
         int acquireWater = indexOf(plan, step -> step.kind() == GoalStep.Kind.ACQUIRE_WATER);
         int toolIron = indexOfFrom(plan, acquireWater + 1, GoalPlannerMiningGameTests::isIronOreStep);
         int diamondOre = indexOf(plan, step -> step.kind() == GoalStep.Kind.MINE_ORE
@@ -128,14 +127,14 @@ public final class GoalPlannerMiningGameTests {
         require(context, obsidianHunts.stream().mapToInt(GoalStep::count).sum() == obsidianRation
                         && obsidianHunts.stream().allMatch(step -> step.count() <= 4),
                 "obsidian readiness hunt batches must be bounded at 4: " + plan.describeSteps());
-        require(context, hunt >= 0 && hunt < firstStoneMine && firstStoneMine < cook,
-                "surface hunt must precede furnace stone mining and cooking: "
+        require(context, hunt >= 0 && hunt < firstStoneGather && firstStoneGather < cook,
+                "surface hunt must precede furnace cobblestone gathering and cooking: "
                         + plan.describeSteps());
-        require(context, firstStoneMine >= 0
-                        && plan.steps().get(firstStoneMine).count() == 3
-                        && firstStoneMine < bootstrapStonePick
-                        && bootstrapStonePick < furnaceStoneMine
-                        && furnaceStoneMine < furnace,
+        require(context, firstStoneGather >= 0
+                        && plan.steps().get(firstStoneGather).count() == 3
+                        && firstStoneGather < bootstrapStonePick
+                        && bootstrapStonePick < furnaceStoneGather
+                        && furnaceStoneGather < furnace,
                 "from-zero obsidian must upgrade after three cobblestone before furnace and "
                         + "bulk stone work: " + plan.describeSteps());
         require(context, hunt < bulkLogs && bulkLogs < lastHunt,
@@ -174,7 +173,7 @@ public final class GoalPlannerMiningGameTests {
                 .mapToInt(GoalStep::count)
                 .sum();
         int preWaterStone = plan.steps().subList(0, acquireWater).stream()
-                .filter(step -> step.kind() == GoalStep.Kind.MINE && step.block() == Blocks.STONE)
+                .filter(GoalPlannerMiningGameTests::isCobblestoneGather)
                 .mapToInt(GoalStep::count)
                 .sum();
         require(context, preWaterStonePicks >= 4 && preWaterSticks >= 47 && preWaterStone >= 78,
@@ -1076,8 +1075,7 @@ public final class GoalPlannerMiningGameTests {
                         && step.item() == Items.TORCH && !step.bestEffort()),
                 "diamond64 hard torch provision was marked best-effort: " + plan.describeSteps());
         int hardStone = plan.steps().stream()
-                .filter(step -> step.kind() == GoalStep.Kind.MINE
-                        && step.block() == Blocks.STONE && !step.bestEffort())
+                .filter(step -> isCobblestoneGather(step) && !step.bestEffort())
                 .mapToInt(GoalStep::count)
                 .sum();
         require(context, hardStone >= MiningBudget.RARE_BOOTSTRAP_STONE_LIKE,
@@ -1088,8 +1086,8 @@ public final class GoalPlannerMiningGameTests {
         int lastBootstrapOre = lastIndexOf(plan, step -> step.kind() == GoalStep.Kind.MINE_ORE
                 && !isDiamondStep(step));
         int rareDescentKit = lastIndexOf(plan, GoalStep::isRareDescentKitService);
-        int lastStoneAcquisition = lastIndexOf(plan, step -> step.kind() == GoalStep.Kind.MINE
-                && step.block() == Blocks.STONE);
+        int lastStoneAcquisition = lastIndexOf(plan,
+                GoalPlannerMiningGameTests::isCobblestoneGather);
         int finalStickTopUp = lastIndexOf(plan, step -> step.kind() == GoalStep.Kind.CRAFT
                 && step.item() == Items.STICK);
         require(context, lastBootstrapOre >= 0
@@ -1519,6 +1517,10 @@ public final class GoalPlannerMiningGameTests {
         return step.kind() == GoalStep.Kind.MINE_ORE
                 && (step.ores().contains(Blocks.COAL_ORE)
                 || step.ores().contains(Blocks.DEEPSLATE_COAL_ORE));
+    }
+
+    private static boolean isCobblestoneGather(GoalStep step) {
+        return step.kind() == GoalStep.Kind.GATHER && step.item() == Items.COBBLESTONE;
     }
 
     private static boolean isSurfaceAcquisitionStep(GoalStep step) {

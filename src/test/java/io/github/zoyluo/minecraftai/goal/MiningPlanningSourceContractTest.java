@@ -14,6 +14,27 @@ class MiningPlanningSourceContractTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
+    void cobblestonePrerequisiteUsesSafeGatherWithoutReorderingItsPickaxe() throws IOException {
+        String planner = read("goal/GoalPlanner.java");
+        int cobblestone = planner.indexOf("if (item == Items.COBBLESTONE)");
+        int pickaxe = planner.indexOf("ensurePickaxeTier(ToolTier.WOOD", cobblestone);
+        int gather = planner.indexOf("GoalStep.gather(Items.COBBLESTONE, missing)", pickaxe);
+        int nextBranch = planner.indexOf("if (item == Items.OBSIDIAN)", gather);
+
+        assertTrue(cobblestone >= 0 && pickaxe > cobblestone && gather > pickaxe
+                        && nextBranch > gather,
+                "cobblestone acquisition must derive a wood pick first, then delegate source "
+                        + "search to the bounded gather task");
+        assertFalse(planner.substring(cobblestone, nextBranch)
+                        .contains("GoalStep.mine(Blocks.STONE, missing)"),
+                "a short local MineTask scan must not stand in for safe resource discovery");
+        assertTrue(planner.contains("private static boolean canFrontLoadGather")
+                        && planner.contains("step.item() != Items.COBBLESTONE"),
+                "a cobblestone gather must retain its pickaxe dependency instead of being "
+                        + "front-loaded with tool-free gathers");
+    }
+
+    @Test
     void obsidianPlanningBindsAcquisitionAndTargetToolContracts() throws IOException {
         String planner = read("goal/GoalPlanner.java");
         int obsidianBranch = planner.indexOf("if (item == Items.OBSIDIAN)");

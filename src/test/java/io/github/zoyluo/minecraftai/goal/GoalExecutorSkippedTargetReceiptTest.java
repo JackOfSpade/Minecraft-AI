@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Items;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -160,6 +161,26 @@ class GoalExecutorSkippedTargetReceiptTest {
         assertEquals("mission_restore_invalid_skipped_target_receipts",
                 GoalExecutor.restoreCheckpointValidationFailure(damaged)
                         .orElseThrow());
+    }
+
+    @Test
+    void completedDeliveryReceiptsRoundTripAndRemainBoundToTheFulfillmentManifest() {
+        Goal.Allocation alexAxe = new Goal.Allocation(Items.STONE_AXE, 1, "Alex");
+        Goal.Allocation samSticks = new Goal.Allocation(Items.STICK, 4, "Sam");
+        Set<Goal.Allocation> receipts = Set.of(alexAxe, samSticks);
+
+        Map<String, String> encoded = GoalCheckpointCodec.encodeCompletedDeliveries(receipts);
+        assertEquals(receipts, GoalCheckpointCodec.decodeCompletedDeliveries(encoded).orElseThrow());
+        assertTrue(GoalExecutor.completedDeliveriesAuthorized(
+                new Goal.Fulfill(List.of(alexAxe, samSticks)), receipts));
+        assertTrue(!GoalExecutor.completedDeliveriesAuthorized(
+                new Goal.HaveItem(Items.STICK, 4), receipts));
+
+        Map<String, String> damaged = new LinkedHashMap<>(encoded);
+        damaged.remove("completed_delivery.00000.recipient");
+        assertTrue(GoalCheckpointCodec.decodeCompletedDeliveries(damaged).isEmpty());
+        assertEquals("mission_restore_invalid_completed_deliveries",
+                GoalExecutor.restoreCheckpointValidationFailure(damaged).orElseThrow());
     }
 
     private static GoalExecutor.SkippedTargetReceipt receipt(GoalStep step) {

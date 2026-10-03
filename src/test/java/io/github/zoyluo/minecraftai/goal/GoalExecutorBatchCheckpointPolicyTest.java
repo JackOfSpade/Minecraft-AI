@@ -3,6 +3,8 @@ package io.github.zoyluo.minecraftai.goal;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.List;
+import net.minecraft.world.item.Items;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -52,5 +54,30 @@ class GoalExecutorBatchCheckpointPolicyTest {
                 "batch_checkpoint.completed_at_checkpoint", "10",
                 "batch_checkpoint.step_limit", "10",
                 "batch_checkpoint.unexpected", "x")).isEmpty());
+    }
+
+    @Test
+    void explicitlyAuthorizedFulfillmentBundleDoesNotUseOrdinaryTenStepConsentGate() {
+        Goal.Fulfill fulfillment = new Goal.Fulfill(List.of(
+                new Goal.Allocation(Items.STICK, 2, ""),
+                new Goal.Allocation(Items.STONE_AXE, 1, "Alex")));
+
+        assertTrue(GoalExecutor.isBatchCheckpointExempt(fulfillment));
+        assertFalse(GoalExecutor.isBatchCheckpointExempt(
+                new Goal.HaveItem(Items.STICK, 2)));
+    }
+
+    @Test
+    void ambiguousPostDropHandoffFailuresNeverReplanIntoADuplicateDelivery() {
+        GoalStep handoff = GoalStep.give(Items.STONE_AXE, 1, "Alex");
+
+        assertTrue(GoalExecutor.isUnreceiptedPhysicalDeliveryFailure(
+                handoff, "give_item_count_mismatch"));
+        assertTrue(GoalExecutor.isUnreceiptedPhysicalDeliveryFailure(
+                handoff, "give_item_receipt_commit_failed"));
+        assertFalse(GoalExecutor.isUnreceiptedPhysicalDeliveryFailure(
+                handoff, "give_item_player_not_found"));
+        assertFalse(GoalExecutor.isUnreceiptedPhysicalDeliveryFailure(
+                GoalStep.craft(Items.STONE_AXE, 1), "give_item_count_mismatch"));
     }
 }

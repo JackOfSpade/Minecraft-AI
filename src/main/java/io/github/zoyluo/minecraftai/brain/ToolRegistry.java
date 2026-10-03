@@ -287,6 +287,16 @@ public final class ToolRegistry {
 
     /** Goal-driven high-level actions: gather/break/fish/trade plus every deterministic-goal task. */
     private void registerGoalTools() {
+        register("fulfill_items", "Fulfill an arbitrary compound item request with deterministic dependency planning and exact player handoffs. Use when the player asks for multiple different final items, a kit, a bundle, or a split between players. Put every final allocation in items; recipient omitted means keep it on this bot, while a named recipient is handed that item after all production is complete. The model chooses the manifest from the player's request; this tool does not assume a fixed kit or recipe.", objectSchema()
+                .property("items", allocationArraySchema("complete final item allocations for this request"))
+                .required("items")
+                .build(), (bot, args) -> {
+            List<Goal.Allocation> allocations = requiredAllocations(args, "items");
+            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Fulfill(allocations));
+            return started ? ok("goal_assigned: fulfill_items allocations=" + allocations.size())
+                    : fail("goal_plan_failed");
+        });
+
         register("set_base", "Remember the bot's current position as the base for stockpiling and resupply tasks.", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             BotMemoryStore.INSTANCE.of(bot.getUUID()).markPlace("base", bot.level(), bot.blockPosition());
             return ok("marked_base: " + bot.blockPosition().toShortString());
@@ -1314,6 +1324,31 @@ public final class ToolRegistry {
         return values;
     }
 
+    /** Parses the typed output manifest accepted by {@code fulfill_items}. */
+    private static List<Goal.Allocation> requiredAllocations(JsonObject args, String name) {
+        if (args == null || !args.has(name) || !args.get(name).isJsonArray()) {
+            throw new IllegalArgumentException("missing_or_bad_arg: " + name);
+        }
+        List<Goal.Allocation> allocations = new java.util.ArrayList<>();
+        for (com.google.gson.JsonElement element : args.getAsJsonArray(name)) {
+            if (!element.isJsonObject()) {
+                throw new IllegalArgumentException("missing_or_bad_arg: " + name);
+            }
+            JsonObject allocation = element.getAsJsonObject();
+            int count = optionalInt(allocation, "count", 1);
+            if (count <= 0) {
+                throw new IllegalArgumentException("must_be_positive: items.count");
+            }
+            allocations.add(new Goal.Allocation(
+                    requiredItem(allocation, "item"), count,
+                    optionalString(allocation, "recipient", "")));
+        }
+        if (allocations.isEmpty()) {
+            throw new IllegalArgumentException("missing_or_bad_arg: " + name);
+        }
+        return List.copyOf(allocations);
+    }
+
     private static Map<String, String> paramsObject(JsonObject args, String name) {
         if (!args.has(name) || !args.get(name).isJsonObject()) {
             return Map.of();
@@ -1480,6 +1515,20 @@ public final class ToolRegistry {
         JsonObject items = new JsonObject();
         items.addProperty("type", "string");
         schema.add("items", items);
+        return schema;
+    }
+
+    private static JsonObject allocationArraySchema(String description) {
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "array");
+        schema.addProperty("description", description);
+        JsonObject allocation = objectSchema()
+                .property("item", stringSchema("final vanilla or modded item id"))
+                .property("count", integerSchema("how many of this item (default 1)", 1, Integer.MAX_VALUE))
+                .property("recipient", stringSchema("player name to receive it; omit to retain on this bot"))
+                .required("item")
+                .build();
+        schema.add("items", allocation);
         return schema;
     }
 

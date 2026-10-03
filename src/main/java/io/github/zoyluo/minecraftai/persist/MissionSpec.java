@@ -1,10 +1,12 @@
 package io.github.zoyluo.minecraftai.persist;
 
 import io.github.zoyluo.minecraftai.goal.Goal;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 
@@ -57,6 +59,17 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 type = "build";
                 params.put("blueprint", g.blueprint());
             }
+            case Goal.Fulfill g -> {
+                type = "fulfill";
+                params.put("schema", "1");
+                List<String> encoded = new ArrayList<>(g.allocations().size() * 3);
+                for (Goal.Allocation allocation : g.allocations()) {
+                    encoded.add(allocation.itemId());
+                    encoded.add(String.valueOf(allocation.count()));
+                    encoded.add(allocation.recipient());
+                }
+                values = List.copyOf(encoded);
+            }
         }
         return new MissionSpec(type, params, values);
     }
@@ -77,6 +90,7 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 case "stockpile" -> new Goal.Stockpile(item("item"), integer("count"));
                 case "food" -> new Goal.Food(integer("count"));
                 case "build" -> new Goal.Build(required("blueprint"));
+                case "fulfill" -> fulfill();
                 default -> throw new IllegalArgumentException("unknown_mission_type:" + type);
             });
         } catch (RuntimeException exception) {
@@ -94,6 +108,42 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
 
     private int integer(String key) {
         return Integer.parseInt(required(key));
+    }
+
+    /** Strict triplet encoding keeps a persisted compound request declarative and replay-safe. */
+    private Goal.Fulfill fulfill() {
+        if (!params.keySet().equals(Set.of("schema"))
+                || !"1".equals(params.get("schema"))
+                || values.isEmpty() || values.size() % 3 != 0) {
+            throw new IllegalArgumentException("invalid_fulfill_mission_spec");
+        }
+        List<Goal.Allocation> allocations = new ArrayList<>(values.size() / 3);
+        for (int index = 0; index < values.size(); index += 3) {
+            String itemId = values.get(index);
+            Identifier identifier = Identifier.tryParse(itemId);
+            net.minecraft.world.item.Item item = identifier == null
+                    ? null : BuiltInRegistries.ITEM.getOptional(identifier).orElse(null);
+            String countText = values.get(index + 1);
+            int count = Integer.parseInt(countText);
+            if (item == null || !itemId.equals(BuiltInRegistries.ITEM.getKey(item).toString())
+                    || count <= 0 || !countText.equals(String.valueOf(count))) {
+                throw new IllegalArgumentException("invalid_fulfill_allocation");
+            }
+            allocations.add(new Goal.Allocation(item, count, values.get(index + 2)));
+        }
+        Goal.Fulfill decoded = new Goal.Fulfill(allocations);
+        // The stored representation must already be canonical.  Otherwise an altered or
+        // duplicate manifest could make a restart describe a different authorization scope.
+        List<String> canonical = new ArrayList<>(decoded.allocations().size() * 3);
+        for (Goal.Allocation allocation : decoded.allocations()) {
+            canonical.add(allocation.itemId());
+            canonical.add(String.valueOf(allocation.count()));
+            canonical.add(allocation.recipient());
+        }
+        if (!canonical.equals(values)) {
+            throw new IllegalArgumentException("noncanonical_fulfill_mission_spec");
+        }
+        return decoded;
     }
 
     private String required(String key) {

@@ -12,7 +12,8 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
         GoalPredicate.Workstation,
         GoalPredicate.Stockpile,
         GoalPredicate.FoodUnits,
-        GoalPredicate.Structure {
+        GoalPredicate.Structure,
+        GoalPredicate.Fulfillment {
     GoalEvaluation evaluate(GoalSnapshot snapshot);
 
     record ItemCount(String itemId, int count) implements GoalPredicate {
@@ -127,6 +128,53 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
                             "skipped", String.valueOf(report.skipped()),
                             "mismatched", String.valueOf(report.mismatched())),
                     satisfied ? List.of() : List.of("structure_mismatch:" + report.mismatched()));
+        }
+    }
+
+    /**
+     * Verifies both the inventory allocations retained by the bot and the exact delivery
+     * receipts committed by the mission.  A receipt means the existing GiveItemTask proved the
+     * requested count left the bot's inventory while it was beside the named player.
+     */
+    record Fulfillment(List<Goal.Allocation> allocations,
+                       Set<Goal.Allocation> completedDeliveries) implements GoalPredicate {
+        public Fulfillment {
+            allocations = allocations == null ? List.of() : List.copyOf(allocations);
+            completedDeliveries = completedDeliveries == null
+                    ? Set.of() : Set.copyOf(completedDeliveries);
+        }
+
+        @Override
+        public GoalEvaluation evaluate(GoalSnapshot snapshot) {
+            int matched = 0;
+            int required = 0;
+            List<String> unmet = new java.util.ArrayList<>();
+            Map<String, String> evidence = new LinkedHashMap<>();
+            for (Goal.Allocation allocation : allocations) {
+                int count = allocation.count();
+                required = Math.addExact(required, count);
+                if (allocation.delivery()) {
+                    boolean delivered = completedDeliveries.contains(allocation);
+                    evidence.put("delivery." + allocation.recipient() + "." + allocation.itemId(),
+                            delivered ? String.valueOf(count) : "0");
+                    if (delivered) {
+                        matched = Math.addExact(matched, count);
+                    } else {
+                        unmet.add("undelivered_item:" + allocation.itemId()
+                                + ":recipient=" + allocation.recipient());
+                    }
+                    continue;
+                }
+                int actual = snapshot.inventoryCount(allocation.itemId());
+                evidence.put("inventory." + allocation.itemId(), String.valueOf(actual));
+                matched = Math.addExact(matched, Math.min(actual, count));
+                if (actual < count) {
+                    unmet.add("missing_item:" + allocation.itemId());
+                }
+            }
+            return new GoalEvaluation(unmet.isEmpty()
+                    ? GoalEvaluation.State.SATISFIED : GoalEvaluation.State.UNSATISFIED,
+                    matched, required, evidence, unmet);
         }
     }
 }

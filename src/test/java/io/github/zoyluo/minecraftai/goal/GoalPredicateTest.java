@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.world.item.Items;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -73,6 +74,21 @@ class GoalPredicateTest {
         assertState(predicate, snapshot(Map.of(), 0, Set.of(), Map.of(), Map.of(), 0,
                         new StructureReport("0,64,0", 116, 116, 114, 2, 0)),
                 GoalEvaluation.State.SATISFIED);
+    }
+
+    @Test
+    void fulfillmentSeparatesRetainedInventoryFromCommittedNamedHandoffs() {
+        Goal.Allocation retained = new Goal.Allocation(Items.STICK, 2, "");
+        Goal.Allocation delivery = new Goal.Allocation(Items.STONE_AXE, 1, "Alex");
+        GoalPredicate predicate = new GoalPredicate.Fulfillment(
+                java.util.List.of(retained, delivery), Set.of());
+        GoalSnapshot snapshot = snapshot(Map.of("minecraft:stick", 2), 0,
+                Set.of(), Map.of(), Map.of(), 0, null);
+
+        assertState(predicate, snapshot, GoalEvaluation.State.UNSATISFIED);
+        assertState(new GoalPredicate.Fulfillment(
+                        java.util.List.of(retained, delivery), Set.of(delivery)),
+                snapshot, GoalEvaluation.State.SATISFIED);
     }
 
     private static GoalSnapshot snapshot(Map<String, Integer> inventory,

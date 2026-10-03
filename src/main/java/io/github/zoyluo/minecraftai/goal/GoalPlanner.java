@@ -286,13 +286,17 @@ public final class GoalPlanner {
     }
 
     private static List<GoalStep> mergeGatherSegment(List<GoalStep> steps, int insertAt) {
-        // GATHER: has no prerequisites -> merge within the segment and move it forward. MINE is not
-        // merged across steps: it may straddle the tool-upgrade boundary of
-        // "wooden pick mines the first 3 stone -> craft stone pick -> stone pick mines the bulk stone."
+        // Front-load only gathers whose task can begin without a planner-owned prerequisite.
+        // Cobblestone is gathered through GatherQuotaTask rather than a local MineTask so it can
+        // safely search/explore for an observed stone source.  That task still needs the pickaxe
+        // this plan derives first, so unlike log gathering (which has a bounded hand-bootstrap)
+        // it must remain after that craft.  MINE likewise remains ordered because it may straddle
+        // the tool-upgrade boundary of "wooden pick mines the first 3 stone -> craft stone pick
+        // -> stone pick mines the bulk stone."
         record GatherKey(Item item, boolean bestEffort) {}
         Map<GatherKey, Integer> gatherTotals = new LinkedHashMap<>();
         for (GoalStep step : steps) {
-            if (step.kind() == GoalStep.Kind.GATHER) {
+            if (canFrontLoadGather(step)) {
                 gatherTotals.merge(new GatherKey(step.item(), step.bestEffort()), step.count(), Integer::sum);
             }
         }
@@ -307,12 +311,21 @@ public final class GoalPlanner {
         }
         for (int i = Math.min(insertAt, steps.size()); i < steps.size(); i++) {
             GoalStep step = steps.get(i);
-            if (step.kind() == GoalStep.Kind.GATHER) {
+            if (canFrontLoadGather(step)) {
                 continue; // already moved to the front
             }
             result.add(step);
         }
         return result;
+    }
+
+    /**
+     * A cobblestone gather breaks stone and therefore requires a pickaxe.  It is the only
+     * planner-emitted gather whose source lacks GatherQuotaTask's log hand-bootstrap, so retain
+     * its dependency position instead of treating every {@code GATHER} as independently runnable.
+     */
+    private static boolean canFrontLoadGather(GoalStep step) {
+        return step.kind() == GoalStep.Kind.GATHER && step.item() != Items.COBBLESTONE;
     }
 
     private static Map<Item, Integer> inventoryCounts(AIPlayerEntity bot) {
@@ -467,7 +480,37 @@ public final class GoalPlanner {
                 case Goal.Stockpile stockpile -> ensureStockpile(stockpile, depth, visiting);
                 case Goal.Food food -> ensureFoodTo(food.cookedCount(), depth, visiting);
                 case Goal.Build build -> ensureBuild(build, depth, visiting);
+                case Goal.Fulfill fulfill -> ensureFulfill(fulfill, depth, visiting);
             };
+        }
+
+        /**
+         * Back-chain all requested allocations as one virtual inventory, then append handoffs
+         * only after production has finished.  This is intentionally not a special-case tool-kit
+         * recipe: any finite manifest shares the same recipe planner and can name any recipient.
+         */
+        private boolean ensureFulfill(Goal.Fulfill fulfill,
+                                      int depth,
+                                      Set<String> visiting) {
+            Set<Goal.Allocation> completedDeliveries = resumeContext == null
+                    ? Set.of() : resumeContext.completedDeliveries();
+            List<Map.Entry<Item, Integer>> required = new ArrayList<>(
+                    fulfill.inventoryRequired(completedDeliveries).entrySet());
+            required.sort(java.util.Comparator.comparing(entry ->
+                    BuiltInRegistries.ITEM.getKey(entry.getKey()).toString()));
+            for (Map.Entry<Item, Integer> entry : required) {
+                if (!ensureItem(entry.getKey(), entry.getValue(), depth, visiting)) {
+                    return false;
+                }
+            }
+            // Every recipe/material task must precede every GiveItemTask.  A completed handoff
+            // is a durable receipt, so a later replan cannot craft and drop it a second time.
+            for (Goal.Allocation allocation : fulfill.deliveries()) {
+                if (!completedDeliveries.contains(allocation)) {
+                    addStep(GoalStep.give(allocation.item(), allocation.count(), allocation.recipient()));
+                }
+            }
+            return true;
         }
 
         // P3: harvest a crop -- no-op if already holding enough produce; otherwise back-derive a
@@ -1598,7 +1641,12 @@ public final class GoalPlanner {
                 if (!ensurePickaxeTier(ToolTier.WOOD, depth + 1, visiting)) {
                     return false;
                 }
-                addStep(GoalStep.mine(Blocks.STONE, missing));
+                // GatherQuotaTask resolves the item's actual drop sources (stone for vanilla
+                // cobblestone) and performs a bounded, observation-fenced search/exploration
+                // when none is reachable locally.  This keeps the planner declarative about the
+                // required resource instead of treating a short local MineTask scan as proof that
+                // the material is unavailable.
+                addStep(GoalStep.gather(Items.COBBLESTONE, missing));
                 counts.merge(Items.COBBLESTONE, missing, Integer::sum);
                 return true;
             }

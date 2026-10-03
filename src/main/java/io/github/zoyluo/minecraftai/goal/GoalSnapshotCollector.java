@@ -42,13 +42,26 @@ public final class GoalSnapshotCollector {
             BlueprintSchema blueprint,
             BlockPos buildAnchor,
             int buildPlaced,
-            int buildSkipped
+            int buildSkipped,
+            /** Exact successful handoffs already committed by a compound fulfillment mission. */
+            Set<Goal.Allocation> completedDeliveries
     ) {
+        /** Backward-compatible context shape for ordinary goals with no handoff receipts. */
+        public Context(BlockPos origin,
+                       Set<BlockPos> boundContainers,
+                       BlueprintSchema blueprint,
+                       BlockPos buildAnchor,
+                       int buildPlaced,
+                       int buildSkipped) {
+            this(origin, boundContainers, blueprint, buildAnchor, buildPlaced, buildSkipped, Set.of());
+        }
+
         public Context {
             origin = origin == null ? BlockPos.ZERO : origin.immutable();
             boundContainers = boundContainers == null ? Set.of() : boundContainers.stream()
                     .map(BlockPos::immutable).collect(java.util.stream.Collectors.toUnmodifiableSet());
             buildAnchor = buildAnchor == null ? null : buildAnchor.immutable();
+            completedDeliveries = completedDeliveries == null ? Set.of() : Set.copyOf(completedDeliveries);
         }
 
         public static Context at(BlockPos origin) {

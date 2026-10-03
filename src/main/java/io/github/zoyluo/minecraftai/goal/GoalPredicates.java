@@ -29,6 +29,18 @@ public final class GoalPredicates {
                     BuiltInRegistries.ITEM.getKey(stockpile.item()).toString(), stockpile.count());
             case Goal.Food food -> new GoalPredicate.FoodUnits(food.cookedCount());
             case Goal.Build build -> new GoalPredicate.Structure(build.blueprint());
+            case Goal.Fulfill fulfill -> new GoalPredicate.Fulfillment(fulfill.allocations(), Set.of());
         };
+    }
+
+    /** Evaluates a goal against the live snapshot plus any mission-owned delivery receipts. */
+    public static GoalEvaluation evaluate(Goal goal,
+                                          GoalSnapshot snapshot,
+                                          Set<Goal.Allocation> completedDeliveries) {
+        if (goal instanceof Goal.Fulfill fulfill) {
+            return new GoalPredicate.Fulfillment(
+                    fulfill.allocations(), completedDeliveries).evaluate(snapshot);
+        }
+        return forGoal(goal).evaluate(snapshot);
     }
 }

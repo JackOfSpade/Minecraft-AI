@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 final class MinecraftAiConfigBrainCapTest {
     @Test
-    void defaultsToInitialCallPlusTwoRetries() {
-        assertEquals(3, MinecraftAiConfig.defaults().brain().maxTurnsPerRequest());
+    void defaultsToAConfigurableMultiTurnPlanningBudget() {
+        assertEquals(12, MinecraftAiConfig.defaults().brain().maxTurnsPerRequest());
     }
 
     @Test

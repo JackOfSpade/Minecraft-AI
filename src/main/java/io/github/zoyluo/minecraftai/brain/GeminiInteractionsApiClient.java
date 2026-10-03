@@ -33,8 +33,12 @@ import java.util.Objects;
  * keeping the state there makes cancellation and latest-request-wins semantics straightforward.</p>
  */
 public final class GeminiInteractionsApiClient {
-    /** Never execute more than this many model calls in one interaction response. */
-    public static final int DEFAULT_MAX_FUNCTION_CALLS_PER_RESPONSE = 3;
+    /**
+     * Fallback only for direct callers that do not supply the brain setting. Runtime wiring uses
+     * {@code brain.maxToolCallsPerTurn}; keep this aligned with that shipped default rather than
+     * silently restoring the former three-call cap.
+     */
+    public static final int DEFAULT_MAX_FUNCTION_CALLS_PER_RESPONSE = 6;
 
     private final MinecraftAiConfig.Llm config;
     private final HttpClient httpClient;

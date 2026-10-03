@@ -4,6 +4,8 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -36,15 +38,30 @@ public final class GiveItemTask extends AbstractTask {
     private final Item item;
     private final int count;
     private final String requestedPlayerName;
+    /** Mission-owned receipt commit that runs only after the exact inventory debit is proved. */
+    private final BooleanSupplier receiptCommitter;
 
     private Phase phase = Phase.FIND_PLAYER;
     private Player target;
     private int phaseTicks;
 
     public GiveItemTask(Item item, int count, String playerName) {
+        this(item, count, playerName, () -> true);
+    }
+
+    /**
+     * The optional mission callback closes the restart window between a successful vanilla drop
+     * and GoalExecutor observing this task as completed.  It must return false if the logical
+     * receipt could not be durably accepted; in that case this task never claims success.
+     */
+    public GiveItemTask(Item item,
+                        int count,
+                        String playerName,
+                        BooleanSupplier receiptCommitter) {
         this.item = item;
         this.count = Math.max(1, count);
         this.requestedPlayerName = FollowTargetResolver.normalize(playerName);
+        this.receiptCommitter = Objects.requireNonNull(receiptCommitter, "receiptCommitter");
     }
 
     @Override
@@ -162,6 +179,12 @@ public final class GiveItemTask extends AbstractTask {
             // Never claim success on anything other than the exact requested count actually
             // leaving the bot's inventory.
             fail("give_item_count_mismatch");
+            return;
+        }
+        if (!receiptCommitter.getAsBoolean()) {
+            // The physical drop has already happened, so a retry could duplicate it. Surface a
+            // typed terminal failure and let the mission fail closed rather than claim delivery.
+            fail("give_item_receipt_commit_failed");
             return;
         }
         complete();

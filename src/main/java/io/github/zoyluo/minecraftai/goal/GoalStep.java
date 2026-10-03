@@ -36,7 +36,9 @@ public record GoalStep(Kind kind,
         DESCEND_TO_Y,
         ACQUIRE_WATER,
         MAKE_OBSIDIAN,
-        BUILD
+        BUILD,
+        /** A survival-legal handoff of a planned item allocation to a named player. */
+        GIVE_ITEM
     }
 
     public GoalStep {
@@ -45,6 +47,10 @@ public record GoalStep(Kind kind,
                 ? Math.max(0, count) : Math.max(1, count);
         ores = ores == null ? Set.of() : Set.copyOf(ores);
         pos = pos == null ? null : pos.immutable();
+        if (kind == Kind.GIVE_ITEM
+                && (item == null || tag == null || tag.isBlank() || !validRecipient(tag))) {
+            throw new IllegalArgumentException("invalid_give_item_step");
+        }
     }
 
     public static GoalStep gather(Item item, int count) {
@@ -212,6 +218,12 @@ public record GoalStep(Kind kind,
         return new GoalStep(Kind.MAKE_OBSIDIAN, null, count, null, Set.of(), null, null, null, null, false);
     }
 
+    /** Queue an exact item handoff after the fulfillment planner has produced every allocation. */
+    public static GoalStep give(Item item, int count, String recipient) {
+        return new GoalStep(Kind.GIVE_ITEM, item, count, null, Set.of(), null, null, null,
+                recipient == null ? "" : recipient.trim(), false);
+    }
+
     /** Build a house: BUILD step -- tag=blueprint name (e.g. small_hut/hut_5x5), materials already back-calculated and prepared during the planning phase. */
     public static GoalStep build(String blueprintName) {
         return new GoalStep(Kind.BUILD, null, 1, null, Set.of(), null, null, null, blueprintName, false);
@@ -270,6 +282,14 @@ public record GoalStep(Kind kind,
     public boolean isRareDescentKitService() {
         return kind == Kind.MINING_SERVICE && tag != null
                 && tag.startsWith("rare_descent_kit:");
+    }
+
+    /** The recipient attached to a {@link Kind#GIVE_ITEM} step. */
+    public String giveRecipient() {
+        if (kind != Kind.GIVE_ITEM || tag == null || !validRecipient(tag)) {
+            throw new IllegalStateException("invalid_give_item_recipient");
+        }
+        return tag;
     }
 
     public int rareOreMissionTarget() {
@@ -352,7 +372,14 @@ public record GoalStep(Kind kind,
             case ACQUIRE_WATER -> "Find a water source and fill a bucket";
             case MAKE_OBSIDIAN -> "Make obsidian x" + count;
             case BUILD -> "Build " + tag;
+            case GIVE_ITEM -> "Give " + itemName(item) + " x" + count + " to " + tag;
         };
+    }
+
+    /** Minecraft profile names are ASCII identifiers of at most sixteen characters. */
+    private static boolean validRecipient(String recipient) {
+        return recipient != null && recipient.length() <= 16
+                && recipient.matches("[A-Za-z0-9_]+");
     }
 
     private static String itemName(Item item) {
