@@ -78,6 +78,20 @@ public final class IntentController {
         requireServerThread(bot);
         String normalized = normalizeReason(origin, reason);
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
+            // An adaptive checkpoint installs an automatic safe pause. A later human "pause"
+            // must still win over its in-flight model decision and remain durable as a manual hold.
+            if (GoalExecutor.INSTANCE.holdStrategyCheckpoint(bot)) {
+                BrainCoordinator.INSTANCE.invalidateDecision(bot,
+                        "intent_pause_strategy_checkpoint:" + normalized);
+                BrainCoordinator.INSTANCE.clearIntentWakeSources(bot);
+                BotLog.comm(bot, "intent_paused_strategy_checkpoint", "origin", origin,
+                        "reason", normalized);
+                if (origin.notifiesUser()) {
+                    BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
+                            "The current mission is paused at its safe strategy checkpoint.");
+                }
+                return true;
+            }
             return false;
         }
         boolean changed = BrainCoordinator.INSTANCE.invalidateDecision(bot, "intent_pause:" + normalized);
@@ -128,8 +142,14 @@ public final class IntentController {
         // generic resume so an ordinary "continue" cannot bypass the goal executor's durable
         // marker, and so the existing plan is resumed rather than replaced by a fresh LLM turn.
         if (isBatchContinuationAcknowledgement(normalized)
-                && GoalExecutor.INSTANCE.resumeBatchCheckpoint(bot)) {
-            return true;
+                && GoalExecutor.INSTANCE.isAwaitingBatchContinuation(bot)) {
+            // A human acknowledgement wins over an in-flight adaptive strategy reply. Invalidate
+            // first so a delayed tokenless/control response cannot alter the freshly resumed work.
+            BrainCoordinator.INSTANCE.invalidateDecision(bot, "manual_goal_checkpoint_continue");
+            BrainCoordinator.INSTANCE.clearIntentWakeSources(bot);
+            if (GoalExecutor.INSTANCE.resumeBatchCheckpoint(bot)) {
+                return true;
+            }
         }
         if (isBatchStopAcknowledgement(normalized)
                 && GoalExecutor.INSTANCE.isAwaitingBatchContinuation(bot)) {
@@ -155,7 +175,7 @@ public final class IntentController {
         return java.util.Set.of(
                 "yes", "yes please", "yeah", "yep", "ok", "okay", "sure",
                 "continue", "continue please", "please continue", "go ahead",
-                "keep going", "carry on", "next batch")
+                "keep going", "carry on", "next batch", "resume")
                 .contains(normalized);
     }
 

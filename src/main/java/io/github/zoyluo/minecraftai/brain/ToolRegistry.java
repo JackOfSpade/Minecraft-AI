@@ -129,7 +129,7 @@ public final class ToolRegistry {
 
     /** Movement and low-level actions plus crafting: say, look/move/mine/place, hotbar, inventory, tool equip, craft/eat/smelt. */
     private void registerMovementAndCraftingTools() {
-        register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the MinecraftAi panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must be paired with an action or goal tool in the same response; purpose=status is for progress or completion after work has started.", objectSchema()
+        register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the MinecraftAi panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must be paired with an action or goal tool in the same response; purpose=status is for progress or completion after work has started. For a requested specialized mechanic that has no supplied tool, use report_unsupported instead of promising it in say.", objectSchema()
                 .property("message", stringSchema("the text to say"))
                 .property("purpose", enumStringSchema("answer for a pure question, plan before starting work, or status after work", "answer", "plan", "status"))
                 .required("message")
@@ -142,6 +142,20 @@ public final class ToolRegistry {
             }
             BrainCoordinator.INSTANCE.sendBotReply(bot, message);
             return ok("said");
+        });
+
+        register("report_unsupported", "End a request truthfully when its requested specialized Minecraft mechanic has no supplied tool. Use only after checking the declared tools. Give the missing building block (for example controlled elytra flight with firework rockets); this tells the player what needs development. Do NOT use it for missing materials, a temporary route/visibility issue, or a normal gather/craft/mine/build task: those must use the applicable high-level tool.", objectSchema()
+                .property("capability", stringSchema("specific missing building block, not a promise or a request for player help"))
+                .required("capability")
+                .build(), (bot, args) -> {
+            String capability = requiredString(args, "capability")
+                    .replace('\r', ' ').replace('\n', ' ').trim();
+            if (capability.length() < 3 || capability.length() > 160) {
+                throw new IllegalArgumentException("unsupported_capability_description_must_be_3_to_160_characters");
+            }
+            BrainCoordinator.INSTANCE.sendBotReply(bot, "I can't do that yet: I don't have a tool for "
+                    + capability + ". I did not start the action; that building block needs to be added.");
+            return ok("unsupported_capability_reported");
         });
 
         register("look_at", "Turn the bot's head toward a coordinate", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
@@ -292,9 +306,43 @@ public final class ToolRegistry {
                 .required("items")
                 .build(), (bot, args) -> {
             List<Goal.Allocation> allocations = requiredAllocations(args, "items");
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Fulfill(allocations));
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.Fulfill(allocations));
             return started ? ok("goal_assigned: fulfill_items allocations=" + allocations.size())
                     : fail("goal_plan_failed");
+        });
+
+        register("continue_goal_step", "Authorize exactly the next server-generated safe stage of an adaptive goal. This is only valid at a mission strategy checkpoint. Pass the mission_id and revision supplied in that checkpoint; it cannot target arbitrary coordinates, recipes, or hidden resources.", objectSchema()
+                .property("mission_id", stringSchema("exact mission id from the strategy checkpoint"))
+                .property("revision", integerSchema("exact non-negative strategy revision from the checkpoint", 0, Integer.MAX_VALUE))
+                .required("mission_id")
+                .required("revision")
+                .build(), (bot, args) -> {
+            boolean continued = GoalExecutor.INSTANCE.continueStrategyCheckpoint(
+                    bot, requiredString(args, "mission_id"), requiredInt(args, "revision"));
+            return continued ? ok("goal_stage_authorized") : fail("stale_or_invalid_goal_strategy_checkpoint");
+        });
+
+        register("replan_goal_from_current_state", "At an adaptive mission checkpoint, rebuild only the remaining server-verified dependency plan from the latest observed state. Use this when the proposed next stage no longer fits current facts. Pass the exact mission_id and revision from the checkpoint; this never discards an in-flight physical transaction.", objectSchema()
+                .property("mission_id", stringSchema("exact mission id from the strategy checkpoint"))
+                .property("revision", integerSchema("exact non-negative strategy revision from the checkpoint", 0, Integer.MAX_VALUE))
+                .required("mission_id")
+                .required("revision")
+                .build(), (bot, args) -> {
+            boolean replanned = GoalExecutor.INSTANCE.replanStrategyCheckpoint(
+                    bot, requiredString(args, "mission_id"), requiredInt(args, "revision"));
+            return replanned ? ok("goal_plan_rebuilt_from_current_state")
+                    : fail("stale_or_unreplannable_goal_strategy_checkpoint");
+        });
+
+        register("stop_goal_mission", "Cancel exactly the adaptive root goal at the supplied safe strategy checkpoint. This is revision-bound, so a delayed model response cannot stop a newer mission. It stops only this root goal; separately queued player goals remain eligible.", objectSchema()
+                .property("mission_id", stringSchema("exact mission id from the strategy checkpoint"))
+                .property("revision", integerSchema("exact non-negative strategy revision from the checkpoint", 0, Integer.MAX_VALUE))
+                .required("mission_id")
+                .required("revision")
+                .build(), (bot, args) -> {
+            boolean stopped = GoalExecutor.INSTANCE.stopStrategyCheckpoint(
+                    bot, requiredString(args, "mission_id"), requiredInt(args, "revision"));
+            return stopped ? ok("adaptive_goal_stopped") : fail("stale_or_invalid_goal_strategy_checkpoint");
         });
 
         register("set_base", "Remember the bot's current position as the base for stockpiling and resupply tasks.", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
@@ -342,7 +390,7 @@ public final class ToolRegistry {
                 assignLlm(bot, task);
                 return ok("assigned: " + task.name());
             }
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                     new Goal.MineOre(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1)));
             return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
         });
@@ -360,7 +408,7 @@ public final class ToolRegistry {
                 .property("count", integerSchema("desired inventory count"))
                 .required("item")
                 .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                     new Goal.HaveItem(requiredItem(args, "item"), optionalInt(args, "count", 1)));
             return started ? ok("goal_assigned: achieve_goal") : fail("goal_plan_failed");
         });
@@ -374,7 +422,7 @@ public final class ToolRegistry {
             net.minecraft.world.item.Item produce = spec.crop() == net.minecraft.world.level.block.Blocks.WHEAT
                     ? net.minecraft.world.item.Items.WHEAT
                     : spec.seed(); // carrot/potato: the produce item is the same as the seed item
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                     new Goal.HarvestCrop(spec.crop(), spec.seed(), produce, optionalInt(args, "count", 1)));
             return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
         });
@@ -384,7 +432,7 @@ public final class ToolRegistry {
                 + "Auto-plans (hunt->cook meat OR farm->bread) based on surroundings; do NOT decompose manually. count = how many food items (default 4).", objectSchema()
                 .property("count", integerSchema("how many cooked food items to stock (default 4)"))
                 .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                     new Goal.Food(optionalInt(args, "count", 4)));
             return started ? ok("goal_assigned: provision_food") : fail("goal_plan_failed");
         });
@@ -394,20 +442,20 @@ public final class ToolRegistry {
                 + "For ANY general find food/get some food request use provision_food instead (it auto-picks hunt or farm). count = how many (default 4).", objectSchema()
                 .property("count", integerSchema("how many wild food to gather (default 4)"))
                 .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                     new Goal.HaveItem(net.minecraft.world.item.Items.SWEET_BERRIES, optionalInt(args, "count", 4)));
             return started ? ok("goal_assigned: forage") : fail("goal_plan_failed");
         });
 
         register("achieve_armor", "Make and equip a full set of iron armor plus an iron sword with deterministic planning. Use for arm yourself up/make a full set of gear/put armor on me/gear up. Auto-plans mining, smelting and crafting; do not decompose manually.", objectSchema()
                 .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Armor());
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.Armor());
             return started ? ok("goal_assigned: achieve_armor") : fail("goal_plan_failed");
         });
 
         register("achieve_workstation", "Set up a base: craft and place a crafting table, furnace and chest nearby. Use for build a home/set up a crafting table/set up a crafting table, furnace and chest/set up a base. Auto-plans gathering and crafting; do not decompose manually.", objectSchema()
                 .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Workstation());
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.Workstation());
             return started ? ok("goal_assigned: achieve_workstation") : fail("goal_plan_failed");
         });
 
@@ -430,7 +478,7 @@ public final class ToolRegistry {
             } else {
                 bp = optionalString(args, "blueprint", "small_hut");
             }
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Build(bp));
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.Build(bp));
             return started ? ok("goal_assigned: build " + bp) : fail("goal_plan_failed");
         });
 
@@ -439,7 +487,7 @@ public final class ToolRegistry {
                 .property("count", integerSchema("how many to obtain"))
                 .required("item")
                 .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                     new Goal.Stockpile(requiredItem(args, "item"), optionalInt(args, "count", 1)));
             return started ? ok("goal_assigned: stockpile") : fail("goal_plan_failed");
         });
@@ -939,7 +987,7 @@ public final class ToolRegistry {
             // Queue relay: walk back to the work face first, then resume mining the same ore type (the goal queue chains automatically, and it can resume even if interrupted midway).
             Task back = new MoveTask(bot, face.get().pos());
             assignLlm(bot, back);
-            GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(
+            GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.MineOre(
                     ores.isEmpty() ? java.util.Set.of(net.minecraft.world.level.block.Blocks.IRON_ORE) : ores,
                     optionalInt(args, "count", 8)));
             return ok("resuming at " + face.get().pos().toShortString());
@@ -952,7 +1000,7 @@ public final class ToolRegistry {
                 .build(), (bot, args) -> {
             var ores = oreTargetsFrom(requiredString(args, "ore"));
             int count = optionalInt(args, "count", 1);
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(ores, count));
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.MineOre(ores, count));
             if (!started) {
                 return fail("goal_plan_failed");
             }
@@ -960,7 +1008,7 @@ public final class ToolRegistry {
             Item yield = io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(ores)
                     .stream().findFirst().orElse(null);
             if (yield != null) {
-                GoalExecutor.INSTANCE.submit(bot, new Goal.Stockpile(yield, count));
+                GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.Stockpile(yield, count));
             }
             return ok("goal_assigned: mine_ore + stockpile queued");
         });
@@ -1016,7 +1064,7 @@ public final class ToolRegistry {
                     assignLlm(bot, task);
                     return ok("assigned: " + task.name());
                 }
-                boolean started = GoalExecutor.INSTANCE.submit(bot,
+                boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                         new Goal.MineOre(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1)));
                 return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
             }
@@ -1029,7 +1077,7 @@ public final class ToolRegistry {
                         assignLlm(bot, task);
                         return ok("assigned: " + task.name());
                     }
-                    boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(OreScan.oreFamily(block), count));
+                    boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.MineOre(OreScan.oreFamily(block), count));
                     return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
                 }
             }

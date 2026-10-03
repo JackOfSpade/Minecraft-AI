@@ -30,6 +30,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.HitResult;
@@ -182,7 +183,14 @@ public final class ServerPlayerContext implements IPlayerContext {
     public BetterBlockPos playerFeet() {
         AIPlayerEntity self = player();
         BetterBlockPos feet = new BetterBlockPos(self.getX(), self.getY() + 0.1251, self.getZ());
-        if (blockStateAt(feet).getBlock() instanceof SlabBlock) {
+        BlockState footing = blockStateAt(feet);
+        // Baritone's grid cell is the air cell above a partial surface the bot is standing on.
+        // Its upstream slab correction already follows that rule. A snow layer has the same
+        // shape of problem: a real player stands partway through it, but the observed layer's
+        // collision surface—not an unseen block below it—is the navigation footing.
+        // The state comes only from the active observation fence, so this never becomes a
+        // hidden-terrain query while a planner worker is running.
+        if (footing.getBlock() instanceof SlabBlock || footing.getBlock() instanceof SnowLayerBlock) {
             return feet.above();
         }
         return feet;

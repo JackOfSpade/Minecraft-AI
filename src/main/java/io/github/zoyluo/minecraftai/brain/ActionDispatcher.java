@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.task.TaskManager;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 
 public final class ActionDispatcher {
@@ -25,7 +26,8 @@ public final class ActionDispatcher {
             java.util.Set.of("move", "mine");
     private static final int GOAL_FAIL_GUARD_TICKS = 600; // 30s
     private static final java.util.Set<String> USER_PAUSED_ALLOWED_TOOLS = java.util.Set.of(
-            "say", "get_task_status", "goal_status", "recall", "list_jobs", "pause", "resume", "stop", "cancel_all");
+            "say", "get_task_status", "goal_status", "recall", "list_jobs", "pause", "resume", "stop", "cancel_all",
+            "continue_goal_step", "replan_goal_from_current_state", "stop_goal_mission", "report_unsupported");
 
     private final ToolRegistry registry;
 
@@ -46,7 +48,33 @@ public final class ActionDispatcher {
     public DispatchBatch dispatchBatch(AIPlayerEntity bot,
                                        List<ChatToolCall> calls,
                                        BooleanSupplier leaseGuard) {
+        return dispatchBatch(bot, calls, leaseGuard, null);
+    }
+
+    /**
+     * Runs a batch inside an optional server-enforced tool scope.  Tool schemas sent to a model
+     * are advisory; this boundary is the authority that prevents an unexpected response from
+     * escaping a constrained mission decision and invoking a normally registered tool.
+     */
+    public DispatchBatch dispatchBatch(AIPlayerEntity bot,
+                                       List<ChatToolCall> calls,
+                                       BooleanSupplier leaseGuard,
+                                       Set<String> allowedToolNames) {
+        return dispatchBatch(bot, calls, leaseGuard, allowedToolNames, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Variant for a bounded capability scope. A strategy checkpoint accepts one decision only;
+     * serializing two individually valid decisions would make their combined effect ambiguous.
+     */
+    public DispatchBatch dispatchBatch(AIPlayerEntity bot,
+                                       List<ChatToolCall> calls,
+                                       BooleanSupplier leaseGuard,
+                                       Set<String> allowedToolNames,
+                                       int maxScopedToolCalls) {
         int maxCalls = MinecraftAiConfig.get().brain().maxToolCallsPerTurn();
+        int scopedLimit = Math.max(0, maxScopedToolCalls);
+        int scopedCalls = 0;
         List<ChatMessage> results = new ArrayList<>();
         List<ExecutedToolCall> executedCalls = new ArrayList<>();
         ControlEffect controlEffect = ControlEffect.NONE;
@@ -58,7 +86,16 @@ public final class ActionDispatcher {
             ToolDefinition.ToolResult result;
             if (index >= maxCalls) {
                 result = new ToolDefinition.ToolResult(false, "throttled");
+            } else if (allowedToolNames != null && !allowedToolNames.contains(call.name())) {
+                result = new ToolDefinition.ToolResult(false,
+                        "blocked: tool_not_available_in_current_mission_decision");
+            } else if (allowedToolNames != null && scopedCalls >= scopedLimit) {
+                result = new ToolDefinition.ToolResult(false,
+                        "blocked: exactly_one_mission_decision_is_allowed_at_this_checkpoint");
             } else {
+                if (allowedToolNames != null) {
+                    scopedCalls++;
+                }
                 result = invoke(bot, call);
             }
             // A tool may synchronously start a newer decision (for example tell_bot targeting self).

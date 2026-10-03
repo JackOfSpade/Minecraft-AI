@@ -207,6 +207,8 @@ public final class BaritoneNavigator {
                     BotLog.action(bot, "baritone_admission_refused",
                             "reason", refusal,
                             "goal", route.target().toShortString(),
+                            "resolved_goal", route.resolvedGoal() == null
+                                    ? "-" : route.resolvedGoal().toShortString(),
                             "type", type,
                             "nodes", plan.nodesConsidered(),
                             "moves", plan.movements().size(),

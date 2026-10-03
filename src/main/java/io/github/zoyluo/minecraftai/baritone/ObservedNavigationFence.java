@@ -20,6 +20,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
@@ -183,7 +185,7 @@ public final class ObservedNavigationFence {
         String dimension = BotEdits.dimensionKey(bot.level());
         Map<Long, Cell> observed = retained(previous, dimension, tick);
         int before = observed.size();
-        BlockPos feet = bot.blockPosition();
+        BlockPos feet = navigationFeet(bot);
         seedBodyEnvelope(bot, observed, tick);
         if (route.shape() == NavRoute.Shape.OWNER_FOLLOW) {
             // A live coordinate of this bot's already-verified owner is intentionally not a terrain observation. The navigator
@@ -300,6 +302,12 @@ public final class ObservedNavigationFence {
                 return Capture.refused("navigation_pursuit_no_observed_hop", rays,
                         Math.max(0, observed.size() - before));
             }
+            // The first horizontal lookahead can select a proven stance one step higher or
+            // lower on a hill.  Give that exact elevation-changing leg its full, ray-proven
+            // movement envelope before Baritone receives it; otherwise its source/destination
+            // headroom becomes virtual bedrock even when the snowy slope is plainly walkable.
+            observeVisibleCorridors(bot, feet, hop, waterTraversal, observed, tick);
+            candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
             // The remote target intentionally remains NavRoute.target() for the next heading
             // calculation and logs. The local observed hop is the only Baritone GoalBlock.
             route.setResolvedGoal(hop);
@@ -346,7 +354,7 @@ public final class ObservedNavigationFence {
                     Math.max(0, observed.size() - before), false);
         }
         int rays = scan(bot, observed, route.target(), REFRESH_RAYS, tick);
-        BlockPos feet = bot.blockPosition();
+        BlockPos feet = navigationFeet(bot);
         if (route.shape() == NavRoute.Shape.RUN_AWAY) {
             observeVisibleCorridors(bot, feet, fleeObservationPoint(bot, route), false, observed, tick);
         } else if (route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT) {
@@ -390,12 +398,25 @@ public final class ObservedNavigationFence {
     }
 
     private static void seedBodyEnvelope(AIPlayerEntity bot, Map<Long, Cell> observed, int tick) {
-        BlockPos feet = bot.blockPosition();
+        BlockPos feet = navigationFeet(bot);
         // The occupied cell, head space, and physical support are directly known to the player.
         observeKnown(bot, feet, observed, tick);
         observeKnown(bot, feet.above(), observed, tick);
         observeKnown(bot, feet.below(), observed, tick);
         observeStandingEnvelope(bot, feet, false, observed, tick);
+    }
+
+    /**
+     * The navigation grid names the air cell immediately above a partial support, matching
+     * {@link ServerPlayerContext#playerFeet()}.  Keeping the observation fence on that same
+     * coordinate is essential: otherwise it can select a snow-top stance that Baritone starts
+     * one cell below and therefore cannot enter without breaking.
+     */
+    private static BlockPos navigationFeet(AIPlayerEntity bot) {
+        BlockPos raw = bot.blockPosition();
+        BlockState occupied = bot.level().getBlockState(raw);
+        return occupied.getBlock() instanceof SlabBlock || occupied.getBlock() instanceof SnowLayerBlock
+                ? raw.above() : raw;
     }
 
     private static void observeKnown(AIPlayerEntity bot, BlockPos pos, Map<Long, Cell> observed, int tick) {
@@ -661,7 +682,7 @@ public final class ObservedNavigationFence {
 
     /** A view-only sampling point for a run-away goal; it is not the navigation goal itself. */
     private static BlockPos fleeObservationPoint(AIPlayerEntity bot, NavRoute route) {
-        BlockPos feet = bot.blockPosition();
+        BlockPos feet = navigationFeet(bot);
         double dx = feet.getX() - route.target().getX();
         double dz = feet.getZ() - route.target().getZ();
         double length = Math.sqrt(dx * dx + dz * dz);
@@ -687,7 +708,7 @@ public final class ObservedNavigationFence {
      * any safe local move actually exists.
      */
     private static BlockPos pursuitObservationPoint(AIPlayerEntity bot, NavRoute route) {
-        BlockPos feet = bot.blockPosition();
+        BlockPos feet = navigationFeet(bot);
         double dx = route.target().getX() - feet.getX();
         double dz = route.target().getZ() - feet.getZ();
         double length = Math.sqrt(dx * dx + dz * dz);

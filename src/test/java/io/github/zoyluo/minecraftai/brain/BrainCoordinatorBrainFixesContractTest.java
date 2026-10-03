@@ -44,7 +44,7 @@ final class BrainCoordinatorBrainFixesContractTest {
 
         assertTrue(containsIgnoringWhitespace(coordinator, "toolsForCall(toolRegistry.tools("),
                 "the offered tool set must be filtered when say is withheld");
-        assertTrue(containsIgnoringWhitespace(coordinator, "geminiRequest, withholdSay,"),
+        assertTrue(containsIgnoringWhitespace(coordinator, "geminiRequest, withholdSay || missionDecision,"),
                 "the flag must reach the executor so chat-completions requires a tool call");
         assertTrue(containsIgnoringWhitespace(executor, "apiClient.chatRequiringToolCall(historySnapshot, tools)"),
                 "chat-completions must send tool_choice=required on a forced call");

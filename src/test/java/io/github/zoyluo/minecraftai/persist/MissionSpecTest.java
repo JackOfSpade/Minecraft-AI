@@ -38,6 +38,17 @@ class MissionSpecTest {
     }
 
     @Test
+    void executionPolicyIsPersistedButLegacyConstructionDefaultsToStandard() {
+        MissionSpec legacy = new MissionSpec("food", java.util.Map.of("count", "1"), List.of());
+        MissionSpec adaptive = new MissionSpec("food", java.util.Map.of("count", "1"), List.of(),
+                MissionSpec.ExecutionMode.ADAPTIVE);
+
+        assertEquals(MissionSpec.ExecutionMode.STANDARD, legacy.executionMode());
+        assertEquals(MissionSpec.ExecutionMode.ADAPTIVE, adaptive.executionMode());
+        assertTrue(adaptive.toGoal().isPresent());
+    }
+
+    @Test
     void compoundFulfillmentPersistsCanonicalItemRecipientTriplets() throws IOException {
         // The real registry-backed round trip runs in the Fabric GameTest. This source contract
         // keeps the ordinary JUnit suite bootstrap-free while guarding its wire format.
@@ -49,5 +60,7 @@ class MissionSpecTest {
         assertTrue(source.contains("encoded.add(allocation.recipient());"));
         assertTrue(source.contains("case \"fulfill\" -> fulfill();"));
         assertTrue(source.contains("noncanonical_fulfill_mission_spec"));
+        assertTrue(source.contains("ExecutionMode executionMode"));
+        assertTrue(source.contains("executionMode == null ? ExecutionMode.STANDARD"));
     }
 }

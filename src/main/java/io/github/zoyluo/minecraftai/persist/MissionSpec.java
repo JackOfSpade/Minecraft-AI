@@ -11,14 +11,36 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 
 /** Stable, declarative Goal representation. No Task, phase, path, entity, or world object is serialized. */
-public record MissionSpec(String type, Map<String, String> params, List<String> values) {
+public record MissionSpec(String type, Map<String, String> params, List<String> values,
+                          ExecutionMode executionMode) {
+    /**
+     * Execution policy is deliberately persisted beside the declarative goal, rather than inferred
+     * from a chat turn after a restart.  It never changes the goal's recipe, allocation, or
+     * postcondition; it only controls whether a safe completed stage needs a fresh strategy
+     * decision before the executor dispatches the next one.
+     */
+    public enum ExecutionMode {
+        STANDARD,
+        ADAPTIVE
+    }
+
     public MissionSpec {
         type = type == null ? "" : type;
         params = params == null ? Map.of() : Map.copyOf(params);
         values = values == null ? List.of() : List.copyOf(values);
+        executionMode = executionMode == null ? ExecutionMode.STANDARD : executionMode;
+    }
+
+    /** Compatibility constructor for legacy callers and persisted records without a policy. */
+    public MissionSpec(String type, Map<String, String> params, List<String> values) {
+        this(type, params, values, ExecutionMode.STANDARD);
     }
 
     public static MissionSpec fromGoal(Goal goal) {
+        return fromGoal(goal, ExecutionMode.STANDARD);
+    }
+
+    public static MissionSpec fromGoal(Goal goal, ExecutionMode executionMode) {
         Map<String, String> params = new LinkedHashMap<>();
         List<String> values = List.of();
         String type;
@@ -71,7 +93,7 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 values = List.copyOf(encoded);
             }
         }
-        return new MissionSpec(type, params, values);
+        return new MissionSpec(type, params, values, executionMode);
     }
 
     public Optional<Goal> toGoal() {

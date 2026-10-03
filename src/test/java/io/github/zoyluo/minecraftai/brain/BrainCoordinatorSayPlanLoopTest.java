@@ -61,6 +61,17 @@ final class BrainCoordinatorSayPlanLoopTest {
     }
 
     @Test
+    void strategyCheckpointOffersOnlyServerBoundContinuationChoices() {
+        List<ToolDefinition> tools = List.of(
+                tool("continue_goal_step"), tool("replan_goal_from_current_state"), tool("stop_goal_mission"),
+                tool("move_to"), tool("mine_block"), tool("fulfill_items"));
+
+        assertEquals(List.of("continue_goal_step", "replan_goal_from_current_state", "stop_goal_mission"),
+                BrainCoordinator.toolsForStrategyCheckpoint(tools).stream()
+                        .map(ToolDefinition::name).toList());
+    }
+
+    @Test
     void aRepeatedPlanIsAFaultOnlyWhileThePlanIsAnnouncedAndUnstarted() {
         assertTrue(BrainCoordinator.isRepeatedPlanSay(say("plan"), true));
         assertFalse(BrainCoordinator.isRepeatedPlanSay(say("plan"), false));

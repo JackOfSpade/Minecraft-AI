@@ -64,6 +64,7 @@ import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.persist.MissionRecord;
 import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.persist.MissionSpec.ExecutionMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -97,6 +98,8 @@ public final class GoalExecutor {
      * pickaxe from scratch.
      */
     public static final int DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT = 10;
+    /** One whole, safe goal stage per adaptive strategy decision. */
+    static final int ADAPTIVE_STRATEGY_STEP_LIMIT = 1;
     private static final int BASE_LIFETIME_REPLAN_LIMIT = 12;
     private static final int MAX_CONSECUTIVE_REPLANS = 3;
     // Package-private: also read by GoalCheckpointCodec's postcondition-repair codec.
@@ -144,7 +147,7 @@ public final class GoalExecutor {
     // P0 goal queue (foundation of the conversational assistant): a compound instruction like "get food first, then mine iron" needs sequential goals. Under the original single-plan model,
     // the second goal would be rejected/overwritten (the prompt even required "one at a time, wait for STOP before the next"). Now: when an active goal exists, a new goal is enqueued,
     // and once the current goal completes/fails it automatically dequeues the next one (like a real person: finish what's in hand, then move to the next thing; if it can't be done, say so and skip).
-    private final Map<UUID, java.util.Deque<Goal>> goalQueue = new ConcurrentHashMap<>();
+    private final Map<UUID, java.util.Deque<QueuedGoal>> goalQueue = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> lastGoalFailTick = new ConcurrentHashMap<>(); // Optimization 2: the tick when the goal failed overall, used to block the brain's subsequent manual block-by-block mining
     private final Map<UUID, Goal> userGoal = new ConcurrentHashMap<>(); // B: the user's original high-level goal, to prevent the brain from downgrading it to one of its prerequisite sub-goals (mine diamond -> make iron pickaxe)
     private final Map<UUID, GoalResult> lastResults = new ConcurrentHashMap<>();
@@ -182,8 +185,28 @@ public final class GoalExecutor {
                                         String nextStep) {
     }
 
+    /**
+     * An immutable, server-generated decision token for an adaptive mission.  The model can only
+     * authorize the exact safe successor identified here; a stale callback cannot advance a newer
+     * stage or a replacement mission.
+     */
+    public record StrategyCheckpointStatus(String missionId,
+                                           long revision,
+                                           String goal,
+                                           int remainingSteps,
+                                           String nextStep) {
+    }
+
     public boolean submit(AIPlayerEntity bot, Goal goal) {
-        return submit(bot, goal, null);
+        return submit(bot, goal, null, ExecutionMode.STANDARD);
+    }
+
+    /**
+     * Starts a mission whose semantic strategy is revisited after every safe completed stage.
+     * Recipes, inventory math, navigation, and physical handoffs remain owned by this executor.
+     */
+    public boolean submitAdaptive(AIPlayerEntity bot, Goal goal) {
+        return submit(bot, goal, null, ExecutionMode.ADAPTIVE);
     }
 
     /**
@@ -191,7 +214,9 @@ public final class GoalExecutor {
      * its durable queue, but must never allocate a second ActivePlan or Task while the suspended
      * checkpoint (especially an open disposal pocket) remains unresolved.
      */
-    private Optional<Boolean> submitIntoSuspendedRuntime(AIPlayerEntity bot, Goal goal) {
+    private Optional<Boolean> submitIntoSuspendedRuntime(AIPlayerEntity bot,
+                                                           Goal goal,
+                                                           ExecutionMode executionMode) {
         UUID uuid = bot.getUUID();
         while (true) {
             MissionRuntimeRecord suspended = deathSuspended.get(uuid);
@@ -222,7 +247,7 @@ public final class GoalExecutor {
                 return Optional.of(false);
             }
             List<MissionSpec> appended = new ArrayList<>(suspended.queue());
-            appended.add(MissionSpec.fromGoal(goal));
+            appended.add(MissionSpec.fromGoal(goal, executionMode));
             MissionRuntimeRecord updated = new MissionRuntimeRecord(
                     suspended.active(), appended, suspended.userPaused());
             if (!deathSuspended.replace(uuid, suspended, updated)) {
@@ -237,8 +262,12 @@ public final class GoalExecutor {
         }
     }
 
-    private boolean submit(AIPlayerEntity bot, Goal goal, RestoreSeed restore) {
-        Optional<Boolean> suspendedSubmission = submitIntoSuspendedRuntime(bot, goal);
+    private boolean submit(AIPlayerEntity bot,
+                           Goal goal,
+                           RestoreSeed restore,
+                           ExecutionMode executionMode) {
+        ExecutionMode mode = executionMode == null ? ExecutionMode.STANDARD : executionMode;
+        Optional<Boolean> suspendedSubmission = submitIntoSuspendedRuntime(bot, goal, mode);
         if (suspendedSubmission.isPresent()) {
             return suspendedSubmission.orElseThrow();
         }
@@ -251,7 +280,8 @@ public final class GoalExecutor {
         }
         // P0 queue: an in-progress goal already exists -> the new goal is enqueued (de-duplicated), and once the current work finishes it automatically continues to the next one. This is the foundation for compound instructions/sequential requests.
         // Note: is it only safe to check this after the "prerequisite downgrade block"? No -- the downgrade block is below; let it run its check first: a sub-goal must still be blocked.
-        java.util.Deque<Goal> queued = goalQueue.computeIfAbsent(bot.getUUID(), k -> new java.util.concurrent.ConcurrentLinkedDeque<>());
+        java.util.Deque<QueuedGoal> queued = goalQueue.computeIfAbsent(bot.getUUID(),
+                k -> new java.util.concurrent.ConcurrentLinkedDeque<>());
         if (existing != null) {
             Goal ugQ = userGoal.get(bot.getUUID());
             if (ugQ != null && !ugQ.equals(goal) && isPrerequisiteOf(bot, goal, ugQ)) {
@@ -259,11 +289,11 @@ public final class GoalExecutor {
                 report(bot, "This is a prerequisite for the current goal and will finish automatically.");
                 return false;
             }
-            if (queued.stream().anyMatch(goal::equals)) {
+            if (queued.stream().map(QueuedGoal::goal).anyMatch(goal::equals)) {
                 BotLog.task(bot, "goal_submit_ignored", "goal", goal, "reason", "duplicate_queued");
                 return true;
             }
-            queued.addLast(goal);
+            queued.addLast(new QueuedGoal(goal, mode));
             BotLog.task(bot, "goal_queued", "goal", goal, "behind", String.valueOf(existing.goal), "queue_size", queued.size());
             report(bot, "Noted. After the current work finishes, I will: " + goalLabel(goal));
             markDirty(bot);
@@ -300,6 +330,17 @@ public final class GoalExecutor {
         GoalEvaluation initialEvaluation = GoalPredicates.evaluate(goal,
                 GoalSnapshotCollector.collect(bot, goal, context),
                 context.completedDeliveries());
+        if (restore != null && restore.batchCheckpoint().persisted()
+                && ((mode == ExecutionMode.ADAPTIVE
+                && restore.batchCheckpoint().stepLimit() != ADAPTIVE_STRATEGY_STEP_LIMIT)
+                || (mode != ExecutionMode.ADAPTIVE
+                && restore.batchCheckpoint().stepLimit() != DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT))) {
+            queued.removeFirstOccurrence(goal);
+            recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
+                    GoalResult.classify(initialEvaluation, false),
+                    "mission_restore_execution_mode_checkpoint_mismatch");
+            return false;
+        }
         if (restore != null && (!restore.validationFailure().isBlank()
                 || restore.huntSearchCursor() == null
                 || restore.skippedTargetReceipts() == null
@@ -1404,7 +1445,7 @@ public final class GoalExecutor {
         }
         HuntSearchCursor huntSearchCursor = restore == null
                 ? HuntSearchCursor.initial() : restore.huntSearchCursor();
-        ActivePlan active = new ActivePlan(missionId, startedTick, goal, predicate, context,
+        ActivePlan active = new ActivePlan(missionId, startedTick, goal, predicate, context, mode,
                 new ArrayDeque<>(restoredSteps), restoredSteps.size(),
                 restoredSteps.stream().map(GoalStep::describe).toList(),
                 huntSearchCursor, restoredSkippedTargets);
@@ -1418,6 +1459,8 @@ public final class GoalExecutor {
                         restore.batchCheckpoint().completedAtCheckpoint();
                 active.batchStepLimit = restore.batchCheckpoint().stepLimit();
                 active.awaitingPlayerContinuation = true;
+                active.strategyManuallyHeld = restore.batchCheckpoint().strategyManuallyHeld();
+                active.strategyDecisionExhausted = restore.batchCheckpoint().strategyDecisionExhausted();
             }
             active.lifetimeReplans = restore.lifetimeReplans();
             active.rareResourceRetriesUsed = restoredRareResourceEpoch;
@@ -1522,15 +1565,19 @@ public final class GoalExecutor {
             report(bot, "I will complete this goal in " + restoredSteps.size() + " steps.");
         }
         if (active.awaitingPlayerContinuation) {
-            // Do not even construct the next task before the player confirms after a restart.
-            // The regular restore path also persists userPaused, but this direct guard covers the
-            // narrow crash window between capturing the batch marker and serializing the runtime.
-            TaskManager.INSTANCE.pauseUserIntent(bot, "restore_goal_batch_checkpoint");
-            BotLog.task(bot, "goal_batch_checkpoint_restored",
+            // Do not construct the next task before continuation authority is restored. Adaptive
+            // missions are re-woken by BrainCoordinator with a fresh observation; legacy
+            // missions still wait for explicit player approval.
+            boolean adaptive = active.executionMode == ExecutionMode.ADAPTIVE;
+            TaskManager.INSTANCE.pauseUserIntent(bot,
+                    adaptive ? "restore_goal_strategy_checkpoint" : "restore_goal_batch_checkpoint");
+            BotLog.task(bot, adaptive ? "goal_strategy_checkpoint_restored" : "goal_batch_checkpoint_restored",
                     "completed", active.completedSteps,
                     "remaining", active.steps.size(),
                     "step_limit", active.batchStepLimit);
-            report(bot, "This goal is still paused." + batchCheckpointReplyInstruction(active.steps.size()));
+            if (!adaptive) {
+                report(bot, "This goal is still paused." + batchCheckpointReplyInstruction(active.steps.size()));
+            }
             markDirty(bot);
             return true;
         }
@@ -1579,10 +1626,11 @@ public final class GoalExecutor {
             return false;
         }
         if (plan.awaitingPlayerContinuation) {
-            // A generic "resume" must not accidentally bypass the explicit confirmation gate.
+            // A generic "resume" must not accidentally bypass the continuation authority.
             // Safety-origin work remains eligible because TaskManager never pauses safety tasks.
             if (!TaskManager.INSTANCE.isUserPaused(bot)) {
-                TaskManager.INSTANCE.pauseUserIntent(bot, "goal_batch_checkpoint_guard");
+                TaskManager.INSTANCE.pauseUserIntent(bot, plan.executionMode == ExecutionMode.ADAPTIVE
+                        ? "goal_strategy_checkpoint_guard" : "goal_batch_checkpoint_guard");
                 markDirty(bot);
             }
             return true;
@@ -1939,7 +1987,7 @@ public final class GoalExecutor {
     }
 
     public int clearQueue(AIPlayerEntity bot) {
-        java.util.Deque<Goal> queued = goalQueue.remove(bot.getUUID());
+        java.util.Deque<QueuedGoal> queued = goalQueue.remove(bot.getUUID());
         int removed = queued == null ? 0 : queued.size();
         if (removed > 0) {
             markDirty(bot);
@@ -2049,7 +2097,7 @@ public final class GoalExecutor {
     }
 
     public int queuedGoalCount(AIPlayerEntity bot) {
-        java.util.Deque<Goal> queued = goalQueue.get(bot.getUUID());
+        java.util.Deque<QueuedGoal> queued = goalQueue.get(bot.getUUID());
         return queued == null ? 0 : queued.size();
     }
 
@@ -2079,6 +2127,189 @@ public final class GoalExecutor {
     }
 
     /**
+     * Returns a token only while an adaptive mission is parked at a safe whole-stage boundary.
+     * A caller cannot use this to inspect or advance a mining/service transaction in flight.
+     */
+    public Optional<StrategyCheckpointStatus> strategyCheckpointStatus(AIPlayerEntity bot) {
+        ActivePlan plan = activePlans.get(bot.getUUID());
+        if (plan == null || plan.executionMode != ExecutionMode.ADAPTIVE
+                || !plan.awaitingPlayerContinuation || plan.strategyManuallyHeld
+                || plan.strategyDecisionExhausted
+                || !hasNoOpenStepTransaction(plan)) {
+            return Optional.empty();
+        }
+        GoalStep next = plan.steps.peekFirst();
+        if (next == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new StrategyCheckpointStatus(
+                plan.missionId.toString(),
+                plan.completedAtLastBatchCheckpoint,
+                strategyGoalDescription(plan.goal),
+                plan.steps.size(),
+                next.describe()));
+    }
+
+    /** True for an adaptive safe boundary even when the human has explicitly put it on hold. */
+    public boolean hasAdaptiveStrategyCheckpoint(AIPlayerEntity bot) {
+        ActivePlan plan = activePlans.get(bot.getUUID());
+        return plan != null && plan.executionMode == ExecutionMode.ADAPTIVE
+                && plan.awaitingPlayerContinuation && hasNoOpenStepTransaction(plan);
+    }
+
+    /**
+     * Converts the executor's automatic strategy pause into an explicit human hold.  This is
+     * persisted with the checkpoint so the idle watcher cannot restart a cancelled/in-flight
+     * model decision after the player says pause.
+     */
+    public boolean holdStrategyCheckpoint(AIPlayerEntity bot) {
+        ActivePlan plan = activePlans.get(bot.getUUID());
+        if (plan == null || plan.executionMode != ExecutionMode.ADAPTIVE
+                || !plan.awaitingPlayerContinuation || plan.strategyManuallyHeld
+                || !hasNoOpenStepTransaction(plan)) {
+            return false;
+        }
+        plan.strategyManuallyHeld = true;
+        markDirty(bot);
+        BotLog.task(bot, "goal_strategy_checkpoint_held_by_player",
+                "mission_id", plan.missionId,
+                "revision", plan.completedAtLastBatchCheckpoint);
+        return true;
+    }
+
+    /** Persists that the bounded strategy allowance for this exact revision was spent. */
+    public boolean exhaustStrategyCheckpoint(AIPlayerEntity bot, String missionId, long revision) {
+        ActivePlan plan = activePlans.get(bot.getUUID());
+        if (plan == null || plan.executionMode != ExecutionMode.ADAPTIVE
+                || !plan.awaitingPlayerContinuation
+                || missionId == null || !plan.missionId.toString().equals(missionId)
+                || revision != plan.completedAtLastBatchCheckpoint
+                || !hasNoOpenStepTransaction(plan)) {
+            return false;
+        }
+        plan.strategyDecisionExhausted = true;
+        markDirty(bot);
+        BotLog.task(bot, "goal_strategy_checkpoint_budget_exhausted",
+                "mission_id", plan.missionId, "revision", revision);
+        return true;
+    }
+
+    /**
+     * Authorizes exactly the server-generated next stage for an adaptive mission.  The mission id
+     * and revision are mandatory so a delayed model result cannot resume a superseded goal.
+     */
+    public boolean continueStrategyCheckpoint(AIPlayerEntity bot, String missionId, long revision) {
+        ActivePlan plan = activePlans.get(bot.getUUID());
+        if (plan == null || plan.executionMode != ExecutionMode.ADAPTIVE
+                || !plan.awaitingPlayerContinuation || plan.strategyManuallyHeld
+                || missionId == null || !plan.missionId.toString().equals(missionId)
+                || revision != plan.completedAtLastBatchCheckpoint
+                || !hasNoOpenStepTransaction(plan)) {
+            return false;
+        }
+        if (finishStrategyCheckpointIfSatisfied(bot, plan,
+                "postcondition_satisfied_at_strategy_checkpoint")) {
+            return true;
+        }
+        resumeCheckpoint(bot, plan, "goal_strategy_checkpoint_continue", false);
+        return true;
+    }
+
+    /**
+     * Rebuilds only the remaining declarative plan from the current authoritative inventory and
+     * observations.  It is legal solely at the same safe strategy boundary as continuation, so
+     * it can never discard an open mining/service transaction or an ambiguous handoff.
+     */
+    public boolean replanStrategyCheckpoint(AIPlayerEntity bot, String missionId, long revision) {
+        ActivePlan plan = activePlans.get(bot.getUUID());
+        if (plan == null || plan.executionMode != ExecutionMode.ADAPTIVE
+                || !plan.awaitingPlayerContinuation || plan.strategyManuallyHeld
+                || missionId == null || !plan.missionId.toString().equals(missionId)
+                || revision != plan.completedAtLastBatchCheckpoint
+                || !hasNoOpenStepTransaction(plan)) {
+            return false;
+        }
+        if (finishStrategyCheckpointIfSatisfied(bot, plan,
+                "postcondition_satisfied_before_strategy_replan")) {
+            return true;
+        }
+        GoalPlanner.GoalPlan fresh = GoalPlanner.plan(bot, plan.goal, snapshotContext(plan),
+                plan.missionId.toString());
+        List<GoalStep> replanned = applySkippedTargetReceipts(
+                fresh.success() ? fresh.steps() : List.of(), plan.skippedTargetReceipts);
+        if (!fresh.success()) {
+            BotLog.task(bot, "goal_strategy_replan_rejected",
+                    "mission_id", plan.missionId,
+                    "revision", revision,
+                    "unresolved", fresh.unresolved());
+            return false;
+        }
+        if (replanned.isEmpty()) {
+            // The declarative planner sees no remaining work. Only the independent final
+            // predicate may convert that into completion; otherwise keep the checkpoint parked
+            // rather than claiming success from a planner/evaluator disagreement.
+            if (finishStrategyCheckpointIfSatisfied(bot, plan,
+                    "postcondition_satisfied_after_empty_strategy_replan")) {
+                return true;
+            }
+            BotLog.task(bot, "goal_strategy_replan_rejected",
+                    "mission_id", plan.missionId,
+                    "revision", revision,
+                    "unresolved", "planner_returned_no_steps_but_postcondition_is_unsatisfied");
+            return false;
+        }
+        plan.steps.clear();
+        plan.steps.addAll(replanned);
+        plan.stepLabels.clear();
+        plan.stepLabels.addAll(replanned.stream().map(GoalStep::describe).toList());
+        plan.totalSteps = replanned.size();
+        BotLog.task(bot, "goal_strategy_replanned",
+                "mission_id", plan.missionId,
+                "revision", revision,
+                "steps", replanned.stream().map(GoalStep::describe).toList());
+        resumeCheckpoint(bot, plan, "goal_strategy_checkpoint_replan", false);
+        return true;
+    }
+
+    /**
+     * Cancels exactly the revision-bound adaptive root mission. Unlike the generic chat stop
+     * command, this cannot be applied by a delayed model response to whichever mission happens
+     * to be active later.
+     */
+    public boolean stopStrategyCheckpoint(AIPlayerEntity bot, String missionId, long revision) {
+        ActivePlan plan = activePlans.get(bot.getUUID());
+        if (plan == null || plan.executionMode != ExecutionMode.ADAPTIVE
+                || !plan.awaitingPlayerContinuation || plan.strategyManuallyHeld
+                || missionId == null || !plan.missionId.toString().equals(missionId)
+                || revision != plan.completedAtLastBatchCheckpoint
+                || !hasNoOpenStepTransaction(plan)) {
+            return false;
+        }
+        resumeCheckpoint(bot, plan, "goal_strategy_checkpoint_stop", false);
+        finishActive(bot, plan, evaluate(bot, plan), "strategy_checkpoint_stopped", true, true);
+        return true;
+    }
+
+    /**
+     * A player may have supplied items or completed a delivery while the model was deciding.
+     * Re-check the authoritative predicate before either resuming or rebuilding a paused plan so
+     * an adaptive boundary never performs a duplicate stage from stale inventory facts.
+     */
+    private boolean finishStrategyCheckpointIfSatisfied(AIPlayerEntity bot,
+                                                         ActivePlan plan,
+                                                         String reason) {
+        GoalEvaluation evaluation = evaluate(bot, plan);
+        if (evaluation.state() != GoalEvaluation.State.SATISFIED) {
+            return false;
+        }
+        // The pause was installed by the just-completed safe stage. Release it before publishing
+        // the terminal result so a queued, separately requested goal is not left inert.
+        resumeCheckpoint(bot, plan, "goal_strategy_checkpoint_already_satisfied", false);
+        finishActive(bot, plan, evaluation, reason, false, true);
+        return true;
+    }
+
+    /**
      * Releases only an automatic batch checkpoint.  This intentionally does not resume an
      * ordinary user pause, and it never creates a new plan: the existing goal queue and exact
      * current continuation remain authoritative.
@@ -2088,18 +2319,29 @@ public final class GoalExecutor {
         if (plan == null || !plan.awaitingPlayerContinuation) {
             return false;
         }
+        resumeCheckpoint(bot, plan, "goal_batch_checkpoint_continue", true);
+        return true;
+    }
+
+    private static void resumeCheckpoint(AIPlayerEntity bot,
+                                         ActivePlan plan,
+                                         String resumeReason,
+                                         boolean playerFacing) {
         plan.awaitingPlayerContinuation = false;
+        plan.strategyManuallyHeld = false;
+        plan.strategyDecisionExhausted = false;
         plan.completedAtLastBatchCheckpoint = plan.completedSteps;
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
-            TaskManager.INSTANCE.resumeUserIntent(bot, "goal_batch_checkpoint_continue");
+            TaskManager.INSTANCE.resumeUserIntent(bot, resumeReason);
         }
         BotLog.task(bot, "goal_batch_checkpoint_resumed",
                 "completed", plan.completedSteps,
                 "remaining", plan.steps.size(),
                 "step_limit", plan.batchStepLimit);
-        report(bot, "Continuing the next batch of the goal.");
+        if (playerFacing) {
+            report(bot, "Continuing the next batch of the goal.");
+        }
         markDirty(bot);
-        return true;
     }
 
     public Optional<GoalResult> lastResult(AIPlayerEntity bot) {
@@ -2125,9 +2367,9 @@ public final class GoalExecutor {
             captureTaskEvidence(bot, active);
         }
         MissionRecord activeRecord = active == null ? null : new MissionRecord(
-                active.missionId.toString(), MissionSpec.fromGoal(active.goal), checkpoint(active));
-        java.util.Deque<Goal> queued = goalQueue.get(bot.getUUID());
-        List<MissionSpec> queue = queued == null ? List.of() : queued.stream().map(MissionSpec::fromGoal).toList();
+                active.missionId.toString(), MissionSpec.fromGoal(active.goal, active.executionMode), checkpoint(active));
+        java.util.Deque<QueuedGoal> queued = goalQueue.get(bot.getUUID());
+        List<MissionSpec> queue = queued == null ? List.of() : queued.stream().map(QueuedGoal::spec).toList();
         boolean hasPersistableMission = activeRecord != null || !queue.isEmpty();
         return new MissionRuntimeRecord(activeRecord, queue,
                 hasPersistableMission && TaskManager.INSTANCE.isUserPaused(bot));
@@ -2182,7 +2424,7 @@ public final class GoalExecutor {
                 }
                 try {
                     submitted = submit(bot, restored.get(),
-                            restoreSeed(bot, restored.get(), activeRecord));
+                            restoreSeed(bot, restored.get(), activeRecord), activeRecord.spec().executionMode());
                     if (rawActivePocket && (!submitted
                             || !restoredActivePocketAuthority(
                             bot, activeRecord.missionId(), rawTaskCheckpoint))) {
@@ -2225,7 +2467,7 @@ public final class GoalExecutor {
         for (MissionSpec spec : runtime.queue()) {
             Optional<Goal> queued = spec.toGoal();
             if (queued.isPresent()) {
-                submit(bot, queued.get());
+                submit(bot, queued.get(), null, spec.executionMode());
             } else {
                 BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                         "mission_queue_restore_isolated", "type", spec.type(), "reason", "invalid_spec");
@@ -2405,7 +2647,9 @@ public final class GoalExecutor {
             checkpoint.putAll(encodeBatchCheckpoint(new GoalBatchCheckpoint(
                     true,
                     active.completedAtLastBatchCheckpoint,
-                    active.batchStepLimit)));
+                    active.batchStepLimit,
+                    active.strategyManuallyHeld,
+                    active.strategyDecisionExhausted)));
         }
         return Map.copyOf(checkpoint);
     }
@@ -2758,6 +3002,22 @@ public final class GoalExecutor {
         };
     }
 
+    /**
+     * Read-only root objective carried into every adaptive decision, including after a restart.
+     * In particular, a fulfillment count alone is not enough for the model to see which items
+     * belong to the player versus the bot, so render the canonical server-owned manifest here.
+     */
+    private static String strategyGoalDescription(Goal goal) {
+        if (!(goal instanceof Goal.Fulfill fulfill)) {
+            return goalLabel(goal);
+        }
+        List<String> allocations = fulfill.allocations().stream()
+                .map(allocation -> allocation.itemId() + " x" + allocation.count()
+                        + (allocation.delivery() ? " -> " + allocation.recipient() : " -> bot"))
+                .toList();
+        return "Fulfill manifest: " + String.join(", ", allocations);
+    }
+
     private static String itemLabel(Item item) {
         Identifier id = item == null ? null : BuiltInRegistries.ITEM.getKey(item);
         return id == null ? "unknown item" : id.getPath().replace('_', ' ');
@@ -2796,14 +3056,14 @@ public final class GoalExecutor {
 
     // P0 queue continuation: once the current goal is settled (completed/failed), automatically start the next one in the queue; ones that fail to plan are skipped one by one, with an explanation each time.
     private boolean advanceQueue(AIPlayerEntity bot) {
-        java.util.Deque<Goal> queued = goalQueue.get(bot.getUUID());
+        java.util.Deque<QueuedGoal> queued = goalQueue.get(bot.getUUID());
         if (queued == null) {
             return false;
         }
-        Goal next;
+        QueuedGoal next;
         while ((next = queued.pollFirst()) != null) {
-            report(bot, "Next, I will: " + goalLabel(next));
-            if (submit(bot, next)) {
+            report(bot, "Next, I will: " + goalLabel(next.goal));
+            if (submit(bot, next.goal, null, next.executionMode)) {
                 if (hasActivePlan(bot)) {
                     return true;
                 }
@@ -2841,9 +3101,18 @@ public final class GoalExecutor {
                                                       int completedSteps,
                                                       int remainingSteps,
                                                       boolean safeBoundary) {
+        return shouldCheckpointAfterCompletedStep(completedAtLastCheckpoint, completedSteps,
+                remainingSteps, safeBoundary, DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT);
+    }
+
+    static boolean shouldCheckpointAfterCompletedStep(int completedAtLastCheckpoint,
+                                                      int completedSteps,
+                                                      int remainingSteps,
+                                                      boolean safeBoundary,
+                                                      int stepLimit) {
         return safeBoundary && remainingSteps > 0
                 && (long) completedSteps - completedAtLastCheckpoint
-                >= DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT;
+                >= stepLimit;
     }
 
     /**
@@ -2853,7 +3122,11 @@ public final class GoalExecutor {
      */
     private static boolean isSafeBatchCheckpointBoundary(ActivePlan plan) {
         return plan != null && !plan.awaitingPlayerContinuation
-                && plan.current == null && plan.currentTask == null
+                && hasNoOpenStepTransaction(plan);
+    }
+
+    private static boolean hasNoOpenStepTransaction(ActivePlan plan) {
+        return plan != null && plan.current == null && plan.currentTask == null
                 && !plan.huntPickupSettlement
                 && plan.taskCheckpointKind == null && plan.taskCheckpoint.isEmpty()
                 && plan.miningCheckpoint.isEmpty()
@@ -2863,36 +3136,45 @@ public final class GoalExecutor {
                 && plan.auxiliaryMiningContinuationFingerprint.isBlank();
     }
 
-    /** Returns true when a committed step turned into a player-confirmation checkpoint. */
+    /** Returns true when a committed step turned into a player or strategy checkpoint. */
     private boolean requestBatchCheckpointIfDue(AIPlayerEntity bot, ActivePlan plan) {
-        // The declared Fulfill manifest is one explicit user-authorized transaction, including
-        // every prerequisite and named handoff.  Keep normal goals' review boundary unchanged,
-        // but never split this bundle solely because it crossed the ordinary ten-step threshold.
-        if (isBatchCheckpointExempt(plan.goal)) {
+        if (isBatchCheckpointExempt(plan.goal, plan.executionMode)) {
             return false;
         }
         if (!shouldCheckpointAfterCompletedStep(plan.completedAtLastBatchCheckpoint,
-                plan.completedSteps, plan.steps.size(), isSafeBatchCheckpointBoundary(plan))) {
+                plan.completedSteps, plan.steps.size(), isSafeBatchCheckpointBoundary(plan),
+                plan.batchStepLimit)) {
             return false;
         }
         int completedInBatch = Math.max(1, plan.completedSteps - plan.completedAtLastBatchCheckpoint);
         plan.awaitingPlayerContinuation = true;
         plan.completedAtLastBatchCheckpoint = plan.completedSteps;
-        TaskManager.INSTANCE.pauseUserIntent(bot, "goal_batch_checkpoint");
-        BotLog.task(bot, "goal_batch_checkpoint_waiting",
+        plan.strategyManuallyHeld = false;
+        plan.strategyDecisionExhausted = false;
+        boolean adaptive = plan.executionMode == ExecutionMode.ADAPTIVE;
+        TaskManager.INSTANCE.pauseUserIntent(bot,
+                adaptive ? "goal_strategy_checkpoint" : "goal_batch_checkpoint");
+        BotLog.task(bot, adaptive ? "goal_strategy_checkpoint_waiting" : "goal_batch_checkpoint_waiting",
                 "completed", plan.completedSteps,
                 "remaining", plan.steps.size(),
                 "step_limit", plan.batchStepLimit,
                 "next", plan.steps.peekFirst() == null ? "" : plan.steps.peekFirst().describe());
-        report(bot, "I completed " + completedInBatch + " stages."
-                + batchCheckpointReplyInstruction(plan.steps.size()));
+        if (!adaptive) {
+            report(bot, "I completed " + completedInBatch + " stages."
+                    + batchCheckpointReplyInstruction(plan.steps.size()));
+        }
         markDirty(bot);
         return true;
     }
 
-    /** Fulfill is one explicit bundle authorization; ordinary goals retain the consent policy. */
+    /** Fulfill remains one explicit transaction in legacy mode; adaptive goals deliberately pause. */
+    static boolean isBatchCheckpointExempt(Goal goal, ExecutionMode executionMode) {
+        return executionMode != ExecutionMode.ADAPTIVE && goal instanceof Goal.Fulfill;
+    }
+
+    /** Legacy policy seam retained for ordinary direct goal submissions and focused tests. */
     static boolean isBatchCheckpointExempt(Goal goal) {
-        return goal instanceof Goal.Fulfill;
+        return isBatchCheckpointExempt(goal, ExecutionMode.STANDARD);
     }
 
     /** Exact player-facing consent contract for bounded work; keep this concise enough for chat. */
@@ -4657,8 +4939,11 @@ public final class GoalExecutor {
         BotReporter.INSTANCE.onGoalMessage(bot, text);
     }
 
-    // Hard-stuck class of failure: retrying unchanged will just fail again (can't dig/stuck/timeout/can't reach). Distinct from "missing materials/missing pickaxe" type failures, which a replan can fix.
-    private static boolean isHardFailure(String reason) {
+    // Hard-stuck class of failure: retrying unchanged will just fail again (can't dig/stuck/timeout/can't reach).
+    // An exhausted set of zero-motion observed probes is also hard: it produced no new position,
+    // inventory, or terrain evidence, so another identical plan cannot discover anything new.
+    // A completed exploration remains soft because it did change the bot's physical viewpoint.
+    static boolean isHardFailure(String reason) {
         if (reason == null) {
             return false;
         }
@@ -4666,7 +4951,9 @@ public final class GoalExecutor {
                 || reason.contains("dig_down_blocked")
                 || reason.contains("stuck:")
                 || reason.contains("timeout")
-                || reason.contains("no_reachable");
+                || reason.contains("no_reachable")
+                || reason.startsWith("no_observed_resource_in_local_view")
+                || reason.startsWith("no_observed_ore_in_local_view");
     }
 
     /**
@@ -4686,6 +4973,7 @@ public final class GoalExecutor {
         private UUID missionId;
         private final int startedTick;
         private final Goal goal;
+        private final ExecutionMode executionMode;
         private final GoalPredicate predicate;
         private net.minecraft.core.BlockPos origin;
         private final Set<net.minecraft.core.BlockPos> boundContainers = new HashSet<>();
@@ -4705,10 +4993,14 @@ public final class GoalExecutor {
         private int totalSteps;
         /** The last completed safe boundary accepted by the player. */
         private int completedAtLastBatchCheckpoint;
-        /** Stable per-mission policy, persisted only while a confirmation is pending. */
+        /** Stable per-mission policy, persisted with MissionSpec and checkpointed while paused. */
         private int batchStepLimit = DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT;
         /** True only after the executor has committed a whole step and asked the player to continue. */
         private boolean awaitingPlayerContinuation;
+        /** Explicit human pause layered on an otherwise automatic adaptive strategy boundary. */
+        private boolean strategyManuallyHeld;
+        /** Durable dedupe for the bounded model allowance at this exact stage revision. */
+        private boolean strategyDecisionExhausted;
         private int replanCount;       // Phase A: semantics = the count of consecutive no-progress replans (reset to zero once progress is made)
         private int postconditionReplans;
         private int lastEvaluationMatched;
@@ -4763,6 +5055,7 @@ public final class GoalExecutor {
                            Goal goal,
                            GoalPredicate predicate,
                            GoalSnapshotCollector.Context context,
+                           ExecutionMode executionMode,
                            ArrayDeque<GoalStep> steps,
                            int totalSteps,
                            java.util.List<String> stepLabels,
@@ -4771,6 +5064,9 @@ public final class GoalExecutor {
             this.missionId = missionId;
             this.startedTick = startedTick;
             this.goal = goal;
+            this.executionMode = executionMode == null ? ExecutionMode.STANDARD : executionMode;
+            this.batchStepLimit = this.executionMode == ExecutionMode.ADAPTIVE
+                    ? ADAPTIVE_STRATEGY_STEP_LIMIT : DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT;
             this.predicate = predicate;
             this.origin = context.origin();
             this.boundContainers.addAll(context.boundContainers());
@@ -5084,11 +5380,54 @@ public final class GoalExecutor {
     /** Persisted only while an automatic, safe continuation confirmation is pending. */
     record GoalBatchCheckpoint(boolean persisted,
                                int completedAtCheckpoint,
-                               int stepLimit) {
+                               int stepLimit,
+                               boolean strategyManuallyHeld,
+                               boolean strategyDecisionExhausted) {
+        GoalBatchCheckpoint(boolean persisted, int completedAtCheckpoint, int stepLimit) {
+            this(persisted, completedAtCheckpoint, stepLimit, false, false);
+        }
+
+        GoalBatchCheckpoint(boolean persisted, int completedAtCheckpoint, int stepLimit,
+                            boolean strategyManuallyHeld) {
+            this(persisted, completedAtCheckpoint, stepLimit, strategyManuallyHeld, false);
+        }
         // Package-private: also read by GoalCheckpointCodec's decodeBatchCheckpoint.
         static GoalBatchCheckpoint legacy() {
             return new GoalBatchCheckpoint(false, 0,
-                    DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT);
+                    DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT, false, false);
+        }
+    }
+
+    /** Keeps a queued goal's execution policy durable without changing its semantic goal value. */
+    private static final class QueuedGoal {
+        private final Goal goal;
+        private final ExecutionMode executionMode;
+
+        private QueuedGoal(Goal goal, ExecutionMode executionMode) {
+            this.goal = java.util.Objects.requireNonNull(goal, "goal");
+            this.executionMode = executionMode == null ? ExecutionMode.STANDARD : executionMode;
+        }
+
+        private Goal goal() {
+            return goal;
+        }
+
+        private MissionSpec spec() {
+            return MissionSpec.fromGoal(goal, executionMode);
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            // Several long-lived validation paths remove a just-submitted Goal from this queue.
+            // Preserve their semantic "same goal" behavior while retaining the policy payload.
+            return other instanceof QueuedGoal queued
+                    ? goal.equals(queued.goal) && executionMode == queued.executionMode
+                    : other instanceof Goal otherGoal && goal.equals(otherGoal);
+        }
+
+        @Override
+        public int hashCode() {
+            return goal.hashCode();
         }
     }
 

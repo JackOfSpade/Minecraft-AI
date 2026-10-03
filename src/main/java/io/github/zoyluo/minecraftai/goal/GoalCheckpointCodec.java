@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.goal;
 
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT;
+import static io.github.zoyluo.minecraftai.goal.GoalExecutor.ADAPTIVE_STRATEGY_STEP_LIMIT;
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_POSTCONDITION_REPLANS;
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_DELIVERY_RECEIPTS;
 import static io.github.zoyluo.minecraftai.goal.GoalExecutor.MAX_SETTLED_SERVICE_TOMBSTONES;
@@ -46,9 +47,14 @@ import net.minecraft.world.level.block.Blocks;
  */
 final class GoalCheckpointCodec {
     private static final String BATCH_CHECKPOINT_PREFIX = "batch_checkpoint.";
-    private static final Set<String> BATCH_CHECKPOINT_KEYS = Set.of(
+    private static final Set<String> LEGACY_BATCH_CHECKPOINT_KEYS = Set.of(
             "schema", "awaiting_player", "completed_at_checkpoint", "step_limit");
-    private static final int BATCH_CHECKPOINT_SCHEMA = 1;
+    private static final Set<String> V2_BATCH_CHECKPOINT_KEYS = Set.of(
+            "schema", "awaiting_player", "completed_at_checkpoint", "step_limit", "strategy_manual_hold");
+    private static final Set<String> BATCH_CHECKPOINT_KEYS = Set.of(
+            "schema", "awaiting_player", "completed_at_checkpoint", "step_limit",
+            "strategy_manual_hold", "strategy_decision_exhausted");
+    private static final int BATCH_CHECKPOINT_SCHEMA = 3;
     private static final int MAX_POSTCONDITION_FINGERPRINT_BYTES = 32_768;
     private static final String POSTCONDITION_REPLANS_KEY =
             "postcondition_replans";
@@ -102,7 +108,7 @@ final class GoalCheckpointCodec {
             return Map.of();
         }
         if (checkpoint.completedAtCheckpoint() < checkpoint.stepLimit()
-                || checkpoint.stepLimit() != DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT) {
+                || !isSupportedBatchStepLimit(checkpoint.stepLimit())) {
             throw new IllegalArgumentException("invalid_goal_batch_checkpoint");
         }
         return Map.of(
@@ -110,7 +116,11 @@ final class GoalCheckpointCodec {
                 BATCH_CHECKPOINT_PREFIX + "awaiting_player", "true",
                 BATCH_CHECKPOINT_PREFIX + "completed_at_checkpoint",
                 String.valueOf(checkpoint.completedAtCheckpoint()),
-                BATCH_CHECKPOINT_PREFIX + "step_limit", String.valueOf(checkpoint.stepLimit()));
+                BATCH_CHECKPOINT_PREFIX + "step_limit", String.valueOf(checkpoint.stepLimit()),
+                BATCH_CHECKPOINT_PREFIX + "strategy_manual_hold",
+                String.valueOf(checkpoint.strategyManuallyHeld()),
+                BATCH_CHECKPOINT_PREFIX + "strategy_decision_exhausted",
+                String.valueOf(checkpoint.strategyDecisionExhausted()));
     }
 
     /**
@@ -140,24 +150,43 @@ final class GoalCheckpointCodec {
         if (!present) {
             return Optional.of(GoalBatchCheckpoint.legacy());
         }
-        if (!values.keySet().equals(BATCH_CHECKPOINT_KEYS)
-                || !String.valueOf(BATCH_CHECKPOINT_SCHEMA).equals(values.get("schema"))) {
+        String schema = values.get("schema");
+        boolean legacySchema = "1".equals(schema) && values.keySet().equals(LEGACY_BATCH_CHECKPOINT_KEYS);
+        boolean v2Schema = "2".equals(schema) && values.keySet().equals(V2_BATCH_CHECKPOINT_KEYS);
+        boolean currentSchema = String.valueOf(BATCH_CHECKPOINT_SCHEMA).equals(schema)
+                && values.keySet().equals(BATCH_CHECKPOINT_KEYS);
+        if (!legacySchema && !v2Schema && !currentSchema) {
             return Optional.empty();
         }
         Optional<Boolean> awaiting = decodeCanonicalBoolean(values.get("awaiting_player"));
+        Optional<Boolean> manualHold = legacySchema ? Optional.of(false)
+                : decodeCanonicalBoolean(values.get("strategy_manual_hold"));
+        Optional<Boolean> decisionExhausted = currentSchema
+                ? decodeCanonicalBoolean(values.get("strategy_decision_exhausted"))
+                : Optional.of(false);
         OptionalInt completed = canonicalNonNegativeInt(values.get("completed_at_checkpoint"));
         OptionalInt limit = canonicalNonNegativeInt(values.get("step_limit"));
-        if (awaiting.isEmpty() || !awaiting.orElseThrow()
+        if (awaiting.isEmpty() || !awaiting.orElseThrow() || manualHold.isEmpty()
+                || decisionExhausted.isEmpty()
                 || completed.isEmpty() || limit.isEmpty()
-                || limit.getAsInt() != DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT
+                || !isSupportedBatchStepLimit(limit.getAsInt())
                 || completed.getAsInt() < limit.getAsInt()) {
             return Optional.empty();
         }
         GoalBatchCheckpoint decoded = new GoalBatchCheckpoint(
-                true, completed.getAsInt(), limit.getAsInt());
+                true, completed.getAsInt(), limit.getAsInt(), manualHold.orElseThrow(),
+                decisionExhausted.orElseThrow());
+        if (legacySchema || v2Schema) {
+            return Optional.of(decoded);
+        }
         return encodeBatchCheckpoint(decoded).entrySet().stream().allMatch(entry ->
                 entry.getValue().equals(source.get(entry.getKey())))
                 ? Optional.of(decoded) : Optional.empty();
+    }
+
+    private static boolean isSupportedBatchStepLimit(int limit) {
+        return limit == DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT
+                || limit == ADAPTIVE_STRATEGY_STEP_LIMIT;
     }
 
     static Map<String, String> encodeHuntSearchCursorNamespace(HuntSearchCursor cursor) {

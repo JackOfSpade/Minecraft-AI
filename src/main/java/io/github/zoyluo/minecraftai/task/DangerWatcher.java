@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.action.PaceRules;
 import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
@@ -512,8 +513,13 @@ public final class DangerWatcher {
         if (maybeLightDarkArea(server, bot, active)) {
             return true;
         }
+        // A strategy checkpoint deliberately uses the same durable pause machinery as a player
+        // pause, but it is the one paused state that must wake the model with fresh observations.
+        // Keep ordinary user pauses inert and never let the generic safety-resume path bypass the
+        // revision-bound checkpoint authority.
+        boolean adaptiveStrategyCheckpoint = GoalExecutor.INSTANCE.strategyCheckpointStatus(bot).isPresent();
         if (active.isEmpty()
-                && !TaskManager.INSTANCE.isUserPaused(bot)
+                && (!TaskManager.INSTANCE.isUserPaused(bot) || adaptiveStrategyCheckpoint)
                 && !bot.getActionPack().hasActiveActions()
                 && BrainCoordinator.INSTANCE.maybeWakeForFailureOrGoal(bot)) {
             return true;
@@ -521,6 +527,7 @@ public final class DangerWatcher {
         if (active.isEmpty()
                 && !bot.getActionPack().hasActiveActions()
                 && TaskManager.INSTANCE.hasPaused(bot)
+                && !adaptiveStrategyCheckpoint
                 && canResumePausedWork(bot, threat)) {
             TaskManager.INSTANCE.resumeFromPause(bot);
             return true;

@@ -1,0 +1,21 @@
+Keep a strict-survival route on the real surface of observed snow layers. A player
+stands above a layer, so the server context reports the air cell over it as its
+navigation feet; Baritone must consequently recognize the observed layer as a
+support. The layer's observed collision shape is itself the footing proof; the
+route does not infer or inspect the unseen block beneath it.
+
+diff --git a/src/main/java/baritone/pathing/movement/MovementHelper.java b/src/main/java/baritone/pathing/movement/MovementHelper.java
+--- a/src/main/java/baritone/pathing/movement/MovementHelper.java
++++ b/src/main/java/baritone/pathing/movement/MovementHelper.java
+@@ -439,6 +439,11 @@ public interface MovementHelper extends ActionCosts, Helper {
+         if (block instanceof StairBlock) {
+             return YES;
+         }
++        if (block instanceof SnowLayerBlock) {
++            // This observed layer is itself a collision-bearing surface. The navigation
++            // fence already required its exact cell, so do not infer unseen support below it.
++            return YES;
++        }
+         if (isWater(state)) {
+             return MAYBE;
+         }

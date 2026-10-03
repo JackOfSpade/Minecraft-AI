@@ -84,10 +84,13 @@ public final class ChatCaptureListener {
         PerceptionSnapshot.SelfState self = PerceptionCollector.collectSelfState(bot);
         ChatRecipientRouter.TaskSummary taskSummary = MiningAssistCoordinator.awaitingContinue(bot)
                 ? new ChatRecipientRouter.TaskSummary("poi_hold", "AWAITING_PLAYER_CONTINUE", 1.0D)
-                : GoalExecutor.INSTANCE.batchCheckpointStatus(bot)
+                : GoalExecutor.INSTANCE.strategyCheckpointStatus(bot)
+                        .map(ignored -> new ChatRecipientRouter.TaskSummary(
+                                "goal_strategy_checkpoint", "AWAITING_AI_DECISION", 1.0D))
+                        .or(() -> GoalExecutor.INSTANCE.batchCheckpointStatus(bot)
                         .filter(GoalExecutor.BatchCheckpointStatus::awaitingPlayer)
                         .map(ignored -> new ChatRecipientRouter.TaskSummary(
-                                "goal_batch_checkpoint", "AWAITING_PLAYER_CONTINUE", 1.0D))
+                                "goal_batch_checkpoint", "AWAITING_PLAYER_CONTINUE", 1.0D)))
                         .orElseGet(() -> {
                             PerceptionSnapshot.TaskInfo task = PerceptionCollector.collectTaskInfo(bot);
                             return new ChatRecipientRouter.TaskSummary(task.name(), task.state(), task.progress());

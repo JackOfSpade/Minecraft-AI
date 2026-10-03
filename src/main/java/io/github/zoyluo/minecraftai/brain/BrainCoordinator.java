@@ -49,7 +49,8 @@ public final class BrainCoordinator {
             "stockpile", "deposit", "withdraw", "inspect_container", "equip_armor", "attack", "light_area",
             "find", "show_location", "follow", "hold", "guard", "farm", "harvest", "breed", "attack_entity", "post_job",
             "tell_bot", "remember", "forget", "mark_place", "goto_place", "resume_mining",
-            "mine_and_stockpile", "recover_drops", "set_goal", "advance_goal", "assign_task",
+            "mine_and_stockpile", "recover_drops", "set_goal", "advance_goal", "assign_task", "continue_goal_step",
+            "replan_goal_from_current_state",
             "launch_boat", "board_boat", "boat_follow", "exit_boat", "give_item");
     // A successful setup, memory, or coordination call is not evidence that the requested work
     // has begun. These are the concrete task/goal/direct-work entry points that may start the
@@ -61,12 +62,16 @@ public final class BrainCoordinator {
             "achieve_armor", "achieve_workstation", "build_house", "stockpile", "deposit", "inspect_container",
             "withdraw", "attack", "light_area", "find", "show_location", "follow", "hold", "guard", "farm",
             "harvest", "breed", "attack_entity", "goto_place", "resume_mining",
-            "mine_and_stockpile", "recover_drops", "assign_task", "launch_boat", "board_boat",
+            "mine_and_stockpile", "recover_drops", "assign_task", "continue_goal_step", "replan_goal_from_current_state",
+            "launch_boat", "board_boat",
             "boat_follow", "exit_boat", "give_item");
     // These terminal/mission-control commands are intentionally not "start work" actions. They
     // must remain usable as concise commands without making a fictional plan first.
     private static final Set<String> CONTROL_ONLY_TOOLS = Set.of(
-            "stop", "abort_task", "pause", "resume", "cancel_all");
+            "stop", "abort_task", "pause", "resume", "cancel_all", "stop_goal_mission", "report_unsupported");
+    /** The strategy supervisor may authorize only the immutable mission's next safe stage or stop it. */
+    private static final Set<String> STRATEGY_CHECKPOINT_TOOLS = Set.of(
+            "continue_goal_step", "replan_goal_from_current_state", "stop_goal_mission");
     private static final String PLAN_REQUIRED_TOOL_RESULT =
             "blocked: call say with purpose=plan and a non-empty English plan before the first action or goal tool";
     private static final String THROTTLED_TOOL_RESULT = "throttled: per-response function-call cap reached";
@@ -201,6 +206,9 @@ public final class BrainCoordinator {
         conversation.lastToolRoundPlanBlockedAction = false;
         conversation.withholdSayNextCall = false;
         conversation.lastInstruction = text;
+        conversation.missionDecisionCall = false;
+        conversation.strategyCheckpoint = null;
+        conversation.exhaustedStrategyCheckpointKey = "";
         conversation.instructionChain.beginPlayerInstruction();
         conversation.geminiInteractionId = null;
         conversation.pendingGeminiFunctionResults = List.of();
@@ -249,9 +257,12 @@ public final class BrainCoordinator {
                 "finish_reason", response.finishReason());
 
         if (response.content() != null && !response.content().isBlank()) {
-            // Plain-text replies bypass the say tool, so log them here the way say is logged.
-            BotLog.comm(bot, "bot_text_reply", "message", ActionDispatcher.chatLogText(response.content()));
-            sendBotReply(bot, response.content());
+            // Never publish an unmediated model sentence as an in-game commitment. A function
+            // response can otherwise say "I'll fly" even though no flight capability exists or
+            // no action actually started. Player-facing communication must travel through say
+            // (or report_unsupported), whose purpose/terminal semantics are checked below.
+            BotLog.comm(bot, "bot_text_reply", "published", "false",
+                    "message", ActionDispatcher.chatLogText(response.content()));
         }
         conversation.lastPromptTokens = response.promptTokens();
         conversation.lastCompletionTokens = response.completionTokens();
@@ -271,9 +282,13 @@ public final class BrainCoordinator {
                                                            boolean failureReportCall) {
         InitialActionGate initialActionGate = initialActionGate(
                 response.toolCalls(),
-                conversation.requestStarted || conversation.initialPlanSpoken || failureReportCall);
+                conversation.requestStarted || conversation.initialPlanSpoken || failureReportCall
+                        // A checkpoint has already committed its preceding stage. Its narrowly
+                        // scoped continuation tools must not be blocked behind a player-facing
+                        // plan (which is deliberately absent from that tool scope).
+                        || conversation.missionDecisionCall);
         List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
-        if (!failureReportCall && !conversation.initialPlanSpoken && containsValidPlan(response.toolCalls())) {
+        if (!failureReportCall && !conversation.initialPlanSpoken && containsExecutablePlan(response.toolCalls())) {
             conversation.initialPlanSpoken = true;
         }
         conversation.history.add(ChatMessage.assistant(response.content(), toolCalls));
@@ -298,7 +313,8 @@ public final class BrainCoordinator {
                 toolCalls,
                 initialActionGate,
                 planAlreadyAnnounced,
-                () -> conversation.decision.isApplying(lease));
+                () -> conversation.decision.isApplying(lease),
+                conversation.missionDecisionCall ? STRATEGY_CHECKPOINT_TOOLS : null);
         if (!conversation.decision.isApplying(lease)) {
             logStaleDecision(lease, "tool_batch");
             return;
@@ -316,6 +332,10 @@ public final class BrainCoordinator {
             conversation.pendingGeminiFunctionResults = List.copyOf(nativeResults);
         }
         if (dispatchBatch.controlEffect() != ActionDispatcher.ControlEffect.NONE) {
+            if (conversation.missionDecisionCall) {
+                conversation.missionDecisionCall = false;
+                conversation.strategyCheckpoint = null;
+            }
             boolean replacementWorkActive = shouldContinueAfterControl(
                     dispatchBatch.controlEffect(),
                     TaskManager.INSTANCE.getActive(bot).isPresent(),
@@ -389,13 +409,13 @@ public final class BrainCoordinator {
                     "model_call", conversation.callBudget.callsUsed(),
                     "tool_calls", toolCalls.stream().map(ChatToolCall::name).toList(),
                     "initial_plan_blocked_action", initialActionGate.blockedActionCalls());
-            if (conversation.callBudget.exhausted()) {
+            if (currentDecisionBudgetExhausted(conversation)) {
                 if (!conversation.decision.complete(lease)) {
                     logStaleDecision(lease, "missing_action_budget_completion");
                     return;
                 }
                 trimHistory(conversation);
-                finishCallBudget(bot, conversation, initialActionGate.blockedActionCalls()
+                finishCurrentDecisionBudget(bot, conversation, initialActionGate.blockedActionCalls()
                         ? "initial_plan_required"
                         : "missing_required_action");
                 return;
@@ -420,13 +440,13 @@ public final class BrainCoordinator {
             BotLog.comm(bot, "tool_round_completed", "model_call", conversation.callBudget.callsUsed());
             return;
         }
-        if (conversation.callBudget.exhausted()) {
+        if (currentDecisionBudgetExhausted(conversation)) {
             if (!conversation.decision.complete(lease)) {
                 logStaleDecision(lease, "model_call_budget_completion");
                 return;
             }
             trimHistory(conversation);
-            finishCallBudget(bot, conversation, "tool_round");
+            finishCurrentDecisionBudget(bot, conversation, "tool_round");
             return;
         }
         trimHistory(conversation);
@@ -447,6 +467,28 @@ public final class BrainCoordinator {
                                         BotConversation conversation,
                                         ChatResponse response,
                                         boolean failureReportCall) {
+        // A strategy checkpoint is not an ordinary conversational turn.  A text reply cannot
+        // advance its immutable mission, so keep the same bounded decision boundary open and ask
+        // for the narrow continuation tool instead of silently leaving the goal paused.
+        if (conversation.missionDecisionCall && !failureReportCall) {
+            conversation.lastToolRoundFailureCount = 0;
+            conversation.lastToolRoundMissingRequiredAction = true;
+            conversation.lastToolRoundPlanBlockedAction = false;
+            if (currentDecisionBudgetExhausted(conversation)) {
+                if (!conversation.decision.complete(lease)) {
+                    logStaleDecision(lease, "strategy_text_budget_completion");
+                    return;
+                }
+                finishMissionDecisionBudget(bot, conversation, "strategy_text_only");
+                return;
+            }
+            if (!conversation.decision.awaitContinuation(lease)) {
+                logStaleDecision(lease, "strategy_text_continuation_wait");
+                return;
+            }
+            scheduleContinuation(bot, conversation, lease);
+            return;
+        }
         // Tool choice is required for every fresh player turn. A bare text response cannot say
         // whether it was an answer or a plan, so do not let it silently complete an action
         // request. Once an initial action has genuinely started, a later text-only completion
@@ -462,13 +504,13 @@ public final class BrainCoordinator {
             BotLog.warn(LogCategory.COMM, bot, "structured_tool_call_missing",
                     "model_call", conversation.callBudget.callsUsed(),
                     "finish_reason", response.finishReason());
-            if (conversation.callBudget.exhausted()) {
+            if (currentDecisionBudgetExhausted(conversation)) {
                 if (!conversation.decision.complete(lease)) {
                     logStaleDecision(lease, "unstructured_response_budget_completion");
                     return;
                 }
                 trimHistory(conversation);
-                finishCallBudget(bot, conversation, "structured_tool_call_missing");
+                finishCurrentDecisionBudget(bot, conversation, "structured_tool_call_missing");
                 return;
             }
             trimHistory(conversation);
@@ -508,27 +550,31 @@ public final class BrainCoordinator {
             List<ChatToolCall> calls,
             InitialActionGate gate,
             boolean planAlreadyAnnounced,
-            BooleanSupplier leaseGuard) {
+            BooleanSupplier leaseGuard,
+            Set<String> allowedToolNames) {
+        boolean hasWorkStart = calls.stream().anyMatch(call -> isWorkStartTool(call.name()));
         boolean anyBlocked = false;
         for (ChatToolCall call : calls) {
-            if (blockedResult(call, gate, planAlreadyAnnounced) != null) {
+            if (blockedResult(call, gate, planAlreadyAnnounced, hasWorkStart) != null) {
                 anyBlocked = true;
                 break;
             }
         }
         if (!anyBlocked) {
-            return dispatcher.dispatchBatch(bot, calls, leaseGuard);
+            return dispatcher.dispatchBatch(bot, calls, leaseGuard, allowedToolNames,
+                    allowedToolNames == null ? Integer.MAX_VALUE : 1);
         }
 
         int maxCalls = MinecraftAiConfig.get().brain().maxToolCallsPerTurn();
         List<ChatToolCall> safeCalls = new ArrayList<>();
         for (int index = 0; index < calls.size() && index < maxCalls; index++) {
             ChatToolCall call = calls.get(index);
-            if (blockedResult(call, gate, planAlreadyAnnounced) == null) {
+            if (blockedResult(call, gate, planAlreadyAnnounced, hasWorkStart) == null) {
                 safeCalls.add(call);
             }
         }
-        ActionDispatcher.DispatchBatch safeBatch = dispatcher.dispatchBatch(bot, safeCalls, leaseGuard);
+        ActionDispatcher.DispatchBatch safeBatch = dispatcher.dispatchBatch(bot, safeCalls, leaseGuard,
+                allowedToolNames, allowedToolNames == null ? Integer.MAX_VALUE : 1);
         if (!leaseGuard.getAsBoolean()) {
             // The regular dispatch path may have begun a newer decision (for example, tell_bot
             // targeting self). Its caller will discard this stale batch in the normal way.
@@ -540,7 +586,7 @@ public final class BrainCoordinator {
         int safeIndex = 0;
         for (int index = 0; index < calls.size(); index++) {
             ChatToolCall call = calls.get(index);
-            String blocked = blockedResult(call, gate, planAlreadyAnnounced);
+            String blocked = blockedResult(call, gate, planAlreadyAnnounced, hasWorkStart);
             if (index >= maxCalls) {
                 appendSyntheticToolFailure(bot, call, THROTTLED_TOOL_RESULT, results, executedCalls);
             } else if (blocked != null) {
@@ -565,7 +611,14 @@ public final class BrainCoordinator {
     }
 
     /** The synthetic failure text for a call that must not run in this round, or null when it may run. */
-    private static String blockedResult(ChatToolCall call, InitialActionGate gate, boolean planAlreadyAnnounced) {
+    private static String blockedResult(ChatToolCall call,
+                                        InitialActionGate gate,
+                                        boolean planAlreadyAnnounced,
+                                        boolean hasWorkStart) {
+        if (!hasWorkStart && isValidSayWithPurpose(call, "plan")) {
+            return "blocked: a plan may be announced only with an applicable work-start tool in the same response; "
+                    + "use report_unsupported for a missing specialized capability";
+        }
         if (gate.blockedActionCalls() && isGenuineActionTool(call.name())) {
             return PLAN_REQUIRED_TOOL_RESULT;
         }
@@ -608,6 +661,16 @@ public final class BrainCoordinator {
             }
         }
         return List.copyOf(withoutSay);
+    }
+
+    /** Restricts an adaptive boundary to server-generated mission continuation, never raw movement/mining. */
+    static List<ToolDefinition> toolsForStrategyCheckpoint(List<ToolDefinition> tools) {
+        if (tools == null) {
+            return List.of();
+        }
+        return tools.stream()
+                .filter(tool -> tool != null && STRATEGY_CHECKPOINT_TOOLS.contains(tool.name()))
+                .toList();
     }
 
     /** What the player hears when the planner gave up without ever starting the request. */
@@ -674,6 +737,11 @@ public final class BrainCoordinator {
     /** Whether any call in this round is a valid say(purpose=plan), regardless of order or outcome. */
     static boolean containsValidPlan(List<ChatToolCall> calls) {
         return calls != null && calls.stream().anyMatch(call -> isValidSayWithPurpose(call, "plan"));
+    }
+
+    /** A visible commitment counts only when its response actually contains a work-start tool. */
+    static boolean containsExecutablePlan(List<ChatToolCall> calls) {
+        return containsValidPlan(calls) && calls.stream().anyMatch(call -> isWorkStartTool(call.name()));
     }
 
     static boolean isAnswerOnlyReply(List<ChatToolCall> calls) {
@@ -760,8 +828,12 @@ public final class BrainCoordinator {
         }
         String message = throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
         BotLog.error(bot, "brain_hiccup", throwable, "message", message);
-        if (conversation.callBudget.exhausted()) {
-            finishCallBudget(bot, conversation, "api_error");
+        if (currentDecisionBudgetExhausted(conversation)) {
+            if (conversation.missionDecisionCall) {
+                finishMissionDecisionBudget(bot, conversation, "api_error");
+            } else {
+                finishCallBudget(bot, conversation, "api_error");
+            }
             return;
         }
         // A failed HTTP/model turn did not apply any game action. Keep the original instruction,
@@ -886,11 +958,15 @@ public final class BrainCoordinator {
     }
 
     public boolean maybeWakeForFailureOrGoal(AIPlayerEntity bot) {
-        // GOALFIX-GF1 P0-A: whenever the bot has an active deterministic goal plan, auto-wake
-        // (FLOW-2 / failure injection) always defers to GoalExecutor, so the two orchestrators do
-        // not race to assign between steps. awaitingTask is NOT cleared here: only after the goal
-        // plan itself completes and is removed from activePlans will this method next wake the
-        // brain, using awaitingTask, to judge whether the overall intent has been achieved.
+        // The one exception to deterministic-plan ownership is a persisted, whole-stage adaptive
+        // checkpoint. The executor has no active task or physical transaction then, and it supplies
+        // a revision-bound successor token. Every other active plan remains exclusively owned by
+        // GoalExecutor so the brain cannot race it between steps.
+        var strategyCheckpoint = io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE
+                .strategyCheckpointStatus(bot);
+        if (strategyCheckpoint.isPresent()) {
+            return startStrategyCheckpointFromIdle(bot, strategyCheckpoint.orElseThrow());
+        }
         if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
@@ -970,7 +1046,7 @@ public final class BrainCoordinator {
             submit(bot, conversation, conversation.decision.beginEpoch());
             return true;
         }
-        if (conversation.callBudget.exhausted()) {
+        if (currentDecisionBudgetExhausted(conversation)) {
             finishCallBudget(bot, conversation, "automatic_wake");
             return false;
         }
@@ -998,6 +1074,46 @@ public final class BrainCoordinator {
             return true;
         }
         return false;
+    }
+
+    /** Starts a strategy decision after restore or when no prior continuation lease is alive. */
+    private boolean startStrategyCheckpointFromIdle(
+            AIPlayerEntity bot,
+            io.github.zoyluo.minecraftai.goal.GoalExecutor.StrategyCheckpointStatus checkpoint) {
+        ensureConfigured();
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUUID(), BotConversation::new);
+        if (conversation.decision.busy()
+                || strategyCheckpointKey(checkpoint).equals(conversation.exhaustedStrategyCheckpointKey)) {
+            return false;
+        }
+        if (conversation.history.isEmpty()) {
+            conversation.history.add(ChatMessage.system(systemMessageText(bot, "")));
+        }
+        conversation.missionDecisionCall = true;
+        conversation.strategyCheckpoint = checkpoint;
+        conversation.missionDecisionBudget.beginBoundary();
+        conversation.instructionChain.beginAutonomousWake();
+        conversation.withholdSayNextCall = false;
+        conversation.continuationTaskPolls = 0;
+        conversation.exhaustedStrategyCheckpointKey = "";
+        try {
+            appendStrategyCheckpointMessage(bot, conversation, checkpoint, false);
+            BotLog.comm(bot, "mission_strategy_checkpoint_wake",
+                    "mission_id", checkpoint.missionId(),
+                    "revision", checkpoint.revision(),
+                    "remaining", checkpoint.remainingSteps(),
+                    "retry", false,
+                    "restored_or_idle", true,
+                    "boundary", conversation.missionDecisionBudget.boundarySequence());
+            trimHistory(conversation);
+            submit(bot, conversation, conversation.decision.beginEpoch());
+            return true;
+        } catch (RuntimeException exception) {
+            BotLog.error(bot, "mission_strategy_checkpoint_prepare_failed", exception,
+                    "mission_id", checkpoint.missionId(), "revision", checkpoint.revision());
+            finishMissionDecisionBudget(bot, conversation, "checkpoint_preparation_error");
+            return false;
+        }
     }
 
     public void shutdown() {
@@ -1055,17 +1171,21 @@ public final class BrainCoordinator {
      */
     private void submit(AIPlayerEntity bot, BotConversation conversation, DecisionLease lease, boolean failureReport) {
         PlayerInstructionCallBudget.Reservation reservation = PlayerInstructionCallBudget.Reservation.NONE;
+        boolean missionDecisionReservation = false;
+        boolean missionDecision = conversation.missionDecisionCall && !failureReport;
         try {
             List<ChatMessage> historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
             MinecraftAiConfig.Brain brainConfig = MinecraftAiConfig.get().brain();
             // A failure report is a say-only job: it never inherits a withheld say from an earlier
             // plan-only round of the instruction.
             boolean withholdSay = !failureReport && conversation.withholdSayNextCall;
-            List<ToolDefinition> toolsSnapshot = toolsForCall(toolRegistry.tools(
+            List<ToolDefinition> availableTools = toolsForCall(toolRegistry.tools(
                     brainConfig,
                     brainConfig.exposesLowLevelTools() || manualMode(bot),
                     BotRuntimeOptions.INSTANCE.memoryToolsEnabled(bot),
                     brainConfig.coordinationToolsEnabled()), withholdSay);
+            List<ToolDefinition> toolsSnapshot = missionDecision
+                    ? toolsForStrategyCheckpoint(availableTools) : availableTools;
             AsyncDecisionExecutor.GeminiInteractionRequest geminiRequest = executor.usesGeminiInteractions()
                     ? geminiRequestFor(conversation, historySnapshot)
                     : null;
@@ -1079,14 +1199,20 @@ public final class BrainCoordinator {
                     reportPendingFailureWithoutModel(bot, conversation);
                     return;
                 }
-            } else if (conversation.callBudget.tryAcquireModelCall()) {
+            } else if (missionDecision && conversation.missionDecisionBudget.tryAcquireModelCall()) {
+                missionDecisionReservation = true;
+            } else if (!missionDecision && conversation.callBudget.tryAcquireModelCall()) {
                 reservation = PlayerInstructionCallBudget.Reservation.REGULAR;
             } else {
                 if (!conversation.decision.failSubmission(lease)) {
                     logStaleDecision(lease, "model_call_budget_submission");
                     return;
                 }
-                finishCallBudget(bot, conversation, "submission");
+                if (missionDecision) {
+                    finishMissionDecisionBudget(bot, conversation, "submission");
+                } else {
+                    finishCallBudget(bot, conversation, "submission");
+                }
                 return;
             }
             // Reporting a failure is not an unfinished player request: a say alone is the right
@@ -1094,12 +1220,13 @@ public final class BrainCoordinator {
             // the instruction-level request flags, so an errored report call leaves them intact.
             conversation.failureReportCall = failureReport;
             BotLog.comm(bot, "model_call_submitted",
-                    "model_call", conversation.callBudget.callsUsed(),
-                    "model_calls_remaining", conversation.callBudget.callsRemaining(),
+                    "model_call", callsUsedForCurrentDecision(conversation),
+                    "model_calls_remaining", callsRemainingForCurrentDecision(conversation),
                     "instruction", conversation.callBudget.instructionSequence(),
                     "provider", executor.usesGeminiInteractions() ? "gemini_interactions" : "chat_completions",
                     "continuation", geminiRequest != null && !geminiRequest.initial(),
                     "failure_report", failureReport,
+                    "mission_strategy", missionDecision,
                     "say_withheld", withholdSay,
                     "tools", toolsSnapshot.size());
             executor.submit(
@@ -1108,11 +1235,15 @@ public final class BrainCoordinator {
                     historySnapshot,
                     toolsSnapshot,
                     geminiRequest,
-                    withholdSay,
+                    withholdSay || missionDecision,
                     (responseLease, response) -> onResponse(bot, responseLease, response),
                     (errorLease, throwable) -> onError(bot, errorLease, throwable));
         } catch (RuntimeException exception) {
-            conversation.callBudget.releaseFailureReportReservation(reservation);
+            if (missionDecisionReservation) {
+                conversation.missionDecisionBudget.releaseLastReservation();
+            } else {
+                conversation.callBudget.releaseFailureReportReservation(reservation);
+            }
             if (!conversation.decision.failSubmission(lease)) {
                 logStaleDecision(lease, "submission_error");
                 return;
@@ -1120,6 +1251,12 @@ public final class BrainCoordinator {
             String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
             BotLog.error(bot, "decision_submit_failed", exception, "message", message);
             sendPanelChat(bot, "system", "AI request could not be submitted: " + message);
+            if (missionDecision) {
+                // Do not let the idle watcher create an unbounded fresh strategy budget after a
+                // synchronous provider/configuration failure. The exact checkpoint remains safely
+                // parked for an explicit player continuation or a new instruction.
+                finishMissionDecisionBudget(bot, conversation, "submission_error");
+            }
         }
     }
 
@@ -1176,6 +1313,13 @@ public final class BrainCoordinator {
                         logStaleDecision(waitingLease, "continuation_timer");
                         return;
                     }
+                    var strategyCheckpoint = io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE
+                            .strategyCheckpointStatus(bot);
+                    if (strategyCheckpoint.isPresent()) {
+                        advanceToStrategyCheckpoint(bot, conversation, waitingLease,
+                                strategyCheckpoint.orElseThrow());
+                        return;
+                    }
                     // GOALFIX-CONT: while a deterministic goal plan is running, never re-wake the
                     // brain -- not even during the single tick where getActive() is briefly empty
                     // between two steps (otherwise the brain would wake and call assign_task,
@@ -1186,6 +1330,13 @@ public final class BrainCoordinator {
                     if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
                         scheduleContinuation(bot, conversation, waitingLease);
                         return;
+                    }
+                    // A model authorization has either completed the root mission or it reached
+                    // a terminal executor-owned failure.  The ordinary result path below may now
+                    // use the original planner budget and normal high-level tools again.
+                    if (conversation.missionDecisionCall) {
+                        conversation.missionDecisionCall = false;
+                        conversation.strategyCheckpoint = null;
                     }
                     if (TaskManager.INSTANCE.getActive(bot).isPresent()
                             || bot.getActionPack().hasActiveActions()) {
@@ -1277,6 +1428,77 @@ public final class BrainCoordinator {
                 }));
     }
 
+    private void advanceToStrategyCheckpoint(
+            AIPlayerEntity bot,
+            BotConversation conversation,
+            DecisionLease waitingLease,
+            io.github.zoyluo.minecraftai.goal.GoalExecutor.StrategyCheckpointStatus checkpoint) {
+        boolean sameCheckpoint = conversation.missionDecisionCall
+                && conversation.strategyCheckpoint != null
+                && conversation.strategyCheckpoint.missionId().equals(checkpoint.missionId())
+                && conversation.strategyCheckpoint.revision() == checkpoint.revision();
+        DecisionLease nextLease = conversation.decision.advanceContinuation(waitingLease).orElse(null);
+        if (nextLease == null) {
+            logStaleDecision(waitingLease, "strategy_checkpoint_advance");
+            return;
+        }
+        if (!sameCheckpoint) {
+            conversation.missionDecisionCall = true;
+            conversation.strategyCheckpoint = checkpoint;
+            conversation.missionDecisionBudget.beginBoundary();
+            conversation.instructionChain.beginAutonomousWake();
+            conversation.withholdSayNextCall = false;
+            conversation.continuationTaskPolls = 0;
+            // A new completed stage has a fresh token and may be considered even if the model
+            // exhausted its small decision budget at a prior checkpoint.
+            conversation.exhaustedStrategyCheckpointKey = "";
+        }
+        try {
+            appendStrategyCheckpointMessage(bot, conversation, checkpoint, sameCheckpoint);
+            BotLog.comm(bot, "mission_strategy_checkpoint_wake",
+                    "mission_id", checkpoint.missionId(),
+                    "revision", checkpoint.revision(),
+                    "remaining", checkpoint.remainingSteps(),
+                    "retry", sameCheckpoint,
+                    "boundary", conversation.missionDecisionBudget.boundarySequence());
+            trimHistory(conversation);
+            submit(bot, conversation, nextLease);
+        } catch (RuntimeException exception) {
+            failContinuationPreparation(bot, conversation, nextLease, exception);
+        }
+    }
+
+    /**
+     * Adds one fresh, bounded strategy prompt. The server owns the mission cursor and physical
+     * plan; Gemini only authorizes the exact successor or asks the server to derive a new one
+     * from the newly observed state. Restore and ordinary continuation therefore receive the
+     * same factual context.
+     */
+    private void appendStrategyCheckpointMessage(
+            AIPlayerEntity bot,
+            BotConversation conversation,
+            io.github.zoyluo.minecraftai.goal.GoalExecutor.StrategyCheckpointStatus checkpoint,
+            boolean retry) {
+        PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
+        conversation.lastPerceptionDigest = perceptionDigest(snapshot);
+        String retryText = retry
+                ? "The prior strategy response did not authorize the stage. Call one allowed decision tool now.\n\n"
+                : "";
+        conversation.history.add(wakeUserMessage(bot, conversation, retryText
+                + "Safe adaptive mission checkpoint (authoritative): mission_id=" + checkpoint.missionId()
+                + ", revision=" + checkpoint.revision()
+                + ", root_goal=" + checkpoint.goal()
+                + ", remaining_safe_stages=" + checkpoint.remainingSteps()
+                + ", proposed_next_stage=" + checkpoint.nextStep()
+                + ". The root goal, recipe arithmetic, delivery receipts, and observed-world safety rules remain"
+                + " server-authoritative. If this proposed stage still serves the root goal, call"
+                + " continue_goal_step exactly once with that mission_id and revision. If fresh observed"
+                + " facts make the remaining plan unsuitable, call replan_goal_from_current_state with the"
+                + " same mission_id and revision. Otherwise call stop_goal_mission with the same token. Do not infer hidden terrain,"
+                + " coordinates, routes, or resources.\n\nCurrent state:\n"
+                + snapshot.toJson()));
+    }
+
     private void failContinuationPreparation(AIPlayerEntity bot,
                                              BotConversation conversation,
                                              DecisionLease lease,
@@ -1292,6 +1514,66 @@ public final class BrainCoordinator {
         } catch (RuntimeException notificationException) {
             BotLog.error(bot, "continuation_failure_notification_failed", notificationException);
         }
+        if (conversation.missionDecisionCall) {
+            finishMissionDecisionBudget(bot, conversation, "continuation_preparation_error");
+        }
+    }
+
+    private static boolean currentDecisionBudgetExhausted(BotConversation conversation) {
+        return conversation.missionDecisionCall
+                ? conversation.missionDecisionBudget.exhausted()
+                : conversation.callBudget.exhausted();
+    }
+
+    private static int callsUsedForCurrentDecision(BotConversation conversation) {
+        return conversation.missionDecisionCall
+                ? conversation.missionDecisionBudget.callsUsed()
+                : conversation.callBudget.callsUsed();
+    }
+
+    private static int callsRemainingForCurrentDecision(BotConversation conversation) {
+        return conversation.missionDecisionCall
+                ? conversation.missionDecisionBudget.callsRemaining()
+                : conversation.callBudget.callsRemaining();
+    }
+
+    private void finishCurrentDecisionBudget(AIPlayerEntity bot,
+                                             BotConversation conversation,
+                                             String trigger) {
+        if (conversation.missionDecisionCall) {
+            finishMissionDecisionBudget(bot, conversation, trigger);
+        } else {
+            finishCallBudget(bot, conversation, trigger);
+        }
+    }
+
+    /** Keeps a failed AI checkpoint paused instead of spending the player's ordinary planner allowance. */
+    private void finishMissionDecisionBudget(AIPlayerEntity bot,
+                                             BotConversation conversation,
+                                             String trigger) {
+        io.github.zoyluo.minecraftai.goal.GoalExecutor.StrategyCheckpointStatus checkpoint =
+                conversation.strategyCheckpoint;
+        BotLog.warn(LogCategory.COMM, bot, "mission_strategy_budget_exhausted",
+                "calls_used", conversation.missionDecisionBudget.callsUsed(),
+                "call_limit", conversation.missionDecisionBudget.callsUsed()
+                        + conversation.missionDecisionBudget.callsRemaining(),
+                "trigger", trigger,
+                "mission_id", checkpoint == null ? "" : checkpoint.missionId(),
+                "revision", checkpoint == null ? -1 : checkpoint.revision());
+        if (checkpoint != null) {
+            conversation.exhaustedStrategyCheckpointKey = strategyCheckpointKey(checkpoint);
+            io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.exhaustStrategyCheckpoint(
+                    bot, checkpoint.missionId(), checkpoint.revision());
+        }
+        conversation.missionDecisionCall = false;
+        conversation.strategyCheckpoint = null;
+        sendBotReply(bot, "I paused at a safe mission checkpoint because I could not choose the next step. "
+                + "Reply [continue] to use the prepared next step, or give me a new instruction.");
+    }
+
+    private static String strategyCheckpointKey(
+            io.github.zoyluo.minecraftai.goal.GoalExecutor.StrategyCheckpointStatus checkpoint) {
+        return checkpoint == null ? "" : checkpoint.missionId() + ":" + checkpoint.revision();
     }
 
     /**
@@ -1650,11 +1932,13 @@ public final class BrainCoordinator {
                 6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). Then call the action or goal tool that starts the work in the SAME response. A plan/status say alone is invalid: it starts nothing, the runtime will strip say from your next call and force an action tool, and if you still start nothing the player is told you could not do it. Never answer an action request with say alone. For "come here" / "come to me" call follow (it walks to the player); for "stay here" call hold; for "follow me" call follow; for "eat until full" call eat. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
                 7. For one item or tool the player wants obtained from whatever materials are available, use achieve_goal directly even when materials may be missing. For multiple different requested items or a player/bot split, use fulfill_items directly and list each output/allocation; it shares the same dependency planner and will gather, craft, mine, smelt, use an existing or newly made crafting table, and then perform each requested handoff. A recipient omitted from a fulfill_items entry stays with you; a named recipient is handed that exact item after production. Use plan_craft only when the player explicitly asks for a feasibility or material breakdown; it is read-only. Use craft only when the player explicitly wants a one-step craft and the required materials are already carried. Do not decompose an item goal into assign_task, mine, smelt, planks, or sticks yourself.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
-                9. For "find/search iron ore", "find wheat", "find sheep", "find the bonus chest", or any named block, call find. find accepts every registered non-air block: use a bare vanilla name with spaces or underscores (for example furnace, crafting table, oak_sapling), or a full modded id such as modid:block. Its semantic targets are iron_ore (the iron-ore family), wheat (mature wheat), sheep, container/bonus_chest, and plant/flower/sapling categories. find is a persistent bounded locate-only task: it walks short observed hops, reports a real visible coordinate, and says it could not find the target when its search limit is spent; it does not mine, harvest, kill, or open anything. For "find and mine iron", first call find with target=iron_ore and wait for its result, then call mine_ore only after it reports visible ore. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore; its count mode owns the bounded observed search and automatically resumes mining when ore becomes visible, so do not pre-split that request into find/retry calls. For "mine the whole/entire vein", "this vein" or "until the vein is gone", call mine_ore with mode=vein (optionally x/y/z of an ore in that vein): it mines only that connected, observed vein, stops, and reports the count; never approximate a vein with a count or tunnel toward unseen ore. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. For a kit or multi-player allocation, call fulfill_items instead. A single mine_ore, achieve_goal, or fulfill_items call runs its entire dependency plan autonomously. The only allowed companion call in that same response is the initial say plan required by rule 6; after that, STOP and wait for the authoritative result. Do not call inventory, assign_task, or mine. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For "break N leaves" / "clear the leaves", call break_blocks with block=leaves (any leaf type) and the exact count; drops are irrelevant and it uses shears or a hoe if carried, otherwise bare hands (never craft shears for it). Use gather only when the player wants leaf blocks in the inventory (that needs shears). For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
+                9. For "find/search iron ore", "find wheat", "find sheep", "find the bonus chest", or any named block, call find. find accepts every registered non-air block: use a bare vanilla name with spaces or underscores (for example furnace, crafting table, oak_sapling), or a full modded id such as modid:block. Its semantic targets are iron_ore (the iron-ore family), wheat (mature wheat), sheep, container/bonus_chest, and plant/flower/sapling categories. find is a persistent bounded locate-only task: it walks short observed hops, reports a real visible coordinate, and says it could not find the target when its search limit is spent; it does not mine, harvest, kill, or open anything. For "find and mine iron", first call find with target=iron_ore and wait for its result, then call mine_ore only after it reports visible ore. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore; its count mode owns the bounded observed search and automatically resumes mining when ore becomes visible, so do not pre-split that request into find/retry calls. For "mine the whole/entire vein", "this vein" or "until the vein is gone", call mine_ore with mode=vein (optionally x/y/z of an ore in that vein): it mines only that connected, observed vein, stops, and reports the count; never approximate a vein with a count or tunnel toward unseen ore. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. For a kit or multi-player allocation, call fulfill_items instead. A high-level goal call establishes an immutable root goal, then the deterministic executor performs one whole safe stage at a time. After each safe stage it automatically gives you a strategy checkpoint containing an exact mission_id, revision, current observed state, a server-rendered root manifest, and a server-generated proposed next stage. At that checkpoint, call continue_goal_step exactly once with that mission_id and revision if the stage still serves the root goal; if current observed facts make the stage unsuitable, call replan_goal_from_current_state with the same token so the server rebuilds the remaining safe plan; call stop_goal_mission with that same token only to end this exact root goal. Do not call inventory, assign_task, mine, raw movement, or another goal tool at a strategy checkpoint. The executor, not you, owns recipes, inventory arithmetic, exploration bounds, navigation, physical handoffs, and final verification. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For "break N leaves" / "clear the leaves", call break_blocks with block=leaves (any leaf type) and the exact count; drops are irrelevant and it uses shears or a hoe if carried, otherwise bare hands (never craft shears for it). Use gather only when the player wants leaf blocks in the inventory (that needs shears). For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
                 For "show me", "take me to it", or any contextual request to point out, lead to, demonstrate, or make a known target easier to locate, call show_location. Those phrases are examples, not a fixed keyword list: infer the player's intent when they ask for a physical demonstration. It does not depend on find: when current visual context, memory, another tool, or the player provides a verified x/y/z, pass those coordinates and a label. Omit x/y/z only to use the latest successful find in this dimension. It first tells the owner it will show them, then safely uses Baritone to get within 5 blocks of the owner and within 3 blocks of the target, faces it, and makes three harmless air-swing gestures. Never call show_location merely because find succeeded or because you think it could be useful. A plain find is locate-only. At its automatic task-finished wake, it has already asked the player whether they want a demonstration: do not start show_location or an unrequested follow-up; wait for a new affirmative player message. Exception: when the original player request explicitly asks both to find and to show/lead the player, that original request is advance authorization; after find reports a verified coordinate, you may call show_location. The same exception applies only to another follow-up explicitly requested in the original request. Never invent a coordinate or call it before there is a known target.
                 10. After each action, look at the next world state (passed in user messages) and decide the next step.
                 11. When the task is complete or impossible, say so and stop calling tools.
                 12. You are fully autonomous and self-reliant. NEVER ask the human for help, for resources, or to move/carry you — the human will not help. NEVER mine ore with bare hands or use assign_task mine to dig without a proper pickaxe (that wastes blocks and drops nothing). To get ore always use mine_ore, and to get an item/tool use achieve_goal or fulfill_items — these automatically gather materials, craft the needed pickaxe, and mine only observed targets. When a high-level goal reports a typed failure, inspect the updated state and choose the next safe high-level step; never blindly repeat the identical failed call. A task result, failure reason, inventory count, remembered coordinate, or missing observation is accounting information, not proof of terrain, travel, a route, or resource absence. Only say you visited, searched, saw, or ruled out a place when the current observation explicitly proves it. In particular, no_reachable_target_block_in_range means the source was not reachable in the current local observation, not that it does not exist; count-mode gathering and ore mining already own their bounded observed search before returning that kind of boundary. Do not tunnel, dig downward blindly, path to hidden blocks, or invent coordinates. If bounded exploration and a materially different safe plan both fail, state the factual observation boundary briefly and stop.
+
+                13. Capability truthfulness is mandatory. The declared tools are your complete capability inventory for this turn; an item in inventory is not a movement, combat, or vehicle-control capability. For ordinary Minecraft work, compose the supplied building blocks (for example say to notify the player, give_item to hand over items, goals for acquire/craft/mine/build, and task tools for movement and interaction). Never promise, claim to have started, or announce that you will complete a physical action unless the same response invokes an applicable work-start tool. Do not publish a plan by itself. If the player requests a genuinely specialized mechanic for which no declared tool exists—such as controlled elytra flight with firework rockets—call report_unsupported with the precise missing building block. It tells the player no action started and what needs development. Do not use report_unsupported for ordinary missing materials, missing visible targets, or transient navigation conditions: use the relevant high-level goal/task and let its factual result drive the next decision.
 
                 Available tools are declared in the tools field. You MUST use them; do not invent tools. All player-facing replies and plans must be concise English.
                 """.formatted(botName, speakerLine);
@@ -1664,6 +1948,7 @@ public final class BrainCoordinator {
         private final DecisionSession decision;
         private final Deque<ChatMessage> history = new ArrayDeque<>();
         private final PlayerInstructionCallBudget callBudget;
+        private final MissionDecisionCallBudget missionDecisionBudget = new MissionDecisionCallBudget();
         private int continuationTaskPolls;
         private boolean budgetExhaustionReported;
         private int lastToolRoundFailureCount;
@@ -1693,6 +1978,11 @@ public final class BrainCoordinator {
                 new InstructionRoundEvaluator.InstructionChain();
         private String lastFailureName;
         private String lastFailureReason;
+        /** True only while the current model chain is deciding an adaptive goal checkpoint. */
+        private boolean missionDecisionCall;
+        private io.github.zoyluo.minecraftai.goal.GoalExecutor.StrategyCheckpointStatus strategyCheckpoint;
+        /** Prevents an exhausted model boundary from being resubmitted every idle-watcher tick. */
+        private String exhaustedStrategyCheckpointKey = "";
 
         private BotConversation(UUID botId) {
             decision = new DecisionSession(botId);

@@ -69,6 +69,14 @@ class GoalExecutorReplanPolicyTest {
     }
 
     @Test
+    void zeroMotionObservedSearchFailureStopsAnIdenticalReplanButCompletedSearchDoesNot() {
+        assertTrue(GoalExecutor.isHardFailure("no_observed_resource_in_local_view:minecraft:cobblestone"));
+        assertTrue(GoalExecutor.isHardFailure("no_observed_ore_in_local_view:minecraft:diamond_ore"));
+        assertFalse(GoalExecutor.isHardFailure("no_observed_resource_after_exploration:minecraft:cobblestone"));
+        assertFalse(GoalExecutor.isHardFailure("no_observed_ore_after_exploration:minecraft:diamond_ore"));
+    }
+
+    @Test
     void huntDoesNotTreatHorizontalTravelOrDescentAsProgress() {
         assertFalse(progress(
                 GoalStep.Kind.HUNT,

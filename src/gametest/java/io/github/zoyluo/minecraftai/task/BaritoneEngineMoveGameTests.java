@@ -16,8 +16,10 @@ import java.lang.reflect.Field;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -91,6 +93,110 @@ public final class BaritoneEngineMoveGameTests {
                 return;
             }
             arena.require(move.state() == TaskState.RUNNING, "move ended: " + move.state() + " " + move.failureReason());
+        });
+    }
+
+    /**
+     * A three-layer snow surface leaves a real player physically in the snow block, while its
+     * Baritone grid position must be the air cell above it. The course begins with one layer,
+     * then crosses into three layers, so both partial-support cases share one navigation model.
+     * The remote coordinate below is only a heading: the assertion on {@code hop} proves strict
+     * directional pursuit chose and reached a local observed destination without breaking or
+     * placing any part of the course.
+     */
+    @GameTest(maxTicks = 500)
+    public void directionalPursuitCrossesThreeLayerSnowWithoutBreakingOrPlacing(GameTestHelper context) {
+        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 20, 14, 5);
+        BlockState shallowSnow = Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, 1);
+        BlockState deepSnow = Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, 3);
+        // Keep the 1 -> 3 layer boundary immediately ahead of the bot.  This makes the
+        // regression specifically about normalising the two partial supports to the same
+        // air-cell grid, rather than relying on a long, separately-observed shallow-snow lane.
+        int firstDeepSnowX = -7;
+        for (int dx = -14; dx <= 14; dx++) {
+            for (int dz = -5; dz <= 5; dz++) {
+                arena.world.setBlock(arena.cell(dx, 0, dz), dx >= firstDeepSnowX ? deepSnow : shallowSnow, Block.UPDATE_ALL);
+            }
+        }
+        BlockPos rawShallowSnowCell = arena.cell(-8, 0, 0);
+        AIPlayerEntity bot = arena.spawnOnBaritone("BeMoveSnow", rawShallowSnowCell.above());
+        ActionPack pack = bot.getActionPack();
+        BlockPos remoteHeading = arena.cell(30, 1, 0);
+        BlockPos[] hop = {null};
+        boolean[] requested = {false};
+        boolean[] launched = {false};
+        boolean[] occupiedDeepSnow = {false};
+        double[] startX = {Double.NaN};
+        double[] furthestX = {Double.NEGATIVE_INFINITY};
+        int[] tick = {0};
+        int[] requestTick = {-1};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            arena.require(now < 480, "snow directional pursuit never settled: " + bot.position());
+            if (!requested[0]) {
+                // Wait until vanilla collision has placed the bot inside the shallow snow cell.
+                // The route must then make the transition into the three-layer surface.
+                if (!bot.blockPosition().equals(rawShallowSnowCell)) {
+                    return;
+                }
+                startX[0] = bot.getX();
+                ActionResult started = pack.startDirectionalPursuitTo(remoteHeading, 8, false, false);
+                arena.require(started.isInProgress(),
+                        "strict snow pursuit was not accepted: " + started.status() + " " + started.reason());
+                // Baritone publishes CALC_STARTED after this server-tick callback. Calling
+                // hasBaritoneRoute() while that hand-off is still in flight can settle the
+                // just-admitted route as an early-ended search, so inspect the local goal on
+                // the next driven tick instead.
+                requested[0] = true;
+                requestTick[0] = now;
+                return;
+            }
+            if (!launched[0]) {
+                if (now <= requestTick[0] + 1) {
+                    return;
+                }
+                arena.require(pack.hasBaritoneRoute(),
+                        "accepted snow pursuit stopped before Baritone took it over: " + pack.lastRouteOutcome());
+                hop[0] = pack.activePathGoal();
+                arena.require(hop[0] != null && hop[0].getX() >= arena.origin.getX() + firstDeepSnowX
+                                && hop[0].getY() == rawShallowSnowCell.getY() + 1,
+                        "pursuit did not resolve a forward snow-top hop: " + hop[0]);
+                launched[0] = true;
+                return;
+            }
+            furthestX[0] = Math.max(furthestX[0], bot.getX());
+            if (bot.blockPosition().getX() >= arena.origin.getX() + firstDeepSnowX
+                    && bot.blockPosition().getY() == rawShallowSnowCell.getY()) {
+                occupiedDeepSnow[0] = true;
+            }
+            if (pack.hasBaritoneRoute()) {
+                return;
+            }
+            NavOutcome outcome = pack.lastRouteOutcome();
+            arena.require(outcome != null && outcome.status() == NavOutcome.Status.SUCCESS
+                            && outcome.goal().equals(hop[0]),
+                    "snow directional pursuit did not reach its local hop: " + outcome);
+            arena.require(furthestX[0] > startX[0] + 2.0D,
+                    "bot never made a meaningful forward move over snow: " + furthestX[0] + " from " + startX[0]);
+            arena.require(occupiedDeepSnow[0],
+                    "bot never physically entered the three-layer snow surface");
+            arena.require(bot.position().distanceTo(hop[0].getCenter()) <= AT_GOAL,
+                    "bot did not arrive at the observed snow hop: " + bot.position() + " -> " + hop[0]);
+            for (int dx = -14; dx <= 14; dx++) {
+                for (int dz = -5; dz <= 5; dz++) {
+                    BlockState surface = arena.world.getBlockState(arena.cell(dx, 0, dz));
+                    if (dx >= firstDeepSnowX) {
+                        arena.require(surface.equals(deepSnow),
+                                "strict pursuit broke or changed snow at " + dx + "," + dz);
+                    } else {
+                        arena.require(surface.equals(shallowSnow),
+                                "strict pursuit broke or changed shallow snow at " + dx + "," + dz);
+                    }
+                    arena.require(arena.world.getBlockState(arena.cell(dx, 1, dz)).isAir(),
+                            "strict pursuit placed a block above snow at " + dx + "," + dz);
+                }
+            }
+            arena.finish(bot);
         });
     }
 
