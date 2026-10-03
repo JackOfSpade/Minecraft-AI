@@ -3799,11 +3799,13 @@ public final class GoalExecutor {
             // 29 existing logs is misread as an already-satisfied absolute target of 3.
             case GATHER -> Optional.of(new GatherQuotaTask(step.item(), gatherTargetCount(
                     GatherQuotaTask.acceptedInventoryCount(bot, step.item()), step.count())));
-            // Generic mining may select only a visible, reachable block; MineTask's movement is
-            // Baritone-owned and it never opens a shaft to discover one.
+            // Generic mining selects visible, reachable blocks and may widen the view through
+            // bounded observation-fenced walk-only hops.  Its movement is Baritone-owned and it
+            // never opens a shaft or paths toward unseen terrain to discover a target.
             case MINE -> Optional.of(new MineTask(step.block(), step.count()));
-            // OreDig owns only currently observed/revalidated finite ore targets. It has no
-            // layer-seeking or blind-tunnel fallback behind this task boundary.
+            // OreDig mines only observed/revalidated finite ore targets.  Count mode may widen
+            // its view through bounded observed walk-only hops, but has no layer-seeking or
+            // blind-tunnel fallback behind this task boundary.
             case MINE_ORE -> {
                 Map<String, String> oreCheckpoint =
                         plan.checkpointForMineOre(step.ores());

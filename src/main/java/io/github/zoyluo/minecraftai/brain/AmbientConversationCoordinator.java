@@ -190,9 +190,23 @@ public final class AmbientConversationCoordinator {
                 .filter(id -> !id.equals(speakerId))
                 .map(id -> AIPlayerManager.INSTANCE.getByUuid(id).map(bot -> bot.getGameProfile().name()).orElse("someone"))
                 .toList();
+        PerceptionSnapshot snapshot = PerceptionCollector.collect(speaker);
+        // With literally no line-of-sight scene fact, a free-form model has nothing from which it
+        // may honestly describe terrain or travel.  Keep this ambient turn social by construction
+        // instead of relying only on a prompt to resist inventing a plausible scene after a task
+        // failure.  This is deliberately based on evidence availability, not a list of words such
+        // as "cliff" or "stone".
+        if (!hasSceneObservation(snapshot.highlights())) {
+            conversation.pendingLine = ambientSocialFallback(mustBeStatement);
+            conversation.pendingReady = true;
+            BotLog.comm(speaker, "ambient_social_fallback_no_scene_evidence",
+                    "turn", conversation.index + 1,
+                    "of", conversation.order.size());
+            return;
+        }
         List<ChatMessage> history = List.of(
                 ChatMessage.system(systemPrompt(speaker.getGameProfile().name(), others, mustBeStatement)),
-                ChatMessage.user(userPayload(conversation.transcript, PerceptionCollector.collect(speaker))));
+                ChatMessage.user(userPayload(conversation.transcript, snapshot)));
 
         OpenAiCompatibleApiClient requestClient;
         ExecutorService worker;
@@ -279,14 +293,30 @@ public final class AmbientConversationCoordinator {
                 Rules:
                 1. Reply with exactly one short, natural sentence or two. No more.
                 2. Stay in character: casual, a little personality is good, not robotic or overly formal.
-                3. React to the conversation so far if there is any; otherwise start a new casual topic based on
-                   what you are currently doing or seeing.
-                4. %s
-                5. Do not use any tools. Do not narrate actions. Reply with only the spoken line, nothing else.
+                3. Treat only the `confirmed current observations` section as evidence for a physical-world claim.
+                   An omitted material, place, route, or resource is UNKNOWN -- it is never evidence that it is absent.
+                   The conversation transcript is dialogue, not world evidence.
+                4. This turn has NO travel or action history. Never claim that you tried, searched, found, failed to
+                   find, walked to, visited, or inspected a place. Never invent terrain, a landmark, a route, or a
+                   location. A task's outcome, an inventory, and missing observations cannot prove any of those things.
+                5. React to the conversation so far if there is any; otherwise start a casual social topic. When no
+                   confirmed observation is relevant, speak socially rather than filling in scene details.
+                6. %s
+                7. Do not use any tools. Do not narrate actions. Reply with only the spoken line, nothing else.
                 """.formatted(botName, companions, turnRule);
     }
 
-    private static String userPayload(List<TranscriptEntry> transcript, PerceptionSnapshot snapshot) {
+    /**
+     * Builds a deliberately narrow ambient-chat context.  A full {@link PerceptionSnapshot} contains
+     * task bookkeeping (including failures) and historical memory that are useful to the planner,
+     * but neither proves that the bot travelled somewhere or saw terrain there.  Passing those
+     * fields to a free-form social model caused failed gather tasks to turn into invented reports
+     * about cliffs and materials.  Ambient chat receives only current, observation-fenced highlights
+     * and self facts; absence from this list is explicitly unknown.
+     */
+    static String userPayload(List<TranscriptEntry> transcript, PerceptionSnapshot snapshot) {
+        Objects.requireNonNull(transcript, "transcript");
+        Objects.requireNonNull(snapshot, "snapshot");
         StringBuilder builder = new StringBuilder();
         builder.append("Conversation so far:\n");
         if (transcript.isEmpty()) {
@@ -296,8 +326,106 @@ public final class AmbientConversationCoordinator {
                 builder.append(entry.speakerName()).append(": ").append(entry.text()).append('\n');
             }
         }
-        builder.append("\nYour current situation:\n").append(snapshot.toJson());
+        builder.append("\nGrounding contract:\n")
+                .append("- The observations below are confirmed only for this exact moment.\n")
+                .append("- Their absence means unknown, not absent.\n")
+                .append("- No task state, task failure, travel history, route history, or remembered location is provided.\n")
+                .append("- Do not treat dialogue above as physical-world evidence.\n")
+                .append("\nSelf facts:\n");
+        appendSelfFacts(builder, snapshot.self());
+        builder.append("\nConfirmed current observations:\n");
+        int observationCount = appendObservationFacts(builder, snapshot.highlights());
+        if (observationCount == 0) {
+            builder.append("(No direct scene observations were supplied. Keep the topic social and non-spatial.)\n");
+        }
         return builder.toString();
+    }
+
+    private static void appendSelfFacts(StringBuilder builder, PerceptionSnapshot.SelfState self) {
+        if (self == null) {
+            builder.append("(No self facts supplied.)\n");
+            return;
+        }
+        builder.append("- holding: ").append(self.holdingItem()).append('\n')
+                .append("- health: ").append(self.hp()).append('\n')
+                .append("- hunger: ").append(self.hunger()).append('\n');
+    }
+
+    private static boolean hasSceneObservation(PerceptionSnapshot.Highlights highlights) {
+        return highlights != null && (hasObservations(highlights.nearest_tree())
+                || hasObservations(highlights.nearest_stone())
+                || hasObservations(highlights.nearest_ore())
+                || hasObservations(highlights.nearest_water())
+                || hasObservations(highlights.nearest_furnace())
+                || hasObservations(highlights.nearest_chest())
+                || hasObservations(highlights.nearest_bed())
+                || hasObservations(highlights.nearest_crafting_table())
+                || hasObservations(highlights.nearest_hostile()));
+    }
+
+    private static boolean hasObservations(List<?> observations) {
+        return observations != null && !observations.isEmpty();
+    }
+
+    private static String ambientSocialFallback(boolean mustBeStatement) {
+        return mustBeStatement
+                ? "I'm glad we got to chat."
+                : "I'm glad we're keeping each other company.";
+    }
+
+    private static int appendObservationFacts(StringBuilder builder, PerceptionSnapshot.Highlights highlights) {
+        if (highlights == null) {
+            return 0;
+        }
+        int count = 0;
+        count += appendBlocks(builder, "tree", highlights.nearest_tree());
+        count += appendBlocks(builder, "stone", highlights.nearest_stone());
+        count += appendBlocks(builder, "ore", highlights.nearest_ore());
+        count += appendBlocks(builder, "water", highlights.nearest_water());
+        count += appendBlocks(builder, "furnace", highlights.nearest_furnace());
+        count += appendBlocks(builder, "chest", highlights.nearest_chest());
+        count += appendBlocks(builder, "bed", highlights.nearest_bed());
+        count += appendBlocks(builder, "crafting table", highlights.nearest_crafting_table());
+        count += appendEntities(builder, "hostile creature", highlights.nearest_hostile());
+        return count;
+    }
+
+    private static int appendBlocks(StringBuilder builder,
+                                    String category,
+                                    List<PerceptionSnapshot.NearbyBlock> observations) {
+        if (observations == null || observations.isEmpty()) {
+            return 0;
+        }
+        int appended = 0;
+        for (PerceptionSnapshot.NearbyBlock observation : observations) {
+            if (observation == null || observation.type() == null || observation.type().isBlank()) {
+                continue;
+            }
+            builder.append("- observed ").append(category).append(": ")
+                    .append(observation.type()).append(" at ")
+                    .append(observation.distance()).append(" blocks\n");
+            appended++;
+        }
+        return appended;
+    }
+
+    private static int appendEntities(StringBuilder builder,
+                                      String category,
+                                      List<PerceptionSnapshot.NearbyEntity> observations) {
+        if (observations == null || observations.isEmpty()) {
+            return 0;
+        }
+        int appended = 0;
+        for (PerceptionSnapshot.NearbyEntity observation : observations) {
+            if (observation == null || observation.type() == null || observation.type().isBlank()) {
+                continue;
+            }
+            builder.append("- observed ").append(category).append(": ")
+                    .append(observation.type()).append(" at ")
+                    .append(observation.distance()).append(" blocks\n");
+            appended++;
+        }
+        return appended;
     }
 
     // ---- Pure, unit-testable decision logic ----

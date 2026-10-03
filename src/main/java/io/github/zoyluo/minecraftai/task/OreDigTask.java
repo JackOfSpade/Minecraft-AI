@@ -134,6 +134,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static final long MAX_COMMITTED_CURSOR_HANDOFF_DISTANCE_SQUARED = 16L * 16L;
     private static final int SCAN_INTERVAL = 10;
     private static final int SCAN_RADIUS = 24;
+    /** Short, walk-only observation-fenced legs used when no target ore is in the current view. */
+    private static final int OBSERVED_SEARCH_MAX_HOPS = 16;
+    private static final int OBSERVED_SEARCH_MOVE_LIMIT = 240;
     private static final int PROSPECT_RANGE = 64;       // prospecting (wide-range locate of the nearest ore) radius -- kicks in when nothing is found nearby
     private static final int PROSPECT_INTERVAL = 40;    // prospecting is relatively expensive (scans section by section), once every 2s
     private static final int VERTICAL_SCAN = 10;
@@ -209,6 +212,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int lastProspectTick = -100;
     private int pickupGrace;
     private BlockPos targetOre;
+    /**
+     * Count-mode ore discovery is allowed to widen the bot's view, but not to inspect or excavate
+     * unseen terrain.  The helper turns a remote compass direction into an admitted local goal.
+     */
+    private final ObservedSearchHops observedOreSearch = new ObservedSearchHops(OBSERVED_SEARCH_MAX_HOPS);
+    private BlockPos observedOreSearchTarget;
+    private BlockPos observedOreSearchStart;
+    private int observedOreSearchStartedBudget;
+    private int observedOreSearchCompletedHops;
+    private int observedOreSearchLastScanTick = -SCAN_INTERVAL;
     private double lastTargetDist = Double.MAX_VALUE; // P0: the historical closest squared distance to the locked ore (monitors whether we're actually approaching)
     private int targetApproachTick;
     private int stripDirIndex = -1;   // Optimization 1: current horizontal digging direction for finding ore at this layer (index into STRIP_DIRS), -1 = not started
@@ -838,6 +851,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         moveUnsettled = false;
         moveUnsettledTicks = 0;
         targetOre = null;
+        observedOreSearch.reset();
+        clearObservedOreSearchLeg();
+        observedOreSearchCompletedHops = 0;
+        observedOreSearchLastScanTick = -SCAN_INTERVAL;
         rememberedHighWorkPoses.clear();
         rememberedHighWorkPoseRouteOwner = null;
         rememberedHighWorkPoseRouteStartedBudget = -1;
@@ -929,6 +946,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         detourInterrupted(bot);
         publishInterruptionCursor(bot, true);
         clearPendingBlindAdvance();
+        clearObservedOreSearchLeg();
         miner.cancel(bot);
         bot.getActionPack().stopAll();
     }
@@ -957,6 +975,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         boolean detourWasLive = detourInterrupted(bot);
         publishInterruptionCursor(bot, false);
         clearPendingBlindAdvance();
+        clearObservedOreSearchLeg();
         markMineFace(bot);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
@@ -1112,6 +1131,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         boolean targetInventoryAdvanced = total > collected;
         if (total > collected) {
             collected = total;
+            // A factual ore pickup proves this region is productive.  A later shortage may start
+            // a fresh bounded outward search rather than inheriting the old empty-view budget.
+            observedOreSearch.reset();
+            observedOreSearchCompletedHops = 0;
             noteProgress();
             BotLog.action(bot, "ore_dig_collected", "total", collected + "/" + targetCount);
             if (!veinMode) {
@@ -1151,6 +1174,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (HarvestCore.isInventoryFull(bot)) {
             fail("ore_dig_inventory_service_required");
             return;
+        }
+
+        // A live observed exploration leg is real, safety-fenced movement toward a local goal. It
+        // counts as progress for the watchdog (unlike an unadmitted compass heading), otherwise a
+        // legitimate 12-block detour could be killed before its next view is surveyed.
+        if (!veinMode && observedOreSearchTarget != null
+                && !bot.getActionPack().isPathExecutorIdle()) {
+            noteProgress();
         }
 
         // No-progress watchdog: if no block is broken within NO_PROGRESS_LIMIT -> fail cleanly.
@@ -1561,6 +1592,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
+        // A count request may widen its *view* by following short, observed walk-only legs. This
+        // runs before the scan throttle so a newly visible ore face interrupts travel immediately;
+        // it never invokes the retired prospect/strip/tunnel machinery.
+        if (tickObservedOreSearch(bot, world)) {
+            return;
+        }
+
         // 3) No locked ore: scan for the nearest target ore (rate-limited).
         int now = bot.level().getServer().getTickCount();
         if (now - lastScanTick < SCAN_INTERVAL) {
@@ -1575,7 +1613,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // and mined (real_armor's actual fix: 372 skips in place mining only 9 -> stable mining
         // after strip-mine advances).
         if (RetiredNavigationTask.legacyExcavationDisabled() && consecutiveSkips >= STRIP_AFTER_SKIPS) {
-            retireUnobservedOreSearch(bot, "observed_target_unreachable");
+            // Several finite targets were observed but could not be approached.  Do not turn that
+            // into a blind tunnel or an immediate global absence claim: expand the view through
+            // the same bounded observed walk-only search used for an empty local scan.
+            consecutiveSkips = 0;
+            if (startObservedOreSearch(bot)) {
+                return;
+            }
+            finishObservedOreSearch(bot);
             return;
         }
         if (consecutiveSkips >= STRIP_AFTER_SKIPS) {
@@ -1602,7 +1647,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         if (RetiredNavigationTask.legacyExcavationDisabled()) {
-            retireUnobservedOreSearch(bot, "no_visible_ore");
+            if (startObservedOreSearch(bot)) {
+                return;
+            }
+            finishObservedOreSearch(bot);
             return;
         }
         // No ore nearby (24 blocks) -> wide-range prospecting (64 blocks, ported from the player
@@ -1677,6 +1725,108 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BotLog.action(bot, "ore_dig_observed_target_required",
                 "reason", reason, "collected", collected + "/" + targetCount);
         fail("no_observed_ore_target");
+    }
+
+    /**
+     * Advances the one currently admitted directional leg. The bot may only act on ore observed
+     * from its new view; the remembered remote compass heading is never passed to a mining route.
+     */
+    private boolean tickObservedOreSearch(AIPlayerEntity bot, ServerLevel world) {
+        if (observedOreSearchTarget == null) {
+            return false;
+        }
+        int now = bot.level().getServer().getTickCount();
+        if (now - observedOreSearchLastScanTick >= SCAN_INTERVAL) {
+            observedOreSearchLastScanTick = now;
+            if (nearestOre(bot, world) != null) {
+                BotLog.action(bot, "ore_dig_explore_found", "at", bot.blockPosition().toShortString(),
+                        "hops", observedOreSearchCompletedHops,
+                        "attempts", observedOreSearch.attempts());
+                bot.getActionPack().stopAll();
+                clearObservedOreSearchLeg();
+                lastScanTick = -SCAN_INTERVAL;
+                return false;
+            }
+        }
+        if (bot.blockPosition().distSqr(observedOreSearchTarget) <= 9.0D) {
+            if (observedOreSearchStart != null
+                    && bot.blockPosition().distSqr(observedOreSearchStart) > 9.0D) {
+                observedOreSearchCompletedHops++;
+                BotLog.action(bot, "ore_dig_explore_arrived",
+                        "hop", observedOreSearchCompletedHops,
+                        "at", bot.blockPosition().toShortString(),
+                        "attempts", observedOreSearch.attempts());
+            }
+            bot.getActionPack().stopAll();
+            clearObservedOreSearchLeg();
+            lastScanTick = -SCAN_INTERVAL;
+            return false;
+        }
+        int legAge = totalBudget() - observedOreSearchStartedBudget;
+        if (legAge > OBSERVED_SEARCH_MOVE_LIMIT
+                || (legAge > 20 && bot.getActionPack().isPathExecutorIdle())) {
+            BotLog.action(bot, "ore_dig_explore_hop_ended",
+                    "reason", legAge > OBSERVED_SEARCH_MOVE_LIMIT ? "timeout" : "route_ended",
+                    "to", observedOreSearchTarget.toShortString());
+            bot.getActionPack().stopAll();
+            clearObservedOreSearchLeg();
+            lastScanTick = -SCAN_INTERVAL;
+            return false;
+        }
+        // This is actual active movement to an observed local destination, not a claim that an
+        // ore exists somewhere beyond it. Keep the generic no-progress watchdog from preempting
+        // the next observation update.
+        noteProgress();
+        return true;
+    }
+
+    /** Starts the next bounded observation-fenced search leg after a local ore scan is empty. */
+    private boolean startObservedOreSearch(AIPlayerEntity bot) {
+        ObservedSearchHops.Attempt attempt = observedOreSearch.begin(bot, null);
+        if (!attempt.started()) {
+            BotLog.action(bot, "ore_dig_explore_hop_refused",
+                    "attempt", attempt.number(),
+                    "heading", attempt.heading() == null ? "none" : attempt.heading().toShortString(),
+                    "reason", attempt.reason(),
+                    "remaining", Math.max(0, OBSERVED_SEARCH_MAX_HOPS - observedOreSearch.attempts()));
+            // The safe-search state did advance even though the bot did not move; give the bounded
+            // set of alternative headings a chance to run before the normal no-progress watchdog.
+            noteProgress();
+            return !observedOreSearch.exhausted();
+        }
+        observedOreSearchTarget = attempt.observedGoal();
+        observedOreSearchStart = bot.blockPosition().immutable();
+        observedOreSearchStartedBudget = totalBudget();
+        observedOreSearchLastScanTick = -SCAN_INTERVAL;
+        BotLog.action(bot, "ore_dig_explore_hop",
+                "attempt", attempt.number(),
+                "heading", attempt.heading().toShortString(),
+                "to", observedOreSearchTarget.toShortString(),
+                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+        noteProgress();
+        return true;
+    }
+
+    private void clearObservedOreSearchLeg() {
+        observedOreSearchTarget = null;
+        observedOreSearchStart = null;
+        observedOreSearchStartedBudget = 0;
+    }
+
+    /** Ends a bounded search by reporting only the observation boundary the bot actually reached. */
+    private void finishObservedOreSearch(AIPlayerEntity bot) {
+        miner.cancel(bot);
+        clearStripMovementOwnership();
+        bot.getActionPack().stopAll();
+        clearObservedOreSearchLeg();
+        String reason = observedOreSearchCompletedHops > 0
+                ? "no_observed_ore_after_exploration"
+                : "no_observed_ore_in_local_view";
+        BotLog.action(bot, "ore_dig_observed_search_exhausted",
+                "hops", observedOreSearchCompletedHops,
+                "attempts", observedOreSearch.attempts(),
+                "collected", collected + "/" + targetCount);
+        fail(reason);
     }
 
     /** Two static reads and a return while L1 is off (design 5.3); see {@link #tickOpportunistic} for the idiom. */

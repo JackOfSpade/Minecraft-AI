@@ -62,24 +62,13 @@ public final class GatherQuotaTask extends AbstractTask {
     private static final int SCAN_STALE_TICKS = 300;     // a scan older than this (task paused, phase left) is dropped, not resumed
     private static final double SCAN_STALE_DISTANCE_SQ = 64.0D; // ... and so is one begun more than 8 blocks from where the bot is now
     private static final double EXPLORE_SCAN_STALE_DISTANCE_SQ = 400.0D; // the en-route scan legitimately trails a walking bot
-    // EXPLORE (head out in a direction to search): roam's small 28-block steps ping-pong across 8
-    // directions on real terrain with near-zero net displacement, so survey keeps circling the same
-    // patch forever (real_wood seed=20260610 observed: looped in place to the 6001t timeout when no
-    // tree was found or a found tree was unreachable). EXPLORE extrapolates outward in big
-    // 48/40/32-block hops; it heads for a remembered resource point from the knowledge base if one
-    // exists, otherwise it does a blind compass search.
-    // Shared-root hardening (real_wheat seed 206232996 gather_timeout observed): 4 hops (~190
-    // blocks) often can't cross a genuinely treeless area (snow plains/desert/coast/plateau) — and
-    // the server's load window (view/sim-distance=10, ~160 blocks) means explore must physically
-    // walk there to trigger new chunk loading (prospect only scans already-loaded chunks, so
-    // widening its range is useless). 8 hops (~380 blocks) are needed to actually cross into
-    // another biome and find a tree.
-    private static final int EXPLORE_MAX_HOPS = 8;
-    private static final double[] EXPLORE_HOP_DISTANCES = {48.0D, 40.0D, 32.0D};
-    private static final int[] EXPLORE_DEFLECTIONS_DEG = {0, 45, -45, 90, -90}; // Deflection-angle sequence: straight ahead first, then fan out left/right
+    // EXPLORE uses short directional hops whose actual destination is selected from terrain the
+    // bot can observe.  The remote compass heading is never passed to navigation as a terrain
+    // goal.  Sixteen 12-block legs let a real player movement/chunk update reveal new terrain
+    // without treating a denied scan or an unseen heightmap column as proof of absence.
+    private static final int EXPLORE_MAX_HOPS = 16;
     private static final int EXPLORE_MOVE_LIMIT = 300;   // If a single hop hasn't arrived after 15s → abandon the hop and return to SURVEY
     private static final int EXPLORE_SCAN_INTERVAL = 20; // Throttle light en-route scans (once per 1s, 16 blocks); stop as soon as a target is seen
-    private static final int EXPLORE_PATH_ATTEMPTS = 5;  // Max synchronous A* runs per waypoint selection (prevents a long single-tick stall)
     private static final int KNOWN_RESOURCE_RANGE = 192; // Max distance for heading toward a knowledge-base remembered point
     private static final int GOTO_FAIL_EXCLUDE = 2;      // N consecutive GOTO failures toward the same target → blacklist it in working memory
     private static final int GOTO_STUCK_LIMIT = 80;      // R1: if the coordinate hasn't moved for this long (4s) while GOTO paths toward a tree → assume airborne/stuck and force recovery
@@ -177,15 +166,14 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos roamTarget;  // Landing point for the roam-to-new-patch move (walked to, never teleported)
     private int selfStuckTick;     // A: tick of the last time new material was actually gathered
     private int selfStuckCount;    // A: last recorded gathered count
-    // EXPLORE state: hop-count budget (reset whenever something new is gathered), current heading
-    // (radians), current hop target, this hop's start tick, memory-point guidance (heads for a
-    // knowledge-base hit and retires it if there's nothing there on arrival), "explored since the
-    // last find" (gates entries into the RESOURCE_FOUND stream), and the throttle for en-route
-    // light scans; the other two fields are for the unreachable blacklist: the previous GOTO
-    // target plus a streak counter for repeated failures against the same target.
+    // EXPLORE state: an admitted directional-hop budget plus the count of legs physically reached.
+    // A refusal to admit a visible local hop consumes only the search budget; it is never described
+    // as travel.  The current target is always the observation-fence's resolved local goal, never
+    // the remote compass/memory coordinate.
+    private final ObservedSearchHops observedSearchHops = new ObservedSearchHops(EXPLORE_MAX_HOPS);
     private int exploreHops;
-    private double exploreHeading;
     private BlockPos exploreTarget;
+    private BlockPos exploreStart;
     private int exploreHopStartTick;
     private BlockPos exploreHint;
     private boolean exploredSinceFind;
@@ -293,8 +281,8 @@ public final class GatherQuotaTask extends AbstractTask {
         // (observed: stuck:gather progress=0 while the bot was still actively roaming/prospecting
         // for a tree got aborted at 200t, derailing the whole diamond-mining goal → the brain took
         // over and mined itself to death). This task's own three-layer fallback is sufficient:
-        // (1) self-stuck (no new material gathered within SELF_STUCK_LIMIT → roam to a new patch);
-        // (2) roam up to MAX_ROAMS times; (3) gather_timeout (6000t).
+        // (1) self-stuck (no new material gathered within SELF_STUCK_LIMIT → observed search);
+        // (2) bounded observed hops; (3) gather_timeout (6000t).
         return true;
     }
 
@@ -308,6 +296,11 @@ public final class GatherQuotaTask extends AbstractTask {
         prospectScan = null;
         exploreScan = null;
         surveyScan = null;
+        observedSearchHops.reset();
+        exploreHops = 0;
+        exploreTarget = null;
+        exploreStart = null;
+        exploreHint = null;
         stockpileTask = null;
         pickupOrigin = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
@@ -410,6 +403,7 @@ public final class GatherQuotaTask extends AbstractTask {
             if (countSoFar != selfStuckCount) {
                 selfStuckCount = countSoFar;
                 selfStuckTick = elapsed;
+                observedSearchHops.reset();
                 exploreHops = 0;          // Gathering something new means this patch produces — reset the explore hop budget
                 exploredSinceFind = true; // The next "found after exploring" is worth recording into memory again
             } else if (elapsed - selfStuckTick > SELF_STUCK_LIMIT) {
@@ -503,7 +497,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 lastProspectFound = null;
             }
             var scanServer = bot.level().getServer();
-            prospectScan = OreProspector.begin(bot, PROSPECT_RANGE,
+            prospectScan = OreProspector.beginObservable(bot, PROSPECT_RANGE,
                     state -> harvestBlocks.contains(state.getBlock()),
                     pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, scanServer.getTickCount()));
         }
@@ -615,71 +609,19 @@ public final class GatherQuotaTask extends AbstractTask {
         return findGroundAt(world, found.getX(), found.getZ());
     }
 
-    // Escape a treeless area (fixes the gather_timeout infinite loop): roam is a local patch
-    // switch (28-56 block small steps), which in a large treeless/harsh-terrain area can keep
-    // bouncing between the same few points without escaping; explore is a directed long-range
-    // escape (160 blocks). Try roam twice first (there might be something nearby, saving
-    // pointless wandering); once 2 consecutive attempts haven't escaped (roamCount>=2), switch to
-    // [prefer explore for a long-range escape] instead of continuing to ping-pong in place until
-    // gather_timeout.
+    // The only legal escape from an empty patch is an admitted directional hop.  Older code
+    // guessed a remote height-map landing point and asked navigation to walk there.  Strict
+    // survival correctly rejects that unseen goal, but the task then mistook the rejection for
+    // proof that the resource was absent.  ObservedSearchHops keeps the distinction explicit.
     private boolean escapeBarrenArea(AIPlayerEntity bot) {
-        if (roamCount >= 2) {
-            return startExplore(bot) || roamToNewArea(bot);
-        }
-        return roamToNewArea(bot) || startExplore(bot);
+        return startExplore(bot);
     }
 
-    // Stuck-step escape: when several blocks in a row in the same patch can't be gathered → walk
-    // to an open-sky surface landing point ROAM_DISTANCE away and retry in a new patch (walked to,
-    // never teleported), instead of grinding in place until killed. Up to MAX_ROAMS times; fail to
-    // the brain/player only after that.
+    // Compatibility entry point for the pickup-recovery path.  It now uses the same bounded,
+    // observation-fenced exploration as every other empty-patch escape; it never manufactures a
+    // remote terrain landing point.
     private boolean roamToNewArea(AIPlayerEntity bot) {
-        if (++roamCount > MAX_ROAMS) {
-            return false;
-        }
-        var world = bot.level();
-        BlockPos feet = bot.blockPosition();
-        int[][] dirs = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}};
-        int start = Math.floorMod(roamCount, dirs.length);
-        // Adaptive distance: if the full distance doesn't work, halve it and try again (on a
-        // mountaintop/cliff edge/surrounded by water, all 8 directions at 28 blocks out may get
-        // their pathing rejected — observed 8 consecutive rejections within 21 ticks leading
-        // straight to a no_resource death; there's almost always a walkable point closer in, so
-        // move there first and expand again next round).
-        for (int dist = ROAM_DISTANCE; dist >= ROAM_DISTANCE / 4; dist /= 2) {
-            // Trail-avoidance only applies at the full-distance tier: roam prefers unsearched new
-            // areas first (fixes blind circling); the reduced-distance tier is a "move somewhere,
-            // even if it's close" fallback and stops being picky (when every direction is near
-            // the trail, it still has to pick one).
-            boolean avoidTrail = dist == ROAM_DISTANCE;
-            for (int i = 0; i < dirs.length; i++) {
-                int[] d = dirs[(start + i) % dirs.length];
-                BlockPos ground = findGroundAt(world, feet.getX() + d[0] * dist, feet.getZ() + d[1] * dist);
-                if (ground == null
-                        || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUUID(), ground, bot.level().getServer().getTickCount())
-                        || (avoidTrail && EpisodeMemory.INSTANCE.nearTrail(
-                        bot.getUUID(), "gather", ground, 10.0D))) {
-                    continue;
-                }
-                // Human-like: walk to the new patch instead of teleport-flashing (observed
-                // teleporting mid-tree-chopping looked jarringly unnatural).
-                bot.getActionPack().stopAll();
-                if (bot.getActionPack().startPathTo(ground).isFailed()) {
-                    continue; // Pathing rejected → try a different direction (entering ROAM without checking the result would immediately bail and waste a roam attempt)
-                }
-                roamTarget = ground;
-                searchRadius = SEARCH_RADIUS;
-                pickupMisses = 0;
-                selfStuckTick = elapsed;
-                phase = Phase.ROAM;
-                BotLog.action(bot, "gather_roam",
-                        "to", ground.getX() + "," + ground.getY() + "," + ground.getZ(),
-                        "n", roamCount, "dist", dist);
-                return true;
-            }
-        }
-        return false;
+        return startExplore(bot);
     }
 
     // Search column (x,z) from high to low for the first standable point (surface/forest floor).
@@ -701,9 +643,8 @@ public final class GatherQuotaTask extends AbstractTask {
         return null;
     }
 
-    // While roaming: walk toward the new patch's landing point; on arrival (within 3 blocks) or
-    // if stuck (path executor idle) → return to SURVEY to find a tree in the new patch (SURVEY
-    // also picks up any tree spotted along the way).
+    // Legacy ROAM state retained for checkpoint/source compatibility.  New empty-patch recovery
+    // enters EXPLORE instead, so this state is not used to pick unseen terrain destinations.
     private void roamMove(AIPlayerEntity bot) {
         // 20-tick startup grace period: after startPathTo, async A* computation takes a few
         // ticks, during which the executor is still idle — judging "can't move" immediately
@@ -721,22 +662,15 @@ public final class GatherQuotaTask extends AbstractTask {
         }
     }
 
-    // EXPLORE hop takeoff: pick a heading (if the knowledge base remembers a same-type resource
-    // within 192 blocks → head for that memory point; otherwise do a blind compass search,
-    // avoiding the trail just walked), then pick a waypoint 48/40/32 blocks out and set off.
-    // Returns false if the hop budget is exhausted or no waypoint can be chosen (survey's fail
-    // chain then decides the outcome).
+    // EXPLORE hop takeoff: memory may provide a heading, but only the observation fence chooses
+    // the actual local route destination.  No block-state/height-map query occurs before this
+    // navigation request, so an unseen cliff cannot turn into an invented "empty area" result.
     private boolean startExplore(AIPlayerEntity bot) {
-        if (exploreHops >= EXPLORE_MAX_HOPS) {
+        if (observedSearchHops.exhausted()) {
             return false;
         }
-        var world = bot.level();
         BlockPos feet = bot.blockPosition();
         exploreHint = null;
-        boolean aimed = false;
-        // Memory-guided: the nearest same-type resource point in the semantic knowledge base
-        // (persists across sessions) → head straight for it (even if an en-route light scan
-        // intercepts something first, that's still a win).
         int now = bot.level().getServer().getTickCount();
         for (Block block : harvestBlocks) {
             var known = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.nearestResource(
@@ -744,106 +678,31 @@ public final class GatherQuotaTask extends AbstractTask {
                     pos -> !EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), pos, now));
             if (known.isPresent()) {
                 exploreHint = known.get().pos();
-                exploreHeading = Math.atan2(exploreHint.getZ() + 0.5D - bot.getZ(), exploreHint.getX() + 0.5D - bot.getX());
-                aimed = true;
                 break;
             }
         }
-        if (!aimed) {
-            // Blind search: among 8 compass directions (45° steps), take the first heading with
-            // "a ground landing point 44 blocks out that isn't within 16 blocks of the recent
-            // trail". If none qualify, keep the current heading (default 0 / the previous hop's
-            // direction) and let pickExploreWaypoint's deflection-angle fan act as the fallback.
-            for (int i = 0; i < 8; i++) {
-                double heading = Math.toRadians(i * 45.0D);
-                int px = (int) Math.floor(bot.getX() + 44.0D * Math.cos(heading));
-                int pz = (int) Math.floor(bot.getZ() + 44.0D * Math.sin(heading));
-                BlockPos probe = findGroundAt(world, px, pz);
-                if (probe == null || EpisodeMemory.INSTANCE.nearTrail(
-                        bot.getUUID(), "gather", probe, 16.0D)) {
-                    continue;
-                }
-                exploreHeading = heading;
-                break;
-            }
+        ObservedSearchHops.Attempt attempt = observedSearchHops.begin(bot, exploreHint);
+        if (!attempt.started()) {
+            BotLog.action(bot, "gather_explore_hop_refused",
+                    "attempt", attempt.number(),
+                    "heading", attempt.heading() == null ? "none" : attempt.heading().toShortString(),
+                    "reason", attempt.reason(),
+                    "remaining", Math.max(0, EXPLORE_MAX_HOPS - observedSearchHops.attempts()));
+            // A refused hop means no physical search happened.  Keep surveying/retrying other
+            // headings until the bounded observed frontier is exhausted instead of failing now.
+            return !observedSearchHops.exhausted();
         }
-        BlockPos picked = pickExploreWaypoint(bot);
-        if (picked == null) {
-            exploreHeading += Math.PI / 2.0D; // That heading's whole fan came up empty → rotate 90° and try again
-            picked = pickExploreWaypoint(bot);
-        }
-        if (picked == null) {
-            exploreHops++; // Burn one hop from the budget: prevents re-entering every tick when "no point can ever be picked"; the fail chain wraps up once the budget is exhausted
-            return false;
-        }
-        exploreHops++;
-        exploreTarget = picked;
+        exploreTarget = attempt.observedGoal();
+        exploreStart = feet.immutable();
         exploreHopStartTick = elapsed;
         exploredSinceFind = true;
         phase = Phase.EXPLORE;
         BotLog.action(bot, "gather_explore_hop",
-                "hop", exploreHops,
-                "to", picked.getX() + "," + picked.getY() + "," + picked.getZ(),
-                "mode", exploreHint == null ? "blind" : "known");
-        return true;
-    }
-
-    // Waypoint selection (mirrors MoveTask.pickWaypoint's structure): a double loop over heading ±
-    // deflection {0,±45,±90} × distance tier {48,40,32}; each candidate is that column's surface
-    // landing point and must be a dry column (lake-surface floating cells / shallow-water foot
-    // cells are all excluded); memory-guided mode additionally requires the candidate not be
-    // 10%+ farther from the memory point than the current distance (prevents the deflection fan
-    // from drifting farther and farther off course). The first candidate whose startPathTo
-    // doesn't fail is used (a successful pathfind means it has already set off); synchronous A*
-    // runs are capped at EXPLORE_PATH_ATTEMPTS to prevent a long single-tick stall.
-    private BlockPos pickExploreWaypoint(AIPlayerEntity bot) {
-        var world = bot.level();
-        double bx = bot.getX();
-        double bz = bot.getZ();
-        double maxHintDistSq = Double.MAX_VALUE;
-        if (exploreHint != null) {
-            double maxHintDist = Math.sqrt(exploreHint.distSqr(bot.blockPosition())) * 1.10D;
-            maxHintDistSq = maxHintDist * maxHintDist;
-        }
-        int pathAttempts = 0;
-        for (int deg : EXPLORE_DEFLECTIONS_DEG) {
-            double phi = exploreHeading + Math.toRadians(deg);
-            double cos = Math.cos(phi);
-            double sin = Math.sin(phi);
-            for (double dist : EXPLORE_HOP_DISTANCES) {
-                BlockPos candidate = findGroundAt(world, (int) Math.floor(bx + dist * cos), (int) Math.floor(bz + dist * sin));
-                if (candidate == null || !isDryColumn(world, candidate)
-                        || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUUID(), candidate, bot.level().getServer().getTickCount())) {
-                    continue;
-                }
-                if (exploreHint != null && candidate.distSqr(exploreHint) > maxHintDistSq) {
-                    continue;
-                }
-                if (pathAttempts >= EXPLORE_PATH_ATTEMPTS) {
-                    return null;
-                }
-                pathAttempts++;
-                bot.getActionPack().stopAll();
-                if (!bot.getActionPack().startPathTo(candidate).isFailed()) {
-                    return candidate;
-                }
-            }
-        }
-        return null;
-    }
-
-    // Dry-column check (copied from MoveTask): only counts as "dry" if the candidate foot cell
-    // and the 4 cells below it are all free of fluid. On a lake, MOTION_BLOCKING_NO_LEAVES picks
-    // up the cell floating above the water surface; in shallow water, the foot cell itself is
-    // water — both cases must be excluded, otherwise a waypoint would lead the bot straight into
-    // water and turn exploration into a death trap.
-    private static boolean isDryColumn(net.minecraft.server.level.ServerLevel world, BlockPos feet) {
-        for (int i = 0; i <= 4; i++) {
-            if (!world.getFluidState(feet.below(i)).isEmpty()) {
-                return false;
-            }
-        }
+                "attempt", attempt.number(),
+                "heading", attempt.heading().toShortString(),
+                "to", exploreTarget.toShortString(),
+                "mode", attempt.guided() ? "known_heading" : "compass",
+                "max_hop", ObservedSearchHops.HOP_DISTANCE);
         return true;
     }
 
@@ -860,6 +719,7 @@ public final class GatherQuotaTask extends AbstractTask {
             bot.getActionPack().stopAll();
             excludeExploreHint(bot, "timeout");
             exploreTarget = null;
+            exploreStart = null;
             searchRadius = SEARCH_RADIUS;
             lastScanTick = -100;
             exploreScan = null; // every exit from EXPLORE drops its en-route scan
@@ -874,7 +734,7 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         if (exploreScan == null && now - lastExploreScanTick >= EXPLORE_SCAN_INTERVAL) {
             lastExploreScanTick = now;
-            exploreScan = OreProspector.begin(bot, 16, state -> harvestBlocks.contains(state.getBlock()), null);
+            exploreScan = OreProspector.beginObservable(bot, 16, state -> harvestBlocks.contains(state.getBlock()), null);
         }
         if (exploreScan != null && exploreScan.step(SCAN_STEP_BUDGET_NANOS)) {
             BlockPos seen = exploreScan.result();
@@ -882,6 +742,7 @@ public final class GatherQuotaTask extends AbstractTask {
             if (seen != null) {
                 bot.getActionPack().stopAll();
                 exploreTarget = null;
+                exploreStart = null;
                 searchRadius = SEARCH_RADIUS;
                 exploreScan = null; // every exit from EXPLORE drops its en-route scan
                 phase = Phase.SURVEY;
@@ -894,37 +755,38 @@ public final class GatherQuotaTask extends AbstractTask {
         // the same stale intel again; then return to SURVEY (the fail chain keeps exploring
         // outward if there's still nothing).
         if (exploreTarget == null || bot.blockPosition().distSqr(exploreTarget) <= 9.0D) {
+            boolean physicallyMoved = exploreStart != null
+                    && bot.blockPosition().distSqr(exploreStart) > 9.0D;
+            if (physicallyMoved) {
+                exploreHops++;
+                BotLog.action(bot, "gather_explore_arrived",
+                        "hop", exploreHops,
+                        "at", bot.blockPosition().toShortString(),
+                        "attempts", observedSearchHops.attempts());
+            }
             if (exploreHint != null && bot.blockPosition().distSqr(exploreHint) <= 256.0D) {
                 invalidateKnownResource(bot, exploreHint);
                 exploreHint = null;
             }
             bot.getActionPack().stopAll();
             exploreTarget = null;
+            exploreStart = null;
             searchRadius = SEARCH_RADIUS;
             exploreScan = null; // every exit from EXPLORE drops its en-route scan
             phase = Phase.SURVEY;
             return;
         }
-        // (4) Path broke mid-route (20-tick startup grace period — right after startPathTo the
-        // executor may still be idle) → reselect a hop on the same heading; if rotating 90° still
-        // can't pick one → return to SURVEY (this hop's EXPLORE_MOVE_LIMIT budget counts
-        // continuously across the whole hop, including any reselection).
+        // (4) A directional route that goes idle before its locally observed destination is not
+        // retried against an invented terrain point.  Drop back to SURVEY; the next bounded
+        // attempt chooses a fresh observed hop and preserves the fact that no leg was completed.
         if (elapsed - exploreHopStartTick > 20 && bot.getActionPack().isPathExecutorIdle()) {
-            BlockPos repick = pickExploreWaypoint(bot);
-            if (repick == null) {
-                exploreHeading += Math.PI / 2.0D;
-                repick = pickExploreWaypoint(bot);
-            }
-            if (repick == null) {
-                bot.getActionPack().stopAll();
-                excludeExploreHint(bot, "no_path");
-                exploreTarget = null;
-                searchRadius = SEARCH_RADIUS;
-                exploreScan = null; // every exit from EXPLORE drops its en-route scan
-                phase = Phase.SURVEY;
-                return;
-            }
-            exploreTarget = repick;
+            bot.getActionPack().stopAll();
+            excludeExploreHint(bot, "route_ended");
+            exploreTarget = null;
+            exploreStart = null;
+            searchRadius = SEARCH_RADIUS;
+            exploreScan = null;
+            phase = Phase.SURVEY;
         }
     }
 
@@ -1045,7 +907,8 @@ public final class GatherQuotaTask extends AbstractTask {
             exploredSinceFind = false;
             BotLog.action(bot, "gather_explore_found",
                     "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ(),
-                    "hops", exploreHops);
+                    "hops", exploreHops,
+                    "attempts", observedSearchHops.attempts());
         }
         if (choice.direct()) {
             startHarvest(bot);
@@ -1060,9 +923,15 @@ public final class GatherQuotaTask extends AbstractTask {
             surfaceTried = false; // New area — allow the "surface fallback" again
             return;
         }
-        // The explore budget is also exhausted (4 hops, ~190 blocks, found nothing) → use a
-        // dedicated reason so the brain/player knows it "already went out and searched".
-        fail(exploreHops >= EXPLORE_MAX_HOPS ? "no_resource_after_explore" : "no_resource_nearby");
+        // Report only what actually happened.  A denied local route is not a completed search;
+        // a model must not turn it into an assertion about terrain it never saw.
+        if (observedSearchHops.exhausted()) {
+            fail(exploreHops > 0
+                    ? "no_observed_resource_after_exploration"
+                    : "no_observed_resource_in_local_view");
+            return;
+        }
+        fail("no_observed_resource_in_local_view");
     }
 
     /** Test hook: true while a budgeted prospect scan is in flight (ProspectScanBudgetGameTests). */
@@ -1475,9 +1344,8 @@ public final class GatherQuotaTask extends AbstractTask {
                 clearPickupLedger();
                 resetSurveyWatchdog();
                 if (roamToNewArea(bot)) {
-                    // Several blocks in a row in the same patch failed to be gathered → roam
-                    // (walk) to a new patch and retry (roamToNewArea already sets phase=ROAM
-                    // internally).
+                    // Several blocks in a row in the same patch failed to be gathered → begin a
+                    // bounded observed exploration hop and retry after a new view is reached.
                 } else {
                     fail("pickup_timeout");
                 }
@@ -1559,6 +1427,7 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         roamTarget = null;
         exploreTarget = null;
+        exploreStart = null;
         targetPos = null;
         searchRadius = SEARCH_RADIUS;
         phase = Phase.SURVEY;

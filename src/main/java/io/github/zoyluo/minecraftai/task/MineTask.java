@@ -16,8 +16,12 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 public final class MineTask extends AbstractTask {
+    private static final int EXPLORE_MAX_HOPS = 16;
+    private static final int EXPLORE_MOVE_LIMIT = 240;
+
     private enum Phase {
         SEARCHING,
+        EXPLORING,
         MOVING,
         MINING,
         PICKING_UP
@@ -34,6 +38,16 @@ public final class MineTask extends AbstractTask {
     private int pickupTicks;
     private boolean pickupSweepAttempted;
     private boolean directMiningTarget;
+    /**
+     * Count-mode mining searches beyond its first local view by walking only to a short destination
+     * selected by the observation fence.  A compass heading is never itself a terrain or route
+     * claim, so a failed admission cannot become a fabricated "no stone over there" result.
+     */
+    private final ObservedSearchHops observedSearchHops = new ObservedSearchHops(EXPLORE_MAX_HOPS);
+    private BlockPos exploreTarget;
+    private BlockPos exploreStart;
+    private int exploreStartedTick;
+    private int completedExploreHops;
 
     public MineTask(Block targetBlock, int countNeeded) {
         this.targetBlock = targetBlock;
@@ -59,6 +73,10 @@ public final class MineTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.SEARCHING;
+        observedSearchHops.reset();
+        exploreTarget = null;
+        exploreStart = null;
+        completedExploreHops = 0;
     }
 
     @Override
@@ -71,6 +89,7 @@ public final class MineTask extends AbstractTask {
         }
         switch (phase) {
             case SEARCHING -> search(bot);
+            case EXPLORING -> explore(bot);
             case MOVING -> move(bot);
             case MINING -> mine(bot);
             case PICKING_UP -> pickup(bot);
@@ -80,11 +99,10 @@ public final class MineTask extends AbstractTask {
     private void search(AIPlayerEntity bot) {
         HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6);
         if (choice == null) {
-            if (OreScan.isOreBlock(targetBlock)) {
-                fail("no_observed_ore_target:" + BuiltInRegistries.BLOCK.getKey(targetBlock));
+            if (startObservedExploration(bot)) {
                 return;
             }
-            fail("no_reachable_target_block_in_range");
+            fail(noObservedTargetReason());
             return;
         }
         targetPos = choice.pos();
@@ -95,6 +113,88 @@ public final class MineTask extends AbstractTask {
         }
         phase = Phase.MOVING;
         bot.getActionPack().startPathTo(choice.stand());
+    }
+
+    /**
+     * Starts one short exploration leg that was admitted from current line-of-sight terrain.  It
+     * gives a generic {@code mine} request the same recovery behavior as gather, without making a
+     * raw world scan, blind path, or mining action part of the search.
+     */
+    private boolean startObservedExploration(AIPlayerEntity bot) {
+        ObservedSearchHops.Attempt attempt = observedSearchHops.begin(bot, null);
+        if (!attempt.started()) {
+            BotLog.action(bot, "mine_explore_hop_refused",
+                    "attempt", attempt.number(),
+                    "heading", attempt.heading() == null ? "none" : attempt.heading().toShortString(),
+                    "reason", attempt.reason(),
+                    "remaining", Math.max(0, EXPLORE_MAX_HOPS - observedSearchHops.attempts()));
+            // A refusal is a planning fact, not movement.  Continue trying bounded alternatives
+            // until the observation fence has exhausted the search budget.
+            return !observedSearchHops.exhausted();
+        }
+        exploreTarget = attempt.observedGoal();
+        exploreStart = bot.blockPosition().immutable();
+        exploreStartedTick = elapsed;
+        phase = Phase.EXPLORING;
+        BotLog.action(bot, "mine_explore_hop",
+                "attempt", attempt.number(),
+                "heading", attempt.heading().toShortString(),
+                "to", exploreTarget.toShortString(),
+                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+        return true;
+    }
+
+    private void explore(AIPlayerEntity bot) {
+        // Finding a visible target while walking is enough to hand control back to normal mining.
+        // The next SEARCHING tick selects a verified local stance and never assumes the remote
+        // compass heading contains a block.
+        if (HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6) != null) {
+            bot.getActionPack().stopAll();
+            clearExploreLeg();
+            phase = Phase.SEARCHING;
+            return;
+        }
+        boolean arrived = exploreTarget == null || bot.blockPosition().distSqr(exploreTarget) <= 9.0D;
+        if (arrived) {
+            recordExploreArrival(bot);
+            bot.getActionPack().stopAll();
+            clearExploreLeg();
+            phase = Phase.SEARCHING;
+            return;
+        }
+        if (elapsed - exploreStartedTick > EXPLORE_MOVE_LIMIT
+                || (elapsed - exploreStartedTick > 20 && bot.getActionPack().isPathExecutorIdle())) {
+            BotLog.action(bot, "mine_explore_hop_ended",
+                    "reason", elapsed - exploreStartedTick > EXPLORE_MOVE_LIMIT ? "timeout" : "route_ended",
+                    "to", exploreTarget.toShortString());
+            bot.getActionPack().stopAll();
+            clearExploreLeg();
+            phase = Phase.SEARCHING;
+        }
+    }
+
+    private void recordExploreArrival(AIPlayerEntity bot) {
+        if (exploreStart != null && bot.blockPosition().distSqr(exploreStart) > 9.0D) {
+            completedExploreHops++;
+            BotLog.action(bot, "mine_explore_arrived",
+                    "hop", completedExploreHops,
+                    "at", bot.blockPosition().toShortString(),
+                    "attempts", observedSearchHops.attempts());
+        }
+    }
+
+    private void clearExploreLeg() {
+        exploreTarget = null;
+        exploreStart = null;
+    }
+
+    private String noObservedTargetReason() {
+        String target = BuiltInRegistries.BLOCK.getKey(targetBlock).toString();
+        boolean searched = completedExploreHops > 0;
+        if (OreScan.isOreBlock(targetBlock)) {
+            return (searched ? "no_observed_ore_after_exploration:" : "no_observed_ore_in_local_view:") + target;
+        }
+        return (searched ? "no_observed_resource_after_exploration:" : "no_observed_resource_in_local_view:") + target;
     }
 
     private void move(AIPlayerEntity bot) {
@@ -187,6 +287,7 @@ public final class MineTask extends AbstractTask {
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         miner.cancel(bot);
+        clearExploreLeg();
         bot.getActionPack().stopAll();
     }
 

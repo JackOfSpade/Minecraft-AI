@@ -23,8 +23,8 @@ public final class ReasonText {
             Map.entry("unknown_block_id", "I do not recognize that block ID."),
             Map.entry("unknown_palette", "I cannot identify the blueprint material palette."),
             Map.entry("inventory_full", "My inventory is full; I need to store items first."),
-            Map.entry("no_resource_nearby", "I could not find a collectable resource nearby."),
-            Map.entry("no_resource_after_explore", "I searched several areas and still could not find a collectable resource."),
+            Map.entry("no_resource_nearby", "I could not observe a collectable resource from my current view."),
+            Map.entry("no_resource_after_explore", "I explored several safe routes but did not observe a collectable resource."),
             Map.entry("unsupported_resource_type", "That resource type cannot be collected automatically yet."),
             Map.entry("gather_timeout", "Gathering took too long, so I will stop and reassess."),
             Map.entry("no_base", "No base is marked yet; I need to remember the base position first."),
@@ -65,6 +65,19 @@ public final class ReasonText {
         }
         if (lower.startsWith("place_crafting_table_failed:")) {
             return "I could not place the crafting table: " + friendly(trimmed.substring(trimmed.indexOf(':') + 1).trim());
+        }
+        if (lower.startsWith("no_observed_resource_after_exploration")) {
+            return "I explored several safe, visible routes but did not observe a collectable resource.";
+        }
+        if (lower.startsWith("no_observed_resource_in_local_view")) {
+            return "I could not observe a collectable resource from my current view.";
+        }
+        if (lower.startsWith("no_observed_ore_after_exploration")) {
+            return "I explored several safe, visible routes but did not observe a mineable ore target.";
+        }
+        if (lower.startsWith("no_observed_ore_in_local_view")
+                || lower.startsWith("no_observed_ore_target")) {
+            return "I could not observe a mineable ore target from my current view.";
         }
         String exact = EXACT.get(lower);
         if (exact != null) {
