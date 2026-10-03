@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.navigation;
 
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -9,12 +10,27 @@ import net.minecraft.core.BlockPos;
  *
  * <p>{@link Shape#BLOCK} is "stand in this cell" (a {@code GoalBlock}, or a {@code GoalNear} of radius 1 when the cell itself
  * cannot be stood in, which is why Baritone resolves the request to a proven nearest standable cell);
- * {@link Shape#NEAR} is "get within {@code radius} blocks of this cell" (a {@code GoalNear}; follow, approach).</p>
+ * {@link Shape#NEAR} is "get within {@code radius} blocks of this cell" (a {@code GoalNear}; follow, approach).
+ * {@link Shape#DIRECTIONAL_PURSUIT} keeps an unobserved remote coordinate only as a heading: admission chooses a nearby,
+ * observed stance as its actual {@code GoalBlock} and never makes the remote terrain part of the route. {@link Shape#OWNER_FOLLOW}
+ * is the one deliberate exception: it may route toward the live coordinate of the bot's verified owner over a snapshot of currently
+ * loaded chunks, but it is always walk-only and cannot name an arbitrary coordinate as an unrestricted goal.</p>
  */
 public final class NavRoute {
     public enum Shape {
         BLOCK,
         NEAR,
+        /**
+         * A bounded follow/search hop toward a known remote coordinate. The remote target is not
+         * a terrain goal: the observation fence resolves it to a nearby visible stance before
+         * Baritone receives any path or movement authority.
+         */
+        DIRECTIONAL_PURSUIT,
+        /**
+         * A live owner-coordinate {@code GoalNear}. The navigator validates its immutable owner UUID before admission and exposes
+         * only a server-captured snapshot of currently full chunks, never a cache or a force-loaded chunk.
+         */
+        OWNER_FOLLOW,
         /**
          * Get at least {@code radius} blocks (horizontally) away from the target/source cell: a
          * {@code GoalRunAway} (retreat, evade). The target is a threat reference, not an arrival
@@ -71,6 +87,8 @@ public final class NavRoute {
     private final Options options;
     private final String label;
     private final int startTick;
+    /** The only player whose live coordinate may use {@link Shape#OWNER_FOLLOW}; null for every ordinary route. */
+    private final UUID ownerUuid;
     /** A constrained surface route may never use a cell below this floor. */
     private final int minimumY;
     /** Optional observed-only return proof anchor for a constrained route. */
@@ -88,11 +106,16 @@ public final class NavRoute {
     private Object goalHandle;
 
     public NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick) {
-        this(shape, target, radius, options, label, startTick, Integer.MIN_VALUE, null);
+        this(shape, target, radius, options, label, startTick, Integer.MIN_VALUE, null, null);
     }
 
     public NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick,
                     int minimumY, BlockPos returnAnchor) {
+        this(shape, target, radius, options, label, startTick, minimumY, returnAnchor, null);
+    }
+
+    private NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick,
+                     int minimumY, BlockPos returnAnchor, UUID ownerUuid) {
         this.shape = shape;
         this.target = target.immutable();
         this.radius = Math.max(0, radius);
@@ -101,7 +124,20 @@ public final class NavRoute {
         this.startTick = startTick;
         this.minimumY = minimumY;
         this.returnAnchor = returnAnchor == null ? null : returnAnchor.immutable();
+        this.ownerUuid = ownerUuid;
         this.deadlineTick = startTick + 600;
+    }
+
+    /**
+     * Creates the sole route form that can use a known-but-not-visible coordinate. Callers still cannot bypass the navigator's
+     * owner check: {@code BaritoneNavigator} compares this UUID against the bot's current owner before it exposes a chunk snapshot.
+     */
+    public static NavRoute ownerFollow(UUID ownerUuid, BlockPos target, int radius, String label, int startTick) {
+        if (ownerUuid == null) {
+            throw new IllegalArgumentException("ownerUuid is required for owner follow");
+        }
+        return new NavRoute(Shape.OWNER_FOLLOW, target, radius, Options.WALK_ONLY, label, startTick,
+                Integer.MIN_VALUE, null, ownerUuid);
     }
 
     public Shape shape() {
@@ -127,6 +163,11 @@ public final class NavRoute {
 
     public int startTick() {
         return startTick;
+    }
+
+    /** The verified-owner identity carried by an {@link Shape#OWNER_FOLLOW} request, otherwise null. */
+    public UUID ownerUuid() {
+        return ownerUuid;
     }
 
     /** The inclusive Y floor enforced by the observation fence, or {@link Integer#MIN_VALUE} when unconstrained. */

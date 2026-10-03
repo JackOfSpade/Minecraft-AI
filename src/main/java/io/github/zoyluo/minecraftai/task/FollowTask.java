@@ -12,6 +12,7 @@ import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
@@ -37,6 +38,8 @@ public final class FollowTask extends AbstractTask {
     private static final double STOP_DISTANCE = 3.0D;
     private static final double MAX_DIRECT_FALLBACK_DISTANCE = 12.0D;
     private static final int REPATH_TICKS = 40;
+    /** One out-of-view follow leg never reaches beyond this locally observed horizontal hop. */
+    private static final int DIRECTIONAL_PURSUIT_MAX_HOP = 12;
     // Retry delay after a "pathfinding_throttled" answer (ActionPack's success cooldown is 5 ticks).
     private static final int THROTTLED_RETRY_TICKS = 5;
     private static final double SWIM_STOP_DISTANCE = 3.5D;
@@ -100,10 +103,15 @@ public final class FollowTask extends AbstractTask {
     private BlockPos holdTargetPos;
     private int nextHoldReevalTick;
     private final FollowSwimming swimming = new FollowSwimming();
-    // ---- nav.engine=baritone (see followLandBaritone): the goal cell the current Baritone route was aimed at, the approach radius
-    // in use, and the last route outcome already reacted to.
-    private BlockPos baritoneGoalPos;
+    // ---- nav.engine=baritone (see followLandBaritone): the followed player's last known cell
+    // (used solely to decide whether a moving player needs a re-goal), the approach radius in
+    // use, and the last route outcome already reacted to. A directional route's physical goal
+    // lives in ActionPack as its resolved observed hop, never in this remote target marker.
+    private BlockPos baritoneTargetPos;
     private int baritoneRadius = (int) STOP_DISTANCE;
+    private boolean baritoneDirectionalPursuit;
+    /** True only while a verified owner's live-coordinate route owns Baritone; named/non-owner follows retain strict observation. */
+    private boolean baritoneOwnerFollow;
     private NavOutcome handledOutcome;
     /** The no-progress rule of the running Baritone route (see FollowProgressWindow). */
     private final FollowProgressWindow baritoneProgress = new FollowProgressWindow();
@@ -231,7 +239,9 @@ public final class FollowTask extends AbstractTask {
         shelterExitDebtRepayer.reset(bot);
         stuckRecovery.reset(bot, elapsed);
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
-        baritoneGoalPos = null;
+        baritoneTargetPos = null;
+        baritoneDirectionalPursuit = false;
+        baritoneOwnerFollow = false;
         baritoneProgress.clear();
         baritoneRadius = (int) STOP_DISTANCE;
         handledOutcome = bot.getActionPack().lastRouteOutcome();
@@ -257,7 +267,9 @@ public final class FollowTask extends AbstractTask {
             // offline/cross-dimension target, or its ActionPack fence would survive forever.
             swimming.cancelStep(bot);
             stopBoatAndActions(bot);
-            baritoneGoalPos = null;
+            baritoneTargetPos = null;
+            baritoneDirectionalPursuit = false;
+            baritoneOwnerFollow = false;
             baritoneProgress.clear();
             waiting = true;
             if (elapsed % 200 == 1) {
@@ -393,7 +405,9 @@ public final class FollowTask extends AbstractTask {
 
     /** Another follow mode takes the bot: a Baritone land route of this task ends now (single writer). */
     private void dropBaritoneRoute(AIPlayerEntity bot) {
-        baritoneGoalPos = null;
+        baritoneTargetPos = null;
+        baritoneDirectionalPursuit = false;
+        baritoneOwnerFollow = false;
         baritoneProgress.clear();
         if (bot.getActionPack().hasBaritoneRoute()) {
             bot.getActionPack().cancelBaritoneRoute("follow_mode_changed");
@@ -540,15 +554,13 @@ public final class FollowTask extends AbstractTask {
 
     /** Ticks between re-targeting a running Baritone route at the moving player (Baritone re-plans in between by itself). */
     private static final int BARITONE_REGOAL_TICKS = 20;
-    /** The player must have moved this far (squared, blocks) from the cell the route aims at before the goal is re-pointed. */
+    /** The player must have moved this far (squared, blocks) from the last actual-player marker before the route is re-pointed. */
     private static final double BARITONE_REGOAL_MOVED_SQ = 4.0D;
 
     /**
-     * Land follow on Baritone: {@code GoalNear(player, radius)} (no stand-off cell, no goal snapping), re-targeted as the player
-     * moves (throttled, and only once they have moved a couple of blocks, so Baritone keeps favouring the path it is on). A
-     * player on the far side of water with no dry route leaves the route ending short: the bot stays on its bank, says so once
-     * ({@code follow_no_dry_route}) and re-plans on the normal schedule. Swimming players and boats retain only their
-     * bounded physical safety routines; dry-land follow has no alternate navigation engine.
+     * Land follow uses a direct {@code GoalNear(player, radius)} for this bot's verified owner, even when the owner is outside
+     * view: Baritone can inspect only the current server-captured full-chunk snapshot and never gets a cached or force-loaded
+     * cell. A named/non-owner player keeps the strict observed route and its short directional-hop fallback.
      */
     private boolean followLandBaritone(AIPlayerEntity bot, ServerPlayer target) {
         ActionPack pack = bot.getActionPack();
@@ -557,7 +569,10 @@ public final class FollowTask extends AbstractTask {
             pack.stopNavigation();
             waiting = true;
             noRouteAnnounced = false;
-            baritoneGoalPos = null;
+            repeatedFailures.reset();
+            baritoneTargetPos = null;
+            baritoneDirectionalPursuit = false;
+            baritoneOwnerFollow = false;
             baritoneProgress.clear();
             baritoneRadius = (int) STOP_DISTANCE;
             repathBackoff = false;
@@ -568,27 +583,38 @@ public final class FollowTask extends AbstractTask {
             if (baritoneProgress.stalled(elapsed, bot.distanceTo(target), bot.getX(), bot.getZ())) {
                 // A route that gets the bot nowhere (a door it cannot open, a replan loop) is abandoned with a back-off, the way
                 // the prior local controller abandoned a frozen executor, instead of spinning until the route deadline.
+                boolean directional = baritoneDirectionalPursuit;
+                boolean ownerFollow = baritoneOwnerFollow;
                 BotLog.action(bot, "follow_route_no_progress", "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.blockPosition()),
-                        "distance", bot.distanceTo(target));
+                        "distance", bot.distanceTo(target), "directional", directional, "owner_follow", ownerFollow);
                 pack.cancelBaritoneRoute("follow_no_progress");
                 baritoneProgress.clear();
-                announceNoRoute(bot, targetPos, "follow_no_progress", FollowNoRoute.GENERIC_MESSAGE);
+                if (directional) {
+                    noteDirectionalPursuitFailure(bot, targetPos, "follow_no_progress");
+                } else {
+                    announceNoRoute(bot, targetPos, "follow_no_progress", FollowNoRoute.GENERIC_MESSAGE);
+                }
                 repathBackoff = true;
                 nextRepathTick = elapsed + REPATH_TICKS;
-                baritoneGoalPos = null;
+                baritoneTargetPos = null;
+                baritoneDirectionalPursuit = false;
+                baritoneOwnerFollow = false;
                 waiting = true;
                 return true;
             }
-            if (baritoneGoalPos != null && elapsed >= nextRepathTick
-                    && baritoneGoalPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ) {
-                ActionResult regoal = pack.startApproachTo(targetPos, baritoneRadius, true, true);
+            if (baritoneTargetPos != null && elapsed >= nextRepathTick
+                    && baritoneTargetPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ) {
+                LandRouteAttempt regoal = startLandRoute(bot, target, targetPos, true);
                 baritoneRegoals++;
-                nextRepathTick = elapsed + BARITONE_REGOAL_TICKS;
-                if (!regoal.isFailed()) {
-                    baritoneGoalPos = targetPos.immutable();
+                nextRepathTick = elapsed + (regoal.result().isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);
+                if (!regoal.result().isFailed()) {
+                    acceptLandRoute(targetPos, regoal);
                 } else {
-                    announceNoRoute(bot, targetPos, regoal.reason(), FollowNoRoute.messageFor(regoal.reason()));
+                    reportLandRouteFailure(bot, targetPos, regoal);
                     repathBackoff = true;
+                    baritoneTargetPos = null;
+                    baritoneDirectionalPursuit = false;
+                    baritoneOwnerFollow = false;
                     waiting = true;
                 }
             }
@@ -598,38 +624,149 @@ public final class FollowTask extends AbstractTask {
         NavOutcome ended = pack.lastRouteOutcome();
         if (ended != null && ended != handledOutcome) {
             handledOutcome = ended;
+            boolean directional = isDirectionalPursuit(ended);
+            boolean ownerFollow = isOwnerFollow(ended);
+            baritoneTargetPos = null;
+            baritoneDirectionalPursuit = false;
+            baritoneOwnerFollow = false;
             if (ended.status() == NavOutcome.Status.FAILED || ended.status() == NavOutcome.Status.TIMEOUT) {
-                // Ended short of the player and Baritone found no more of a way (a lake between us, a sealed room), was vetoed
-                // again and again, or ran out of time: wait dry, and do not start the same route again at once (a timed-out route
-                // is a failed one).
-                announceNoRoute(bot, targetPos, ended.reason(), noRouteMessage(ended));
-                repathBackoff = true;
-                nextRepathTick = elapsed + REPATH_TICKS;
-                baritoneGoalPos = null;
+                // A partial directional leg has reached the edge of its current local proof. It
+                // is expected to acquire the next cone immediately; every other failure backs
+                // off, but remains a standing follow order and keeps retrying indefinitely.
+                if ((directional || ownerFollow) && NavRouteRules.PATH_INCOMPLETE.equals(ended.reason())) {
+                    repathBackoff = false;
+                } else {
+                    if (directional) {
+                        noteDirectionalPursuitFailure(bot, targetPos, ended.reason());
+                    } else {
+                        announceNoRoute(bot, targetPos, ended.reason(), noRouteMessage(ended));
+                    }
+                    repathBackoff = true;
+                    nextRepathTick = elapsed + REPATH_TICKS;
+                }
             } else if (ended.status() == NavOutcome.Status.SUCCESS) {
-                // Inside the goal radius but not close enough for the arrival rule (the goal counts whole blocks): aim tighter.
-                baritoneRadius = Math.max(1, baritoneRadius - 1);
+                if (directional) {
+                    // A completed local hop is real evidence that the last temporary hold has
+                    // cleared. Re-arm any diagnostic before continuing toward the next cone.
+                    noRouteAnnounced = false;
+                    repeatedFailures.reset();
+                } else {
+                    // Inside the direct GoalNear radius but not close enough for the arrival
+                    // rule: aim tighter. A directional hop is already an exact local standoff
+                    // leg, so it must keep its independent max-hop size instead of shrinking to
+                    // one block.
+                    baritoneRadius = Math.max(1, baritoneRadius - 1);
+                }
             }
         }
         if (repathBackoff && elapsed < nextRepathTick) {
             waiting = true;
             return true;
         }
-        ActionResult started = pack.startApproachTo(targetPos, baritoneRadius, false, true);
+        LandRouteAttempt started = startLandRoute(bot, target, targetPos, false);
         baritoneStarts++;
-        nextRepathTick = elapsed + (started.isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);
-        if (started.isFailed()) {
-            announceNoRoute(bot, targetPos, started.reason(), FollowNoRoute.messageFor(started.reason()));
+        nextRepathTick = elapsed + (started.result().isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);
+        if (started.result().isFailed()) {
+            reportLandRouteFailure(bot, targetPos, started);
             repathBackoff = true;
-            baritoneGoalPos = null;
+            baritoneTargetPos = null;
+            baritoneDirectionalPursuit = false;
+            baritoneOwnerFollow = false;
             waiting = true;
             return true;
         }
-        repathBackoff = false;
-        baritoneGoalPos = targetPos.immutable();
-        baritoneProgress.clear();
+        acceptLandRoute(targetPos, started);
         waiting = false;
         return true;
+    }
+
+    /** A bot's own owner gets a loaded-chunk direct route; every other selected player stays inside the ordinary observation boundary. */
+    private LandRouteAttempt startLandRoute(AIPlayerEntity bot, ServerPlayer target, BlockPos targetPos, boolean refresh) {
+        ActionPack pack = bot.getActionPack();
+        if (isVerifiedOwner(bot, target)) {
+            ActionResult ownerRoute = pack.startOwnerFollowTo(target.getUUID(), targetPos, baritoneRadius, refresh);
+            if (!ownerRoute.isFailed()) {
+                BotLog.path(bot, "follow_owner_route", "target", io.github.zoyluo.minecraftai.log.LogFields.pos(targetPos),
+                        "radius", baritoneRadius, "refresh", refresh, "policy", "walk_only_loaded_chunks");
+            }
+            return new LandRouteAttempt(ownerRoute, false, true);
+        }
+        ActionResult direct = pack.startApproachTo(targetPos, baritoneRadius, refresh, true);
+        if (!direct.isFailed() || !isObservationAdmissionFailure(direct.reason())) {
+            return new LandRouteAttempt(direct, false, false);
+        }
+        // The actual player position stays in baritoneTargetPos for re-goal comparison. This
+        // derived coordinate merely tells the local hop where to stop, preserving STOP_DISTANCE
+        // even when the player begins only slightly beyond the observation radius.
+        BlockPos standoff = standOffsetFrom(targetPos, bot.blockPosition(), STOP_DISTANCE);
+        ActionResult pursuit = pack.startDirectionalPursuitTo(standoff, DIRECTIONAL_PURSUIT_MAX_HOP, refresh, true);
+        if (!pursuit.isFailed()) {
+            BotLog.path(bot, "follow_directional_pursuit", "target",
+                    io.github.zoyluo.minecraftai.log.LogFields.pos(targetPos), "standoff",
+                    io.github.zoyluo.minecraftai.log.LogFields.pos(standoff), "hop", DIRECTIONAL_PURSUIT_MAX_HOP,
+                    "refresh", refresh);
+        }
+        return new LandRouteAttempt(pursuit, true, false);
+    }
+
+    private static boolean isVerifiedOwner(AIPlayerEntity bot, ServerPlayer target) {
+        return target != null && AIPlayerManager.INSTANCE.ownerOf(bot).filter(target.getUUID()::equals).isPresent();
+    }
+
+    private static boolean isObservationAdmissionFailure(String reason) {
+        if (reason == null) {
+            return false;
+        }
+        return switch (reason) {
+            case "navigation_goal_unobserved", "navigation_observed_corridor_unavailable",
+                    "navigation_goal_without_observed_stance", "navigation_observation_fence_insufficient" -> true;
+            default -> false;
+        };
+    }
+
+    private void acceptLandRoute(BlockPos targetPos, LandRouteAttempt attempt) {
+        boolean directional = attempt.directional();
+        repathBackoff = false;
+        // Admission says only that this local directional cone is safe to try, not that the
+        // bot made any progress through it. Keep a prior pursuit-failure episode alive until a
+        // hop actually succeeds, so a wall/edge cannot suppress the eventual useful notice by
+        // repeatedly accepting and immediately ending one-cell route attempts.
+        if (!directional) {
+            noRouteAnnounced = false;
+            repeatedFailures.reset();
+        }
+        baritoneTargetPos = targetPos.immutable();
+        baritoneDirectionalPursuit = directional;
+        baritoneOwnerFollow = attempt.ownerFollow();
+        baritoneProgress.clear();
+    }
+
+    private void reportLandRouteFailure(AIPlayerEntity bot, BlockPos targetPos, LandRouteAttempt attempt) {
+        if (attempt.directional()) {
+            // One small visible cone may simply end at a wall or chunk edge. Do not claim the
+            // player is unreachable from this one hop; after a sustained series, explain the
+            // wait while retaining the permanent follow order.
+            noteDirectionalPursuitFailure(bot, targetPos, attempt.result().reason());
+        } else {
+            announceNoRoute(bot, targetPos, attempt.result().reason(), FollowNoRoute.messageFor(attempt.result().reason()));
+        }
+    }
+
+    private void noteDirectionalPursuitFailure(AIPlayerEntity bot, BlockPos targetPos, String reason) {
+        if (repeatedFailures.recordFailure(elapsed)) {
+            announceNoRoute(bot, targetPos, reason, FollowNoRoute.GENERIC_MESSAGE);
+        }
+    }
+
+    private static boolean isDirectionalPursuit(NavOutcome outcome) {
+        return "directional_pursuit".equals(outcome.label());
+    }
+
+    private static boolean isOwnerFollow(NavOutcome outcome) {
+        return "owner_follow".equals(outcome.label());
+    }
+
+    private record LandRouteAttempt(ActionResult result, boolean directional, boolean ownerFollow) {
     }
 
     /** What the bot says when a Baritone route ended without getting to the player: the dry-route line only for what it is. */
@@ -640,6 +777,24 @@ public final class FollowTask extends AbstractTask {
     }
 
     private void followLand(AIPlayerEntity bot, ServerPlayer target) {
+        // An arrived follower is intentionally still; do not mistake its personal-space hold
+        // for a stalled route. Otherwise recovery owns only its individually observed local
+        // step or forces this same Baritone follow loop to replan -- it never completes/cancels
+        // the standing follow order just because the player or bot stopped moving.
+        if (bot.distanceTo(target) <= STOP_DISTANCE + STOP_ARRIVAL_SLACK) {
+            suspendLandRecovery(bot);
+            followLandBaritone(bot, target);
+            return;
+        }
+        if (stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)) {
+            waiting = true;
+            return;
+        }
+        if (stuckRecovery.consumeForcedRepath()) {
+            dropBaritoneRoute(bot);
+            repathBackoff = false;
+            nextRepathTick = elapsed;
+        }
         // An unavailable/refused Baritone route is a visible follow hold, never a second
         // navigator. The swimming branch above retains its bounded physical safety moves.
         followLandBaritone(bot, target);

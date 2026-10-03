@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavigationControllerOwner;
@@ -24,6 +25,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import java.util.UUID;
 
 public final class ActionPack {
     /** Failure reason of a request identical to the previous one still inside its cooldown. */
@@ -672,7 +674,11 @@ public final class ActionPack {
                 // arrival goal. Exposing it here makes a caller treat the bot as though it is
                 // navigating *toward* the threat. Baritone normally has no resolved endpoint
                 // for this shape, in which case there simply is no active path goal to report.
-                if (route.shape() == NavRoute.Shape.RUN_AWAY) {
+                if (route.shape() == NavRoute.Shape.RUN_AWAY
+                        || route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT) {
+                    // A directional pursuit, like a flee, keeps its original coordinate only as
+                    // metadata. Never expose it as a physical destination before admission has
+                    // installed the short observed hop.
                     return route.resolvedGoal();
                 }
                 return route.resolvedGoal() != null ? route.resolvedGoal() : route.target();
@@ -722,6 +728,57 @@ public final class ActionPack {
         NavRoute request = new NavRoute(NavRoute.Shape.NEAR, target, radius, options, "approach", serverTick());
         boolean admit = !(refresh && route != null);
         return NavEngineSelector.attempt(player.getUUID(), "approach", () -> startBaritoneRoute(request, null, admit),
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
+    }
+
+    /**
+     * Follows this bot's verified owner by their live server coordinate, including while they are outside the bot's view. Unlike an
+     * ordinary {@link #startApproachTo} request, the owner route may use only a server-captured snapshot of chunks that are already
+     * fully loaded; it never force-loads a chunk, reads Baritone's cache, breaks, places, or crosses water. The navigator repeats
+     * the UUID/current-position validation immediately before it exposes that snapshot to Baritone.
+     */
+    public ActionResult startOwnerFollowTo(UUID ownerUuid, BlockPos target, int radius, boolean refresh) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
+        if (ownerUuid == null || target == null
+                || AIPlayerManager.INSTANCE.ownerOf(player).filter(ownerUuid::equals).isEmpty()) {
+            return ActionResult.failed("owner_follow_target_not_owner");
+        }
+        if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
+            return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
+        }
+        NavRoute request = NavRoute.ownerFollow(ownerUuid, target, Math.max(1, radius), "owner_follow", serverTick());
+        boolean admit = !(refresh && route != null);
+        return NavEngineSelector.attempt(player.getUUID(), "owner_follow", () -> startBaritoneRoute(request, null, admit),
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
+    }
+
+    /**
+     * Starts one bounded, locally observed pursuit hop toward a known remote coordinate. Unlike
+     * {@link #startApproachTo}, that coordinate need not be in sight: the navigation fence uses
+     * it only as a heading, resolves an observed nearby stance, and Baritone receives only that
+     * local {@code GoalBlock}. It never requests chunk loading or grants a path through unseen
+     * terrain.
+     *
+     * @param remoteTarget a standoff coordinate derived from the followed player; heading only
+     * @param maxHop maximum horizontal distance of the observed local goal
+     * @param refresh re-point a running pursuit after the player moved or became visible
+     * @param allowBreak whether a visibly proven obstacle may be broken as a last resort
+     */
+    public ActionResult startDirectionalPursuitTo(BlockPos remoteTarget, int maxHop, boolean refresh, boolean allowBreak) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
+        if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
+            return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
+        }
+        NavRoute.Options options = new NavRoute.Options(allowBreak, false, player.isInWater());
+        NavRoute request = new NavRoute(NavRoute.Shape.DIRECTIONAL_PURSUIT, remoteTarget,
+                Math.max(1, maxHop), options, "directional_pursuit", serverTick());
+        boolean admit = !(refresh && route != null);
+        return NavEngineSelector.attempt(player.getUUID(), "directional_pursuit",
+                () -> startBaritoneRoute(request, null, admit),
                 () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
 
@@ -800,8 +857,15 @@ public final class ActionPack {
             logEngine(request.label(), request.target(), NavEngine.BARITONE, "rejected: " + admission.failure());
             return ActionResult.failed(admission.failure());
         }
-        double dx = request.target().getX() + 0.5D - player.getX();
-        double dz = request.target().getZ() + 0.5D - player.getZ();
+        // A directional pursuit's target is intentionally remote heading metadata. Its admitted
+        // local hop is the actual route and therefore the only distance allowed to shape this
+        // deadline; using the remote coordinate here would turn one small observed segment into
+        // an unbounded route budget.
+        BlockPos deadlineGoal = request.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT
+                ? java.util.Objects.requireNonNull(request.resolvedGoal(), "directional pursuit must have an observed hop")
+                : request.target();
+        double dx = deadlineGoal.getX() + 0.5D - player.getX();
+        double dz = deadlineGoal.getZ() + 0.5D - player.getZ();
         // A flight is as long as its radius, not as far as the source it runs from.
         double travel = request.shape() == NavRoute.Shape.RUN_AWAY ? request.radius() : Math.sqrt(dx * dx + dz * dz);
         int deadlineBudget = NavRouteRules.deadlineTicks(travel);
@@ -919,7 +983,12 @@ public final class ActionPack {
             // A replacement route (releaseWater=false) has registered itself; only a route that really ended takes its lease with it.
             clearRouteLease();
         }
-        BlockPos goal = finished.resolvedGoal() != null ? finished.resolvedGoal() : finished.target();
+        // Directional pursuit's target remains a remote heading, not an endpoint. Admission
+        // always installs a resolved hop before the route can run; the current cell is a
+        // fail-closed diagnostic fallback if a lifecycle bug ever violates that invariant.
+        BlockPos goal = finished.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT
+                ? (finished.resolvedGoal() != null ? finished.resolvedGoal() : player.blockPosition())
+                : (finished.resolvedGoal() != null ? finished.resolvedGoal() : finished.target());
         NavOutcome outcome = new NavOutcome(status, reason, finished.label(), goal, serverTick() - finished.startTick());
         lastRouteOutcome = outcome;
         if (releaseWater) {

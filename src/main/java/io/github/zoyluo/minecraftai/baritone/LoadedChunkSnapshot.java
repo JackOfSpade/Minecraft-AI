@@ -1,14 +1,18 @@
 package io.github.zoyluo.minecraftai.baritone;
 
+import baritone.utils.accessor.IClientChunkProvider;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import java.util.function.BooleanSupplier;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 
@@ -31,6 +35,56 @@ public final class LoadedChunkSnapshot extends ChunkSource {
     public LoadedChunkSnapshot(ServerLevel level, Long2ObjectMap<ChunkHolder> holders) {
         this.level = level;
         this.holders = holders;
+    }
+
+    /**
+     * Captures the same never-loading full-chunk view Baritone gives a planning worker. This is deliberately obtained from the
+     * server-thread chunk-source adapter rather than through {@code ServerLevel#getChunk}: it cannot request generation or wait on
+     * the server thread. A missing adapter fails closed; a direct owner-follow route then has no cells to plan through.
+     */
+    public static LoadedChunkSnapshot capture(ServerLevel level) {
+        Object source = level == null ? null : level.getChunkSource();
+        if (!(source instanceof IClientChunkProvider provider)) {
+            return null;
+        }
+        ChunkSource copy = provider.createThreadSafeCopy();
+        return copy instanceof LoadedChunkSnapshot snapshot ? snapshot : null;
+    }
+
+    /** True only while this snapshot still has a fully generated/readable chunk at the requested column. */
+    public boolean hasFullChunk(int chunkX, int chunkZ) {
+        return getChunk(chunkX, chunkZ, ChunkStatus.FULL, false) instanceof LevelChunk chunk && !chunk.isEmpty();
+    }
+
+    /** True when this snapshot can supply a state for the exact block coordinate. */
+    public boolean hasCell(int x, int y, int z) {
+        int relativeY = y - level.dimensionType().minY();
+        return relativeY >= 0 && relativeY < level.dimensionType().height() && hasFullChunk(x >> 4, z >> 4);
+    }
+
+    /** Whether this immutable snapshot belongs to the supplied live level (teleports/dimension changes must fail closed). */
+    public boolean belongsTo(ServerLevel candidate) {
+        return level == candidate;
+    }
+
+    /**
+     * Reads a block state only from this snapshot's full chunks. It returns null rather than consulting Baritone's cache or the live
+     * {@code Level} when the column was not captured (or has since become unavailable), which is what lets owner-follow expose
+     * coordinate navigation without an unseen-terrain cache leak.
+     */
+    public BlockState stateAt(int x, int y, int z) {
+        int relativeY = y - level.dimensionType().minY();
+        if (!hasCell(x, y, z)) {
+            return null;
+        }
+        ChunkAccess access = getChunk(x >> 4, z >> 4, ChunkStatus.FULL, false);
+        if (!(access instanceof LevelChunk chunk) || chunk.isEmpty()) {
+            return null;
+        }
+        LevelChunkSection section = chunk.getSections()[relativeY >> 4];
+        return section == null ? null
+                : section.hasOnlyAir() ? Blocks.AIR.defaultBlockState()
+                : section.getBlockState(x & 15, relativeY & 15, z & 15);
     }
 
     @Override

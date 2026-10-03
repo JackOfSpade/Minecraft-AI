@@ -79,9 +79,17 @@ final class BaritoneNavigatorMappingTest {
         String admit = method(fence, "public static Capture admit(");
         int near = admit.indexOf("if (route.shape() == NavRoute.Shape.NEAR)");
         int liveTargetGate = admit.indexOf("if (!liveTarget)", near);
+        int pursuit = admit.indexOf("else if (route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT)", near);
         int runAway = admit.indexOf("else if (route.shape() == NavRoute.Shape.RUN_AWAY)", near);
-        assertTrue(near >= 0 && liveTargetGate > near && runAway > liveTargetGate,
+        assertTrue(near >= 0 && liveTargetGate > near && pursuit > liveTargetGate && runAway > pursuit,
                 "NEAR must reject an unobserved coordinate before its corridor is admitted");
+        String pursuitBranch = admit.substring(pursuit, runAway);
+        assertTrue(pursuitBranch.contains("pursuitObservationPoint")
+                        && pursuitBranch.contains("nearestDirectionalPursuitStance")
+                        && pursuitBranch.contains("route.setResolvedGoal(hop)"),
+                "directional pursuit must resolve its remote heading to one observed local stance");
+        assertFalse(pursuitBranch.contains("!liveTarget"),
+                "directional pursuit deliberately does not require seeing the remote owner cell");
         assertFalse(admit.substring(runAway).contains("!liveTarget"),
                 "RUN_AWAY must remain a direction-only admission");
     }
@@ -223,6 +231,93 @@ final class BaritoneNavigatorMappingTest {
                 new NavRoute.Options(false, true, false), "placement", 0);
         assertNull(BaritoneNavigator.observedAdmissionSafetyFailure(placement, partial),
                 "a construction route has separately proven observed placement cells and must not be folded into the no-place guard");
+    }
+
+    @Test
+    void directionalPursuitPermitsOnlyABoundedObservedPartialAndRequiresALocalGoal() throws IOException {
+        NavRoute pursuit = new NavRoute(NavRoute.Shape.DIRECTIONAL_PURSUIT,
+                new net.minecraft.core.BlockPos(40, 64, 0), 12, NavRoute.Options.WALK_ONLY, "directional_pursuit", 0);
+        BaritonePlanner.Plan partial = new BaritonePlanner.Plan(
+                new PathCalculationResult(PathCalculationResult.Type.SUCCESS_SEGMENT), 1L, 0L, java.util.List.of());
+        assertNull(BaritoneNavigator.observedAdmissionSafetyFailure(pursuit, partial),
+                "a local directional hop may use a partial Baritone segment inside its immutable observed fence");
+
+        String navigator = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/BaritoneNavigator.java"));
+        String goalOf = method(navigator, "static Goal goalOf(AIPlayerEntity bot, NavRoute route) {");
+        assertTrue(goalOf.contains("case DIRECTIONAL_PURSUIT")
+                        && goalOf.contains("BlockPos hop = route.resolvedGoal()")
+                        && goalOf.contains("new GoalBlock(hop)")
+                        && goalOf.contains("directional pursuit has no observed hop"),
+                "the remote heading must never become a Baritone goal when admission omitted a local stance");
+        String completion = method(navigator, "private static boolean requiresCompleteObservedGoal(");
+        assertTrue(completion.contains("route.shape() != NavRoute.Shape.DIRECTIONAL_PURSUIT"),
+                "the exception is shape-specific; ordinary NEAR/BLOCK routes retain their complete-corridor rule");
+
+        String fence = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ObservedNavigationFence.java"));
+        String stance = method(fence, "private static BlockPos nearestDirectionalPursuitStance(");
+        assertTrue(stance.contains("distanceSq > maxHopSq") && stance.contains("forward > targetDistance"),
+                "a hop stays within its local bound and cannot pass the requested standoff point");
+        assertFalse(stance.contains("bot.level()") || stance.contains("getChunk"),
+                "choosing a pursuit stance must use only the frozen observation fence, never load or inspect remote terrain");
+    }
+
+    @Test
+    void ownerFollowIsOwnerBoundWalkOnlyAndCannotFallThroughToBaritoneCache() throws IOException {
+        NavRoute ownerRoute = NavRoute.ownerFollow(java.util.UUID.randomUUID(), new net.minecraft.core.BlockPos(40, 64, 0),
+                3, "owner_follow", 0);
+        assertEquals(NavRoute.Shape.OWNER_FOLLOW, ownerRoute.shape());
+        assertEquals(NavRoute.Options.WALK_ONLY, ownerRoute.options(),
+                "the only direct-coordinate shape is dry walking with no breaking or placing");
+        assertTrue(ownerRoute.ownerUuid() != null);
+
+        String pack = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/action/ActionPack.java"));
+        String ownerStart = method(pack, "public ActionResult startOwnerFollowTo(UUID ownerUuid, BlockPos target, int radius, boolean refresh) {");
+        assertTrue(ownerStart.contains("AIPlayerManager.INSTANCE.ownerOf(player).filter(ownerUuid::equals).isEmpty()")
+                        && ownerStart.contains("NavRoute.ownerFollow(ownerUuid, target")
+                        && ownerStart.contains("NavEngineSelector.attempt(player.getUUID(), \"owner_follow\""),
+                "the public route entry verifies ownership and delegates only to the Baritone seam");
+
+        String navigator = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/BaritoneNavigator.java"));
+        String start = method(navigator, "public static Admission start(AIPlayerEntity bot, NavRoute route, boolean admit) {");
+        assertTrue(start.contains("route.shape() == NavRoute.Shape.OWNER_FOLLOW && !isAuthorizedOwnerFollow(bot, route)"),
+                "the navigator repeats the owner check at the mutation boundary");
+        String guard = method(navigator, "private static boolean isAuthorizedOwnerFollow(");
+        assertTrue(guard.contains("route.ownerUuid() == null")
+                        && guard.contains("route.options().allowBreak() || route.options().allowPlace()")
+                        && guard.contains("route.options().allowWater()")
+                        && guard.contains("owner.blockPosition().equals(route.target())"),
+                "a direct goal must be this bot's current owner's current cell and remain walk-only");
+        String principal = method(navigator, "private static boolean isCurrentOwnerFollow(");
+        assertTrue(principal.contains("currentOwnerFollowTarget(bot, route) != null"),
+                "a running owner route must retain its owner/dimension authority without treating ordinary movement as revocation");
+        String refresh = method(navigator, "public static boolean refreshObservationFence(AIPlayerEntity bot) {");
+        assertTrue(refresh.contains("route.shape() == NavRoute.Shape.OWNER_FOLLOW && !isCurrentOwnerFollow(bot, route)")
+                        && refresh.contains("registry.revokeObservation(bot, \"owner_follow_authority_lost\", false)"),
+                "an ownership, disconnect, or dimension change revokes the direct snapshot before the next Baritone PRE tick");
+        String goalOf = method(navigator, "static Goal goalOf(AIPlayerEntity bot, NavRoute route) {");
+        assertTrue(goalOf.contains("case OWNER_FOLLOW -> new GoalNear(route.target(), route.radius())"),
+                "the approved owner coordinate maps directly to GoalNear");
+        String completion = method(navigator, "private static boolean requiresCompleteObservedGoal(");
+        assertTrue(completion.contains("route.shape() != NavRoute.Shape.OWNER_FOLLOW"),
+                "only the dedicated owner shape may continue through a loaded-chunk segment");
+
+        String context = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ServerPlayerContext.java"));
+        String allow = method(context, "public boolean allowNavigationCell(int x, int y, int z) {");
+        String state = method(context, "public BlockState navigationCellState(int x, int y, int z) {");
+        assertTrue(allow.contains("return ownerSnapshot.hasCell(x, y, z);")
+                        && state.contains("BlockState state = ownerSnapshot.stateAt(x, y, z);")
+                        && state.contains("return state == null ? Blocks.BEDROCK.defaultBlockState() : state;"),
+                "an allowed direct cell is paired with a snapshot state; any race/miss is virtual bedrock, never cache fallback");
+        assertTrue(context.contains("ownerFollowSnapshot = null;"),
+                "the direct snapshot is cleared at both route and lifecycle boundaries");
+
+        String snapshot = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/LoadedChunkSnapshot.java"));
+        String full = method(snapshot, "public boolean hasFullChunk(int chunkX, int chunkZ) {");
+        String stateAt = method(snapshot, "public BlockState stateAt(int x, int y, int z) {");
+        assertTrue(full.contains("instanceof LevelChunk chunk && !chunk.isEmpty()")
+                        && stateAt.contains("if (!hasCell(x, y, z))")
+                        && stateAt.contains("if (!(access instanceof LevelChunk chunk) || chunk.isEmpty())"),
+                "the loaded-cell predicate and state lookup agree: an empty/missing chunk cannot reopen a provider read");
     }
 
     @Test

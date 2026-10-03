@@ -185,6 +185,14 @@ public final class ObservedNavigationFence {
         int before = observed.size();
         BlockPos feet = bot.blockPosition();
         seedBodyEnvelope(bot, observed, tick);
+        if (route.shape() == NavRoute.Shape.OWNER_FOLLOW) {
+            // A live coordinate of this bot's already-verified owner is intentionally not a terrain observation. The navigator
+            // separately validates the UUID and installs a server-captured full-chunk snapshot in ServerPlayerContext; retaining
+            // only the body envelope here means the ordinary visible-terrain fence never turns into a global allow list.
+            ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
+            return new Capture(candidate, true, "", TargetProvenance.DIRECTION_ONLY, 0,
+                    Math.max(0, observed.size() - before), false);
+        }
         int rays = scan(bot, observed, route.target(), ADMISSION_RAYS, tick);
 
         // A target whose cell can presently be seen gets a small, individually-ray-proven stance
@@ -277,6 +285,23 @@ public final class ObservedNavigationFence {
                 return Capture.refused("navigation_goal_unobserved", rays, Math.max(0, observed.size() - before));
             }
             observeVisibleCorridors(bot, feet, route.target(), waterTraversal, observed, tick);
+        } else if (route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT) {
+            // Follow may know its owner's server position while the owner is outside this bot's
+            // view. That coordinate supplies a heading only: expose one short local corridor,
+            // then select an already observed stance that actually advances in that direction.
+            // No remote cell, chunk, or terrain state becomes route authority here.
+            observeVisibleCorridors(bot, feet, pursuitObservationPoint(bot, route), waterTraversal, observed, tick);
+            ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
+            BlockPos hop = nearestDirectionalPursuitStance(candidate, feet, route.target(), route.radius());
+            if (hop == null) {
+                return Capture.refused("navigation_pursuit_no_observed_hop", rays,
+                        Math.max(0, observed.size() - before));
+            }
+            // The remote target intentionally remains NavRoute.target() for the next heading
+            // calculation and logs. The local observed hop is the only Baritone GoalBlock.
+            route.setResolvedGoal(hop);
+            return new Capture(candidate, true, "", TargetProvenance.DIRECTION_ONLY, rays,
+                    Math.max(0, observed.size() - before), false);
         } else if (route.shape() == NavRoute.Shape.RUN_AWAY) {
             // GoalRunAway itself chooses the safe destination.  This merely exposes a short,
             // visible corridor away from the observed threat so it cannot discover terrain by
@@ -310,10 +335,19 @@ public final class ObservedNavigationFence {
         Map<Long, Cell> observed = retained(previous, dimension, tick);
         int before = observed.size();
         seedBodyEnvelope(bot, observed, tick);
+        if (route.shape() == NavRoute.Shape.OWNER_FOLLOW) {
+            // Return a fresh object (rather than `previous`) at the regular refresh cadence. BaritoneNavigator sees the replacement
+            // and renews the paired LoadedChunkSnapshot, so newly normal-player-loaded chunks can become available without a force load.
+            ObservedNavigationFence fence = freeze(dimension, route.minimumY(), generation, tick, observed);
+            return new Capture(fence, true, "", TargetProvenance.DIRECTION_ONLY, 0,
+                    Math.max(0, observed.size() - before), false);
+        }
         int rays = scan(bot, observed, route.target(), REFRESH_RAYS, tick);
         BlockPos feet = bot.blockPosition();
         if (route.shape() == NavRoute.Shape.RUN_AWAY) {
             observeVisibleCorridors(bot, feet, fleeObservationPoint(bot, route), false, observed, tick);
+        } else if (route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT) {
+            observeVisibleCorridors(bot, feet, pursuitObservationPoint(bot, route), route.options().allowWater(), observed, tick);
         } else {
             // Rays refresh faces and air cells, but they do not by themselves establish every
             // feet/head/support triple that a newly reached walking cell needs.  Carry a narrow
@@ -641,6 +675,97 @@ public final class ObservedNavigationFence {
                 (int) Math.round(dz / length * distance));
     }
 
+    /**
+     * The far end of one follow-pursuit lookahead. It is deliberately a horizontal projection
+     * from the bot's own current cell: a remote player's height must not manufacture an unseen
+     * cliff, stair, or pillar target. The subsequent corridor and stance proofs decide whether
+     * any safe local move actually exists.
+     */
+    private static BlockPos pursuitObservationPoint(AIPlayerEntity bot, NavRoute route) {
+        BlockPos feet = bot.blockPosition();
+        double dx = route.target().getX() - feet.getX();
+        double dz = route.target().getZ() - feet.getZ();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length <= 1.0E-9D) {
+            return feet;
+        }
+        int perception = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        // Leave two blocks of sight range for a ray-proven feet/head/support envelope at the
+        // hop edge. A low configured perception radius simply yields a very short or no hop.
+        int distance = Math.min(Math.max(1, route.radius()), Math.max(1, perception - 2));
+        return feet.offset((int) Math.round(dx / length * distance), 0,
+                (int) Math.round(dz / length * distance));
+    }
+
+    /**
+     * Selects the farthest forward local stance that the immutable fence has already proven.
+     * The remote coordinate is a compass bearing, never a cell to read: each candidate is in the
+     * current fence, is locally standable, stays inside the bounded hop radius, and strictly
+     * reduces horizontal distance to that coordinate. This prevents a failed pursuit from
+     * wandering away from the followed player while still permitting a small sideways detour.
+     */
+    private static BlockPos nearestDirectionalPursuitStance(ObservedNavigationFence fence, BlockPos origin,
+                                                             BlockPos remoteTarget, int requestedHop) {
+        double towardX = remoteTarget.getX() - origin.getX();
+        double towardZ = remoteTarget.getZ() - origin.getZ();
+        double targetDistanceSq = towardX * towardX + towardZ * towardZ;
+        if (targetDistanceSq <= 1.0E-9D) {
+            return null;
+        }
+        double targetDistance = Math.sqrt(targetDistanceSq);
+        double unitX = towardX / targetDistance;
+        double unitZ = towardZ / targetDistance;
+        int perception = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int maxHop = Math.min(Math.max(1, requestedHop), Math.max(1, perception - 2));
+        double maxHopSq = (double) maxHop * maxHop;
+
+        BlockPos best = null;
+        double bestForward = Double.NEGATIVE_INFINITY;
+        double bestLateral = Double.POSITIVE_INFINITY;
+        double bestDistance = Double.NEGATIVE_INFINITY;
+        for (long packed : fence.cells) {
+            BlockPos candidate = BlockPos.of(packed);
+            if (!SnapshotEnvironment.isStandable(fence, candidate)
+                    || Math.abs(candidate.getY() - origin.getY()) > 3) {
+                continue;
+            }
+            double dx = candidate.getX() - origin.getX();
+            double dz = candidate.getZ() - origin.getZ();
+            double distanceSq = dx * dx + dz * dz;
+            if (distanceSq < 1.0D || distanceSq > maxHopSq) {
+                continue;
+            }
+            double forward = dx * unitX + dz * unitZ;
+            // The directional target is FollowTask's standoff point, not the player cell. A
+            // local hop may approach it, but must never project through it and erase the
+            // player's requested personal-space gap on the last hop.
+            if (forward <= 0.25D || forward > targetDistance + 1.0E-6D) {
+                continue;
+            }
+            double remainingX = remoteTarget.getX() - candidate.getX();
+            double remainingZ = remoteTarget.getZ() - candidate.getZ();
+            if (remainingX * remainingX + remainingZ * remainingZ >= targetDistanceSq) {
+                continue;
+            }
+            double lateral = Math.abs(dx * unitZ - dz * unitX);
+            double distance = Math.sqrt(distanceSq);
+            if (best == null || forward > bestForward + 1.0E-6D
+                    || (Math.abs(forward - bestForward) <= 1.0E-6D && lateral < bestLateral - 1.0E-6D)
+                    || (Math.abs(forward - bestForward) <= 1.0E-6D
+                    && Math.abs(lateral - bestLateral) <= 1.0E-6D && distance > bestDistance)
+                    || (Math.abs(forward - bestForward) <= 1.0E-6D
+                    && Math.abs(lateral - bestLateral) <= 1.0E-6D
+                    && Math.abs(distance - bestDistance) <= 1.0E-6D
+                    && comparePosition(candidate, best) < 0)) {
+                best = candidate.immutable();
+                bestForward = forward;
+                bestLateral = lateral;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
     private static int scan(AIPlayerEntity bot, Map<Long, Cell> observed, BlockPos target, int rays, int tick) {
         if (rays <= 0) {
             return 0;
@@ -747,6 +872,8 @@ public final class ObservedNavigationFence {
         BlockPos goal = switch (route.shape()) {
             case BLOCK -> nearestStandable(fence, route.target());
             case NEAR -> nearestStandableWithin(fence, route.target(), route.radius());
+            case DIRECTIONAL_PURSUIT -> route.resolvedGoal();
+            case OWNER_FOLLOW -> null;
             case RUN_AWAY -> null;
         };
         return goal != null && ObservedGraphSearch.path(source, goal, new SnapshotEnvironment(fence)) != null;

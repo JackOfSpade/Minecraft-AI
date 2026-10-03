@@ -17,6 +17,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
@@ -28,6 +29,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.block.Block;
@@ -92,6 +94,11 @@ public final class BaritoneNavigator {
         // its exact owner reconciles the lease.
         if (bot.getActionPack().baritoneControlBlocked()) {
             return Admission.refused(ActionPack.GUARDED_STEP_FENCE);
+        }
+        if (route.shape() == NavRoute.Shape.OWNER_FOLLOW && !isAuthorizedOwnerFollow(bot, route)) {
+            // OWNER_FOLLOW is deliberately not a generic x-ray navigation shape. It is admitted only for the bot's current owner,
+            // only toward that owner's current live cell, and only as a dry walk-only route.
+            return Admission.refused("owner_follow_target_not_owner");
         }
         BaritoneRegistry registry = BaritoneRegistry.INSTANCE;
         IBaritone baritone = registry.get(bot);
@@ -411,8 +418,39 @@ public final class BaritoneNavigator {
     }
 
     private static boolean requiresCompleteObservedGoal(NavRoute route) {
+        // A directional pursuit has already resolved its remote heading to one nearby observed
+        // GoalBlock. It may execute a bounded partial segment inside that immutable fence, then
+        // reports back to FollowTask for a new hop; unlike NEAR/BLOCK it never gains authority
+        // to continue toward the unobserved remote coordinate.
         return route != null && route.shape() != NavRoute.Shape.RUN_AWAY
+                && route.shape() != NavRoute.Shape.DIRECTIONAL_PURSUIT
+                && route.shape() != NavRoute.Shape.OWNER_FOLLOW
                 && !route.options().allowWater() && !route.options().allowPlace();
+    }
+
+    /** Validates the narrow exception before a route gets a chunk snapshot or a Baritone process. */
+    private static boolean isAuthorizedOwnerFollow(AIPlayerEntity bot, NavRoute route) {
+        if (route.ownerUuid() == null || route.options().allowBreak() || route.options().allowPlace()
+                || route.options().allowWater()) {
+            return false;
+        }
+        ServerPlayer owner = currentOwnerFollowTarget(bot, route);
+        return owner != null && owner.blockPosition().equals(route.target());
+    }
+
+    /** The live owner identity/dimension check shared by first admission and active-route refreshes. */
+    private static boolean isCurrentOwnerFollow(AIPlayerEntity bot, NavRoute route) {
+        return route.ownerUuid() != null && !route.options().allowBreak() && !route.options().allowPlace()
+                && !route.options().allowWater() && currentOwnerFollowTarget(bot, route) != null;
+    }
+
+    /** Returns the currently connected owner in this bot's level, or null when that authority has gone away. */
+    private static ServerPlayer currentOwnerFollowTarget(AIPlayerEntity bot, NavRoute route) {
+        if (AIPlayerManager.INSTANCE.ownerOf(bot).filter(route.ownerUuid()::equals).isEmpty()) {
+            return null;
+        }
+        ServerPlayer owner = bot.getServer().getPlayerList().getPlayer(route.ownerUuid());
+        return owner != null && owner.level() == bot.level() ? owner : null;
     }
 
     /** Stops whatever Baritone is doing for the bot (goal, path, search, inputs, block being broken) and lets go of it. */
@@ -445,6 +483,16 @@ public final class BaritoneNavigator {
     static Goal goalOf(AIPlayerEntity bot, NavRoute route) {
         return switch (route.shape()) {
             case NEAR -> new GoalNear(route.target(), route.radius());
+            case OWNER_FOLLOW -> new GoalNear(route.target(), route.radius());
+            case DIRECTIONAL_PURSUIT -> {
+                BlockPos hop = route.resolvedGoal();
+                if (hop == null) {
+                    // The observation admission must install a local stance before Baritone is
+                    // even initialized. Do not fall back to the remote heading as a goal.
+                    throw new IllegalStateException("directional pursuit has no observed hop");
+                }
+                yield new GoalBlock(hop);
+            }
             // Baritone's own flee goal: satisfied at radius blocks (horizontally) from the observed source cell; its search
             // picks the way, this mod does not project a flee target by hand.
             case RUN_AWAY -> new GoalRunAway(route.radius(), route.target());
@@ -478,6 +526,15 @@ public final class BaritoneNavigator {
         NavRoute route = registry.observedRoute(bot);
         if (route == null) {
             return true;
+        }
+        // A direct coordinate route remains a privilege of the current owner, not merely of
+        // the UUID that owned the bot when the route began. The exact cell is intentionally
+        // allowed to lag until FollowTask's normal re-goal cadence (the owner may be walking),
+        // but an ownership, disconnect, or dimension change must revoke the terrain snapshot
+        // before another Baritone PRE tick can use it.
+        if (route.shape() == NavRoute.Shape.OWNER_FOLLOW && !isCurrentOwnerFollow(bot, route)) {
+            registry.revokeObservation(bot, "owner_follow_authority_lost", false);
+            return false;
         }
         ObservedNavigationFence prior = registry.observationFence(bot);
         ObservedNavigationFence.Capture refreshed = ObservedNavigationFence.refresh(

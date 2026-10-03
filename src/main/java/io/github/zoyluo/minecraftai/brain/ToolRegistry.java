@@ -43,6 +43,7 @@ import io.github.zoyluo.minecraftai.task.CombatTask;
 import io.github.zoyluo.minecraftai.task.ContainerTask;
 import io.github.zoyluo.minecraftai.task.CraftTask;
 import io.github.zoyluo.minecraftai.task.DismountBoatTask;
+import io.github.zoyluo.minecraftai.task.DiscoveryTask;
 import io.github.zoyluo.minecraftai.task.EatTask;
 import io.github.zoyluo.minecraftai.task.FishTask;
 import io.github.zoyluo.minecraftai.task.FarmTask;
@@ -56,6 +57,7 @@ import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MineValuablesTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
+import io.github.zoyluo.minecraftai.task.ShowTargetTask;
 import io.github.zoyluo.minecraftai.task.StockpileTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.Task;
@@ -441,6 +443,27 @@ public final class ToolRegistry {
                 .build(), (bot, args) -> ContainerTask.nearestContainer(bot, optionalInt(args, "radius", 8))
                 .map(pos -> ok("{\"x\":" + pos.getX() + ",\"y\":" + pos.getY() + ",\"z\":" + pos.getZ() + "}"))
                 .orElseGet(() -> fail("no_container")));
+
+        register("find", "Start a persistent, bounded locate-only search for any registered non-air block (for example furnace, crafting_table, oak_sapling, water, or modid:block), or for sheep / a storage container. It surveys only targets the bot can actually see, then explores with short observed hops (never force-loading chunks, mining, harvesting, attacking, or opening storage). It reports either a real coordinate or that it could not find the target within the requested radius.", objectSchema()
+                .property("target", stringSchema("registered block name/id (e.g. furnace, oak_sapling, minecraft:chest, modid:block), or sheep/container/bonus_chest"))
+                .property("radius", integerSchema("search radius in blocks (24..64)", 24, 64))
+                .required("target")
+                .build(), (bot, args) -> {
+            Task task = DiscoveryTask.find(requiredString(args, "target"), optionalInt(args, "radius", 64));
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("show_location", "Physically show this bot's owner where any known, verified location or target is. The bot first tells the owner it will show them, uses Baritone to sprint within 5 blocks of that owner (even if out of view), then uses only safe observed Baritone navigation to within 3 blocks of the target, faces it, and makes three harmless air swings. Pass all x/y/z when another tool, visible context, memory, or the player supplied a verified coordinate; omit them only to use the latest successful find in this dimension. It never mines, attacks, opens, or interacts with the target.", objectSchema()
+                .property("x", integerSchema("optional verified target x; omit x/y/z only to use the latest find"))
+                .property("y", integerSchema("optional verified target y; omit x/y/z only to use the latest find"))
+                .property("z", integerSchema("optional verified target z; omit x/y/z only to use the latest find"))
+                .property("label", stringSchema("optional player-facing name for the target"))
+                .build(), (bot, args) -> {
+            Task task = showLocationTask(bot, args);
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
+        });
 
         register("find_item_in_storage", "Answer where an item is stored, from what this bot itself saw the last time it opened storage containers (chests, barrels, shulker boxes). Returns the few best remembered containers with count, free slots and age; it never looks inside a container from a distance, so a result can be stale. Use before withdraw when you are unsure which chest holds the item.", objectSchema()
                 .property("item", stringSchema("item id, for example minecraft:cobblestone"))
@@ -966,8 +989,8 @@ public final class ToolRegistry {
 
     /** assign_task and the task lifecycle tools it shares status/cancellation with. */
     private void registerTaskLifecycleTools() {
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, and container work. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which only selects observed targets. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw"))
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, container work, or showing any known verified location. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which only selects observed targets. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+                .property("task_type", stringSchema("move, find, show_location, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -1035,6 +1058,13 @@ public final class ToolRegistry {
         }
         return switch (taskType) {
             case "move" -> new MoveTask(bot, new BlockPos(requiredInt(params, "x"), requiredInt(params, "y"), requiredInt(params, "z")));
+            case "find" -> DiscoveryTask.find(requiredString(params, "target"), optionalInt(params, "radius", 64));
+            case "show_location" -> showLocationTask(bot, params);
+            // The session log showed the model attempting assign_task(find_container) even
+            // though the old one-shot inspection tool was not a task type. Retain that spelling
+            // as a safe persistent locate-only alias instead of leaving the bot idle.
+            case "find_container" -> DiscoveryTask.find(optionalString(params, "target", "bonus_chest"),
+                    optionalInt(params, "radius", 64));
             case "forage" -> GatherQuotaTask.collectAdditional(
                     net.minecraft.world.item.Items.SWEET_BERRIES, optionalInt(params, "count", 4));
             case "attack" -> new CombatTask(
@@ -1116,6 +1146,18 @@ public final class ToolRegistry {
             }
             default -> throw new IllegalArgumentException("unknown_task_type: " + taskType);
         };
+    }
+
+    /** Explicit verified coordinates work independently; omitting them makes “show me” use the latest real discovery. */
+    private static Task showLocationTask(AIPlayerEntity bot, JsonObject args) {
+        BlockPos explicit = optionalBlockPos(args, "x", "y", "z");
+        String label = optionalString(args, "label", "");
+        if (explicit != null) {
+            return new ShowTargetTask(explicit, label);
+        }
+        DiscoveryTask.FoundTarget found = DiscoveryTask.latestFound(bot)
+                .orElseThrow(() -> new IllegalArgumentException("no_recent_find_in_this_dimension"));
+        return new ShowTargetTask(found.pos(), label.isBlank() ? found.label() : label);
     }
 
     private void register(String name, String description, JsonObject schema, ToolDefinition.Handler handler) {

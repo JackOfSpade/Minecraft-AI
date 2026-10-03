@@ -66,6 +66,12 @@ public final class ServerPlayerContext implements IPlayerContext {
     /** Bounded same-dimension memory retained between routes; it is never exposed to Baritone while idle. */
     private volatile ObservedNavigationFence observationMemory = ObservedNavigationFence.empty();
     /**
+     * The one intentionally coordinate-aware navigation grant: a full-chunk snapshot captured on the server thread for a verified
+     * owner-follow route. It exposes exact states only from chunks that were already FULL at capture time; it never loads a chunk
+     * and, unlike a blanket allow flag, cannot fall through to Baritone's cached regions.
+     */
+    private volatile LoadedChunkSnapshot ownerFollowSnapshot;
+    /**
      * A pre-execution fence refusal emitted by the vendored executor. The driver consumes it in
      * the same PRE tick and revokes the route before another executor can take over.
      */
@@ -184,8 +190,18 @@ public final class ServerPlayerContext implements IPlayerContext {
 
     /** Installs an admitted route's immutable observed terrain. Server thread only. */
     public void setObservationFence(ObservedNavigationFence fence) {
+        setObservationFence(fence, false);
+    }
+
+    /**
+     * Installs a route boundary. A verified owner follow gets a fresh, immutable loaded-chunk snapshot in addition to its ordinary
+     * observation fence; every other route clears that grant immediately.
+     */
+    public void setObservationFence(ObservedNavigationFence fence, boolean ownerFollow) {
         observationFence = java.util.Objects.requireNonNull(fence, "fence");
         observationMemory = fence;
+        ownerFollowSnapshot = ownerFollow && player().level() instanceof net.minecraft.server.level.ServerLevel serverLevel
+                ? LoadedChunkSnapshot.capture(serverLevel) : null;
         navigationPathSafetyFailure = null;
     }
 
@@ -202,6 +218,7 @@ public final class ServerPlayerContext implements IPlayerContext {
     /** Stops every future planner/executor lookup immediately while retaining bounded evidence for a later route. */
     public void clearObservationFence() {
         observationFence = ObservedNavigationFence.empty();
+        ownerFollowSnapshot = null;
         navigationPathSafetyFailure = null;
     }
 
@@ -209,6 +226,7 @@ public final class ServerPlayerContext implements IPlayerContext {
     public void clearObservationMemory() {
         observationFence = ObservedNavigationFence.empty();
         observationMemory = ObservedNavigationFence.empty();
+        ownerFollowSnapshot = null;
         navigationPathSafetyFailure = null;
     }
 
@@ -218,6 +236,12 @@ public final class ServerPlayerContext implements IPlayerContext {
      */
     @Override
     public boolean allowNavigationCell(int x, int y, int z) {
+        LoadedChunkSnapshot ownerSnapshot = ownerFollowSnapshot();
+        if (ownerSnapshot != null) {
+            // The paired navigationCellState() below supplies the state from this exact snapshot. Returning true only here makes
+            // a missing/evicted column virtual bedrock before BlockStateInterface can consult its cached-region fallback.
+            return ownerSnapshot.hasCell(x, y, z);
+        }
         ObservedNavigationFence fence = observationFence;
         return fenceMatchesCurrentDimension(fence) && fence.allows(x, y, z);
     }
@@ -225,6 +249,16 @@ public final class ServerPlayerContext implements IPlayerContext {
     /** Patch 0018 consumes this immutable state instead of re-reading a past observation from the live world. */
     @Override
     public BlockState navigationCellState(int x, int y, int z) {
+        LoadedChunkSnapshot ownerSnapshot = ownerFollowSnapshot();
+        if (ownerSnapshot != null) {
+            // Never return null while a direct snapshot is active. The snapshot can be refreshed
+            // between BlockStateInterface's state read and its allowNavigationCell check (and a
+            // holder can disappear between hasCell and stateAt); a null in either case would let
+            // BSI fall through to its provider/cache. Virtual bedrock keeps that one stale cell
+            // blocked; a later replan sees the fresh snapshot normally.
+            BlockState state = ownerSnapshot.stateAt(x, y, z);
+            return state == null ? Blocks.BEDROCK.defaultBlockState() : state;
+        }
         ObservedNavigationFence fence = observationFence;
         return fenceMatchesCurrentDimension(fence) ? fence.stateAt(x, y, z) : null;
     }
@@ -273,6 +307,13 @@ public final class ServerPlayerContext implements IPlayerContext {
     /** A same-coordinate snapshot must never survive a dimension change or external teleport. */
     private boolean fenceMatchesCurrentDimension(ObservedNavigationFence fence) {
         return fence != null && fence.dimension().equals(BotEdits.dimensionKey(player().level()));
+    }
+
+    /** The direct snapshot must not survive a level replacement even if teardown ordering is interrupted. */
+    private LoadedChunkSnapshot ownerFollowSnapshot() {
+        LoadedChunkSnapshot snapshot = ownerFollowSnapshot;
+        return snapshot != null && player().level() instanceof net.minecraft.server.level.ServerLevel serverLevel
+                && snapshot.belongsTo(serverLevel) ? snapshot : null;
     }
 
     /** The bot's break/place permission. Applies to the next plan (a running path re-validates its costs every tick). */

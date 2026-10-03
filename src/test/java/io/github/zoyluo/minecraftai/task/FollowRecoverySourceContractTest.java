@@ -18,9 +18,18 @@ final class FollowRecoverySourceContractTest {
         String follow = read("task/FollowTask.java");
 
         assertTrue(follow.contains("private boolean followLandBaritone(AIPlayerEntity bot, ServerPlayer target)"));
-        assertTrue(follow.contains("pack.startApproachTo(targetPos, baritoneRadius, false, true)"));
-        assertTrue(follow.contains("pack.startApproachTo(targetPos, baritoneRadius, true, true)"),
-                "a moving player is re-goaled through Baritone, not a second navigator");
+        assertTrue(follow.contains("isVerifiedOwner(bot, target)")
+                        && follow.contains("pack.startOwnerFollowTo(target.getUUID(), targetPos, baritoneRadius, refresh)")
+                        && follow.contains("new LandRouteAttempt(ownerRoute, false, true)"),
+                "the verified owner uses the dedicated live-coordinate route before ordinary observed routing");
+        assertTrue(follow.contains("pack.startApproachTo(targetPos, baritoneRadius, refresh, true)"),
+                "a named/non-owner player remains inside the ordinary observed GoalNear boundary");
+        assertTrue(follow.contains("pack.startDirectionalPursuitTo(standoff, DIRECTIONAL_PURSUIT_MAX_HOP, refresh, true)"),
+                "an out-of-view named/non-owner player receives a bounded observed Baritone hop, not a local navigator");
+        assertTrue(follow.contains("standOffsetFrom(targetPos, bot.blockPosition(), STOP_DISTANCE)"),
+                "the remote pursuit heading stops at the normal personal-space offset");
+        assertTrue(follow.contains("baritoneTargetPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ"),
+                "re-goal comparison keeps the actual player position rather than the standoff heading");
         assertTrue(follow.contains("if (repathBackoff && elapsed < nextRepathTick)"),
                 "a failed admission becomes an explicit hold/backoff rather than an every-tick retry");
         assertFalse(follow.contains("ObservableWorldQuery"),
@@ -67,6 +76,12 @@ final class FollowRecoverySourceContractTest {
                 "arrival threshold must keep the one-sided slack");
         assertTrue(follow.contains("baritoneProgress.stalled(elapsed, bot.distanceTo(target), bot.getX(), bot.getZ())"),
                 "follow owns a Baritone no-progress recovery instead of handing off to another navigator");
+        assertTrue(follow.contains("stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)")
+                        && follow.contains("stuckRecovery.consumeForcedRepath()"),
+                "a physically stopped follower retains its standing order and gets bounded recovery/replans");
+        assertTrue(follow.contains("(directional || ownerFollow) && NavRouteRules.PATH_INCOMPLETE.equals(ended.reason())")
+                        && follow.contains("repathBackoff = false;"),
+                "a bounded directional leg or loaded-chunk owner segment immediately acquires its next route");
         assertTrue(follow.contains("private static final double SWIM_STOP_DISTANCE = 3.5D;"),
                 "swim distance is unchanged by the land stop-distance change");
         assertFalse(follow.contains("startSurfacePathTo"),

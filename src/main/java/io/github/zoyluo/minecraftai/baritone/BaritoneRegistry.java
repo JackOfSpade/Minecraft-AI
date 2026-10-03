@@ -171,7 +171,7 @@ public final class BaritoneRegistry {
     public void setObservationFence(AIPlayerEntity bot, ObservedNavigationFence fence, NavRoute route) {
         get(bot);
         Entry entry = entries.get(bot.getUUID());
-        entry.context.setObservationFence(fence);
+        entry.context.setObservationFence(fence, route != null && route.shape() == NavRoute.Shape.OWNER_FOLLOW);
         entry.observedRoute = route;
         entry.observationRevocationReason = null;
     }
@@ -195,7 +195,8 @@ public final class BaritoneRegistry {
         if (after == before) {
             return;
         }
-        entry.context.setObservationFence(after);
+        entry.context.setObservationFence(after, entry.observedRoute != null
+                && entry.observedRoute.shape() == NavRoute.Shape.OWNER_FOLLOW);
         BotLog.path(bot, "nav_observed_placement_result", "pos", pos, "generation", after.generation());
     }
 

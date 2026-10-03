@@ -84,7 +84,8 @@ final class NavEngineLazyBootstrapContractTest {
             assertTrue(pack.substring(Math.max(0, at - 120), at).contains("NavEngineSelector.attempt("),
                     "startBaritoneRoute call at offset " + at + " is not inside NavEngineSelector.attempt");
         }
-        assertEquals(5, calls, "walk_to, path_to, approach, swim_route and run_away are the Baritone entries");
+        assertEquals(7, calls,
+                "walk_to, path_to, approach, owner_follow, directional_pursuit, swim_route and run_away are the Baritone entries");
         // Nothing else in the mod starts Baritone routes.
         try (Stream<Path> files = Files.walk(MAIN)) {
             List<Path> users = files.filter(p -> p.toString().endsWith(".java"))
@@ -162,6 +163,12 @@ final class NavEngineLazyBootstrapContractTest {
         int resolved = body.indexOf("return route.resolvedGoal();", runAway);
         assertTrue(runAway >= 0 && resolved > runAway,
                 "RUN_AWAY must report only a real resolved destination (normally none), never its threat source");
+        int directional = body.indexOf("route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT");
+        assertTrue(directional > runAway && body.indexOf("return route.resolvedGoal();", directional) > directional,
+                "DIRECTIONAL_PURSUIT must likewise report only its admitted local hop, never its remote heading");
+        assertTrue(pack.contains("? java.util.Objects.requireNonNull(request.resolvedGoal(), \"directional pursuit must have an observed hop\")")
+                        && pack.contains("finished.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT"),
+                "a directional route's deadline and outcome must use its local resolved hop, never the remote heading");
     }
 
     @Test

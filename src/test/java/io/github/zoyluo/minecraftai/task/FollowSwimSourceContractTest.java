@@ -1150,9 +1150,9 @@ final class FollowSwimSourceContractTest {
     @Test
     void followRechecksItsBaritoneGoalAsSoonAsThePlayerMoves() throws IOException {
         String follow = read("task/FollowTask.java");
-        assertTrue(follow.contains("baritoneGoalPos = targetPos.immutable();"));
-        assertTrue(follow.contains("baritoneGoalPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ")
-                && follow.contains("nextRepathTick = elapsed + BARITONE_REGOAL_TICKS;"));
+        assertTrue(follow.contains("baritoneTargetPos = targetPos.immutable();"));
+        assertTrue(follow.contains("baritoneTargetPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ")
+                && follow.contains("nextRepathTick = elapsed + (regoal.result().isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);"));
     }
 
     @Test

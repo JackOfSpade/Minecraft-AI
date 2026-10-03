@@ -80,6 +80,17 @@ public final class OreProspector {
     }
 
     /**
+     * Starts a resumable search that always uses the normal player-visible cell predicate,
+     * even if a caller happens to run with a diagnostic/operator hidden-scan capability. Use
+     * this for player-facing discovery where inspecting unseen loaded terrain would itself be
+     * the wrong behavior, rather than merely re-proving the final result before reporting it.
+     */
+    public static Scan beginObservable(AIPlayerEntity bot, int range,
+                                       Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
+        return new Scan(bot, range, match, posFilter, false, false);
+    }
+
+    /**
      * Like {@link #begin}, but a candidate cell counts as seen when {@link ObservableWorldQuery#canObserveFarmCell}
      * says the bot can see its real outline. Crops have an outline but no collider, so the collider-ray
      * face test of {@link #begin} can never see them; farm scans (village crop raiding) use this instead.
@@ -90,6 +101,12 @@ public final class OreProspector {
         boolean hiddenScanAllowed = CapabilityRuntime.decide(
                 bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_prospector").allowed();
         return new Scan(bot, range, match, posFilter, hiddenScanAllowed, true);
+    }
+
+    /** Observable-only counterpart of {@link #beginFarmCells(AIPlayerEntity, int, Predicate, Predicate)}. */
+    public static Scan beginObservableFarmCells(AIPlayerEntity bot, int range,
+                                                Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
+        return new Scan(bot, range, match, posFilter, false, true);
     }
 
     /**
