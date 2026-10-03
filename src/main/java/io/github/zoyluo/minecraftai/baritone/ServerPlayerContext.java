@@ -4,9 +4,11 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.cache.IWorldData;
 import baritone.api.pathing.calc.IPath;
+import baritone.api.pathing.movement.IMovement;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.IPlayerController;
+import baritone.pathing.movement.movements.MovementParkour;
 import baritone.api.utils.RayTraceUtils;
 import baritone.api.utils.Rotation;
 import baritone.behavior.LookBehavior;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -65,6 +68,12 @@ public final class ServerPlayerContext implements IPlayerContext {
     private volatile ObservedNavigationFence observationFence = ObservedNavigationFence.empty();
     /** Bounded same-dimension memory retained between routes; it is never exposed to Baritone while idle. */
     private volatile ObservedNavigationFence observationMemory = ObservedNavigationFence.empty();
+    /**
+     * Whether the active route explicitly permits water traversal. This is route-scoped rather
+     * than a global Baritone preference: a dry follower must not turn a visible water surface
+     * into a legal shortcut merely because another bot is swimming.
+     */
+    private volatile boolean waterAllowed;
     /**
      * The one intentionally coordinate-aware navigation grant: a full-chunk snapshot captured on the server thread for a verified
      * owner-follow route. It exposes exact states only from chunks that were already FULL at capture time; it never loads a chunk
@@ -205,6 +214,11 @@ public final class ServerPlayerContext implements IPlayerContext {
         navigationPathSafetyFailure = null;
     }
 
+    /** Applies the active route's water rule to both planner and executor snapshot reads. */
+    public void setWaterAllowed(boolean allowed) {
+        waterAllowed = allowed;
+    }
+
     /** The active fence; safe to hand to the server-thread refresh boundary. */
     public ObservedNavigationFence observationFence() {
         return observationFence;
@@ -219,6 +233,7 @@ public final class ServerPlayerContext implements IPlayerContext {
     public void clearObservationFence() {
         observationFence = ObservedNavigationFence.empty();
         ownerFollowSnapshot = null;
+        waterAllowed = false;
         navigationPathSafetyFailure = null;
     }
 
@@ -227,6 +242,7 @@ public final class ServerPlayerContext implements IPlayerContext {
         observationFence = ObservedNavigationFence.empty();
         observationMemory = ObservedNavigationFence.empty();
         ownerFollowSnapshot = null;
+        waterAllowed = false;
         navigationPathSafetyFailure = null;
     }
 
@@ -240,10 +256,11 @@ public final class ServerPlayerContext implements IPlayerContext {
         if (ownerSnapshot != null) {
             // The paired navigationCellState() below supplies the state from this exact snapshot. Returning true only here makes
             // a missing/evicted column virtual bedrock before BlockStateInterface can consult its cached-region fallback.
-            return ownerSnapshot.hasCell(x, y, z);
+            BlockState state = ownerSnapshot.stateAt(x, y, z);
+            return navigationStateAllowed(state);
         }
         ObservedNavigationFence fence = observationFence;
-        return fenceMatchesCurrentDimension(fence) && fence.allows(x, y, z);
+        return fenceMatchesCurrentDimension(fence) && navigationStateAllowed(fence.stateAt(x, y, z));
     }
 
     /** Patch 0018 consumes this immutable state instead of re-reading a past observation from the live world. */
@@ -254,13 +271,30 @@ public final class ServerPlayerContext implements IPlayerContext {
             // Never return null while a direct snapshot is active. The snapshot can be refreshed
             // between BlockStateInterface's state read and its allowNavigationCell check (and a
             // holder can disappear between hasCell and stateAt); a null in either case would let
-            // BSI fall through to its provider/cache. Virtual bedrock keeps that one stale cell
-            // blocked; a later replan sees the fresh snapshot normally.
+            // BSI fall through to its provider/cache. Virtual bedrock keeps a stale or dry-water
+            // cell blocked; allowNavigationCell independently rejects the latter so it can never
+            // become imaginary walking support.
             BlockState state = ownerSnapshot.stateAt(x, y, z);
-            return state == null ? Blocks.BEDROCK.defaultBlockState() : state;
+            return state == null || !navigationStateAllowed(state)
+                    ? Blocks.BEDROCK.defaultBlockState() : state;
         }
         ObservedNavigationFence fence = observationFence;
-        return fenceMatchesCurrentDimension(fence) ? fence.stateAt(x, y, z) : null;
+        if (!fenceMatchesCurrentDimension(fence)) {
+            return null;
+        }
+        BlockState state = fence.stateAt(x, y, z);
+        // BlockStateInterface asks this method before its generic allowNavigationCell fallback.
+        // Return virtual bedrock for a dry water cell as well as denying it there: either lookup
+        // order therefore remains fail-closed, while canWalkOn sees the paired denial and cannot
+        // use the virtual block as support.
+        return state == null || navigationStateAllowed(state) ? state : Blocks.BEDROCK.defaultBlockState();
+    }
+
+    /** Water permission never makes lava navigable; dry routes additionally treat water as unavailable terrain. */
+    private boolean navigationStateAllowed(BlockState state) {
+        return state != null
+                && !state.getFluidState().is(FluidTags.LAVA)
+                && (waterAllowed || !state.getFluidState().is(FluidTags.WATER));
     }
 
     /**
@@ -274,11 +308,80 @@ public final class ServerPlayerContext implements IPlayerContext {
             return false;
         }
         String failure = BaritoneNavigator.observedExecutionPathSafetyFailure(player(), path, firstMovement);
+        if (failure == null && !allowPathFootprints(path, firstMovement)) {
+            // MovementParkour can jump over a short gap without declaring the cells beneath the
+            // arc as a source, destination, or block action. Keep the executor fail-closed even
+            // if a planner bug proposes a route whose swept body/support cells include lava or
+            // another unavailable observation-fence cell. Dry routes also reject water through
+            // the same navigation-cell predicate.
+            failure = "navigation_route_cell_denied";
+        }
         if (failure == null) {
             return true;
         }
         navigationPathSafetyFailure = failure;
         return false;
+    }
+
+    /**
+     * Checks Baritone's one hidden-span movement. Ordinary movements expose their full cells to
+     * the planner and executor callbacks; {@link MovementParkour} instead records no intermediate
+     * cells even though it crosses a short cardinal arc. That arc must remain inside the admitted
+     * observation fence; water-capable routes may cross water, but no route may cross lava.
+     */
+    private boolean allowPathFootprints(IPath path, int firstMovement) {
+        if (path == null) {
+            return true;
+        }
+        List<IMovement> movements = path.movements();
+        int start = Math.max(0, firstMovement);
+        for (int index = start; index < movements.size(); index++) {
+            IMovement movement = movements.get(index);
+            if (movement == null || (movement instanceof MovementParkour
+                    && !allowParkourFootprint(movement.getSrc(), movement.getDest()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** MovementParkour is cardinal; malformed geometry is denied instead of being approximated as a diagonal. */
+    private boolean allowParkourFootprint(BetterBlockPos source, BetterBlockPos destination) {
+        if (source == null || destination == null) {
+            return false;
+        }
+        int sourceX = source.getX();
+        int sourceY = source.getY();
+        int sourceZ = source.getZ();
+        int destinationX = destination.getX();
+        int destinationY = destination.getY();
+        int destinationZ = destination.getZ();
+        int deltaX = destinationX - sourceX;
+        int deltaZ = destinationZ - sourceZ;
+        int spanX = Math.abs(deltaX);
+        int spanZ = Math.abs(deltaZ);
+        int span = spanX + spanZ;
+        if ((spanX == 0) == (spanZ == 0) || span < 2 || span > 4
+                || (destinationY != sourceY && destinationY != sourceY + 1)) {
+            return false;
+        }
+        int directionX = Integer.signum(deltaX);
+        int directionZ = Integer.signum(deltaZ);
+        for (int distance = 0; distance <= span; distance++) {
+            if (!allowParkourColumn(sourceX + directionX * distance, sourceY,
+                    sourceZ + directionZ * distance)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Same support/body/head envelope as patch 0019's MovementParkour cost check. */
+    private boolean allowParkourColumn(int x, int y, int z) {
+        return allowNavigationCell(x, y - 1, z)
+                && allowNavigationCell(x, y, z)
+                && allowNavigationCell(x, y + 1, z)
+                && allowNavigationCell(x, y + 2, z);
     }
 
     /**

@@ -107,6 +107,12 @@ public final class NavSafetyNet {
     }
     private final Map<UUID, WaterRescueDeadline> waterRescueDeadlines = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> followSwimLeaseUntil = new ConcurrentHashMap<>();
+    /**
+     * A ShowTargetTask surface presentation uses this distinct, short high-air lease. It is not
+     * Follow's broader water pursuit: its caller freshly proves a single top-water cell before
+     * every renewal, and a low-air or lava condition immediately restores ordinary rescue.
+     */
+    private final Map<UUID, Integer> surfacePresentationWaterLeaseUntil = new ConcurrentHashMap<>();
     // The Baritone counterpart of the follow swim lease: renewed on every tick Baritone drives a bot along a route that is
     // allowed to go through water (BaritoneDriver), so the bot is not treated as a drowning rescue case while it swims the
     // segment Baritone planned. Same guards as the follow lease: a few ticks long, void as soon as the air gets low.
@@ -183,6 +189,7 @@ public final class NavSafetyNet {
         strictAutomaticWaterRescueSessions.remove(id);
         waterRescueDeadlines.remove(id);
         followSwimLeaseUntil.remove(id);
+        surfacePresentationWaterLeaseUntil.remove(id);
         baritoneWaterLeaseUntil.remove(id);
         waterEscapeCache.remove(id);
         strictWaterEscapeSearches.remove(id);
@@ -198,6 +205,7 @@ public final class NavSafetyNet {
         strictAutomaticWaterRescueSessions.clear();
         waterRescueDeadlines.clear();
         followSwimLeaseUntil.clear();
+        surfacePresentationWaterLeaseUntil.clear();
         baritoneWaterLeaseUntil.clear();
         waterEscapeCache.clear();
         strictWaterEscapeSearches.clear();
@@ -266,6 +274,38 @@ public final class NavSafetyNet {
     }
 
     /**
+     * Authorizes a briefly held, observed water-surface presentation. The caller supplies the
+     * exact water cell it has just proved to be breathable, so this cannot become a general
+     * permission to dive or ignore a hidden water crisis.
+     *
+     * @return whether the high-air, lava-free surface lease was admitted
+     */
+    boolean renewObservedSurfacePresentationWater(AIPlayerEntity bot, BlockPos waterCell) {
+        if (waterCell == null || followSwimMustYield(bot) || bot.isInLava()
+                || bot.level().getFluidState(bot.blockPosition()).is(FluidTags.LAVA)
+                || SwimRoute.observedCell(bot, bot.level(), waterCell, false)
+                != SwimRoute.Cell.WATER_WITH_AIR_ABOVE) {
+            clearObservedSurfacePresentationWater(bot);
+            return false;
+        }
+        // A prior rescue belongs to an accidental entry. Replace only its exact admission after
+        // the caller's fresh surface proof, so it cannot fight the guarded surface stroke.
+        releaseRescueStep(bot, true);
+        surfacePresentationWaterLeaseUntil.put(bot.getUUID(),
+                bot.level().getServer().getTickCount() + FOLLOW_SWIM_LEASE_TICKS);
+        waterRescueShore.remove(bot.getUUID());
+        strictAutomaticWaterRescueSessions.remove(bot.getUUID());
+        waterRescueDeadlines.remove(bot.getUUID());
+        strictWaterEscapeSearches.remove(bot.getUUID());
+        return true;
+    }
+
+    /** Ends the narrow show-target surface lease without affecting a real safety successor. */
+    void clearObservedSurfacePresentationWater(AIPlayerEntity bot) {
+        surfacePresentationWaterLeaseUntil.remove(bot.getUUID());
+    }
+
+    /**
      * Leases the bot to Baritone for a few ticks: it is driving the bot along a route that may go through water, so the water
      * crisis machine below does not take the bot over (its rescue steps would move a swimming bot off Baritone's path and
      * fight it for the position). Called by {@code BaritoneDriver} on every driven tick of a swim-permitted route; not a general
@@ -306,6 +346,15 @@ public final class NavSafetyNet {
         Integer until = followSwimLeaseUntil.get(bot.getUUID());
         if (until == null || until < currentTick || followSwimMustYield(bot)) {
             followSwimLeaseUntil.remove(bot.getUUID());
+            return false;
+        }
+        return true;
+    }
+
+    private boolean hasObservedSurfacePresentationWaterLease(AIPlayerEntity bot, int currentTick) {
+        Integer until = surfacePresentationWaterLeaseUntil.get(bot.getUUID());
+        if (until == null || until < currentTick || followSwimMustYield(bot)) {
+            surfacePresentationWaterLeaseUntil.remove(bot.getUUID());
             return false;
         }
         return true;
@@ -379,6 +428,11 @@ public final class NavSafetyNet {
         if (hasFollowSwimLease(bot, server.getTickCount())) {
             // The lease is renewed only by an active FollowTask and only above the safety oxygen
             // threshold.  Once air falls, the normal branch below immediately resumes rescue.
+            return false;
+        }
+        if (hasObservedSurfacePresentationWaterLease(bot, server.getTickCount())) {
+            // ShowTargetTask freshly proves a breathable top-water cell before renewing this
+            // short lease. Low air, lava, or expiry falls straight through to ordinary rescue.
             return false;
         }
         if (hasBaritoneWaterLease(bot, server.getTickCount())) {

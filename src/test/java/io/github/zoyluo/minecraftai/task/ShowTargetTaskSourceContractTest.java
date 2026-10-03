@@ -13,7 +13,7 @@ final class ShowTargetTaskSourceContractTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
-    void guidanceUsesOnlyBaritoneWithAPlayerRendezvousAndObservedTargetLeg() throws IOException {
+    void guidanceUsesObservedNavigationWithAPlayerRendezvousAndObservedTargetLeg() throws IOException {
         String task = read("task/ShowTargetTask.java");
 
         assertTrue(task.contains("OWNER_RADIUS = 5")
@@ -26,6 +26,24 @@ final class ShowTargetTaskSourceContractTest {
                         && task.contains("startApproachTo(target, TARGET_RADIUS, false, false)")
                         && task.contains("startDirectionalPursuitTo(target, HOP_DISTANCE, false, false)"),
                 "the target must be visibly re-proven before GoalNear(3), with only observed hops while it is out of view");
+        assertTrue(task.contains("observedSurfaceWaterAtTargetColumn(bot)")
+                        && task.contains("driveSurfacePresentation(bot, presentation, now)")
+                        && task.contains("startSurfacePresentationStep(bot, surfaceWater)")
+                        && task.contains("withinSurfacePresentation(bot, presentation)")
+                        && task.contains("observed_surface_swim_no_dive")
+                        && task.contains("canObserveCellThroughFluids(bot, water)")
+                        && task.contains("WalkedStep.Kind.SWIM")
+                        && task.contains("WATER_WITH_AIR_ABOVE")
+                        && task.contains("SurfaceStepAdmission")
+                        && task.contains("feet.getY() < admission.surfaceY()")
+                        && task.contains("withinSurfaceStepContinuationEnvelope")
+                        && task.contains("isSafeSurfaceStance")
+                        && task.contains("renewObservedSurfacePresentationWater")
+                        && task.contains("maintainSurfaceHold")
+                        && task.contains("beginObservedSurfaceEntry"),
+                "a known target below visible water must use observed, top-water strokes, never a GoalNear dive");
+        assertTrue(task.contains("It's below here.") && task.contains("surfacePresentation != null"),
+                "the completed surface presentation must explain that the known target is below the safe water stance");
         assertTrue(task.contains("requestRoutePace(Gait.SPRINT, PaceOwner.TASK)")
                         && task.contains("requestSprintRoute(bot);"),
                 "each successful Baritone leg must request the task's sprint pace without bypassing Baritone safety");
@@ -90,7 +108,7 @@ final class ShowTargetTaskSourceContractTest {
                         && brain.contains("automatic task-finished wake")
                         && brain.contains("wait for a new affirmative player message")
                         && brain.contains("original request is advance authorization")
-                        && brain.contains("never invent a coordinate"),
+                        && brain.contains("Never invent a coordinate"),
                 "the action gate and planner guidance must allow any verified coordinate, not just a find result");
     }
 

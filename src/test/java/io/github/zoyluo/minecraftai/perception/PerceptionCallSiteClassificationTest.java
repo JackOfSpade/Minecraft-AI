@@ -69,6 +69,7 @@ class PerceptionCallSiteClassificationTest {
         m.put("task/BoatSupport.java", Counts.of(0, 3, 0));                    // boat and each boarding/dismount candidate
         m.put("task/BreedTask.java", Counts.of(0, 1, 0));                      // deliberate search for animals
         m.put("task/CreateObsidianTask.java", Counts.of(0, 1, 0));             // dropped items
+        m.put("task/DiscoveryTask.java", Counts.of(0, 1, 0));                  // deliberate local sheep survey
         m.put("task/HuntTask.java", Counts.of(0, 5, 1));                       // prey and its drops; physical: strike legality
         m.put("task/MiningServiceTask.java", Counts.of(0, 4, 0));              // dropped items
         m.put("task/OreDigTask.java", Counts.of(0, 1, 0));                     // dropped items
@@ -141,7 +142,7 @@ class PerceptionCallSiteClassificationTest {
     void theObjectSitesStayOmnidirectional() throws IOException {
         // Objects and deliberate searches must never be given the cone: they use canObserveEntity, not canNoticeCreature.
         for (String file : List.of("action/HarvestCore.java", "action/MilkCowAction.java", "task/BoatSupport.java", "task/BreedTask.java",
-                "task/CreateObsidianTask.java", "task/HuntTask.java", "task/MiningServiceTask.java", "task/OreDigTask.java",
+                "task/CreateObsidianTask.java", "task/DiscoveryTask.java", "task/HuntTask.java", "task/MiningServiceTask.java", "task/OreDigTask.java",
                 "task/RecoverDropsTask.java", "task/TradeTask.java", "mining/assist/PoiDetector.java")) {
             assertEquals(0, expected().get(file).notice(), file + " searches for objects or deliberately for animals");
         }

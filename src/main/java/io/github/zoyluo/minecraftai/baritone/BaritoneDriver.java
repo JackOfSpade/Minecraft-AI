@@ -150,6 +150,7 @@ public final class BaritoneDriver {
             if (wasDriven) {
                 entry.driven = false;
                 entry.waterAllowed = false;
+                entry.context.setWaterAllowed(false);
                 NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
                 BotInputBridge.release(bot);
                 BotLog.lifecycle(bot, "baritone_released", "pos", bot.blockPosition());

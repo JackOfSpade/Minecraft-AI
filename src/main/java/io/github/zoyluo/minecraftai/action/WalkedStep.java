@@ -100,6 +100,12 @@ public final class WalkedStep {
     private Result finalResult;
     private int pushDirection = -1;
     private boolean startedWet;
+    /**
+     * A proved, level entry from a dry bank into breathable top water must not turn its first
+     * input tick into a full land jump.  Once the body is in water, the ordinary SWIM depth hold
+     * resumes.  This is opt-in because general SWIM steps may intentionally rise from dry ground.
+     */
+    private boolean waitForWaterBeforeSwimStroke;
     private ContinuationGuard continuationGuard;
 
     private boolean anchored;
@@ -115,6 +121,19 @@ public final class WalkedStep {
     /** A step to the bottom centre of {@code cell}: an adjacent cell for FLAT, STEP_UP, STEP_DOWN and SWIM; the bot's own cell for the rest. */
     public static WalkedStep begin(AIPlayerEntity bot, BlockPos cell, Kind kind, String reason) {
         return new WalkedStep(bot, cell, Vec3.atBottomCenterOf(cell), kind, reason);
+    }
+
+    /**
+     * Starts a caller-proven, level entry from dry ground into a breathable top-water cell.
+     * Unlike an ordinary {@link Kind#SWIM} step, it walks into the water before holding jump,
+     * avoiding a land-jump arc that can carry a surface-only swimmer beneath the waterline.
+     * Callers must independently prove the target's water/air pair and preserve that proof with
+     * a continuation guard.
+     */
+    public static WalkedStep beginObservedSurfaceEntry(AIPlayerEntity bot, BlockPos cell, String reason) {
+        WalkedStep step = begin(bot, cell, Kind.SWIM, reason);
+        step.waitForWaterBeforeSwimStroke = true;
+        return step;
     }
 
     /** A step to {@code point} inside the bot's cell (RECENTER, SNEAK_SHIFT) or, for PUSH_OUT, out of the block it overlaps. */
@@ -356,6 +375,9 @@ public final class WalkedStep {
         }
         boolean grounded = supported(bot);
         boolean jump = WalkedStepRules.jumpNow(kind, grounded, bot.getY(), cell.getY(), bot.isInWater());
+        if (waitForWaterBeforeSwimStroke && kind == Kind.SWIM && !bot.isInWater()) {
+            jump = false;
+        }
         if (kind == Kind.STEP_UP) {
             if (jump) {
                 pack.jumpOnce();

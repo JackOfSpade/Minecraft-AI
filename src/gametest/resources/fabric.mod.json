@@ -83,6 +83,7 @@
       "io.github.zoyluo.minecraftai.task.SurvivalReflexGameTests",
       "io.github.zoyluo.minecraftai.task.SelfPreservationGameTests",
       "io.github.zoyluo.minecraftai.task.FollowTaskGameTests",
+      "io.github.zoyluo.minecraftai.task.ShowTargetTaskGameTests",
       "io.github.zoyluo.minecraftai.pathfinding.GoalSnapGameTests",
       "io.github.zoyluo.minecraftai.pathfinding.StringPullWaterCornerGameTests",
       "io.github.zoyluo.minecraftai.task.BoatFollowGameTests",

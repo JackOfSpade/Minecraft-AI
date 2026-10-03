@@ -58,6 +58,13 @@ final class BaritoneNavigatorMappingTest {
         assertTrue(admit.contains("boolean exactWaterGoal = route.options().exactWaterGoal()")
                         && admit.contains("if (exactWaterGoal)"),
                 "only dedicated exact-water goals may use water-cell admission instead of dry-stance admission");
+
+        String context = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ServerPlayerContext.java"));
+        String allowed = method(context, "private boolean navigationStateAllowed(BlockState state) {");
+        assertTrue(allowed.contains("!state.getFluidState().is(FluidTags.LAVA)")
+                        && allowed.contains("waterAllowed || !state.getFluidState().is(FluidTags.WATER)"),
+                "water permission must never make a lava cell navigable");
+
     }
 
     @Test
@@ -257,6 +264,9 @@ final class BaritoneNavigatorMappingTest {
         String stance = method(fence, "private static BlockPos nearestDirectionalPursuitStance(");
         assertTrue(stance.contains("distanceSq > maxHopSq") && stance.contains("forward > targetDistance"),
                 "a hop stays within its local bound and cannot pass the requested standoff point");
+        assertTrue(stance.contains("ObservedGraphSearch.search(origin, new SnapshotEnvironment(fence))")
+                        && stance.contains("allowBreakFallback"),
+                "a walk-only pursuit hop must be graph-reachable; a breakable route may retain a secondary observed fallback");
         assertFalse(stance.contains("bot.level()") || stance.contains("getChunk"),
                 "choosing a pursuit stance must use only the frozen observation fence, never load or inspect remote terrain");
     }
@@ -304,10 +314,11 @@ final class BaritoneNavigatorMappingTest {
         String context = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ServerPlayerContext.java"));
         String allow = method(context, "public boolean allowNavigationCell(int x, int y, int z) {");
         String state = method(context, "public BlockState navigationCellState(int x, int y, int z) {");
-        assertTrue(allow.contains("return ownerSnapshot.hasCell(x, y, z);")
+        assertTrue(allow.contains("BlockState state = ownerSnapshot.stateAt(x, y, z);")
+                        && allow.contains("return navigationStateAllowed(state);")
                         && state.contains("BlockState state = ownerSnapshot.stateAt(x, y, z);")
-                        && state.contains("return state == null ? Blocks.BEDROCK.defaultBlockState() : state;"),
-                "an allowed direct cell is paired with a snapshot state; any race/miss is virtual bedrock, never cache fallback");
+                        && state.contains("state == null || !navigationStateAllowed(state)"),
+                "an allowed direct cell is paired with a snapshot state; a dry water or race/miss is virtual bedrock, never cache fallback");
         assertTrue(context.contains("ownerFollowSnapshot = null;"),
                 "the direct snapshot is cleared at both route and lifecycle boundaries");
 

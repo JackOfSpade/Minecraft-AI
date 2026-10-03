@@ -302,7 +302,9 @@ final class FollowStuckRecovery {
                 step.kind(), step.ticks())) {
             return false;
         }
-        return SwimRoute.observedCell(bot, bot.level(), step.cell(), false)
+        return SwimRoute.observedCell(bot, bot.level(), bot.blockPosition(), false)
+                == SwimRoute.Cell.DRY
+                && SwimRoute.observedCell(bot, bot.level(), step.cell(), false)
                 == SwimRoute.Cell.DRY
                 && SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
     }

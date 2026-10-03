@@ -290,9 +290,12 @@ public final class ObservedNavigationFence {
             // view. That coordinate supplies a heading only: expose one short local corridor,
             // then select an already observed stance that actually advances in that direction.
             // No remote cell, chunk, or terrain state becomes route authority here.
-            observeVisibleCorridors(bot, feet, pursuitObservationPoint(bot, route), waterTraversal, observed, tick);
+            BlockPos pursuitPoint = pursuitObservationPoint(bot, route);
+            observeVisibleCorridors(bot, feet, pursuitPoint, waterTraversal, observed, tick);
+            observeDirectionalDetourCorridors(bot, feet, pursuitPoint, route, waterTraversal, observed, tick);
             ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
-            BlockPos hop = nearestDirectionalPursuitStance(candidate, feet, route.target(), route.radius());
+            BlockPos hop = nearestDirectionalPursuitStance(candidate, feet, route.target(), route.radius(),
+                    route.options().allowBreak());
             if (hop == null) {
                 return Capture.refused("navigation_pursuit_no_observed_hop", rays,
                         Math.max(0, observed.size() - before));
@@ -347,7 +350,9 @@ public final class ObservedNavigationFence {
         if (route.shape() == NavRoute.Shape.RUN_AWAY) {
             observeVisibleCorridors(bot, feet, fleeObservationPoint(bot, route), false, observed, tick);
         } else if (route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT) {
-            observeVisibleCorridors(bot, feet, pursuitObservationPoint(bot, route), route.options().allowWater(), observed, tick);
+            BlockPos pursuitPoint = pursuitObservationPoint(bot, route);
+            observeVisibleCorridors(bot, feet, pursuitPoint, route.options().allowWater(), observed, tick);
+            observeDirectionalDetourCorridors(bot, feet, pursuitPoint, route, route.options().allowWater(), observed, tick);
         } else {
             // Rays refresh faces and air cells, but they do not by themselves establish every
             // feet/head/support triple that a newly reached walking cell needs.  Carry a narrow
@@ -698,14 +703,121 @@ public final class ObservedNavigationFence {
     }
 
     /**
+     * Adds two small, ray-proven L-shaped detour lanes to a direction-only hop. The forward
+     * corridor alone proves only a narrow strip, which can make a plainly visible gap beside a
+     * short wall unavailable and turn its top into the first break goal. Each lane remains inside
+     * the same local perception/hop bounds and every cell is still admitted by its own view ray;
+     * this is a bounded look-around, never a remote terrain query.
+     */
+    private static void observeDirectionalDetourCorridors(AIPlayerEntity bot, BlockPos from, BlockPos forward,
+                                                            NavRoute route, boolean throughFluids,
+                                                            Map<Long, Cell> observed, int tick) {
+        int dx = forward.getX() - from.getX();
+        int dz = forward.getZ() - from.getZ();
+        double length = Math.sqrt((double) dx * dx + (double) dz * dz);
+        if (length <= 1.0E-9D) {
+            return;
+        }
+        int perception = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int lateral = Math.min(6, Math.max(1, Math.min(route.radius(), perception - 2)));
+        double sideX = -dz / length;
+        double sideZ = dx / length;
+        for (int sign : new int[]{-1, 1}) {
+            int offsetX = (int) Math.round(sideX * lateral * sign);
+            int offsetZ = (int) Math.round(sideZ * lateral * sign);
+            if (offsetX == 0 && offsetZ == 0) {
+                continue;
+            }
+            BlockPos flank = from.offset(offsetX, 0, offsetZ);
+            observeVisibleCorridors(bot, from, flank, throughFluids, observed, tick);
+            observeVisibleCorridors(bot, flank, forward, throughFluids, observed, tick);
+            // A wall can hide the centre ray to a gap at its end even though the bot can really
+            // see an inset corner of that gap from its current eye. Prove only that one corner
+            // stance; the normal graph still has to connect it through the visible flank lane.
+            int advanceX = Math.abs(dx) >= Math.abs(dz) ? Integer.signum(dx) : 0;
+            int advanceZ = advanceX == 0 ? Integer.signum(dz) : 0;
+            if (advanceX != 0 || advanceZ != 0) {
+                observeInsetDetourStance(bot, flank.offset(advanceX, 0, advanceZ),
+                        advanceX, advanceZ, offsetX, offsetZ, throughFluids, observed, tick);
+            }
+        }
+    }
+
+    /**
+     * Proves a stance at the visible end of a lateral lane without pretending the bot has already
+     * moved there. Each feet/head/support cell gets its own ray from the real current eye, aimed
+     * at the corner that faces the lane and away from the blocked forward direction.
+     */
+    private static void observeInsetDetourStance(AIPlayerEntity bot, BlockPos feet,
+                                                  int advanceX, int advanceZ, int lateralX, int lateralZ,
+                                                  boolean throughFluids, Map<Long, Cell> observed, int tick) {
+        int lateralSignX = Integer.signum(lateralX);
+        int lateralSignZ = Integer.signum(lateralZ);
+        for (int y = 0; y <= NAVIGATION_HEADROOM; y++) {
+            observeInsetRouteCell(bot, feet.above(y), advanceX, advanceZ, lateralSignX, lateralSignZ,
+                    0.5D, throughFluids, observed, tick);
+        }
+        observeInsetRouteCell(bot, feet.below(), advanceX, advanceZ, lateralSignX, lateralSignZ,
+                0.999D, throughFluids, observed, tick);
+    }
+
+    /** Records only a genuine first hit at this cell, or a collider miss that proves its interior is visible. */
+    private static void observeInsetRouteCell(AIPlayerEntity bot, BlockPos cell,
+                                               int advanceX, int advanceZ, int lateralSignX, int lateralSignZ,
+                                               double height, boolean throughFluids,
+                                               Map<Long, Cell> observed, int tick) {
+        Vec3 eye = bot.getEyePosition();
+        // Keep the endpoint just inside the visible face: this has enough margin to expose a
+        // genuine wall-end gap even when the bot has stopped close to the obstruction.
+        Vec3 inset = new Vec3(cell.getX() + insetCoordinate(advanceX, lateralSignX),
+                cell.getY() + height,
+                cell.getZ() + insetCoordinate(advanceZ, lateralSignZ));
+        double dx = inset.x - eye.x;
+        double dy = inset.y - eye.y;
+        double dz = inset.z - eye.z;
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        if (!(distance > 1.0E-9D) || distance > radius) {
+            return;
+        }
+        ObservableWorldQuery.ViewHit view = throughFluids
+                ? ObservableWorldQuery.castViewRayThroughFluids(bot, dx, dy, dz, distance,
+                        ObservableWorldQuery.ViewShape.COLLIDER)
+                : ObservableWorldQuery.castViewRay(bot, dx, dy, dz, distance,
+                        ObservableWorldQuery.ViewShape.COLLIDER);
+        if (view.isUnknown()) {
+            return;
+        }
+        if (view.hit()) {
+            if (cell.equals(view.pos()) && view.state() != null) {
+                put(observed, cell.asLong(), view.state(), tick);
+            }
+        } else {
+            // The ray reached an interior point of this exact cell without an earlier collider.
+            // Like observeCellIfVisible(), that own-eye proof authorizes the one state read.
+            put(observed, cell.asLong(), bot.level().getBlockState(cell), tick);
+        }
+    }
+
+    /** Keeps a diagonal look-around endpoint inside the cell that the miss authorizes us to read. */
+    private static double insetCoordinate(int advance, int lateral) {
+        return Math.max(0.001D, Math.min(0.999D, 0.5D - 0.499D * advance + 0.499D * lateral));
+    }
+
+    /**
      * Selects the farthest forward local stance that the immutable fence has already proven.
      * The remote coordinate is a compass bearing, never a cell to read: each candidate is in the
-     * current fence, is locally standable, stays inside the bounded hop radius, and strictly
-     * reduces horizontal distance to that coordinate. This prevents a failed pursuit from
-     * wandering away from the followed player while still permitting a small sideways detour.
+     * current fence, is locally standable, and stays inside the bounded hop radius. It normally
+     * reduces horizontal distance to that coordinate; a graph-reachable local detour may briefly
+     * trade straight-line distance for a bounded sideways lane. This prevents a failed pursuit
+     * from wandering away from the followed player while still permitting a small sideways detour. A
+     * route explicitly allowed to break may use a bounded observed but graph-disconnected stance
+     * only when no advancing walking stance exists, so a sealed obstruction remains mineable
+     * without making an avoidable wall top its first goal.
      */
     private static BlockPos nearestDirectionalPursuitStance(ObservedNavigationFence fence, BlockPos origin,
-                                                             BlockPos remoteTarget, int requestedHop) {
+                                                             BlockPos remoteTarget, int requestedHop,
+                                                             boolean allowBreakFallback) {
         double towardX = remoteTarget.getX() - origin.getX();
         double towardZ = remoteTarget.getZ() - origin.getZ();
         double targetDistanceSq = towardX * towardX + towardZ * towardZ;
@@ -718,11 +830,16 @@ public final class ObservedNavigationFence {
         int perception = Math.max(1, MinecraftAiConfig.get().perception().radius());
         int maxHop = Math.min(Math.max(1, requestedHop), Math.max(1, perception - 2));
         double maxHopSq = (double) maxHop * maxHop;
+        // A locally standable cell is not necessarily a walking destination: the air above a
+        // two-high wall is a common example. Prefer stances connected to the bot by the same
+        // frozen, observed walking graph that backs other local navigation choices. A breakable
+        // route retains a strictly secondary observed fallback for a sealed obstruction, but a
+        // walk-only route can never turn an unreachable wall top into a movement goal.
+        Map<BlockPos, Double> reachable = ObservedGraphSearch.search(origin, new SnapshotEnvironment(fence));
 
-        BlockPos best = null;
-        double bestForward = Double.NEGATIVE_INFINITY;
-        double bestLateral = Double.POSITIVE_INFINITY;
-        double bestDistance = Double.NEGATIVE_INFINITY;
+        DirectionalPursuitStance reachableBest = null;
+        DirectionalPursuitStance reachableDetourBest = null;
+        DirectionalPursuitStance breakFallback = null;
         for (long packed : fence.cells) {
             BlockPos candidate = BlockPos.of(packed);
             if (!SnapshotEnvironment.isStandable(fence, candidate)
@@ -744,26 +861,46 @@ public final class ObservedNavigationFence {
             }
             double remainingX = remoteTarget.getX() - candidate.getX();
             double remainingZ = remoteTarget.getZ() - candidate.getZ();
-            if (remainingX * remainingX + remainingZ * remainingZ >= targetDistanceSq) {
-                continue;
-            }
+            boolean closesDistance = remainingX * remainingX + remainingZ * remainingZ < targetDistanceSq;
             double lateral = Math.abs(dx * unitZ - dz * unitX);
             double distance = Math.sqrt(distanceSq);
-            if (best == null || forward > bestForward + 1.0E-6D
-                    || (Math.abs(forward - bestForward) <= 1.0E-6D && lateral < bestLateral - 1.0E-6D)
-                    || (Math.abs(forward - bestForward) <= 1.0E-6D
-                    && Math.abs(lateral - bestLateral) <= 1.0E-6D && distance > bestDistance)
-                    || (Math.abs(forward - bestForward) <= 1.0E-6D
-                    && Math.abs(lateral - bestLateral) <= 1.0E-6D
-                    && Math.abs(distance - bestDistance) <= 1.0E-6D
-                    && comparePosition(candidate, best) < 0)) {
-                best = candidate.immutable();
-                bestForward = forward;
-                bestLateral = lateral;
-                bestDistance = distance;
+            DirectionalPursuitStance stance = new DirectionalPursuitStance(candidate.immutable(), forward, lateral, distance);
+            if (reachable.containsKey(candidate)) {
+                if (closesDistance && isBetterDirectionalPursuitStance(stance, reachableBest)) {
+                    reachableBest = stance;
+                } else if (!closesDistance && isBetterDirectionalPursuitStance(stance, reachableDetourBest)) {
+                    reachableDetourBest = stance;
+                }
+            } else if (allowBreakFallback && closesDistance
+                    && isBetterDirectionalPursuitStance(stance, breakFallback)) {
+                breakFallback = stance;
             }
         }
-        return best;
+        if (reachableBest != null) {
+            return reachableBest.position();
+        }
+        if (reachableDetourBest != null) {
+            return reachableDetourBest.position();
+        }
+        return breakFallback == null ? null : breakFallback.position();
+    }
+
+    private static boolean isBetterDirectionalPursuitStance(DirectionalPursuitStance candidate,
+                                                              DirectionalPursuitStance incumbent) {
+        return incumbent == null
+                || candidate.forward() > incumbent.forward() + 1.0E-6D
+                || (Math.abs(candidate.forward() - incumbent.forward()) <= 1.0E-6D
+                && candidate.lateral() < incumbent.lateral() - 1.0E-6D)
+                || (Math.abs(candidate.forward() - incumbent.forward()) <= 1.0E-6D
+                && Math.abs(candidate.lateral() - incumbent.lateral()) <= 1.0E-6D
+                && candidate.distance() > incumbent.distance())
+                || (Math.abs(candidate.forward() - incumbent.forward()) <= 1.0E-6D
+                && Math.abs(candidate.lateral() - incumbent.lateral()) <= 1.0E-6D
+                && Math.abs(candidate.distance() - incumbent.distance()) <= 1.0E-6D
+                && comparePosition(candidate.position(), incumbent.position()) < 0);
+    }
+
+    private record DirectionalPursuitStance(BlockPos position, double forward, double lateral, double distance) {
     }
 
     private static int scan(AIPlayerEntity bot, Map<Long, Cell> observed, BlockPos target, int rays, int tick) {

@@ -44,7 +44,8 @@ class ActionPackAdmissionSourceContractTest {
             "task/MiningBarricadeTask.java",
             "task/NavSafetyNet.java",
             "task/OreDigTask.java",
-            "task/ShelterExitDebtRepayer.java");
+            "task/ShelterExitDebtRepayer.java",
+            "task/ShowTargetTask.java");
 
     @Test
     void runStepReturnsNullableLeaseAndExposesExactReconciliation() throws IOException {
@@ -182,6 +183,16 @@ class ActionPackAdmissionSourceContractTest {
                 "retreatStep = next", "retreatStepLease = lease", "MiningBarricadeTask");
         assertTaskLeaseLifecycle("task/ShelterExitDebtRepayer.java", "boolean repay(",
                 "step = next", "stepLease = lease", "ShelterExitDebtRepayer");
+
+        String showTarget = source("task/ShowTargetTask.java");
+        assertContains(showTarget, "ActionPack.StepLease surfaceStepLease",
+                "ShowTarget must retain the exact admission for its observed surface stroke");
+        assertContains(showTarget, "stepInFlightFor(surfaceStepLease)",
+                "ShowTarget must wait only for its own surface stroke");
+        assertContains(showTarget, "stepResultFor(surfaceStepLease)",
+                "ShowTarget must consume only its own surface-stroke outcome");
+        assertContains(showTarget, "releaseSurfaceStep(bot, true)",
+                "ShowTarget must cancel and release its guarded surface stroke on terminal paths");
 
         String safetyNet = source("task/NavSafetyNet.java");
         assertContains(safetyNet, "record RescueStepAdmission(AIPlayerEntity bot, ActionPack.StepLease lease",

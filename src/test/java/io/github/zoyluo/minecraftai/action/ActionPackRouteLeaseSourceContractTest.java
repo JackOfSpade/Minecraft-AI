@@ -31,7 +31,9 @@ class ActionPackRouteLeaseSourceContractTest {
         int refused = body.indexOf("if (!admission.accepted()) {");
         assertTrue(yield >= 0 && thrown > yield && refused > thrown);
         String thrownBranch = body.substring(thrown, refused);
-        String refusedBranch = body.substring(refused, body.indexOf("double dx = request.target()", refused));
+        int deadlineSetup = body.indexOf("BlockPos deadlineGoal", refused);
+        assertTrue(deadlineSetup > refused);
+        String refusedBranch = body.substring(refused, deadlineSetup);
         assertTrue(thrownBranch.contains("cancelBaritoneRoute(\"start_failed\")") && thrownBranch.contains("dropStaleRouteLease()"),
                 "a start that throws with no Baritone route behind it must drop the old route's lease");
         assertTrue(refusedBranch.contains("cancelBaritoneRoute(\"rejected_request\")") && refusedBranch.contains("dropStaleRouteLease()"),

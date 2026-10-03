@@ -628,9 +628,12 @@ public final class UndergroundSafetyGameTests {
                 Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         BlockPos unsupported = start.north();
         BlockPos water = start.east();
+        BlockPos waterSupport = start.south();
         context.getLevel().setBlock(water.below(),
                 Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         context.getLevel().setBlock(water,
+                Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(waterSupport.below(),
                 Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "StandableStepGT", start);
@@ -645,6 +648,11 @@ public final class UndergroundSafetyGameTests {
                 "a walked step accepted a water cell as its landing");
         require(context, bot.blockPosition().equals(start),
                 "water step moved the bot: " + bot.blockPosition().toShortString());
+        require(context, io.github.zoyluo.minecraftai.action.WalkedStep.refusal(bot, waterSupport,
+                        io.github.zoyluo.minecraftai.action.WalkedStep.Kind.FLAT) != null,
+                "a walked step accepted air above water as dry footing");
+        require(context, bot.blockPosition().equals(start),
+                "water-supported step moved the bot: " + bot.blockPosition().toShortString());
         finish(context, bot, "StandableStepGT");
     }
 

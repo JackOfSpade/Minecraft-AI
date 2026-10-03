@@ -1,0 +1,45 @@
+Keep dry routes from treating an unavailable support cell as an empty jump gap. The
+per-cell observation policy already makes water unavailable to normal walking; parkour
+must apply the same policy to the cells swept beneath its arc before accepting a landing.
+
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+--- a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+@@ -77,7 +77,12 @@ public class MovementParkour extends Movement {
+         if (MovementHelper.canWalkOn(context, x + xDiff, y - 1, z + zDiff, adj)) { // don't parkour if we could just traverse (for now)
+             // second most common case -- we could just traverse not parkour
+             return;
+         }
++        if (!navigationFootprintAllowed(context, x + xDiff, y, z + zDiff)) {
++            // An unavailable support (including water forbidden by a dry route) is not an
++            // empty gap that this movement may jump over.
++            return;
++        }
+         if (MovementHelper.avoidWalkingInto(adj) && !(adj.getFluidState().getType() instanceof WaterFluid)) { // magma sucks
+             return;
+         }
+@@ -118,6 +123,9 @@ public class MovementParkour extends Movement {
+             int destX = x + xDiff * i;
+             int destZ = z + zDiff * i;
+ 
++            if (!navigationFootprintAllowed(context, destX, y, destZ)) {
++                break;
++            }
+             // check head/feet
+             if (!MovementHelper.fullyPassable(context, destX, y + 1, destZ)) {
+                 break;
+@@ -200,6 +208,14 @@ public class MovementParkour extends Movement {
+         }
+     }
+ 
++    /** The launch arc occupies feet/head cells while relying on its support; all must be route-visible. */
++    private static boolean navigationFootprintAllowed(CalculationContext context, int x, int y, int z) {
++        return context.bsi.isNavigationCellAllowed(x, y - 1, z)
++                && context.bsi.isNavigationCellAllowed(x, y, z)
++                && context.bsi.isNavigationCellAllowed(x, y + 1, z)
++                && context.bsi.isNavigationCellAllowed(x, y + 2, z);
++    }
++
+     private static boolean checkOvershootSafety(BlockStateInterface bsi, int x, int y, int z) {
+         // we're going to walk into these two blocks after the landing of the parkour anyway, so make sure they aren't avoidWalkingInto
+         return !MovementHelper.avoidWalkingInto(bsi.get0(x, y, z)) && !MovementHelper.avoidWalkingInto(bsi.get0(x, y + 1, z));

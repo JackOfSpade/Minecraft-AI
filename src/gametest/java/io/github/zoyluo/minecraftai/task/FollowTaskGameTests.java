@@ -457,9 +457,11 @@ public final class FollowTaskGameTests {
             teleportTo(world, targetBot, aloft);
             require(context, followTask.state() == TaskState.RUNNING,
                     "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
-            if (tick[0] <= 150) {
+            int taskElapsed = followTask.elapsedTicks();
+            if (taskElapsed <= FollowNoRoute.REPEATED_FAILURE_SPAN_TICKS) {
                 require(context, followTask.noRouteNotices() == 0,
-                        "the unstandable goal was announced at tick " + tick[0] + ", before it had persisted 10 s");
+                        "the unstandable goal was announced at task tick " + taskElapsed
+                                + " (GameTest callback tick " + tick[0] + "), before it had persisted 10 s");
             }
             if (tick[0] >= 480) {
                 require(context, followTask.noRouteNotices() == 1,

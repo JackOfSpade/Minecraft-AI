@@ -48,9 +48,14 @@ final class FollowFieldFixture {
 
     /** As above on its own world layer (a long or wide scene keeps clear of the layer-0 scenes that run at the same time). */
     FollowFieldFixture(GameTestHelper context, int halfX, int halfZ, int layer) {
+        this(context, halfX, halfZ, layer, 4);
+    }
+
+    /** As above with a deeper sealed floor for a water column whose bottom is part of the fixture. */
+    FollowFieldFixture(GameTestHelper context, int halfX, int halfZ, int layer, int floorDepth) {
         this.context = context;
         this.level = context.getLevel();
-        this.arena = BaritoneEngineArena.build(context, layer, halfX, halfZ);
+        this.arena = BaritoneEngineArena.build(context, layer, halfX, halfZ, floorDepth);
         level.setDayTime(1000L);
         GameTestCleanup.whenFinished(context, this::cleanUp);
     }

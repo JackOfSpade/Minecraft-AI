@@ -96,12 +96,12 @@ public final class FollowTask extends AbstractTask {
     // waits at its bank and re-plans on the normal schedule, and tells the player so once until it next arrives.
     private boolean noRouteAnnounced;
     private int noRouteNotices;
-    // Non-genuine failed re-plans in a row (see FollowNoRoute.RepeatedFailures): repeated ones get a generic notice.
+    // Non-genuine failed re-plans in a row (see FollowNoRoute.RepeatedFailures): only a persistent streak is announced.
     private final FollowNoRoute.RepeatedFailures repeatedFailures = new FollowNoRoute.RepeatedFailures();
-    // Where the followed player stood when the resolved goal collapsed onto the bot's own cell (see
-    // followLand): the hold is re-evaluated as soon as they move rather than after a full REPATH_TICKS.
+    // Where the followed player stood when a dry Baritone route had no usable continuation. If
+    // they move materially, the old hold is stale and is re-evaluated immediately rather than
+    // waiting for the normal re-path backoff.
     private BlockPos holdTargetPos;
-    private int nextHoldReevalTick;
     private final FollowSwimming swimming = new FollowSwimming();
     // ---- nav.engine=baritone (see followLandBaritone): the followed player's last known cell
     // (used solely to decide whether a moving player needs a re-goal), the approach radius in
@@ -188,7 +188,7 @@ public final class FollowTask extends AbstractTask {
         return directWalkCount;
     }
 
-    /** Package-visible for GameTests: true while the goal has collapsed onto the bot's own cell and it is holding there. */
+    /** Package-visible for GameTests: true while a no-route land hold awaits a materially moved target. */
     boolean holdingAtOwnCell() {
         return holdTargetPos != null;
     }
@@ -229,7 +229,6 @@ public final class FollowTask extends AbstractTask {
         noRouteAnnounced = false;
         repeatedFailures.reset();
         holdTargetPos = null;
-        nextHoldReevalTick = 0;
         boatFollow = null;
         nextBoatAttemptTick = 0;
         boatAcquireFailures = 0;
@@ -267,6 +266,7 @@ public final class FollowTask extends AbstractTask {
             // offline/cross-dimension target, or its ActionPack fence would survive forever.
             swimming.cancelStep(bot);
             stopBoatAndActions(bot);
+            holdTargetPos = null;
             baritoneTargetPos = null;
             baritoneDirectionalPursuit = false;
             baritoneOwnerFollow = false;
@@ -409,6 +409,7 @@ public final class FollowTask extends AbstractTask {
         baritoneDirectionalPursuit = false;
         baritoneOwnerFollow = false;
         baritoneProgress.clear();
+        holdTargetPos = null;
         if (bot.getActionPack().hasBaritoneRoute()) {
             bot.getActionPack().cancelBaritoneRoute("follow_mode_changed");
         }
@@ -574,6 +575,7 @@ public final class FollowTask extends AbstractTask {
             baritoneDirectionalPursuit = false;
             baritoneOwnerFollow = false;
             baritoneProgress.clear();
+            holdTargetPos = null;
             baritoneRadius = (int) STOP_DISTANCE;
             repathBackoff = false;
             return true;
@@ -590,12 +592,13 @@ public final class FollowTask extends AbstractTask {
                 pack.cancelBaritoneRoute("follow_no_progress");
                 baritoneProgress.clear();
                 if (directional) {
-                    noteDirectionalPursuitFailure(bot, targetPos, "follow_no_progress");
+                    noteRouteFailure(bot, targetPos, "follow_no_progress");
                 } else {
-                    announceNoRoute(bot, targetPos, "follow_no_progress", FollowNoRoute.GENERIC_MESSAGE);
+                    reportRouteFailure(bot, targetPos, "follow_no_progress", FollowNoRoute.GENERIC_MESSAGE);
                 }
                 repathBackoff = true;
                 nextRepathTick = elapsed + REPATH_TICKS;
+                holdTargetPos = targetPos.immutable();
                 baritoneTargetPos = null;
                 baritoneDirectionalPursuit = false;
                 baritoneOwnerFollow = false;
@@ -612,6 +615,7 @@ public final class FollowTask extends AbstractTask {
                 } else {
                     reportLandRouteFailure(bot, targetPos, regoal);
                     repathBackoff = true;
+                    holdTargetPos = targetPos.immutable();
                     baritoneTargetPos = null;
                     baritoneDirectionalPursuit = false;
                     baritoneOwnerFollow = false;
@@ -637,12 +641,13 @@ public final class FollowTask extends AbstractTask {
                     repathBackoff = false;
                 } else {
                     if (directional) {
-                        noteDirectionalPursuitFailure(bot, targetPos, ended.reason());
+                        noteRouteFailure(bot, targetPos, ended.reason());
                     } else {
-                        announceNoRoute(bot, targetPos, ended.reason(), noRouteMessage(ended));
+                        reportRouteFailure(bot, targetPos, ended.reason(), noRouteMessage(ended));
                     }
                     repathBackoff = true;
                     nextRepathTick = elapsed + REPATH_TICKS;
+                    holdTargetPos = targetPos.immutable();
                 }
             } else if (ended.status() == NavOutcome.Status.SUCCESS) {
                 if (directional) {
@@ -669,6 +674,7 @@ public final class FollowTask extends AbstractTask {
         if (started.result().isFailed()) {
             reportLandRouteFailure(bot, targetPos, started);
             repathBackoff = true;
+            holdTargetPos = targetPos.immutable();
             baritoneTargetPos = null;
             baritoneDirectionalPursuit = false;
             baritoneOwnerFollow = false;
@@ -735,6 +741,7 @@ public final class FollowTask extends AbstractTask {
             noRouteAnnounced = false;
             repeatedFailures.reset();
         }
+        holdTargetPos = null;
         baritoneTargetPos = targetPos.immutable();
         baritoneDirectionalPursuit = directional;
         baritoneOwnerFollow = attempt.ownerFollow();
@@ -746,16 +753,29 @@ public final class FollowTask extends AbstractTask {
             // One small visible cone may simply end at a wall or chunk edge. Do not claim the
             // player is unreachable from this one hop; after a sustained series, explain the
             // wait while retaining the permanent follow order.
-            noteDirectionalPursuitFailure(bot, targetPos, attempt.result().reason());
+            noteRouteFailure(bot, targetPos, attempt.result().reason());
         } else {
-            announceNoRoute(bot, targetPos, attempt.result().reason(), FollowNoRoute.messageFor(attempt.result().reason()));
+            reportRouteFailure(bot, targetPos, attempt.result().reason(), FollowNoRoute.messageFor(attempt.result().reason()));
         }
     }
 
-    private void noteDirectionalPursuitFailure(AIPlayerEntity bot, BlockPos targetPos, String reason) {
-        if (repeatedFailures.recordFailure(elapsed)) {
-            announceNoRoute(bot, targetPos, reason, FollowNoRoute.GENERIC_MESSAGE);
+    /** Reports an exhaustive/no-water route failure immediately; transient failures need a sustained streak. */
+    private void reportRouteFailure(AIPlayerEntity bot, BlockPos targetPos, String reason, String immediateMessage) {
+        if (requiresImmediateNoRouteNotice(reason)) {
+            announceNoRoute(bot, targetPos, reason, immediateMessage);
+        } else {
+            noteRouteFailure(bot, targetPos, reason);
         }
+    }
+
+    private void noteRouteFailure(AIPlayerEntity bot, BlockPos targetPos, String reason) {
+        if (repeatedFailures.recordFailure(elapsed)) {
+            announceNoRoute(bot, targetPos, reason, FollowNoRoute.messageFor(reason));
+        }
+    }
+
+    private static boolean requiresImmediateNoRouteNotice(String reason) {
+        return FollowNoRoute.isGenuine(reason) || NavRouteRules.ROUTE_ENTERED_WATER.equals(reason);
     }
 
     private static boolean isDirectionalPursuit(NavOutcome outcome) {
@@ -785,6 +805,15 @@ public final class FollowTask extends AbstractTask {
             suspendLandRecovery(bot);
             followLandBaritone(bot, target);
             return;
+        }
+        if (holdTargetPos != null && holdTargetPos.distSqr(target.blockPosition()) >= BARITONE_REGOAL_MOVED_SQ) {
+            // The player left the cell behind the current no-route hold. Do not let recovery or
+            // the ordinary backoff turn that stale answer into several seconds of inaction.
+            holdTargetPos = null;
+            suspendLandRecovery(bot);
+            dropBaritoneRoute(bot);
+            repathBackoff = false;
+            nextRepathTick = elapsed;
         }
         if (stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)) {
             waiting = true;

@@ -139,7 +139,9 @@ public final class BaritoneRegistry {
      */
     public void setWaterAllowed(AIPlayerEntity bot, boolean allowed) {
         get(bot);
-        entries.get(bot.getUUID()).waterAllowed = allowed;
+        Entry entry = entries.get(bot.getUUID());
+        entry.waterAllowed = allowed;
+        entry.context.setWaterAllowed(allowed);
     }
 
     /** The last path event of the bot's instance and the server tick it arrived in; null without one. */
@@ -393,6 +395,7 @@ public final class BaritoneRegistry {
             boolean wasDriven = entry.driven;
             entry.driven = false;
             entry.waterAllowed = false;
+            entry.context.setWaterAllowed(false);
             entry.context.clearObservationMemory();
             bestEffort(() -> cancelAll(entry));
             bestEffort(() -> NavSafetyNet.INSTANCE.clearBaritoneWater(bot));
@@ -419,6 +422,7 @@ public final class BaritoneRegistry {
         boolean wasDriven = entry.driven;
         entry.driven = false;
         entry.waterAllowed = false;
+        entry.context.setWaterAllowed(false);
         entry.observedRoute = null;
         entry.context.clearObservationFence();
         try {

@@ -310,6 +310,11 @@ public final class Standability {
         if (feet.is(BlockTags.CLIMBABLE)) {
             return true;
         }
+        // An air cell above water is breathable, but it is not dry footing. In particular, a
+        // local recovery must not treat the surface of a moat as an ordinary walk landing.
+        if (!below.getFluidState().isEmpty()) {
+            return false;
+        }
         if (below.isAir()) {
             return false;
         }
