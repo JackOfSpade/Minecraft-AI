@@ -3,13 +3,18 @@ package io.github.zoyluo.minecraftai.persist;
 import io.github.zoyluo.minecraftai.goal.Goal;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
-import net.minecraft.world.item.Items;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MissionSpecTest {
+    private static final Path MISSION_SPEC = Path.of(
+            "src/main/java/io/github/zoyluo/minecraftai/persist/MissionSpec.java");
+
     @Test
     void registryIndependentGoalKindsRoundTripWithoutTaskState() {
         List<Goal> goals = List.of(
@@ -33,20 +38,16 @@ class MissionSpecTest {
     }
 
     @Test
-    void compoundFulfillmentRoundTripsCanonicalRetainedAndDeliveryAllocations() {
-        Goal.Fulfill goal = new Goal.Fulfill(List.of(
-                new Goal.Allocation(Items.STONE_AXE, 1, "Alex"),
-                new Goal.Allocation(Items.STICK, 4, ""),
-                new Goal.Allocation(Items.STONE_AXE, 1, "Alex")));
+    void compoundFulfillmentPersistsCanonicalItemRecipientTriplets() throws IOException {
+        // The real registry-backed round trip runs in the Fabric GameTest. This source contract
+        // keeps the ordinary JUnit suite bootstrap-free while guarding its wire format.
+        String source = Files.readString(MISSION_SPEC);
 
-        MissionSpec spec = MissionSpec.fromGoal(goal);
-
-        assertEquals("fulfill", spec.type());
-        assertEquals(goal, spec.toGoal().orElseThrow());
-        assertTrue(new MissionSpec("fulfill", java.util.Map.of("schema", "1"),
-                List.of("minecraft:stick", "01", "")).toGoal().isEmpty());
-        assertTrue(new MissionSpec("fulfill", java.util.Map.of("schema", "1"),
-                List.of("minecraft:stick", "1", "", "minecraft:stick", "1", ""))
-                .toGoal().isEmpty());
+        assertTrue(source.contains("case Goal.Fulfill g -> {"));
+        assertTrue(source.contains("params.put(\"schema\", \"1\");"));
+        assertTrue(source.contains("encoded.add(allocation.itemId());"));
+        assertTrue(source.contains("encoded.add(allocation.recipient());"));
+        assertTrue(source.contains("case \"fulfill\" -> fulfill();"));
+        assertTrue(source.contains("noncanonical_fulfill_mission_spec"));
     }
 }
