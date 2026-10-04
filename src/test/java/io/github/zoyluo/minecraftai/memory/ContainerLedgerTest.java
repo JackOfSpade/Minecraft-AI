@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import org.junit.jupiter.api.Test;
 
 final class ContainerLedgerTest {
@@ -136,6 +137,64 @@ final class ContainerLedgerTest {
         assertEquals(9, loaded.freeSlots());
         assertEquals(27, loaded.totalSlots());
         assertEquals(1234L, loaded.lastVerified());
+    }
+
+    @Test
+    void loadEnforcesTheSameEntryAndItemLimitsAsLiveRecording() {
+        ListTag saved = new ListTag();
+        for (int index = 0; index < ContainerLedger.MAX_ENTRIES + 4; index++) {
+            CompoundTag container = new CompoundTag();
+            container.putString("dimension", OVERWORLD);
+            container.putInt("x", index);
+            container.putInt("y", 64);
+            container.putInt("z", 0);
+            container.putString("block", "minecraft:chest");
+            container.putInt("free", 1);
+            container.putInt("slots", 27);
+            container.putLong("verified", index);
+            CompoundTag items = new CompoundTag();
+            for (int item = 0; item < 70; item++) {
+                items.putInt("minecraft:item_" + item, 1);
+            }
+            container.put("items", items);
+            saved.add(container);
+        }
+
+        ContainerLedger ledger = new ContainerLedger();
+        ledger.load(saved);
+
+        assertEquals(ContainerLedger.MAX_ENTRIES, ledger.size());
+        assertTrue(ledger.get(OVERWORLD, new BlockPos(3, 64, 0)).isEmpty(),
+                "an oversized persisted list keeps the recent tail without parsing its stale prefix");
+        assertTrue(ledger.get(OVERWORLD, new BlockPos(4, 64, 0)).isPresent(),
+                "the first record in the retained recent tail is available");
+        assertEquals(64, ledger.get(OVERWORLD,
+                new BlockPos(ContainerLedger.MAX_ENTRIES + 3, 64, 0)).orElseThrow().items().size(),
+                "loading must not retain more item kinds than the persisted representation writes");
+    }
+
+    @Test
+    void loadSaturatesMalformedPositiveItemCountsAtIntMax() {
+        CompoundTag container = new CompoundTag();
+        container.putString("dimension", OVERWORLD);
+        container.putInt("x", 4);
+        container.putInt("y", 64);
+        container.putInt("z", 0);
+        container.putString("block", "minecraft:chest");
+        container.putInt("free", 2);
+        container.putInt("slots", 27);
+        CompoundTag items = new CompoundTag();
+        items.putInt("minecraft:diamond", Integer.MAX_VALUE);
+        items.putInt("minecraft:emerald", 1);
+        container.put("items", items);
+        ListTag saved = new ListTag();
+        saved.add(container);
+
+        ContainerLedger ledger = new ContainerLedger();
+        ledger.load(saved);
+
+        assertEquals(Integer.MAX_VALUE,
+                ledger.get(OVERWORLD, new BlockPos(4, 64, 0)).orElseThrow().totalItems());
     }
 
     @Test

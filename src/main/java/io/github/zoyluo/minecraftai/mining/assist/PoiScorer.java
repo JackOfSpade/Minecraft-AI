@@ -54,9 +54,6 @@ public final class PoiScorer {
     public static final int CERTAIN_MIN_CELLS = 6;
     public static final int CERTAIN_MIN_NON_WEAK_BUCKETS = 3;
 
-    public static final int MANDATORY_SENSORS = 2;
-    public static final int MANDATORY_SCULK_FAMILY_CELLS = 6;
-    public static final double MANDATORY_SCULK_FAMILY_C_MIN = 0.3D;
 
     /** Evaluation cadence and hysteresis window (design 6.3). */
     public static final int EVAL_INTERVAL_TICKS = 20;
@@ -78,8 +75,7 @@ public final class PoiScorer {
         POSSIBLE,
         /** POSSIBLE whose only reason is a large natural cavern; it always consults. */
         CAVERN_ONLY,
-        STRUCTURE_CERTAIN,
-        MANDATORY;
+        STRUCTURE_CERTAIN;
 
         /** True for the two bands that consult (POSSIBLE and CAVERN_ONLY). */
         public boolean isPossibleClass() {
@@ -90,7 +86,7 @@ public final class PoiScorer {
     /**
      * One evaluation. All doubles are in [0, 1]. {@code distinctCells} counts the evidence cells that
      * contribute (weak cells only when admitted), uncapped. {@code possibleGate} is the instantaneous
-     * "T >= 0.40 and one qualifying condition" test, independent of MANDATORY and of the certain
+     * "T >= 0.40 and one qualifying condition" test, independent of the certain
      * path; it is what {@link Hysteresis} counts.
      *
      * @param sumW              weighted, capped evidence sum
@@ -103,14 +99,13 @@ public final class PoiScorer {
      * @param strongBucket      a STRONG bucket meets its {@code strongMinCells}
      * @param band              result band
      * @param downgradedByHabitation a would-be STRUCTURE_CERTAIN was demoted to POSSIBLE (player base)
-     * @param mandatoryTrigger  {@code +}-joined trigger tokens when band is MANDATORY, else empty
      * @param centroid          mean of the contributing cell centres, {@code null} when there are none
      * @param weakCounted       weak buckets were admitted into sumW
      * @param clusterBonus      the 6-ball cluster bonus applied
      * @param cavernActive      the cavern channel was live (valid, dimension enabled, R &gt;= 12)
      * @param possibleGate      instantaneous POSSIBLE gate
      * @param distinctBuckets   {@code nonWeakBuckets} plus the weak buckets that were admitted
-     * @param habitationLike    a habitation item is in the evidence and none of SPAWNER, SCULK_STRUCT,
+     * @param habitationLike    a habitation item is in the evidence and none of SPAWNER,
      *                          RAIL, WEB is; true for any band, unlike {@code downgradedByHabitation}
      *                          (used by the design 6.7 "not habitation-like" rows)
      */
@@ -125,7 +120,6 @@ public final class PoiScorer {
             boolean strongBucket,
             Band band,
             boolean downgradedByHabitation,
-            String mandatoryTrigger,
             Vec3 centroid,
             boolean weakCounted,
             boolean clusterBonus,
@@ -133,10 +127,6 @@ public final class PoiScorer {
             boolean possibleGate,
             int distinctBuckets,
             boolean habitationLike) {
-
-        public boolean isMandatory() {
-            return band == Band.MANDATORY;
-        }
 
         /** The centroid rounded down to a block, or {@code null} when there is no evidence cell. */
         public BlockPos centroidBlock() {
@@ -150,14 +140,10 @@ public final class PoiScorer {
     public static PoiScore evaluate(PoiSignals signals) {
         Objects.requireNonNull(signals, "signals");
 
-        // Openness first: the channel is gated by dimension, radius and validity, and the mandatory
-        // rule below reads the gated value.
+        // Openness first: the channel is gated by dimension, radius and validity.
         boolean cavernActive = signals.opennessValid()
                 && cavernChannelActive(signals.cavernDimensionEnabled(), signals.perceptionRadius());
         double c = cavernActive ? clamp01(signals.opennessC()) : 0.0D;
-
-        // Warden rule (I13): decided on its own, before and independent of any score.
-        String mandatory = mandatoryTrigger(signals, c);
 
         int nonWeak = 0;
         boolean strong = false;
@@ -214,9 +200,7 @@ public final class PoiScorer {
         boolean downgraded = false;
 
         Band band;
-        if (!mandatory.isEmpty()) {
-            band = Band.MANDATORY;
-        } else if (certain && habitationLike) {
+        if (certain && habitationLike) {
             band = Band.POSSIBLE;
             downgraded = true;
         } else if (certain) {
@@ -227,7 +211,7 @@ public final class PoiScorer {
             band = Band.NONE;
         }
 
-        return new PoiScore(sumW, s, c, e, t, distinctCells, nonWeak, strong, band, downgraded, mandatory,
+        return new PoiScore(sumW, s, c, e, t, distinctCells, nonWeak, strong, band, downgraded,
                 centroid(evidence), weakBuckets > 0, cluster, cavernActive, gate, nonWeak + weakBuckets,
                 habitationLike);
     }
@@ -272,7 +256,7 @@ public final class PoiScorer {
      * Entity score {@code E} from the entity type ids that passed the observability filter:
      * {@code chest_minecart} 0.6; villager, pillager, vindicator, evoker, illusioner 0.3 each;
      * item_frame and armor_stand 0.15 each; any non-{@code minecraft} namespace 0.4 (once); group cap
-     * 0.6. A warden adds nothing here (see {@link #isWarden}); it is mandatory on its own.
+     * 0.6.
      */
     public static double entityScore(Iterable<String> entityTypeIds) {
         double sum = 0.0D;
@@ -302,52 +286,15 @@ public final class PoiScorer {
         return Math.min(ENTITY_CAP, sum);
     }
 
-    public static boolean isWarden(String entityTypeId) {
-        return "minecraft:warden".equals(entityTypeId) || "warden".equals(entityTypeId);
-    }
-
     /**
-     * Player-base look: a habitation item is in the evidence and none of SPAWNER, SCULK_STRUCT, RAIL or
+     * Player-base look: a habitation item is in the evidence and none of SPAWNER, RAIL or
      * WEB is. A structure-certain candidate that is habitation-like is downgraded to POSSIBLE.
      */
     public static boolean habitationLike(PoiSignals signals) {
         return signals.hasHabitationItem()
                 && signals.cellCount(PoiBucket.SPAWNER) == 0
-                && signals.cellCount(PoiBucket.SCULK_STRUCT) == 0
                 && signals.cellCount(PoiBucket.RAIL) == 0
                 && signals.cellCount(PoiBucket.WEB) == 0;
-    }
-
-    /** Warden rule, evaluated on its own (I13); returns the {@code +}-joined trigger tokens or empty. */
-    private static String mandatoryTrigger(PoiSignals signals, double effectiveC) {
-        StringBuilder sb = new StringBuilder();
-        if (signals.wardenVisible()) {
-            append(sb, "warden_visible");
-        }
-        if (signals.reinforcedDeepslateCount() >= 1) {
-            append(sb, "reinforced_deepslate");
-        }
-        if (signals.sculkShriekerCount() >= 1) {
-            append(sb, "sculk_shrieker");
-        }
-        if (signals.sculkCatalystCount() >= 1) {
-            append(sb, "sculk_catalyst");
-        }
-        if (signals.sculkSensorCount() >= MANDATORY_SENSORS) {
-            append(sb, "sculk_sensors");
-        }
-        if (signals.sculkFamilyWithin12() >= MANDATORY_SCULK_FAMILY_CELLS
-                && ge(effectiveC, MANDATORY_SCULK_FAMILY_C_MIN)) {
-            append(sb, "sculk_family_cavern");
-        }
-        return sb.toString();
-    }
-
-    private static void append(StringBuilder sb, String token) {
-        if (sb.length() > 0) {
-            sb.append('+');
-        }
-        sb.append(token);
     }
 
     /** True when some evidence cell has at least {@link #CLUSTER_MIN_CELLS} cells (itself included) within the ball. */

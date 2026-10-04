@@ -314,50 +314,6 @@ public final class NaturalSwimGameTests {
     }
 
     /**
-     * The dig-out step: the bot breaks the two cells of a 2-thick natural stone wall in its way and walks into each opened cell
-     * (it is never placed there), then stands on the far side. No correction teleport, the floor stays.
-     */
-    @GameTest(environment = "minecraftai-gametest:natural_swim_game_tests_follow_dig_out_by_walking", maxTicks = 900)
-    public void followDigOutByWalking(GameTestHelper context) {
-        BlockPos feet = buildLand(context);
-        ServerLevel world = context.getLevel();
-        for (int x = 10; x <= 11; x++) {
-            for (int z = -2; z <= 20; z++) {
-                for (int y = 0; y <= 1; y++) {
-                    world.setBlock(feet.offset(x, y, z), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        Standability.clearCache();
-        AIPlayerEntity target = FollowSwimGameTests.spawnBot(world, "NatDigTgt", feet.offset(20, 0, 8));
-        FollowSwimGameTests.holdStill(target);
-        AIPlayerEntity bot = spawn(context, "NatDigBot", feet.offset(9, 0, 8));
-        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
-        FollowDigOut digOut = new FollowDigOut();
-        require(context, digOut.start(bot, target), "the dig-out did not start against a plain natural wall");
-        AtomicInteger tick = new AtomicInteger();
-        context.failIfEver(() -> {
-            int now = tick.incrementAndGet();
-            boolean active = digOut.tick(bot);
-            requireUnhurt(context, bot, "dig out", now);
-            for (int x = 9; x <= 14; x++) {
-                require(context, !world.getBlockState(feet.offset(x, -1, 8)).isAir(),
-                        "the dig-out removed the floor at x=" + x);
-            }
-            if (!active) {
-                require(context, bot.getX() >= feet.getX() + 11.0D, "the dig-out ended before the wall was crossed: x="
-                        + (bot.getX() - feet.getX()));
-                require(context, world.getBlockState(feet.offset(10, 0, 8)).isAir() && world.getBlockState(feet.offset(11, 1, 8)).isAir(),
-                        "the wall cells on the bot's lane were not opened");
-                requireNoCorrections(context, bot, "dig out");
-                LOGGER.info("SWIMPROBE dig_out done tick={}", now);
-                despawn(context, bot, target);
-                context.succeed();
-            }
-        });
-    }
-
-    /**
      * A cancelled shelter's doorway: the follower breaks the bot-owned blocks of the doorway on the player's side and then WALKS
      * through it (no teleport), and the owned exit debt is repaid.
      */
@@ -399,6 +355,8 @@ public final class NaturalSwimGameTests {
                 require(context, world.getBlockState(egress).isAir() && world.getBlockState(egress.above()).isAir(),
                         "the doorway was not opened");
                 require(context, EmergencyShelterTask.pendingExitDebt(bot).isEmpty(), "the exit debt was not repaid");
+                require(context, !bot.getActionPack().stepAdmissionBlocked(),
+                        "shelter exit retained its completed guarded-step lease");
                 requireNoCorrections(context, bot, "shelter exit");
                 LOGGER.info("SWIMPROBE shelter_exit done tick={}", now);
                 despawn(context, bot, target);

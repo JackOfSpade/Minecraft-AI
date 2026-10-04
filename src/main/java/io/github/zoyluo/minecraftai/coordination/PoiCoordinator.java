@@ -8,7 +8,6 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import io.github.zoyluo.minecraftai.mining.assist.MandatoryLatch;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
@@ -50,7 +49,7 @@ import net.minecraft.server.level.ServerPlayer;
  *       restart but the bot is still user-paused, rebuilds the case from {@link BotMemory} and resends the
  *       stop notice once, prefixed {@code "Still paused: "}.</li>
  *   <li><b>{@link #onCandidate}</b> runs only when {@code PoiDetector} produced an actionable result
- *       (MANDATORY, STRUCTURE_CERTAIN, or a confirmed POSSIBLE/CAVERN_ONLY): it is design 6.5's decision
+ *       (STRUCTURE_CERTAIN or a confirmed POSSIBLE/CAVERN_ONLY): it is the decision
  *       tree — mandatory always checked first (bypassing {@code PoiRegistry} entirely, since a DECLINED or
  *       STOPPED registry entry must never suppress a mandatory candidate), then the dedupe registry, then the
  *       per-mission hold/stop cap, then a deterministic structure-certain stop, then {@link #possibleFlow} for
@@ -67,7 +66,7 @@ import net.minecraft.server.level.ServerPlayer;
  * </ul>
  *
  * <p>Server thread only, exactly like the state it reads and writes ({@code PoiRegistry}, {@code
- * MandatoryLatch}, {@code MissionAssistLedger}, {@code TaskManager}, {@code BotMemory}).</p>
+ * MissionAssistLedger}, {@code TaskManager}, {@code BotMemory}).</p>
  */
 public final class PoiCoordinator {
     public static final PoiCoordinator INSTANCE = new PoiCoordinator();
@@ -75,13 +74,10 @@ public final class PoiCoordinator {
     /** Where a stop's decision came from. Kept only in memory ({@code PoiRegistry.OpenCase.source()}):
      * design 2.4/6.4 both say, in bold, "No {@code BotMemory} facts are written," so a restart never reads
      * this back from persistence -- see {@link #tick}'s rehydration branch, which reconstructs it from the
-     * (already-persisted, MANDATORY-only) {@value #WARDEN_RISK_LABEL} label instead. */
-    enum Source { MANDATORY, CERTAIN, FALLBACK }
+     * already-persisted label instead. */
+    enum Source { CERTAIN, FALLBACK }
 
     private static final String HOLD_PLACE_PREFIX = "poi_hold_";
-    /** {@link PoiDetector#labelFor}'s label for every MANDATORY candidate, and no other band's: a reliable,
-     * already-persisted discriminator for {@link #tick}'s rehydration, so no BotMemory fact is needed. */
-    private static final String WARDEN_RISK_LABEL = "warden_risk";
     /** Design 6.4: "(at most 3 more)" once the per-mission hold/stop cap is reached. */
     private static final int MAX_CERTAIN_NOTIFY_AFTER_CAP = 3;
     /** Design 6.5's "else deadline = now + 300" (no hold: DigDown descent, or a hold that could not start). */
@@ -168,10 +164,7 @@ public final class PoiCoordinator {
             }
             String label = marker.get().getKey().substring(HOLD_PLACE_PREFIX.length());
             // No BotMemory fact records which Source produced the hold (design 2.4/6.4). PoiNotice.renderStop
-            // only branches on MANDATORY vs not, and WARDEN_RISK_LABEL is the one label PoiDetector ever hands
-            // a MANDATORY candidate (never any other band), so it alone is enough to pick the right template;
-            // any non-mandatory guess is equivalent to any other for that branch.
-            String source = label.equals(WARDEN_RISK_LABEL) ? Source.MANDATORY.name() : Source.FALLBACK.name();
+            String source = Source.FALLBACK.name();
             BotMemory.Place place = marker.get().getValue();
             open = new PoiRegistry.OpenCase(label, source, place.dimension(), place.pos());
             PoiRegistry.openCase(id, open);
@@ -180,12 +173,11 @@ public final class PoiCoordinator {
                 // Best-effort only: by rehydration time (a later process, or a later tick of this one) a
                 // DigDownTask's own onPause already converted DESCEND to RETURN long ago (see stopNow's
                 // comment), so peekPaused can no longer recover the phase it was in at the original stop.
-                // Same documented-simplification idiom as PoiRegistry/MandatoryLatch's own javadoc notes.
                 boolean descending = TaskManager.INSTANCE.peekPaused(bot)
                         .map(task -> task instanceof DigDownTask digDownTask && digDownTask.isDescending())
                         .orElse(false);
-                String text = PoiNotice.renderStop(descending, Source.valueOf(open.source()) == Source.MANDATORY,
-                        open.label(), open.anchor(), bot.blockPosition(), null, "Still paused: ");
+                String text = PoiNotice.renderStop(descending, open.label(), open.anchor(), bot.blockPosition(),
+                        null, "Still paused: ");
                 sendNotice(bot, bot.level(), text);
                 BotLog.task(bot, "poi_restart_rehydrated", "label", label, "source", source);
             }
@@ -194,9 +186,6 @@ public final class PoiCoordinator {
         if (userPaused) {
             return;
         }
-        if (Source.MANDATORY.name().equals(open.source())) {
-            MandatoryLatch.acknowledge(id, serverTick);
-        }
         BotMemory mem = BotMemoryStore.INSTANCE.of(id);
         mem.forgetPlace(HOLD_PLACE_PREFIX + open.label());
         PoiRegistry.closeCase(id);
@@ -204,7 +193,7 @@ public final class PoiCoordinator {
     }
 
     /**
-     * Called only when {@code PoiDetector} produced an actionable result (MANDATORY, STRUCTURE_CERTAIN, or a
+     * Called only when {@code PoiDetector} produced an actionable result (STRUCTURE_CERTAIN or a
      * confirmed POSSIBLE/CAVERN_ONLY) — design 6.5's {@code onCandidate}.
      */
     public void onCandidate(AIPlayerEntity bot, MiningAssistState state, ServerLevel world,
@@ -215,11 +204,6 @@ public final class PoiCoordinator {
         BlockPos anchor = result.anchor();
         String label = result.label();
         PoiScorer.PoiScore score = result.score();
-
-        if (result.band() == PoiScorer.Band.MANDATORY) {
-            mandatoryFlow(bot, world, dim, anchor, score, serverTick);
-            return;
-        }
 
         if (PoiRegistry.suppressed(id, dim, anchor, label, score.s(), serverTick)) {
             return;
@@ -543,29 +527,11 @@ public final class PoiCoordinator {
     }
 
     /**
-     * The warden rule (I13), evaluated on its own, before and independent of the dedupe registry: a DECLINED
-     * or STOPPED {@code PoiRegistry} entry must never suppress a mandatory candidate, so mandatory never
-     * consults the registry at all — only {@link MandatoryLatch}.
-     */
-    private void mandatoryFlow(AIPlayerEntity bot, ServerLevel world, String dim, BlockPos anchor,
-                               PoiScorer.PoiScore score, int serverTick) {
-        UUID id = bot.getUUID();
-        boolean wardenVisible = score.mandatoryTrigger().contains("warden_visible");
-        if (MandatoryLatch.suppresses(id, dim, anchor, wardenVisible, serverTick)) {
-            return;
-        }
-        MandatoryLatch.record(id, dim, anchor, serverTick);
-        // Literal "warden_risk" (== WARDEN_RISK_LABEL), not the constant: PoiCoordinatorSourceContractTest
-        // pins this exact call text.
-        stopNow(bot, world, dim, anchor, "warden_risk", Source.MANDATORY, score.s(), null, serverTick, null, false);
-    }
-
-    /**
      * Pauses the bot's mission, records the stop in the dedupe registry, opens the case (BotMemory ring slot
      * plus the resumable {@code poi_hold_<label>} marker; no {@code BotMemory} fact -- design 2.4/6.4), and
      * sends the notice. {@code structureScore} is {@code S} at the moment of the stop (mandatory passes
      * {@code score.s()} of its own evaluation, since there is no separate "structure score" for a
-     * warden-risk trigger).
+     * deterministic trigger).
      *
      * @param alreadyPaused P3: true when a R4 consult already paused this bot via {@code TaskManager.
      *                      pauseUserIntent} for a hold (design 6.5's {@code ownsPause}) and its own verdict
@@ -577,14 +543,10 @@ public final class PoiCoordinator {
                          Source source, double structureScore, MissionAssistLedger.Entry ledger, int serverTick,
                          String autoDetectedNote, boolean alreadyPaused) {
         UUID id = bot.getUUID();
-        // Design 6.1's DigDown-descend variant needs the task's phase at the MOMENT of the stop, captured
-        // from the still-active task BEFORE it is paused: IntentController.pause below routes through
-        // TaskManager.pauseFor -> DigDownTask.onPause, which -- as its own documented side effect (design
-        // 6.1's table: "onPause converts to a RETURN climb") -- flips phase DESCEND to RETURN before the
-        // call returns. Reading isDescending() any later, even correctly via peekPaused once the task is on
-        // the pause stack, would always observe the post-pause RETURN phase and could never select the
-        // climb-out template (real-server regression guard: OreDigPoiGameTests.digDownStopUsesDescentClimbNotice
-        // / digDownMandatoryUsesDescentVariantToo).
+        // The legacy DigDown notice variant needs its phase captured while the task is active:
+        // pausing can advance DESCEND to RETURN before the call returns. DigDown is retired in
+        // strict survival today, but preserving this ordering keeps the notice renderer correct
+        // for an already-active compatible task without consulting a paused task afterward.
         boolean descending = TaskManager.INSTANCE.getActive(bot)
                 .map(task -> task instanceof DigDownTask digDownTask && digDownTask.isDescending())
                 .orElse(false);
@@ -592,7 +554,7 @@ public final class PoiCoordinator {
             IntentController.INSTANCE.pause(bot, IntentController.ControlOrigin.SYSTEM, "poi_stop");
         }
         PoiRegistry.record(id, dim, anchor, label, PoiRegistry.State.STOPPED, structureScore, serverTick);
-        if (source != Source.MANDATORY && ledger != null) {
+        if (ledger != null) {
             ledger.notePoiHoldOrStop();
         }
         int slot = PoiRegistry.nextRingSlot(id);
@@ -600,8 +562,7 @@ public final class PoiCoordinator {
         mem.markPlace("poi_" + slot + "_" + label, world, anchor);
         mem.markPlace(HOLD_PLACE_PREFIX + label, world, anchor);
         PoiRegistry.openCase(id, new PoiRegistry.OpenCase(label, source.name(), dim, anchor));
-        String text = PoiNotice.renderStop(descending, source == Source.MANDATORY, label, anchor,
-                bot.blockPosition(), autoDetectedNote, null);
+        String text = PoiNotice.renderStop(descending, label, anchor, bot.blockPosition(), autoDetectedNote, null);
         sendNotice(bot, world, text);
         BotLog.task(bot, "poi_stop", "label", label, "source", source, "pos", PoiNotice.anchorStr(anchor),
                 "ledger_key", ledgerKeyFor(bot));

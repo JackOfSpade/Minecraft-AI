@@ -512,6 +512,8 @@ public final class FarmSurvivalGameTests {
                 require(context, world.getBlockState(nearestCrop).is(Blocks.WHEAT)
                                 && bot.isWithinBlockInteractionRange(nearestCrop, 0.0D),
                         "fixture: the hidden crop must be inside interaction reach");
+                require(context, FarmTask.adjacentStandPos(bot, nearestCrop.below()) == null,
+                        "an unseen stand behind the wall became a farm route hint");
                 ActionResult proof = FarmAction.harvestProof(bot, nearestCrop);
                 require(context, proof.isFailed() && "crop_not_visible".equals(proof.reason()),
                         "a crop behind the wall passed the click proof: " + proof);
@@ -752,11 +754,18 @@ public final class FarmSurvivalGameTests {
                             "the walk trampled the field at " + cell.toShortString() + ": " + world.getBlockState(cell.below()));
                 }
             }
-            if (bot.getActionPack().isWalkToIdle()) {
+            // startWalkTo hands the request to the selected route engine on its next tick.  Do not
+            // mistake that handoff window for an arrived walk before the route has begun.
+            if (context.getTick() < 20) {
+                return;
+            }
+            if (bot.getActionPack().isWalkToIdle() && bot.getActionPack().isPathExecutorIdle()) {
                 require(context, bot.position().distanceTo(Vec3.atBottomCenterOf(goal)) <= 1.0D,
                         "the walk across the field stopped short at " + bot.blockPosition().toShortString());
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), "FarmWalkGT");
                 context.succeed();
+            } else if (context.getTick() > 180) {
+                context.fail(Component.nullToEmpty("the walk across the field did not settle"));
             }
         });
     }
@@ -804,11 +813,16 @@ public final class FarmSurvivalGameTests {
                             "the walk trampled the field at " + cell.toShortString() + ": " + world.getBlockState(cell.below()));
                 }
             }
-            if (bot.getActionPack().isWalkToIdle()) {
+            if (context.getTick() < 20) {
+                return;
+            }
+            if (bot.getActionPack().isWalkToIdle() && bot.getActionPack().isPathExecutorIdle()) {
                 require(context, bot.position().distanceTo(Vec3.atBottomCenterOf(goal)) <= 1.0D,
                         "the walk across the field's channel stopped short at " + bot.blockPosition().toShortString());
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), "FarmChannelWalkGT");
                 context.succeed();
+            } else if (context.getTick() > 260) {
+                context.fail(Component.nullToEmpty("the walk across the field's channel did not settle"));
             }
         });
     }

@@ -117,7 +117,6 @@ class PoiScorerTest {
         assertTrue(r.strongBucket());
         assertEquals(Band.STRUCTURE_CERTAIN, r.band());
         assertFalse(r.downgradedByHabitation());
-        assertEquals("", r.mandatoryTrigger());
         assertEquals(PoiLabeler.MINESHAFT, PoiLabeler.label(signals));
 
         // The design's "strong weight 40%": rails plus cobwebs over the whole sum.
@@ -143,24 +142,6 @@ class PoiScorerTest {
         assertEquals(11, r.distinctCells());
         assertEquals(Band.STRUCTURE_CERTAIN, r.band());
         assertEquals(PoiLabeler.DUNGEON, PoiLabeler.label(signals));
-    }
-
-    /** 6 deepslate build + 2 soul lanterns + 1 shrieker: mandatory whatever else the score says. */
-    @Test
-    void fixtureAncientCityEdgeIsMandatory() {
-        Grid g = new Grid(1);
-        PoiSignals.Builder b = PoiSignals.builder().sculkShrieker(1);
-        add(b, g, PoiBucket.DEEPSLATE_BUILD, 6);
-        add(b, g, PoiBucket.LIGHT_DRESSING, 2);
-        add(b, g, PoiBucket.SCULK_STRUCT, 1);
-        PoiSignals signals = b.build();
-        PoiScore r = PoiScorer.evaluate(signals);
-
-        assertEquals(Band.MANDATORY, r.band());
-        assertEquals("sculk_shrieker", r.mandatoryTrigger());
-        assertEquals(9.5D, r.sumW(), EXACT);
-        assertTrue(r.s() > 0.9D);
-        assertEquals(PoiLabeler.ANCIENT_CITY, PoiLabeler.label(signals));
     }
 
     /** 6 tuff/copper + 1 vault + 2 chests (9 cells). */
@@ -592,8 +573,8 @@ class PoiScorerTest {
     }
 
     @Test
-    void habitationDowngradeIsSuppressedBySpawnerSculkRailOrWeb() {
-        for (PoiBucket immune : new PoiBucket[]{PoiBucket.SPAWNER, PoiBucket.SCULK_STRUCT, PoiBucket.RAIL, PoiBucket.WEB}) {
+    void habitationDowngradeIsSuppressedBySpawnerRailOrWeb() {
+        for (PoiBucket immune : new PoiBucket[]{PoiBucket.SPAWNER, PoiBucket.RAIL, PoiBucket.WEB}) {
             PoiSignals.Builder b = certainBase().habitation(Habitation.BED);
             b.cell(immune, new BlockPos(50, 60, 50));
             PoiScore r = eval(b);
@@ -637,10 +618,6 @@ class PoiScorerTest {
         // No habitation item at all.
         assertFalse(eval(certainBase()).habitationLike());
         assertTrue(eval(certainBase().habitation(Habitation.BOOKSHELF)).habitationLike());
-        // Mandatory candidates still report the flag but are never downgraded.
-        PoiScore mandatory = eval(certainBase().habitation(Habitation.BED).wardenVisible(true));
-        assertTrue(mandatory.habitationLike());
-        assertFalse(mandatory.downgradedByHabitation());
     }
 
     @Test
@@ -804,7 +781,7 @@ class PoiScorerTest {
         Grid g = new Grid(1);
         PoiSignals.Builder b = PoiSignals.builder()
                 .entityScore(Double.POSITIVE_INFINITY).openness(Double.NaN)
-                .perceptionRadius(Double.NaN).sculkFamilyWithin12(-5).reinforcedDeepslate(-1);
+                .perceptionRadius(Double.NaN);
         for (PoiBucket bucket : evidenceBuckets()) {
             add(b, g, bucket, bucket.cap() + 3);
         }
@@ -875,79 +852,6 @@ class PoiScorerTest {
         assertNull(eval(PoiSignals.builder()).centroidBlock());
     }
 
-    // ------------------------------------------------------------------ mandatory rule
-
-    @Test
-    void mandatoryWardenVisibleAloneFires() {
-        PoiScore r = eval(PoiSignals.builder().wardenVisible(true));
-
-        assertEquals(Band.MANDATORY, r.band());
-        assertEquals("warden_visible", r.mandatoryTrigger());
-        assertTrue(r.isMandatory());
-        assertEquals(0.0D, r.t(), EXACT);
-        assertFalse(r.possibleGate());
-        assertNull(r.centroid());
-    }
-
-    @Test
-    void mandatoryOnSingleReinforcedDeepslateShriekerOrCatalyst() {
-        assertEquals("reinforced_deepslate", eval(PoiSignals.builder().reinforcedDeepslate(1)).mandatoryTrigger());
-        assertEquals("sculk_shrieker", eval(PoiSignals.builder().sculkShrieker(1)).mandatoryTrigger());
-        assertEquals("sculk_catalyst", eval(PoiSignals.builder().sculkCatalyst(1)).mandatoryTrigger());
-        for (PoiSignals.Builder b : List.of(PoiSignals.builder().reinforcedDeepslate(1),
-                PoiSignals.builder().sculkShrieker(1), PoiSignals.builder().sculkCatalyst(1))) {
-            assertEquals(Band.MANDATORY, eval(b).band());
-        }
-    }
-
-    @Test
-    void mandatoryNeedsTwoSculkSensors() {
-        assertEquals(Band.NONE, eval(PoiSignals.builder().sculkSensors(1)).band());
-        PoiScore two = eval(PoiSignals.builder().sculkSensors(2));
-        assertEquals(Band.MANDATORY, two.band());
-        assertEquals("sculk_sensors", two.mandatoryTrigger());
-    }
-
-    @Test
-    void mandatorySculkFamilyNeedsSixCellsAndCavernChannelAtLeastPointThree() {
-        PoiSignals.Builder six = PoiSignals.builder().sculkFamilyWithin12(6).perceptionRadius(16.0D);
-        assertEquals(Band.MANDATORY, eval(six.openness(0.30D)).band());
-        assertEquals("sculk_family_cavern", eval(six).mandatoryTrigger());
-        assertEquals(Band.NONE, eval(PoiSignals.builder().sculkFamilyWithin12(6).openness(0.29D)).band());
-        // Five cells is one short: a big open cavern is only CAVERN_ONLY, never mandatory.
-        assertEquals(Band.CAVERN_ONLY, eval(PoiSignals.builder().sculkFamilyWithin12(5).openness(1.0D)).band());
-        // Without a usable channel the family rule cannot fire.
-        assertEquals(Band.NONE, eval(PoiSignals.builder().sculkFamilyWithin12(20)).band());
-        assertEquals(Band.NONE, eval(PoiSignals.builder().sculkFamilyWithin12(20).openness(1.0D)
-                .dimensionId("minecraft:the_nether")).band());
-        assertEquals(Band.NONE, eval(PoiSignals.builder().sculkFamilyWithin12(20).openness(1.0D)
-                .perceptionRadius(8.0D)).band());
-    }
-
-    @Test
-    void mandatoryIsIndependentOfEverythingElse() {
-        // Nothing else in the picture: cavern disabled, no cells, no entities.
-        PoiScore bare = eval(PoiSignals.builder().sculkShrieker(1).dimensionId("minecraft:the_nether"));
-        assertEquals(Band.MANDATORY, bare.band());
-
-        // Habitation items never soften it.
-        PoiSignals.Builder base = certainBase().habitation(Habitation.BED).sculkShrieker(1);
-        PoiScore withBase = eval(base);
-        assertEquals(Band.MANDATORY, withBase.band());
-        assertFalse(withBase.downgradedByHabitation());
-
-        // A certain structure with a warden nearby is mandatory, not merely certain.
-        assertEquals(Band.MANDATORY, eval(certainBase().wardenVisible(true)).band());
-    }
-
-    @Test
-    void mandatoryTriggersJoinInFixedOrder() {
-        PoiScore r = eval(PoiSignals.builder().wardenVisible(true).reinforcedDeepslate(2)
-                .sculkShrieker(1).sculkCatalyst(1).sculkSensors(3));
-        assertEquals("warden_visible+reinforced_deepslate+sculk_shrieker+sculk_catalyst+sculk_sensors",
-                r.mandatoryTrigger());
-    }
-
     // ------------------------------------------------------------------ entities
 
     @Test
@@ -965,8 +869,8 @@ class PoiScorerTest {
         assertEquals(0.4D, PoiScorer.entityScore(List.of("create:contraption")), EXACT);
         // One non-minecraft namespace bonus, not one per entity.
         assertEquals(0.4D, PoiScorer.entityScore(List.of("create:contraption", "mobs:golem")), EXACT);
-        // Ordinary mobs and the warden add nothing.
-        assertEquals(0.0D, PoiScorer.entityScore(List.of("minecraft:zombie", "minecraft:warden", "minecraft:bat")), EXACT);
+        // Ordinary mobs add nothing.
+        assertEquals(0.0D, PoiScorer.entityScore(List.of("minecraft:zombie", "minecraft:bat")), EXACT);
     }
 
     @Test
@@ -979,13 +883,6 @@ class PoiScorerTest {
         // The scorer also caps defensively whatever the caller passes.
         assertEquals(0.6D, eval(PoiSignals.builder().entityScore(5.0D)).e(), EXACT);
         assertEquals(0.6D, eval(PoiSignals.builder().entityScore(0.75D)).e(), EXACT);
-    }
-
-    @Test
-    void isWardenMatchesOnlyTheWarden() {
-        assertTrue(PoiScorer.isWarden("minecraft:warden"));
-        assertFalse(PoiScorer.isWarden("minecraft:zombie"));
-        assertFalse(PoiScorer.isWarden(null));
     }
 
     @Test
@@ -1328,17 +1225,10 @@ class PoiScorerTest {
         assertEquals("minecraft:overworld", empty.dimensionId());
         assertTrue(empty.cavernDimensionEnabled());
         assertEquals(PoiSignals.DEFAULT_PERCEPTION_RADIUS, empty.perceptionRadius(), EXACT);
-        assertFalse(empty.wardenVisible());
         assertEquals(0.0D, empty.entityScore(), EXACT);
         assertNotNull(empty.habitation());
 
-        PoiSignals clamped = PoiSignals.builder().sculkShrieker(-2).sculkCatalyst(-1).sculkSensors(-9)
-                .reinforcedDeepslate(-4).sculkFamilyWithin12(-3).openness(7.0D).build();
-        assertEquals(0, clamped.sculkShriekerCount());
-        assertEquals(0, clamped.sculkCatalystCount());
-        assertEquals(0, clamped.sculkSensorCount());
-        assertEquals(0, clamped.reinforcedDeepslateCount());
-        assertEquals(0, clamped.sculkFamilyWithin12());
+        PoiSignals clamped = PoiSignals.builder().openness(7.0D).build();
         assertEquals(1.0D, clamped.opennessC(), EXACT);
         assertEquals(0, PoiScorer.evaluate(clamped).distinctCells());
     }
@@ -1504,12 +1394,6 @@ class PoiScorerTest {
         final List<PoiBucket> buckets = new ArrayList<>();
         final List<BlockPos> positions = new ArrayList<>();
         final Set<Habitation> habitation = EnumSet.noneOf(Habitation.class);
-        boolean warden;
-        int reinforced;
-        int shrieker;
-        int catalyst;
-        int sensors;
-        int family;
         double entity;
         boolean opennessValid;
         double c;
@@ -1517,9 +1401,7 @@ class PoiScorerTest {
         boolean dimensionEnabled;
 
         PoiSignals build() {
-            PoiSignals.Builder b = PoiSignals.builder().wardenVisible(warden).reinforcedDeepslate(reinforced)
-                    .sculkShrieker(shrieker).sculkCatalyst(catalyst).sculkSensors(sensors)
-                    .sculkFamilyWithin12(family).entityScore(entity).perceptionRadius(radius)
+            PoiSignals.Builder b = PoiSignals.builder().entityScore(entity).perceptionRadius(radius)
                     .cavernDimensionEnabled(dimensionEnabled);
             if (opennessValid) {
                 b.openness(c);
@@ -1568,12 +1450,6 @@ class PoiScorerTest {
                 }
             }
         }
-        sp.warden = rnd.nextInt(30) == 0;
-        sp.reinforced = rnd.nextInt(40) == 0 ? 1 + rnd.nextInt(2) : 0;
-        sp.shrieker = rnd.nextInt(40) == 0 ? 1 + rnd.nextInt(2) : 0;
-        sp.catalyst = rnd.nextInt(40) == 0 ? 1 + rnd.nextInt(2) : 0;
-        sp.sensors = rnd.nextInt(15) == 0 ? 1 + rnd.nextInt(3) : 0;
-        sp.family = rnd.nextInt(8) == 0 ? rnd.nextInt(10) : 0;
         sp.entity = rnd.nextInt(5) < 3 ? 0.0D : rnd.nextDouble() * 0.9D;
         sp.opennessValid = rnd.nextInt(4) != 0;
         sp.c = rnd.nextInt(5) < 2 ? 0.0D : rnd.nextDouble();
@@ -1666,35 +1542,13 @@ class PoiScorerTest {
         x.gate = x.t >= 0.40D && (qualifies || cavernOnly);
         boolean certain = x.s >= 0.80D && x.cells >= 6 && x.nonWeak >= 3;
         boolean anyImmune = false;
-        for (PoiBucket immune : new PoiBucket[]{PoiBucket.SPAWNER, PoiBucket.SCULK_STRUCT, PoiBucket.RAIL, PoiBucket.WEB}) {
+        for (PoiBucket immune : new PoiBucket[]{PoiBucket.SPAWNER, PoiBucket.RAIL, PoiBucket.WEB}) {
             anyImmune |= byBucket.containsKey(immune);
         }
         x.habitationLike = !sp.habitation.isEmpty() && !anyImmune;
 
-        List<String> triggers = new ArrayList<>();
-        if (sp.warden) {
-            triggers.add("warden_visible");
-        }
-        if (sp.reinforced >= 1) {
-            triggers.add("reinforced_deepslate");
-        }
-        if (sp.shrieker >= 1) {
-            triggers.add("sculk_shrieker");
-        }
-        if (sp.catalyst >= 1) {
-            triggers.add("sculk_catalyst");
-        }
-        if (sp.sensors >= 2) {
-            triggers.add("sculk_sensors");
-        }
-        if (sp.family >= 6 && x.c >= 0.3D) {
-            triggers.add("sculk_family_cavern");
-        }
-        x.trigger = String.join("+", triggers);
-
-        if (!triggers.isEmpty()) {
-            x.band = Band.MANDATORY;
-        } else if (certain) {
+        x.trigger = "";
+        if (certain) {
             x.band = x.habitationLike ? Band.POSSIBLE : Band.STRUCTURE_CERTAIN;
             x.downgraded = x.habitationLike;
         } else if (x.gate) {
@@ -1744,7 +1598,6 @@ class PoiScorerTest {
             assertEquals(x.gate, r.possibleGate(), msg);
             assertEquals(x.habitationLike, r.habitationLike(), msg);
             assertEquals(x.downgraded, r.downgradedByHabitation(), msg);
-            assertEquals(x.trigger, r.mandatoryTrigger(), msg);
             assertEquals(x.band, r.band(), msg);
             if (x.centroid == null) {
                 assertNull(r.centroid(), msg);
@@ -1754,7 +1607,6 @@ class PoiScorerTest {
                 assertEquals(x.centroid[2], r.centroid().z, 1.0e-9D, msg);
             }
             // Cross-band invariants that hold whatever the inputs.
-            assertEquals(r.band() == Band.MANDATORY, !r.mandatoryTrigger().isEmpty(), msg);
             assertFalse(r.band() == Band.STRUCTURE_CERTAIN && r.habitationLike(), msg);
             if (r.band().isPossibleClass() || r.band() == Band.STRUCTURE_CERTAIN) {
                 assertTrue(r.possibleGate(), msg);

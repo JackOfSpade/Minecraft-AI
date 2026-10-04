@@ -37,7 +37,6 @@ import java.util.Objects;
  *   <li>Item 5: {@code threatCooldown} THREAT_COOLDOWN, {@code shelterEpisode} SHELTER_EPISODE.</li>
  *   <li>Item 6: {@code hostilePressure} HOSTILE_PRESSURE.</li>
  *   <li>Item 7: {@code lavaInThreatBox} LAVA_THREAT_BOX, {@code hazardLavaNear} HAZARD_LAVA.</li>
- *   <li>Item 8: {@code deepDark} DEEP_DARK_BIOME (the builder has already applied {@code safety.deepDarkVeto}).</li>
  *   <li>Item 9: POI_EVIDENCE when {@code poiEvidenceStale} (a fact that was never computed or is old is not "no
  *       evidence": fail closed), or {@code poiStructureScore >= POI_S_LIMIT}, or {@code poiWindowVeto}, or
  *       {@code poiCandidatePending}, or {@code inNoDetourZone}.</li>
@@ -173,11 +172,6 @@ public final class SafeGate {
                 return SafeReason.HAZARD_LAVA;
             }
         }
-        if (stage.reads(8)) {
-            if (inputs.deepDark()) {
-                return SafeReason.DEEP_DARK_BIOME;
-            }
-        }
         if (stage.reads(9)) {
             if (inputs.poiEvidenceStale()
                     || inputs.poiStructureScore() >= POI_S_LIMIT
@@ -197,9 +191,7 @@ public final class SafeGate {
 
     /**
      * Item 9 helper for the input builder: true when {@code window} holds a cell that vetoes a detour by
-     * itself, that is any entry whose bucket is {@link PoiBucket#SCULK_STRUCT} or {@link PoiBucket#SPAWNER}, or
-     * whose flags contain {@link PoiEvidenceFlags#REINFORCED_DEEPSLATE}. Looks at the structural and the
-     * flag-only entries. A null or empty window gives false.
+     * itself, that is any entry whose bucket is {@link PoiBucket#SPAWNER}. A null or empty window gives false.
      */
     public static boolean poiWindowVeto(PoiEvidenceWindow window) {
         if (window == null || window.isEmpty()) {
@@ -219,9 +211,7 @@ public final class SafeGate {
     }
 
     private static boolean vetoes(PoiEvidenceWindow.Entry entry) {
-        return entry.bucket() == PoiBucket.SCULK_STRUCT
-                || entry.bucket() == PoiBucket.SPAWNER
-                || PoiEvidenceFlags.has(entry.flags(), PoiEvidenceFlags.REINFORCED_DEEPSLATE);
+        return entry.bucket() == PoiBucket.SPAWNER;
     }
 
     /**
@@ -241,7 +231,7 @@ public final class SafeGate {
         boolean bandPending = switch (band) {
             case NONE -> false;
             case CAVERN_ONLY -> cavernBlocksDetour;
-            case POSSIBLE, STRUCTURE_CERTAIN, MANDATORY -> true;
+            case POSSIBLE, STRUCTURE_CERTAIN -> true;
         };
         return bandPending || anyCandidateSatisfied;
     }

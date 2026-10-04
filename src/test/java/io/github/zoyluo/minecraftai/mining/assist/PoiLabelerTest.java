@@ -58,25 +58,6 @@ class PoiLabelerTest {
     }
 
     @Test
-    void ancientCityFromDeepslateBuildPlusSculk() {
-        assertEquals(PoiLabeler.ANCIENT_CITY, label(add(add(PoiSignals.builder(),
-                PoiBucket.DEEPSLATE_BUILD, 6), PoiBucket.SCULK_STRUCT, 1)));
-        // Sculk counts also arrive without cells (plain sculk and veins are natural blocks).
-        assertEquals(PoiLabeler.ANCIENT_CITY, label(add(PoiSignals.builder().sculkFamilyWithin12(9),
-                PoiBucket.DEEPSLATE_BUILD, 4)));
-        assertEquals(PoiLabeler.ANCIENT_CITY, label(add(PoiSignals.builder().sculkShrieker(1),
-                PoiBucket.DEEPSLATE_BUILD, 6)));
-        assertEquals(PoiLabeler.ANCIENT_CITY, label(add(PoiSignals.builder().reinforcedDeepslate(1),
-                PoiBucket.DEEPSLATE_BUILD, 1)));
-    }
-
-    @Test
-    void ancientCityNeedsBothDeepslateBuildAndSculk() {
-        assertEquals(PoiLabeler.STRUCTURE_UNKNOWN, label(add(PoiSignals.builder(), PoiBucket.DEEPSLATE_BUILD, 8)));
-        assertEquals(PoiLabeler.STRUCTURE_UNKNOWN, label(add(PoiSignals.builder(), PoiBucket.SCULK_STRUCT, 3)));
-    }
-
-    @Test
     void trialChamberFromTuffCopperOrVault() {
         assertEquals(PoiLabeler.TRIAL_CHAMBER, label(add(PoiSignals.builder(), PoiBucket.COPPER_TUFF_BUILD, 1)));
         assertEquals(PoiLabeler.TRIAL_CHAMBER, label(PoiSignals.builder().vault(true)));
@@ -150,8 +131,8 @@ class PoiLabelerTest {
                 .stoneBricks(true), PoiBucket.STONE_BUILD, 6)));
         assertEquals(PoiLabeler.TRIAL_CHAMBER, label(add(PoiSignals.builder().blackstone(true).vault(true),
                 PoiBucket.COPPER_TUFF_BUILD, 3)));
-        assertEquals(PoiLabeler.ANCIENT_CITY, label(add(add(PoiSignals.builder().blackstone(true),
-                PoiBucket.DEEPSLATE_BUILD, 4), PoiBucket.SCULK_STRUCT, 1)));
+        assertEquals(PoiLabeler.FORTRESS_BASTION, label(add(add(PoiSignals.builder().blackstone(true),
+                PoiBucket.DEEPSLATE_BUILD, 4), PoiBucket.LIGHT_DRESSING, 1)));
         // Nether bricks are not natural anywhere but a fortress, so they still win over the generic materials.
         assertEquals(PoiLabeler.FORTRESS_BASTION, label(add(PoiSignals.builder().blackstone(true).netherBricks(true),
                 PoiBucket.WOOD_BUILD, 6)));
@@ -162,7 +143,7 @@ class PoiLabelerTest {
 
     /**
      * Exhaustive check of the documented precedence: every combination of the 13 signals maps to the
-     * first matching rule in the order ancient_city, trial_chamber, nether bricks, dungeon, stronghold,
+     * first matching rule in the order trial_chamber, nether bricks, dungeon, stronghold,
      * mineshaft, blackstone, unknown.
      */
     @Test
@@ -186,7 +167,7 @@ class PoiLabelerTest {
             PoiSignals.Builder b = PoiSignals.builder().vault(vault).netherBricks(netherBricks).mossyStone(mossy)
                     .ironBars(bars).stoneBricks(bricks).blackstone(blackstone);
             add(b, PoiBucket.DEEPSLATE_BUILD, deepslate ? 1 : 0);
-            add(b, PoiBucket.SCULK_STRUCT, sculkCell ? 1 : 0);
+            add(b, PoiBucket.LIGHT_DRESSING, sculkCell ? 1 : 0);
             add(b, PoiBucket.COPPER_TUFF_BUILD, copper ? 1 : 0);
             add(b, PoiBucket.SPAWNER, spawner ? 1 : 0);
             add(b, PoiBucket.RAIL, rail ? 1 : 0);
@@ -194,9 +175,7 @@ class PoiLabelerTest {
             add(b, PoiBucket.WOOD_BUILD, wood ? 1 : 0);
 
             String expected;
-            if (deepslate && sculkCell) {
-                expected = PoiLabeler.ANCIENT_CITY;
-            } else if (vault || copper) {
+            if (vault || copper) {
                 expected = PoiLabeler.TRIAL_CHAMBER;
             } else if (netherBricks) {
                 expected = PoiLabeler.FORTRESS_BASTION;
@@ -216,25 +195,13 @@ class PoiLabelerTest {
     }
 
     @Test
-    void ancientCityBeatsEveryOtherLabel() {
-        PoiSignals.Builder b = PoiSignals.builder().vault(true).mossyStone(true).netherBricks(true)
-                .ironBars(true).stoneBricks(true);
-        add(b, PoiBucket.SPAWNER, 1);
-        add(b, PoiBucket.COPPER_TUFF_BUILD, 2);
-        add(b, PoiBucket.DEEPSLATE_BUILD, 4);
-        add(b, PoiBucket.SCULK_STRUCT, 1);
-        add(b, PoiBucket.RAIL, 2);
-        assertEquals(PoiLabeler.ANCIENT_CITY, label(b));
-    }
-
-    @Test
     void labelsAreDeterministicAndAlwaysFromTheAdvertisedSet() {
         PoiSignals s = add(add(PoiSignals.builder().mossyStone(true), PoiBucket.SPAWNER, 1),
                 PoiBucket.STONE_BUILD, 4).build();
         assertEquals(PoiLabeler.label(s), PoiLabeler.label(s));
         assertTrue(PoiLabeler.ALL_LABELS.contains(PoiLabeler.label(s)));
-        assertEquals(7, PoiLabeler.ALL_LABELS.size());
-        assertEquals(7, new HashSet<>(PoiLabeler.ALL_LABELS).size());
+        assertEquals(6, PoiLabeler.ALL_LABELS.size());
+        assertEquals(6, new HashSet<>(PoiLabeler.ALL_LABELS).size());
         for (String label : PoiLabeler.ALL_LABELS) {
             assertTrue(label.matches("[a-z_]+"), label);
         }
@@ -262,16 +229,6 @@ class PoiLabelerTest {
         PoiSignals d = dungeon.build();
         assertEquals(Band.STRUCTURE_CERTAIN, PoiScorer.evaluate(d).band());
         assertEquals(PoiLabeler.DUNGEON, PoiLabeler.label(d));
-
-        // Ancient city edge.
-        PoiSignals.Builder city = PoiSignals.builder().sculkShrieker(1);
-        add(city, PoiBucket.DEEPSLATE_BUILD, 6);
-        add(city, PoiBucket.LIGHT_DRESSING, 2);
-        add(city, PoiBucket.SCULK_STRUCT, 1);
-        PoiSignals c = city.build();
-        PoiScore cityScore = PoiScorer.evaluate(c);
-        assertEquals(Band.MANDATORY, cityScore.band());
-        assertEquals(PoiLabeler.ANCIENT_CITY, PoiLabeler.label(c));
 
         // Trial chamber.
         PoiSignals.Builder trial = PoiSignals.builder().vault(true);

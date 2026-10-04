@@ -58,10 +58,16 @@ class HuntConstrainedRouteSourceContractTest {
         assertTrue(approach.contains(
                         "BlockPos returnAnchor = bot.blockPosition().immutable();"));
         assertTrue(approach.contains(
-                        "digBreakthroughFloor(bot.blockPosition(), attackPose, surfaceFloorY(bot))"),
+                        "digBreakthroughFloor(bot.blockPosition(), legDestination, surfaceFloorY(bot))"),
                 "approach execution must bind the near-level dig floor to its own segment");
         assertTrue(approach.contains("returnAnchor, true);"),
                 "moving-prey replans must own the start of each new approach segment");
+        assertTrue(approach.contains("nextObservedSurfaceLeg("),
+                "distant visible prey must be reduced to bounded observed approach legs");
+        assertTrue(approach.contains("legDestination.equals(attackPose)"),
+                "the exact attack/drop proof must wait until the final observed leg");
+        assertTrue(source.contains("!activeGoal.equals(approachLeg)"),
+                "an active bounded leg must not be cancelled merely because it differs from the final pose");
         assertTrue(roam.contains(
                         "bot, ground, surfaceFloorY(bot), feet"),
                 "ROAM execution must retain the origin used by its round-trip proof");
@@ -101,6 +107,8 @@ class HuntConstrainedRouteSourceContractTest {
         assertTrue(sweep.contains(
                         "bot, candidate, surfaceFloorY(bot), pickupReturnAnchor"),
                 "pickup observation sweeps must retain the transaction anchor");
+        assertTrue(sweep.contains("pickupSweepVisited.add(candidate.immutable())"),
+                "each admitted pickup sweep stance must be consumed before trying another stance");
     }
 
     @Test
@@ -113,8 +121,10 @@ class HuntConstrainedRouteSourceContractTest {
                 "private static String dimension");
 
         assertTrue(surfaceReturn.contains(
-                        "bot, destination, returnFloor, null"),
-                "RETURN_SURFACE needs minimumY but no reverse-route contract");
+                        "startObservedSurfaceReturnLeg(bot, destination, anchor)"),
+                "RETURN_SURFACE must reduce a distant anchor to observed legs");
+        assertTrue(source.contains("nextObservedSurfaceLeg(bot, destination, returnFloor)"),
+                "surface-return legs must use the same bounded observation rule as prey approach");
     }
 
     @Test

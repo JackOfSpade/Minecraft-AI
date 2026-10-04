@@ -5,7 +5,6 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
 import io.github.zoyluo.minecraftai.mining.assist.AssistGate;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.minecraftai.mining.assist.MandatoryLatch;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
@@ -49,18 +48,13 @@ import net.minecraft.server.level.ServerLevel;
  *       detour's own just-completed break exposed to design 4.7's seal-or-abort instead of double-aborting it
  *       here) and the bot's {@code HazardField} ({@code anyLavaWithin}) around the bot, {@code pose} and
  *       {@code ore} with {@code detour.lavaClearRadius}.</li>
- *   <li>Item 8: the own-cell biome id is the deep dark ({@code state.deepDark()}) and {@code safety.deepDarkVeto}.
- *       The biome is refreshed here through {@code PoiDetector.refreshBiome} when
- *       {@code MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)} (never a bare {@code tick - biomeTick},
- *       which overflows for the NEVER sentinel), independent of {@code poi.enabled} and {@code poi.useOwnBiome}.</li>
- *   <li>Item 9: fail closed on stale facts: {@code poiEvidenceStale} is true when {@code poi.enabled} and
+ *   <li>Item 8: fail closed on stale facts: {@code poiEvidenceStale} is true when {@code poi.enabled} and
  *       {@code staleOrNever(tick, state.poiScoreTick(), 60)} (the score was never computed, or is older than about
  *       three POI passes), or when there is no state; the structure score {@code state.poiStructureScore()};
  *       {@code SafeGate.poiWindowVeto(state.poiWindow())}; a pending candidate through
  *       {@code SafeGate.candidatePending(state.lastPoiBand(), anyCandidateHysteresisSatisfied,
- *       CAVERN_BLOCKS_DETOUR)} (a tracked candidate that merely exists does not count); the no-detour zone reads
- *       {@code MandatoryLatch.inNoDetourZone}.</li>
- *   <li>Item 10: {@code HazardField.anyTrapWithin(centre, 3)} around the bot, {@code pose} and {@code ore}.</li>
+ *       CAVERN_BLOCKS_DETOUR)} (a tracked candidate that merely exists does not count).</li>
+ *   <li>Item 9: {@code HazardField.anyTrapWithin(centre, 3)} around the bot, {@code pose} and {@code ore}.</li>
  * </ul>
  * A missing {@code MiningAssistState} FAILS CLOSED: {@code poiEvidenceStale} is set (the gate answers POI_EVIDENCE)
  * and no hazard fact is invented. {@code OreDigTask.tickOpportunistic} never asks the gate without a state (a live
@@ -151,13 +145,11 @@ public final class DetourSafetyGate {
         }
         if (stage.reads(8)) {
             if (state == null) {
-                b.deepDark(false);
             } else {
                 if (MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)) {
                     ServerLevel world = bot.level();
                     PoiDetector.refreshBiome(bot, state, world, tick);
                 }
-                b.deepDark(cfg.safety().deepDarkVeto() && state.deepDark());
             }
         }
         if (stage.reads(9)) {
@@ -173,7 +165,7 @@ public final class DetourSafetyGate {
                         .poiWindowVeto(SafeGate.poiWindowVeto(state.poiWindow()))
                         .poiCandidatePending(SafeGate.candidatePending(state.lastPoiBand(), anyCandidateSatisfied,
                                 CAVERN_BLOCKS_DETOUR))
-                        .inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.blockPosition()));
+                        .inNoDetourZone(false);
             }
         }
         if (stage.reads(10)) {

@@ -51,13 +51,12 @@ class PerceptionCallSiteClassificationTest {
         m.put("task/AggroSense.java", Counts.of(1, 1, 0));                     // mob aggressors noticed; object: the OWNER (a friend) being hurt, plain sight
         m.put("task/SharedVision.java", Counts.of(1, 0, 1));                   // seenByBotOrOwner: the bot part is noticing; ownerSees is the owner's own ray
         m.put("task/CombatCore.java", Counts.of(2, 1, 5));                     // ranged threats, target acquisition (hostile: notice; non-hostile deliberate search: object); physical: strike/reach rays
-        m.put("task/CombatTask.java", Counts.of(2, 0, 4));                     // pressure, shoot-from-here; physical: strike legality and lost-sight timer
+        m.put("task/CombatTask.java", Counts.of(2, 0, 5));                     // pressure, shoot-from-here; physical: strike legality and lost-sight timer
         m.put("task/ShieldGuard.java", Counts.of(5, 1, 0));                    // reactive shield: noticed melee/creeper/guardian/drawing/tracked shooter; visible primed TNT is an observed object
         m.put("task/CreeperDefenseTask.java", Counts.of(1, 0, 0));
-        m.put("task/EmergencyShelterTask.java", Counts.of(3, 0, 2));           // physical: melee strike from the shelter
+        m.put("task/EmergencyShelterTask.java", Counts.of(2, 1, 2));           // physical: melee strike from the shelter
         m.put("task/EvadeTask.java", Counts.of(3, 1, 0));                      // object: the OWNER's direction (a friend), plain sight
         m.put("task/FollowEscort.java", Counts.of(1, 0, 0));
-        m.put("action/QuietZone.java", Counts.of(2, 0, 0));                    // warden detection
         m.put("perception/PerceptionCollector.java", Counts.of(1, 1, 0));      // what the LLM is told it sees: creatures noticed; dropped items observed
         m.put("log/DiagnosticLogger.java", Counts.of(1, 0, 0));
         m.put("baritone/ServerPlayerContext.java", Counts.of(1, 1, 0));        // mob avoidance: noticed mobs; dropped items observed
@@ -120,10 +119,10 @@ class PerceptionCallSiteClassificationTest {
     @Test
     void theCreatureSitesOfTheBriefAllUseTheNoticePredicate() throws IOException {
         // The named creature sites: DangerWatcher threat scans, AggroSense, CombatCore target acquisition, CombatTask
-        // skeleton/creeper/target checks, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, ProjectileThreat, QuietZone warden
-        // detection, SharedVision (bot part), HostileBotIntent sampling, PerceptionCollector and the DiagnosticLogger lists.
+        // skeleton/creeper/target checks, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, ProjectileThreat,
+        // SharedVision (bot part), HostileBotIntent sampling, PerceptionCollector and the DiagnosticLogger lists.
         for (String file : List.of("task/DangerWatcher.java", "task/AggroSense.java", "task/CombatCore.java", "task/CombatTask.java",
-                "task/CreeperDefenseTask.java", "task/EmergencyShelterTask.java", "task/EvadeTask.java", "action/QuietZone.java",
+                "task/CreeperDefenseTask.java", "task/EmergencyShelterTask.java", "task/EvadeTask.java",
                 "task/SharedVision.java", "perception/PerceptionCollector.java", "log/DiagnosticLogger.java",
                 "task/FollowEscort.java", "baritone/ServerPlayerContext.java")) {
             assertTrue(expected().get(file).notice() > 0, file + " must ask canNoticeCreature");

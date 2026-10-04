@@ -119,7 +119,8 @@ public final class BuildAction {
         // A placement target is terrain too: direct BuildAction callers must have a fresh eye
         // proof before vanilla is asked to inspect it. Baritone supplies the equivalent already
         // admitted-fence proof through the explicit trusted result overload below.
-        if (!ObservableWorldQuery.canObserveCell(player, destination)) {
+        if (!ObservableWorldQuery.canObserveCell(player, destination)
+                && !supportHitProvesAdjacentDestinationVisible(player, hit, destination)) {
             return ActionResult.failed("destination_not_visible");
         }
         Use use = useItemOnHitCrouching(player, hit, hand, placementState);
@@ -158,7 +159,8 @@ public final class BuildAction {
      * Outcome of {@link #useItemOnHit}.
      *
      * @param result      what the vanilla interaction returned
-     * @param placementState the already-proven block state the successful action placed, or null for a non-placement click
+     * @param placementState the factual state at the admitted adjacent destination after a successful placement, or null
+     *                       when the click did not change that destination
      * @param destination the cell a placement would have filled
      */
     public record Use(net.minecraft.world.InteractionResult result, BlockState placementState, BlockPos destination) {
@@ -180,8 +182,9 @@ public final class BuildAction {
 
     /**
      * Executes an already aimed block click. {@code placementState} is supplied only by a caller
-     * that has proved the destination (a visible direct placement or Baritone's admitted fence);
-     * it is never recovered by reading the live destination after the click.
+     * that has proved the destination (a visible direct placement or Baritone's admitted fence).
+     * The exact admitted destination is then checked after the click so a consumed interaction
+     * cannot be published as terrain when vanilla made no block change.
      */
     public static Use useItemOnHit(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand,
                                    BlockState placementState) {
@@ -201,13 +204,20 @@ public final class BuildAction {
         if (isProtectedArea(player, hit.getBlockPos())) {
             return new Use(net.minecraft.world.InteractionResult.FAIL, null, destination);
         }
+        // Every caller that supplies an expected placement state has already admitted this exact
+        // adjacent cell (placeBlock proves it directly; Baritone supplies its admitted click
+        // state). A consumed vanilla click alone is not proof of terrain mutation: it can be
+        // refused because the placer still overlaps the destination.
+        BlockState destinationBefore = placementState == null ? null : player.level().getBlockState(destination);
         net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
                 player,
                 player.level(),
                 stack,
                 hand,
                 hit);
-        BlockState placed = confirmedPlacementState(heldPlacementState, placementState, result);
+        BlockState destinationAfter = placementState == null ? null : player.level().getBlockState(destination);
+        BlockState placed = confirmedPlacementState(heldPlacementState, placementState, result,
+                destinationBefore, destinationAfter);
         if (placed != null) {
             AStarPathfinder.invalidateCache("block_place");
             BotEdits.notePlaced(player, destination);
@@ -216,7 +226,7 @@ public final class BuildAction {
         return new Use(result, placed, destination);
     }
 
-    /** The state a simple block item contributes after a confirmed placement, without a destination read. */
+    /** The state a simple block item is expected to contribute before the click. */
     private static BlockState placementStateOf(ItemStack stack) {
         return stack.getItem() instanceof BlockItem item ? item.getBlock().defaultBlockState() : null;
     }
@@ -228,11 +238,15 @@ public final class BuildAction {
      * into terrain provenance.
      */
     private static BlockState confirmedPlacementState(BlockState heldItemState, BlockState expected,
-                                                      net.minecraft.world.InteractionResult result) {
-        if (expected == null || heldItemState == null || !result.consumesAction()) {
+                                                      net.minecraft.world.InteractionResult result,
+                                                      BlockState destinationBefore, BlockState destinationAfter) {
+        if (expected == null || heldItemState == null || !result.consumesAction()
+                || destinationBefore == null || destinationAfter == null
+                || destinationBefore.equals(destinationAfter)
+                || !destinationAfter.is(expected.getBlock())) {
             return null;
         }
-        return expected.equals(heldItemState) ? expected : null;
+        return expected.equals(heldItemState) ? destinationAfter : null;
     }
 
     /**
@@ -545,8 +559,10 @@ public final class BuildAction {
                 BlockHitResult hit = rotate
                         ? rotateAndRaycast(player, target, sampleRange)
                         : rayTo(player, eye, target, sampleRange);
-                if (isExactSupportFace(hit, against, face)) {
-                    return hit;
+                BlockHitResult exact = exactSupportFaceHit(player, eye, target, sampleRange,
+                        against, face, rotate, hit);
+                if (exact != null) {
+                    return exact;
                 }
             }
         }
@@ -563,19 +579,43 @@ public final class BuildAction {
         double sampleRangeSquared = sampleRange * sampleRange;
         Vec3 eye = player.getEyePosition();
         for (double[] offset : FACE_SAMPLE_OFFSETS) {
-            Vec3 target = FaceAim.facePoint(aim.box(), face, 0.0D, offset[0], offset[1]);
+            // End just inside the authorised outline. A segment that stops exactly on a shape
+            // surface can report MISS, and extending it can close a narrow exposed edge behind
+            // an occluder. The exact face check below still verifies the first hit.
+            Vec3 target = FaceAim.facePoint(aim.box(), face, FaceAim.OBSERVE_DEPTH, offset[0], offset[1]);
             if (eye.distanceToSqr(target) > sampleRangeSquared) {
                 continue;
             }
             BlockHitResult hit = rotate
                     ? rotateAndRaycast(player, target, sampleRange)
                     : rayTo(player, eye, target, sampleRange);
-            if (!isExactSupportFace(hit, against, face)) {
-                continue;
+            BlockHitResult exact = exactSupportFaceHit(player, eye, target, sampleRange,
+                    against, face, rotate, hit);
+            if (exact != null) {
+                return exact;
             }
-            return hit;
         }
         return null;
+    }
+
+    /**
+     * The placement path turns the bot toward its sampled hit point first. Rotation is stored as
+     * floats, so a ray grazing an exposed inset can miss after that rounding even though the exact
+     * double-precision eye-to-hit segment is clear. Keep the physical turn, accept the ordinary
+     * vanilla pick when it reaches the requested face, and only then use that exact segment as a
+     * fallback. It still requires the same support, face, range, and unobstructed world ray.
+     */
+    private static BlockHitResult exactSupportFaceHit(AIPlayerEntity player, Vec3 eye, Vec3 target,
+                                                       double sampleRange, BlockPos against, Direction face,
+                                                       boolean rotated, BlockHitResult hit) {
+        if (isExactSupportFace(hit, against, face)) {
+            return hit;
+        }
+        if (!rotated) {
+            return null;
+        }
+        BlockHitResult precise = rayTo(player, eye, target, sampleRange);
+        return isExactSupportFace(precise, against, face) ? precise : null;
     }
 
     private static boolean isExactSupportFace(BlockHitResult hit, BlockPos against, Direction face) {
@@ -583,6 +623,35 @@ public final class BuildAction {
                 && hit.getType() == HitResult.Type.BLOCK
                 && against.equals(hit.getBlockPos())
                 && hit.getDirection() == face;
+    }
+
+    /**
+     * {@code hit} was produced by the first unobstructed eye ray to this exact support face. Its
+     * adjacent destination cell is visible at its near boundary, even when that cell's centre is
+     * hidden behind the same near occluder. Extend the segment a tiny distance into that exact
+     * adjacent cell and re-clip it with the cell-observation fluid policy. This proves the cell,
+     * rather than merely proving the clicked support a second time, while retaining a legal edge
+     * click whose centre ray is occluded.
+     */
+    private static boolean supportHitProvesAdjacentDestinationVisible(AIPlayerEntity player, BlockHitResult hit,
+                                                                       BlockPos destination) {
+        if (hit.getType() != HitResult.Type.BLOCK
+                || !hit.getBlockPos().relative(hit.getDirection()).equals(destination)) {
+            return false;
+        }
+        Vec3 insideDestination = hit.getLocation().add(
+                hit.getDirection().getStepX() * FaceAim.OBSERVE_DEPTH,
+                hit.getDirection().getStepY() * FaceAim.OBSERVE_DEPTH,
+                hit.getDirection().getStepZ() * FaceAim.OBSERVE_DEPTH);
+        double sampleRange = exactPlacementSampleRange(
+                MinecraftAiConfig.get().perception().radius(), player.blockInteractionRange());
+        if (player.getEyePosition().distanceToSqr(insideDestination) > sampleRange * sampleRange) {
+            return false;
+        }
+        BlockHitResult seen = player.level().clip(new ClipContext(
+                player.getEyePosition(), insideDestination,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, player));
+        return seen.getType() == HitResult.Type.MISS || destination.equals(seen.getBlockPos());
     }
 
     /** The real placement's ray: turn the head to {@code target}, then vanilla's own look-direction raycast. */
@@ -593,12 +662,21 @@ public final class BuildAction {
     }
 
     /**
-     * The pure equivalent of {@code Entity.pick(sampleRange, 1.0F, false)} after aiming exactly at
-     * {@code target}: same start (the eye), same end (eye plus that direction times {@code sampleRange}),
-     * same shape and fluid handling (OUTLINE, no fluids) -- built directly from the two points instead of
-     * through the entity's own look vector, so it never reads or writes yaw or pitch.
+     * A pure proof for a sampled support point. It first clips the exact eye-to-point segment, which
+     * preserves a narrow exposed inset that can be lost when the segment is extended past the support.
+     * A point on a shape surface may report MISS because the endpoint never enters that shape, so the
+     * previous full-range ray remains a fallback only for that case. Both forms use OUTLINE and ignore
+     * fluids; neither reads or writes yaw or pitch.
      */
     private static BlockHitResult rayTo(AIPlayerEntity player, Vec3 eye, Vec3 target, double sampleRange) {
+        if (eye.distanceToSqr(target) > sampleRange * sampleRange) {
+            return null;
+        }
+        BlockHitResult direct = player.level().clip(new ClipContext(
+                eye, target, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        if (direct.getType() != HitResult.Type.MISS) {
+            return direct;
+        }
         Vec3 toTarget = target.subtract(eye);
         Vec3 direction = toTarget.lengthSqr() < 1.0E-9D ? new Vec3(0.0D, -1.0D, 0.0D) : toTarget.normalize();
         Vec3 end = eye.add(direction.scale(sampleRange));

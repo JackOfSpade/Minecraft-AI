@@ -9,22 +9,15 @@ import java.util.Locale;
  * natural blocks (plain sculk, sculk veins, natural blackstone). Pure: ids in, an int out.
  */
 public final class PoiEvidenceFlags {
-    /** Any sculk-family block, including plain sculk and sculk_vein. */
-    public static final int SCULK_FAMILY = 1;
-    public static final int REINFORCED_DEEPSLATE = 1 << 1;
-    public static final int SCULK_SHRIEKER = 1 << 2;
-    public static final int SCULK_CATALYST = 1 << 3;
-    /** sculk_sensor or calibrated_sculk_sensor. */
-    public static final int SCULK_SENSOR = 1 << 4;
-    public static final int MOSSY_STONE = 1 << 5;
-    public static final int VAULT = 1 << 6;
-    public static final int IRON_BARS = 1 << 7;
-    public static final int STONE_BRICKS = 1 << 8;
-    public static final int NETHER_BRICKS = 1 << 9;
-    public static final int BLACKSTONE = 1 << 10;
+    public static final int MOSSY_STONE = 1;
+    public static final int VAULT = 1 << 1;
+    public static final int IRON_BARS = 1 << 2;
+    public static final int STONE_BRICKS = 1 << 3;
+    public static final int NETHER_BRICKS = 1 << 4;
+    public static final int BLACKSTONE = 1 << 5;
 
     /** Mask of every non-habitation flag bit. */
-    public static final int FLAG_MASK = (1 << 11) - 1;
+    public static final int FLAG_MASK = (1 << 6) - 1;
 
     private static final int HABITATION_SHIFT = 16;
     private static final int HABITATION_MASK = 0xF << HABITATION_SHIFT;
@@ -36,21 +29,6 @@ public final class PoiEvidenceFlags {
     /** Flags of a block id: every lexicon marker that applies. Never throws. */
     public static int compute(String namespace, String path) {
         int flags = 0;
-        if (PoiLexicon.isSculkFamily(namespace, path)) {
-            flags |= SCULK_FAMILY;
-        }
-        if (AssistRules.isVanilla(namespace) && path != null) {
-            switch (path.trim().toLowerCase(Locale.ROOT)) {
-                case "reinforced_deepslate" -> flags |= REINFORCED_DEEPSLATE;
-                case "sculk_shrieker" -> flags |= SCULK_SHRIEKER;
-                case "sculk_catalyst" -> flags |= SCULK_CATALYST;
-                default -> {
-                }
-            }
-        }
-        if (PoiLexicon.isSculkSensor(namespace, path)) {
-            flags |= SCULK_SENSOR;
-        }
         if (PoiLexicon.isMossyStone(namespace, path)) {
             flags |= MOSSY_STONE;
         }

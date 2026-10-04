@@ -5,14 +5,13 @@ import io.github.zoyluo.minecraftai.action.QuietZone;
 
 /**
  * The pace of a bot that follows a player, decided from what an observer can see of the player and of the surroundings: how far away
- * they are, whether they sneak, walk or sprint, whether hostiles are after somebody, whether a warden is near. Pure (no Minecraft
+ * they are, whether they sneak, walk or sprint, and whether hostiles are after somebody. Pure (no Minecraft
  * types beyond the {@link Gait} and {@link QuietZone.Level} enums), so every rule is unit-tested; {@link FollowTask} gathers the
  * {@link Input} and publishes the answer as a FOLLOW tick lease ({@code ActionPack.requestPace}).
  *
  * <p>Rules, first that applies decides:</p>
  * <ol>
- *   <li>A hunting warden, or aggro pressure on the bot, the player or a Minecraft-AI bot: SPRINT (WALK near a calm warden that is
- *       not hunting: sprinting is what wakes it).</li>
+ *   <li>Aggro pressure on the bot, the player or a Minecraft-AI bot: SPRINT.</li>
  *   <li>Within {@value #CLOSE_GAP} blocks: SNEAK when the player has been sneaking for {@value #SNEAK_TICKS} ticks, else WALK.</li>
  *   <li>The player sneaks: SNEAK up to {@value #SNEAK_MIRROR_GAP} blocks; further out WALK, and SPRINT only from
  *       {@value #SNEAK_CATCH_UP_GAP} blocks and outside every quiet zone.</li>
@@ -33,7 +32,7 @@ public final class FollowPace {
     public static final double SNEAK_MIRROR_GAP = 8.0D;
     /** A sneaking player this far ahead is caught up with at a sprint (outside quiet zones). */
     public static final double SNEAK_CATCH_UP_GAP = 14.0D;
-    /** In CAUTION (deep dark, darkness) the follower sprints only this far behind. */
+    /** In CAUTION the follower sprints only this far behind. */
     public static final double CAUTION_SPRINT_GAP = 16.0D;
     /** Consecutive ticks the player must have sneaked before the follower mirrors it. */
     public static final int SNEAK_TICKS = 4;
@@ -56,15 +55,13 @@ public final class FollowPace {
      * @param targetSneakingTicks consecutive ticks the player has been sneaking (0 = not sneaking)
      * @param quiet              the quiet-zone level around the follower
      * @param pressure           hostiles are after a protected player or bot (AggroSense)
-     * @param huntingWarden      an observed warden hunts the bot or its owner
-     * @param calmWardenWithin16 an observed calm warden stands within 16 blocks
      * @param previous           the gait of the previous decision
      * @param ticksInGait        ticks the follower has been at {@code previous}
      * @param walkGap            the follower walks at or below this gap
      * @param sprintGap          the follower sprints from this gap
      */
     public record Input(double gap, double targetSpeedBps, boolean targetSprinting, int targetSneakingTicks,
-                        QuietZone.Level quiet, boolean pressure, boolean huntingWarden, boolean calmWardenWithin16,
+                        QuietZone.Level quiet, boolean pressure,
                         Gait previous, int ticksInGait, double walkGap, double sprintGap) {
     }
 
@@ -80,9 +77,9 @@ public final class FollowPace {
     /** The gait the rules ask for, before the downgrade dwell. */
     static Gait wanted(Input in) {
         boolean sneaking = in.targetSneakingTicks() >= SNEAK_TICKS;
-        // 1. Hunted: run. A calm warden nearby makes a sprint a beacon, so a walk it is.
-        if (in.huntingWarden() || in.pressure()) {
-            return in.calmWardenWithin16() && !in.huntingWarden() ? Gait.WALK : Gait.SPRINT;
+        // 1. Under pressure: run.
+        if (in.pressure()) {
+            return Gait.SPRINT;
         }
         // 2. With the player.
         if (in.gap() <= CLOSE_GAP) {

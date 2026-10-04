@@ -13,6 +13,14 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
 public final class Standability {
+    /**
+     * This memo holds strong {@link ServerLevel} references, so it must remain bounded even if a
+     * caller searches a large area or a test server is torn down before the next invalidation.
+     * Rebuilding this small, derived cache is cheaper and safer than retaining old worlds.
+     */
+    // A normal A* expansion can inspect several cells per node, so retain enough results for a
+    // full 10,000-node search without repeatedly flushing its own derived facts.
+    private static final int CACHE_LIMIT = 32_768;
     private static final Map<CacheKey, Boolean> CACHE = new ConcurrentHashMap<>(4096);
     private static volatile long version;
 
@@ -29,12 +37,18 @@ public final class Standability {
     }
 
     public static boolean isStandable(ServerLevel world, BlockPos pos) {
-        CacheKey key = new CacheKey(world.dimension().identifier().toString(), version, pos);
+        CacheKey key = new CacheKey(world, version, pos);
         Boolean cached = CACHE.get(key);
         if (cached != null) {
             return cached;
         }
         boolean result = compute(world, pos);
+        // Concurrent path searches can momentarily race past the limit by one wave of writers,
+        // but the next writer clears the derived memo. The retained world/position set is thus
+        // bounded by the cache limit plus active writers, instead of growing with exploration.
+        if (CACHE.size() >= CACHE_LIMIT) {
+            CACHE.clear();
+        }
         CACHE.put(key, result);
         return result;
     }
@@ -336,7 +350,7 @@ public final class Standability {
                 || state.is(Blocks.POINTED_DRIPSTONE);
     }
 
-    private record CacheKey(String dimension, long version, BlockPos pos) {
+    private record CacheKey(ServerLevel world, long version, BlockPos pos) {
         private CacheKey {
             pos = pos.immutable();
         }

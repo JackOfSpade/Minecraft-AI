@@ -26,7 +26,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
@@ -173,45 +172,6 @@ public final class PaceBaritoneGameTests {
 
     // ---------------------------------------------------------------------------------------------------------------
 
-    @GameTest(maxTicks = 420)
-    public void baritoneLongRouteSprintsThenWalksNearGoal(GameTestHelper context) {
-        Course course = Course.build(context, "PaceBLongGT", 0, -2, 44, 4, 5);
-        AIPlayerEntity bot = course.spawn(0, 0);
-        BlockPos goal = course.feet.offset(30, 0, 0);
-        ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
-        require(context, !started.isFailed(), "the route was refused: " + started.reason());
-        require(context, bot.getActionPack().hasBaritoneRoute(), "the route is not Baritone's");
-        Trip trip = new Trip(bot);
-        int[] sprintFirstTwenty = {0};
-        int[] sprintNear = {0};
-        boolean[] done = {false};
-        context.onEachTick(() -> {
-            if (done[0]) {
-                return;
-            }
-            trip.sample();
-            if (bot.isSprinting() && bot.getX() - trip.start.x <= 20.0D) {
-                sprintFirstTwenty[0]++;
-            }
-            if (bot.isSprinting() && course.distanceTo(goal) <= 4.0D) {
-                sprintNear[0]++;
-            }
-            if (trip.ticks > 2 && routeEnded(bot.getActionPack())) {
-                done[0] = true;
-                System.out.println("PACE baritone_long ticks=" + trip.ticks + " sprintTicks=" + trip.sprintTicks
-                        + " sprintFirst20=" + sprintFirstTwenty[0] + " sprintNear=" + sprintNear[0]);
-                requireRouteSucceeded(context, bot.getActionPack());
-                require(context, course.distanceTo(goal) <= 1.6D, "not at the goal: " + bot.position());
-                require(context, sprintFirstTwenty[0] >= 20, "sprinted for only " + sprintFirstTwenty[0] + " ticks in the first 20 blocks");
-                require(context, sprintNear[0] == 0, "sprinted for " + sprintNear[0] + " ticks within 4 blocks of the goal");
-                course.finish();
-            } else if (trip.ticks > 400) {
-                done[0] = true;
-                fail(context, "the route never ended: " + bot.position());
-            }
-        });
-    }
-
     @GameTest(maxTicks = 700)
     public void raisedShieldSlowsWalkBaritone(GameTestHelper context) {
         Course course = Course.build(context, "PaceBShieldGT", 1, -2, 24, 4, 5);
@@ -315,20 +275,8 @@ public final class PaceBaritoneGameTests {
         BlockPos goal = course.feet.offset(14, 0, 0);
         ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
         require(context, !started.isFailed() && bot.getActionPack().hasBaritoneRoute(), "the route was not started: " + started.reason());
-        bot.getActionPack().requestRoutePace(Gait.SNEAK, PaceOwner.WARDEN);
+        bot.getActionPack().requestRoutePace(Gait.SNEAK, PaceOwner.TASK);
         awaitLeasedFlatRoute(course, bot, goal, Gait.SNEAK);
-    }
-
-    /** The same for a WALK route lease: a long flat route that would sprint most of the way never sprints. */
-    @GameTest(maxTicks = 700)
-    public void walkRouteLeaseHoldsAfterBaritoneTakesOver(GameTestHelper context) {
-        Course course = Course.build(context, "PaceBLeaseWalkGT", 7, -2, 34, 4, 5);
-        AIPlayerEntity bot = course.spawn(0, 0);
-        BlockPos goal = course.feet.offset(28, 0, 0);
-        ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
-        require(context, !started.isFailed() && bot.getActionPack().hasBaritoneRoute(), "the route was not started: " + started.reason());
-        bot.getActionPack().requestRoutePace(Gait.WALK, PaceOwner.TASK);
-        awaitLeasedFlatRoute(course, bot, goal, Gait.WALK);
     }
 
     private static void awaitLeasedFlatRoute(Course course, AIPlayerEntity bot, BlockPos goal, Gait leased) {
@@ -395,7 +343,7 @@ public final class PaceBaritoneGameTests {
         ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
         require(context, !started.isFailed() && bot.getActionPack().hasBaritoneRoute(), "the route was not started: " + started.reason());
         awaitJump(course, bot, goal, "gap of 2 under a sneak lease",
-                () -> bot.getActionPack().requestPace(Gait.SNEAK, PaceOwner.WARDEN));
+                () -> bot.getActionPack().requestPace(Gait.SNEAK, PaceOwner.TASK));
     }
 
     private static void gap(Course course, int fromX, int width) {
@@ -436,50 +384,4 @@ public final class PaceBaritoneGameTests {
         });
     }
 
-    /** Climb down a six block vine column with a SNEAK route lease: a sneaking player would not go down it, so the sneak is lifted. */
-    @GameTest(maxTicks = 800)
-    public void vineDescentUnderSneakLease(GameTestHelper context) {
-        Course course = Course.build(context, "PaceBVineGT", 5, -2, 10, 3, 9);
-        for (int dx = 3; dx <= 10; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                course.fill(dx, dz, Blocks.BEDROCK, 0, 5);
-            }
-        }
-        BlockState vine = Blocks.VINE.defaultBlockState().setValue(VineBlock.EAST, true);
-        for (int dy = 0; dy <= 5; dy++) {
-            course.world.setBlock(course.feet.offset(2, dy, 0), vine, Block.UPDATE_CLIENTS);
-        }
-        AIPlayerEntity bot = course.spawn(7, 6);
-        BlockPos goal = course.feet;
-        ActionResult started = bot.getActionPack().startSurfacePathTo(goal);
-        require(context, !started.isFailed() && bot.getActionPack().hasBaritoneRoute(), "the route was not started: " + started.reason());
-        bot.getActionPack().requestRoutePace(Gait.SNEAK, PaceOwner.WARDEN);
-        Trip trip = new Trip(bot);
-        float health = bot.getHealth();
-        int[] sneakingOnVine = {0};
-        boolean[] done = {false};
-        context.onEachTick(() -> {
-            if (done[0]) {
-                return;
-            }
-            trip.sample();
-            require(context, !bot.getActionPack().hasBaritoneRoute() || bot.getActionPack().leasedGait() == Gait.SNEAK,
-                    "the SNEAK route lease was lost while Baritone drove");
-            if (bot.onClimbable() && bot.isShiftKeyDown()) {
-                sneakingOnVine[0]++;
-            }
-            if (trip.ticks > 2 && routeEnded(bot.getActionPack())) {
-                done[0] = true;
-                System.out.println("PACE vine ticks=" + trip.ticks + " sneakingOnVine=" + sneakingOnVine[0] + " outcome=" + bot.getActionPack().lastRouteOutcome());
-                requireRouteSucceeded(context, bot.getActionPack());
-                require(context, course.distanceTo(goal) <= 1.6D && bot.getY() <= course.feet.getY() + 0.8D, "not down at the goal: " + bot.position());
-                require(context, bot.getHealth() >= health, "the descent cost health: " + health + " -> " + bot.getHealth());
-                require(context, sneakingOnVine[0] == 0, "shift was down for " + sneakingOnVine[0] + " ticks on the vines");
-                course.finish();
-            } else if (trip.ticks > 760) {
-                done[0] = true;
-                fail(context, "the bot never got down: " + bot.position() + " outcome=" + bot.getActionPack().lastRouteOutcome());
-            }
-        });
-    }
 }

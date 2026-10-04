@@ -369,7 +369,7 @@ public final class HarvestCore {
             AABB body = box.inflate(0.0D, -0.01D, 0.0D);
             // This is a safety prefilter, not a loaded-world route oracle. Prove every cell it
             // will ask collision/fluid questions about before any of those raw reads occur.
-            if (!canObserveWalkCorridorEnvelope(bot, box)) {
+            if (!canObserveWalkCorridorBody(bot, box)) {
                 return false;
             }
             // Blocked unless the obstacle is something a walking player steps onto (farmland next to a path,
@@ -390,17 +390,18 @@ public final class HarvestCore {
                     return false;
                 }
             }
-            if (world.noCollision(bot, box.expandTowards(0.0D, -CORRIDOR_MAX_FALL - 0.01D, 0.0D))) {
-                return false; // no floor within a harmless fall
-            }
             // The fall column: a gap the bot would drop into is only as safe as everything it drops through down
             // to the floor it lands on (lava or water in a pit is not a floor, a cactus or magma block is not one
             // either). The scan stops at the first layer that has a collision shape, the floor the bot stands on
             // or lands on, so a lava pool under a bridge it walks on does not matter.
             int floorLimit = belowY - (int) Math.ceil(CORRIDOR_MAX_FALL) - 1;
+            boolean floorFound = false;
             for (int y = belowY; y >= floorLimit; y--) {
                 boolean floor = false;
                 for (BlockPos cell : BlockPos.betweenClosed(minX, y, minZ, maxX, y, maxZ)) {
+                    if (!canObserveWalkCorridorCell(bot, cell)) {
+                        return false;
+                    }
                     var state = world.getBlockState(cell);
                     if (Standability.isDangerous(state) || !state.getFluidState().isEmpty()) {
                         return false;
@@ -410,27 +411,30 @@ public final class HarvestCore {
                     }
                 }
                 if (floor) {
+                    floorFound = true;
                     break;
                 }
+            }
+            if (!floorFound) {
+                return false;
             }
         }
         return true;
     }
 
     /**
-     * State-free observation envelope for one straight-walk sample. It includes the normal and
-     * step-height body boxes plus the complete harmless-fall column inspected below, so the
-     * collision and hazard prefilter cannot turn loaded but unseen terrain into a pickup decision.
+     * State-free observation envelope for the collision reads at one straight-walk sample. The
+     * fall scan proves cells one layer at a time and stops at its first observed floor, so it does
+     * not demand authority to inspect terrain below that floor.
      */
-    private static boolean canObserveWalkCorridorEnvelope(AIPlayerEntity bot, AABB box) {
+    private static boolean canObserveWalkCorridorBody(AIPlayerEntity bot, AABB box) {
         int minX = net.minecraft.util.Mth.floor(box.minX);
         int maxX = net.minecraft.util.Mth.floor(box.maxX);
         int minZ = net.minecraft.util.Mth.floor(box.minZ);
         int maxZ = net.minecraft.util.Mth.floor(box.maxZ);
         int belowY = net.minecraft.util.Mth.floor(box.minY - 0.01D);
         int raisedHeadY = net.minecraft.util.Mth.floor(box.maxY + CORRIDOR_STEP_UP - 0.01D);
-        int floorLimit = belowY - (int) Math.ceil(CORRIDOR_MAX_FALL) - 1;
-        for (BlockPos cell : BlockPos.betweenClosed(minX, floorLimit, minZ, maxX, raisedHeadY, maxZ)) {
+        for (BlockPos cell : BlockPos.betweenClosed(minX, belowY, minZ, maxX, raisedHeadY, maxZ)) {
             if (!canObserveWalkCorridorCell(bot, cell)) {
                 return false;
             }
@@ -444,7 +448,8 @@ public final class HarvestCore {
         return cell.equals(feet)
                 || cell.equals(feet.above())
                 || cell.equals(feet.below())
-                || ObservableWorldQuery.canObserveCell(bot, cell);
+                || ObservableWorldQuery.canObserveCell(bot, cell)
+                || ObservableWorldQuery.canObserveCollider(bot, cell);
     }
 
     public static void sweepPickup(AIPlayerEntity bot, Item item, double radius, int maxTargets) {

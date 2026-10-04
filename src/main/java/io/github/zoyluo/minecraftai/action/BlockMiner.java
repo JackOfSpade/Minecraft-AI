@@ -37,12 +37,16 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class BlockMiner {
     /** Per-block mining timeout (ticks). Even bedrock-tier hard stone with a diamond pickaxe finishes well under this; a timeout is treated as unreachable/abnormal. */
     private static final int MINE_TIMEOUT_TICKS = 200;
+    /** Another ActionPack mining controller replaced or cancelled this miner's lease. */
+    public static final String MINING_PREEMPTED = "mining_preempted";
 
     public enum Status { IDLE, MINING, DONE, FAILED }
 
     private BlockPos target;
     private int sinceTick;
     private boolean started;
+    /** Exact ActionPack controller generation that this miner started, or -1 before admission. */
+    private long miningGeneration = -1L;
     private boolean miningChannelToolPolicy;
     /** Refuse (fail with {@code break_refused:<reason>}) a target the shared {@link BreakRule} denies for the legacy diggers ({@link BreakRule#legacyDenialOf}). */
     private boolean naturalTerrainOnly;
@@ -63,6 +67,7 @@ public final class BlockMiner {
         this.target = pos == null ? null : pos.immutable();
         this.sinceTick = 0;
         this.started = false;
+        this.miningGeneration = -1L;
         this.miningChannelToolPolicy = miningChannelToolPolicy;
         this.failureReason = "";
     }
@@ -95,14 +100,31 @@ public final class BlockMiner {
         if (target == null) {
             return Status.IDLE;
         }
+        // Do not let a controller that was cancelled or replaced claim an empty target as its
+        // own completion. The check must precede visiblyAir(), whose state read is otherwise a
+        // valid terminal result only for the controller that still owns this generation.
+        if (started && miningGeneration != bot.getActionPack().miningGeneration()) {
+            return miningPreempted(bot);
+        }
         ServerLevel world = bot.level();
         // The target may have been broken by this miner on the preceding scheduler tick. A
         // player-visible empty cell is a safe terminal observation, not a reason to retry or
         // inspect hidden terrain.
         if (MiningController.visiblyAir(bot, target)) {
-            bot.getActionPack().stopMining();
+            stopOwnedMining(bot);
             target = null;
             started = false;
+            miningGeneration = -1L;
+            return Status.DONE;
+        }
+        // The pack's receipt is created only after its own observed MiningController completed
+        // this exact generation. It lets the stateful owner settle the break when the newly empty
+        // cell is hidden behind an unchanged adjacent block; it does not authorize a new read,
+        // tool choice, or break packet.
+        if (started && bot.getActionPack().consumeSuccessfulMining(target, miningGeneration)) {
+            target = null;
+            started = false;
+            miningGeneration = -1L;
             return Status.DONE;
         }
         // A BlockMiner may be restored from a task checkpoint, so its retained coordinate is not
@@ -113,7 +135,7 @@ public final class BlockMiner {
         // Target already broken (air / replaced with something else is the caller's concern; here we only recognize "no longer minable" = air).
         BlockState targetState = world.getBlockState(target);
         if (targetState.isAir()) {
-            bot.getActionPack().stopMining();
+            stopOwnedMining(bot);
             target = null;
             return Status.DONE;
         }
@@ -122,7 +144,7 @@ public final class BlockMiner {
         // every block before it gets blacklisted (observed: miner_slow_dump block=water, 13 in a row
         // blacklisted). Fail immediately instead and move to the next block.
         if (!targetState.getFluidState().isEmpty()) {
-            bot.getActionPack().stopMining();
+            stopOwnedMining(bot);
             failureReason = "target_is_fluid";
             target = null;
             return Status.FAILED;
@@ -131,7 +153,7 @@ public final class BlockMiner {
         if (naturalTerrainOnly) {
             String denial = BreakRule.legacyDenialOf(targetState);
             if (denial != null) {
-                bot.getActionPack().stopMining();
+                stopOwnedMining(bot);
                 failureReason = "break_refused:" + denial;
                 target = null;
                 return Status.FAILED;
@@ -139,7 +161,7 @@ public final class BlockMiner {
         }
         sinceTick++;
         if (sinceTick > MINE_TIMEOUT_TICKS) {
-            bot.getActionPack().stopMining();
+            stopOwnedMining(bot);
             failureReason = "mine_timeout";
             target = null;
             return Status.FAILED;
@@ -175,7 +197,7 @@ public final class BlockMiner {
                 // would otherwise be broken without a harvest drop or consume a scarce wrong tier.
                 if (selection.slot() < 0
                         || (equipTarget.requiresCorrectToolForDrops() && selection.stack().isEmpty())) {
-                    bot.getActionPack().stopMining();
+                    stopOwnedMining(bot);
                     failureReason = "missing_mining_channel_tool:"
                             + BuiltInRegistries.ITEM.getKey(
                             ToolSelector.requiredMiningChannelTool(equipTarget));
@@ -194,15 +216,17 @@ public final class BlockMiner {
                 return Status.FAILED;
             }
             started = true;
+            miningGeneration = bot.getActionPack().miningGeneration();
         }
         return Status.MINING;
     }
 
     /** Abandon the current mining operation (called when a task is paused/aborted); does not change the external intent of "which block to mine". */
     public void cancel(AIPlayerEntity bot) {
-        bot.getActionPack().stopMining();
+        stopOwnedMining(bot);
         target = null;
         started = false;
+        miningGeneration = -1L;
         sinceTick = 0;
         miningChannelToolPolicy = false;
         naturalTerrainOnly = false;
@@ -219,11 +243,31 @@ public final class BlockMiner {
     /** Refusal is terminal for this retained coordinate; callers may only nominate a new visible target. */
     private Status targetNotObserved(AIPlayerEntity bot) {
         BlockPos refused = target;
-        bot.getActionPack().stopMining();
+        stopOwnedMining(bot);
         failureReason = MiningController.TARGET_NOT_OBSERVED;
         started = false;
+        miningGeneration = -1L;
         target = null;
         BotLog.action(bot, "miner_target_unobserved", "target", refused.toShortString(),
+                "reason", failureReason);
+        return Status.FAILED;
+    }
+
+    /** Stops only the controller this miner actually started; a stale candidate owns no pack lease. */
+    private void stopOwnedMining(AIPlayerEntity bot) {
+        if (started && miningGeneration == bot.getActionPack().miningGeneration()) {
+            bot.getActionPack().stopMining();
+        }
+    }
+
+    /** Releases only this stale state machine; the newer ActionPack controller remains untouched. */
+    private Status miningPreempted(AIPlayerEntity bot) {
+        BlockPos preempted = target;
+        failureReason = MINING_PREEMPTED;
+        started = false;
+        miningGeneration = -1L;
+        target = null;
+        BotLog.action(bot, "miner_preempted", "target", preempted.toShortString(),
                 "reason", failureReason);
         return Status.FAILED;
     }

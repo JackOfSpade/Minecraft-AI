@@ -29,7 +29,7 @@ import net.minecraft.world.phys.Vec3;
  * client's move packet to drive {@code doCheckFallDamage}), and {@code Player.attack} against a {@code ServerPlayer} sends the
  * knockback to that player's client and then restores the old server-side velocity (the client is expected to apply it). A bot
  * has no client, so it took no fall damage and no player melee knockback. These tests fail on a branch without the fixes: the fall
- * tests measure the health a bot loses when it leaves a ledge (by the legacy executor and by a plain push), the knockback test
+ * tests measure the health a bot loses when it leaves a ledge (by ordinary movement input and by a plain push), the knockback test
  * compares a bot hit by a player or a zombie with a vanilla zombie hit by the same attacker in the same geometry.</p>
  *
  * <p>Fall damage in vanilla is {@code ceil(distance - 3)}: 0 / 2 / 5 / 9 hit points for 3 / 5 / 8 / 12 blocks. The Baritone
@@ -96,8 +96,8 @@ public final class BotFallAndKnockbackGameTests {
 
     /** How the bot is sent over the edge of the pillar. */
     private enum Mover {
-        /** ActionPack.startWalkTo: the legacy executor's straight-line walk (its steering writes the inputs). */
-        LEGACY_WALK,
+        /** An ordinary forward input, the same local movement physics a route ultimately drives. */
+        INPUT_WALK,
         /** No controller at all: a velocity impulse toward the edge, as a knockback or a piston would give. */
         PLAIN_PUSH
     }
@@ -177,8 +177,11 @@ public final class BotFallAndKnockbackGameTests {
                 bot.getFoodData().setFoodLevel(17);
                 bot.getFoodData().setSaturation(0.0F);
                 put(bot, world, origin.getX() + 0.5D, floorY + h, origin.getZ() + 0.5D + (mover == Mover.PLAIN_PUSH ? 2.2D : 0.0D));
-                if (mover == Mover.LEGACY_WALK) {
-                    bot.getActionPack().startWalkTo(new Vec3(origin.getX() + 0.5D, floorY, origin.getZ() + 6.5D), 0.3D);
+                if (mover == Mover.INPUT_WALK) {
+                    // startWalkTo is now an observed Baritone route rather than the former local
+                    // straight-line controller. This test isolates fall accounting from route
+                    // admission, so supply the same physical forward input directly.
+                    bot.getActionPack().setForward(1.0F);
                 } else {
                     bot.setDeltaMovement(0.0D, 0.0D, 0.5D);
                 }

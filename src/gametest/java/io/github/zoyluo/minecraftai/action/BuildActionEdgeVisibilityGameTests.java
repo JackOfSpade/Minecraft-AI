@@ -99,6 +99,8 @@ public final class BuildActionEdgeVisibilityGameTests {
                 "fixture exposed one of the legacy six face-center rays");
         require(context, ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, support),
                 "fixture did not expose an exact inset observation ray");
+        require(context, hasVisibleWestEdgePoint(bot, support),
+                "fixture did not expose a direct ray to the requested west support face");
 
         ActionResult result = BuildAction.placeBlockAt(bot, destination);
         require(context, result.isSuccess(),
@@ -108,6 +110,18 @@ public final class BuildActionEdgeVisibilityGameTests {
         require(context, bot.getMainHandItem().getCount() == 1,
                 "edge sampler did not consume exactly one physical block");
         cleanup(context, bot, "BuildHiddenEdge");
+    }
+
+    /** The fixture's independently chosen south-west edge point is the one left clear around the occluder. */
+    private static boolean hasVisibleWestEdgePoint(AIPlayerEntity bot, BlockPos support) {
+        Vec3 eye = bot.getEyePosition();
+        Vec3 target = new Vec3(support.getX() + 0.001D, support.getY() + 0.5D,
+                support.getZ() + 0.875D);
+        BlockHitResult hit = bot.level().clip(new ClipContext(
+                eye, target, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, bot));
+        return hit.getType() == HitResult.Type.BLOCK
+                && support.equals(hit.getBlockPos())
+                && hit.getDirection() == Direction.WEST;
     }
 
     @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_water_source_may_be_observable_only_through_an_inset_ray", maxTicks = 40)

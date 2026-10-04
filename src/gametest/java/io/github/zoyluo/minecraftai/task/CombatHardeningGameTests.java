@@ -234,79 +234,6 @@ public final class CombatHardeningGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "no_melee_against_warden", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
-    public void noMeleeAgainstWarden(GameTestHelper context) {
-        AIPlayerEntity bot = spawnCorridor(context, "CombatWardenGT", 38, -64, 12);
-        BlockPos origin = bot.blockPosition().immutable();
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SWORD));
-        bot.setHealth(20.0F);
-        Warden warden = spawnDisabledWarden(context, origin.east(2));
-        float initialHealth = warden.getHealth();
-
-        PerceptionFixtures.faceToward(bot, warden);
-        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(warden), since -> {
-        // The pure policy first: a warden is never a melee target, defensive or commanded.
-        require(context, CombatCore.isMeleeForbiddenThreat(warden),
-                "a warden was not in the never-melee table");
-        require(context, !CombatCore.strikeIfReady(bot, warden),
-                "strikeIfReady accepted a warden");
-
-        CombatTask combat = CombatTask.defensive(warden, 6.0F, origin);
-        combat.start(bot);
-        for (int tick = 0; tick < 12; tick++) {
-            combat.tick(bot);
-        }
-        require(context, combat.state() == TaskState.RUNNING
-                        && combat.describe().contains("phase=RETREAT")
-                        && warden.getHealth() == initialHealth,
-                "defensive CombatTask engaged a warden: " + combat.describe()
-                        + " state=" + combat.state() + ":" + combat.failureReason());
-        BlockPos goal = bot.getActionPack().activePathGoal();
-        // The retreat leg must clear the 15-block sonic boom, not the generic six-block step.
-        require(context, goal != null
-                        && Math.sqrt(goal.distSqr(warden.blockPosition()))
-                        >= CombatCore.WARDEN_SONIC_BOOM_RANGE,
-                "warden retreat did not clear the sonic boom range: "
-                        + (goal == null ? "no goal" : goal.toShortString()));
-        combat.abort(bot);
-        warden.discard();
-        despawnAndComplete(context, bot);
-        });
-    }
-
-    @GameTest(environment = ENV + "warden_threat_routes_to_evade_beyond_sonic_boom_range", maxTicks = 80 + PerceptionFixtures.MAX_WAIT_TICKS)
-    public void wardenThreatRoutesToEvadeBeyondSonicBoomRange(GameTestHelper context) {
-        AIPlayerEntity bot = spawnCorridor(context, "EvadeWardenGT", 50, -64, 12);
-        BlockPos origin = bot.blockPosition().immutable();
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SWORD));
-        bot.setHealth(20.0F);
-        bot.getFoodData().setFoodLevel(20);
-        HoldingTask work = new HoldingTask();
-        TaskManager.INSTANCE.assign(bot, work, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_warden_evade"));
-        Warden warden = spawnDisabledWarden(context, origin.east(6));
-        float initialHealth = warden.getHealth();
-
-        PerceptionFixtures.faceToward(bot, warden);
-        PerceptionFixtures.afterNoticed(context, bot, List.of(warden), () -> {
-        require(context, DangerWatcher.isActiveHostileThreat(bot, warden)
-                        && CombatCore.isWithinHostilePressureEnvelope(bot, warden),
-                "a warden in view was not a factual active threat");
-        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
-        Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
-        require(context, active instanceof EvadeTask,
-                "warden routed to " + (active == null ? "idle" : active.name()));
-        BlockPos goal = bot.getActionPack().activePathGoal();
-        require(context, goal != null
-                        && Math.sqrt(goal.distSqr(warden.blockPosition()))
-                        > CombatCore.WARDEN_SONIC_BOOM_RANGE,
-                "warden evade goal stayed inside the sonic boom range: "
-                        + (goal == null ? "no goal" : goal.toShortString()));
-        require(context, warden.getHealth() == initialHealth, "warden routing dealt combat damage");
-        warden.discard();
-        despawnAndComplete(context, bot);
-        });
-    }
-
     @GameTest(environment = ENV + "strike_through_wall_or_beyond_vanilla_reach_is_refused", maxTicks = 130)
     public void strikeThroughWallOrBeyondVanillaReachIsRefused(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "StrikeLegalGT", 62);
@@ -566,6 +493,41 @@ public final class CombatHardeningGameTests {
                         + (now == null ? "idle" : now.describe())));
             }
         });
+        });
+    }
+
+    /** A noticed Warden is assigned the ordinary safety EvadeTask, which must create real separation. */
+    @GameTest(maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void visibleWardenThreatStartsOrdinaryEvade(GameTestHelper context) {
+        AIPlayerEntity bot = spawnCorridor(context, "WardenEvadeGT", 50, -64, 20);
+        BlockPos origin = bot.blockPosition().immutable();
+        bot.setHealth(20.0F);
+        bot.getFoodData().setFoodLevel(20);
+        HoldingTask work = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, work, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_warden_evade"));
+        Warden warden = spawnDisabledWarden(context, origin.east(6));
+        PerceptionFixtures.faceToward(bot, warden);
+        PerceptionFixtures.afterNoticed(context, bot, List.of(warden), since -> {
+            DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            require(context, active instanceof EvadeTask,
+                    "a visible Warden routed to " + (active == null ? "idle" : active.name()));
+            double[] farthest = {bot.distanceTo(warden)};
+            PerceptionFixtures.everyTick(context, () -> {
+                farthest[0] = Math.max(farthest[0], bot.distanceTo(warden));
+                Task current = TaskManager.INSTANCE.getActive(bot).orElse(null);
+                require(context, current instanceof EvadeTask || farthest[0] >= 8.0D,
+                        "the Warden evade was replaced before it gained separation: "
+                                + (current == null ? "idle" : current.name()));
+                if (farthest[0] >= 8.0D) {
+                    warden.discard();
+                    TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_warden_evade_done");
+                    despawnAndComplete(context, bot);
+                } else if (since.getAsLong() >= 280) {
+                    context.fail(Component.nullToEmpty("the Warden evade gained only "
+                            + String.format("%.1f", farthest[0]) + " blocks"));
+                }
+            });
         });
     }
 
@@ -1339,8 +1301,8 @@ public final class CombatHardeningGameTests {
     private static Warden spawnDisabledWarden(GameTestHelper context, BlockPos feet) {
         Warden warden = EntityType.WARDEN.create(context.getLevel(), EntitySpawnReason.COMMAND);
         if (warden == null) {
-            context.fail(Component.nullToEmpty("failed to create the warden fixture"));
-            throw new IllegalStateException("failed to create the warden fixture");
+            context.fail(Component.nullToEmpty("failed to create the Warden fixture"));
+            throw new IllegalStateException("failed to create the Warden fixture");
         }
         warden.setPersistenceRequired();
         warden.setNoAi(true);

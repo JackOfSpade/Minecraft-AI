@@ -17,8 +17,6 @@ class PacePolicyTest {
     private static final class Rig {
         final PacePolicy.State state = new PacePolicy.State();
         long now = 1000L;
-        boolean hunting;
-        boolean calmCeiling;
         boolean pressure;
         PacePolicy.Lease lease;
         boolean taskSneak;
@@ -29,7 +27,7 @@ class PacePolicyTest {
 
         Gait decide() {
             now++;
-            PacePolicy.Inputs in = new PacePolicy.Inputs(hunting, calmCeiling, pressure, lease, taskSneak, taskSprint, distance,
+            PacePolicy.Inputs in = new PacePolicy.Inputs(pressure, lease, taskSneak, taskSprint, distance,
                     quiet, cap, SPRINT_FROM, WALK_TO, now);
             return PacePolicy.decide(in, state);
         }
@@ -113,7 +111,7 @@ class PacePolicyTest {
         }
         rig.lease = PacePolicy.Lease.route(Gait.WALK, PaceOwner.TASK);
         assertEquals(Gait.WALK, rig.decideAt(2.0D), "a lease downgrade is immediate");
-        rig.lease = PacePolicy.Lease.route(Gait.SNEAK, PaceOwner.WARDEN);
+        rig.lease = PacePolicy.Lease.route(Gait.SNEAK, PaceOwner.TASK);
         assertEquals(Gait.SNEAK, rig.decideAt(50.0D));
     }
 
@@ -122,10 +120,10 @@ class PacePolicyTest {
         long now = 5L;
         PacePolicy.Lease follow = PacePolicy.Lease.tick(Gait.SPRINT, PaceOwner.FOLLOW, now);
         PacePolicy.Lease evade = PacePolicy.Lease.tick(Gait.SPRINT, PaceOwner.EVADE, now);
-        PacePolicy.Lease warden = PacePolicy.Lease.route(Gait.SNEAK, PaceOwner.WARDEN);
+        PacePolicy.Lease task = PacePolicy.Lease.route(Gait.SNEAK, PaceOwner.TASK);
         assertSame(evade, PacePolicy.Lease.best(follow, evade, now));
         assertSame(evade, PacePolicy.Lease.best(evade, follow, now));
-        assertSame(warden, PacePolicy.Lease.best(evade, warden, now));
+        assertSame(evade, PacePolicy.Lease.best(evade, task, now));
         assertSame(follow, PacePolicy.Lease.best(follow, null, now));
         assertNull(PacePolicy.Lease.best(null, null, now));
         assertSame(evade, PacePolicy.Lease.best(evade, PacePolicy.Lease.tick(Gait.WALK, PaceOwner.EVADE, now), now),
@@ -145,38 +143,6 @@ class PacePolicyTest {
     }
 
     @Test
-    void aHuntingWardenMakesTheBotSprintWhateverElseAsks() {
-        Rig rig = new Rig();
-        rig.hunting = true;
-        rig.quiet = QuietZone.Level.SILENT;
-        rig.taskSneak = true;
-        rig.lease = PacePolicy.Lease.route(Gait.SNEAK, PaceOwner.FOLLOW);
-        assertEquals(Gait.SPRINT, rig.decideAt(2.0D));
-        rig.cap = Gait.WALK;
-        assertEquals(Gait.WALK, rig.decideAt(2.0D), "a ceiling (a jump node) still holds");
-    }
-
-    @Test
-    void aCalmWardenCeilingCapsAnEvadeSprintButNotAWardenSneak() {
-        Rig rig = new Rig();
-        rig.calmCeiling = true;
-        rig.lease = PacePolicy.Lease.tick(Gait.SPRINT, PaceOwner.EVADE, rig.now);
-        assertEquals(Gait.WALK, rig.decideAt(50.0D), "an evade sprint next to a calm warden is a walk");
-        rig.lease = PacePolicy.Lease.route(Gait.SNEAK, PaceOwner.WARDEN);
-        assertEquals(Gait.SNEAK, rig.decideAt(50.0D), "the warden's own sneak is not raised by the cap");
-        rig.lease = PacePolicy.Lease.route(Gait.SPRINT, PaceOwner.WARDEN);
-        assertEquals(Gait.SPRINT, rig.decideAt(50.0D), "a WARDEN lease is exempt from the calm-warden ceiling");
-        rig.lease = null;
-        rig.pressure = true;
-        assertEquals(Gait.WALK, rig.decideAt(50.0D), "pressure next to a calm warden is capped to a walk");
-        rig.pressure = false;
-        rig.taskSprint = true;
-        assertEquals(Gait.WALK, rig.decideAt(50.0D), "so is the task sprint");
-        rig.calmCeiling = false;
-        assertEquals(Gait.SPRINT, rig.decideAt(50.0D), "no ceiling, no cap");
-    }
-
-    @Test
     void aCeilingBeatsPressure() {
         Rig rig = new Rig();
         rig.pressure = true;
@@ -188,13 +154,11 @@ class PacePolicyTest {
     }
 
     @Test
-    void aWardenLeaseDecidesOverPressureButAnOrdinaryLeaseDoesNot() {
+    void pressureDecidesOverAnOrdinaryLease() {
         Rig rig = new Rig();
         rig.pressure = true;
-        rig.lease = PacePolicy.Lease.route(Gait.SNEAK, PaceOwner.WARDEN);
-        assertEquals(Gait.SNEAK, rig.decideAt(30.0D));
         rig.lease = PacePolicy.Lease.route(Gait.WALK, PaceOwner.TASK);
-        assertEquals(Gait.SPRINT, rig.decideAt(30.0D), "an ordinary lease does not beat pressure");
+        assertEquals(Gait.SPRINT, rig.decideAt(30.0D), "pressure beats a lease");
     }
 
     @Test
@@ -221,7 +185,7 @@ class PacePolicyTest {
         rig.taskSprint = false;
         assertEquals(Gait.SNEAK, rig.decideAt(50.0D));
         rig.pressure = true;
-        assertEquals(Gait.SPRINT, rig.decideAt(50.0D), "under attack the bot runs, sculk or not");
+        assertEquals(Gait.SPRINT, rig.decideAt(50.0D), "under attack the bot runs");
         rig.pressure = false;
         rig.lease = PacePolicy.Lease.tick(Gait.SPRINT, PaceOwner.EVADE, rig.now);
         assertEquals(Gait.SPRINT, rig.decideAt(50.0D), "a lease is its owner's decision");

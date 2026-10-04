@@ -26,14 +26,12 @@ delay `block_delay_seconds` (0.25 s = 5 ticks for a shield).
 | wind charge (a player's or a breeze's; the burst still pushes), firework rocket from a crossbow | `wind_charge`, `fireworks` | yes |
 | explosions faced (creeper, TNT, fireball) | `explosion`, `player_explosion` | yes |
 | melee: `mob_attack`, `mob_attack_no_aggro`, `player_attack`, `sting`, `mace_smash`, `spear` | | yes, from the front |
-| guardian and elder guardian beam | `indirect_magic` (1, 3 on Hard, +2 elder: unblockable), then `mob_attack` (6, elder 8) | the `mob_attack` part |
 | Piercing arrows and bolts | `arrow` with `pierceLevel > 0` | no |
 | snowballs, eggs, ender pearls | `thrown` of ZERO damage to a player (a snowball hurts only blazes) | nothing to block |
 | thrown splash and lingering potions, evoker fangs | `indirect_magic` | no |
 | a wither skull with no living owner | `magic` (5) | no |
 | a firework rocket without explosions, or not shot at an angle (going up, boosting an elytra) | no hit (0) | nothing to block |
 | experience bottles, area effect clouds, eyes of ender | no hit | never reacted to |
-| warden sonic boom | `sonic_boom` | no |
 | dragon fireballs (no hit of their own) and dragon breath clouds | `dragon_breath`, the Harming effect | no |
 | lightning (including a Channeling trident's bolt) | `lightning_bolt` | no |
 | fire, lava, cactus, berry bushes, falling anvils and stalactites, magic, wither, freeze, starve, fall, drown, ... | the rest of `#bypasses_shield` | no |
@@ -61,8 +59,6 @@ failing test.
   bot. The pre-emptive raise of a player in PvP, held until the shot lands or the draw stops. When that shooter is the combat target
   within striking reach, the combat task's melee rhythm owns the shield instead (below), so a shooter in melee range is struck between
   blocks rather than blocked for ever.
-* **A registered vanilla guardian or elder guardian beam** locked on the bot (the beam a client draws from its first tick): the shield
-  is held until the beam lets go; the bite is blocked from the front, the magic part still hurts.
 * **A registered vanilla creeper** with a late, lit fuse (the creeper defence task has its own shield phase through the same raise), or
   a visibly observed registered vanilla primed TNT entity inside its real eight-block damage envelope. TNT first waits the same human visible-object reaction time,
   then uses its synced fuse and the same turn/hotbar/block-delay budget; the actual vanilla explosion source and `TNT_EXPLODES` rule
@@ -72,10 +68,10 @@ failing test.
 * **Melee**: the combat task's rhythm (below).
 
 **Following, escorting, escaping and combat retreating keep the sprint (RULES win over the spec).** RULES say a follower or escort
-always sprints while hostiles are aggroed, a bot sprints away from a hunting warden, and `CombatRegroupTask` plus `CombatTask.RETREAT`
+always sprints while hostiles are aggroed, and `CombatRegroupTask` plus `CombatTask.RETREAT`
 are fighting retreats. `FollowTask`, `EvadeTask`, `CombatRegroupTask` and a retreating `CombatTask` block only projectiles ALREADY IN
 FLIGHT at them (a hold of a few ticks: raised, blocked, lowered, and sprint resumes); none makes a pre-emptive hold against a drawing or
-loaded shooter, a charging guardian beam or a fuse (the danger watcher takes a follower off the follow for a creeper). A retreat's
+loaded shooter or a fuse (the danger watcher takes a follower off the follow for a creeper). A retreat's
 occasional clearance counterstrike likewise does not create a between-swings shield rhythm, because preserving that sprint is the
 explicit rule.
 
@@ -98,9 +94,8 @@ Right after its own swing the bot raises the shield and holds it through the att
 target at the human turn speed; when the weapon is ready AND the target is under the crosshair within vanilla reach the shield comes
 down, and the swing follows on the next tick (`ShieldRules.meleeStep`; a player cannot attack while using an item, and the client drops
 the attack click of the tick the use key is released). A raise is skipped when it could not be active before the next swing. An axe hit
-or a warden disables the shield through vanilla's item cooldown (`Weapon.disableBlockingForSeconds`, five seconds for an axe): no raise
-and no attempt until it is over (`ShieldGuard.raise` returns before calling the use path), the fight goes on. Companions never fight
-wardens, and the sonic boom is not blockable anyway. Combat and guard share this rhythm; hunt's fixed prey set contains only
+disables the shield through vanilla's item cooldown (`Weapon.disableBlockingForSeconds`, five seconds for an axe): no raise
+and no attempt until it is over (`ShieldGuard.raise` returns before calling the use path), the fight goes on. Combat and guard share this rhythm; hunt's fixed prey set contains only
 non-attacking animals, so it never raises a shield against an animal that cannot make a melee hit. A follower in follow mode only
 knocks back what reaches it while it keeps sprinting after its player (R4), so it does not stop to block melee.
 

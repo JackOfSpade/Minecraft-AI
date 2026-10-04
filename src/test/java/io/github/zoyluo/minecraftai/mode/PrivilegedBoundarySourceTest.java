@@ -171,7 +171,7 @@ class PrivilegedBoundarySourceTest {
                         && observation.contains("private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range)")
                         && observation.contains("canObserveCellWithinAfterPolicy(bot, pos, range, ClipContext.Fluid.ANY)"),
                 "ordinary block, collider, and interaction observers must retain Fluid.ANY occlusion");
-        assertEquals(Set.of("baritone/BaritoneWaterFall.java", "baritone/ObservedNavigationFence.java", "mode/ObservableWorldQuery.java",
+        assertEquals(Set.of("baritone/BaritoneWaterFall.java", "baritone/ObservedNavigationFence.java", "mode/ObservableWorldQuery.java", "task/BoatSupport.java",
                         "task/CreateObsidianTask.java", "task/NavSafetyNet.java", "task/ShowTargetTask.java", "task/SwimRoute.java"),
                 matchingSources(Pattern.compile("canObserve(?:Cell|Collider)ThroughFluids\\s*\\(")).keySet(),
                 "fluid-transparent observation must stay scoped to reviewed water-navigation helpers, observed surface presentation, own-bucket recovery, obsidian pickup, and the Baritone fence");

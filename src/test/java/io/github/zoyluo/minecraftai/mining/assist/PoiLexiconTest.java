@@ -162,11 +162,11 @@ class PoiLexiconTest {
     }
 
     @Test
-    void sculkStructBucket() {
-        assertBucket(PoiBucket.SCULK_STRUCT,
+    void sculkFamilyDoesNotProducePoiEvidence() {
+        assertBucket(PoiBucket.NATURAL,
                 "sculk_shrieker", "sculk_sensor", "calibrated_sculk_sensor", "sculk_catalyst",
                 "reinforced_deepslate");
-        assertEquals(PoiBucket.SCULK_STRUCT, PoiLexicon.classify(MC, "sculk_shrieker", true, false));
+        assertEquals(PoiBucket.NATURAL, PoiLexicon.classify(MC, "sculk_shrieker", true, false));
     }
 
     @Test
@@ -482,10 +482,7 @@ class PoiLexiconTest {
             PoiBucket bucket = PoiLexicon.classify(ns, path, random.nextBoolean(), random.nextBoolean());
             assertNotNull(bucket, ns + " / " + path);
             PoiLexicon.entityScore(ns, path);
-            PoiLexicon.isWarden(ns, path);
             PoiLexicon.isHabitationItem(path);
-            PoiLexicon.isSculkFamily(path);
-            PoiLexicon.isWarnBlockForWarden(path);
         }
     }
 
@@ -534,11 +531,9 @@ class PoiLexiconTest {
     }
 
     @Test
-    void ancientCityPaletteBucketsAsThePlannedFixtureNeeds() {
-        assertBucket(PoiBucket.DEEPSLATE_BUILD, "deepslate_tiles", "deepslate_bricks");
-        assertBucket(PoiBucket.LIGHT_DRESSING, "soul_lantern");
-        assertBucket(PoiBucket.SCULK_STRUCT, "sculk_shrieker");
-        assertBucket(PoiBucket.NATURAL, "sculk", "sculk_vein");
+    void sculkFamilyBlocksStayNaturalPoiInputs() {
+        assertBucket(PoiBucket.NATURAL, "sculk", "sculk_vein", "sculk_shrieker", "sculk_sensor",
+                "calibrated_sculk_sensor", "sculk_catalyst", "reinforced_deepslate");
     }
 
     @Test
@@ -619,7 +614,6 @@ class PoiLexiconTest {
     void bucketTableMatchesDesign62() {
         assertTable(PoiBucket.SPAWNER, PoiBucket.Strength.STRONG, 2.0D, 2, 1);
         assertTable(PoiBucket.CONTAINER, PoiBucket.Strength.STRONG, 1.0D, 3, 2);
-        assertTable(PoiBucket.SCULK_STRUCT, PoiBucket.Strength.STRONG, 2.5D, 3, 1);
         assertTable(PoiBucket.DEEPSLATE_BUILD, PoiBucket.Strength.STRONG, 1.0D, 6, 4);
         assertTable(PoiBucket.RAIL, PoiBucket.Strength.STRONG, 0.7D, 4, 2);
         assertTable(PoiBucket.WEB, PoiBucket.Strength.STRONG, 0.4D, 4, 1);
@@ -653,7 +647,7 @@ class PoiLexiconTest {
         assertEquals(0.28D, s, 0.005D);
     }
 
-    // ------------------------------------------------------------------ 10. habitation and warden helpers
+    // ------------------------------------------------------------------ 10. habitation helpers
 
     @Test
     void habitationItemsMatchDesign63() {
@@ -692,61 +686,6 @@ class PoiLexiconTest {
         assertTrue(PoiLexicon.isHabitationItem(null, " Anvil "));
     }
 
-    @Test
-    void sculkFamilyCoversPlainSculkAndEveryStructureBlock() {
-        for (String path : List.of("sculk", "sculk_vein", "sculk_sensor", "calibrated_sculk_sensor",
-                "sculk_shrieker", "sculk_catalyst")) {
-            assertTrue(PoiLexicon.isSculkFamily(path), path);
-            assertTrue(PoiLexicon.isSculkFamily(MC, path), path);
-        }
-        for (String path : List.of("reinforced_deepslate", "deepslate", "sculky", "stone",
-                "soul_sand", "")) {
-            assertFalse(PoiLexicon.isSculkFamily(path), path);
-        }
-        assertFalse(PoiLexicon.isSculkFamily(null));
-        assertFalse(PoiLexicon.isSculkFamily("terralith", "sculk"));
-    }
-
-    @Test
-    void warnBlocksForWarden() {
-        for (String path : List.of("reinforced_deepslate", "sculk_shrieker", "sculk_catalyst",
-                "sculk_sensor", "calibrated_sculk_sensor")) {
-            assertTrue(PoiLexicon.isWarnBlockForWarden(path), path);
-            assertTrue(PoiLexicon.isWarnBlockForWarden(MC, path), path);
-        }
-        for (String path : List.of("sculk", "sculk_vein", "deepslate", "deepslate_bricks", "spawner",
-                "chest", "")) {
-            assertFalse(PoiLexicon.isWarnBlockForWarden(path), path);
-        }
-        assertFalse(PoiLexicon.isWarnBlockForWarden(null));
-        assertFalse(PoiLexicon.isWarnBlockForWarden("fakemod", "reinforced_deepslate"));
-        assertFalse(PoiLexicon.isWarnBlockForWarden("fakemod:sculk_shrieker"));
-    }
-
-    @Test
-    void singleTriggerAndSensorSplitMatchesTheMandatoryRule() {
-        for (String path : List.of("reinforced_deepslate", "sculk_shrieker", "sculk_catalyst")) {
-            assertTrue(PoiLexicon.isWardenSingleTrigger(path), path);
-            assertFalse(PoiLexicon.isSculkSensor(path), path);
-        }
-        for (String path : List.of("sculk_sensor", "calibrated_sculk_sensor")) {
-            assertFalse(PoiLexicon.isWardenSingleTrigger(path), path);
-            assertTrue(PoiLexicon.isSculkSensor(path), path);
-        }
-        assertFalse(PoiLexicon.isWardenSingleTrigger("sculk"));
-        assertFalse(PoiLexicon.isSculkSensor("sculk_vein"));
-        assertFalse(PoiLexicon.isWardenSingleTrigger(null));
-        assertFalse(PoiLexicon.isSculkSensor(null));
-    }
-
-    @Test
-    void everyWarnBlockIsSculkStructBucketed() {
-        for (String path : List.of("reinforced_deepslate", "sculk_shrieker", "sculk_catalyst",
-                "sculk_sensor", "calibrated_sculk_sensor")) {
-            assertEquals(PoiBucket.SCULK_STRUCT, classify(path), path);
-        }
-    }
-
     // ------------------------------------------------------------------ 11. entities
 
     @Test
@@ -763,7 +702,7 @@ class PoiLexiconTest {
     @Test
     void unlistedVanillaEntitiesScoreZero() {
         for (String path : List.of("zombie", "skeleton", "creeper", "spider", "cave_spider", "bat",
-                "warden", "hopper_minecart", "minecart", "tnt_minecart", "zombie_villager",
+                "hopper_minecart", "minecart", "tnt_minecart", "zombie_villager",
                 "wandering_trader", "iron_golem", "item", "experience_orb", "player", "")) {
             assertEquals(0.0D, PoiLexicon.entityScore(MC, path), path);
         }
@@ -798,20 +737,6 @@ class PoiLexiconTest {
         for (String path : List.of("chest_minecart", "villager", "item_frame")) {
             assertTrue(PoiLexicon.entityScore(MC, path) <= PoiLexicon.ENTITY_GROUP_CAP, path);
         }
-    }
-
-    @Test
-    void wardenIsRecognizedOnlyInTheVanillaNamespace() {
-        assertTrue(PoiLexicon.isWarden(MC, "warden"));
-        assertTrue(PoiLexicon.isWarden(null, "warden"));
-        assertTrue(PoiLexicon.isWarden("", "WARDEN"));
-        assertTrue(PoiLexicon.isWarden(null, "minecraft:warden"));
-        assertFalse(PoiLexicon.isWarden("somemod", "warden"));
-        assertFalse(PoiLexicon.isWarden(MC, "zombie"));
-        assertFalse(PoiLexicon.isWarden(MC, "wardens"));
-        assertFalse(PoiLexicon.isWarden(MC, null));
-        assertFalse(PoiLexicon.isWarden(null, null));
-        assertFalse(PoiLexicon.isWarden(MC, ""));
     }
 
     // ------------------------------------------------------------------ 12. registry snapshot
@@ -856,15 +781,6 @@ class PoiLexiconTest {
             PoiBucket bucket = classify(id);
             if (PoiLexicon.isHabitationItem(id)) {
                 assertEquals(PoiBucket.FURNISHING, bucket, id);
-            }
-            if (PoiLexicon.isWarnBlockForWarden(id)) {
-                assertEquals(PoiBucket.SCULK_STRUCT, bucket, id);
-            }
-            if (PoiLexicon.isWardenSingleTrigger(id) || PoiLexicon.isSculkSensor(id)) {
-                assertTrue(PoiLexicon.isWarnBlockForWarden(id), id);
-            }
-            if (PoiLexicon.isSculkFamily(id)) {
-                assertTrue(bucket == PoiBucket.NATURAL || bucket == PoiBucket.SCULK_STRUCT, id);
             }
             if (PoiLexicon.isVault(MC, id)) {
                 assertEquals(PoiBucket.SPAWNER, bucket, id);
@@ -969,8 +885,8 @@ class PoiLexiconTest {
         assertEquals(PoiBucket.FURNISHING, PoiLexicon.classify(MC, "smoker", true, false));
         assertEquals(PoiBucket.FURNISHING, PoiLexicon.classify(MC, "blast_furnace", true, false));
         assertEquals(PoiBucket.FURNISHING, PoiLexicon.classify(MC, "brewing_stand", true, false));
-        assertEquals(PoiBucket.SCULK_STRUCT, PoiLexicon.classify(MC, "sculk_sensor", true, false));
-        assertEquals(PoiBucket.SCULK_STRUCT, PoiLexicon.classify(MC, "sculk_catalyst", true, false));
+        assertEquals(PoiBucket.NATURAL, PoiLexicon.classify(MC, "sculk_sensor", true, false));
+        assertEquals(PoiBucket.NATURAL, PoiLexicon.classify(MC, "sculk_catalyst", true, false));
         assertEquals(PoiBucket.SPAWNER, PoiLexicon.classify(MC, "trial_spawner", true, false));
         assertEquals(PoiBucket.SPAWNER, PoiLexicon.classify(MC, "vault", true, false));
         assertEquals(PoiBucket.CONTAINER, PoiLexicon.classify(MC, "ender_chest", true, false));
@@ -1153,19 +1069,6 @@ class PoiLexiconTest {
         assertFalse(PoiLexicon.isVault("minecraft", "somemod:vault"));
     }
 
-    @Test
-    void wardenBlockHelpersRejectModdedClonesOfEveryTrigger() {
-        for (String path : List.of("reinforced_deepslate", "sculk_shrieker", "sculk_catalyst",
-                "sculk_sensor", "calibrated_sculk_sensor")) {
-            assertFalse(PoiLexicon.isWardenSingleTrigger("fakemod", path), path);
-            assertFalse(PoiLexicon.isSculkSensor("fakemod", path), path);
-            assertFalse(PoiLexicon.isWarnBlockForWarden("fakemod", path), path);
-            assertFalse(PoiLexicon.isSculkFamily("fakemod", path), path);
-            assertTrue(PoiLexicon.isWardenSingleTrigger(MC, path)
-                    || PoiLexicon.isSculkSensor(MC, path), path);
-        }
-    }
-
     // ------------------------------------------------------------------ 15. fuzz on the whole surface
 
     @Test
@@ -1179,7 +1082,7 @@ class PoiLexiconTest {
             assertTrue(allowed.contains(PoiLexicon.entityScore(ns, path)), ns + " / " + path);
         }
         for (String path : List.of("chest_minecart", "villager", "pillager", "vindicator", "evoker",
-                "illusioner", "item_frame", "glow_item_frame", "armor_stand", "warden", "creeper")) {
+                "illusioner", "item_frame", "glow_item_frame", "armor_stand", "creeper")) {
             assertTrue(allowed.contains(PoiLexicon.entityScore(MC, path)), path);
         }
     }
@@ -1199,11 +1102,6 @@ class PoiLexiconTest {
             PoiLexicon.isStoneBricks(ns, path);
             PoiLexicon.isNetherBricks(ns, path);
             PoiLexicon.isBlackstoneFamily(ns, path);
-            PoiLexicon.isSculkFamily(ns, path);
-            PoiLexicon.isWarnBlockForWarden(ns, path);
-            PoiLexicon.isWardenSingleTrigger(ns, path);
-            PoiLexicon.isSculkSensor(ns, path);
-            PoiLexicon.isWarden(ns, path);
         }
     }
 
@@ -1213,7 +1111,6 @@ class PoiLexiconTest {
         Map<PoiBucket, String> table = new LinkedHashMap<>();
         table.put(PoiBucket.SPAWNER, GOLDEN_SPAWNER);
         table.put(PoiBucket.CONTAINER, GOLDEN_CONTAINER);
-        table.put(PoiBucket.SCULK_STRUCT, GOLDEN_SCULK_STRUCT);
         table.put(PoiBucket.DEEPSLATE_BUILD, GOLDEN_DEEPSLATE_BUILD);
         table.put(PoiBucket.RAIL, GOLDEN_RAIL);
         table.put(PoiBucket.WEB, GOLDEN_WEB);
@@ -1279,10 +1176,6 @@ class PoiLexiconTest {
             light_gray_shulker_box lime_shulker_box magenta_shulker_box orange_shulker_box
             pink_shulker_box purple_shulker_box red_shulker_box shulker_box trapped_chest
             white_shulker_box yellow_shulker_box
-            """;
-
-    private static final String GOLDEN_SCULK_STRUCT = """
-            calibrated_sculk_sensor reinforced_deepslate sculk_catalyst sculk_sensor sculk_shrieker
             """;
 
     private static final String GOLDEN_DEEPSLATE_BUILD = """
@@ -1509,6 +1402,7 @@ class PoiLexiconTest {
 
     private static final String GOLDEN_NATURAL = """
             air allium ancient_debris andesite azalea azalea_leaves azure_bluet bamboo
+            calibrated_sculk_sensor reinforced_deepslate sculk_catalyst sculk_sensor sculk_shrieker
             bamboo_sapling basalt bedrock big_dripleaf big_dripleaf_stem black_terracotta
             blackstone blue_ice blue_orchid blue_terracotta brain_coral brain_coral_block
             brain_coral_fan brain_coral_wall_fan brown_mushroom brown_mushroom_block

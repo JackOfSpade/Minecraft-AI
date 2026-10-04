@@ -64,8 +64,6 @@ import org.slf4j.Logger;
  * {@code REQUEST_PAUSE}, so Baritone never plans a path but counts as busy and therefore drives the bot. A listener on the
  * game event handler answers {@code SprintStateEvent} from the SPRINT key (the role {@code PathExecutor} plays for real
  * movements), so the bridge's sprint rules (forward input, food, wall hit) are what the sprint trials exercise.
- * The water trials declare the route swim-permitted ({@link BaritoneRegistry#setWaterAllowed}) so the driver leases the bot to Baritone
- * against the drowning safety net every driven tick, the way a swim route does.
  */
 public final class BaritoneInputPhysicsProbeGameTests {
     private static final Logger LOG = LogUtils.getLogger();
@@ -243,7 +241,6 @@ public final class BaritoneInputPhysicsProbeGameTests {
         long groundMismatchTicks;
         long groundCheckedTicks;
         boolean originalSpawnMonsters;
-        double lastWaterBps;
 
         Rig(GameTestHelper ctx, AIPlayerEntity bot, BlockPos origin, String probe) {
             this.ctx = ctx;
@@ -1203,125 +1200,7 @@ public final class BaritoneInputPhysicsProbeGameTests {
         run(context, r, name);
     }
 
-    // ==================================================================== 7. water and swimming
-    @GameTest(environment = "minecraftai-gametest:baritone_input_physics_probe_game_tests_water_and_swimming", maxTicks = 1500)
-    public void waterAndSwimming(GameTestHelper context) {
-        String name = "RawWaterGT";
-        Rig r = newRig(context, "water_and_swimming", name);
-        ServerLevel w = context.getLevel();
-        air(w, r.origin, -6, -8, -8, 6, 8, 24);
-        Consumer<Rig> pool = rig -> {
-            air(w, rig.origin, -6, -7, -8, 6, 8, 24);
-            box(w, rig.origin, -6, -6, -8, 6, -6, 24, stone());
-            box(w, rig.origin, -6, -5, -8, 6, -1, 0, stone()); // shore, top at y=0
-            box(w, rig.origin, -6, -5, 21, 6, 4, 21, stone());
-            box(w, rig.origin, -4, -5, 1, -4, 4, 20, stone());
-            box(w, rig.origin, 4, -5, 1, 4, 4, 20, stone());
-            box(w, rig.origin, -3, -5, 1, 3, -5, 20, stone());
-            box(w, rig.origin, -3, -4, 1, 3, -1, 20, Blocks.WATER.defaultBlockState()); // 4 deep, surface at y=0
-        };
-        for (String variant : new String[]{"forward_jump", "forward_only", "forward_jump_sprint", "idle_sink"}) {
-            r.trials.add(new Trial("swim_" + variant + "_with_lease", rig -> {
-                pool.accept(rig);
-                rig.teleport(0.5D, 0.0D, -1.5D, 0.0F);
-            }, (rig, t) -> {
-                BaritoneRegistry.INSTANCE.setWaterAllowed(rig.bot, true);
-                if (t >= 100) {
-                    return true;
-                }
-                rig.keys.forward = !variant.equals("idle_sink") || t < 18;
-                rig.keys.jump = variant.startsWith("forward_jump");
-                rig.keys.sprint = variant.equals("forward_jump_sprint");
-                return false;
-            }, rig -> {
-                String res = waterResult(rig);
-                if (variant.equals("forward_only")) {
-                    rig.expect(Math.abs(rig.lastWaterBps - 1.96D) < 0.12D, "underwater walk speed " + f(rig.lastWaterBps));
-                }
-                return res;
-            }));
-        }
-        r.trials.add(new Trial("swim_up_from_pool_floor_jump_only", rig -> {
-            pool.accept(rig);
-            rig.teleport(0.5D, -4.0D, 4.5D, 0.0F);
-        }, (rig, t) -> {
-            BaritoneRegistry.INSTANCE.setWaterAllowed(rig.bot, true);
-            double y = rig.bot.getY() - rig.origin.getY();
-            if (t >= 90 || (y > -0.6D && t > 2)) {
-                return true;
-            }
-            rig.keys.jump = true;
-            return false;
-        }, rig -> {
-            double y = rig.bot.getY() - rig.origin.getY();
-            double maxVy = 0.0D;
-            for (Sample s : rig.samples) {
-                maxVy = Math.max(maxVy, s.postVy);
-            }
-            rig.expect(y > -0.6D, "jump-in-water never surfaced y=" + f(y));
-            return "ticksToSurface=" + rig.samples.size() + " finalY=" + f(y) + " maxVy=" + f(maxVy)
-                    + " inWater=" + rig.bot.isInWater() + " underWater=" + rig.bot.isUnderWater();
-        }));
-        r.trials.add(new Trial("swim_to_shore_and_exit_flush_with_water_surface", rig -> {
-            pool.accept(rig);
-            rig.teleport(0.5D, -1.0D, 4.5D, 180.0F);
-        }, (rig, t) -> {
-            BaritoneRegistry.INSTANCE.setWaterAllowed(rig.bot, true);
-            double y = rig.bot.getY() - rig.origin.getY();
-            double z = rig.bot.getZ() - rig.origin.getZ();
-            if (t >= 120 || (rig.bot.onGround() && y > -0.05D && z < 0.6D && t > 3)) {
-                return true;
-            }
-            rig.keys.forward = true;
-            rig.keys.jump = true;
-            return false;
-        }, rig -> {
-            double y = rig.bot.getY() - rig.origin.getY();
-            double z = rig.bot.getZ() - rig.origin.getZ();
-            boolean out = rig.bot.onGround() && y > -0.05D && z < 1.0D;
-            rig.expect(out, "could not leave the pool flush with the water surface");
-            return "exited=" + out + " ticks=" + rig.samples.size() + " finalY=" + f(y) + " finalZ=" + f(z);
-        }));
-        run(context, r, name);
-    }
-
-    private static String waterResult(Rig rig) {
-        int inWater = 0;
-        int under = 0;
-        int swimming = 0;
-        double minY = 1e9;
-        double maxWaterSpeed = 0.0D;
-        int firstWater = -1;
-        for (Sample s : rig.samples) {
-            if (s.postInWater) {
-                inWater++;
-                if (firstWater < 0) {
-                    firstWater = s.t;
-                }
-            }
-            if (s.postUnderWater) {
-                under++;
-            }
-            if (s.postSwimming) {
-                swimming++;
-            }
-            minY = Math.min(minY, s.postY - rig.origin.getY());
-        }
-        int a = Math.min(rig.samples.size() - 2, Math.max(firstWater + 20, 40));
-        int b = rig.samples.size() - 1;
-        while (b > a && rig.s(b).preZ - rig.origin.getZ() > 19.0D) {
-            b--;
-        }
-        double waterBps = b > a ? rig.bps(a, b) : 0.0D;
-        rig.lastWaterBps = waterBps;
-        double y = rig.bot.getY() - rig.origin.getY();
-        double z = rig.bot.getZ() - rig.origin.getZ();
-        return "ticks=" + rig.samples.size() + " ticksInWater=" + inWater + " ticksUnderWater=" + under + " ticksSwimmingPose=" + swimming
-                + " minY=" + f(minY) + " finalY=" + f(y) + " finalZ=" + f(z)
-                + " steadyBpsLate=" + f(waterBps) + " (vanilla water walk/swim about 1.96 b/s, sprint-swim faster)";
-    }
-
-    // ================================================== 8. slow blocks, slabs and stairs (no jump)
+    // ================================================== 7. slow blocks, slabs and stairs (no jump)
     @GameTest(environment = "minecraftai-gametest:baritone_input_physics_probe_game_tests_slow_blocks_slabs_and_stairs", maxTicks = 1000)
     public void slowBlocksSlabsAndStairs(GameTestHelper context) {
         String name = "RawSlowGT";

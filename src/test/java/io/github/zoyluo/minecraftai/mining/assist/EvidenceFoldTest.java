@@ -115,13 +115,12 @@ class EvidenceFoldTest {
     }
 
     @Test
-    void naturalBlocksDoNotEnterButPlainSculkEntersTheFlagOnlyWindow() {
+    void naturalBlocksIncludingSculkDoNotEnterThePoiWindow() {
         MiningAssistState s = state();
         hit(s, P, facts("stone"), null, 1);
         assertTrue(s.poiWindow().isEmpty());
         hit(s, P.east(), facts("sculk"), null, 1);
-        assertEquals(1, s.poiWindow().flagOnlySize());
-        assertEquals(0, s.poiWindow().structuralSize());
+        assertTrue(s.poiWindow().isEmpty());
     }
 
     @Test
@@ -208,14 +207,5 @@ class EvidenceFoldTest {
         assertEquals(EvidenceFold.NEW_SIGHTING | EvidenceFold.NEW_POI, result);
         assertNotNull(s.sightings().get(P));
         assertEquals(1, s.poiWindow().structuralSize());
-    }
-
-    @Test
-    void mandatoryBlocksKeepTheirFlagsInTheWindow() {
-        MiningAssistState s = state();
-        hit(s, P, facts("sculk_shrieker"), null, 1);
-        PoiEvidenceWindow.Entry entry = s.poiWindow().structuralEntries().iterator().next();
-        assertEquals(PoiBucket.SCULK_STRUCT, entry.bucket());
-        assertTrue(PoiEvidenceFlags.has(entry.flags(), PoiEvidenceFlags.SCULK_SHRIEKER));
     }
 }

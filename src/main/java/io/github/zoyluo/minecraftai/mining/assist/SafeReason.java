@@ -47,7 +47,6 @@ public enum SafeReason {
     HOSTILE_PRESSURE(6),
     LAVA_THREAT_BOX(7),
     HAZARD_LAVA(7),
-    DEEP_DARK_BIOME(8),
     POI_EVIDENCE(9),
     TRAP_SPOT(10);
 
@@ -76,7 +75,6 @@ public enum SafeReason {
             case OK -> "";
             case TPS, HEADROOM -> "degraded_tps";
             case PAUSED, USER_PAUSED -> "paused";
-            case DEEP_DARK_BIOME -> "deep_dark_biome";
             case POI_EVIDENCE -> "poi_evidence";
             case TRAP_SPOT -> "trap_spot";
             default -> "safety_" + name().toLowerCase(Locale.ROOT);

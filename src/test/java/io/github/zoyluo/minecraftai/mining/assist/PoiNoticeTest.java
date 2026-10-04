@@ -39,13 +39,6 @@ class PoiNoticeTest {
     }
 
     @Test
-    void renderMandatoryProducesTheExactFixedTemplateWithNoLabelSubstituted() {
-        assertEquals("Stopped: warden risk (ancient city / deep dark) at 10 70 0 (~10 blocks E). "
-                        + "I will not go further on my own. Say \"continue\" to override or \"cancel\" to redirect me.",
-                PoiNotice.renderMandatory(SITE_EAST, BOT_POS));
-    }
-
-    @Test
     void renderFyiProducesTheExactTemplate() {
         assertEquals("FYI: possible mineshaft at 10 70 0 (auto-detected, not confirmed). "
                         + "I'm continuing; say \"stop\" if you want to look.",
@@ -99,41 +92,25 @@ class PoiNoticeTest {
         assertTrue(fyi.endsWith("I'm continuing; say \"stop\" if you want to look."));
     }
 
-    @Test
-    void renderMandatoryHasNoLabelToTruncateAndStaysWellWithinMaxLength() {
-        BlockPos farSite = new BlockPos(-1_234_567, -2033, 9_876_543);
-        BlockPos farBot = new BlockPos(1_234_567, 320, -9_876_543);
-        String rendered = PoiNotice.renderMandatory(farSite, farBot);
-        assertTrue(rendered.length() <= PoiNotice.MAX_LENGTH);
-    }
-
-    // ---- renderStop: descending > mandatory > standard, plus the restart prefix -----------------------
+    // ---- renderStop: descending > standard, plus the restart prefix -----------------------------------
 
     @Test
-    void renderStopPicksDigDownDescendWheneverDescendingRegardlessOfMandatory() {
+    void renderStopPicksDigDownDescendWhenDescending() {
         assertEquals(PoiNotice.renderDigDownDescend("mineshaft", SITE_EAST, BOT_POS),
-                PoiNotice.renderStop(true, true, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
-        assertEquals(PoiNotice.renderDigDownDescend("mineshaft", SITE_EAST, BOT_POS),
-                PoiNotice.renderStop(true, false, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
-    }
-
-    @Test
-    void renderStopPicksMandatoryWhenNotDescendingAndMandatory() {
-        assertEquals(PoiNotice.renderMandatory(SITE_EAST, BOT_POS),
-                PoiNotice.renderStop(false, true, "mineshaft", SITE_EAST, BOT_POS, null, null));
+                PoiNotice.renderStop(true, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
     }
 
     @Test
     void renderStopPicksStandardWhenNeitherDescendingNorMandatory() {
         assertEquals(PoiNotice.renderStandard("mineshaft", SITE_EAST, BOT_POS, "(auto-detected)"),
-                PoiNotice.renderStop(false, false, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
+                PoiNotice.renderStop(false, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
     }
 
     @Test
     void renderStopPrependsANonNullRestartPrefixToWhicheverTemplateWasChosen() {
         String base = PoiNotice.renderStandard("mineshaft", SITE_EAST, BOT_POS, null);
         assertEquals("Still paused: " + base,
-                PoiNotice.renderStop(false, false, "mineshaft", SITE_EAST, BOT_POS, null, "Still paused: "));
+                PoiNotice.renderStop(false, "mineshaft", SITE_EAST, BOT_POS, null, "Still paused: "));
     }
 
     // ---- renderLateCheck ------------------------------------------------------------------------------

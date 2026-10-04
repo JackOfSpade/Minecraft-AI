@@ -97,6 +97,15 @@ public final class PowderSnowEscapeTask extends AbstractTask {
             bestDistance = Double.MAX_VALUE;
             lastProgressTick = elapsed;
         }
+        // A live break owns the controls until it settles. Retrying a refused walk here would
+        // claim ActionPack and preempt this task's own mining generation before the next break tick.
+        if (miner.target() != null) {
+            BlockMiner.Status status = miner.tick(bot);
+            if (status != BlockMiner.Status.MINING) {
+                lastProgressTick = elapsed;
+            }
+            return;
+        }
         if (target != null) {
             Vec3 center = Vec3.atBottomCenterOf(target);
             LookAction.lookHorizontallyAt(bot, center);
@@ -110,13 +119,6 @@ public final class PowderSnowEscapeTask extends AbstractTask {
             }
         }
         boolean stalled = elapsed - lastProgressTick >= STALL_TICKS;
-        if (miner.target() != null) {
-            BlockMiner.Status status = miner.tick(bot);
-            if (status != BlockMiner.Status.MINING) {
-                lastProgressTick = elapsed;
-            }
-            return;
-        }
         if (stalled) {
             BlockPos toBreak = nextPowderToBreak(bot);
             if (toBreak != null) {
@@ -132,6 +134,14 @@ public final class PowderSnowEscapeTask extends AbstractTask {
     private BlockPos nextPowderToBreak(AIPlayerEntity bot) {
         var world = bot.level();
         BlockPos feet = bot.blockPosition();
+        // A surrounding powder-snow cell physically intersecting the body is directly known even
+        // when its opaque snow prevents an eye ray. Break that immediate obstruction first; every
+        // other candidate still requires an ordinary observation ray.
+        for (BlockPos pos : new BlockPos[] {feet.above(), feet}) {
+            if (intersectsBody(bot, pos) && world.getBlockState(pos).is(Blocks.POWDER_SNOW)) {
+                return pos.immutable();
+            }
+        }
         if (target != null) {
             int dx = Integer.compare(target.getX(), feet.getX());
             int dz = Integer.compare(target.getZ(), feet.getZ());
@@ -151,6 +161,11 @@ public final class PowderSnowEscapeTask extends AbstractTask {
             }
         }
         return null;
+    }
+
+    private static boolean intersectsBody(AIPlayerEntity bot, BlockPos pos) {
+        return bot.getBoundingBox().deflate(0.001D).intersects(
+                pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1.0D, pos.getY() + 1.0D, pos.getZ() + 1.0D);
     }
 
     /** Standable dry footing that is not powder snow itself or on top of it. */

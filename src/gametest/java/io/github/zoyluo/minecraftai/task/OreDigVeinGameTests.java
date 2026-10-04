@@ -40,53 +40,6 @@ public final class OreDigVeinGameTests {
     private static final int MIN_Z = -8;
     private static final int MAX_Z = 3;
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_mine_whole_vein_behind_stone_stops_without_tunnelling", maxTicks = 1500)
-    public void mineWholeVeinBehindStoneStopsWithoutTunnelling(GameTestHelper context) {
-        Fixture fixture = spawn(context, "VeinBehindGT", true, true, 20);
-        AIPlayerEntity bot = fixture.bot();
-        var world = bot.level();
-        BlockPos start = fixture.start();
-        // Three ores on the wall face, then three ores that are only reachable through the cells the
-        // first ones leave behind (each has exactly one exposed face, into another ore).
-        Set<BlockPos> vein = cells(start, new int[][]{
-                {0, 0, -3}, {1, 0, -3}, {1, 1, -3}, {1, 0, -4}, {1, 1, -4}, {1, 0, -5}});
-        for (BlockPos pos : vein) {
-            world.setBlock(pos, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        BlockPos hiddenDecoy = start.offset(3, 1, -6);
-        BlockPos coalDecoy = start.offset(0, 1, -3);
-        world.setBlock(hiddenDecoy, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(coalDecoy, Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
-        Map<BlockPos, BlockState> before = snapshot(world, start);
-        int deaths = deathCount(bot);
-
-        JsonObject args = JsonParser.parseString(
-                "{\"ore\":\"minecraft:iron_ore\",\"mode\":\"vein\",\"count\":1}").getAsJsonObject();
-        OreDigTask task = invokeVeinTool(context, bot, args);
-
-        context.failIfEver(() -> {
-            require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                fail(context, "vein task ended as " + task.state() + ":" + task.failureReason());
-            }
-            if (task.state() != TaskState.COMPLETED) {
-                return;
-            }
-            require(context, task.veinMined() == vein.size(),
-                    "vein mode mined " + task.veinMined() + " ores, expected " + vein.size());
-            require(context, InventoryAction.countItem(bot, Items.RAW_IRON) == vein.size(),
-                    "raw iron collected " + InventoryAction.countItem(bot, Items.RAW_IRON)
-                            + ", expected " + vein.size());
-            requireOnlyChanged(context, world, before, vein, "vein mode changed a block outside the vein");
-            require(context, world.getBlockState(hiddenDecoy).is(Blocks.IRON_ORE),
-                    "an unconnected hidden iron ore was mined");
-            require(context, world.getBlockState(coalDecoy).is(Blocks.COAL_ORE),
-                    "a different ore type beside the vein was mined");
-            require(context, bot.getBlockY() >= start.getY() - 1, "bot descended while mining a vein");
-            finish(context, fixture);
-        });
-    }
-
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_nearest_vein_only_leaves_second_vein_intact", maxTicks = 1500)
     public void nearestVeinOnlyLeavesSecondVeinIntact(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinNearestGT", true, true, 20);

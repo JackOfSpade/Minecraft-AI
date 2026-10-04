@@ -685,6 +685,53 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 "gametest_shelter_recovered_exit_no_reseal_block", List.of(Direction.NORTH), true);
     }
 
+    /**
+     * An opaque owned wall may be opened from the inside, but replacing one wall after the shell
+     * closes revokes that ownership. The intact shell still has an alternate owned door, so the
+     * task must leave through it while preserving the replacement block.
+     */
+    @GameTest(maxTicks = 16000)
+    public void egressSkipsReplacedOwnedWallAndUsesAnotherOwnedDoor(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
+        BlockPos replacedFoot = feet.north();
+        BlockPos replacedHead = replacedFoot.above();
+        preparePlatform(context, feet, 4);
+        AIPlayerEntity bot = spawn(context, "ShelterReplacedDoorGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
+
+        EmergencyShelterTask task = new EmergencyShelterTask();
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_replaced_owned_door"));
+        boolean[] replacementInstalled = {false};
+
+        runLocked(context, () -> {
+            context.getLevel().setDayTime(1000L);
+            if (!replacementInstalled[0] && task.state() == TaskState.RUNNING
+                    && task.describe().contains("phase=HOLD")) {
+                require(context, shelterShell(feet).stream().allMatch(pos -> isSealed(context, pos)),
+                        "replacement fixture reached HOLD without a sealed shelter");
+                context.getLevel().setBlock(replacedFoot, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(replacedHead, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                replacementInstalled[0] = true;
+                return;
+            }
+            if (task.state() == TaskState.RUNNING) {
+                return;
+            }
+            require(context, replacementInstalled[0], "replacement fixture never reached HOLD");
+            require(context, task.state() == TaskState.COMPLETED,
+                    "replaced-wall exit ended unexpectedly: "
+                            + task.state() + ":" + task.failureReason() + " " + task.describe());
+            require(context, context.getLevel().getBlockState(replacedFoot).is(Blocks.STONE)
+                            && context.getLevel().getBlockState(replacedHead).is(Blocks.STONE),
+                    "shelter mined the replacement rather than an exact owned doorway");
+            require(context, !bot.blockPosition().equals(replacedFoot),
+                    "shelter stepped through the replaced unowned doorway");
+            assertPhysicalExit(context, bot, feet);
+            finish(context, bot, "ShelterReplacedDoorGT");
+        });
+    }
+
     private static void verifyRecoveredBotLeavesDespiteHostiles(GameTestHelper context,
                                                                 String botName,
                                                                 String reason,

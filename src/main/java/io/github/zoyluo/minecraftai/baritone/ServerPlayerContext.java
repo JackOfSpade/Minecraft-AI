@@ -345,12 +345,54 @@ public final class ServerPlayerContext implements IPlayerContext {
         int start = Math.max(0, firstMovement);
         for (int index = start; index < movements.size(); index++) {
             IMovement movement = movements.get(index);
-            if (movement == null || (movement instanceof MovementParkour
+            // This callback runs on every PRE tick. Check only the movement about to execute;
+            // later movements will be checked when they become current.  Ordinary Baritone
+            // movements already expose their complete footprint through the navigation-cell
+            // callbacks used while planning.  Do not turn this water guard into a second
+            // footprint validator: ascent and descent legitimately use cells outside a simple
+            // source/destination support/body/head triple.  The guard is only the immediate
+            // dry-route invariant, read from the immutable admitted snapshot rather than the
+            // live world.
+            if (movement == null || (!waterAllowed && index == start
+                    && !avoidsObservedWater(movement))
+                    || (movement instanceof MovementParkour
                     && !allowParkourFootprint(movement.getSrc(), movement.getDest()))) {
                 return false;
             }
         }
         return true;
+    }
+
+    private boolean avoidsObservedWater(IMovement movement) {
+        return observedDryMovementBody(movement.getSrc())
+                && observedDryMovementBody(movement.getDest());
+    }
+
+    /**
+     * The planner's normal cell gate rejects every movement footprint. This pre-input check
+     * independently requires the actual player body cells to be present and dry, closing the
+     * dry-route water race without incorrectly treating an ascent's support as part of its
+     * body. It uses only the admitted snapshot and fails closed for an absent state.
+     */
+    private boolean observedDryMovementBody(BetterBlockPos pos) {
+        if (pos == null) {
+            return false;
+        }
+        BlockState feet = observedNavigationState(pos.getX(), pos.getY(), pos.getZ());
+        BlockState head = observedNavigationState(pos.getX(), pos.getY() + 1, pos.getZ());
+        return feet != null && head != null
+                && !feet.getFluidState().is(FluidTags.WATER)
+                && !head.getFluidState().is(FluidTags.WATER);
+    }
+
+    private BlockState observedNavigationState(int x, int y, int z) {
+        LoadedChunkSnapshot ownerSnapshot = ownerFollowSnapshot();
+        if (ownerSnapshot != null) {
+            return ownerSnapshot.stateAt(x, y, z);
+        }
+        ObservedNavigationFence fence = observationFence;
+        return fenceMatchesCurrentDimension(fence)
+                ? fence.stateAt(x, y, z) : null;
     }
 
     /** MovementParkour is cardinal; malformed geometry is denied instead of being approximated as a diagonal. */

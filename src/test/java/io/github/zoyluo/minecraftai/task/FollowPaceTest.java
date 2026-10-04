@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Every rule of the follow pace, in order, plus the downgrade dwell and the calm-warden cap. */
+/** Every rule of the follow pace, in order, plus the downgrade dwell. */
 class FollowPaceTest {
     private static final double WALK_GAP = 6.0D;
     private static final double SPRINT_GAP = 10.0D;
@@ -20,13 +20,11 @@ class FollowPaceTest {
         int sneakTicks;
         QuietZone.Level quiet = QuietZone.Level.NONE;
         boolean pressure;
-        boolean hunting;
-        boolean calm16;
         Gait previous = Gait.WALK;
         int ticksInGait = LONG;
 
         Gait decide() {
-            return FollowPace.decide(new FollowPace.Input(gap, speed, sprinting, sneakTicks, quiet, pressure, hunting, calm16,
+            return FollowPace.decide(new FollowPace.Input(gap, speed, sprinting, sneakTicks, quiet, pressure,
                     previous, ticksInGait, WALK_GAP, SPRINT_GAP));
         }
 
@@ -37,22 +35,9 @@ class FollowPaceTest {
     }
 
     @Test
-    void aHuntingWardenOrPressureSprintsEvenAtSmallGaps() {
+    void pressureSprintsEvenAtSmallGaps() {
         Rig rig = new Rig().gap(2.0D);
         rig.pressure = true;
-        assertEquals(Gait.SPRINT, rig.decide());
-        rig.pressure = false;
-        rig.hunting = true;
-        assertEquals(Gait.SPRINT, rig.decide());
-    }
-
-    @Test
-    void aCalmWardenWithinSixteenCapsPressureToAWalkButNotAHuntingWarden() {
-        Rig rig = new Rig().gap(12.0D);
-        rig.pressure = true;
-        rig.calm16 = true;
-        assertEquals(Gait.WALK, rig.decide());
-        rig.hunting = true;
         assertEquals(Gait.SPRINT, rig.decide());
     }
 
@@ -205,7 +190,7 @@ class FollowPaceTest {
         Rig rig = new Rig().gap(3.0D);
         rig.previous = Gait.SPRINT;
         rig.ticksInGait = 0;
-        assertEquals(Gait.WALK, FollowPace.wanted(new FollowPace.Input(3.0D, 0.0D, false, 0, QuietZone.Level.NONE, false, false,
-                false, Gait.SPRINT, 0, WALK_GAP, SPRINT_GAP)));
+        assertEquals(Gait.WALK, FollowPace.wanted(new FollowPace.Input(3.0D, 0.0D, false, 0, QuietZone.Level.NONE, false,
+                Gait.SPRINT, 0, WALK_GAP, SPRINT_GAP)));
     }
 }

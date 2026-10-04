@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link #evaluate} themselves need a real {@code AIPlayerEntity}/{@code ServerLevel}, which the pure JUnit lane
  * cannot construct (review round, P1 contract G.5): those two methods are pinned here as source-contract checks
  * on the comment-stripped production text instead of exercised live. The live behaviour (a real biome read,
- * {@code deepDark}/{@code poiStructureScore} filled) is covered by the GameTest lane and by
+ * {@code poiStructureScore} filled) is covered by the GameTest lane and by
  * {@code MiningAssistStateTest}'s accessor tests.
  */
 class PoiDetectorTest {
@@ -135,7 +135,6 @@ class PoiDetectorTest {
         PoiSignals empty = PoiSignals.empty();
         assertEquals("", PoiDetector.labelFor(PoiScorer.Band.NONE, empty));
         assertEquals("cavern", PoiDetector.labelFor(PoiScorer.Band.CAVERN_ONLY, empty));
-        assertEquals("warden_risk", PoiDetector.labelFor(PoiScorer.Band.MANDATORY, empty));
         assertEquals(PoiLabeler.STRUCTURE_UNKNOWN, PoiDetector.labelFor(PoiScorer.Band.POSSIBLE, empty));
 
         PoiEvidenceWindow window = new PoiEvidenceWindow();
@@ -152,7 +151,7 @@ class PoiDetectorTest {
     void logFieldsAreEvenKeyValuePairsWithoutASingleNullValue() {
         PoiScorer.PoiScore score = PoiScorer.evaluate(PoiSignals.empty());
         PoiDetector.Result result = new PoiDetector.Result(true, PoiScorer.Band.NONE, score, "", false, true,
-                new BlockPos(1, 2, 3), 4, 0, 0, "minecraft:lush_caves", false);
+                new BlockPos(1, 2, 3), 4, 0, 0, "minecraft:lush_caves");
         Object[] fields = result.logFields();
         assertEquals(0, fields.length % 2);
         for (int i = 0; i < fields.length; i += 2) {

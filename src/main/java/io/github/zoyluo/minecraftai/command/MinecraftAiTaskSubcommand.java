@@ -18,7 +18,7 @@ import io.github.zoyluo.minecraftai.action.FarmAction;
 import io.github.zoyluo.minecraftai.task.BreedTask;
 import io.github.zoyluo.minecraftai.task.BuildTask;
 import io.github.zoyluo.minecraftai.task.CombatTask;
-import io.github.zoyluo.minecraftai.task.WardenRefusal;
+import io.github.zoyluo.minecraftai.task.BossRefusal;
 import io.github.zoyluo.minecraftai.task.ContainerTask;
 import io.github.zoyluo.minecraftai.task.CraftTask;
 import io.github.zoyluo.minecraftai.task.EatTask;
@@ -205,9 +205,9 @@ public final class MinecraftAiTaskSubcommand {
     private static int assignAttack(CommandContext<CommandSourceStack> context, int count) {
         return assign(context, bot -> {
             var type = BuiltInRegistries.ENTITY_TYPE.getValue(IdentifierArgument.getId(context, "entity_type"));
-            if (WardenRefusal.refuses(type)) {
-                WardenRefusal.logRefused(bot, "command");
-                throw new IllegalArgumentException(WardenRefusal.MESSAGE);
+            if (BossRefusal.refuses(type)) {
+                BossRefusal.logRefused(bot, "command");
+                throw new IllegalArgumentException(BossRefusal.MESSAGE);
             }
             return new CombatTask(type, count, io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp());
         });

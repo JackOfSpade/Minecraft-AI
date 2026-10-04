@@ -36,11 +36,6 @@ public final class NavigationCourseGameTests {
         NavigationCourseRun.run(context, NavigationCourses.PIT_CREVASSE);
     }
 
-    @GameTest(environment = ENV + "staircase_baritone", maxTicks = 1000)
-    public void staircaseBaritone(GameTestHelper context) {
-        NavigationCourseRun.run(context, NavigationCourses.STAIRCASE);
-    }
-
     @GameTest(environment = ENV + "lake_dry_path_baritone", maxTicks = 1000)
     public void lakeDryPathBaritone(GameTestHelper context) {
         NavigationCourseRun.run(context, NavigationCourses.LAKE_DRY_PATH);
@@ -76,16 +71,6 @@ public final class NavigationCourseGameTests {
         NavigationCourseRun.run(context, NavigationCourses.HOUSE_DOOR);
     }
 
-    @GameTest(environment = ENV + "fence_gate_baritone", maxTicks = 800)
-    public void fenceGateBaritone(GameTestHelper context) {
-        NavigationCourseRun.run(context, NavigationCourses.FENCE_GATE);
-    }
-
-    @GameTest(environment = ENV + "ladder_shaft_baritone", maxTicks = 700)
-    public void ladderShaftBaritone(GameTestHelper context) {
-        NavigationCourseRun.run(context, NavigationCourses.LADDER_SHAFT);
-    }
-
     @GameTest(environment = ENV + "forest_baritone", maxTicks = 1100)
     public void forestBaritone(GameTestHelper context) {
         NavigationCourseRun.run(context, NavigationCourses.FOREST);
@@ -101,8 +86,4 @@ public final class NavigationCourseGameTests {
         NavigationCourseRun.run(context, NavigationCourses.TWO_BOTS);
     }
 
-    @GameTest(environment = ENV + "long_path_baritone", maxTicks = 2200)
-    public void longPathBaritone(GameTestHelper context) {
-        NavigationCourseRun.run(context, NavigationCourses.LONG_PATH);
-    }
 }

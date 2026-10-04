@@ -166,17 +166,35 @@ public final class ObservableWorldQuery {
 
     /** {@link #canObserveBlockWithInsetFaces} for support and standability proofs: a collision shape is required. */
     public static boolean canObserveColliderWithInsetFaces(AIPlayerEntity bot, BlockPos pos) {
-        return observeShapeInsetFaces(bot, pos, false);
+        return observeShapeInsetFaces(bot, pos, false, bot.blockInteractionRange());
+    }
+
+    /**
+     * Collision-shape observation for a caller that needs a factual movement stance rather than
+     * an interaction target. The supplied range remains capped by ordinary perception; it only
+     * avoids treating a visible destination as unreachable because it cannot yet be clicked.
+     */
+    public static boolean canObserveColliderWithInsetFacesWithin(AIPlayerEntity bot,
+                                                                  BlockPos pos,
+                                                                  int range) {
+        return observeShapeInsetFaces(bot, pos, false, Math.max(1, range));
     }
 
     private static boolean observeShapeInsetFaces(AIPlayerEntity bot, BlockPos pos, boolean outlineFallback) {
+        return observeShapeInsetFaces(bot, pos, outlineFallback, bot.blockInteractionRange());
+    }
+
+    private static boolean observeShapeInsetFaces(AIPlayerEntity bot,
+                                                  BlockPos pos,
+                                                  boolean outlineFallback,
+                                                  double rangeLimit) {
         if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                 "observable_block_inset_face_query").allowed()) {
             return true;
         }
         double observationRange = Math.min(
                 Math.max(1, MinecraftAiConfig.get().perception().radius()),
-                bot.blockInteractionRange());
+                Math.max(1.0D, rangeLimit));
         double observationRangeSquared = observationRange * observationRange;
         Vec3 eye = bot.getEyePosition();
         FaceAim.Target aim = FaceAim.aim(bot.level(), pos, bot.level().getBlockState(pos),
@@ -380,8 +398,7 @@ public final class ObservableWorldQuery {
     }
 
     /**
-     * {@link #canNoticeCreature} for a creature watched beyond the observation radius: the quiet-zone watch of a warden (24 blocks).
-     * Only a warden is scanned that far; anything else is bounded by the observation radius as ever. With perception off it is
+     * {@link #canNoticeCreature} bounded by an explicit caller-provided range. With perception off it is
      * {@link #canObserveEntityWithin}.
      */
     public static boolean canNoticeCreatureWithin(AIPlayerEntity bot, Entity entity, int range) {

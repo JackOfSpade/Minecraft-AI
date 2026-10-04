@@ -45,7 +45,7 @@ public record MinecraftAiConfig(
         Pickup pickup,
         Conversation conversation,
         Storage storage,
-        // Companion behaviour switches (pace, hostile-bot targeting, gear choice, follow, warden). See docs/OPERATING_PROFILES.md.
+        // Companion behaviour switches (pace, hostile-bot targeting, gear choice and follow). See docs/OPERATING_PROFILES.md.
         Behaviour behaviour
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -552,7 +552,7 @@ public record MinecraftAiConfig(
                 mining, goal, nav, pickup, conversation, storage, Behaviour.defaults());
     }
 
-    /** A copy with another behaviour section (tests swap the pace, targeting, gear, follow and warden switches with it). */
+    /** A copy with another behaviour section (tests swap the pace, targeting, gear and follow switches with it). */
     public MinecraftAiConfig withBehaviour(Behaviour behaviour) {
         return new MinecraftAiConfig(profile(), operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage(), behaviour);
     }
@@ -721,20 +721,20 @@ public record MinecraftAiConfig(
      * same defaults. Every section is null-tolerant: a missing section, key or Boolean is the default, a number that is missing,
      * zero, negative or NaN is the default. See docs/OPERATING_PROFILES.md ("Behaviour switches").
      */
-    public record Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden, CombatBehaviour combat,
+    public record Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, CombatBehaviour combat,
                             PerceptionBehaviour perception) {
         /** Source-compatible constructor for callers that predate the combat section: it carries the combat and perception defaults. */
-        public Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden) {
-            this(pace, targeting, gear, follow, warden, CombatBehaviour.defaults(), PerceptionBehaviour.defaults());
+        public Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow) {
+            this(pace, targeting, gear, follow, CombatBehaviour.defaults(), PerceptionBehaviour.defaults());
         }
 
         /** Source-compatible constructor for callers that predate the perception section: it carries the perception defaults. */
-        public Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, Warden warden, CombatBehaviour combat) {
-            this(pace, targeting, gear, follow, warden, combat, PerceptionBehaviour.defaults());
+        public Behaviour(Pace pace, Targeting targeting, Gear gear, Follow follow, CombatBehaviour combat) {
+            this(pace, targeting, gear, follow, combat, PerceptionBehaviour.defaults());
         }
 
         public static Behaviour defaults() {
-            return new Behaviour(Pace.defaults(), Targeting.defaults(), Gear.defaults(), Follow.defaults(), Warden.defaults(),
+            return new Behaviour(Pace.defaults(), Targeting.defaults(), Gear.defaults(), Follow.defaults(),
                     CombatBehaviour.defaults(), PerceptionBehaviour.defaults());
         }
 
@@ -744,7 +744,6 @@ public record MinecraftAiConfig(
                     targeting == null ? defaults.targetingOrDefaults() : targeting.withDefaults(defaults.targetingOrDefaults()),
                     gear == null ? defaults.gearOrDefaults() : gear.withDefaults(defaults.gearOrDefaults()),
                     follow == null ? defaults.followOrDefaults() : follow.withDefaults(defaults.followOrDefaults()),
-                    warden == null ? defaults.wardenOrDefaults() : warden.withDefaults(defaults.wardenOrDefaults()),
                     combat == null ? defaults.combatOrDefaults() : combat.withDefaults(defaults.combatOrDefaults()),
                     perception == null ? defaults.perceptionOrDefaults() : perception.withDefaults(defaults.perceptionOrDefaults()));
         }
@@ -767,11 +766,6 @@ public record MinecraftAiConfig(
         /** The follow section; never null. */
         public Follow followOrDefaults() {
             return follow == null ? Follow.defaults() : follow;
-        }
-
-        /** The warden section; never null. */
-        public Warden wardenOrDefaults() {
-            return warden == null ? Warden.defaults() : warden;
         }
 
         /** The combat section; never null. */
@@ -930,14 +924,13 @@ public record MinecraftAiConfig(
      * Walking pace of controller-driven travel. {@code enabled}: the natural sprint/walk/sneak policy at all (the vanilla item-use
      * slowdown and the hunger cost of moving are not switchable: a bot always pays them).
      * {@code routeSprintDistance} / {@code routeWalkDistance}: a route sprints from that far to its goal and walks below the
-     * second one; {@code quietZoneCaution}: cap the pace in sculk/warden zones.
+     * second one.
      */
     public record Pace(Boolean enabled,
                        double routeSprintDistance,
-                       double routeWalkDistance,
-                       Boolean quietZoneCaution) {
+                       double routeWalkDistance) {
         public static Pace defaults() {
-            return new Pace(true, 8.0D, 4.5D, true);
+            return new Pace(true, 8.0D, 4.5D);
         }
 
         Pace withDefaults(Pace defaults) {
@@ -951,17 +944,13 @@ public record MinecraftAiConfig(
             return new Pace(
                     boolOrDefault(enabled, defaults.enabled),
                     sprint,
-                    walk,
-                    boolOrDefault(quietZoneCaution, defaults.quietZoneCaution));
+                    walk);
         }
 
         public boolean paceEnabled() {
             return boolOrTrue(enabled, defaults().enabled);
         }
 
-        public boolean quietZoneCautionEnabled() {
-            return boolOrTrue(quietZoneCaution, defaults().quietZoneCaution);
-        }
     }
 
     /**
@@ -1080,21 +1069,6 @@ public record MinecraftAiConfig(
 
         public boolean escortOnlyEnabled() {
             return boolOrTrue(escortOnly, defaults().escortOnly);
-        }
-    }
-
-    /** Wardens are never fought. {@code sneakAway}: creep away from a calm one (a hunting one is outrun at a sprint). */
-    public record Warden(Boolean sneakAway) {
-        public static Warden defaults() {
-            return new Warden(true);
-        }
-
-        Warden withDefaults(Warden defaults) {
-            return new Warden(boolOrDefault(sneakAway, defaults.sneakAway));
-        }
-
-        public boolean sneakAwayEnabled() {
-            return boolOrTrue(sneakAway, defaults().sneakAway);
         }
     }
 

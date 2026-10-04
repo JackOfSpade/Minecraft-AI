@@ -6,8 +6,7 @@ import java.util.Objects;
  * Pure fallback matrix (design 6.7): what to do about a POI candidate when the LLM advisor is
  * unavailable (keyless, breaker open, budget exhausted, degraded TPS, timeout, or invalid reply).
  * Deterministic and total over every {@link PoiScorer.Band}: {@link PoiScorer.Band#NONE},
- * {@link PoiScorer.Band#MANDATORY} and {@link PoiScorer.Band#STRUCTURE_CERTAIN} have rows here
- * for completeness (a NONE band is never a stop, and MANDATORY/STRUCTURE_CERTAIN always stop
+ * {@link PoiScorer.Band#STRUCTURE_CERTAIN} has a deterministic stop row
  * regardless of policy), even though {@code PoiCoordinator} only ever routes POSSIBLE and
  * CAVERN_ONLY candidates through {@link #decide}: a mandatory candidate stops unconditionally
  * before this class is consulted, and a structure-certain one stops directly unless the
@@ -28,7 +27,7 @@ public final class PoiDecisionPolicy {
      * <ol>
      *   <li>{@link PoiScorer.Band#NONE}: always {@link Decision#NOTIFY_ONLY} — there is no candidate to
      *       stop for, regardless of a stale {@code structureScore};</li>
-     *   <li>{@link PoiScorer.Band#MANDATORY} or {@link PoiScorer.Band#STRUCTURE_CERTAIN}: always
+     *   <li>{@link PoiScorer.Band#STRUCTURE_CERTAIN}: always
      *       {@link Decision#STOP};</li>
      *   <li>{@link PoiScorer.Band#CAVERN_ONLY}: {@link Decision#STOP} when {@code cavernKeylessPolicy} is
      *       {@code STOP_IF_POSSIBLE}, else {@link Decision#NOTIFY_ONLY} — independent of
@@ -59,7 +58,7 @@ public final class PoiDecisionPolicy {
         if (band == PoiScorer.Band.NONE) {
             return Decision.NOTIFY_ONLY;
         }
-        if (band == PoiScorer.Band.MANDATORY || band == PoiScorer.Band.STRUCTURE_CERTAIN) {
+        if (band == PoiScorer.Band.STRUCTURE_CERTAIN) {
             return Decision.STOP;
         }
         if (band == PoiScorer.Band.CAVERN_ONLY) {

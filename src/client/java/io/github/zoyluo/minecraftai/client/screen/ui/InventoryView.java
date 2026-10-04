@@ -223,13 +223,14 @@ public final class InventoryView implements PanelComponent {
         }
     }
 
-    // Whole stack = 0 (server takes the whole stack); single = 1; half stack = half, rounded up.
+    // Whole stack = 0 (server takes the whole stack); single = 1; half stack rounds up.
     private static int amountFor(ItemStack src, boolean single, boolean half) {
         if (single) {
             return 1;
         }
         if (half) {
-            return Math.max(1, src.getCount() / 2);
+            int count = src.getCount();
+            return Math.max(1, count / 2 + count % 2);
         }
         return 0;
     }

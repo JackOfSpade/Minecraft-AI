@@ -35,6 +35,8 @@ final class BoatSupport {
     private static final int LAUNCH_SEARCH_DOWN = 6;
     private static final int LAUNCH_SEARCH_UP = 3;
     private static final int LAUNCH_SHORE_RADIUS = 3;
+    private static final int WATER_APPROACH_HORIZONTAL_RADIUS = 6;
+    private static final int WATER_APPROACH_VERTICAL_RADIUS = 4;
     // Eye-to-water distance from the shore CELL CENTRE. The bot stops within 1.5 blocks of that
     // centre and the boat item is placed only within the 4.5-block block-interaction range, so leave
     // a real margin instead of picking spots that are reachable only from the exact centre.
@@ -112,8 +114,7 @@ final class BoatSupport {
                         origin.offset(-LOCAL_WATER_SEARCH_RADIUS, -LAUNCH_SEARCH_DOWN, -LOCAL_WATER_SEARCH_RADIUS),
                         origin.offset(LOCAL_WATER_SEARCH_RADIUS, LAUNCH_SEARCH_UP, LOCAL_WATER_SEARCH_RADIUS))
                 .map(BlockPos::immutable)
-                .filter(water -> canObserveWater(bot, water))
-                .filter(water -> isOpenWater(bot, world, water))
+                .filter(water -> isObservedOpenWater(bot, world, water))
                 .map(water -> launchSite(bot, world, water))
                 .flatMap(Optional::stream)
                 .sorted(Comparator.comparingDouble(site -> site.shore().distSqr(origin)))
@@ -126,18 +127,107 @@ final class BoatSupport {
      * shore, and near water is only visible from up close).  Empty when no open water is visible.
      */
     static Optional<BlockPos> findWaterApproach(AIPlayerEntity bot) {
+        return findWaterApproach(bot, Set.of());
+    }
+
+    /**
+     * Finds the nearest visible dry approach to local water while skipping approaches that this
+     * launch attempt has already proven unreachable.
+     */
+    static Optional<BlockPos> findWaterApproach(AIPlayerEntity bot, Set<BlockPos> excluded) {
         ServerLevel world = bot.level();
         BlockPos origin = bot.blockPosition();
         Standability.clearCache();
-        Optional<BlockPos> water = BlockPos.betweenClosedStream(
+        boolean[][][] observedWater = observedOpenWater(bot, world, origin);
+        if (!hasObservedWater(observedWater)) {
+            return Optional.empty();
+        }
+        return BlockPos.betweenClosedStream(
                         origin.offset(-LOCAL_WATER_SEARCH_RADIUS, -LAUNCH_SEARCH_DOWN, -LOCAL_WATER_SEARCH_RADIUS),
                         origin.offset(LOCAL_WATER_SEARCH_RADIUS, LAUNCH_SEARCH_UP, LOCAL_WATER_SEARCH_RADIUS))
                 .map(BlockPos::immutable)
-                .filter(cell -> canObserveWater(bot, cell))
-                .filter(cell -> isOpenWater(bot, world, cell))
-                .sorted(Comparator.comparingDouble(cell -> cell.distSqr(origin)))
-                .findFirst();
-        return water.flatMap(cell -> nearestObservedStandable(bot, world, cell, 6, 4, 4));
+                .filter(approach -> !excluded.contains(approach))
+                // One dry-cell scan replaces the old water-cell-by-water-cell standability scan.
+                // The old nested search could issue 1,521 visibility probes for each of 10,890
+                // water cells. Nearby water is now a factual entry made by the bounded pass above.
+                .filter(approach -> observedStandable(bot, world, approach))
+                .map(approach -> new WaterApproach(approach,
+                        nearestObservedWaterDistanceSquared(approach, origin, observedWater)))
+                // Keep the original water-first intent: move to a shore cell nearest water, then
+                // choose the nearest such shore to the bot. A globally nearest dry cell merely
+                // within six blocks of water can leave the bot where it started.
+                .filter(candidate -> candidate.waterDistanceSquared() != Integer.MAX_VALUE)
+                .min(Comparator.comparingInt(WaterApproach::waterDistanceSquared)
+                        .thenComparingDouble(candidate -> candidate.approach().distSqr(origin)))
+                .map(WaterApproach::approach);
+    }
+
+    /** Ray-proves open water once, then keeps its factual local state in a compact index. */
+    private static boolean[][][] observedOpenWater(AIPlayerEntity bot, ServerLevel world,
+                                                    BlockPos origin) {
+        int width = LOCAL_WATER_SEARCH_RADIUS * 2 + 1;
+        int height = LAUNCH_SEARCH_DOWN + LAUNCH_SEARCH_UP + 1;
+        boolean[][][] water = new boolean[width][height][width];
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                for (int z = 0; z < width; z++) {
+                    BlockPos cell = origin.offset(x - LOCAL_WATER_SEARCH_RADIUS,
+                            y - LAUNCH_SEARCH_DOWN, z - LOCAL_WATER_SEARCH_RADIUS);
+                    water[x][y][z] = isObservedOpenWater(bot, world, cell);
+                }
+            }
+        }
+        return water;
+    }
+
+    private static boolean hasObservedWater(boolean[][][] observedWater) {
+        for (boolean[][] waterColumn : observedWater) {
+            for (boolean[] waterLayer : waterColumn) {
+                for (boolean water : waterLayer) {
+                    if (water) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Finds the nearest factual water in the former shore window without new world queries. */
+    private static int nearestObservedWaterDistanceSquared(BlockPos approach, BlockPos origin,
+                                                           boolean[][][] observedWater) {
+        int minX = Math.max(0, approach.getX() - origin.getX() - WATER_APPROACH_HORIZONTAL_RADIUS
+                + LOCAL_WATER_SEARCH_RADIUS);
+        int maxX = Math.min(observedWater.length - 1,
+                approach.getX() - origin.getX() + WATER_APPROACH_HORIZONTAL_RADIUS
+                        + LOCAL_WATER_SEARCH_RADIUS);
+        int minY = Math.max(0, approach.getY() - origin.getY() - WATER_APPROACH_VERTICAL_RADIUS
+                + LAUNCH_SEARCH_DOWN);
+        int maxY = Math.min(observedWater[0].length - 1,
+                approach.getY() - origin.getY() + WATER_APPROACH_VERTICAL_RADIUS
+                        + LAUNCH_SEARCH_DOWN);
+        int minZ = Math.max(0, approach.getZ() - origin.getZ() - WATER_APPROACH_HORIZONTAL_RADIUS
+                + LOCAL_WATER_SEARCH_RADIUS);
+        int maxZ = Math.min(observedWater[0][0].length - 1,
+                approach.getZ() - origin.getZ() + WATER_APPROACH_HORIZONTAL_RADIUS
+                        + LOCAL_WATER_SEARCH_RADIUS);
+        int nearest = Integer.MAX_VALUE;
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    if (observedWater[x][y][z]) {
+                        int dx = x - LOCAL_WATER_SEARCH_RADIUS - (approach.getX() - origin.getX());
+                        int dy = y - LAUNCH_SEARCH_DOWN - (approach.getY() - origin.getY());
+                        int dz = z - LOCAL_WATER_SEARCH_RADIUS - (approach.getZ() - origin.getZ());
+                        nearest = Math.min(nearest, dx * dx + dy * dy + dz * dz);
+                    }
+                }
+            }
+        }
+        return nearest;
+    }
+
+    private record WaterApproach(BlockPos approach, int waterDistanceSquared) {
     }
 
     /**
@@ -287,9 +377,13 @@ final class BoatSupport {
         return true;
     }
 
+    private static boolean isObservedOpenWater(AIPlayerEntity bot, ServerLevel world, BlockPos water) {
+        return canObserveWater(bot, water) && isOpenWater(bot, world, water);
+    }
+
+    /** Checks the open-water envelope after {@link #isObservedOpenWater} proved the water cell. */
     private static boolean isOpenWater(AIPlayerEntity bot, ServerLevel world, BlockPos water) {
-        if (!canObserveWater(bot, water)
-                || !ObservableWorldQuery.canObserveCell(bot, water.above())
+        if (!ObservableWorldQuery.canObserveCell(bot, water.above())
                 || !isWater(world, water)
                 || !world.getFluidState(water.above()).isEmpty()
                 || !world.getBlockState(water.above()).getCollisionShape(world, water.above()).isEmpty()) {
@@ -317,7 +411,12 @@ final class BoatSupport {
             for (int dz = -1; dz <= 1; dz++) {
                 for (int dy = 0; dy <= 1; dy++) {
                     BlockPos pos = water.offset(dx, dy, dz);
-                    if (!ObservableWorldQuery.canObserveCell(bot, pos)) {
+                    // Water is transparent to a player looking through a launch area. The generic
+                    // cell-centre probe treats nearer water as an obstruction and rejects the far
+                    // edge of an otherwise visible footprint. This transparent-fluid probe still
+                    // requires a factual ray to the cell, and preserves the existing rule that a
+                    // hull edge may occupy either water or open air so long as it has no collision.
+                    if (!ObservableWorldQuery.canObserveCellThroughFluids(bot, pos)) {
                         return false;
                     }
                     if (!world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()) {

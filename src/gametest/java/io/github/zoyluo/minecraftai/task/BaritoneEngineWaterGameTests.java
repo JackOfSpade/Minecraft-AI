@@ -3,7 +3,6 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
-import io.github.zoyluo.minecraftai.baritone.ObservedBaritoneTestRoutes;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
@@ -17,86 +16,51 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Baritone driving a bot through water (the drowning safety net must not take a swimmer over while Baritone owns the route),
- * fail-closed handling when Baritone is unavailable, and default Baritone bootstrap.
+ * NavSafetyNet's Baritone water-lease behavior, fail-closed handling when Baritone is unavailable,
+ * and default Baritone bootstrap. The lease tests exercise the live safety net directly; route
+ * admission and driver renewal/release are covered by the Baritone contract tests.
  */
 public final class BaritoneEngineWaterGameTests {
-    private static final double AT_GOAL = 1.7D;
-
-    /**
-     * A swim route across a two-deep, four-wide channel for a bot that starts submerged on its bottom (it has just fallen in): with
-     * its eyes under the surface the safety net declares a rescue and moves the bot by a block or more per step, off the path
-     * Baritone is walking it along. With the Baritone lease it must not: every tick's displacement is swimming speed, no rescue is
-     * ever active, and the lease ends with the route.
-     */
-    @GameTest(environment = "minecraftai-gametest:baritone_engine_water_game_tests_baritone_swim_route_is_not_hijacked_by_the_safety_net", maxTicks = 500)
-    public void baritoneSwimRouteIsNotHijackedByTheSafetyNet(GameTestHelper context) {
+    /** A renewed live water lease keeps the safety net from taking over, and release hands the swimmer back to it. */
+    @GameTest(maxTicks = 160)
+    public void renewedWaterLeaseSuppressesRescueUntilItEnds(GameTestHelper context) {
         BaritoneEngineArena arena = channel(context, 20);
-        AIPlayerEntity bot = arena.spawnOnBaritone("BeSwimLease", arena.cell(-6, 0, 0));
-        arena.teleportTo(bot, arena.cell(1, -1, 0));
-        BlockPos goal = arena.cell(8, 0, 0);
-        ActionPack pack = bot.getActionPack();
-        ActionResult started = pack.startSwimRouteTo(goal);
-        arena.require(started.isInProgress(), "the swim route was not accepted: " + started.status() + " " + started.reason());
-        float health = bot.getHealth();
-        Vec3[] last = {bot.position()};
-        double[] maxStep = {0.0D};
-        int[] inWaterTicks = {0};
-        int[] underwaterTicks = {0};
-        int[] leaseTicks = {0};
+        AIPlayerEntity bot = arena.spawn("BeWaterLease", arena.cell(1, -1, 0));
+        NavSafetyNet.INSTANCE.renewBaritoneWater(bot);
         int[] tick = {0};
         context.failIfEver(() -> {
             int now = ++tick[0];
-            arena.require(now < 480, "the swimmer never arrived: " + bot.position());
-            double step = bot.position().distanceTo(last[0]);
-            last[0] = bot.position();
-            maxStep[0] = Math.max(maxStep[0], step);
-            arena.require(step <= 0.75D, "displaced by " + step + " blocks in one tick at tick " + now + ": " + bot.position() + " (a rescue step?)");
-            arena.require(!NavSafetyNet.INSTANCE.isWaterRescueActive(bot), "the safety net started a water rescue on the swimmer at tick " + now);
-            if (bot.isUnderWater()) {
-                underwaterTicks[0]++;
+            arena.require(now < 130, "the safety net did not take over after the water lease ended");
+            if (now <= 12) {
+                NavSafetyNet.INSTANCE.renewBaritoneWater(bot);
+                arena.require(NavSafetyNet.INSTANCE.hasBaritoneWaterLease(bot), "the renewed water lease was not held");
+                arena.require(!NavSafetyNet.INSTANCE.isWaterRescueActive(bot), "the safety net took over a renewed water lease");
+                return;
             }
-            if (bot.isInWater()) {
-                inWaterTicks[0]++;
-                if (NavSafetyNet.INSTANCE.hasBaritoneWaterLease(bot)) {
-                    leaseTicks[0]++;
-                }
+            if (now == 13) {
+                NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
+                arena.require(!NavSafetyNet.INSTANCE.hasBaritoneWaterLease(bot), "the water lease remained after release");
             }
-            if (!pack.hasBaritoneRoute()) {
-                NavOutcome outcome = pack.lastRouteOutcome();
-                arena.require(outcome != null && outcome.status() == NavOutcome.Status.SUCCESS, "the swim route did not succeed: " + outcome);
-                arena.require(bot.position().distanceTo(goal.getCenter()) <= AT_GOAL, "not at the goal: " + bot.position());
-                arena.require(underwaterTicks[0] >= 2, "the bot never was submerged (" + underwaterTicks[0] + " ticks): the fixture does not exercise the safety net");
-                arena.require(inWaterTicks[0] >= 10, "the bot hardly swam (" + inWaterTicks[0] + " ticks in water): the fixture is wrong");
-                arena.require(leaseTicks[0] >= inWaterTicks[0] - 2, "the water lease covered only " + leaseTicks[0] + " of " + inWaterTicks[0] + " swimming ticks");
-                arena.require(!NavSafetyNet.INSTANCE.hasBaritoneWaterLease(bot), "the lease outlived the route");
-                arena.require(bot.getHealth() >= health, "the swimmer lost health: " + health + " -> " + bot.getHealth());
-                BotLog.path(bot, "gametest_swim_route", "in_water_ticks", inWaterTicks[0], "underwater_ticks", underwaterTicks[0],
-                        "lease_ticks", leaseTicks[0], "max_step", maxStep[0]);
+            if (NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
+                arena.require(!NavSafetyNet.INSTANCE.hasBaritoneWaterLease(bot), "a released water lease reappeared during rescue");
                 arena.finish(bot);
             }
         });
     }
 
-    /** The control of the lease test: revoke the lease after a production-seam swim route starts, so the safety net must intervene. */
-    @GameTest(environment = "minecraftai-gametest:baritone_engine_water_game_tests_baritone_swim_route_is_not_hijacked_by_the_safety_net", maxTicks = 500)
-    public void withoutTheLeaseTheSafetyNetTakesTheSwimmerOver(GameTestHelper context) {
+    /** A lease revoked before the next safety tick does not hide an accidental water entry. */
+    @GameTest(maxTicks = 160)
+    public void revokedWaterLeaseLetsTheSafetyNetTakeOver(GameTestHelper context) {
         BaritoneEngineArena arena = channel(context, 21);
-        AIPlayerEntity bot = arena.spawnOnBaritone("BeSwimNoLease", arena.cell(-6, 0, 0));
-        arena.teleportTo(bot, arena.cell(1, -1, 0));
-        BlockPos goal = arena.cell(8, 0, 0);
-        ObservedBaritoneTestRoutes.swim(bot, goal, "swim_without_lease");
-        BaritoneRegistry.INSTANCE.setWaterAllowed(bot, false);
+        AIPlayerEntity bot = arena.spawn("BeWaterNoLease", arena.cell(1, -1, 0));
+        NavSafetyNet.INSTANCE.renewBaritoneWater(bot);
         NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
-        boolean[] intervened = {false};
+        arena.require(!NavSafetyNet.INSTANCE.hasBaritoneWaterLease(bot), "fixture: the water lease was not revoked");
         int[] tick = {0};
         context.failIfEver(() -> {
-            int now = ++tick[0];
+            arena.require(++tick[0] < 130, "the safety net did not take over a revoked water lease");
             if (NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
-                intervened[0] = true;
-            }
-            if (intervened[0] || now > 350 || !BaritoneRegistry.INSTANCE.isBusy(bot)) {
-                arena.require(intervened[0], "the safety net never intervened, so the lease test has no control (tick " + now + ", at " + bot.position() + ")");
+                arena.require(!NavSafetyNet.INSTANCE.hasBaritoneWaterLease(bot), "the revoked water lease returned during rescue");
                 arena.finish(bot);
             }
         });
@@ -219,19 +183,11 @@ public final class BaritoneEngineWaterGameTests {
         });
     }
 
-    // ---------------------------------------------------------------------------------------------------------------
-
-    /**
-     * A 4-wide, two-deep channel across the whole course at x = 0..3 (the floor cell and the cell above it; stone below), walled by
-     * the bedrock ring: the bot wades along its bottom with its eyes under the surface, which is what makes the safety net treat a
-     * walker as a drowning bot. (Baritone plans a way through such a strip; see BaritonePlanningGameTests.)
-     */
     private static BaritoneEngineArena channel(GameTestHelper context, int layer) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, layer, 14, 6);
         for (int dx = 0; dx <= 3; dx++) {
-            for (int dz = -6; dz <= 6; dz++) {
+            for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -1; dy <= 0; dy++) {
-                    // Placed without neighbour updates or fluid ticks: the strip stays exactly as built.
                     arena.world.setBlock(arena.cell(dx, dy, dz), Blocks.WATER.defaultBlockState(),
                             Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SKIP_ON_PLACE);
                 }
@@ -239,4 +195,5 @@ public final class BaritoneEngineWaterGameTests {
         }
         return arena;
     }
+
 }

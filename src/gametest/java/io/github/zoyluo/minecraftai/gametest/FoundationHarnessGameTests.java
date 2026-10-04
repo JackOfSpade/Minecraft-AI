@@ -17,7 +17,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The harness the behaviour work (pace, hostile-bot targeting, worst-first gear, wardens, no micro-teleports) is measured with:
+ * The harness the behaviour work (pace, hostile-bot targeting, worst-first gear, no micro-teleports) is measured with:
  * survival mock players that really take damage, {@link RecentDamage} recording the hits in level game time, and
  * {@link TeleportAudit} classifying the moves of a bot.
  */

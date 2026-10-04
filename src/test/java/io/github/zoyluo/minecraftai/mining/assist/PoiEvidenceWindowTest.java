@@ -29,7 +29,7 @@ class PoiEvidenceWindowTest {
     @Test
     void naturalCellWithAFlagGoesToTheFlagOnlyWindow() {
         PoiEvidenceWindow window = new PoiEvidenceWindow();
-        assertTrue(window.observe(at(1, 2, 3), PoiBucket.NATURAL, PoiEvidenceFlags.SCULK_FAMILY, 10, false));
+        assertTrue(window.observe(at(1, 2, 3), PoiBucket.NATURAL, PoiEvidenceFlags.BLACKSTONE, 10, false));
         assertEquals(0, window.structuralSize());
         assertEquals(1, window.flagOnlySize());
         assertTrue(window.contains(at(1, 2, 3)));
@@ -47,8 +47,8 @@ class PoiEvidenceWindowTest {
     @Test
     void aCellMovesBetweenSubWindowsWhenItsClassificationChanges() {
         PoiEvidenceWindow window = new PoiEvidenceWindow();
-        window.observe(at(4, 4, 4), PoiBucket.NATURAL, PoiEvidenceFlags.SCULK_FAMILY, 1, false);
-        window.observe(at(4, 4, 4), PoiBucket.SCULK_STRUCT, PoiEvidenceFlags.SCULK_FAMILY | PoiEvidenceFlags.SCULK_SHRIEKER,
+        window.observe(at(4, 4, 4), PoiBucket.NATURAL, PoiEvidenceFlags.BLACKSTONE, 1, false);
+        window.observe(at(4, 4, 4), PoiBucket.RAIL, PoiEvidenceFlags.BLACKSTONE,
                 2, false);
         assertEquals(1, window.structuralSize());
         assertEquals(0, window.flagOnlySize());
@@ -102,11 +102,11 @@ class PoiEvidenceWindowTest {
     }
 
     @Test
-    void aSculkFieldCannotPushStructuralEvidenceOut() {
+    void aFlagOnlyFieldCannotPushStructuralEvidenceOut() {
         PoiEvidenceWindow window = new PoiEvidenceWindow();
         window.observe(at(500, 0, 0), PoiBucket.RAIL, 0, 1, false);
         for (int i = 0; i < 1000; i++) {
-            window.observe(at(i, 1, 0), PoiBucket.NATURAL, PoiEvidenceFlags.SCULK_FAMILY, 2 + i, false);
+            window.observe(at(i, 1, 0), PoiBucket.NATURAL, PoiEvidenceFlags.BLACKSTONE, 2 + i, false);
         }
         assertEquals(PoiEvidenceWindow.FLAG_ONLY_CAP, window.flagOnlySize());
         assertTrue(window.contains(at(500, 0, 0)));
@@ -149,7 +149,7 @@ class PoiEvidenceWindowTest {
     void clearEmptiesEverything() {
         PoiEvidenceWindow window = new PoiEvidenceWindow();
         window.observe(at(1, 1, 1), PoiBucket.RAIL, 0, 1, false);
-        window.observe(at(2, 2, 2), PoiBucket.NATURAL, PoiEvidenceFlags.SCULK_FAMILY, 1, false);
+        window.observe(at(2, 2, 2), PoiBucket.NATURAL, PoiEvidenceFlags.BLACKSTONE, 1, false);
         window.clear();
         assertEquals(0, window.size());
     }

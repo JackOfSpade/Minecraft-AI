@@ -12,6 +12,8 @@ final class ItemLookupTest {
     @Test
     void normalizeAcceptsPlainNamesAndFullIds() {
         assertEquals("minecraft:copper_pickaxe", ItemLookup.normalize("Copper Pickaxe"));
+        assertEquals("minecraft:copper_pickaxe", ItemLookup.normalize("Copper\tPickaxe"));
+        assertEquals("minecraft:copper_pickaxe", ItemLookup.normalize("Copper\nPickaxe"));
         assertEquals("minecraft:lunge", ItemLookup.normalize("  lunge "));
         assertEquals("minecraft:copper_pickaxe", ItemLookup.normalize("minecraft:copper_pickaxe"));
         assertEquals("othermod:thing", ItemLookup.normalize("othermod:thing"));

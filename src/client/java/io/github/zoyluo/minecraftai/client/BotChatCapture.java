@@ -1,6 +1,6 @@
 package io.github.zoyluo.minecraftai.client;
 
-import io.github.zoyluo.minecraftai.network.payload.BotChatS2C;
+import io.github.zoyluo.minecraftai.network.payload.BotCommandC2S;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 
@@ -10,7 +10,10 @@ public final class BotChatCapture {
 
     public static void register() {
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-            if (ClientPlayNetworking.canSend(BotChatS2C.ID)) {
+            // BotChatS2C is server-to-client only, so canSend(BotChatS2C.ID) is always false.
+            // Use a supported C2S payload as the protocol capability probe; otherwise the
+            // fallback chat parser duplicates messages already delivered by BotChatS2C.
+            if (ClientPlayNetworking.canSend(BotCommandC2S.ID)) {
                 return;
             }
             String text = message.getString();

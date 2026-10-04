@@ -121,9 +121,9 @@ public final class ServerPlayerController implements IPlayerController {
         if (use.placed()) {
             BaritoneEdits.record(self, new BaritoneEdits.Edit(BaritoneEdits.Kind.PLACE, use.destination().immutable(), item, item, 0,
                     self.getServer().getTickCount()));
-            // The checked placement supplied this exact throwaway-block result. Publish that
-            // provenance fact only; a successful click never authorises a second live scan of
-            // its destination or any neighbour.
+            // BuildAction confirmed the exact already-admitted destination changed and returns
+            // its factual after-state. Publish that owned placement fact without another
+            // controller-side destination or neighbor scan.
             BaritoneRegistry.INSTANCE.recordObservedPlacement(self, use.destination(), use.placementState());
         }
         return use.result();

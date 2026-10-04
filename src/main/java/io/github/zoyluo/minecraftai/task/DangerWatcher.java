@@ -4,7 +4,6 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.PaceRules;
-import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
@@ -22,7 +21,6 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -67,14 +65,8 @@ public final class DangerWatcher {
     private static final float LAST_RESORT_HEALTH_CAP = 10.0F;
     /** Vanilla stops a player's sprint at 6 food points or fewer: the bot eats at 7 so its food never gets there (R6). */
     static final int SPRINT_LIMIT_FOOD = PaceRules.SPRINT_FOOD_FLOOR + 1;
-    /** Eating is put off while a calm warden is observed this close (its bites are vibrations) ... */
-    static final double CALM_WARDEN_EAT_RANGE = 20.0D;
-    /** ... unless the bot's health is at or below this (then the meal is worth the risk). */
-    static final float CALM_WARDEN_EAT_HEALTH = 6.0F;
     /** The follow keeps an ordinary hostile threat instead of pausing for it, log at most this often (ticks). */
     private static final int FOLLOW_KEEP_LOG_TICKS = 100;
-    /** A warden this close (even a calm one) is escaped, not followed past. */
-    private static final double FOLLOW_WARDEN_EVADE_RANGE = 8.0D;
     private static final double DROP_RECOVERY_MAX_DISTANCE = 80.0D;
     private static final int DROP_RECOVERY_MAX_VERTICAL_DELTA = 24;
     private static final int SHELTER_RETRY_COOLDOWN = 100;
@@ -620,9 +612,8 @@ public final class DangerWatcher {
 
     /**
      * R4: a bot that follows a player does not stop following for an ordinary hostile: the escort (FollowEscort) knocks back whatever
-     * is in reach and the follow pace sprints while anyone is under attack. What still takes the bot off the follow is what is not
-     * ordinary: low health, a creeper (CreeperDefense), a hunting or close warden, a hostile that could kill the bot in two hits
-     * (last-resort shelter), lava, drowning and falling (other threat types).
+     * is in reach and the follow pace sprints while anyone is under attack. Low health, creepers,
+     * bosses, a hostile that could kill the bot in two hits, lava, drowning and falling take priority.
      */
     private boolean followKeepsThreat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active, Threat top) {
         if (!isEscortFollow(bot, active)
@@ -633,9 +624,7 @@ public final class DangerWatcher {
                 || shouldStartLastResortShelter(bot, top)) {
             return false;
         }
-        if (top.entity() instanceof Warden warden
-                && (bot.distanceTo(warden) <= FOLLOW_WARDEN_EVADE_RANGE
-                || WardenState.isHunting(warden, QuietZone.victimsOf(bot), bot.level().getGameTime()))) {
+        if (CombatCore.isBossThreat(top.entity())) {
             return false;
         }
         int now = server.getTickCount();
@@ -728,8 +717,6 @@ public final class DangerWatcher {
                 .filter(DangerWatcher::ownsMiningPickTransaction).isPresent();
         boolean pausedTaskOwnsMiningTransaction = paused
                 .filter(DangerWatcher::ownsMiningPickTransaction).isPresent();
-        boolean pausedDigDownOwnsReturnDebt = paused
-                .filter(DigDownTask.class::isInstance).isPresent();
         // Crafting never spends or depends on the held mining tool. In particular, the final rare
         // bootstrap deliberately crafts fresh replacements while an old nearly-broken pick may
         // still be selected. Generic tool resupply here would pause that atomic craft and consume
@@ -740,16 +727,6 @@ public final class DangerWatcher {
         // kind in the pack is simply used up (the next worst takes over when it breaks).
         boolean lastToolUse = lastUseOfAToolWithNoSuccessor(bot, mainHand, active.isPresent() || paused.isPresent());
         if (lastToolUse
-                && mainHand.is(ItemTags.PICKAXES)
-                && pausedDigDownOwnsReturnDebt
-                && !taskDoesNotUseHeldTool) {
-            // DigDown alone needs a generic tool to pay an exact physical RETURN debt after a
-            // safety displacement. Service it from carried materials only; travelling to a
-            // remembered base would compound that displacement. MiningService/CreateObsidian/
-            // OreDig retain their own exact-budget or typed, persisted service boundaries instead
-            // of spending materials through this generic last-use threshold.
-            task = ResupplyTask.toolInPlace(mainHand.getItem());
-        } else if (lastToolUse
                 && !activeTaskOwnsMiningTransaction
                 && !pausedTaskOwnsMiningTransaction
                 && !taskDoesNotUseHeldTool) {
@@ -847,14 +824,6 @@ public final class DangerWatcher {
         }
         int now = server.getTickCount();
         if (now < nextEatAttemptTick.getOrDefault(bot.getUUID(), 0)) {
-            return false;
-        }
-        // Chewing is a sound a calm warden hears: delay only a routine meal while it is in range.
-        // Critical hunger, a healing emergency and shelter-cleanup recovery are all urgent survival
-        // transactions, so the bite wins even when the bot is otherwise healthy.
-        if (!urgent && bot.getHealth() > CALM_WARDEN_EAT_HEALTH
-                && QuietZone.calmWardenObservedWithin(bot, CALM_WARDEN_EAT_RANGE)) {
-            nextEatAttemptTick.put(bot.getUUID(), now + 20);
             return false;
         }
         if (!InventoryAction.hasFood(bot)) {
@@ -1451,7 +1420,7 @@ public final class DangerWatcher {
         // exchange. Replacing it with a one-off CombatTask loses the guard point and can abort
         // its task-owned shield rhythm between swings; GuardTask itself acquires and defends
         // observable hostiles that it has actually acquired (or would acquire while watching). High-priority pressure still preempts it:
-        // HIGH HOSTILE is a creeper/warden and LOW_HP, lava, drowning, or falling have their
+        // High-priority hostile pressure and LOW_HP, lava, drowning, or falling have their
         // existing safety owners.
         if (task instanceof GuardTask guard && guard.ownsOrdinaryThreat(bot, threat)) {
             return false;
@@ -1601,10 +1570,8 @@ public final class DangerWatcher {
      * merely cautious combat retreat from creating a dirt enclosure.
      */
     private static boolean shouldStartLastResortShelter(AIPlayerEntity bot, Threat threat) {
-        // Building a shelter next to a warden is a stream of vibrations that wakes it: a warden is escaped (Evade), never walled off.
         if (!isHostileBacked(threat)
                 || isCreeperThreat(threat)
-                || threat.entity() instanceof Warden
                 || !ObservableWorldQuery.canNoticeCreature(bot, threat.entity())
                 || !CombatCore.hasLineOfSight(bot, threat.entity())
                 || !CombatCore.isWithinHostilePressureEnvelope(bot, threat.entity())) {
@@ -1723,13 +1690,10 @@ public final class DangerWatcher {
         // that cannot, before distance breaks the remaining ties.
         boolean meleeModeActive = hostiles.stream()
                 .anyMatch(mob -> bot.distanceTo(mob) <= CombatCore.MELEE_ENGAGEMENT_RANGE);
-        // Explosive pressure cannot be hidden behind a closer ordinary mob. A strict obsidian run
-        // resumed its water mission while a Creeper was still visible at fifteen blocks; sorting
-        // Creepers first keeps every shelter/combat branch below aligned with the no-melee policy.
-        // A warden, like a creeper, is a lethal never-melee source: it sorts first as well.
+        // A threat that cannot enter ordinary combat must not be hidden behind a closer mob:
+        // selecting it first takes the existing Evade path instead of starting a separate duel.
         hostiles.sort(Comparator
-                .comparing((LivingEntity mob) -> !(mob instanceof Creeper
-                        || mob instanceof net.minecraft.world.entity.monster.warden.Warden))
+                .comparing((LivingEntity mob) -> !(mob instanceof Creeper || CombatCore.isBossThreat(mob)))
                 .thenComparing(mob -> meleeModeActive || CombatCore.isRangedThreat(mob) ? 0 : 1)
                 .thenComparingDouble(bot::distanceTo));
         for (LivingEntity mob : hostiles) {
@@ -1745,8 +1709,7 @@ public final class DangerWatcher {
                 return Optional.of(new Threat(
                         Threat.Type.LOW_HP, Threat.Severity.HIGH, mob, mob.blockPosition()));
             }
-            // A warden (sonic boom ignores armour, 30 per hit) is as lethal as a fuse: same severity.
-            Threat.Severity severity = mob instanceof Creeper || mob instanceof net.minecraft.world.entity.monster.warden.Warden
+            Threat.Severity severity = mob instanceof Creeper || CombatCore.isBossThreat(mob)
                     ? Threat.Severity.HIGH : Threat.Severity.MEDIUM;
             return Optional.of(new Threat(Threat.Type.HOSTILE, severity, mob, mob.blockPosition()));
         }

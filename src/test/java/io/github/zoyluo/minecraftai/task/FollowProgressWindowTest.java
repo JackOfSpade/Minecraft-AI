@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
 /** The no-progress window of a Baritone land-follow route. */
@@ -49,6 +50,24 @@ class FollowProgressWindowTest {
     }
 
     @Test
+    void lateralLoopEventuallyStallsWithoutClosingDistance() {
+        FollowProgressWindow window = new FollowProgressWindow();
+        window.stalled(0, 10.0, 0, 0);
+        assertFalse(window.stalled(10, 10.0, 4.0, 0), "the first new extent is a legitimate detour");
+        assertFalse(window.stalled(20, 10.0, 0, 4.0), "a loop does not immediately fail");
+        assertTrue(window.stalled(110, 10.0, 0, 4.0), "a route loop must not renew itself forever by moving sideways");
+    }
+
+    @Test
+    void expandingLongDetourKeepsRearmingWithoutClosingDistance() {
+        FollowProgressWindow window = new FollowProgressWindow();
+        window.stalled(0, 20.0, 0, 0);
+        assertFalse(window.stalled(90, 20.0, 4.0, 0));
+        assertFalse(window.stalled(180, 20.0, 8.0, 0), "new terrain extends the detour footprint");
+        assertFalse(window.stalled(270, 20.0, 12.0, 0), "a long detour stays alive until it can close distance");
+    }
+
+    @Test
     void clearingRearmsAndAnUnarmedWindowNeverReportsStalled() {
         FollowProgressWindow window = new FollowProgressWindow();
         window.stalled(0, 10.0, 0, 0);
@@ -71,5 +90,31 @@ class FollowProgressWindowTest {
         int backoff = source.indexOf("repathBackoff = true;", abandon);
         assertTrue(running > 0 && window > running && abandon > window && backoff > abandon,
                 "a route without progress is cancelled and followed by a back-off");
+    }
+
+    @Test
+    void consecutiveDirectionalHopsTowardTheSameTargetKeepTheNoProgressClock() {
+        FollowProgressWindow window = new FollowProgressWindow();
+        BlockPos target = new BlockPos(20, 64, 0);
+        window.beginRoute(target, true);
+        assertFalse(window.stalled(0, 20.0, 0, 0));
+
+        // Baritone can complete a short observed hop without moving. Re-accepting the next hop
+        // must not turn that into a fresh 100-tick grace period.
+        window.beginRoute(target, true);
+        assertTrue(window.stalled(FollowProgressWindow.WINDOW_TICKS, 20.0, 0, 0));
+    }
+
+    @Test
+    void directionalTargetChangeStartsANewProgressEpisode() {
+        FollowProgressWindow window = new FollowProgressWindow();
+        window.beginRoute(new BlockPos(20, 64, 0), true);
+        assertFalse(window.stalled(0, 20.0, 0, 0));
+
+        window.beginRoute(new BlockPos(22, 64, 0), true);
+        assertFalse(window.stalled(90, 22.0, 0, 0));
+        assertFalse(window.stalled(FollowProgressWindow.WINDOW_TICKS, 22.0, 0, 0),
+                "the new target re-arms at tick 90 instead of inheriting the old target's deadline");
+        assertTrue(window.stalled(190, 22.0, 0, 0));
     }
 }

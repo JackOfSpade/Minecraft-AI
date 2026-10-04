@@ -13,7 +13,6 @@ import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
@@ -142,11 +141,6 @@ public final class FollowTask extends AbstractTask {
     /** Package-visible for GameTests: swings the escort has landed. */
     int escortStrikes() {
         return escort.strikes();
-    }
-
-    /** Package-visible for GameTests: the game tick of the last ready swing that was still turning toward its target. */
-    long escortLastAimTick() {
-        return escort.lastAimTick();
     }
 
     /** Package-visible for GameTests: the gait this task last asked for. */
@@ -389,8 +383,7 @@ public final class FollowTask extends AbstractTask {
         MinecraftAiConfig.Follow follow = MinecraftAiConfig.get().behaviour().followOrDefaults();
         int sneakTicks = targetSneakSince < 0L ? 0 : (int) Math.min(Integer.MAX_VALUE, now - targetSneakSince);
         FollowPace.Input input = new FollowPace.Input(bot.distanceTo(target), targetSpeedBps(), target.isSprinting(), sneakTicks,
-                quietZone.level(), PacePolicy.underPressure(bot), quietZone.huntingWardenObserved(),
-                quietZone.calmWardenWithin(PacePolicy.CALM_WARDEN_RANGE), paceGait,
+                quietZone.level(), PacePolicy.underPressure(bot), paceGait,
                 (int) Math.min(Integer.MAX_VALUE, now - paceSince), follow.walkGap(), follow.sprintGap());
         Gait gait = FollowPace.decide(input);
         if (gait != paceGait) {
@@ -405,12 +398,17 @@ public final class FollowTask extends AbstractTask {
 
     /** Another follow mode takes the bot: a Baritone land route of this task ends now (single writer). */
     private void dropBaritoneRoute(AIPlayerEntity bot) {
+        // BoatLaunchTask and BoardBoatTask also use ActionPack's Baritone route.  They are child
+        // work of this FollowTask, but they do not populate the land-follow target marker.  Do not
+        // cancel their route on every boat-follow tick: doing so repeatedly restarts shore approach
+        // until the global stuck watcher aborts the parent follow task.
+        boolean ownsLandRoute = baritoneTargetPos != null;
         baritoneTargetPos = null;
         baritoneDirectionalPursuit = false;
         baritoneOwnerFollow = false;
         baritoneProgress.clear();
         holdTargetPos = null;
-        if (bot.getActionPack().hasBaritoneRoute()) {
+        if (ownsLandRoute && bot.getActionPack().hasBaritoneRoute()) {
             bot.getActionPack().cancelBaritoneRoute("follow_mode_changed");
         }
     }
@@ -614,6 +612,7 @@ public final class FollowTask extends AbstractTask {
                     acceptLandRoute(targetPos, regoal);
                 } else {
                     reportLandRouteFailure(bot, targetPos, regoal);
+                    baritoneProgress.clear();
                     repathBackoff = true;
                     holdTargetPos = targetPos.immutable();
                     baritoneTargetPos = null;
@@ -640,6 +639,7 @@ public final class FollowTask extends AbstractTask {
                 if ((directional || ownerFollow) && NavRouteRules.PATH_INCOMPLETE.equals(ended.reason())) {
                     repathBackoff = false;
                 } else {
+                    baritoneProgress.clear();
                     if (directional) {
                         noteRouteFailure(bot, targetPos, ended.reason());
                     } else {
@@ -673,6 +673,7 @@ public final class FollowTask extends AbstractTask {
         nextRepathTick = elapsed + (started.result().isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);
         if (started.result().isFailed()) {
             reportLandRouteFailure(bot, targetPos, started);
+            baritoneProgress.clear();
             repathBackoff = true;
             holdTargetPos = targetPos.immutable();
             baritoneTargetPos = null;
@@ -745,7 +746,7 @@ public final class FollowTask extends AbstractTask {
         baritoneTargetPos = targetPos.immutable();
         baritoneDirectionalPursuit = directional;
         baritoneOwnerFollow = attempt.ownerFollow();
-        baritoneProgress.clear();
+        baritoneProgress.beginRoute(targetPos, directional);
     }
 
     private void reportLandRouteFailure(AIPlayerEntity bot, BlockPos targetPos, LandRouteAttempt attempt) {

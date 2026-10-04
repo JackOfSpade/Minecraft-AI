@@ -493,17 +493,25 @@ final class NavigationCourseRun {
                 }
             }
         }
+        for (Runner r : runners) {
+            if (r.maxX < course.minimumMaxX) {
+                violations.add(r.name + " advanced only to x=" + r.maxX + " (required " + course.minimumMaxX + ")");
+            }
+            if (r.minY > course.maximumMinY) {
+                violations.add(r.name + " descended only to y=" + r.minY + " (required " + course.maximumMinY + ")");
+            }
+        }
         if (course.moving && lostTicks > 0) {
             violations.add("the follower fell more than 8 blocks behind for " + lostTicks + " ticks");
         }
         if (course.noBreak && tracker.broken > 0) {
             violations.add("broke " + tracker.broken + " block(s) although a walkable way exists");
         }
-        if (course.pickaxe && course.id.equals("sealed") && reached && tracker.broken < 1) {
-            violations.add("got through a sealed wall without breaking anything?");
-        }
         if (course.mode == Mode.FOLLOW && baritoneStarts < 1) {
             violations.add("no Baritone route was ever started");
+        }
+        if (baritoneStarts > course.maxBaritoneStarts) {
+            violations.add("started " + baritoneStarts + " Baritone routes (maximum " + course.maxBaritoneStarts + ")");
         }
         if (!baritoneInstance) {
             violations.add("a bot has no Baritone instance");

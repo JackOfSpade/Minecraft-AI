@@ -154,13 +154,9 @@ class MiningAssistStateTest {
     }
 
     @Test
-    void biomeFlagsFollowTheFeetBiome() {
+    void lushBiomeFlagFollowsTheFeetBiome() {
         MiningAssistState state = new MiningAssistState(BOT);
-        state.setBiome("minecraft:deep_dark");
-        assertTrue(state.deepDark());
-        assertFalse(state.lush());
         state.setBiome("minecraft:lush_caves");
-        assertFalse(state.deepDark());
         assertTrue(state.lush());
         state.setBiome(null);
         assertEquals("", state.biomeId());
@@ -260,7 +256,7 @@ class MiningAssistStateTest {
         state.exclusions().exclude(new BlockPos(1, 2, 3), 0, 600);
         state.noteBiomeRead(10);
         state.notePoiScore(10, 0.9D);
-        state.setLastPoiBand(PoiScorer.Band.MANDATORY);
+        state.setLastPoiBand(PoiScorer.Band.STRUCTURE_CERTAIN);
         assertEquals(1, state.exclusions().size());
 
         state.resetObservations();

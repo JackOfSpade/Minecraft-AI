@@ -34,12 +34,10 @@ package io.github.zoyluo.minecraftai.mining.assist;
  * @param hostilePressure     item 6: {@code DangerWatcher.hasObservableHostilePressure(bot)}
  * @param lavaInThreatBox     item 7: {@code DangerWatcher.observedLavaInThreatBox(bot)} is present
  * @param hazardLavaNear      item 7: a remembered lava cell within {@code detour.lavaClearRadius} of the bot, the stand pose or the valuable
- * @param deepDark            item 8: the own-cell biome is the deep dark AND {@code safety.deepDarkVeto}
  * @param poiStructureScore   item 9: the last structure score S of the shadow POI evaluation (0 when none)
  * @param poiEvidenceStale    item 9: the POI facts are not fresh (score never computed or older than 60 ticks while {@code poi.enabled}, no state, or the window cannot be trusted); fails closed as POI_EVIDENCE
  * @param poiWindowVeto       item 9: {@link SafeGate#poiWindowVeto} of the POI window
  * @param poiCandidatePending item 9: a POI candidate is pending, see {@link SafeGate#candidatePending}
- * @param inNoDetourZone      item 9: inside a mandatory no-detour zone ({@link io.github.zoyluo.minecraftai.mining.assist.MandatoryLatch#inNoDetourZone})
  * @param trapNear            item 10: a remembered TRAP cell within 3 blocks of the bot, the stand pose or the valuable
  */
 public record SafeGateInputs(
@@ -68,7 +66,6 @@ public record SafeGateInputs(
         boolean hostilePressure,
         boolean lavaInThreatBox,
         boolean hazardLavaNear,
-        boolean deepDark,
         double poiStructureScore,
         boolean poiEvidenceStale,
         boolean poiWindowVeto,
@@ -116,7 +113,6 @@ public record SafeGateInputs(
         boolean hostilePressure;
         boolean lavaInThreatBox;
         boolean hazardLavaNear;
-        boolean deepDark;
         double poiStructureScore;
         boolean poiEvidenceStale;
         boolean poiWindowVeto;
@@ -252,11 +248,6 @@ public record SafeGateInputs(
             return this;
         }
 
-        public Builder deepDark(boolean v) {
-            this.deepDark = v;
-            return this;
-        }
-
         public Builder poiStructureScore(double v) {
             this.poiStructureScore = v;
             return this;
@@ -297,7 +288,6 @@ public record SafeGateInputs(
                     threatCooldown, shelterEpisode,
                     hostilePressure,
                     lavaInThreatBox, hazardLavaNear,
-                    deepDark,
                     poiStructureScore, poiEvidenceStale, poiWindowVeto, poiCandidatePending, inNoDetourZone,
                     trapNear);
         }

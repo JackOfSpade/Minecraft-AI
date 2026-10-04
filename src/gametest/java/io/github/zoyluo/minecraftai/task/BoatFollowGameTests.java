@@ -46,6 +46,11 @@ public final class BoatFollowGameTests {
     private static final int LAKE_MAX_X = 44;
     private static final int MAX_Z = 24;
     private static final int FEET_Z = 12;
+    // GameTest lays ordinary structures on its positive-Z grid before batches run. This fixture
+    // writes a 47x27 lake, so keep the entire lake and its eastbound route in a reserved negative-Z
+    // lane instead of overwriting a neighboring test's template or having its sweeper erase water.
+    private static final int FIXTURE_X = 8;
+    private static final int FIXTURE_Z = -72;
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_ai_player_boat_moves_when_steered_on_open_water", maxTicks = 200)
     public void aiPlayerBoatMovesWhenSteeredOnOpenWater(GameTestHelper context) {
@@ -132,11 +137,11 @@ public final class BoatFollowGameTests {
         BlockPos feet = scenario.feet();
         ServerLevel world = context.getLevel();
         InventoryAction.giveItem(scenario.bot(), new ItemStack(Items.OAK_BOAT, 1));
-        // A boat sitting on dry land in front of the bot, with a one-high stone wall right in the
-        // line to the lake: boarding works, steering east never gets anywhere (a hull cannot climb
-        // a block), while a walking bot simply steps over it once it has abandoned the boat.
+        // A boat sitting on dry land in front of the bot, with a short one-high stone barrier right
+        // in the line to the lake: boarding works, steering east never gets anywhere (a hull cannot
+        // climb a block), while the abandoned bot has a plainly observed walking detour around it.
         BlockState stone = Blocks.STONE.defaultBlockState();
-        for (int z = 4; z <= 20; z++) {
+        for (int z = FEET_Z - 1; z <= FEET_Z + 1; z++) {
             world.setBlock(feet.offset(10, 0, z), stone, Block.UPDATE_ALL);
         }
         AbstractBoat beached = placeBoat(world, feet.offset(8, 0, FEET_Z));
@@ -321,11 +326,11 @@ public final class BoatFollowGameTests {
 
     // ---- world / entity helpers --------------------------------------------------------------
 
-    /** Builds the lake fixture and returns the feet-level origin cell (x=0, z=0). */
+    /** Builds the isolated lake fixture and returns its feet-level origin cell. */
     private static BlockPos buildLake(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         world.setDayTime(1000L);
-        BlockPos feet = context.absolutePos(new BlockPos(0, 4, 0));
+        BlockPos feet = context.absolutePos(new BlockPos(FIXTURE_X, 4, FIXTURE_Z));
         BlockState stone = Blocks.STONE.defaultBlockState();
         BlockState air = Blocks.AIR.defaultBlockState();
         BlockState water = Blocks.WATER.defaultBlockState();
@@ -352,6 +357,16 @@ public final class BoatFollowGameTests {
                     }
                     world.setBlock(feet.offset(x, y, z), state, Block.UPDATE_ALL);
                 }
+            }
+        }
+        // The GameTest world location changes between the focused and full suites.  In a cold
+        // biome, exposed source water can freeze before the follower reaches the shore, turning
+        // this into a land fixture and producing a misleading no_nearby_water_shore failure.
+        // A glass canopy removes sky access without constraining the bot or either boat (it is
+        // four blocks above the water cell), so the lake's water state is deterministic.
+        for (int x = LAND_MAX_X + 1; x <= LAKE_MAX_X; x++) {
+            for (int z = 0; z <= MAX_Z; z++) {
+                world.setBlock(feet.offset(x, 3, z), Blocks.GLASS.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         // The gametest world is a flat void-ish world below y=40: every slime chunk spawns slimes

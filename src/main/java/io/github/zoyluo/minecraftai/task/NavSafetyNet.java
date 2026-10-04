@@ -1989,15 +1989,13 @@ public final class NavSafetyNet {
         Standability.clearCache();
         if (io.github.zoyluo.minecraftai.action.WalkedStep.canPushOut(bot)) {
             pack.stopAll();
-            beginSuffocationEmergencyStep(bot, state, WalkedStep.begin(bot, bot.position(),
+            return beginSuffocationEmergencyStep(bot, state, WalkedStep.begin(bot, bot.position(),
                     WalkedStep.Kind.PUSH_OUT, "navsafe_suffocation"));
-            return true;
         }
         var walked = observedAdjacentSuffocationStep(bot, world, feet);
         if (walked != null) {
             pack.stopAll();
-            beginSuffocationEmergencyStep(bot, state, walked);
-            return true;
+            return beginSuffocationEmergencyStep(bot, state, walked);
         }
         BlockPos target = escapeBreakTarget(bot, world, feet);
         if (target != null) {

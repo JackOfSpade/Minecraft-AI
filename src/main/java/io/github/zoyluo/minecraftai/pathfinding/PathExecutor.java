@@ -76,6 +76,9 @@ public final class PathExecutor {
     // Real-physics PILLAR_UP: same idea as jumpAttemptTicks, tracked separately since the two move
     // types can never share a node but do reset independently in cleanup()/advanceTo().
     private int pillarAttemptTicks;
+    // The latest refusal during the active physical pillar attempt. A jump can briefly overlap
+    // the destination, so only exhaust the bounded retry budget before replanning for it.
+    private String pillarPlacementFailure;
 
     public PathExecutor(List<Node> path, BlockPos originalGoal) {
         this(path, originalGoal, false, false, 0);
@@ -521,7 +524,12 @@ public final class PathExecutor {
     private ActionResult tickPillar(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
         BlockPos placeSlot = next.pos().below(); // current feet position; the support block goes here
-        if (player.getBlockY() >= next.pos().getY() && WalkedStep.supported(player)) {
+        // A clientless player can retain vanilla's onGround bit for the first airborne tick.
+        // For a pillar node, that bit alone must not commit the upper cell: the slot the node
+        // is responsible for repairing needs a factual collision support first.
+        boolean pillarSupportPlaced = !player.level().getBlockState(placeSlot)
+                .getCollisionShape(player.level(), placeSlot).isEmpty();
+        if (player.getBlockY() >= next.pos().getY() && pillarSupportPlaced && WalkedStep.supported(player)) {
             return commitAdvance(pack, index + 1);
         }
         if (io.github.zoyluo.minecraftai.task.ShieldGuard.usingShield(player)) {
@@ -547,9 +555,13 @@ public final class PathExecutor {
         pack.jumpOnce();
         pillarAttemptTicks++;
         double rise = player.getY() - placeSlot.getY();
-        if (rise > 0.5D && rise < 1.2D && player.level().getBlockState(placeSlot).isAir()) {
-            BuildAction.placeBlockAt(player, placeSlot);
-            return ActionResult.IN_PROGRESS;
+        if (rise > 0.5D && player.level().getBlockState(placeSlot).isAir()) {
+            ActionResult placed = BuildAction.placeBlockAt(player, placeSlot);
+            if (placed.isFailed()) {
+                pillarPlacementFailure = placed.reason();
+            } else {
+                return ActionResult.IN_PROGRESS;
+            }
         }
         // "Stalled" = still standing at the original (lower) footing with no vertical progress at all, not the ordinary
         // mid-arc state of a real jump still developing.
@@ -567,7 +579,10 @@ public final class PathExecutor {
             BotLog.path(player, "path_pillar_rejump", "at", LogFields.pos(placeSlot), "retry", pillarRetries);
             return ActionResult.IN_PROGRESS;
         }
-        return handleStuck(pack, "pillar_jump_blocked");
+        String reason = pillarPlacementFailure == null
+                ? "pillar_jump_blocked"
+                : "pillar_place_failed: " + pillarPlacementFailure;
+        return handleStuck(pack, reason);
     }
 
     /**
@@ -1114,6 +1129,7 @@ public final class PathExecutor {
         pillarAttemptTicks = 0;
         pillarRetries = 0;
         pillarBackoff = 0;
+        pillarPlacementFailure = null;
     }
 
     private static final Direction[] HORIZONTAL_NEIGHBORS = {

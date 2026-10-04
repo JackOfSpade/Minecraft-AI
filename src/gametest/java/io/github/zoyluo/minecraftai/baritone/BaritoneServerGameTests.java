@@ -228,18 +228,30 @@ public final class BaritoneServerGameTests {
 
         AtomicInteger ticks = new AtomicInteger();
         AtomicInteger forwardTicks = new AtomicInteger();
+        AtomicInteger goalTicks = new AtomicInteger();
+        AtomicInteger pathTicks = new AtomicInteger();
         var nextTick = TickEvent.createNextProvider();
         context.onEachTick(() -> {
             // What the real integration does once per server tick, before the bot's own tick.
             baritone.getGameEventHandler().onTick(nextTick.apply(EventState.PRE, TickEvent.Type.IN));
+            if (baritone.getPathingBehavior().getGoal() != null) {
+                goalTicks.incrementAndGet();
+            }
+            if (baritone.getPathingBehavior().getCurrent() != null || baritone.getPathingBehavior().isPathing()) {
+                pathTicks.incrementAndGet();
+            }
             if (baritone.getInputOverrideHandler().isInputForcedDown(Input.MOVE_FORWARD)) {
                 forwardTicks.incrementAndGet();
             }
             if (ticks.incrementAndGet() == 100) {
                 try {
-                    require(context, baritone.getPathingBehavior().getGoal() != null, "the goal was dropped");
-                    require(context, baritone.getPathingBehavior().getCurrent() != null || baritone.getPathingBehavior().isPathing(),
-                            "no path was ever planned/executed after 100 ticks");
+                    // A short observed route may finish well before this sampling point. Completion
+                    // clears Baritone's live goal, so require that the stack actually owned a goal
+                    // and planned/executed it during the observation window rather than requiring
+                    // the completed route to remain live at tick 100.
+                    require(context, goalTicks.get() > 0, "the behavior stack never owned a goal");
+                    require(context, pathTicks.get() > 0,
+                            "no path was ever planned/executed during the server tick window");
                     require(context, forwardTicks.get() > 0, "the path executor never asked to walk forward");
                 } finally {
                     BaritoneRegistry.INSTANCE.forget(bot, "gametest_behavior_stack");

@@ -41,11 +41,11 @@ class BlockFactsTest {
     }
 
     @Test
-    void plainSculkIsNaturalButStillEvidenceThroughItsFlag() {
+    void plainSculkIsNaturalAndNotPoiEvidence() {
         BlockFacts sculk = facts("sculk");
         assertTrue(sculk.natural());
-        assertTrue(sculk.evidence());
-        assertTrue(PoiEvidenceFlags.has(sculk.poiFlags(), PoiEvidenceFlags.SCULK_FAMILY));
+        assertFalse(sculk.evidence());
+        assertEquals(0, sculk.poiFlags());
     }
 
     @Test

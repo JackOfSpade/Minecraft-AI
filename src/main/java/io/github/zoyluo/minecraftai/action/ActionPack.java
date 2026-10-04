@@ -57,10 +57,20 @@ public final class ActionPack {
 
     private WalkToController walkTo;
     private MiningController mining;
+    /** Monotonically identifies each direct mining controller admitted by this pack. */
+    private long miningGeneration;
+    /** One-shot evidence that a specific observed direct break completed. */
+    private MiningCompletion completedMining;
     /** Vanilla client destroyDelay: ticks a finished multi-tick break makes the next one wait (see {@link #tickMining}). */
     static final int DESTROY_DELAY_TICKS = 5;
     /** Game time before which the running mining controller does nothing (the post-break delay); 0 when none. */
     private long nextBreakAt;
+
+    private record MiningCompletion(long generation, BlockPos pos) {
+        private MiningCompletion {
+            pos = pos.immutable();
+        }
+    }
     /** The input-driven step this pack runs (see {@link WalkedStep}); it has the bot to itself while it is in flight. */
     private WalkedStep step;
     /** Lease of {@link #step}, cleared as soon as the active step ends or is cancelled. */
@@ -221,11 +231,11 @@ public final class ActionPack {
     /**
      * Keeps the world-space direction of an already-issued local movement input when a late task action changes the bot's yaw
      * before the next physics tick. This rewrites only those input fields (including the values physics will consume next); it
-     * never claims control, stops navigation, or replans. It leaves every input untouched while Baritone owns the bot, including a
-     * direct Baritone caller that has no ActionPack route to advertise.
+     * never claims control, stops navigation, or replans. Baritone owns its bridge inputs, so
+     * they remain untouched when a late combat swing changes yaw before the next physics tick.
      */
     public void reprojectControllerInputsForYawChange(float yawBefore) {
-        if (baritoneOwnsBot()) {
+        if (emergencyInputBlocked() || baritoneOwnsBot()) {
             return;
         }
         float yawAfter = player.getYRot();
@@ -1231,6 +1241,8 @@ public final class ActionPack {
             return ActionResult.failed(MiningController.TARGET_NOT_OBSERVED);
         }
         claim("mining");
+        completedMining = null;
+        miningGeneration++;
         this.mining = new MiningController(pos, face);
         clearRouteLease();
         this.forward = 0.0F;
@@ -1238,10 +1250,34 @@ public final class ActionPack {
         return ActionResult.IN_PROGRESS;
     }
 
+    /**
+     * Consumes the exact completion receipt produced by this pack's current mining generation.
+     * The receipt carries no world-state authority: it only settles the successful observed break
+     * that {@link #tickMining()} has already committed, after an empty cell becomes occluded.
+     */
+    public boolean consumeSuccessfulMining(BlockPos pos, long generation) {
+        if (pos == null || completedMining == null
+                || completedMining.generation() != generation
+                || !completedMining.pos().equals(pos)) {
+            return false;
+        }
+        completedMining = null;
+        return true;
+    }
+
+    /** Generation of the controller most recently admitted through {@link #startMining}. */
+    public long miningGeneration() {
+        return miningGeneration;
+    }
+
     public void stopMining() {
         if (this.mining != null) {
             this.mining.abort(player);
             this.mining = null;
+            // A cancellation revokes the old controller's lease even when no replacement is
+            // started. Do not change the generation after tickMining() succeeds: its receipt
+            // must remain consumable by the BlockMiner that owned that completed controller.
+            miningGeneration++;
         }
     }
 
@@ -1659,6 +1695,7 @@ public final class ActionPack {
                     "pos", LogFields.pos(mining.pos()),
                     "tool", toolName,
                     "ticks", mining.elapsedTicks());
+            completedMining = new MiningCompletion(miningGeneration, mining.pos());
             if (brokenState != null) {
                 BaritoneEdits.recordBreak(player, mining.pos(), brokenBlock, toolName, mining.elapsedTicks());
             }

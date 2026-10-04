@@ -17,6 +17,7 @@ public final class MinecraftAiClient implements ClientModInitializer {
         AIPayloads.register();
         MinecraftAiKeyBindings.register();
         MinecraftAiClientNetworking.register();
+        BotChatCapture.register();
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
 

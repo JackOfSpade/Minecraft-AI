@@ -78,8 +78,13 @@ final class ShelterExitDebtRepayer {
         }
         activeShelterEgress = egress;
         // Every egress cell is durable shelter metadata, not a present-tense terrain fact.  A
-        // cancelled shelter may therefore wait for a visible doorway, but must not turn its
-        // recorded side list into a scan of the world beyond the shell.
+        // cancelled shelter may open its exact recorded opaque doorway in two stages, but must
+        // not turn its recorded side list into a scan of the world beyond the shell.
+        BlockPos stagedObstruction = stagedOwnedDoorwayObstruction(bot, egress);
+        if (stagedObstruction != null) {
+            mineOwnedEgressObstruction(bot, egress, stagedObstruction);
+            return true;
+        }
         if (!canObserveEgressEnvelope(bot, egress)) {
             bot.getActionPack().stopMovement();
             waiting = true;
@@ -93,15 +98,7 @@ final class ShelterExitDebtRepayer {
                 waiting = true;
                 return true;
             }
-            if (!obstruction.equals(shelterExitMiner.target())) {
-                shelterExitMiner.begin(bot, obstruction);
-            }
-            BlockMiner.Status status = shelterExitMiner.tick(bot);
-            if (status == BlockMiner.Status.FAILED) {
-                rejectedShelterEgress.add(egress);
-                activeShelterEgress = null;
-            }
-            waiting = true;
+            mineOwnedEgressObstruction(bot, egress, obstruction);
             return true;
         }
         Standability.clearCache();
@@ -150,6 +147,7 @@ final class ShelterExitDebtRepayer {
         if (!pack.stepIdle()) {
             // A safety successor owns the pack. Forget only this repayer's old admission and
             // leave its inputs and result completely untouched.
+            pack.releaseStepLease(lease);
             stepping = false;
             step = null;
             stepLease = null;
@@ -157,6 +155,10 @@ final class ShelterExitDebtRepayer {
             return true;
         }
         WalkedStep.Result result = pack.stepResultFor(lease);
+        // A guarded step keeps its fence after natural completion until its exact owner
+        // reconciles the outcome. Retire it before this repayer selects another doorway or
+        // lets Follow start the next controller.
+        pack.releaseStepLease(lease);
         stepping = false;
         step = null;
         stepLease = null;
@@ -184,15 +186,22 @@ final class ShelterExitDebtRepayer {
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (BlockPos candidate : shelterExitDebt.egressCandidates()) {
-            if (rejectedShelterEgress.contains(candidate)
-                    || !canObserveEgressEnvelope(bot, candidate)
-                    || !hasSafeShelterExitSupport(bot, candidate)) {
+            if (rejectedShelterEgress.contains(candidate)) {
                 continue;
             }
-            BlockPos obstruction = firstShelterExitObstruction(bot, candidate);
-            if (obstruction != null && !shelterExitDebt.ownsCurrentPlacement(bot, obstruction)) {
-                rejectedShelterEgress.add(candidate);
+            boolean stagedDoorway = stagedOwnedDoorwayObstruction(bot, candidate) != null;
+            if (!stagedDoorway && !canObserveEgressEnvelope(bot, candidate)) {
                 continue;
+            }
+            if (!stagedDoorway && !hasSafeShelterExitSupport(bot, candidate)) {
+                continue;
+            }
+            if (!stagedDoorway) {
+                BlockPos obstruction = firstShelterExitObstruction(bot, candidate);
+                if (obstruction != null && !shelterExitDebt.ownsCurrentPlacement(bot, obstruction)) {
+                    rejectedShelterEgress.add(candidate);
+                    continue;
+                }
             }
             double targetDistance = candidate.distSqr(target.blockPosition());
             if (best == null || targetDistance < bestDistance) {
@@ -201,6 +210,36 @@ final class ShelterExitDebtRepayer {
             }
         }
         return best;
+    }
+
+    /**
+     * A cancelled shelter can hide its own doorway from the full cell envelope. Its exact owned
+     * head/foot pair is still durable provenance, so open the head first; only after that head
+     * port is visibly open may the exact owned foot be mined. Movement never uses this exception.
+     */
+    private BlockPos stagedOwnedDoorwayObstruction(AIPlayerEntity bot, BlockPos egress) {
+        if (shelterExitDebt.ownsCurrentPlacement(bot, egress)
+                && shelterExitDebt.ownsCurrentPlacement(bot, egress.above())) {
+            return egress.above().immutable();
+        }
+        if (shelterExitDebt.ownsCurrentPlacement(bot, egress)
+                && ObservableWorldQuery.canObserveCell(bot, egress.above())
+                && isPassableShelterExitCell(bot, egress.above())) {
+            return egress.immutable();
+        }
+        return null;
+    }
+
+    private void mineOwnedEgressObstruction(AIPlayerEntity bot, BlockPos egress, BlockPos obstruction) {
+        if (!obstruction.equals(shelterExitMiner.target())) {
+            shelterExitMiner.begin(bot, obstruction);
+        }
+        BlockMiner.Status status = shelterExitMiner.tick(bot);
+        if (status == BlockMiner.Status.FAILED) {
+            rejectedShelterEgress.add(egress);
+            activeShelterEgress = null;
+        }
+        waiting = true;
     }
 
     /**
@@ -296,10 +335,10 @@ final class ShelterExitDebtRepayer {
     }
 
     private void cancelOwnedStep(AIPlayerEntity bot) {
-        if (stepping && bot.getActionPack().stepInFlightFor(stepLease)) {
-            // This is safe only after the exact lease check; a stale debt repayer must not cancel
-            // a higher-priority successor that took the pack after its own step ended.
-            bot.getActionPack().cancelStep();
+        if (stepLease != null) {
+            // The opaque lease makes this harmless when a successor has already taken over and
+            // releases the continuation fence when this repayer still owns it.
+            bot.getActionPack().cancelStep(stepLease);
         }
         stepping = false;
         stepLease = null;

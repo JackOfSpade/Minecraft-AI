@@ -120,11 +120,15 @@ final class PerceptionFollowupSourceContractTest {
     @Test
     void theShelterExitLooksThroughTheObservationPortForTheReactionTimeBeforeOpeningTheDoor() throws IOException {
         String shelter = read("task/EmergencyShelterTask.java");
-        int reseal = shelter.indexOf("if (!forcePressureExit && resealObservedPressure(bot)) {");
-        int dwell = shelter.indexOf("if (!forcePressureExit && observationPortDwell(bot)) {");
-        int obstruction = shelter.indexOf("BlockPos obstruction = firstExitObstruction(bot, egressFeet);");
-        assertTrue(reseal >= 0 && dwell > reseal && obstruction > dwell,
-                "after the port is open and before the foot wall is mined, the bot looks through the port");
+        String opening = between(shelter, "private void tickOpenExit(AIPlayerEntity bot)",
+                "private boolean resealObservedPressure(AIPlayerEntity bot)");
+        int sealedHead = opening.indexOf("ownedSealedDoorway(bot, egressFeet)");
+        int reseal = opening.indexOf("resealObservedPressure(bot)");
+        int dwell = opening.indexOf("observationPortDwell(bot)");
+        int foot = opening.indexOf("? egressFeet.immutable()", dwell);
+        assertTrue(sealedHead >= 0 && reseal > sealedHead && dwell > reseal && foot > dwell
+                        && opening.contains("if (!forcePressureExit && !ownedSealedDoorway(bot, egressFeet)"),
+                "the opaque owned head is mined first; only an observed port may reseal or dwell before the foot wall opens");
         String body = between(shelter, "private boolean observationPortDwell(AIPlayerEntity bot)", "private int observableExitPressure");
         assertTrue(body.contains("CreatureSenses.noticeDwellTicks(CombatCore.hostilePressureScanRange())")
                         && body.contains("ownsCurrentPlacement(bot, egressFeet)"),

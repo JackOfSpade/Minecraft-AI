@@ -99,7 +99,7 @@ the cache. A change of verdict writes one `assist_gate` line with the reason.
   reads as fluid in the occupancy window.
 - **Shadow POI scoring**, every 20 ticks per bot (staggered by `uuid.hashCode() & 15`). The scorer combines
   the non-natural blocks the rays saw, visible entities (through `canObserveEntity`) and the cave openness
-  estimate into a band: `NONE`, `POSSIBLE`, `CAVERN_ONLY`, `STRUCTURE_CERTAIN` or `MANDATORY` (warden risk).
+  estimate into a band: `NONE`, `POSSIBLE`, `CAVERN_ONLY`, or `STRUCTURE_CERTAIN`.
   Only band changes are logged. It is the one heavy operation of the tick; nothing acts on it.
 - **The bot's own edits.** Blocks a bot placed (torches, planks, beds, seals) are recorded per dimension and
   never count as structure evidence. The record is persisted to `config/minecraftai/mining_assist_edits.json`,
@@ -138,7 +138,6 @@ are read in P0:
 | `detour.minFreeSlots`, `detour.startHpMargin`, `detour.lavaClearRadius` | 3, 4, 4 | Inventory reserve, extra hp margin to start, and how close a remembered lava cell may be. |
 | `route.bucketMs` | 100 | Server-wide millisecond budget for starting a detour route (`RouteBudget`); reconfigured live when the config reloads. |
 | `tick.startWorkMs`, `tick.abortWorkMs` | 38, 48 | Start and abort gates of the tick headroom; a running detour re-asks these before every break, route leg and drop chase (design 4.3/4.6). |
-| `safety.deepDarkVeto` | true | Whether the own-cell deep-dark biome vetoes a detour start and self-aborts a running one. |
 
 The other keys of the design (the remaining `poi.*`, `advisor.*`, `explore.*`) are parsed and validated but
 nothing reads them until their phase ships.
@@ -291,8 +290,7 @@ of changes it held back); `assist_sighting` for rare finds (at most 6 per window
 - Sightings are nominations. A future consumer must re-prove the exact cell through the ordinary observation
   path before acting on one.
 - The openness estimate needs about 16 ticks of sweep after arriving somewhere new before it is valid.
-- Sensing is underground only and only for the five task classes above. The mandatory warden-risk band is
-  scored and logged in P0 but does not stop the bot; that arrives with the POI phase.
+- Sensing is underground only and only for the five task classes above. Results are scored and logged in P0 but do not stop the bot; that arrives with the POI phase.
 - The placed-blocks record keeps one 8192-cell least-recently-used set per dimension id it has seen, and the
   sidecar file holds all of them (a full dimension is about 172 KB; a file over 8 MiB is refused on load and
   the record starts empty). A vanilla-plus-Fabric pack has a handful of dimensions, so this does not bind today; a

@@ -198,7 +198,10 @@ if [[ "${CI_STATIC_CHECK_ARTIFACTS:-0}" == 1 ]]; then
   inspected=0
   while IFS= read -r -d '' jar_file; do
     inspected=1
-    if jar tf "$jar_file" | grep -Eq 'io/github/zoyluo/minecraftai/(gametest/|command/MinecraftAi(Test|Verify)Subcommand)'; then
+    if ! jar_entries="$(jar tf "$jar_file")"; then
+      fail "could not list jar for artifact inspection: $jar_file"
+    fi
+    if grep -Eq 'io/github/zoyluo/minecraftai/(gametest/|command/MinecraftAi(Test|Verify)Subcommand)' <<<"$jar_entries"; then
       fail "verification harness leaked into jar: $jar_file"
     fi
   done < <(find build/libs -maxdepth 1 -type f -name '*.jar' -print0)

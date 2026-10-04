@@ -86,11 +86,9 @@ class PaceRulesTest {
     }
 
     @Test
-    void ownerPrioritiesRankWardenAboveEvadeAboveTaskAboveFollow() {
-        assertTrue(PaceOwner.WARDEN.priority() > PaceOwner.EVADE.priority());
+    void ownerPrioritiesRankEvadeAboveTaskAboveFollow() {
         assertTrue(PaceOwner.EVADE.priority() > PaceOwner.TASK.priority());
         assertTrue(PaceOwner.TASK.priority() > PaceOwner.FOLLOW.priority());
-        assertEquals(90, PaceOwner.WARDEN.priority());
         assertEquals(30, PaceOwner.FOLLOW.priority());
     }
 }

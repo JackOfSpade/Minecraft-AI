@@ -149,8 +149,7 @@ public final class MiningAssistLog {
                 "open_fraction", format(openness.fraction()),
                 "open_up_free", format(openness.upFree()),
                 "radius", radius,
-                "biome", state.biomeId().isEmpty() ? "-" : state.biomeId(),
-                "deep_dark", state.deepDark());
+                "biome", state.biomeId().isEmpty() ? "-" : state.biomeId());
     }
 
     /**

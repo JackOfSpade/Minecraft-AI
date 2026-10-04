@@ -103,6 +103,36 @@ final class BoatFollowSourceContractTest {
         assertTrue(boatFollow.contains("STUCK_WINDOW_TICKS"));
     }
 
+    @Test
+    void waterApproachScansObservedDryCellsOnceInsteadOfNestingStandabilitySearches() throws IOException {
+        String boatSupport = read("task/BoatSupport.java");
+        String launch = read("task/BoatLaunchTask.java");
+        int approachStart = boatSupport.indexOf("static Optional<BlockPos> findWaterApproach(AIPlayerEntity bot, Set<BlockPos> excluded)");
+        int approachEnd = boatSupport.indexOf("static boolean canObserveWater", approachStart);
+        String approach = boatSupport.substring(approachStart, approachEnd);
+
+        assertTrue(approach.contains("observedOpenWater(bot, world, origin)"));
+        assertTrue(approach.contains("observedStandable(bot, world, approach)"));
+        assertTrue(approach.contains("nearestObservedWaterDistanceSquared(approach, origin, observedWater)"));
+        assertTrue(approach.contains("Comparator.comparingInt(WaterApproach::waterDistanceSquared)"),
+                "approach selection must prefer the shore nearest water before bot distance");
+        assertFalse(approach.contains("nearestObservedStandable"),
+                "each water cell must not start a fresh observed-standability scan");
+        assertTrue(launch.contains("lastProblem = \"water_approach_no_launch_site\"")
+                        && launch.contains("rejectedWaterApproaches.add(waterApproach.immutable())"),
+                "an arrived approach without a launch site must be rejected before another search");
+    }
+
+    @Test
+    void wideBoatFixtureUsesTheReservedNegativeZLane() throws IOException {
+        String fixture = Files.readString(Path.of(
+                "src/gametest/java/io/github/zoyluo/minecraftai/task/BoatFollowGameTests.java"));
+
+        assertTrue(fixture.contains("private static final int FIXTURE_Z = -72")
+                        && fixture.contains("new BlockPos(FIXTURE_X, 4, FIXTURE_Z)"),
+                "the wide lake must stay outside the positive-Z GameTest structure grid");
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(MAIN.resolve(relative));
     }

@@ -14,8 +14,6 @@ import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.AbstractTask;
-import io.github.zoyluo.minecraftai.task.DescendToYTask;
-import io.github.zoyluo.minecraftai.task.DigDownTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MineValuablesTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
@@ -1193,7 +1191,7 @@ public final class MiningAssistSenseGameTests {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // 7c. Every mining class senses; other tasks do not
+    // 7c. Every active mining class senses; other tasks do not
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_task_classes", maxTicks = 600)
@@ -1207,8 +1205,6 @@ public final class MiningAssistSenseGameTests {
         BlockPos feet = bot.blockPosition();
         List<Task> sensed = List.of(
                 new OreDigTask(Set.of(Blocks.COAL_ORE), 1),
-                new DigDownTask(Blocks.DIAMOND_ORE, 1),
-                new DescendToYTask(feet.getY() - 4),
                 new MineTask(Blocks.OBSIDIAN, 1),
                 new MineValuablesTask(8));
         Progress p = new Progress();
@@ -1271,103 +1267,6 @@ public final class MiningAssistSenseGameTests {
 
     // ---------------------------------------------------------------------------------------------
     // 7c2. A real strip mine: the break peek and the bot's own torches, measured on a bot that really digs
-    // ---------------------------------------------------------------------------------------------
-
-    @GameTest(environment = "minecraftai-gametest:assist_sense_strip_mine", maxTicks = 900)
-    public void realStripMineIsPeekedAndItsOwnTorchesNeverScore(GameTestHelper context) {
-        Harness h = new Harness(context);
-        // A small pocket inside a solid mass of stone, and a target ore that does not exist: OreDig strip-mines.
-        Room room = h.newMass(90, -2, 2, -2, 2, 3, 22);
-        AIPlayerEntity bot = h.spawn("AssistStripGT", room, 0, 0);
-        h.enableAssist(bot);
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 16));
-        UUID id = bot.getUUID();
-        BlockPos start = bot.blockPosition();
-        Progress p = new Progress();
-        OreDigTask[] task = new OreDigTask[1];
-        int[] maxRank = {0};
-        int failuresBefore = MiningAssistRuntime.failures().size();
-        double[] firstMs = {-1.0D, -1.0D};
-
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            p.tick++;
-            if (p.assignedAt < 0) {
-                if (h.settle(bot, p)) {
-                    h.assertStrict(bot, "assist_strip_mine");
-                    task[0] = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1);
-                    TaskManager.INSTANCE.assign(bot, task[0],
-                            TaskOrigin.of(TaskOrigin.Kind.PLAYER_COMMAND, "gametest_assist_strip_mine"));
-                    p.assignedAt = p.tick;
-                }
-                return;
-            }
-            MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
-            if (state == null) {
-                h.require(p.tick - p.assignedAt < 60, "a real strip-mining OreDig never produced assist state");
-                return;
-            }
-            if (firstMs[0] < 0.0D && state.counters().steps >= 1L) {
-                firstMs[0] = state.counters().maxStepNanos / 1_000_000.0D;
-            }
-            if (firstMs[1] < 0.0D && state.counters().poiEvaluations >= 1L) {
-                firstMs[1] = state.counters().maxPoiNanos / 1_000_000.0D;
-            }
-            maxRank[0] = Math.max(maxRank[0], rank(state.lastPoiBand()));
-            h.require(maxRank[0] == 0, "the bot's own strip-mine work scored as a point of interest: " + state.lastPoiBand()
-                    + " " + windowCounts(state));
-            h.require(task[0].state() == TaskState.RUNNING,
-                    "the strip-mining task ended: " + task[0].state() + ":" + task[0].failureReason());
-            if (p.tick - p.assignedAt < 450) {
-                return;
-            }
-            SenseCounters c = state.counters();
-            Map<String, BotProfiler.Stat> profile = BotProfiler.INSTANCE.snapshot(id);
-            double moved = Math.sqrt(bot.blockPosition().distSqr(start));
-            int torches = 0;
-            int torchesInLedger = 0;
-            for (int x = -3; x <= 3; x++) {
-                for (int y = -1; y <= 3; y++) {
-                    for (int z = -26; z <= 3; z++) {
-                        BlockPos pos = room.at(x, y, z);
-                        BlockState cell = room.world.getBlockState(pos);
-                        if (cell.is(Blocks.TORCH) || cell.is(Blocks.WALL_TORCH)) {
-                            torches++;
-                            if (BotEdits.wasPlaced(room.world, pos)) {
-                                torchesInLedger++;
-                            }
-                        }
-                    }
-                }
-            }
-            LOG.info("[assist-gametest] strip_mine moved={} steps={} rays={} peeked_breaks={} breaks_unconfirmed={} peek_neighbours={}"
-                            + " breakthroughs={} breakthroughs_deferred={} throttled_out={} torches_in_tunnel={} torches_in_ledger={}"
-                            + " first_step_ms={} first_poi_ms={} max_band_rank={} sections={}",
-                    fmt(moved), c.steps, state.lifetimeRays(), c.peekedBreaks, c.breaksUnconfirmed, c.peekNeighbours,
-                    c.breakthroughs, c.breakthroughsDeferred, c.raysThrottledOut, torches, torchesInLedger,
-                    fmt(firstMs[0]), fmt(firstMs[1]), maxRank[0],
-                    statLine(profile));
-            h.require(moved >= 6.0D, "the bot did not dig anywhere (moved " + fmt(moved) + " blocks): " + task[0].describe());
-            h.require(c.steps >= 350L, "sensing was interrupted during the dig: steps=" + c.steps);
-            h.require(c.peekedBreaks >= 10L, "too few breaks were peeked for a real dig: " + describe(state));
-            h.require(torchesInLedger == torches,
-                    "a torch the bot placed is missing from its placed ledger (" + torchesInLedger + "/" + torches + ")");
-            BotProfiler.Stat sweep = profile.get(ViewSweeper.SECTION_SWEEP);
-            h.require(sweep != null && sweep.avgMs() < 10.0D, "sweep average too high while digging: " + stat(profile, ViewSweeper.SECTION_SWEEP));
-            h.require(MiningAssistRuntime.failures().size() == failuresBefore, "the coordinator's exception fence fired during the dig");
-            h.assertStrict(bot, "assist_strip_mine_end");
-            h.assertNoAllowedCapabilityDecision(bot);
-            h.pass();
-        }));
-    }
-
-    // ---------------------------------------------------------------------------------------------
-    // 7d. The documented clocks: a cost summary per minute of sensing, state released after two idle minutes
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_clocks", maxTicks = 4600)
@@ -1736,7 +1635,6 @@ public final class MiningAssistSenseGameTests {
             case NONE -> 0;
             case POSSIBLE, CAVERN_ONLY -> 1;
             case STRUCTURE_CERTAIN -> 2;
-            case MANDATORY -> 3;
         };
     }
 

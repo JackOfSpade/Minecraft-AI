@@ -104,10 +104,9 @@ class DetourSafetyGateSourceContractTest {
         assertTrue(body.contains("DangerWatcher.observedLavaInThreatBox(bot, ore).isPresent()"));
         assertTrue(body.contains("cfg.detour().lavaClearRadius()"));
         assertTrue(body.contains("state.hazards().anyLavaWithin("));
-        // Item 8: the biome refresh is gated by staleOrNever, never a bare subtraction.
+        // Item 8: the ordinary biome refresh is gated by staleOrNever, never a bare subtraction.
         assertTrue(body.contains("MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)"));
         assertTrue(body.contains("PoiDetector.refreshBiome(bot, state, world, tick)"));
-        assertTrue(body.contains("cfg.safety().deepDarkVeto() && state.deepDark()"));
         assertFalse(Pattern.compile("tick\\s*-\\s*state\\.biomeTick\\(\\)\\s*>").matcher(body).find(),
                 "never a bare subtraction against a NEVER-capable field");
         // Item 9: fails closed on a missing state and on a stale score.
@@ -118,9 +117,6 @@ class DetourSafetyGateSourceContractTest {
         assertTrue(body.contains("candidate.hysteresis().satisfied(tick)"));
         assertTrue(body.contains("SafeGate.candidatePending(state.lastPoiBand(), anyCandidateSatisfied,"));
         assertTrue(body.contains("CAVERN_BLOCKS_DETOUR"));
-        // P2: the no-detour zone now reads the real mandatory-repeat latch instead of a hard-coded false.
-        assertTrue(body.contains(".inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.blockPosition()))"),
-                "the no-detour zone reads MandatoryLatch.inNoDetourZone");
         // Item 10.
         assertTrue(body.contains("state.hazards().anyTrapWithin("));
     }
@@ -129,12 +125,9 @@ class DetourSafetyGateSourceContractTest {
     void aMissingStateFailsClosedThroughPoiEvidenceOnly() throws IOException {
         String body = method(code(),
                 "public static SafeGateInputs inputs(AIPlayerEntity bot, SafeGate.Stage stage, BlockPos pose, BlockPos ore) {");
-        int item8 = body.indexOf("stage.reads(8)");
         int item9 = body.indexOf("stage.reads(9)");
-        assertTrue(item8 >= 0 && item9 > item8);
-        String item8Block = body.substring(item8, item9);
+        assertTrue(item9 >= 0);
         String item9Block = body.substring(item9);
-        assertTrue(item8Block.contains("b.deepDark(false)"), "item 8 answers all-clear when there is no state");
         assertTrue(item9Block.contains("b.poiEvidenceStale(true)"), "item 9 is the only backstop for a missing state");
     }
 

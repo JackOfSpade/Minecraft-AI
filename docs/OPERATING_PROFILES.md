@@ -92,7 +92,6 @@ The `behaviour` section of `minecraftai.json` holds the companion behaviour swit
 | `behaviour.pace.enabled` | `true` | The natural sprint/walk/sneak policy for controller-driven travel (a path or route walk). Off: the earlier always-as-asked behaviour. |
 | `behaviour.pace.routeSprintDistance` | `8.0` | A route sprints while its goal is at least this far away (blocks). |
 | `behaviour.pace.routeWalkDistance` | `4.5` | A route walks once its goal is this close or closer; in between the pace is kept. |
-| `behaviour.pace.quietZoneCaution` | `true` | Cap the pace in quiet zones (sculk, an ancient city) so a bot does not wake a warden. |
 | `behaviour.targeting.hostileBots` | `true` | A foreign bot (a fake player that is not one of ours, e.g. a PvP bot) that attacks the owner or a Minecraft-AI bot becomes a target. The owner and every Minecraft-AI bot are never targets. |
 | `behaviour.targeting.ownerVision` | `true` | What the owner can see may nominate a hostile bot as a target (the bot still needs its own reach and line of sight to strike). |
 | `behaviour.targeting.aggressorMemoryTicks` | `600` | How long a hostile bot stays marked after its last hostile act (level game ticks). |
@@ -104,7 +103,6 @@ The `behaviour` section of `minecraftai.json` holds the companion behaviour swit
 | `behaviour.follow.escortOnly` | `true` | A following bot only knocks back what is within melee range and keeps following; it does not stop to fight. |
 | `behaviour.follow.walkGap` | `6.0` | The follower walks when the gap to the followed player is at or below this (blocks). |
 | `behaviour.follow.sprintGap` | `10.0` | The follower sprints from this gap on. |
-| `behaviour.warden.sneakAway` | `true` | Wardens are never fought. A bot sneaks away from a calm one and sprints away from one that hunts it. |
 | `behaviour.combat.aim.maxTurnDegPerSec` | `540.0` | Human aim: the fastest a companion's head turns (degrees per second) while it aims a weapon or strikes; no instant spin-and-shoot. A shot leaves only when the aim is within 1.5 degrees of the shot direction (with a settle jitter that fades: sigma = 0.3 deg + 2.5 deg * exp(-t/0.25 s) after a fast turn), and a melee strike lands only on the entity under the crosshair (vanilla's pick along the real look vector within the weapon's vanilla attack range). Walking, mining and placing keep their own facing. |
 | `behaviour.perception.enabled` | `true` | Realistic noticing of creatures (docs/PERCEPTION.md): a companion notices a mob, player or bot only when it SEES it (inside the view cone of its real look vector, a clear line, within `perception.radius`) for the reaction time, or hears it (vanilla vibrations) and sees it, or is struck by it. Nobody is noticed from behind while silent. Off: the earlier omnidirectional line of sight exactly (no listener is registered). Items, boats and deliberate searches for animals and villagers are always omnidirectional. |
 | `behaviour.perception.reactionBaseSeconds` | `0.5` | The reaction time up close (seconds). Every distance has its own value: `(base + (at64 - base) * distance / 64) * angleFactor * sneakFactor / visibility`. |
@@ -113,7 +111,7 @@ The `behaviour` section of `minecraftai.json` holds the companion behaviour swit
 | `behaviour.perception.peripheralHalfAngleDeg` | `100` | The edge of the view field (a 200 degree field); beyond it (behind) nothing is seen, only heard. |
 | `behaviour.perception.peripheralMultiplier` | `2.0` | The reaction time factor at the peripheral edge (linear from 1 at the full attention angle); 1..20. |
 | `behaviour.perception.sneakMultiplier` | `2.0` | How much longer a sneaking creature takes to notice; 1..20. |
-| `behaviour.perception.hearing.listenerRadius` | `16` | The vanilla vibration radius in blocks (the Warden's; a sculk sensor's is 8). Vanilla decides sneaking (silent), wool (blocks vibrations) and travel time. |
+| `behaviour.perception.hearing.listenerRadius` | `16` | The vanilla vibration radius in blocks. Vanilla decides sneaking (silent), wool (blocks vibrations) and travel time. |
 
 These switches only exist as configuration from this version on; the behaviours they name are switched on by the jobs that implement them, and until then a switch has no effect.
 

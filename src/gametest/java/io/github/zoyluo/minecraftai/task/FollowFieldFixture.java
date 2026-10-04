@@ -21,7 +21,6 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
@@ -151,13 +150,6 @@ final class FollowFieldFixture {
         zombie.setNoAi(noAi);
         zombie.setItemSlot(EquipmentSlot.HEAD, new ItemStack(net.minecraft.world.item.Items.LEATHER_HELMET)); // no sun burn
         return add(zombie, dx, dz);
-    }
-
-    Warden warden(double dx, double dz) {
-        Warden warden = EntityType.WARDEN.create(level, EntitySpawnReason.COMMAND);
-        warden.setPersistenceRequired();
-        warden.setNoAi(true);
-        return add(warden, dx, dz);
     }
 
     Creeper creeper(double dx, double dz) {

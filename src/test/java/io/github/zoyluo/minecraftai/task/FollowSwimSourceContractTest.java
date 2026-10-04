@@ -1014,24 +1014,6 @@ final class FollowSwimSourceContractTest {
                 "task/SurfaceWaterRecoveryGameTests.java",
                 "surface_water_recovery_game_tests_strict_diagonal_rescue_rejects_visible_solid_corner");
         assertGameTestEnvironment(
-                "task/SurfaceWaterRecoveryGameTests.java",
-                "surface_water_recovery_game_tests_strict_clear_water_shaft_starts_physical_oxygen_ascent");
-        assertGameTestEnvironment(
-                "task/SurfaceWaterRecoveryGameTests.java",
-                "surface_water_recovery_game_tests_strict_solid_shaft_occluder_blocks_unseen_oxygen_ascent");
-        assertGameTestEnvironment(
-                "task/SurfaceWaterRecoveryGameTests.java",
-                "surface_water_recovery_game_tests_operator_rescue_step_is_cancelled_before_strict_reproof");
-        assertGameTestEnvironment(
-                "task/SurfaceWaterRecoveryGameTests.java",
-                "surface_water_recovery_game_tests_strict_visible_empty_support_is_known_invalid");
-        assertGameTestEnvironment(
-                "task/SurfaceWaterRecoveryGameTests.java",
-                "surface_water_recovery_game_tests_operator_deadline_does_not_survive_strict_context_round_trip");
-        assertGameTestEnvironment(
-                "task/SurfaceWaterRecoveryGameTests.java",
-                "surface_water_recovery_game_tests_guarded_lease_blocks_ordinary_input_but_lava_emergency_preempts");
-        assertGameTestEnvironment(
                 "task/FollowSwimGameTests.java",
                 "follow_swim_game_tests_strict_route_search_resumes_after_pending_slice");
         assertGameTestEnvironment(
@@ -1064,7 +1046,7 @@ final class FollowSwimSourceContractTest {
         String recovery = read("task/FollowStuckRecovery.java");
         String dig = read("task/FollowDigOut.java");
 
-        int adjacent = recovery.indexOf("beginStep(bot, current, best)");
+        int adjacent = recovery.indexOf("beginStep(bot, current, candidate)");
         int replan = recovery.indexOf("follow_recovery_baritone_required");
         assertTrue(adjacent >= 0 && replan > adjacent,
                 "recovery must exhaust verified local steps before requesting a fresh Baritone route");
@@ -1075,6 +1057,16 @@ final class FollowSwimSourceContractTest {
         assertTrue(dig.contains("RetiredNavigationTask.legacyExcavationDisabled()")
                         && dig.contains("legacy_navigation_retired"),
                 "the retained legacy entry point must fail closed and leave an audit record");
+    }
+
+    @Test
+    void stuckRecoveryReconcilesOnlyItsExactStepLease() throws IOException {
+        String recovery = read("task/FollowStuckRecovery.java");
+        assertTrue(recovery.contains("pack.cancelStep(stepLease);")
+                        && recovery.contains("pack.releaseStepLease(stepLease);")
+                        && recovery.contains("pack.releaseStepLease(lease);")
+                        && !recovery.contains("pack.cancelStep();"),
+                "stuck recovery must release only its own cancelled or completed guarded lease");
     }
 
     @Test

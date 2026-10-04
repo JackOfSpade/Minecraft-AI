@@ -251,7 +251,7 @@ public final class AStarPathfinder {
         }
         enumerator.setPathGoal(effectiveGoal);
         CacheKey cacheKey = new CacheKey(
-                world.dimension().identifier().toString(),
+                world,
                 effectiveStart, effectiveGoal,
                 (int) (maxNodes + heuristicWeight * 1000), maxMillis,
                 canPillar, allowDig, minimumY, cacheVersion);
@@ -391,7 +391,10 @@ public final class AStarPathfinder {
         if (state.getCollisionShape(world, pos).isEmpty()) {
             return true;  // already passable
         }
-        return state.getDestroySpeed(world, pos) >= 0; // diggable (bedrock's -1 is excluded)
+        // Keep endpoint admission in lockstep with neighbor expansion. A goal behind a protected
+        // or player-built block must be snapped or rejected, not accepted as a dig target that
+        // no DIG_THROUGH edge can ever enter.
+        return NeighborEnumerator.isMineable(world, pos);
     }
 
     private static PathfindingResult cached(CacheKey key, long startTime) {
@@ -440,8 +443,13 @@ public final class AStarPathfinder {
         return System.currentTimeMillis() - startTime;
     }
 
+    /**
+     * The world instance belongs in the key: distinct ServerLevels may share a dimension id while
+     * holding different terrain (notably during sequential server lifecycles in one JVM). The
+     * bounded, short-lived cache is cleared at every runtime world boundary.
+     */
     private record CacheKey(
-            String dimension,
+            ServerLevel world,
             BlockPos start,
             BlockPos goal,
             int maxNodes,

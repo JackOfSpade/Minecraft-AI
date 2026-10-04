@@ -89,9 +89,7 @@ public final class PoiRegistry {
      * that has not met the re-ask rule ({@code >= RE_ASK_MIN_TICKS} old AND {@code currentScore - entry.score
      * >= RE_ASK_SCORE_GROWTH}), or within {@link #SAME_LABEL_RADIUS_BLOCKS} of a STOPPED entry with the same
      * label. Prunes expired entries first (STOPPED older than {@link #STOPPED_TTL_TICKS}, DECLINED older than
-     * {@link #DECLINED_TTL_TICKS}). Never called for MANDATORY candidates (design 6.4: "A DECLINED or STOPPED
-     * registry entry never suppresses a mandatory candidate" — enforced by the caller never invoking this for a
-     * mandatory band, not by this method).
+     * {@link #DECLINED_TTL_TICKS}).
      */
     public static boolean suppressed(UUID botId, String dimensionKey, BlockPos anchor, String label, double currentScore, int nowTick) {
         List<Entry> entries = ENTRIES.get(botId);

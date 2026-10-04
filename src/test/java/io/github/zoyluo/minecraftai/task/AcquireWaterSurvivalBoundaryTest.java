@@ -14,7 +14,7 @@ class AcquireWaterSurvivalBoundaryTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
-    void visibleWaterAndVanillaBucketInteractionAreTheOnlySuccessPath() throws IOException {
+    void visibleWaterAndVanillaBucketInteractionStayWithinObservedBaritonePolicy() throws IOException {
         String task = read("task/AcquireWaterTask.java");
         int scan = task.indexOf("nearestObservableWaterSource");
         int visibility = task.indexOf("ObservableWorldQuery.canObserveCell(bot, candidate)", scan);
@@ -32,16 +32,17 @@ class AcquireWaterSurvivalBoundaryTest {
         assertFalse(task.contains("InventoryAction.giveItem("));
         assertFalse(task.contains("InventoryAction.removeItems("));
         assertFalse(task.contains("teleportTo("));
-        assertTrue(task.contains("InCellWalk.beginEdgeShift(")
-                        && task.contains("InCellWalk.beginEdgeReturn("),
-                "multi-level cave ascent must pay for an isolated support with a bounded"
-                        + " sneak-bridge placement, walked with the movement keys (lean, place, walk back)");
+        assertTrue(task.contains("requireBaritoneSurfaceRoute(bot)")
+                        && task.contains("acquire_water_surface_baritone_required"),
+                "surface return must delegate movement to the observed-terrain Baritone route");
+        assertFalse(task.contains("ascendOneStair("),
+                "retired local stair excavation must not remain as a surface-return fallback");
         assertFalse(task.contains("FakePlayerMotion."),
-                "the sneak-bridge lean and its return are walked steps, never a teleport primitive");
+                "water acquisition must not use a fake-player movement primitive");
         assertFalse(task.contains("FakePlayerMotion.stepTo("),
                 "water acquisition itself must not manufacture adjacent travel");
         assertFalse(task.contains("FakePlayerMotion.jumpTo("),
-                "ascent landing must remain owned by the ordinary surface path executor");
+                "water acquisition itself must not manufacture adjacent travel");
         assertFalse(task.contains("EMERGENCY_TELEPORT"));
         assertFalse(task.contains("OreProspector"));
     }
@@ -83,58 +84,6 @@ class AcquireWaterSurvivalBoundaryTest {
     }
 
     @Test
-    void ascentWorldReadsStayBehindObservableCellGates() throws IOException {
-        String task = read("task/AcquireWaterTask.java");
-        int inspect = task.indexOf("private static AscentCandidate inspectAscentCandidate");
-        int arcLoop = task.indexOf("for (BlockPos cell :", inspect);
-        int arcGate = task.indexOf("observableCellOrBlock(bot, cell)", arcLoop);
-        int arcRead = task.indexOf("world.getBlockState(cell)", arcLoop);
-        int supportGate = task.indexOf("observableCellOrBlock(bot, support)", arcRead);
-        int supportRead = task.indexOf("world.getBlockState(support)", supportGate);
-
-        assertTrue(inspect >= 0 && arcLoop > inspect && arcGate > arcLoop && arcRead > arcGate,
-                "jump-arc state must be read behind an observable-cell gate");
-        assertTrue(supportGate > arcRead && supportRead > supportGate,
-                "ascent support state must be read only after the visible arc obstruction is"
-                        + " removed and its own observable-cell gate passes");
-        assertTrue(task.contains("hasObservableAdjacentFluid(bot, world, cell)"),
-                "adjacent fluid evidence must use the observable-world adapter");
-        assertTrue(task.contains("ObservableWorldQuery.canObserveCell(bot, pos)")
-                        && task.contains("ObservableWorldQuery.canObserveBlock(bot, pos)"),
-                "empty and solid ascent cells must each use the matching observable query");
-        assertFalse(task.contains("firstAscentObstruction(ServerLevel"),
-                "a second ungated obstruction scan must not bypass the inspected arc result");
-    }
-
-    @Test
-    void carvedRelocationRechecksVisibleDryCellsBeforePhysicalMovement() throws IOException {
-        String task = read("task/AcquireWaterTask.java");
-        int inspect = task.indexOf(
-                "private static CarvedRelocationCandidate inspectCarvedAscentRelocation");
-        int orderedCells = task.indexOf(
-                "new BlockPos[]{target.above(), target}", inspect);
-        int cellGate = task.indexOf("observableCellOrBlock(bot, cell)", orderedCells);
-        int stateRead = task.indexOf("world.getBlockState(cell)", cellGate);
-        int fluidGuard = task.indexOf("hasObservableAdjacentFluid(bot, world, cell)", stateRead);
-        int landingProof = task.indexOf(
-                "safeObservableRelocation(bot, world, target)", fluidGuard);
-        int tick = task.indexOf("private boolean tickAscentRelocation");
-        int movement = task.indexOf(
-                "startSurfacePathTo(ascentRelocationTarget)", tick);
-
-        assertTrue(inspect >= 0 && orderedCells > inspect,
-                "carved relocation must inspect head before feet");
-        assertTrue(cellGate > orderedCells && stateRead > cellGate && fluidGuard > stateRead,
-                "each carved relocation block read must follow its observable gate and fluid check");
-        assertTrue(landingProof > fluidGuard,
-                "support/standability proof must happen only after both pocket cells are clear");
-        assertTrue(movement >= 0,
-                "carved relocation movement must stay with the ordinary surface path executor");
-        assertTrue(task.contains("MAX_ASCENT_RELOCATIONS_PER_LEVEL"),
-                "carved relocation must retain the bounded per-level movement budget");
-    }
-
-    @Test
     void reusableSurfaceEgressReadsStayBehindObservableStandCellGates() throws IOException {
         String task = read("task/AcquireWaterTask.java");
         int helper = task.indexOf("private static boolean hasReusableSurfaceEgress");
@@ -164,6 +113,20 @@ class AcquireWaterSurvivalBoundaryTest {
                         && uphillStateRead > uphillGate
                         && supportStateRead > uphillStateRead,
                 "uphill surface candidate and support reads must follow its observable gate");
+    }
+
+    @Test
+    void activeBaritoneSurfaceReturnIsNotCancelledOnItsNextTaskTick() throws IOException {
+        String task = read("task/AcquireWaterTask.java");
+        int route = task.indexOf("private void requireBaritoneSurfaceRoute");
+        int routeEnd = task.indexOf("private boolean fillReachableReturnWater", route);
+        assertTrue(route >= 0 && routeEnd > route, "surface-route helper boundary is missing");
+        String body = task.substring(route, routeEnd);
+
+        assertTrue(body.contains("retryPath(bot, surfaceAnchor, false)"),
+                "the surface return must start or continue its observed route");
+        assertFalse(body.contains("clearReturnSurfaceWork(bot)"),
+                "a repeated RETURN_SURFACE tick must not cancel the route it started previously");
     }
 
     private static String read(String relative) throws IOException {

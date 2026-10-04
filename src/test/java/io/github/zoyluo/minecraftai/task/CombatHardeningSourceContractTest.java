@@ -81,12 +81,12 @@ final class CombatHardeningSourceContractTest {
     }
 
     @Test
-    void neverMeleeTableCoversWardenWitherAndHeartBoundCreakingAndGuardHonoursIt() throws IOException {
+    void neverMeleeTableCoversBossesAndHeartBoundCreakingAndGuardHonoursIt() throws IOException {
         String core = read("task/CombatCore.java");
         int table = core.indexOf("static boolean isMeleeForbiddenThreat");
         String body = core.substring(table, core.indexOf("public static boolean isFriendly"));
-        for (String forbidden : new String[]{"Creeper", "EnderMan", "Warden", "WitherBoss", "Ghast",
-                "Shulker", "EnderDragon", "Creaking creaking && creaking.isHeartBound()"}) {
+        for (String forbidden : new String[]{"Creeper", "EnderMan", "isBossThreat(entity)", "Ghast",
+                "Shulker", "Creaking creaking && creaking.isHeartBound()"}) {
             assertTrue(body.contains(forbidden), "missing from the never-melee table: " + forbidden);
         }
         assertTrue(core.contains("entity instanceof Enemy || entity instanceof Monster"),
@@ -102,8 +102,8 @@ final class CombatHardeningSourceContractTest {
                 "GuardTask must apply the forbid rule, a lost-sight exit and the strike-pose gate");
         String watcher = read("task/DangerWatcher.java");
         assertTrue(watcher.contains("return CombatCore.hostileTo(bot, entity);"));
-        assertTrue(read("task/EvadeTask.java").contains("CombatCore.WARDEN_ESCAPE_DISTANCE"),
-                "a warden flight must clear the sonic boom range");
+        assertTrue(read("task/EvadeTask.java").contains("return ESCAPE_DISTANCE;"),
+                "bosses use the ordinary Evade escape leg");
     }
 
     @Test

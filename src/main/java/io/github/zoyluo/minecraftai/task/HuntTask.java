@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -137,12 +138,18 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private int targetAuxiliaryBaseline;
     private long targetAuxiliaryPickupBaseline;
     private int pickupSweepCursor;
+    // Each admitted sweep stance is a one-way recovery attempt for this pickup transaction.
+    // Reusing it after Baritone releases would trap the bot on the same side of a new wall.
+    private final Set<BlockPos> pickupSweepVisited = new HashSet<>();
     private BlockPos pickupOrigin;
     private BlockPos pickupReturnAnchor;
     private Phase phase = Phase.ACQUIRE;
     private LivingEntity target;
     private BlockPos attackPose;
     private BlockPos attackPreyCell;
+    // The currently admitted bounded approach leg. This differs from attackPose while a distant
+    // visible prey is being approached through normal-radius observed terrain.
+    private BlockPos approachLeg;
     private BlockPos approachStuckPos; // Approach-stuck detection: the last recorded stand position
     private int approachStuckTick;     // The tick at which that stand position was recorded
     private int roamCount;             // Number of roam-to-new-tile attempts while searching for prey
@@ -245,6 +252,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         targetAuxiliaryBaseline = HarvestCore.countInventoryItems(bot, PREY_AUXILIARY_DROPS);
         targetAuxiliaryPickupBaseline = pickedUpAuxiliary(bot);
         pickupSweepCursor = 0;
+        pickupSweepVisited.clear();
         pickupOrigin = null;
         pickupReturnAnchor = null;
         roamCount = 0;
@@ -448,10 +456,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         phase = Phase.RETURN_SURFACE;
         surfaceReturnStartTick = elapsed;
         BlockPos destination = new BlockPos(anchor.x(), anchor.y(), anchor.z());
-        int returnFloor = Math.min(
-                bot.blockPosition().getY(), surfaceFloorY(anchor));
-        SurfacePathStart start = HuntSurfaceRoutes.startExactSurfacePath(
-                bot, destination, returnFloor, null);
+        SurfacePathStart start = startObservedSurfaceReturnLeg(bot, destination, anchor);
         if (start == SurfacePathStart.UNREACHABLE) {
             fail("hunt_surface_return_unreachable anchor=" + destination.toShortString()
                     + " from=" + bot.blockPosition().toShortString());
@@ -488,10 +493,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
-            int returnFloor = Math.min(
-                    bot.blockPosition().getY(), surfaceFloorY(anchor));
-            SurfacePathStart start = HuntSurfaceRoutes.startExactSurfacePath(
-                    bot, destination, returnFloor, null);
+            SurfacePathStart start = startObservedSurfaceReturnLeg(bot, destination, anchor);
             if (start == SurfacePathStart.UNREACHABLE) {
                 fail("hunt_surface_return_unreachable anchor=" + destination.toShortString()
                         + " from=" + bot.blockPosition().toShortString());
@@ -501,6 +503,17 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                         "to", destination.toShortString());
             }
         }
+    }
+
+    /** Returns to a persisted surface anchor through normal-radius observed legs. */
+    private SurfacePathStart startObservedSurfaceReturnLeg(
+            AIPlayerEntity bot, BlockPos destination, HuntSearchCursor.SurfaceAnchor anchor) {
+        int returnFloor = Math.min(bot.blockPosition().getY(), surfaceFloorY(anchor));
+        BlockPos leg = HuntSurfaceRoutes.nextObservedSurfaceLeg(bot, destination, returnFloor);
+        if (leg == null) {
+            return SurfacePathStart.RETRY;
+        }
+        return HuntSurfaceRoutes.startExactSurfacePath(bot, leg, returnFloor, null);
     }
 
     private static String dimension(AIPlayerEntity bot) {
@@ -528,6 +541,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         // then mistake that real pickup for pre-existing food and wait forever.
         captureTargetTransactionEvidence(bot);
         approachStuckPos = null;
+        approachLeg = null;
         approachStuckTick = elapsed;
         lastProgressTick = elapsed;
         bestApproachDistance = target == null
@@ -558,10 +572,30 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (bot.blockPosition().equals(attackPose)) {
             return SurfacePathStart.STARTED;
         }
-        return HuntSurfaceRoutes.startExactSurfacePath(
-                bot, attackPose,
-                HuntSurfaceRoutes.digBreakthroughFloor(bot.blockPosition(), attackPose, surfaceFloorY(bot)),
+        BlockPos legDestination = HuntSurfaceRoutes.nextObservedSurfaceLeg(
+                bot, attackPose, surfaceFloorY(bot));
+        if (legDestination == null) {
+            return SurfacePathStart.RETRY;
+        }
+        // A visible animal may be farther away than the ordinary terrain admission radius.
+        // Prove and walk one normal-radius leg at a time; the final attack/drop cells are only
+        // admitted when the bot has physically reached a position that can observe their route.
+        if (legDestination.equals(attackPose)) {
+            SurfaceRouteProof dropRecovery = HuntSurfaceRoutes.proveSurfaceRoute(
+                    bot, attackPreyCell, surfaceFloorY(bot), attackPose);
+            if (dropRecovery != SurfaceRouteProof.SAFE) {
+                return dropRecovery == SurfaceRouteProof.RETRY
+                        ? SurfacePathStart.RETRY : SurfacePathStart.UNREACHABLE;
+            }
+        }
+        SurfacePathStart started = HuntSurfaceRoutes.startExactSurfacePath(
+                bot, legDestination,
+                HuntSurfaceRoutes.digBreakthroughFloor(bot.blockPosition(), legDestination, surfaceFloorY(bot)),
                 returnAnchor, true);
+        if (started == SurfacePathStart.STARTED) {
+            approachLeg = legDestination.immutable();
+        }
+        return started;
     }
 
     private boolean isSafePreyPose(AIPlayerEntity bot, LivingEntity prey) {
@@ -619,22 +653,19 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     || !isObservableStandCandidate(bot, candidate, current, floorY)) {
                 continue;
             }
+            // Each candidate gets a route proof for its next normal-radius leg. This keeps a
+            // blocked nearest attack pose from hiding a later, reachable side of the same prey.
+            BlockPos leg = HuntSurfaceRoutes.nextObservedSurfaceLeg(bot, candidate, floorY);
+            if (leg == null) {
+                continue;
+            }
             SurfaceRouteProof outbound = HuntSurfaceRoutes.provePreyApproachRoute(
-                    bot, candidate, floorY, null);
+                    bot, leg, floorY, current);
             if (outbound == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
             }
-            if (outbound != SurfaceRouteProof.SAFE) {
-                continue;
-            }
-            SurfaceRouteProof dropRecovery = HuntSurfaceRoutes.proveSurfaceRoute(
-                    bot, preyCell, floorY, candidate);
-            if (dropRecovery == SurfaceRouteProof.RETRY) {
-                retryObserved = true;
-                continue;
-            }
-            if (dropRecovery == SurfaceRouteProof.SAFE) {
+            if (outbound == SurfaceRouteProof.SAFE) {
                 return AttackPoseSelection.safe(candidate, preyCell);
             }
         }
@@ -691,6 +722,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private void clearAttackIntent() {
         attackPose = null;
         attackPreyCell = null;
+        approachLeg = null;
         approachStuckPos = null;
     }
 
@@ -735,9 +767,14 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         int rejectedUntil = elapsed + WET_PREY_REJECTION_TICKS;
         unsafePreyRejectedUntil.put(prey.getUUID(), rejectedUntil);
-        EpisodeMemory.INSTANCE.exclude(
-                bot.getUUID(), prey.blockPosition(),
-                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+        // A water-rescue handoff invalidates the current observed route, rather than proving the
+        // animal permanently unreachable.  Its short retry cooldown is enough to prevent an
+        // immediate retarget once dry ground is restored.
+        if (!"surface_route_lost".equals(reason)) {
+            EpisodeMemory.INSTANCE.exclude(
+                    bot.getUUID(), prey.blockPosition(),
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+        }
         BotLog.action(bot, "hunt_unsafe_prey_rejected",
                 "prey", prey.getUUID(),
                 "at", prey.blockPosition().toShortString(),
@@ -750,6 +787,14 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         target = nearestPrey(bot);
         if (target != null) {
             beginApproach(bot);
+            return;
+        }
+        // If the only visible prey just led this hunt into water, keep the physical rescue
+        // result rather than burning the no-progress budget on blind roams while its bounded
+        // rejection window is active. Other eligible prey still win above; when this cooldown
+        // expires normal acquisition resumes and can reconsider the original animal.
+        if (!wetPreyRejectedUntil.isEmpty() || !unsafePreyRejectedUntil.isEmpty()) {
+            lastProgressTick = elapsed;
             return;
         }
         // No prey nearby (64 blocks) -> roam to a new tile first to find more, trying to reach the
@@ -1012,7 +1057,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         BlockPos at = bot.blockPosition();
         BlockPos activeGoal = bot.getActionPack().activePathGoal();
-        boolean staleGoal = activeGoal != null && !activeGoal.equals(attackPose);
+        boolean staleGoal = activeGoal != null
+                && (approachLeg == null || !activeGoal.equals(approachLeg));
         if (staleGoal) {
             bot.getActionPack().stopAll();
         }
@@ -1184,6 +1230,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         bot.getActionPack().stopAll();
         pickupGrace = 0;
         pickupSweepCursor = 0;
+        pickupSweepVisited.clear();
         lastProgressTick = elapsed;
         phase = Phase.PICKUP;
         checkpointDirty = true;
@@ -1281,8 +1328,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             if ((auxiliaryPickupObserved || pickupGrace >= BLIND_PICKUP_SWEEP_DELAY)
                     && startNextPickupSweepStep(bot)) {
                 pickupMovementActive = true;
-            } else if (pickupOrigin != null && safePickupCellRoute(bot, pickupOrigin)) {
-                pickupMovementActive = approachKnownPickupCell(bot, pickupOrigin);
+            } else {
+                boolean directRoute = pickupOrigin != null && safePickupCellRoute(bot, pickupOrigin);
+                if (directRoute) {
+                    pickupMovementActive = approachKnownPickupCell(bot, pickupOrigin);
+                }
             }
         }
         // PICKUP is an atomic inventory transaction, not a one-tick visibility hint. A dead
@@ -1513,8 +1563,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     Math.floorMod(pickupSweepCursor++, PICKUP_SWEEP_OFFSETS.length)];
             BlockPos candidate = pickupOrigin.offset(offset[0], 0, offset[1]);
             Standability.clearCache();
-            if (candidate.equals(bot.blockPosition())
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate)
+            if (pickupSweepVisited.contains(candidate) || candidate.equals(bot.blockPosition())) {
+                continue;
+            }
+            if (!ObservableWorldQuery.canObserveCell(bot, candidate)
                     || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
                     || !ObservableWorldQuery.canObserveCollider(bot, candidate.below())
                     || !Standability.isStandable(world, candidate)
@@ -1526,6 +1578,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             if (start != SurfacePathStart.STARTED) {
                 continue;
             }
+            pickupSweepVisited.add(candidate.immutable());
             BotLog.action(bot, "hunt_pickup_observation_sweep",
                     "origin", pickupOrigin.toShortString(),
                     "to", candidate.toShortString(),
@@ -1534,6 +1587,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         return false;
     }
+
 
     private static long pickedUpAuxiliary(AIPlayerEntity bot) {
         long count = 0L;
@@ -1602,6 +1656,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         pickupOrigin = restored.pickupOrigin();
         pickupReturnAnchor = restored.pickupReturnAnchor();
         pickupSweepCursor = 0;
+        pickupSweepVisited.clear();
         clearRoamIntent();
         wetPreyRejectedUntil.clear();
         unsafePreyRejectedUntil.clear();

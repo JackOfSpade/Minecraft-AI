@@ -1,28 +1,16 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
-import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
-import io.github.zoyluo.minecraftai.action.BlockMiner;
-import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.BucketAction;
-import io.github.zoyluo.minecraftai.action.HarvestCore;
-import io.github.zoyluo.minecraftai.action.InCellWalk;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
-import io.github.zoyluo.minecraftai.action.MaterialPalette;
-import io.github.zoyluo.minecraftai.action.ToolSelector;
-import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -30,8 +18,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
@@ -54,14 +40,12 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private static final int MAX_ELAPSED = 30_000;
     private static final int SCAN_INTERVAL = 10;
     private static final int PATH_RETRY_INTERVAL = 20;
-    private static final int ASCENT_BLOCKED_LOG_INTERVAL = 100;
-    private static final int MAX_ASCENT_RELOCATIONS_PER_LEVEL = 32;
     private static final int PATH_STALL_LIMIT = 400;
     private static final int APPROACH_LIMIT = 600;
     // A Y16 iron trip can finish 80+ Manhattan blocks from the mission origin.  A physical
     // two-high stair costs roughly 30-40 ticks per vertical level, so 1,800 ticks expired exactly
-    // as the seed-3000 bot reached Y66.  Keep this bounded but large enough for the ascent plus the
-    // remaining surface traverse.
+    // as the seed-3000 bot reached Y66. Keep this bounded but large enough for the observed
+    // Baritone return route and remaining surface traverse.
     private static final int RETURN_LIMIT = 6_000;
     private static final int MAX_SURFACE_OVERSHOOT = 32;
     private static final int SEARCH_STEP = 12;
@@ -81,33 +65,6 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST
     };
 
-    /** The sneak-bridge in flight: the bot leans over the edge (SHIFTING), places, then walks back to the middle (RETURNING). */
-    private enum EdgeStage {
-        SHIFTING,
-        /** The foundation interaction has finished; wait until the exact walk-back can be admitted. */
-        RETURN_PENDING,
-        RETURNING
-    }
-
-    private static final class EdgePlacement {
-        final BlockPos anchor;
-        final Direction direction;
-        final BlockPos foundation;
-        final String item;
-        EdgeStage stage = EdgeStage.SHIFTING;
-        String placeFailure;
-        // The step of the current stage: its own state says when it ended, whatever else the action pack runs meanwhile.
-        WalkedStep step;
-
-        EdgePlacement(BlockPos anchor, Direction direction, BlockPos foundation, String item, WalkedStep step) {
-            this.step = step;
-            this.anchor = anchor.immutable();
-            this.direction = direction;
-            this.foundation = foundation.immutable();
-            this.item = item;
-        }
-    }
-
     private enum Phase {
         RETURN_SURFACE,
         SEARCH,
@@ -119,8 +76,6 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private final SearchCheckpoint restored;
     private final boolean invalidCheckpoint;
     private final Set<BlockPos> rejectedSources = new LinkedHashSet<>();
-    private final BlockMiner returnMiner = new BlockMiner();
-    private CraftTask ascentToolCraft;
 
     private BlockPos surfaceAnchor;
     private BlockPos searchOrigin;
@@ -149,27 +104,8 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private int lastPathAttemptBudget = -PATH_RETRY_INTERVAL;
     /** Logged once per live task when an old checkpoint tries to resume raw stair excavation. */
     private boolean surfaceStairRetirementLogged;
-    private BlockPos ascentTarget;
-    private EdgePlacement edge;
-    private WalkedStep ascentSettle;
-    /** Exact admission for the local settle step; a successor must not settle it by proxy. */
-    private ActionPack.StepLease ascentSettleLease;
-    private BlockPos ascentCommittedFrom;
-    private boolean ascentPathStarted;
-    private int ascentPathStartedBudget;
-    private BlockPos ascentRelocationTarget;
-    private BlockPos ascentRelocationOrigin;
-    private boolean ascentRelocationPathStarted;
-    private BlockPos ascentRelocationPrevious;
-    private int ascentRelocationStartedBudget;
-    private int ascentRelocationLevel = Integer.MIN_VALUE;
-    private int ascentRelocationsAtLevel;
-    private final Set<BlockPos> failedAscentSupports = new LinkedHashSet<>();
-    private final Set<BlockPos> failedAscentRelocations = new LinkedHashSet<>();
-    private BlockPos lastAscentBlockedPos;
-    private String lastAscentBlockedReasons = "";
-    private int lastAscentBlockedLogBudget = -ASCENT_BLOCKED_LOG_INTERVAL;
-    private BlockPos pausedAscentPosition;
+    /** Position at pause, used to discard stale route retries after a safety displacement. */
+    private BlockPos pausedPosition;
 
     public AcquireWaterTask(BlockPos surfaceAnchor) {
         this(surfaceAnchor, Map.of());
@@ -295,127 +231,36 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
-        clearReturnSurfaceWork(bot, "acquire_water_aborted");
+        clearReturnSurfaceWork(bot);
     }
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
-        if (ascentToolCraft != null && ascentToolCraft.state() == TaskState.RUNNING) {
-            ascentToolCraft.pause(bot);
-        }
-        returnMiner.cancel(bot);
-        BlockPos current = bot.blockPosition().immutable();
-        settleOrReleasePausedAscentMotion(bot, current);
-        pausedAscentPosition = current;
+        pausedPosition = bot.blockPosition().immutable();
         bot.getActionPack().stopAll();
     }
 
     @Override
     protected void onResume(AIPlayerEntity bot) {
         BlockPos current = bot.blockPosition();
-        boolean safetyDisplaced = pausedAscentPosition != null
-                && !pausedAscentPosition.equals(current);
-
-        // A safety task owns movement while this task is paused. Never resume an old path from its
-        // pre-safety origin: release every transient motion intent and select again from the factual
-        // current cell on the next tick. Relocation failures are local geometry observations, so a
-        // safety displacement also invalidates that temporary ledger without refunding any durable
-        // task budget or weakening the fluid checks used by the new selection.
-        ascentTarget = null;
-        ascentPathStarted = false;
-        edge = null;
-        ascentSettle = null;
-        ascentSettleLease = null;
-        ascentRelocationTarget = null;
-        ascentRelocationOrigin = null;
-        ascentRelocationPathStarted = false;
-        if (safetyDisplaced) {
-            ascentRelocationPrevious = null;
-            failedAscentRelocations.clear();
+        if (pausedPosition != null && !pausedPosition.equals(current)) {
             // Ordinary path failures and their retry cooldown are observations about the old
             // position. A safety task can move the bot onto a different connected surface cell;
             // retaining either value would make the first factual retry wait for stale evidence,
             // or even inherit the old RETURN_SURFACE three-attempt terminal gate.
             pathAttempts = 0;
             lastPathAttemptBudget = totalBudget() - PATH_RETRY_INTERVAL;
-            noteAscentProgress();
         }
-        pausedAscentPosition = null;
-
-        if (ascentToolCraft != null && ascentToolCraft.state() == TaskState.PAUSED) {
-            ascentToolCraft.resume(bot);
-        }
+        pausedPosition = null;
     }
 
     /**
-     * Settles a movement that physically reached its target before the safety pause, and releases
-     * any unfinished motion without recording a false path failure. The safety task may move the
-     * bot immediately after this callback, so all path executor state must be closed here.
+     * Releases the active route before RETURN_SURFACE is abandoned. Durable search state is not
+     * touched, so a checkpoint keeps its cursor and budget authority.
      */
-    private void settleOrReleasePausedAscentMotion(AIPlayerEntity bot, BlockPos current) {
-        if (ascentTarget != null && current.equals(ascentTarget)) {
-            pathAttempts = 0;
-            noteAscentProgress();
-        }
-        ascentTarget = null;
-        ascentPathStarted = false;
-        edge = null;
-        ascentSettle = null;
-        ascentSettleLease = null;
-
-        if (ascentRelocationTarget == null) {
-            return;
-        }
-        BlockPos reached = ascentRelocationTarget;
-        if (current.equals(reached)) {
-            ascentRelocationPrevious = ascentRelocationOrigin;
-            ascentRelocationsAtLevel++;
-            failedAscentSupports.clear();
-            failedAscentRelocations.clear();
-            pathAttempts = 0;
-            noteAscentProgress();
-            BotLog.action(bot, "acquire_water_ascent_relocated",
-                    "to", reached.toShortString(),
-                    "used", ascentRelocationsAtLevel,
-                    "budget", MAX_ASCENT_RELOCATIONS_PER_LEVEL,
-                    "boundary", "pause");
-        }
-        ascentRelocationTarget = null;
-        ascentRelocationOrigin = null;
-        ascentRelocationPathStarted = false;
-    }
-
-    /**
-     * Releases every transient owner of RETURN_SURFACE work before that phase is abandoned.
-     * Durable search budget/cursor state is intentionally untouched; this is only process-local
-     * mining, crafting, relocation, and movement state that must never leak into SEARCH or DONE.
-     */
-    private void clearReturnSurfaceWork(AIPlayerEntity bot, String reason) {
-        returnMiner.cancel(bot);
-        if (ascentToolCraft != null) {
-            ascentToolCraft.cancel(bot, reason);
-            ascentToolCraft = null;
-        }
-        ascentTarget = null;
-        ascentPathStarted = false;
-        edge = null;
-        ascentSettle = null;
-        ascentSettleLease = null;
-        ascentRelocationTarget = null;
-        ascentRelocationOrigin = null;
-        ascentRelocationPathStarted = false;
-        pausedAscentPosition = null;
+    private void clearReturnSurfaceWork(AIPlayerEntity bot) {
+        pausedPosition = null;
         bot.getActionPack().stopAll();
-    }
-
-    /** Package-private invariant seam for live transition tests. */
-    boolean hasReturnSurfaceWorkForTesting() {
-        return returnMiner.target() != null
-                || ascentToolCraft != null
-                || ascentTarget != null
-                || ascentPathStarted
-                || ascentRelocationTarget != null
-                || ascentRelocationOrigin != null;
     }
 
     @Override
@@ -442,7 +287,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
 
     private void returnToSurface(AIPlayerEntity bot) {
         // A cave opening can change after a support/shelter placement and flood the current cell
-        // on the next vanilla fluid tick. Stop the ascent immediately and let the global physical
+        // on the next vanilla fluid tick. Stop the surface return immediately and let the global physical
         // water rescue own movement until a dry landing is proved; continuing to inspect/place
         // supports from inside water makes every Fluid.ANY perception ray self-occlude.
         BlockPos wetFeet = bot.blockPosition();
@@ -450,18 +295,9 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
                 || bot.level().getFluidState(wetFeet).is(FluidTags.WATER)
                 || bot.level().getFluidState(wetFeet.above()).is(FluidTags.WATER);
         if (touchingWater || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
-            returnMiner.cancel(bot);
-            ascentTarget = null;
-            edge = null;
-            ascentPathStarted = false;
             bot.getActionPack().stopAll();
             NavSafetyNet.INSTANCE.requestWaterRescue(bot);
             return;
-        }
-        // A pre-migration checkpoint can only have an in-flight local stair/bridge in memory. It
-        // cannot resume that raw navigation ownership; restart the return through Baritone instead.
-        if (edge != null) {
-            clearReturnSurfaceWork(bot, "acquire_water_surface_baritone_required");
         }
         // A strict return stair can expose a real aquifer before it reaches the remembered
         // surface.  When that source is already visible and reachable from the current dry
@@ -501,7 +337,10 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private void requireBaritoneSurfaceRoute(AIPlayerEntity bot) {
-        clearReturnSurfaceWork(bot, "acquire_water_surface_baritone_required");
+        // This method runs every RETURN_SURFACE tick. The observed route it starts below is the
+        // active return work, so cancelling here would stop it on the next tick before it can
+        // make physical progress. Terminal/phase transitions still release it through
+        // clearReturnSurfaceWork().
         if (!surfaceStairRetirementLogged) {
             surfaceStairRetirementLogged = true;
             BotLog.action(bot, "acquire_water_surface_baritone_required",
@@ -591,7 +430,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
                 && current.getY() >= surfaceAnchor.getY();
         // The reusable exit is the dry current footing plus the observable outward edge checked
         // below.  Requiring the current column itself to see sky creates a one-block-overhang
-        // deadlock: the edge already proves open surface, so the ascent controller stops climbing,
+        // deadlock: the edge already proves open surface, so the surface-return route stops,
         // but this method used to refuse the same evidence and never published SEARCH.  The Y gate
         // still prevents a sky-lit ravine below the remembered surface from minting an exit.
         if (!nearKnownSurface && current.getY() < surfaceAnchor.getY()) {
@@ -608,7 +447,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private void beginSurfaceSearch(AIPlayerEntity bot, BlockPos origin) {
-        clearReturnSurfaceWork(bot, "acquire_water_surface_exit_reached");
+        clearReturnSurfaceWork(bot);
         // Keep the durable surface proof and the phase transition adjacent: no checkpoint can
         // observe SEARCH with the old false latch or the pre-exit origin.
         surfaceExitReached = true;
@@ -658,911 +497,6 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         return false;
     }
 
-    /**
-     * Advances one safe diagonal-up stair cell.  Returns {@code true} when this tick is owned by
-     * the ascent (mining, jumping, or deliberately rejecting a dangerous candidate); {@code false}
-     * lets the caller fall back to ordinary pathfinding.
-     */
-    private boolean ascendOneStair(AIPlayerEntity bot) {
-        // Kept only to make old in-memory/checkpoint call paths fail closed. RETURN_SURFACE now
-        // owns movement through requireBaritoneSurfaceRoute, never via a raw mined stair.
-        if (RetiredNavigationTask.legacyExcavationDisabled()) {
-            clearReturnSurfaceWork(bot, "acquire_water_surface_baritone_required");
-            return false;
-        }
-        ServerLevel world = bot.level();
-        BlockPos current = bot.blockPosition();
-        if (edge != null) {
-            tickEdgePlacement(bot);
-            return true;
-        }
-        prepareAscentLevel(current);
-        if (ascentToolCraft != null) {
-            tickAscentToolCraft(bot);
-            return true;
-        }
-        if (settleOnStandableCell(bot, world, current)) {
-            return true;
-        }
-        if (tickAscentRelocation(bot, current)) {
-            return true;
-        }
-        if (ascentTarget != null && current.equals(ascentTarget)) {
-            returnMiner.cancel(bot);
-            ascentTarget = null;
-            ascentPathStarted = false;
-            pathAttempts = 0;
-            noteAscentProgress();
-            return true;
-        }
-        // A subtask that ran mid-ascent (tool crafting, then physically walking over to reclaim
-        // its crafting table) can leave the bot one cell away from the stance this step committed
-        // from, even though the committed target still blocks the same stair and stays within
-        // ordinary reach. Re-deriving everything from that drifted `current` would fail the
-        // adjacency check below and abandon a live commitment for an easier direction instead of
-        // finishing it. Keep evaluating the target from its already-vetted stance as long as the
-        // bot can still physically reach both that stance and the obstruction itself; a real
-        // safety displacement clears ascentTarget outright (see onResume) well before this runs,
-        // so this never resurrects a target across an unrelated relocation.
-        AscentCandidate driftCandidate = null;
-        if (ascentTarget != null && !isAdjacentUp(current, ascentTarget)
-                && ascentCommittedFrom != null
-                && isAdjacentUp(ascentCommittedFrom, ascentTarget)
-                && current.getY() == ascentCommittedFrom.getY()
-                && HarvestCore.canReach(bot, ascentCommittedFrom)) {
-            AscentCandidate inspected =
-                    inspectAscentCandidate(bot, world, ascentCommittedFrom, ascentTarget);
-            if (inspected.accepted() && inspected.obstruction() != null
-                    && HarvestCore.canReach(bot, inspected.obstruction())) {
-                driftCandidate = inspected;
-            }
-        }
-        boolean keepDriftedTarget = driftCandidate != null;
-
-        if (!keepDriftedTarget
-                && (ascentTarget == null || !isAdjacentUp(current, ascentTarget)
-                    || !inspectAscentCandidate(bot, world, current, ascentTarget).accepted())) {
-            returnMiner.cancel(bot);
-            ascentPathStarted = false;
-            AscentChoice choice = selectAscentTarget(bot, world, current);
-            ascentTarget = choice.target();
-            ascentCommittedFrom = ascentTarget == null ? null : current.immutable();
-            if (ascentTarget == null) {
-                if (beginAscentRelocation(bot, world, current, choice.rejections())) {
-                    return true;
-                }
-                maybeLogAscentBlocked(bot, current, choice.rejections());
-                return false;
-            }
-            bot.getActionPack().stopAll();
-            BotLog.action(bot, "acquire_water_ascent_step",
-                    "from", current.toShortString(), "to", ascentTarget.toShortString());
-        }
-
-        AscentCandidate candidate = keepDriftedTarget
-                ? driftCandidate
-                : inspectAscentCandidate(bot, world, current, ascentTarget);
-        if (candidate.foundationMissing()) {
-            placeAscentFoundation(bot, current, ascentTarget.below().below());
-            return true;
-        }
-        if (candidate.supportMissing()) {
-            placeAscentSupport(bot, current, ascentTarget.below());
-            return true;
-        }
-
-        BlockPos obstruction = candidate.obstruction();
-        if (obstruction != null) {
-            ascentPathStarted = false;
-            if (!observableCellOrBlock(bot, obstruction)) {
-                returnMiner.cancel(bot);
-                ascentTarget = null;
-                return true;
-            }
-            var obstructionState = world.getBlockState(obstruction);
-            if (obstructionState.requiresCorrectToolForDrops()) {
-                int requiredTier = ToolTier.requiredPickaxeTier(obstructionState.getBlock());
-                // A low-tier obstruction is tunnel overhead, not expedition loot.  Keep the finite
-                // iron/diamond picks for diamond and obsidian: if no renewable healthy stone pick
-                // remains, replenish one locally even when a higher-tier pick could technically
-                // harvest this block.
-                if (requiredTier <= ToolTier.STONE && !hasHealthyStonePickaxe(bot)) {
-                    beginAscentToolCraft(bot, obstruction);
-                    return true;
-                }
-                ToolSelector.Selection selection =
-                        ToolSelector.equipMiningChannelTool(bot, obstructionState);
-                if (selection.slot() < 0 || selection.stack().isEmpty()) {
-                    returnMiner.cancel(bot);
-                    if (requiredTier > ToolTier.STONE) {
-                        fail("acquire_water_ascent_need_tool:"
-                                + ToolTier.requiredPickaxeItemId(obstructionState.getBlock()));
-                        return true;
-                    }
-                    beginAscentToolCraft(bot, obstruction);
-                    return true;
-                }
-            }
-            if (returnMiner.target() == null || !returnMiner.target().equals(obstruction)) {
-                // The physical return tunnel is part of the mining channel: never spend a scarce
-                // future iron/diamond pick on ordinary rock, and never fall back to punching a
-                // tool-required ore with a crafting table after all stone picks reach one durability.
-                returnMiner.begin(bot, obstruction, true);
-            }
-            BlockMiner.Status status = returnMiner.tick(bot);
-            if (status == BlockMiner.Status.FAILED) {
-                BotLog.action(bot, "acquire_water_ascent_mine_failed",
-                        "target", obstruction.toShortString(), "reason", returnMiner.failureReason());
-                ascentTarget = null;
-            }
-            return true;
-        }
-
-        returnMiner.cancel(bot);
-        if (!Standability.isStandable(world, ascentTarget)) {
-            BotLog.action(bot, "acquire_water_ascent_path_failed",
-                    "from", current.toShortString(), "to", ascentTarget.toShortString(),
-                    "reason", "unsafe_landing");
-            ascentTarget = null;
-            ascentPathStarted = false;
-            return true;
-        }
-        if (!ascentPathStarted) {
-            ActionResult result = bot.getActionPack().startSurfacePathTo(ascentTarget);
-            if (result.isFailed()) {
-                BotLog.action(bot, "acquire_water_ascent_path_failed",
-                        "from", current.toShortString(), "to", ascentTarget.toShortString(),
-                        "reason", result.reason());
-                ascentTarget = null;
-                return true;
-            }
-            ascentPathStarted = true;
-            ascentPathStartedBudget = totalBudget();
-            return true;
-        }
-        if (bot.getActionPack().isPathExecutorIdle()
-                && totalBudget() - ascentPathStartedBudget > PATH_RETRY_INTERVAL) {
-            BotLog.action(bot, "acquire_water_ascent_path_failed",
-                    "from", current.toShortString(), "to", ascentTarget.toShortString(),
-                    "reason", "ended_before_target");
-            ascentTarget = null;
-            ascentPathStarted = false;
-        }
-        return true;
-    }
-
-    /**
-     * A bot whose body overhangs the edge of its floor (a restart or a cancelled hop left it half over the next cell) stands in a cell
-     * that is not standable although it is supported by a neighbour. Every stair candidate and every route search treats the bot's
-     * cell as its start, so nothing chosen from there is sound; a route search from such a start only plans the walk onto the
-     * neighbouring cell and, when the search then fails, the plan is dropped and the same target is chosen again for the whole budget.
-     * The bot first walks (a walked step, inputs only) onto the standable cell it is leaning on. Returns true while that step runs.
-     */
-    private boolean settleOnStandableCell(AIPlayerEntity bot, ServerLevel world, BlockPos current) {
-        if (ascentSettle != null) {
-            ActionPack pack = bot.getActionPack();
-            ActionPack.StepLease lease = ascentSettleLease;
-            if (pack.stepInFlightFor(lease)) {
-                return true;
-            }
-            if (!pack.stepIdle()) {
-                // A successor owns the action pack. Forget only the stale settle admission;
-                // never let its global terminal result decide this ascent's footing.
-                ascentSettle = null;
-                ascentSettleLease = null;
-                return true;
-            }
-            WalkedStep.Result result = pack.stepResultFor(lease);
-            ascentSettle = null;
-            ascentSettleLease = null;
-            if (result != null && result.succeeded()) {
-                // A completed recenter is real ascent progress even though the next candidate is
-                // selected from the factual current cell rather than from the step result.
-                noteAscentProgress();
-            }
-            return false;
-        }
-        if (Standability.isStandableFresh(world, current) || !WalkedStep.supported(bot)) {
-            return false;
-        }
-        WalkedStep step = bot.getActionPack().adjacentStandableStep("acquire_water_ascent_settle");
-        if (step == null) {
-            return false;
-        }
-        returnMiner.cancel(bot);
-        bot.getActionPack().stopAll();
-        ActionPack.StepLease lease = bot.getActionPack().runStep(step);
-        if (lease == null) {
-            // A guarded safety owner still owns the ActionPack handoff. Leave the settlement
-            // unpublished so this same physical recovery is retried rather than observing a
-            // foreign step result on the next tick.
-            return true;
-        }
-        ascentSettle = step;
-        ascentSettleLease = lease;
-        ascentPathStarted = false;
-        ascentTarget = null;
-        return true;
-    }
-
-    private void prepareAscentLevel(BlockPos current) {
-        if (ascentRelocationLevel == current.getY()) {
-            return;
-        }
-        ascentRelocationLevel = current.getY();
-        ascentRelocationsAtLevel = 0;
-        ascentRelocationPrevious = null;
-        failedAscentSupports.clear();
-        failedAscentRelocations.clear();
-        noteAscentProgress();
-    }
-
-    private void noteAscentProgress() {
-        lastAscentBlockedPos = null;
-        lastAscentBlockedReasons = "";
-        lastAscentBlockedLogBudget = totalBudget() - ASCENT_BLOCKED_LOG_INTERVAL;
-    }
-
-    private void placeAscentSupport(AIPlayerEntity bot, BlockPos current, BlockPos support) {
-        var slot = MaterialPalette.pickPathSupportBlockSlot(bot);
-        if (slot.isEmpty()) {
-            failedAscentSupports.add(support.immutable());
-            ascentTarget = null;
-            return;
-        }
-        String item = String.valueOf(bot.getInventory().getNonEquipmentItems().get(slot.getAsInt()).getItem());
-        if (InventoryAction.equipFromSlot(bot, slot.getAsInt()) < 0) {
-            failedAscentSupports.add(support.immutable());
-            ascentTarget = null;
-            BotLog.action(bot, "acquire_water_ascent_support_failed",
-                    "pos", support.toShortString(), "reason", "equip_failed");
-            return;
-        }
-        bot.getActionPack().stopAll();
-        // A real jump-arc landing can leave the server-side onGround bit stale for one tick even
-        // though the new cell has a collision-verified support (the same clientless fake-player
-        // quirk placeAscentFoundation already accounts for below). Publish the equivalent movement
-        // packet fact before this precise placement; never do this for a genuinely unsupported pose.
-        Standability.clearCache();
-        if (!bot.onGround() && Standability.isStandable(bot.level(), current)) {
-            bot.setOnGround(true);
-        }
-        ActionResult result = BuildAction.placeBlockAt(bot, support);
-        if (result.isInProgress()) {
-            return;
-        }
-        if (result.isFailed()) {
-            failedAscentSupports.add(support.immutable());
-            ascentTarget = null;
-            BotLog.action(bot, "acquire_water_ascent_support_failed",
-                    "pos", support.toShortString(), "reason", result.reason());
-            return;
-        }
-        pathAttempts = 0;
-        noteAscentProgress();
-        BotLog.action(bot, "acquire_water_ascent_support_placed",
-                "pos", support.toShortString(), "item", item);
-    }
-
-    /**
-     * Extends the current pillar by one ordinary sneak-bridged foundation block. An open cave can
-     * require more than one rise: after the first support is climbed, every neighbouring landing
-     * has both an empty support and an empty base. A real player first bridges at foot level, then
-     * places the landing support on top. Keeping those as two verified vanilla placements avoids
-     * either reading a hidden block or using the non-survival direct-placement fallback.
-     */
-    private void placeAscentFoundation(AIPlayerEntity bot,
-                                       BlockPos current,
-                                       BlockPos foundation) {
-        int dx = foundation.getX() - current.getX();
-        int dz = foundation.getZ() - current.getZ();
-        Direction direction = null;
-        for (Direction candidate : Direction.Plane.HORIZONTAL) {
-            if (candidate.getStepX() == dx && candidate.getStepZ() == dz) {
-                direction = candidate;
-                break;
-            }
-        }
-        BlockPos support = foundation.above();
-        var slot = MaterialPalette.pickPathSupportBlockSlot(bot);
-        if (direction == null || slot.isEmpty()) {
-            failedAscentSupports.add(support.immutable());
-            ascentTarget = null;
-            return;
-        }
-        int sourceSlot = slot.getAsInt();
-        String item = String.valueOf(bot.getInventory().getNonEquipmentItems().get(sourceSlot).getItem());
-        if (InventoryAction.equipFromSlot(bot, sourceSlot) < 0) {
-            failedAscentSupports.add(support.immutable());
-            ascentTarget = null;
-            return;
-        }
-        bot.getActionPack().stopAll();
-        // A clientless path jump can leave the server-side onGround bit stale for one tick even
-        // though the new cell has a collision-verified support. Publish the equivalent movement
-        // packet fact before the bounded sneak shift; never do this for an unsupported pose.
-        Standability.clearCache();
-        if (!bot.onGround() && Standability.isStandable(bot.level(), current)) {
-            bot.setOnGround(true);
-        }
-        // A real player sneak-bridges by leaning out over the edge (sneaking will not walk off it), placing against the side
-        // face of the support, and stepping back: three separate moments, so the bot walks the lean and the return with its
-        // movement keys and the placement happens between them (tickEdgePlacement).
-        if (!WalkedStep.supported(bot)) {
-            // Still settling out of the last hop: the lean starts from solid footing, so ask again next tick.
-            return;
-        }
-        WalkedStep lean = InCellWalk.beginEdgeShift(bot, current, direction, "acquire_water_ascent_foundation");
-        if (lean == null) {
-            if (bot.getActionPack().stepAdmissionBlocked()) {
-                // InCellWalk rejected only the handoff admission. Keep this support candidate
-                // live; its owner will release the fence and this exact lean can be retried.
-                return;
-            }
-            failedAscentSupports.add(support.immutable());
-            ascentTarget = null;
-            BotLog.action(bot, "acquire_water_ascent_foundation_failed",
-                    "pos", foundation.toShortString(), "reason", "foundation_edge_unreachable");
-            return;
-        }
-        edge = new EdgePlacement(current, direction, foundation, item, lean);
-    }
-
-    /** Carries the sneak-bridge on: lean over the edge, place the foundation block, walk back to the middle of the cell. */
-    private void tickEdgePlacement(AIPlayerEntity bot) {
-        var pack = bot.getActionPack();
-        EdgePlacement current = edge;
-        if (!current.step.ended()) {
-            return;
-        }
-        if (!pack.stepIdle()) {
-            // InCellWalk gives us the completed step object but not its ActionPack lease. If a
-            // higher-priority owner replaced it, do not let this old edge terminal path release
-            // that successor's movement inputs or turn its activity into a failed foundation.
-            edge = null;
-            return;
-        }
-        WalkedStep.Result result = current.step.outcome();
-        BlockPos support = current.foundation.above();
-        if (current.stage == EdgeStage.SHIFTING) {
-            if (result == null || !result.succeeded()) {
-                edge = null;
-                pack.stopMovement();
-                if (result != null && "not_supported".equals(result.reason())) {
-                    // The bot left its footing between the request and the first tick (a hop still settling): not a verdict on the
-                    // support, so the ascent looks at the cell again.
-                    return;
-                }
-                failedAscentSupports.add(support.immutable());
-                ascentTarget = null;
-                BotLog.action(bot, "acquire_water_ascent_foundation_failed",
-                        "pos", current.foundation.toShortString(), "reason", "foundation_edge_unreachable");
-                return;
-            }
-            ActionResult placed = BuildAction.placeBlock(
-                    bot, current.anchor.below(), current.direction, InteractionHand.MAIN_HAND);
-            if (placed.isInProgress()) {
-                return;
-            }
-            current.placeFailure = placed.isFailed() ? placed.reason() : null;
-            // The placement is now a durable physical receipt; if a guarded owner blocks the
-            // walk back, retain that receipt and retry only the unstarted return. Do not put a
-            // null WalkedStep into the RETURNING state or repeat the placement on every retry.
-            current.stage = EdgeStage.RETURN_PENDING;
-        }
-        if (current.stage == EdgeStage.RETURN_PENDING) {
-            WalkedStep returning = InCellWalk.beginEdgeReturn(
-                    bot, current.anchor, "acquire_water_ascent_foundation");
-            if (returning == null) {
-                return;
-            }
-            current.step = returning;
-            current.stage = EdgeStage.RETURNING;
-            return;
-        }
-        edge = null;
-        pack.stopMovement();
-        boolean returned = result != null && result.succeeded();
-        if (current.placeFailure != null || !returned) {
-            failedAscentSupports.add(support.immutable());
-            ascentTarget = null;
-            BotLog.action(bot, "acquire_water_ascent_foundation_failed",
-                    "pos", current.foundation.toShortString(),
-                    "reason", current.placeFailure != null ? current.placeFailure : "foundation_edge_return_failed");
-            return;
-        }
-        pathAttempts = 0;
-        noteAscentProgress();
-        BotLog.action(bot, "acquire_water_ascent_foundation_placed",
-                "pos", current.foundation.toShortString(), "item", current.item);
-    }
-
-    private boolean tickAscentRelocation(AIPlayerEntity bot, BlockPos current) {
-        if (ascentRelocationTarget == null) {
-            return false;
-        }
-        if (current.equals(ascentRelocationTarget)) {
-            bot.getActionPack().stopAll();
-            ascentRelocationPrevious = ascentRelocationOrigin;
-            BlockPos reached = ascentRelocationTarget;
-            ascentRelocationTarget = null;
-            ascentRelocationOrigin = null;
-            ascentRelocationPathStarted = false;
-            ascentRelocationsAtLevel++;
-            failedAscentSupports.clear();
-            failedAscentRelocations.clear();
-            pathAttempts = 0;
-            noteAscentProgress();
-            BotLog.action(bot, "acquire_water_ascent_relocated",
-                    "to", reached.toShortString(),
-                    "used", ascentRelocationsAtLevel,
-                    "budget", MAX_ASCENT_RELOCATIONS_PER_LEVEL);
-            return true;
-        }
-
-        // A water pocket can become visible only after the shared jump-arc ceiling is mined. In
-        // solid rock that correctly rejects every upward candidate, but there may be no already
-        // open same-level cell for the old relocation controller to use. A real player escapes by
-        // cutting a short dry side pocket first. Mine its head before its feet, re-check observable
-        // fluid evidence after every block, and do not start movement until the exposed support is
-        // physically proven standable. The partially cut pocket is factual world state, so pause or
-        // restart can safely rediscover it without checkpointing a speculative route.
-        if (!ascentRelocationPathStarted) {
-            CarvedRelocationCandidate candidate = inspectCarvedAscentRelocation(
-                    bot, bot.level(), current, ascentRelocationTarget);
-            if (!candidate.accepted()) {
-                failAscentRelocation(bot, current, candidate.reason());
-                return true;
-            }
-            BlockPos obstruction = candidate.obstruction();
-            if (obstruction != null) {
-                mineAscentRelocationObstruction(bot, current, obstruction);
-                return true;
-            }
-            ActionResult result = bot.getActionPack().startSurfacePathTo(ascentRelocationTarget);
-            if (result.isFailed()) {
-                if (!"pathfinding_throttled".equals(result.reason())) {
-                    failAscentRelocation(bot, current, result.reason());
-                }
-                return true;
-            }
-            ascentRelocationPathStarted = true;
-            ascentRelocationStartedBudget = totalBudget();
-            return true;
-        }
-
-        if (bot.getActionPack().isPathExecutorIdle()
-                && totalBudget() - ascentRelocationStartedBudget > PATH_RETRY_INTERVAL) {
-            failAscentRelocation(bot, current, "ended_before_target");
-        }
-        return true;
-    }
-
-    private void mineAscentRelocationObstruction(AIPlayerEntity bot,
-                                                 BlockPos current,
-                                                 BlockPos obstruction) {
-        if (!observableCellOrBlock(bot, obstruction)) {
-            failAscentRelocation(bot, current, "obstruction_unobservable");
-            return;
-        }
-        var obstructionState = bot.level().getBlockState(obstruction);
-        if (obstructionState.requiresCorrectToolForDrops()) {
-            int requiredTier = ToolTier.requiredPickaxeTier(obstructionState.getBlock());
-            if (requiredTier <= ToolTier.STONE && !hasHealthyStonePickaxe(bot)) {
-                beginAscentToolCraft(bot, obstruction);
-                return;
-            }
-            ToolSelector.Selection selection =
-                    ToolSelector.equipMiningChannelTool(bot, obstructionState);
-            if (selection.slot() < 0 || selection.stack().isEmpty()) {
-                failAscentRelocation(bot, current, "tool_unavailable");
-                return;
-            }
-        }
-        if (returnMiner.target() == null || !returnMiner.target().equals(obstruction)) {
-            returnMiner.begin(bot, obstruction, true);
-        }
-        BlockMiner.Status status = returnMiner.tick(bot);
-        if (status == BlockMiner.Status.FAILED) {
-            failAscentRelocation(bot, current,
-                    "mine_failed:" + returnMiner.failureReason());
-        }
-    }
-
-    private void failAscentRelocation(AIPlayerEntity bot,
-                                      BlockPos current,
-                                      String reason) {
-        returnMiner.cancel(bot);
-        BlockPos failed = ascentRelocationTarget;
-        if (failed != null) {
-            failedAscentRelocations.add(failed.immutable());
-        }
-        BotLog.action(bot, "acquire_water_ascent_relocation_failed",
-                "from", ascentRelocationOrigin == null
-                        ? current.toShortString() : ascentRelocationOrigin.toShortString(),
-                "to", failed == null ? "none" : failed.toShortString(),
-                "reason", reason);
-        ascentRelocationTarget = null;
-        ascentRelocationOrigin = null;
-        ascentRelocationPathStarted = false;
-    }
-
-    private boolean beginAscentRelocation(AIPlayerEntity bot,
-                                          ServerLevel world,
-                                          BlockPos current,
-                                          String ascentRejections) {
-        if (ascentRelocationsAtLevel >= MAX_ASCENT_RELOCATIONS_PER_LEVEL
-                || !bot.getActionPack().isPathExecutorIdle()) {
-            return false;
-        }
-        List<Direction> directions = orderedAscentDirections(current);
-        // First exhaust every factual forward/side option. Returning to the immediately previous
-        // relocation before trying a new dry pocket creates a two-cell oscillation when both cells
-        // share the same water hazard.
-        for (Direction direction : directions) {
-            BlockPos target = current.relative(direction);
-            if (target.equals(ascentRelocationPrevious)
-                    || failedAscentRelocations.contains(target)) {
-                continue;
-            }
-            if (startOpenAscentRelocation(
-                    bot, world, current, target, ascentRejections)) {
-                return true;
-            }
-        }
-        for (Direction direction : directions) {
-            BlockPos target = current.relative(direction);
-            if (target.equals(ascentRelocationPrevious)
-                    || failedAscentRelocations.contains(target)) {
-                continue;
-            }
-            CarvedRelocationCandidate candidate = inspectCarvedAscentRelocation(
-                    bot, world, current, target);
-            if (candidate.accepted() && candidate.obstruction() != null) {
-                beginCarvedAscentRelocation(
-                        bot, current, target, candidate.obstruction(), ascentRejections);
-                return true;
-            }
-        }
-        // An already proven dry previous cell remains a bounded last resort. Never carve back into
-        // it: if its geometry changed, the same observable/standable predicate must prove it again.
-        if (ascentRelocationPrevious != null
-                && !failedAscentRelocations.contains(ascentRelocationPrevious)
-                && startOpenAscentRelocation(bot, world, current,
-                ascentRelocationPrevious, ascentRejections)) {
-            return true;
-        }
-        return false;
-    }
-
-    private boolean startOpenAscentRelocation(AIPlayerEntity bot,
-                                              ServerLevel world,
-                                              BlockPos current,
-                                              BlockPos target,
-                                              String ascentRejections) {
-        if (!safeObservableRelocation(bot, world, target)) {
-            return false;
-        }
-        ActionResult result = bot.getActionPack().startSurfacePathTo(target);
-        if (!result.isFailed()) {
-            ascentRelocationOrigin = current.immutable();
-            ascentRelocationTarget = target.immutable();
-            ascentRelocationPathStarted = true;
-            ascentRelocationStartedBudget = totalBudget();
-            BotLog.action(bot, "acquire_water_ascent_relocation",
-                    "from", current.toShortString(), "to", target.toShortString(),
-                    "ascent_rejections", ascentRejections);
-            return true;
-        }
-        if (!"pathfinding_throttled".equals(result.reason())) {
-            failedAscentRelocations.add(target.immutable());
-            BotLog.action(bot, "acquire_water_ascent_relocation_failed",
-                    "from", current.toShortString(), "to", target.toShortString(),
-                    "reason", result.reason());
-        }
-        return false;
-    }
-
-    private void beginCarvedAscentRelocation(AIPlayerEntity bot,
-                                             BlockPos current,
-                                             BlockPos target,
-                                             BlockPos obstruction,
-                                             String ascentRejections) {
-        ascentRelocationOrigin = current.immutable();
-        ascentRelocationTarget = target.immutable();
-        ascentRelocationPathStarted = false;
-        ascentRelocationStartedBudget = totalBudget();
-        BotLog.action(bot, "acquire_water_ascent_relocation_carve",
-                "from", current.toShortString(),
-                "to", target.toShortString(),
-                "obstruction", obstruction.toShortString(),
-                "ascent_rejections", ascentRejections);
-    }
-
-    private static CarvedRelocationCandidate inspectCarvedAscentRelocation(
-            AIPlayerEntity bot,
-            ServerLevel world,
-            BlockPos current,
-            BlockPos target) {
-        if (target == null || target.getY() != current.getY()
-                || Math.abs(target.getX() - current.getX())
-                + Math.abs(target.getZ() - current.getZ()) != 1) {
-            return CarvedRelocationCandidate.rejected("not_adjacent_same_level");
-        }
-        // Head first keeps a solid foot barrier in place while the side pocket is being exposed.
-        for (BlockPos cell : new BlockPos[]{target.above(), target}) {
-            if (!observableCellOrBlock(bot, cell)) {
-                return CarvedRelocationCandidate.rejected(
-                        "carve_unobservable@" + cell.toShortString());
-            }
-            var state = world.getBlockState(cell);
-            if (!state.getFluidState().isEmpty()) {
-                return CarvedRelocationCandidate.rejected(
-                        "carve_fluid@" + cell.toShortString());
-            }
-            if (Standability.isDangerous(state)) {
-                return CarvedRelocationCandidate.rejected(
-                        "carve_dangerous@" + cell.toShortString());
-            }
-            if (hasObservableAdjacentFluid(bot, world, cell)) {
-                return CarvedRelocationCandidate.rejected(
-                        "carve_adjacent_fluid@" + cell.toShortString());
-            }
-            if (!state.getCollisionShape(world, cell).isEmpty()
-                    && (state.getDestroySpeed(world, cell) < 0.0F
-                    || world.getBlockEntity(cell) != null)) {
-                return CarvedRelocationCandidate.rejected(
-                        "carve_unbreakable@" + cell.toShortString());
-            }
-            if (!state.getCollisionShape(world, cell).isEmpty()
-                    && state.requiresCorrectToolForDrops()
-                    && ToolTier.requiredPickaxeTier(state.getBlock()) > ToolTier.STONE) {
-                return CarvedRelocationCandidate.rejected(
-                        "carve_reserved_tool@" + cell.toShortString());
-            }
-            if (!state.getCollisionShape(world, cell).isEmpty()) {
-                return CarvedRelocationCandidate.accepted(cell.immutable());
-            }
-        }
-        if (!safeObservableRelocation(bot, world, target)) {
-            return CarvedRelocationCandidate.rejected("carve_landing_unproven");
-        }
-        return CarvedRelocationCandidate.accepted(null);
-    }
-
-    private record CarvedRelocationCandidate(boolean accepted,
-                                               String reason,
-                                               BlockPos obstruction) {
-        private static CarvedRelocationCandidate accepted(BlockPos obstruction) {
-            return new CarvedRelocationCandidate(true, "safe", obstruction);
-        }
-
-        private static CarvedRelocationCandidate rejected(String reason) {
-            return new CarvedRelocationCandidate(false, reason, null);
-        }
-    }
-
-    private static boolean safeObservableRelocation(AIPlayerEntity bot,
-                                                     ServerLevel world,
-                                                     BlockPos target) {
-        return observableStandCell(bot, target)
-                && Standability.isStandable(world, target)
-                && !hasObservableAdjacentFluid(bot, world, target)
-                && !hasObservableAdjacentFluid(bot, world, target.above());
-    }
-
-    private void maybeLogAscentBlocked(AIPlayerEntity bot, BlockPos current, String reasons) {
-        boolean changed = !current.equals(lastAscentBlockedPos)
-                || !reasons.equals(lastAscentBlockedReasons);
-        if (!changed && totalBudget() - lastAscentBlockedLogBudget < ASCENT_BLOCKED_LOG_INTERVAL) {
-            return;
-        }
-        lastAscentBlockedPos = current.immutable();
-        lastAscentBlockedReasons = reasons;
-        lastAscentBlockedLogBudget = totalBudget();
-        BotLog.action(bot, "acquire_water_ascent_blocked",
-                "at", current.toShortString(), "reasons", reasons);
-    }
-
-    private static boolean hasHealthyStonePickaxe(AIPlayerEntity bot) {
-        for (var stack : bot.getInventory().getNonEquipmentItems()) {
-            if (ToolTier.pickaxeTier(stack) == ToolTier.STONE) {
-                return true;
-            }
-        }
-        if (ToolTier.pickaxeTier(bot.getItemBySlot(EquipmentSlot.OFFHAND)) == ToolTier.STONE) {
-            return true;
-        }
-        return false;
-    }
-
-    private void beginAscentToolCraft(AIPlayerEntity bot, BlockPos obstruction) {
-        returnMiner.cancel(bot);
-        int desired = InventoryAction.countItem(bot, Items.STONE_PICKAXE) + 1;
-        ascentToolCraft = new CraftTask(Items.STONE_PICKAXE, desired);
-        ascentToolCraft.start(bot);
-        BotLog.action(bot, "acquire_water_ascent_tool_replenish",
-                "target", obstruction.toShortString(),
-                "item", Items.STONE_PICKAXE,
-                "desired", desired);
-    }
-
-    private void tickAscentToolCraft(AIPlayerEntity bot) {
-        CraftTask child = ascentToolCraft;
-        child.tick(bot);
-        if (child.state() == TaskState.COMPLETED) {
-            ascentToolCraft = null;
-            BotLog.action(bot, "acquire_water_ascent_tool_ready",
-                    "item", Items.STONE_PICKAXE,
-                    "count", InventoryAction.countItem(bot, Items.STONE_PICKAXE));
-            return;
-        }
-        if (child.state() == TaskState.FAILED || child.state() == TaskState.CANCELLED) {
-            String reason = child.failureReason();
-            ascentToolCraft = null;
-            fail("acquire_water_ascent_tool_unavailable:minecraft:stone_pickaxe:" + reason);
-        }
-    }
-
-    private AscentChoice selectAscentTarget(AIPlayerEntity bot,
-                                            ServerLevel world,
-                                            BlockPos current) {
-        List<Direction> directions = orderedAscentDirections(current);
-        List<String> rejections = new ArrayList<>();
-        BlockPos supportFallback = null;
-        for (Direction direction : directions) {
-            BlockPos candidate = current.relative(direction).above();
-            AscentCandidate inspected = inspectAscentCandidate(bot, world, current, candidate);
-            if (!inspected.accepted()) {
-                rejections.add(direction.getSerializedName() + ":" + inspected.reason());
-                continue;
-            }
-            if (!inspected.supportMissing()) {
-                return new AscentChoice(candidate.immutable(), String.join(",", rejections));
-            }
-            if (failedAscentSupports.contains(candidate.below())) {
-                rejections.add(direction.getSerializedName() + ":support_place_failed");
-            } else if (supportFallback == null
-                    && MaterialPalette.pickPathSupportBlockSlot(bot).isPresent()) {
-                supportFallback = candidate.immutable();
-            } else {
-                rejections.add(direction.getSerializedName() + ":support_missing");
-            }
-        }
-        if (supportFallback != null) {
-            return new AscentChoice(supportFallback, String.join(",", rejections));
-        }
-        return new AscentChoice(null, String.join(",", rejections));
-    }
-
-    private List<Direction> orderedAscentDirections(BlockPos current) {
-        List<Direction> directions = new ArrayList<>(List.of(HORIZONTAL));
-        directions.sort(Comparator.comparingDouble(direction -> {
-            BlockPos candidate = current.relative(direction).above();
-            double dx = candidate.getX() - surfaceAnchor.getX();
-            double dz = candidate.getZ() - surfaceAnchor.getZ();
-            return dx * dx + dz * dz;
-        }));
-        return directions;
-    }
-
-    private static AscentCandidate inspectAscentCandidate(AIPlayerEntity bot,
-                                                           ServerLevel world,
-                                                           BlockPos current,
-                                                           BlockPos target) {
-        if (!isAdjacentUp(current, target)) {
-            return AscentCandidate.rejected("not_adjacent_up");
-        }
-
-        // Inspect and remove the visible jump-arc obstruction before asking for the landing
-        // support. In a natural two-block-high tunnel the solid block at {@code target} hides the
-        // top/side faces of {@code target.down()}; requiring the support first therefore rejected
-        // every ordinary stone stair as support_unobservable and left RETURN_SURFACE motionless.
-        // Mining only the first observable obstruction exposes the support on the next tick, where
-        // the normal support/fluid checks below still fail closed before any movement or placement.
-        for (BlockPos cell : new BlockPos[]{current.above(2), target, target.above()}) {
-            if (!observableCellOrBlock(bot, cell)) {
-                return AscentCandidate.rejected("arc_unobservable@" + cell.toShortString());
-            }
-            var state = world.getBlockState(cell);
-            if (!state.getFluidState().isEmpty()) {
-                return AscentCandidate.rejected("arc_fluid@" + cell.toShortString());
-            }
-            if (Standability.isDangerous(state)) {
-                return AscentCandidate.rejected("arc_dangerous@" + cell.toShortString());
-            }
-            if (!state.getCollisionShape(world, cell).isEmpty()
-                    && state.getDestroySpeed(world, cell) < 0.0F) {
-                return AscentCandidate.rejected("arc_unbreakable@" + cell.toShortString());
-            }
-            if (!state.getCollisionShape(world, cell).isEmpty()
-                    && world.getBlockEntity(cell) != null) {
-                return AscentCandidate.rejected("arc_block_entity@" + cell.toShortString());
-            }
-            if (hasObservableAdjacentFluid(bot, world, cell)) {
-                return AscentCandidate.rejected("arc_adjacent_fluid@" + cell.toShortString());
-            }
-            if (!state.getCollisionShape(world, cell).isEmpty()) {
-                return new AscentCandidate(true, false, false,
-                        "visible_obstruction", cell.immutable());
-            }
-        }
-
-        BlockPos support = target.below();
-        if (!observableCellOrBlock(bot, support)) {
-            return AscentCandidate.rejected("support_unobservable");
-        }
-        var supportState = world.getBlockState(support);
-        if (!supportState.getFluidState().isEmpty()) {
-            return AscentCandidate.rejected("support_fluid");
-        }
-        if (Standability.isDangerous(supportState)) {
-            return AscentCandidate.rejected("support_dangerous");
-        }
-        boolean supportMissing = supportState.getCollisionShape(world, support).isEmpty();
-        boolean foundationMissing = false;
-        if (supportMissing) {
-            BlockPos base = support.below();
-            if (!supportState.canBeReplaced()) {
-                return AscentCandidate.rejected("support_not_replaceable");
-            }
-            if (!observableCellOrBlock(bot, base)) {
-                return AscentCandidate.rejected("support_unobservable");
-            }
-            var baseState = world.getBlockState(base);
-            if (!baseState.getFluidState().isEmpty()
-                    || Standability.isDangerous(baseState)) {
-                return AscentCandidate.rejected("support_base_unsafe");
-            }
-            if (baseState.getCollisionShape(world, base).isEmpty()) {
-                if (!baseState.canBeReplaced()) {
-                    return AscentCandidate.rejected("support_base_unsafe");
-                }
-                foundationMissing = true;
-            }
-        }
-        return new AscentCandidate(true, supportMissing, foundationMissing,
-                supportMissing ? "support_missing" : "safe", null);
-    }
-
-    private record AscentChoice(BlockPos target, String rejections) {
-    }
-
-    private record AscentCandidate(boolean accepted,
-                                   boolean supportMissing,
-                                   boolean foundationMissing,
-                                   String reason,
-                                   BlockPos obstruction) {
-        private static AscentCandidate rejected(String reason) {
-            return new AscentCandidate(false, false, false, reason, null);
-        }
-    }
-
-    private static boolean isAdjacentUp(BlockPos from, BlockPos to) {
-        return from != null && to != null
-                && to.getY() - from.getY() == 1
-                && Math.abs(to.getX() - from.getX()) + Math.abs(to.getZ() - from.getZ()) == 1;
-    }
-
-    private static boolean hasObservableAdjacentFluid(AIPlayerEntity bot,
-                                                      ServerLevel world,
-                                                      BlockPos cell) {
-        for (Direction direction : Direction.values()) {
-            BlockPos adjacent = cell.relative(direction);
-            if (observableCellOrBlock(bot, adjacent)
-                    && !world.getFluidState(adjacent).isEmpty()) {
-                return true;
-            }
-        }
-        return observableCellOrBlock(bot, cell)
-                && !world.getFluidState(cell).isEmpty();
-    }
-
-    private static boolean observableCellOrBlock(AIPlayerEntity bot, BlockPos pos) {
-        return ObservableWorldQuery.canObserveCell(bot, pos)
-                || ObservableWorldQuery.canObserveBlock(bot, pos);
-    }
-
     private void search(AIPlayerEntity bot) {
         if (totalBudget() - lastScanBudget >= SCAN_INTERVAL) {
             lastScanBudget = totalBudget();
@@ -1604,6 +538,26 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // PathExecutor replan is not search progress and therefore cannot extend the deadline.
         if (totalBudget() - waypointStartedBudget >= PATH_STALL_LIMIT) {
             skipSearchWaypoint(bot, "path_stalled");
+            return;
+        }
+        // A remote spiral post normally becomes a short directional hop. Before handing that
+        // hop to the asynchronous navigator, prove that there is an observable local runway to
+        // leave. Without one (a sealed room or a collapsed pocket), the route can stay active
+        // until its broad deadline even though no movement can ever reveal new terrain. Treat
+        // that as the same bounded unreachable-sector evidence as a rejected path.
+        if (!ObservableWorldQuery.canObserveCell(bot, searchWaypoint)
+                && !hasObservableSurfaceRunway(bot, bot.level(), bot.blockPosition())) {
+            boolean boundaryOwned = noteUnreachableWaypoint(bot);
+            if (state == TaskState.FAILED) {
+                // Checkpoint decoding requires three path-attempt units at a terminal
+                // unreachable boundary. A local-runway refusal has no navigator call to
+                // increment that counter, but it is the same three-waypoint proof; publish
+                // that durable boundary so a terminal restore cannot become a fresh search.
+                pathAttempts = Math.max(pathAttempts, MAX_UNREACHABLE_WAYPOINTS);
+            }
+            if (!boundaryOwned) {
+                skipSearchWaypoint(bot, "goal_unreachable");
+            }
             return;
         }
         retryPath(bot, searchWaypoint, true, true);
@@ -1702,9 +656,28 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             return;
         }
         lastPathAttemptBudget = totalBudget();
-        ActionResult result = surfaceOnly
-                ? bot.getActionPack().startSurfacePathTo(target)
-                : bot.getActionPack().startPathTo(target);
+        // SEARCH waypoints are durable spiral posts, while navigation may only receive an
+        // observed local stance. A remote post therefore becomes a bounded directional hop;
+        // keep searchWaypoint unchanged so a hop can never be mistaken for reaching the post.
+        boolean directionalSearchHop = surfaceOnly && phase == Phase.SEARCH
+                && !ObservableWorldQuery.canObserveCell(bot, target);
+        ActionResult result;
+        if (directionalSearchHop) {
+            result = bot.getActionPack().startDirectionalPursuitTo(
+                    target, ObservedSearchHops.HOP_DISTANCE, false, false);
+        } else if (surfaceOnly) {
+            result = bot.getActionPack().startSurfacePathTo(target);
+            // Seeing the cursor post does not prove that every cell on a route to it is admitted.
+            // Keep the durable post and take one observed hop instead of rejecting it merely
+            // because the direct surface corridor has not entered the fence yet.
+            if (phase == Phase.SEARCH && isObservedCorridorAdmissionFailure(result.reason())) {
+                directionalSearchHop = true;
+                result = bot.getActionPack().startDirectionalPursuitTo(
+                        target, ObservedSearchHops.HOP_DISTANCE, false, false);
+            }
+        } else {
+            result = bot.getActionPack().startPathTo(target);
+        }
         if (result.isFailed()) {
             if (!"pathfinding_throttled".equals(result.reason())) {
                 pathAttempts = Math.min(MAX_RESTORABLE_PATH_ATTEMPTS, pathAttempts + 1);
@@ -1712,21 +685,39 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             BotLog.action(bot, "acquire_water_path_retry",
                     "phase", phase, "target", target.toShortString(), "reason", result.reason());
             if (phase == Phase.SEARCH && pathAttempts >= 3) {
-                if (result.reason().contains("GOAL_UNREACHABLE")
-                        && noteUnreachableWaypoint(bot)) {
+                boolean rejectedSearchWaypoint = isRejectedSearchWaypoint(result.reason());
+                if (rejectedSearchWaypoint && noteUnreachableWaypoint(bot)) {
                     return;
                 }
-                skipSearchWaypoint(bot, result.reason().contains("GOAL_UNREACHABLE")
+                skipSearchWaypoint(bot, rejectedSearchWaypoint
                         ? "goal_unreachable" : "path_start_failed");
             }
             return;
         }
         pathAttempts = 0;
-        if (updateResolvedSearchGoal && bot.getActionPack().activePathGoal() != null) {
+        if (updateResolvedSearchGoal && !directionalSearchHop
+                && bot.getActionPack().activePathGoal() != null) {
             // Keep waypointStartedBudget unchanged: endpoint snapping is part of the same issued
             // observation attempt and must not grant a new 400-tick window.
             searchWaypoint = bot.getActionPack().activePathGoal().immutable();
         }
+    }
+
+    /**
+     * A strict search may only leave the current cell through an admitted, observed route. A
+     * rejected observation proof therefore has the same sector-level meaning as an unreachable
+     * path: retrying the identical hidden waypoint cannot reveal or make it traversable. Count it
+     * in the bounded ledger so a sealed surface fails closed instead of burning the whole spiral.
+     */
+    private static boolean isRejectedSearchWaypoint(String reason) {
+        return reason.contains("GOAL_UNREACHABLE")
+                || reason.equals("navigation_goal_unobserved")
+                || reason.equals("navigation_goal_without_observed_stance")
+                || reason.equals("navigation_observed_corridor_unavailable");
+    }
+
+    private static boolean isObservedCorridorAdmissionFailure(String reason) {
+        return "navigation_observed_corridor_unavailable".equals(reason);
     }
 
     private void skipSearchWaypoint(AIPlayerEntity bot, String reason) {
@@ -2050,7 +1041,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private void finish(AIPlayerEntity bot) {
-        clearReturnSurfaceWork(bot, "acquire_water_completed");
+        clearReturnSurfaceWork(bot);
         phase = Phase.DONE;
         complete();
     }

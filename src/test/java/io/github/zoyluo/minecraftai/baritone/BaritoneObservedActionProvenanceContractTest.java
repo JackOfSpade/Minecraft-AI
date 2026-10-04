@@ -145,11 +145,13 @@ class BaritoneObservedActionProvenanceContractTest {
 
         String use = method(build, "public static Use useItemOnHit(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand,");
         assertTrue(use.contains("supportFaceRefusal(player, hit)") && use.contains("confirmedPlacementState("));
-        assertFalse(use.contains("getBlockState(destination)"),
-                "trusted placement provenance cannot be inferred from a destination scan");
+        assertTrue(use.contains("BlockState destinationBefore") && use.contains("BlockState destinationAfter"),
+                "the already-admitted destination must be compared before and after the vanilla click");
         String confirmed = method(build, "private static BlockState confirmedPlacementState(");
         assertTrue(confirmed.contains("expected == null") && confirmed.contains("heldItemState == null")
-                        && confirmed.contains("result.consumesAction()") && confirmed.contains("expected.equals(heldItemState)"),
-                "only the pre-checked matching block item and a consumed click may publish placement state");
+                        && confirmed.contains("result.consumesAction()") && confirmed.contains("expected.equals(heldItemState)")
+                        && confirmed.contains("destinationBefore.equals(destinationAfter)")
+                        && confirmed.contains("destinationAfter.is(expected.getBlock())"),
+                "only a changed, already-admitted destination matching the pre-checked block item may publish placement state");
     }
 }

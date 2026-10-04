@@ -91,6 +91,34 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
+    public void closedSearchRestoreRepaysWaterDebtBeforeReportingEnclosure(GameTestHelper context) {
+        Fixture fixture = spawnPreparedBot(context, "ObsidianClosedWaterDebtGT", 15, false);
+        BlockPos waterSource = fixture.start().east(2);
+        fixture.bot().level().setBlock(waterSource, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
+                fixture.start(), CreateObsidianTask.Phase.SEARCH, 15, waterSource));
+        ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(fixture.start(), 12);
+        for (int direction = 0; direction < 4; direction++) {
+            cursor = cursor.beginNextLeg().skipBlockedLeg();
+        }
+        cursor.encode().forEach(checkpoint::put);
+
+        CreateObsidianTask restored = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
+        restored.start(fixture.bot());
+
+        require(context, restored.state() == TaskState.RUNNING
+                        && CreateObsidianTask.Phase.RECOVER_WATER.name()
+                        .equals(restored.checkpoint().get("phase")),
+                "closed SEARCH restored before its placed-water obligation: "
+                        + restored.state() + ":" + restored.failureReason()
+                        + " checkpoint=" + restored.checkpoint());
+        require(context, fixture.bot().level().getFluidState(waterSource).is(Fluids.WATER),
+                "closed SEARCH restore changed its water source before recovery");
+        restored.cancel(fixture.bot(), "gametest_complete");
+        finish(context, fixture);
+    }
+
+    @GameTest(maxTicks = 20)
     public void thirtyOneOfThirtyTwoDoesNotCompleteOrReplaceCheckpoint(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMission31GT", 31, true);
         Map<String, String> taskCheckpoint = taskCheckpoint(
@@ -853,7 +881,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void searchPreservesHigherTierOreAndClosesTheStoneOnlyLeg(GameTestHelper context) {
+    public void retiredSearchRefusesWithoutMutatingObservedHigherTierOre(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchGoldGT", 0, true);
         BlockPos gold = fixture.start().north().above();
         fixture.bot().level().setBlock(
@@ -874,35 +902,23 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
         CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
         task.start(fixture.bot());
-        AtomicInteger ticks = new AtomicInteger();
-        context.failIfEver(() -> {
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(fixture.bot());
-            }
-            require(context, task.state() == TaskState.RUNNING,
-                    "higher-tier search obstruction ended the obsidian task: "
-                            + task.failureReason());
-            require(context,
-                    fixture.bot().level().getBlockState(gold).is(Blocks.GOLD_ORE),
-                    "stone-only obsidian search destroyed the finite gold obstruction");
-            if (!"0".equals(task.checkpoint().get("steps_left"))) {
-                if (ticks.incrementAndGet() > 10) {
-                    context.fail(Component.nullToEmpty(
-                            "gold-facing search leg was not durably closed: "
-                                    + task.checkpoint()));
-                }
-                return;
-            }
-            require(context, "0".equals(task.checkpoint().get("direction")),
-                    "gold obstruction changed the wrong search leg: " + task.checkpoint());
-            int stoneDamageAfter = fixture.bot().getInventory().getNonEquipmentItems().stream()
-                    .filter(stack -> stack.is(Items.STONE_PICKAXE))
-                    .mapToInt(ItemStack::getDamageValue)
-                    .sum();
-            require(context, stoneDamageAfter == stoneDamageBefore,
-                    "gold reroute consumed stone-pick durability");
-            finish(context, fixture);
-        });
+        task.tick(fixture.bot());
+
+        require(context, task.state() == TaskState.FAILED
+                        && "create_obsidian_no_observed_lava".equals(task.failureReason()),
+                "retired search must refuse before entering an unobserved search leg: "
+                        + task.state() + ":" + task.failureReason());
+        require(context, fixture.bot().blockPosition().equals(fixture.start()),
+                "retired search moved before refusing the unobserved leg");
+        require(context, fixture.bot().level().getBlockState(gold).is(Blocks.GOLD_ORE),
+                "retired search mutated the observed higher-tier obstruction");
+        int stoneDamageAfter = fixture.bot().getInventory().getNonEquipmentItems().stream()
+                .filter(stack -> stack.is(Items.STONE_PICKAXE))
+                .mapToInt(ItemStack::getDamageValue)
+                .sum();
+        require(context, stoneDamageAfter == stoneDamageBefore,
+                "retired search consumed mining-tool durability");
+        finish(context, fixture);
     }
 
     @GameTest(maxTicks = 220)
@@ -1005,7 +1021,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void auditedServiceRestartDoesNotPromoteUnrelatedInventoryObsidian(
+    public void auditedServiceRestartDoesNotPromoteUnrelatedInventoryObsidianWithoutObservedLava(
             GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianAuditServiceRestartGT", 0, true);
         MiningEvidenceAudit.begin(fixture.bot(), MiningEvidenceAudit.Target.OBSIDIAN);
@@ -1033,9 +1049,10 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 "service restore promoted unrelated inventory obsidian: "
                         + restored.checkpoint());
         restored.tick(fixture.bot());
-        require(context, restored.state() == TaskState.RUNNING
+        require(context, restored.state() == TaskState.FAILED
+                        && "create_obsidian_no_observed_lava".equals(restored.failureReason())
                         && "8".equals(restored.checkpoint().get("collected")),
-                "first restored tick rejected or promoted the exact audit ledger: "
+                "no-lava restore rejected or promoted the exact audit ledger: "
                         + restored.state() + ":" + restored.failureReason()
                         + " checkpoint=" + restored.checkpoint());
 
@@ -1078,260 +1095,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 80)
-    public void searchPhysicallyLightsTheDarkTrailBehindItsReachedFace(GameTestHelper context) {
-        Fixture fixture = spawnPreparedBot(context, "ObsidianSearchTorchGT", 0, true);
-        var world = fixture.bot().level();
-        BlockPos next = fixture.start().north();
-        for (BlockPos cell : List.of(fixture.start(), next)) {
-            world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell.above(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            for (net.minecraft.core.Direction side : List.of(
-                    net.minecraft.core.Direction.EAST,
-                    net.minecraft.core.Direction.WEST)) {
-                world.setBlock(cell.relative(side),
-                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(cell.relative(side).above(),
-                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            }
-        }
-        for (BlockPos end : List.of(fixture.start().south(), next.north())) {
-            world.setBlock(end, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(end.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.TORCH));
-        Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
-                fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
-        ObsidianSearchCursor.initial(fixture.start(), 12).beginNextLeg().encode()
-                .forEach(checkpoint::put);
-        AtomicReference<CreateObsidianTask> taskRef = new AtomicReference<>();
-        AtomicBoolean litBeforeMove = new AtomicBoolean();
-        // Sky and block light under the fresh corridor roofs only settle once the light engine
-        // catches up with the fixture placement; under parallel batch load that can lag past
-        // a fixed tick. Gate on the observed darkness instead, so the assertions cannot race
-        // the engine.
-        AtomicBoolean started = new AtomicBoolean();
-        context.failIfEver(() -> {
-            if (!started.get()) {
-                if (world.canSeeSky(fixture.start()) || world.canSeeSky(next)
-                        || world.getBrightness(LightLayer.BLOCK, fixture.start()) >= 8
-                        || world.getBrightness(LightLayer.SKY, fixture.start()) >= 8) {
-                    return;
-                }
-                started.set(true);
-                require(context, !world.canSeeSky(fixture.start()) && !world.canSeeSky(next),
-                        "dark search fixture still exposed its corridor to the sky");
-                require(context, world.getBrightness(LightLayer.BLOCK, fixture.start()) < 8
-                                && world.getBrightness(LightLayer.SKY, fixture.start()) < 8,
-                        "dark search fixture was not actually dark");
-                CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
-                task.start(fixture.bot());
-                taskRef.set(task);
-                return;
-            }
-            CreateObsidianTask task = taskRef.get();
-            if (task == null) {
-                return;
-            }
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(fixture.bot());
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("dark search trail failed before lighting: "
-                        + task.failureReason()));
-            }
-            if (fixture.bot().level().getBlockState(fixture.start()).is(Blocks.TORCH)
-                    && fixture.bot().blockPosition().equals(fixture.start())) {
-                litBeforeMove.set(true);
-            }
-            if (!fixture.bot().level().getBlockState(fixture.start()).is(Blocks.TORCH)) {
-                return;
-            }
-            if (!fixture.bot().blockPosition().equals(fixture.start().north())) {
-                return;
-            }
-            require(context, litBeforeMove.get(),
-                    "dark SEARCH moved or mined before physically lighting its initial face");
-            require(context, fixture.bot().blockPosition().equals(fixture.start().north()),
-                    "search torch appeared without a physical one-cell advance");
-            require(context, InventoryAction.countItem(fixture.bot(), Items.TORCH) == 0,
-                    "search lighting did not consume exactly one physical torch");
-            require(context, fixture.start().north().equals(
-                            ObsidianSearchCursor.decode(task.checkpoint()).orElseThrow().face()),
-                    "torch placement fabricated or lost the durable search face");
-            finish(context, fixture);
-        });
-    }
-
-    @GameTest(maxTicks = 100)
-    public void threeBlockedDirectionsClearOnlyAfterTheOpenFaceIsReached(GameTestHelper context) {
-        Fixture fixture = spawnPreparedBot(context, "ObsidianSearchOneExitGT", 0, true);
-        for (net.minecraft.core.Direction direction : List.of(
-                net.minecraft.core.Direction.NORTH,
-                net.minecraft.core.Direction.EAST,
-                net.minecraft.core.Direction.SOUTH)) {
-            fixture.bot().level().setBlock(
-                    fixture.start().relative(direction).above(),
-                    Blocks.GOLD_ORE.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
-                fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
-        ObsidianSearchCursor.initial(fixture.start(), 12).encode().forEach(checkpoint::put);
-        CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
-        task.start(fixture.bot());
-
-        context.failIfEver(() -> {
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(fixture.bot());
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("one-exit search failed before moving: "
-                        + task.failureReason()));
-            }
-            if (!fixture.bot().blockPosition().equals(fixture.start().west())) {
-                return;
-            }
-            require(context, "0".equals(task.checkpoint().get("blocked_directions")),
-                    "physical movement did not clear the prior blocked sweep: " + task.checkpoint());
-            require(context, "1".equals(task.checkpoint().get("topology_epoch")),
-                    "one factual face advance did not increment topology exactly once");
-            finish(context, fixture);
-        });
-    }
-
-    @GameTest(maxTicks = 80)
-    public void skyLitSearchDoesNotSpendTheUndergroundTorchReserve(GameTestHelper context) {
-        Fixture fixture = spawnPreparedBot(context, "ObsidianSearchSkyGT", 0, true);
-        InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.TORCH));
-        Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
-                fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
-        ObsidianSearchCursor.initial(fixture.start(), 12).beginNextLeg().encode()
-                .forEach(checkpoint::put);
-        AtomicReference<CreateObsidianTask> taskRef = new AtomicReference<>();
-        // canSeeSky() depends on a lazily refreshed heightmap and can briefly report the
-        // pre-fixture value when the default GameTest batch prepares many neighbouring
-        // structures in the same server tick (see
-        // searchPhysicallyLightsTheDarkTrailBehindItsReachedFace and
-        // DangerWatcherLowHealthGameTests#hostileLowHealthCannotInterruptAtomicHealingEat).
-        // Gate on the observed sky visibility settling to the expected value instead of
-        // asserting it synchronously right after spawn, so the assertion and the task start
-        // cannot race the engine.
-        AtomicBoolean started = new AtomicBoolean();
-        context.failIfEver(() -> {
-            if (!started.get()) {
-                if (!fixture.bot().level().canSeeSky(fixture.start())) {
-                    return;
-                }
-                started.set(true);
-                CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
-                task.start(fixture.bot());
-                taskRef.set(task);
-                return;
-            }
-            CreateObsidianTask task = taskRef.get();
-            if (task == null) {
-                return;
-            }
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(fixture.bot());
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("sky-lit search failed: " + task.failureReason()));
-            }
-            if (!fixture.bot().blockPosition().equals(fixture.start().north())) {
-                return;
-            }
-            require(context, !fixture.bot().level().getBlockState(
-                            fixture.start()).is(Blocks.TORCH),
-                    "sky-lit search placed an unnecessary underground torch");
-            require(context, InventoryAction.countItem(fixture.bot(), Items.TORCH) == 1,
-                    "sky-lit search consumed its torch reserve");
-            finish(context, fixture);
-        });
-    }
-
-    @GameTest(maxTicks = 80)
-    public void fourClosedSearchDirectionsFailTypedWithoutRotatingAsProgress(GameTestHelper context) {
-        Fixture fixture = spawnPreparedBot(context, "ObsidianSearchClosedGT", 0, true);
-        InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.IRON_PICKAXE));
-        List<net.minecraft.core.Direction> blockedDirections = new ArrayList<>();
-        for (net.minecraft.core.Direction direction
-                : net.minecraft.core.Direction.Plane.HORIZONTAL) {
-            blockedDirections.add(direction);
-        }
-        for (int index = 0; index < blockedDirections.size(); index++) {
-            fixture.bot().level().setBlock(
-                    fixture.start().relative(blockedDirections.get(index)),
-                    Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-            fixture.bot().level().setBlock(
-                    fixture.start().relative(blockedDirections.get(index)).above(),
-                    Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
-                fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
-        ObsidianSearchCursor.initial(fixture.start(), 12).encode().forEach(checkpoint::put);
-        CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
-        task.start(fixture.bot());
-        int toolDamageBefore = fixture.bot().getInventory().getNonEquipmentItems().stream()
-                .filter(stack -> stack.is(Items.STONE_PICKAXE)
-                        || stack.is(Items.IRON_PICKAXE)
-                        || stack.is(Items.DIAMOND_PICKAXE))
-                .mapToInt(ItemStack::getDamageValue)
-                .sum();
-
-        context.failIfEver(() -> {
-            if (task.state() == TaskState.RUNNING) {
-                // GameTests run in parallel and several mining fixtures deliberately tunnel
-                // beyond their tiny empty templates. Reassert this test-owned one-cell shell
-                // before every task tick so a neighbouring fixture cannot turn a factual closed
-                // direction into ordinary mineable stone midway through the four-face sweep.
-                for (net.minecraft.core.Direction direction : blockedDirections) {
-                    fixture.bot().level().setBlock(
-                            fixture.start().relative(direction),
-                            Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-                    fixture.bot().level().setBlock(
-                            fixture.start().relative(direction).above(),
-                            Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-                }
-                task.tick(fixture.bot());
-                return;
-            }
-            require(context, task.state() == TaskState.FAILED,
-                    "four-direction closure ended as " + task.state());
-            require(context, task.failureReason().startsWith("create_obsidian_search_enclosed"),
-                    "four-direction closure did not expose a typed terminal reason: "
-                            + task.failureReason());
-            require(context, "15".equals(task.checkpoint().get("blocked_directions")),
-                    "closed-direction mask was not durably persisted: " + task.checkpoint());
-            require(context, fixture.bot().blockPosition().equals(fixture.start()),
-                    "closed-direction sweep moved away from its factual work face");
-            require(context, "0".equals(task.checkpoint().get("topology_epoch"))
-                            && "390".equals(task.checkpoint().get("last_progress")),
-                    "pure blocked rotation was recorded as topology/progress: " + task.checkpoint());
-            int toolDamageAfter = fixture.bot().getInventory().getNonEquipmentItems().stream()
-                    .filter(stack -> stack.is(Items.STONE_PICKAXE)
-                            || stack.is(Items.IRON_PICKAXE)
-                            || stack.is(Items.DIAMOND_PICKAXE))
-                    .mapToInt(ItemStack::getDamageValue)
-                    .sum();
-            require(context, toolDamageAfter == toolDamageBefore,
-                    "closed-direction sweep spent a reserved mining tool");
-            for (int index = 0; index < blockedDirections.size(); index++) {
-                require(context, fixture.bot().level().getBlockState(
-                                fixture.start().relative(blockedDirections.get(index)))
-                                .is(Blocks.BEDROCK),
-                        "closed search destroyed its feet-level factual blocker");
-                require(context, fixture.bot().level().getBlockState(
-                                fixture.start().relative(blockedDirections.get(index)).above())
-                                .is(Blocks.BEDROCK),
-                        "closed search destroyed its head-level factual blocker");
-            }
-            finish(context, fixture);
-        });
-    }
-
-    @GameTest(maxTicks = 40)
+                    @GameTest(maxTicks = 40)
     public void darkRestoredClosedMaskOutranksMissingTorch(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianDarkClosedGT", 0, true);
         var world = fixture.bot().level();

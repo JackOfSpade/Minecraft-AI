@@ -10,7 +10,7 @@ import com.google.gson.JsonParser;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import org.junit.jupiter.api.Test;
 
-/** {@code behaviour}: the companion behaviour switches (pace, hostile-bot targeting, gear, follow, warden). */
+/** {@code behaviour}: the companion behaviour switches (pace, hostile-bot targeting, gear and follow). */
 final class MinecraftAiConfigBehaviourTest {
     private static MinecraftAiConfig parse(String json, OperatingProfile profile) {
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
@@ -26,7 +26,6 @@ final class MinecraftAiConfigBehaviourTest {
     private static void assertShippedDefaults(MinecraftAiConfig.Behaviour behaviour) {
         MinecraftAiConfig.Pace pace = behaviour.pace();
         assertTrue(pace.paceEnabled());
-        assertTrue(pace.quietZoneCautionEnabled());
         assertEquals(8.0D, pace.routeSprintDistance());
         assertEquals(4.5D, pace.routeWalkDistance());
         MinecraftAiConfig.Targeting targeting = behaviour.targeting();
@@ -40,7 +39,6 @@ final class MinecraftAiConfigBehaviourTest {
         assertTrue(follow.escortOnlyEnabled());
         assertEquals(6.0D, follow.walkGap());
         assertEquals(10.0D, follow.sprintGap());
-        assertTrue(behaviour.warden().sneakAwayEnabled());
         assertEquals(540.0D, behaviour.combatOrDefaults().aimOrDefaults().maxTurnDegPerSec());
     }
 
@@ -60,6 +58,12 @@ final class MinecraftAiConfigBehaviourTest {
     }
 
     @Test
+    void removedWardenSectionIsIgnoredForExistingJson() {
+        MinecraftAiConfig.Behaviour parsed = parse("{\"behaviour\":{\"warden\":{\"sneakAway\":false}}}").behaviour();
+        assertEquals(MinecraftAiConfig.Behaviour.defaults(), parsed);
+    }
+
+    @Test
     void aPartialSectionKeepsTheGivenValuesAndDefaultsTheRest() {
         MinecraftAiConfig.Behaviour behaviour = parse("{\"behaviour\":{"
                 + "\"pace\":{\"enabled\":false,\"routeSprintDistance\":12.0},"
@@ -70,7 +74,6 @@ final class MinecraftAiConfigBehaviourTest {
         assertFalse(behaviour.pace().paceEnabled());
         assertEquals(12.0D, behaviour.pace().routeSprintDistance());
         assertEquals(4.5D, behaviour.pace().routeWalkDistance(), "the missing walk distance is the default");
-        assertTrue(behaviour.pace().quietZoneCautionEnabled());
         assertFalse(behaviour.targeting().ownerVisionEnabled());
         assertEquals(900, behaviour.targeting().aggressorMemoryTicks());
         assertTrue(behaviour.targeting().hostileBotsEnabled());
@@ -79,7 +82,6 @@ final class MinecraftAiConfigBehaviourTest {
         assertFalse(behaviour.gear().worstFirstEnabled());
         assertFalse(behaviour.follow().escortOnlyEnabled());
         assertEquals(6.0D, behaviour.follow().walkGap());
-        assertFalse(behaviour.warden().sneakAwayEnabled());
     }
 
     @Test
@@ -89,7 +91,6 @@ final class MinecraftAiConfigBehaviourTest {
         assertEquals(MinecraftAiConfig.Behaviour.defaults().pace(), behaviour.pace());
         assertEquals(MinecraftAiConfig.Behaviour.defaults().targeting(), behaviour.targeting());
         assertEquals(MinecraftAiConfig.Behaviour.defaults().follow(), behaviour.follow());
-        assertEquals(MinecraftAiConfig.Behaviour.defaults().warden(), behaviour.warden());
     }
 
     @Test
@@ -110,9 +111,9 @@ final class MinecraftAiConfigBehaviourTest {
     @Test
     void notANumberAndInfinityFallBackToTheDefaults() {
         MinecraftAiConfig.Pace defaultPace = MinecraftAiConfig.Pace.defaults();
-        MinecraftAiConfig.Pace nan = new MinecraftAiConfig.Pace(null, Double.NaN, Double.NaN, null).withDefaults(defaultPace);
+        MinecraftAiConfig.Pace nan = new MinecraftAiConfig.Pace(null, Double.NaN, Double.NaN).withDefaults(defaultPace);
         assertEquals(defaultPace, nan);
-        MinecraftAiConfig.Pace infinite = new MinecraftAiConfig.Pace(true, Double.POSITIVE_INFINITY, 2.0D, true)
+        MinecraftAiConfig.Pace infinite = new MinecraftAiConfig.Pace(true, Double.POSITIVE_INFINITY, 2.0D)
                 .withDefaults(defaultPace);
         assertEquals(8.0D, infinite.routeSprintDistance());
         assertEquals(2.0D, infinite.routeWalkDistance());
@@ -182,13 +183,11 @@ final class MinecraftAiConfigBehaviourTest {
     }
     @Test
     void nullBooleansReadAsTheDefault() {
-        assertTrue(new MinecraftAiConfig.Pace(null, 0.0D, 0.0D, null).paceEnabled());
-        assertTrue(new MinecraftAiConfig.Pace(null, 0.0D, 0.0D, null).quietZoneCautionEnabled());
+        assertTrue(new MinecraftAiConfig.Pace(null, 0.0D, 0.0D).paceEnabled());
         assertTrue(new MinecraftAiConfig.Targeting(null, null, 0, 0, 0.0D).hostileBotsEnabled());
         assertTrue(new MinecraftAiConfig.Targeting(null, null, 0, 0, 0.0D).ownerVisionEnabled());
         assertTrue(new MinecraftAiConfig.Gear(null).worstFirstEnabled());
         assertTrue(new MinecraftAiConfig.Follow(null, 0.0D, 0.0D).escortOnlyEnabled());
-        assertTrue(new MinecraftAiConfig.Warden(null).sneakAwayEnabled());
         assertFalse(new MinecraftAiConfig.Gear(false).worstFirstEnabled());
     }
 
@@ -229,10 +228,10 @@ final class MinecraftAiConfigBehaviourTest {
         assertNotNull(config.behaviour());
         assertNotNull(config.behaviourOrDefaults());
         assertShippedDefaults(config.behaviour());
-        MinecraftAiConfig.Behaviour hollow = new MinecraftAiConfig.Behaviour(null, null, null, null, null);
+        MinecraftAiConfig.Behaviour hollow = new MinecraftAiConfig.Behaviour(null, null, null, null);
         assertShippedDefaults(new MinecraftAiConfig.Behaviour(
                 hollow.paceOrDefaults(), hollow.targetingOrDefaults(), hollow.gearOrDefaults(),
-                hollow.followOrDefaults(), hollow.wardenOrDefaults()));
+                hollow.followOrDefaults()));
     }
 
     @Test
@@ -255,11 +254,10 @@ final class MinecraftAiConfigBehaviourTest {
     @Test
     void theCopiesCarryTheBehaviour() {
         MinecraftAiConfig.Behaviour custom = new MinecraftAiConfig.Behaviour(
-                new MinecraftAiConfig.Pace(false, 9.0D, 5.0D, true),
+                new MinecraftAiConfig.Pace(false, 9.0D, 5.0D),
                 MinecraftAiConfig.Targeting.defaults(),
                 new MinecraftAiConfig.Gear(false),
-                MinecraftAiConfig.Follow.defaults(),
-                MinecraftAiConfig.Warden.defaults());
+                MinecraftAiConfig.Follow.defaults());
         MinecraftAiConfig config = MinecraftAiConfig.defaults().withBehaviour(custom);
         assertEquals(custom, config.behaviour());
         assertEquals(custom, config.withNav(config.nav()).behaviour());

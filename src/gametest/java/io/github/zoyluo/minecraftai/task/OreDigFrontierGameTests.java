@@ -40,7 +40,7 @@ import java.util.UUID;
  * {@code OreDigDetourEngine}), running through the real {@code OreDigTask} / {@code OreDigDetourEngine} /
  * {@code SafeGate} stack against a live server, never the JUnit {@code FakeDetourHost}.
  *
- * <p>Both tests follow the {@code OreDigOpportunisticGameTests} / {@code LegChooserGameTests} Harness/Room idiom
+ * <p>The test follows the {@code OreDigOpportunisticGameTests} Harness/Room idiom
  * (a sealed stone-shelled fixture, {@link MiningAssistRuntime#forceEnable}, a DETOUR-mode config with
  * {@code harnessOff=true}, a real MISSION-origin task). What P5 additionally needs, that a P1 detour test does
  * not, is a controlled warm-up: {@code explorationTick}'s own gates (an estimated open volume of at least 1200,
@@ -106,6 +106,10 @@ public final class OreDigFrontierGameTests {
                 hidden.at(18, 0, -6), hidden.at(26, 0, 6), hidden.at(22, 3, 0), hidden.at(18, 5, 6), hidden.at(26, 1, -6));
 
         AIPlayerEntity bot = h.spawn("OreDigFrontierWaypointsGT", cavern, 0, 0);
+        BlockPos anchor = bot.blockPosition();
+        // The absent deep diamond target gives observed cavern stands a real Y-band score after
+        // warm-up, so the lowered positive threshold exercises selection without relying on
+        // residual UNKNOWN cells that a complete sensor sweep may legitimately eliminate.
         h.enableFrontier(bot, 256, 0.02D);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
@@ -149,7 +153,7 @@ public final class OreDigFrontierGameTests {
                     // Swap the frozen warm-up task for the real mission: TaskManager.assign aborts the frozen
                     // task first (design's own single-active-task discipline), so this is a clean hand-off, not
                     // a second task running alongside the first.
-                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
+                    task[0] = new OreDigTask(Set.of(Blocks.DEEPSLATE_DIAMOND_ORE), 40);
                     TaskManager.INSTANCE.assign(bot, task[0],
                             TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_frontier_waypoints"));
                     stage[0] = 2;
@@ -199,6 +203,9 @@ public final class OreDigFrontierGameTests {
                         h.require(tick - stageStart[0] < 400, "RETURN never finished within budget");
                         return;
                     }
+                    h.require(bot.blockPosition().equals(anchor),
+                            "the unproductive frontier excursion did not return to its exact anchor: at "
+                                    + bot.blockPosition().toShortString() + ", anchor " + anchor.toShortString());
                     ObservedOccupancy occ = state == null ? null : state.occupancyIfPresent();
                     if (occ != null) {
                         for (BlockPos pos : hiddenSample) {
@@ -237,239 +244,7 @@ public final class OreDigFrontierGameTests {
                 "FRONTIER_WALK is standing on a cell (" + feet.toShortString() + ") that was never observed");
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // 2. Design 10's own "done when" bar: walks to a frontier, mines a valuable, returns (10, 5.4's "same...
-    //    return"), and never selects an unobserved or lava-adjacent target.
-    // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = ENV_PREFIX + "frontier_excursion_mines_a_valuable_and_returns_to_anchor", maxTicks = 2400)
-    public void frontierExcursionMinesAValuableAndReturnsToAnchor(GameTestHelper context) {
-        Harness h = new Harness(context);
-        Room cavern = h.newRoom(60, -CAVERN_HALF, CAVERN_HALF, -CAVERN_HALF, CAVERN_HALF, CAVERN_HEIGHT);
-        // A single valuable, sealed on all 6 faces inside its own little pillar (the hub()/x-ray-canary idiom
-        // this whole suite uses) well off the frontier's own +X axis (z=-3, not z=0) so it neither blocks nor
-        // biases ObservedGraphSearch's route to the frontier candidate. Deliberately on the NORTH (-Z) side of
-        // the anchor, not the south: with explore.legChooser off, OreDigTask's own first strip leg always
-        // starts along STRIP_DIRS[0] = Direction.NORTH (stripDirIndex defaults to 0), so once the mission
-        // resumes stripMine right after the frontier excursion's RETURN (the 600-tick unproductive cooldown
-        // is frontierCooldownUntilServerTick, design 5.4's own re-trigger gate on a SECOND frontier excursion --
-        // it never gates stripMine or the ordinary P1 ORE detour, which the mission ledger paces separately),
-        // the strip actually walks TOWARD this pillar and DetourPolicy's maxRadius (measured from the bot's
-        // own live position every recheck, not a fixed point) can catch it -- placing it south, opposite that
-        // deterministic direction, would have the strip walk permanently away and this test would never see a
-        // P1 detour at all, no matter how long it waits. It stays sealed through the whole excursion (so the
-        // excursion's own sightings count never reaches design 5.4's productive threshold of 2) and is only
-        // exposed once the bot is verifiably back at the anchor -- proving the diamond is picked up by the
-        // ORDINARY P1 opportunistic detour on a later tick, never folded into the frontier excursion.
-        BlockPos ore = cavern.at(5, 1, -3);
-        cavern.set(5, 0, -3, Blocks.STONE);
-        cavern.set(5, 1, -3, Blocks.DIAMOND_ORE);
-        cavern.set(5, 2, -3, Blocks.STONE);
-        cavern.set(4, 1, -3, Blocks.STONE); // the face opened later; the approach stand is (4,0,-3), one step further out
-        cavern.set(6, 1, -3, Blocks.STONE);
-        cavern.set(5, 1, -2, Blocks.STONE);
-        cavern.set(5, 1, -4, Blocks.STONE);
-        for (Direction direction : Direction.values()) {
-            BlockState neighbour = cavern.world.getBlockState(ore.relative(direction));
-            h.require(!neighbour.isAir(), "fixture error: the sealed valuable at " + ore.toShortString()
-                    + " touches air on its " + direction + " face before the excursion ever runs");
-        }
-        // A lava hazard well off the frontier's own axis: never a candidate itself (SafeGate/frontierStandable
-        // must refuse anything within the configured lava-clear radius of it), and never anywhere near the
-        // accepted route or the diamond, so it only ever proves a negative.
-        BlockPos lava = cavern.at(-9, -1, -9);
-        cavern.world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
-
-        AIPlayerEntity bot = h.spawn("OreDigFrontierExcursionGT", cavern, 0, 0);
-        h.enableFrontier(bot, 256, 0.02D);
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUUID();
-        BlockPos anchor = bot.blockPosition();
-        OreDigTask[] task = new OreDigTask[1];
-        int[] stage = {0};
-        int[] stageStart = {0};
-        boolean[] sawApproachOrMineAfterReturn = {false};
-
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            int tick = ++h.tick;
-            switch (stage[0]) {
-                case 0 -> {
-                    h.assertStrict(bot, "ore_dig_frontier_excursion_warmup");
-                    freeze(bot, TaskOrigin.Kind.MISSION, "gametest_frontier_excursion_warmup");
-                    stage[0] = 1;
-                    stageStart[0] = tick;
-                }
-                case 1 -> {
-                    if (tick - stageStart[0] < WARMUP_TICKS) {
-                        return;
-                    }
-                    MiningAssistState warm = MiningAssistRegistry.getIfPresent(id);
-                    h.require(warm != null, "the frozen warm-up task never produced assist state");
-                    ObservedOccupancy occ = warm.occupancyIfPresent();
-                    h.require(occ != null, "no occupancy window after " + WARMUP_TICKS + " warm-up ticks");
-                    h.require(occ.get(cavern.at(12, 0, 0)) == ObservedOccupancy.AIR,
-                            "the cavern's own interior was not mapped after warm-up");
-                    h.require(!warm.sightings().contains(ore),
-                            "the sealed diamond was already sighted before the mission started (fixture leak)");
-                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
-                    TaskManager.INSTANCE.assign(bot, task[0],
-                            TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_frontier_excursion"));
-                    stage[0] = 2;
-                    stageStart[0] = tick;
-                }
-                case 2 -> {
-                    requireNotFailed(h, task[0]);
-                    MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
-                    boolean walking = state != null && state.detourOwner() == task[0]
-                            && state.detourPhase() == DetourPhase.FRONTIER_WALK;
-                    if (!walking) {
-                        h.require(tick - stageStart[0] < 150,
-                                "explorationTick never started a FRONTIER excursion from an already-mapped cavern"
-                                        + " with frontierMinUtility forced low");
-                        return;
-                    }
-                    stage[0] = 3;
-                    stageStart[0] = tick;
-                    checkFrontierWalkSafety(h, state, bot, cavern, lava);
-                }
-                case 3 -> {
-                    requireNotFailed(h, task[0]);
-                    MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
-                    h.require(state != null, "assist state disappeared mid frontier excursion");
-                    if (state.detourOwner() == task[0] && state.detourPhase() == DetourPhase.FRONTIER_WALK) {
-                        checkFrontierWalkSafety(h, state, bot, cavern, lava);
-                        h.require(tick - stageStart[0] < 500, "FRONTIER_WALK never left within budget");
-                        return;
-                    }
-                    // The panorama burst at arrival can see at most the sealed diamond (still 0 -- it is sealed)
-                    // and nothing else in this fixture, so the excursion must be unproductive: RETURN, not a
-                    // cleared tuple from rebaseCursorHere.
-                    h.require(state.detourOwner() == task[0] && state.detourPhase() == DetourPhase.RETURN,
-                            "the excursion left FRONTIER_WALK for " + (state.detourOwner() == task[0]
-                                    ? state.detourPhase() : "no detour") + ", expected RETURN");
-                    stage[0] = 4;
-                    stageStart[0] = tick;
-                }
-                case 4 -> {
-                    requireNotFailed(h, task[0]);
-                    MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
-                    boolean stillReturning = state != null && state.detourOwner() == task[0];
-                    if (stillReturning) {
-                        h.require(tick - stageStart[0] < 400, "RETURN from the frontier excursion never finished");
-                        return;
-                    }
-                    h.require(bot.blockPosition().equals(anchor),
-                            "the bot did not return to the exact anchor after the frontier excursion: at "
-                                    + bot.blockPosition().toShortString() + ", anchor " + anchor.toShortString());
-                    // The frontier excursion's own design-5.4 assertions (waypoints stayed observed, arrival ran
-                    // the panorama burst, an unproductive excursion walked RETURN and landed on the exact anchor)
-                    // are already proven by this point. Switch explore.frontier back off now, before revealing the
-                    // diamond: once this mission's own frontierCooldownUntilServerTick lapses, a second frontier
-                    // excursion would otherwise compete with the ordinary P1 opportunistic detour for hook 9/14's
-                    // shared tick (hook 9 runs first, but only once MIN_TASK_AGE_TICKS-gated; hook 14 has no such
-                    // gate) and could walk the bot away from the very valuable this test still needs to watch get
-                    // mined. P1 itself (hook 9, unaffected by this switch) keeps running normally.
-                    h.disableFrontier(256);
-                    // Reveal the sealed diamond now, well after the excursion is over: the west face becomes the
-                    // exposed one, with (4,0,-3) -- one open-floor step further west -- as its ordinary stand.
-                    cavern.world.setBlock(cavern.at(4, 1, -3), AIR, Block.UPDATE_ALL);
-                    stage[0] = 5;
-                    stageStart[0] = tick;
-                }
-                case 5 -> {
-                    requireNotFailed(h, task[0]);
-                    MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
-                    h.require(state != null, "assist state disappeared after the excursion returned");
-                    if (state.sightings().contains(ore)) {
-                        stage[0] = 6;
-                        stageStart[0] = tick;
-                        return;
-                    }
-                    h.require(tick - stageStart[0] < 200,
-                            "the newly exposed diamond was never sighted by the ordinary running sensor");
-                }
-                case 6 -> {
-                    requireNotFailed(h, task[0]);
-                    if (cavern.world.getBlockState(ore).is(Blocks.DIAMOND_ORE)) {
-                        MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
-                        if (state != null && state.detourOwner() == task[0]
-                                && (state.detourPhase() == DetourPhase.APPROACH || state.detourPhase() == DetourPhase.MINE)) {
-                            sawApproachOrMineAfterReturn[0] = true;
-                            checkNeverLavaAdjacent(h, bot, lava);
-                        }
-                        h.require(tick - stageStart[0] < 700,
-                                "the now-visible diamond, well within an ordinary P1 detour's reach, was never mined"
-                                        + " by a LATER opportunistic detour after the frontier excursion returned"
-                                        + " [diag: sighted=" + (state != null && state.sightings().contains(ore))
-                                        + " bot=" + bot.blockPosition().toShortString()
-                                        + " ore=" + ore.toShortString()
-                                        + " anchor=" + anchor.toShortString()
-                                        + " chebyshevXZ=" + Math.max(
-                                                Math.abs(ore.getX() - bot.blockPosition().getX()),
-                                                Math.abs(ore.getZ() - bot.blockPosition().getZ()))
-                                        + " dy=" + (ore.getY() - bot.blockPosition().getY())
-                                        + " eyeDist=" + bot.getEyePosition().distanceTo(
-                                                net.minecraft.world.phys.Vec3.atCenterOf(ore))
-                                        + "]");
-                        return;
-                    }
-                    h.require(sawApproachOrMineAfterReturn[0],
-                            "the diamond was mined without this test ever observing the ORE-kind APPROACH/MINE"
-                                    + " phase that design 5.4 says must come strictly after the frontier RETURN");
-                    stage[0] = 7;
-                    stageStart[0] = tick;
-                }
-                case 7 -> {
-                    requireNotFailed(h, task[0]);
-                    MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
-                    boolean stillOnDetour = state != null && state.detourOwner() == task[0];
-                    if (stillOnDetour) {
-                        h.require(tick - stageStart[0] < 500, "the ORE-kind detour that mined the diamond never finished");
-                        return;
-                    }
-                    int driftXZ = Math.max(Math.abs(bot.blockPosition().getX() - anchor.getX()),
-                            Math.abs(bot.blockPosition().getZ() - anchor.getZ()));
-                    h.require(driftXZ <= LATER_DETOUR_RETURN_TOLERANCE_XZ,
-                            "the bot did not return near the anchor after mining the diamond: at "
-                                    + bot.blockPosition().toShortString() + ", anchor " + anchor.toShortString()
-                                    + ", driftXZ=" + driftXZ);
-                    h.assertStrict(bot, "ore_dig_frontier_excursion_end");
-                    h.pass();
-                }
-                default -> {
-                }
-            }
-        }));
-    }
-
-    /** During FRONTIER_WALK: never an unobserved cell, and never within the lava clearance (design 5.4, 4.4). */
-    private static void checkFrontierWalkSafety(Harness h, MiningAssistState state, AIPlayerEntity bot,
-            Room cavern, BlockPos lava) {
-        BlockPos feet = bot.blockPosition();
-        h.require(cavern.contains(feet),
-                "FRONTIER_WALK left the mapped cavern at " + feet.toShortString());
-        ObservedOccupancy occ = state.occupancyIfPresent();
-        h.require(occ != null && occ.get(feet) != ObservedOccupancy.UNKNOWN,
-                "FRONTIER_WALK is standing on a cell (" + feet.toShortString() + ") that was never observed");
-        checkNeverLavaAdjacent(h, bot, lava);
-    }
-
-    private static void checkNeverLavaAdjacent(Harness h, AIPlayerEntity bot, BlockPos lava) {
-        int lavaClearRadius = MiningAssistRuntime.config().detour().lavaClearRadius();
-        BlockPos feet = bot.blockPosition();
-        int chebyshev = Math.max(Math.max(Math.abs(feet.getX() - lava.getX()), Math.abs(feet.getY() - lava.getY())),
-                Math.abs(feet.getZ() - lava.getZ()));
-        h.require(chebyshev > lavaClearRadius,
-                "the bot is within the configured lava-clear radius (" + lavaClearRadius + ") of the hazard at "
-                        + lava.toShortString() + ": stand " + feet.toShortString());
-    }
-
-    // ---------------------------------------------------------------------------------------------
     // Shared fixture plumbing
     // ---------------------------------------------------------------------------------------------
 

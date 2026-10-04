@@ -291,25 +291,9 @@ class SafeGateTest {
     }
 
     @Test
-    void item7BeatsItem8() {
-        SafeGateInputs in = SafeGateInputs.builder().lavaInThreatBox(true).deepDark(true).build();
+    void lavaThreatBoxBeatsPoiEvidence() {
+        SafeGateInputs in = SafeGateInputs.builder().lavaInThreatBox(true).poiStructureScore(1.0D).build();
         assertEquals(SafeReason.LAVA_THREAT_BOX, SafeGate.evaluate(in, Stage.TICK_FULL));
-    }
-
-    // ---- item 8: deep dark biome (TICK_FAST does not read it) ----
-
-    @Test
-    void deepDarkIgnoredByTickFastOnly() {
-        SafeGateInputs in = SafeGateInputs.builder().deepDark(true).build();
-        assertEquals(SafeReason.DEEP_DARK_BIOME, SafeGate.evaluate(in, Stage.START));
-        assertEquals(SafeReason.OK, SafeGate.evaluate(in, Stage.TICK_FAST));
-        assertEquals(SafeReason.DEEP_DARK_BIOME, SafeGate.evaluate(in, Stage.TICK_FULL));
-    }
-
-    @Test
-    void item8BeatsItem9() {
-        SafeGateInputs in = SafeGateInputs.builder().deepDark(true).poiStructureScore(1.0D).build();
-        assertEquals(SafeReason.DEEP_DARK_BIOME, SafeGate.evaluate(in, Stage.TICK_FULL));
     }
 
     // ---- item 9: POI evidence (TICK_FAST does not read it) ----
@@ -396,7 +380,6 @@ class SafeGateTest {
         assertEquals("safety_hostile_pressure", SafeReason.HOSTILE_PRESSURE.abortReason());
         assertEquals("safety_lava_threat_box", SafeReason.LAVA_THREAT_BOX.abortReason());
         assertEquals("safety_hazard_lava", SafeReason.HAZARD_LAVA.abortReason());
-        assertEquals("deep_dark_biome", SafeReason.DEEP_DARK_BIOME.abortReason());
         assertEquals("poi_evidence", SafeReason.POI_EVIDENCE.abortReason());
         assertEquals("trap_spot", SafeReason.TRAP_SPOT.abortReason());
     }
@@ -425,7 +408,6 @@ class SafeGateTest {
         assertEquals(6, SafeReason.HOSTILE_PRESSURE.item());
         assertEquals(7, SafeReason.LAVA_THREAT_BOX.item());
         assertEquals(7, SafeReason.HAZARD_LAVA.item());
-        assertEquals(8, SafeReason.DEEP_DARK_BIOME.item());
         assertEquals(9, SafeReason.POI_EVIDENCE.item());
         assertEquals(10, SafeReason.TRAP_SPOT.item());
     }
@@ -456,26 +438,9 @@ class SafeGateTest {
     }
 
     @Test
-    void poiWindowVetoIsTrueForSculkStruct() {
-        PoiEvidenceWindow window = new PoiEvidenceWindow();
-        window.observe(new BlockPos(1, 2, 3), PoiBucket.SCULK_STRUCT, 0, 10, false);
-        assertTrue(SafeGate.poiWindowVeto(window));
-    }
-
-    @Test
     void poiWindowVetoIsTrueForSpawner() {
         PoiEvidenceWindow window = new PoiEvidenceWindow();
         window.observe(new BlockPos(1, 2, 3), PoiBucket.SPAWNER, 0, 10, false);
-        assertTrue(SafeGate.poiWindowVeto(window));
-    }
-
-    @Test
-    void poiWindowVetoIsTrueForAReinforcedDeepslateFlagOnlyEntry() {
-        PoiEvidenceWindow window = new PoiEvidenceWindow();
-        // A natural cell carrying only the flag: lands in the flag-only sub-window, not structural.
-        window.observe(new BlockPos(1, 2, 3), PoiBucket.NATURAL, PoiEvidenceFlags.REINFORCED_DEEPSLATE, 10, false);
-        assertEquals(0, window.structuralSize());
-        assertEquals(1, window.flagOnlySize());
         assertTrue(SafeGate.poiWindowVeto(window));
     }
 
@@ -499,7 +464,6 @@ class SafeGateTest {
     void candidatePendingIsTrueForPossibleStructureCertainOrMandatoryRegardless() {
         assertTrue(SafeGate.candidatePending(PoiScorer.Band.POSSIBLE, false, false));
         assertTrue(SafeGate.candidatePending(PoiScorer.Band.STRUCTURE_CERTAIN, false, false));
-        assertTrue(SafeGate.candidatePending(PoiScorer.Band.MANDATORY, false, false));
     }
 
     @Test
@@ -561,7 +525,6 @@ class SafeGateTest {
                 SafeGateInputs.builder().userPaused(true).build(),
                 SafeGateInputs.builder().threatCooldown(true).build(),
                 SafeGateInputs.builder().lavaInThreatBox(true).build(),
-                SafeGateInputs.builder().deepDark(true).build(),
                 SafeGateInputs.builder().poiStructureScore(1.0D).build(),
                 SafeGateInputs.builder().trapNear(true).build(),
         };

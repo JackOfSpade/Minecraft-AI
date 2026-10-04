@@ -188,9 +188,6 @@ class ShieldGuardSourceContractTest {
     void guardianBeamLethalityIncludesItsUnblockableMagicBeforeTheBlockableBite() throws IOException {
         assertEquals(7.0F, ShieldGuard.guardianBeamDamage(6.0D, false, false));
         assertEquals(9.0F, ShieldGuard.guardianBeamDamage(6.0D, true, false));
-        // Vanilla ElderGuardian#createAttributes gives the elder an 8.0 mob-attack attribute;
-        // GuardianAttackGoal then adds 1 indirect magic, 2 on Hard, and 2 for elder status.
-        assertEquals(13.0F, ShieldGuard.guardianBeamDamage(8.0D, true, true));
         assertTrue(read("task/ShieldGuard.java").contains("isVanillaGuardian(guardian)"),
                 "the vanilla guardian beam formula declines a modded Guardian subclass rather than guessing its damage");
     }

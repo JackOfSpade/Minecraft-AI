@@ -139,7 +139,7 @@ final class EmergencyShelterRecoverySourceContractTest {
     void failedEgressStepsRotateTheDoorwayInsteadOfRetryingOneUnverifiedPoseForever() throws IOException {
         String shelter = read("task/EmergencyShelterTask.java");
         int onMotionEnded = shelter.indexOf("private boolean onMotionEnded(AIPlayerEntity bot, Motion finished");
-        int dropMotion = shelter.indexOf("private void dropMotion()", onMotionEnded);
+        int dropMotion = shelter.indexOf("private void dropMotion(AIPlayerEntity bot)", onMotionEnded);
         String motionCompletion = shelter.substring(onMotionEnded, dropMotion);
         int egress = motionCompletion.indexOf("case EGRESS ->");
         assertTrue(egress >= 0);

@@ -34,7 +34,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
@@ -47,8 +46,8 @@ import net.minecraft.world.phys.Vec3;
  * creature" cost a hash lookup, never a ray.
  *
  * <ul>
- *   <li><b>Sight</b> of a creature: same level, within the profile observation radius ({@code perception.radius}; a warden within
- *       {@link #WARDEN_SIGHT_RANGE}, the quiet-zone watch), inside the view cone of the bot's REAL look vector (full attention up to 30
+ *   <li><b>Sight</b> of a creature: same level, within the profile observation radius ({@code perception.radius}), inside the view
+ *       cone of the bot's REAL look vector (full attention up to 30
  *       degrees, peripheral to 100, behind never), a clear line (an eye ray, then a body-centre ray, collider shapes) and not fully
  *       invisible. Rays are cast last.</li>
  *   <li><b>Noticing</b> takes the continuous reaction time of {@link CreaturePerception}, counted per (bot, creature) by an
@@ -76,8 +75,6 @@ public final class CreatureSenses {
     public static final double HEARD_MATCH = 4.0D;
     /** A projectile vibration is delivered as one source block, so its reconstructed event point must lie in that block (plus rounding). */
     static final double HEARD_PROJECTILE_EVENT_EPSILON = 0.25D;
-    /** How far a warden is watched (the quiet-zone scan range), beyond the observation radius of everything else. */
-    public static final double WARDEN_SIGHT_RANGE = 24.0D;
     /** Ticks an idle bot keeps its head turned toward a sound or a blow it could not place. */
     static final int LOOK_TICKS = 25;
     /** Ticks a hint stays worth investigating. */
@@ -331,17 +328,6 @@ public final class CreatureSenses {
         List<LivingEntity> around = new ArrayList<>(level.getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(radius),
                 e -> e != bot && e.isAlive() && !e.isSpectator() && (e instanceof Mob || e instanceof Player)
                         && bot.distanceToSqr(e) <= (double) radius * radius));
-        if (WARDEN_SIGHT_RANGE > radius) {
-            // A warden is watched farther (the quiet-zone scan): a class-specific query, far cheaper than widening the general one.
-            for (Warden warden : level.getEntitiesOfClass(Warden.class, bot.getBoundingBox().inflate(WARDEN_SIGHT_RANGE),
-                    w -> w.isAlive() && !w.isSpectator()
-                            && bot.distanceToSqr(w) <= WARDEN_SIGHT_RANGE * WARDEN_SIGHT_RANGE)) {
-                if (!around.contains(warden)) {
-                    around.add(warden);
-                }
-            }
-        }
-
         // Sounds first: a creature in clear view near the sound is where it came from (the bot turns to it); a sound with nobody in
         // view is a place to investigate.
         for (BotEars.Sound sound : sounds) {

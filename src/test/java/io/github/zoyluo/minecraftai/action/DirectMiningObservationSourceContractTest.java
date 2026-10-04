@@ -11,8 +11,9 @@ import org.junit.jupiter.api.Test;
 /**
  * Direct mining is intentionally narrower than an observed Baritone route: a caller may name one
  * exposed block, but the retained coordinate can never become authority to inspect, tool-select,
- * or send a break packet for hidden terrain. These source contracts pin the state-free-first order
- * at all three public/compatibility entry points.
+ * or send a break packet for hidden terrain. A touching fire or powder-snow cell is the narrow
+ * direct-body exception. These source contracts pin the state-free-first order at all three
+ * public/compatibility entry points.
  */
 class DirectMiningObservationSourceContractTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai/action");
@@ -36,9 +37,26 @@ class DirectMiningObservationSourceContractTest {
         String source = read("MiningController.java");
         String observation = body(source, "static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos)");
         assertInOrder(observation,
+                "ownBodyEmergencyBlock(player, pos)",
                 "ObservableWorldQuery.canObserveBlockCellFace(player, pos)",
                 "ObservableWorldQuery.canObserveBlock(player, pos)",
                 "ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos)");
+        String crop = body(source, "private static boolean currentObservedCropTarget(AIPlayerEntity player, BlockPos pos)");
+        assertInOrder(crop,
+                "ObservableWorldQuery.canObserveFarmCell(player, pos)",
+                "player.level().getBlockState(pos)",
+                "instanceof CropBlock");
+        String bodyEmergency = body(source, "private static boolean ownBodyEmergencyBlock(AIPlayerEntity player, BlockPos pos)");
+        assertInOrder(bodyEmergency,
+                "player.getBoundingBox().deflate(0.001D).intersects(",
+                "BlockState state = player.level().getBlockState(pos);");
+        assertTrue(bodyEmergency.contains("Blocks.FIRE")
+                        && bodyEmergency.contains("Blocks.SOUL_FIRE")
+                        && bodyEmergency.contains("Blocks.POWDER_SNOW")
+                        && bodyEmergency.contains("state.getCollisionShape(player.level(), pos).isEmpty()")
+                        && bodyEmergency.contains("state.getDestroySpeed(player.level(), pos) >= 0.0F")
+                        && bodyEmergency.contains("BreakRule.denialOf(state) == null"),
+                "a direct-body solid escape must be colliding, breakable natural terrain; protected or unseen cells remain refused");
         String air = body(source, "static boolean visiblyAir(AIPlayerEntity player, BlockPos pos)");
         assertInOrder(air,
                 "ObservableWorldQuery.canObserveCell(player, pos)",

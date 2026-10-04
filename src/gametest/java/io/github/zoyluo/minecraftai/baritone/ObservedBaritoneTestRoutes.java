@@ -50,12 +50,6 @@ public final class ObservedBaritoneTestRoutes {
                 NavRoute.Shape.NEAR, target, radius, options, label, serverTick(bot)));
     }
 
-    /** Production-equivalent explicit swim fixture, including its safety-net lease. */
-    public static void swim(AIPlayerEntity bot, BlockPos target, String label) {
-        requireAdmitted(bot, start(bot, new NavRoute(
-                NavRoute.Shape.BLOCK, target, 0, NavRoute.Options.SWIM, label, serverTick(bot))), target);
-    }
-
     private static BaritoneNavigator.Admission start(AIPlayerEntity bot, NavRoute route) {
         BaritoneNavigator.Admission admission = BaritoneNavigator.start(bot, route, true);
         return admission;

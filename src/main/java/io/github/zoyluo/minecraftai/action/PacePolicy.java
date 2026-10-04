@@ -13,21 +13,18 @@ import java.util.function.Predicate;
  *
  * <p>Order of the rules (the first that applies decides; the ceilings are applied to whatever came out):</p>
  * <ol>
- *   <li><b>A warden hunts the bot or its owner</b> (observed): SPRINT.</li>
- *   <li><b>Aggro pressure</b> while travelling (the {@linkplain #setPressureProbe pressure probe}, wired to AggroSense): SPRINT,
- *       unless a WARDEN-owned lease decides the pace (the warden logic knows better).</li>
+ *   <li><b>Aggro pressure</b> while travelling (the {@linkplain #setPressureProbe pressure probe}, wired to AggroSense): SPRINT.</li>
  *   <li><b>A lease</b> ({@link ActionPack#requestPace}, {@link ActionPack#requestRoutePace}): the highest-priority one. A lease is
  *       its owner's decision and skips the downgrade dwell (the owner has its own hysteresis).</li>
  *   <li><b>The task's own flags</b> ({@code setSneaking(true)} = SNEAK, {@code setSprinting(true)} = SPRINT).</li>
  *   <li><b>Route pace</b> from the straight-line distance to the goal: SPRINT from {@code routeSprintDistance} (8) on, WALK from
  *       {@code routeWalkDistance} (4.5) down, in between the previous route gait, so it never flaps. A downgrade needs
  *       {@value #DOWNGRADE_DWELL_TICKS} ticks at the current route gait; an upgrade is immediate.</li>
- *   <li><b>Quiet zone</b> on the task flags and route pace only (not on leases, pressure or a hunting warden): SILENT = SNEAK,
+ *   <li><b>Quiet zone</b> on the task flags and route pace only (not on leases or pressure): SILENT = SNEAK,
  *       CAUTION = at most WALK.</li>
  * </ol>
- * Then the ceilings: a <b>calm observed warden within 16 blocks</b> caps everything except a WARDEN lease to WALK (lifted while a
- * warden hunts the bot or the bot is taking damage), and a {@link ActionPack#capPace} ceiling (jump, drop, pillar, bridge and dig
- * nodes of a bounded local action) caps last: it beats pressure.
+ * Then an {@link ActionPack#capPace} ceiling (jump, drop, pillar, bridge and dig nodes of a bounded local action) caps last: it
+ * beats pressure.
  *
  * <p>{@code pace.enabled=false} answers what the code did before this policy: the task's sprint flag, else a walk (the local
  * enforcer leaves the sub-target sprint rule of {@code WalkToController} in charge, and the Baritone bridge skips the policy).</p>
@@ -37,8 +34,6 @@ import java.util.function.Predicate;
 public final class PacePolicy {
     /** Ticks a route gait must have lasted before it may be lowered again. */
     public static final int DOWNGRADE_DWELL_TICKS = 10;
-    /** A calm warden this close caps the pace at a walk. */
-    public static final double CALM_WARDEN_RANGE = 16.0D;
     /** The bot counts as "taking damage" for this many ticks after a hit. */
     public static final int DAMAGE_WINDOW_TICKS = 20;
     /** No decision for this many game ticks: the next one starts a fresh route (no hysteresis carried over from an old trip). */
@@ -130,8 +125,6 @@ public final class PacePolicy {
     /**
      * Everything one decision looks at.
      *
-     * @param huntingWarden     an observed warden within 24 blocks is hunting the bot or its owner
-     * @param calmWardenCeiling a calm observed warden within 16 blocks, no hunting warden, the bot not taking damage
      * @param pressure          travelling and under aggro pressure
      * @param lease             the winning lease, or null
      * @param taskSneak         the task asked for {@code setSneaking(true)}
@@ -141,7 +134,7 @@ public final class PacePolicy {
      * @param cap               the {@code capPace} ceiling, or null
      * @param now               the game time
      */
-    public record Inputs(boolean huntingWarden, boolean calmWardenCeiling, boolean pressure, Lease lease, boolean taskSneak,
+    public record Inputs(boolean pressure, Lease lease, boolean taskSneak,
                          boolean taskSprint, double goalDistance, QuietZone.Level quiet, Gait cap, double routeSprintDistance,
                          double routeWalkDistance, long now) {
     }
@@ -150,16 +143,10 @@ public final class PacePolicy {
     public static Gait decide(Inputs in, State state) {
         state.calls++;
         Gait result;
-        boolean wardenLease = in.lease() != null && in.lease().owner() == PaceOwner.WARDEN;
-        boolean ceilingExempt = false;
-        if (in.huntingWarden()) {
-            result = Gait.SPRINT;
-            ceilingExempt = true;
-        } else if (in.pressure() && !wardenLease) {
+        if (in.pressure()) {
             result = Gait.SPRINT;
         } else if (in.lease() != null) {
             result = in.lease().gait();
-            ceilingExempt = wardenLease;
         } else {
             if (in.taskSneak()) {
                 result = Gait.SNEAK;
@@ -169,9 +156,6 @@ public final class PacePolicy {
                 result = routePace(in, state);
             }
             result = quietCeiling(result, in.quiet());
-        }
-        if (in.calmWardenCeiling() && !ceilingExempt) {
-            result = Gait.min(result, Gait.WALK);
         }
         if (in.cap() != null) {
             result = Gait.min(result, in.cap());
@@ -233,13 +217,8 @@ public final class PacePolicy {
         long now = bot.level().getGameTime();
         QuietZone zone = pack.quietZone();
         zone.refresh(bot);
-        boolean hunting = zone.huntingWardenObserved();
-        boolean tookDamage = RecentDamage.tookEntityDamage(bot.getUUID(), now, DAMAGE_WINDOW_TICKS);
-        boolean calmCeiling = !hunting && !tookDamage && zone.calmWardenWithin(CALM_WARDEN_RANGE);
         Inputs inputs = new Inputs(
-                hunting,
-                calmCeiling,
-                travelling && !hunting && pressureProbe.test(bot),
+                travelling && pressureProbe.test(bot),
                 pack.leaseAt(now),
                 pack.sneakRequested(),
                 pack.sprintRequested(),
@@ -257,7 +236,7 @@ public final class PacePolicy {
                     "goal_dist", Double.isNaN(goalDistance) ? "-" : Math.round(goalDistance * 10.0D) / 10.0D,
                     "lease", inputs.lease() == null ? "-" : inputs.lease().owner() + ":" + inputs.lease().gait(),
                     "cap", inputs.cap() == null ? "-" : inputs.cap() + ":" + pack.capReason(),
-                    "quiet", inputs.quiet(), "hunting_warden", inputs.huntingWarden(), "calm_warden_cap", inputs.calmWardenCeiling(),
+                    "quiet", inputs.quiet(),
                     "pressure", inputs.pressure(), "task_sprint", inputs.taskSprint(), "task_sneak", inputs.taskSneak());
         }
         return gait;

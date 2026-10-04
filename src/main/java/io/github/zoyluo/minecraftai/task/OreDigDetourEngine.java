@@ -1305,7 +1305,7 @@ final class OreDigDetourEngine {
                 }
             }
             default -> {
-                // safety_*, degraded_tps, paused, deep_dark_biome, poi_evidence, trap_spot, budget, capacity,
+                // safety_*, degraded_tps, paused, poi_evidence, trap_spot, budget, capacity,
                 // tick_gap, safety_state_lost: no exclusion, no ledger effect (C.5).
             }
         }

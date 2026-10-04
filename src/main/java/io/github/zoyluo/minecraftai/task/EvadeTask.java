@@ -4,9 +4,6 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.Gait;
 import io.github.zoyluo.minecraftai.action.PaceOwner;
-import io.github.zoyluo.minecraftai.action.PacePolicy;
-import io.github.zoyluo.minecraftai.action.QuietZone;
-import io.github.zoyluo.minecraftai.entity.RecentDamage;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
@@ -19,7 +16,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.phys.Vec3;
 
 public final class EvadeTask extends AbstractTask {
@@ -55,36 +51,19 @@ public final class EvadeTask extends AbstractTask {
     private double budget;
     private Gait lastGait;
 
-    /**
-     * How far one escape leg must carry the bot from {@code source}. The generic leg is twelve
-     * blocks; a warden's sonic boom reaches fifteen (twenty vertically) and ignores armour, so a
-     * flight from a warden must end outside that range or it only relocates the bot inside it.
-     */
+    /** How far one ordinary escape leg carries the bot from its source. */
     static int escapeDistanceFor(LivingEntity source) {
-        return source instanceof net.minecraft.world.entity.monster.warden.Warden
-                ? CombatCore.WARDEN_ESCAPE_DISTANCE : ESCAPE_DISTANCE;
+        return ESCAPE_DISTANCE;
     }
 
-    /**
-     * How the bot moves while it flees {@code source}: it creeps (SNEAK, silent) from a CALM warden, which sniffs only what it can
-     * notice and is not chasing anything; every other flight is a sprint, and so is one from a warden that hunts the bot or its owner
-     * (see {@link WardenState}: synced anger, a roar, a recent hit) or while the bot is taking damage.
-     */
+    /** An ordinary escape sprint is the fastest reliable way to increase distance. */
     static Gait fleeGait(AIPlayerEntity bot, LivingEntity source) {
-        if (source instanceof Warden warden
-                && MinecraftAiConfig.get().behaviour().wardenOrDefaults().sneakAwayEnabled()) {
-            long now = bot.level().getGameTime();
-            if (WardenState.isCalm(warden, QuietZone.victimsOf(bot), now)
-                    && !RecentDamage.tookEntityDamage(bot.getUUID(), now, PacePolicy.DAMAGE_WINDOW_TICKS)) {
-                return Gait.SNEAK;
-            }
-        }
         return Gait.SPRINT;
     }
 
-    /** Who asks for the flee gait: the warden logic for a warden (it outranks the pressure and the calm-warden cap), else evade. */
+    /** The ordinary evade task owns its route pace. */
     private static PaceOwner fleeOwner(LivingEntity source) {
-        return source instanceof Warden ? PaceOwner.WARDEN : PaceOwner.EVADE;
+        return PaceOwner.EVADE;
     }
 
     /** Asks for the flee gait as a route lease, for the route that has just been started (starting a route ends the previous lease). */
@@ -132,8 +111,7 @@ public final class EvadeTask extends AbstractTask {
     protected void onStart(AIPlayerEntity bot) {
         escort.reset();
         startBestEscapePath(bot);
-        // Escaping sprints (walking at 4.3m/s against a zombie's 4.0m/s pursuit speed is only marginally faster; only
-        // 5.6m/s actually shakes it off, field-tested), except from a CALM warden, which is crept away from: see fleeGait.
+        // Escaping sprints: walking at 4.3m/s against a zombie's 4.0m/s pursuit speed is only marginally faster.
         // escapeGoal==null (nowhere to flee) -> do not start pathfinding; onTick fails on the first
         // tick and hands off to the wall-building escalation.
     }
@@ -142,7 +120,7 @@ public final class EvadeTask extends AbstractTask {
     protected void onTick(AIPlayerEntity bot) {
         flee(bot);
         // Like a follower, a retreating bot only knocks back what is in its melee reach, on a ready tick, and never turns the flight
-        // around (FollowEscort never paths toward the mob; it is silent next to a calm warden, and never touches a creeper or a warden).
+        // around (FollowEscort never paths toward the mob and never touches a creeper).
         if (state == TaskState.RUNNING) {
             escort.tick(bot, null);
         }
@@ -195,8 +173,7 @@ public final class EvadeTask extends AbstractTask {
     }
 
     /**
-     * Renews the flee gait every tick (a tick lease, so a calm warden that starts to hunt turns the creep into a sprint on the very next
-     * tick, and a hunting one that stops chasing turns it back), and re-issues the route lease when the gait changes.
+     * Renews the flee gait every tick and re-issues the route lease when the gait changes.
      */
     private Gait keepFleeGait(AIPlayerEntity bot) {
         LivingEntity source = threat.entity();
@@ -302,7 +279,7 @@ public final class EvadeTask extends AbstractTask {
             ActionResult path = bot.getActionPack().startSurfacePathTo(candidate);
             attempts++;
             if (!path.isFailed()) {
-                // The flee gait (a sprint, or a creep from a calm warden) belongs only to an admitted live escape path, and is requested after
+                // The flee gait belongs only to an admitted live escape path, and is requested after
                 // the route has started (starting a route ends the previous lease). A gait left behind after a failed admission would make
                 // ActionPack permanently busy and block the resume of paused work; the failure path below calls stopAll, which clears it.
                 requestFleeRoutePace(bot, source);
@@ -405,10 +382,22 @@ public final class EvadeTask extends AbstractTask {
     }
 
     private static BlockPos findStandableNear(AIPlayerEntity bot, BlockPos base) {
+        // The Baritone run-away goal has no destination elevation. If its fenced admission
+        // cannot cross a visible descent, the surface-fan fallback needs to be able to name the
+        // landing stance. Bound that search by the same configured safe-fall limit that
+        // Baritone enforces; the subsequent exact surface-route admission still requires every
+        // intervening cell to be visibly proven.
+        int verticalDown = Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
         for (int radius = 0; radius <= 4; radius++) {
             for (BlockPos candidate : BlockPos.betweenClosed(
-                    base.offset(-radius, -2, -radius), base.offset(radius, 2, radius))) {
-                if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
+                    base.offset(-radius, -verticalDown, -radius), base.offset(radius, 2, radius))) {
+                if (!ObservableWorldQuery.canObserveCell(bot, candidate)
+                        || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                        || !ObservableWorldQuery.canObserveColliderWithInsetFacesWithin(
+                                bot, candidate.below(), MinecraftAiConfig.get().perception().radius())) {
+                    continue;
+                }
+                if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandableFresh(
                         bot.level(), candidate)) {
                     return candidate.immutable();
                 }

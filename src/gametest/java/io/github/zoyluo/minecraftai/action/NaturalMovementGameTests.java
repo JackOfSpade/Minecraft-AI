@@ -197,8 +197,8 @@ public final class NaturalMovementGameTests {
     // ---------------------------------------------------------------------------------------------------------------
 
     /**
-     * The bot starts one block above the floor with nothing under it (a cell that is not standable): it falls into the layer below
-     * and the route it asked for begins with a walked step onto an adjacent standable cell. A second start out of the same cell inside
+     * The bot starts one block above the floor with nothing under it (a cell that is not standable): an observed, input-driven
+     * start step leaves it for an adjacent standable cell before its route is admitted. A second start out of the same cell inside
      * the guard window is refused (no yo-yo). Nothing teleports the bot.
      */
     @GameTest(environment = "minecraftai-gametest:natural_movement_game_tests_non_standable_start_walks_to_neighbour_cell", maxTicks = 260)
@@ -209,13 +209,26 @@ public final class NaturalMovementGameTests {
         AIPlayerEntity bot = arena.spawn("NonStandableStartGT", invalid);
         require(context, !Standability.isStandable(arena.world, invalid), "fixture: the start cell is standable");
 
-        ActionResult started = bot.getActionPack().startPathTo(goal);
-        require(context, !started.isFailed(), "the route from a non-standable start was refused: " + started.reason());
+        // Baritone admission never repositions a body as a side effect of planning. Leave the
+        // invalid cell through the same observed physical step used by local safety recovery,
+        // then route from the factual landing cell.
+        WalkedStep startStep = bot.getActionPack().adjacentStandableStep("gametest_non_standable_start");
+        require(context, startStep != null, "the non-standable start had no observed physical exit");
+        ActionPack.StepLease startLease = bot.getActionPack().runStep(startStep);
+        require(context, startLease != null, "the non-standable start step was not admitted");
+        boolean[] routeStarted = {false};
         boolean[] refusedChecked = {false};
         int[] tick = {0};
         context.onEachTick(() -> {
             tick[0]++;
-            if (bot.getActionPack().isPathExecutorIdle() && tick[0] > 3) {
+            if (!routeStarted[0] && !bot.getActionPack().stepInFlightFor(startLease)) {
+                require(context, startStep.ended() && startStep.outcome() != null && startStep.outcome().succeeded(),
+                        "the non-standable start step did not reach its observed landing: " + startStep.outcome());
+                ActionResult started = bot.getActionPack().startPathTo(goal);
+                require(context, !started.isFailed(), "the route after the non-standable start was refused: " + started.reason());
+                routeStarted[0] = true;
+            }
+            if (routeStarted[0] && bot.getActionPack().isPathExecutorIdle() && tick[0] > 3) {
                 requireNoCorrections(context, bot, "non-standable start");
                 require(context, bot.blockPosition().distManhattan(goal) <= 1,
                         "the bot did not reach the goal: " + bot.blockPosition().toShortString());
@@ -233,39 +246,6 @@ public final class NaturalMovementGameTests {
                 }
             }
             require(context, tick[0] < 250, "timed out at " + bot.blockPosition().toShortString());
-        });
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // Pillar and hop
-    // ---------------------------------------------------------------------------------------------------------------
-
-    /** The route to a ledge three blocks up is pillar, pillar, hop: real jumps and real placements, no rescue teleport. */
-    @GameTest(environment = "minecraftai-gametest:natural_movement_game_tests_pillar_up_without_rescue_teleport", maxTicks = 500)
-    public void pillarUpWithoutRescueTeleport(GameTestHelper context) {
-        Arena arena = Arena.build(context, 1, -3, 8, -3, 3);
-        // A platform block whose top is 3 above the floor, one cell east of the bot's column.
-        arena.set(1, 2, 0, Blocks.STONE);
-        arena.set(1, 1, 0, Blocks.STONE);
-        arena.set(1, 0, 0, Blocks.STONE);
-        arena.set(2, 2, 0, Blocks.STONE);
-        arena.set(2, 1, 0, Blocks.STONE);
-        arena.set(2, 0, 0, Blocks.STONE);
-        BlockPos goal = arena.at(2, 3, 0);
-        AIPlayerEntity bot = arena.spawn("PillarNoRescueGT", arena.at(-1, 0, 0));
-        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 16));
-        ActionResult started = bot.getActionPack().startPathTo(goal);
-        require(context, !started.isFailed(), "no route to the ledge: " + started.reason());
-        int[] tick = {0};
-        context.onEachTick(() -> {
-            tick[0]++;
-            if (bot.getActionPack().isPathExecutorIdle() && tick[0] > 3) {
-                requireNoCorrections(context, bot, "pillar");
-                require(context, bot.blockPosition().equals(goal),
-                        "the pillar route ended away from the ledge: " + bot.blockPosition().toShortString());
-                arena.finish(bot);
-            }
-            require(context, tick[0] < 480, "timed out at " + bot.blockPosition().toShortString());
         });
     }
 
@@ -418,6 +398,11 @@ public final class NaturalMovementGameTests {
             if (open && tick[0] > 10) {
                 requireNoCorrections(context, bot, "buried in dirt");
                 require(context, bot.isAlive() && bot.getHealth() >= 10.0F, "the bot nearly died digging out: " + bot.getHealth());
+                for (Direction direction : Direction.Plane.HORIZONTAL) {
+                    BlockPos adjacent = arena.at(0, 0, 0).relative(direction);
+                    require(context, arena.world.getBlockState(adjacent).is(Blocks.DIRT),
+                            "buried escape mined an unseen adjacent cell: " + adjacent.toShortString());
+                }
                 arena.finish(bot);
             }
             require(context, tick[0] < 390, "still buried at tick " + tick[0] + " hp=" + bot.getHealth() + " " + audit(bot));
@@ -430,7 +415,7 @@ public final class NaturalMovementGameTests {
 
     /**
      * A follower that starts with its body overlapping a wall column, and is later put on a half-slab edge, follows a target along a
-     * 40-block course (a slab step, two one-block step-ups, a two-block drop, a fence corner). It corrects its off-centre poses by
+     * 40-block course (a slab step, two one-block step-ups and descents, a fence corner). It corrects its off-centre poses by
      * walking (a shove out of the block, a first leg away from it): no correction teleport, no damage, and it ends by the target.
      */
     @GameTest(environment = "minecraftai-gametest:natural_movement_game_tests_follow_repaths_from_off_centre_cells_without_teleport", maxTicks = 1300)
@@ -445,7 +430,7 @@ public final class NaturalMovementGameTests {
         for (int z = -5; z <= 5; z++) {
             for (int x = 12; x <= 17; x++) {
                 arena.set(x, 0, z, Blocks.STONE);
-                if (x >= 14) {
+                if (x >= 14 && x <= 15) {
                     arena.set(x, 1, z, Blocks.STONE);
                 }
             }
@@ -454,7 +439,7 @@ public final class NaturalMovementGameTests {
         for (int z = -5; z <= 0; z++) {
             arena.set(23, 0, z, Blocks.OAK_FENCE);
         }
-        List<BlockPos> waypoints = List.of(arena.at(6, 0, 0), arena.at(10, 0, 0), arena.at(16, 2, 0), arena.at(20, 0, 0),
+        List<BlockPos> waypoints = List.of(arena.at(6, 0, 0), arena.at(10, 0, 0), arena.at(15, 2, 0), arena.at(20, 0, 0),
                 arena.at(29, 0, -3), arena.at(42, 0, 0));
         String targetName = "FollowCourseTargetGT";
         AIPlayerEntity target = arena.spawn(targetName, waypoints.get(0));

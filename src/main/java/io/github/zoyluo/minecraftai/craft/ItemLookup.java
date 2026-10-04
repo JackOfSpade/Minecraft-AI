@@ -84,7 +84,7 @@ public final class ItemLookup {
         if (query == null) {
             return "";
         }
-        String cleaned = query.trim().toLowerCase(Locale.ROOT).replaceAll("\s+", "_");
+        String cleaned = query.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", "_");
         if (cleaned.isEmpty()) {
             return "";
         }

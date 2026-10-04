@@ -13,7 +13,6 @@ class EntityEvidenceTest {
     void emptyEvidenceScoresNothing() {
         EntityEvidence evidence = new EntityEvidence();
         assertEquals(0.0D, evidence.rawScore(), EPS);
-        assertFalse(evidence.wardenVisible());
         assertTrue(evidence.isEmpty());
         assertTrue(evidence.habitation().isEmpty());
     }
@@ -52,14 +51,6 @@ class EntityEvidenceTest {
     }
 
     @Test
-    void aVisibleWardenScoresNothingButFlagsTheMandatoryRule() {
-        EntityEvidence evidence = new EntityEvidence();
-        assertTrue(evidence.add("minecraft", "warden"));
-        assertTrue(evidence.wardenVisible());
-        assertEquals(0.0D, evidence.rawScore(), EPS);
-    }
-
-    @Test
     void uninterestingEntitiesContributeNothing() {
         EntityEvidence evidence = new EntityEvidence();
         assertFalse(evidence.add("minecraft", "zombie"));
@@ -71,10 +62,4 @@ class EntityEvidenceTest {
         assertEquals(0, evidence.count());
     }
 
-    @Test
-    void wardenFlagIsNamespaceStrict() {
-        EntityEvidence evidence = new EntityEvidence();
-        evidence.add("othermod", "warden");
-        assertFalse(evidence.wardenVisible());
-    }
 }

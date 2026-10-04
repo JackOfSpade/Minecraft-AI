@@ -47,11 +47,10 @@ final class FollowEscortSourceContractTest {
         assertTrue(escort.contains("CombatCore.hostileTo(bot, entity)")
                         && escort.contains("!CombatCore.isMeleeForbiddenThreat(entity)")
                         && escort.contains("ObservableWorldQuery.canNoticeCreature(bot, entity)"),
-                "the candidates are the bot's own defence targets it has noticed, never a creeper or a warden");
+                "the candidates are the bot's own defence targets it has noticed, never a melee-forbidden threat");
         assertFalse(escort.contains("stopMovement") || escort.contains("stopNavigation") || escort.contains("startPathTo")
                         || escort.contains("startApproachTo") || escort.contains("startWalkTo"),
                 "the escort never stops or redirects the follow");
-        assertTrue(escort.contains("calmWardenObservedWithin(bot, CALM_WARDEN_RANGE)"), "silent next to a calm warden");
 
         String pack = read("action/ActionPack.java");
         int projection = pack.indexOf("public void reprojectControllerInputsForYawChange(float yawBefore)");
@@ -66,10 +65,8 @@ final class FollowEscortSourceContractTest {
                 "the next physics tick must receive the reprojected inputs, not only ActionPack's later update");
         assertTrue(projectionBody.contains("forward == 0.0F && strafing == 0.0F && player.zza == 0.0F && player.xxa == 0.0F"),
                 "a stale already-applied input must still be reprojected even after its controller cleared raw fields");
-        assertTrue(projectionBody.contains("if (baritoneOwnsBot())")
-                        && baritoneOwner.contains("route != null")
-                        && baritoneOwner.contains("NavEngineSelector.query(\"baritone_busy\", () -> BaritoneRegistry.INSTANCE.isBusy(player), false)"),
-                "the writer boundary must leave inputs untouched for both ActionPack routes and direct busy Baritone callers");
+        assertTrue(projectionBody.contains("|| baritoneOwnsBot()"),
+                "the writer boundary must leave ActionPack-owned route inputs untouched");
         assertFalse(projectionBody.contains("claim(") || projectionBody.contains("stopNavigation")
                         || projectionBody.contains("startPathTo") || projectionBody.contains("BaritoneRegistry")
                         || projectionBody.contains("NavEngineSelector"),
@@ -138,15 +135,6 @@ final class FollowEscortSourceContractTest {
         int followKeeps = dispatch.indexOf("followKeepsThreat(server, bot, active, top)");
         assertTrue(severity >= 0 && owner > severity && cooldown > owner && followKeeps > cooldown,
                 "follow escort logging and shelter probing run only after a medium-or-higher threat can dispatch");
-    }
-
-    @Test
-    void aCalmWardenOnlyDefersRoutineEatingNotUrgentSurvivalTransactions() throws IOException {
-        String watcher = read("task/DangerWatcher.java");
-        int wardenGate = watcher.indexOf("QuietZone.calmWardenObservedWithin(bot, CALM_WARDEN_EAT_RANGE)");
-        int urgentGate = watcher.lastIndexOf("if (!urgent", wardenGate);
-        assertTrue(wardenGate >= 0 && urgentGate >= 0 && urgentGate < wardenGate,
-                "critical hunger, healing and shelter-cleanup recovery must bypass the calm-warden eating deferral");
     }
 
     private static String read(String relative) throws IOException {

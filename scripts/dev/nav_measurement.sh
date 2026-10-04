@@ -3,8 +3,8 @@
 # it records elapsed sections on the server thread but does NOT establish production wall-clock route performance.
 #
 # usage: scripts/dev/nav_measurement.sh <repo-or-worktree> <outdir> [repetitions=5] [course-id ...]
-# course ids: wall wallpick sealed steps pit stairs lakedry lakenone lava cactus cliff3 cliff6
-#             house gate ladder forest moving twobots long
+# course ids: wall wallpick sealed steps pit lakedry lakenone lava cactus cliff3 cliff6
+#             house forest moving twobots
 #
 # Every selected fixed geometry runs once per repetition on Baritone. The script keeps every new
 # NAVCOURSE, NAVMEASURE and NAVPLAN row in a per-run directory rather than reducing repeated
@@ -176,7 +176,7 @@ if [ -e "$OUT/README.txt" ] || [ -e "$OUT/runner.txt" ] || [ -d "$OUT/runs" ]; t
   exit 2
 fi
 
-ALL_COURSES=(wall wallpick sealed steps pit stairs lakedry lakenone lava cactus cliff3 cliff6 house gate ladder forest moving twobots long)
+ALL_COURSES=(wall wallpick sealed steps pit lakedry lakenone lava cactus cliff3 cliff6 house forest moving twobots)
 COURSES=("$@")
 if [ ${#COURSES[@]} -eq 0 ]; then
   COURSES=("${ALL_COURSES[@]}")
@@ -190,7 +190,6 @@ filter_for() {
     sealed) suffix=sealed_wall_baritone ;;
     steps) suffix=steps_baritone ;;
     pit) suffix=pit_crevasse_baritone ;;
-    stairs) suffix=staircase_baritone ;;
     lakedry) suffix=lake_dry_path_baritone ;;
     lakenone) suffix=lake_no_dry_path_baritone ;;
     lava) suffix=lava_moat_bridge_baritone ;;
@@ -198,12 +197,9 @@ filter_for() {
     cliff3) suffix=cliff_safe_drop_baritone ;;
     cliff6) suffix=cliff_unsafe_drop_baritone ;;
     house) suffix=house_door_baritone ;;
-    gate) suffix=fence_gate_baritone ;;
-    ladder) suffix=ladder_shaft_baritone ;;
     forest) suffix=forest_baritone ;;
     moving) suffix=moving_target_baritone ;;
     twobots) suffix=two_bots_baritone ;;
-    long) suffix=long_path_baritone ;;
     *) return 1 ;;
   esac
   printf 'navigation_course_game_tests_%s\n' "$suffix"

@@ -20,7 +20,6 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 
@@ -32,8 +31,8 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p>The protected victims are the bot, its owner and every {@link AIPlayerEntity} within {@link #VICTIM_RANGE} blocks (any owner).
  * Mob candidates are living entities within {@link #SCAN_RANGE} blocks that the bot's OWN eyes see and that
- * {@link CombatCore#hostileTo} calls hostile; owner vision is used only for foreign-bot candidates. A calm warden is excluded unless
- * {@link WardenState#isHunting}. One entity query per bot per server tick; the snapshot is cached for that tick.</p>
+ * {@link CombatCore#hostileTo} calls hostile; owner vision is used only for foreign-bot candidates. One entity query per bot per
+ * server tick; the snapshot is cached for that tick.</p>
  */
 public final class AggroSense {
     public static final double SCAN_RANGE = 24.0D;
@@ -166,9 +165,6 @@ public final class AggroSense {
                     rangedOrExplosive |= HostileBotIntent.holdsDrawnRanged(player);
                 }
             } else {
-                if (entity instanceof Warden warden && !WardenState.isHunting(warden, victims, now)) {
-                    continue; // a calm warden is no aggressor (and its distance history is not kept)
-                }
                 if (!CombatCore.hostileTo(bot, entity) || !ObservableWorldQuery.canNoticeCreature(bot, entity)) {
                     continue;
                 }

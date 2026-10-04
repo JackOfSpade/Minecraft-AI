@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.BreakRule;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistHooks;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
@@ -12,6 +13,8 @@ import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 public final class MiningController {
@@ -74,15 +77,30 @@ public final class MiningController {
     /**
      * Current, state-free-first evidence for a direct break target. The shape-aware observers
      * necessarily inspect the target state to derive its outline, so the unit-cell first-hit
-     * proof must remain first. This is deliberately live rather than a remembered sighting:
-     * mining exposes terrain, and a stale target must never keep a break packet alive.
+     * proof must remain first. A fire or powder-snow cell intersecting the bot's body is one
+     * exception: it is a direct physical hazard rather than hidden terrain. A crop's short
+     * outline is the other: its observed outline earns a crop-only state check. This is
+     * deliberately live rather than a remembered sighting: mining exposes terrain, and a stale
+     * target must never keep a break packet alive. A solid natural-terrain cell that currently
+     * intersects the player's own body is also direct evidence: escaping it does not discover a
+     * neighbouring cell, and is needed when the player's eye is inside the collision shape.
      */
     static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos) {
-        return player != null
-                && pos != null
-                && ObservableWorldQuery.canObserveBlockCellFace(player, pos)
+        return player != null && pos != null && (ownBodyEmergencyBlock(player, pos)
+                || ObservableWorldQuery.canObserveBlockCellFace(player, pos)
                 && (ObservableWorldQuery.canObserveBlock(player, pos)
-                || ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos));
+                || ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos))
+                || currentObservedCropTarget(player, pos));
+    }
+
+    /**
+     * A crop has a real, player-visible outline but does not fill a block cell, so the generic
+     * cell-face admission above intentionally cannot prove it. The outline proof comes before
+     * the state read; only an actual crop may use this narrow path.
+     */
+    private static boolean currentObservedCropTarget(AIPlayerEntity player, BlockPos pos) {
+        return ObservableWorldQuery.canObserveFarmCell(player, pos)
+                && player.level().getBlockState(pos).getBlock() instanceof CropBlock;
     }
 
     /**
@@ -168,6 +186,25 @@ public final class MiningController {
             return ActionResult.failed("timeout");
         }
         return ActionResult.IN_PROGRESS;
+    }
+
+    /**
+     * A cell overlapping the player's own body is direct physical evidence, never a hidden
+     * terrain read. Fire and powder snow remain immediate hazards. A solid escape cell must also
+     * be breakable natural terrain: this exception never authorizes an unbreakable, interactive,
+     * structure, or player-built block merely because a player intersects it.
+     */
+    private static boolean ownBodyEmergencyBlock(AIPlayerEntity player, BlockPos pos) {
+        if (player == null || pos == null
+                || !player.getBoundingBox().deflate(0.001D).intersects(
+                pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1.0D, pos.getY() + 1.0D, pos.getZ() + 1.0D)) {
+            return false;
+        }
+        BlockState state = player.level().getBlockState(pos);
+        return state.is(Blocks.FIRE) || state.is(Blocks.SOUL_FIRE) || state.is(Blocks.POWDER_SNOW)
+                || (!state.getCollisionShape(player.level(), pos).isEmpty()
+                && state.getDestroySpeed(player.level(), pos) >= 0.0F
+                && BreakRule.denialOf(state) == null);
     }
 
     public void abort(AIPlayerEntity player) {

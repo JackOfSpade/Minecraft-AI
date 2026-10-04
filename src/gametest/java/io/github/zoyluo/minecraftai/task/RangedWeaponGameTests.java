@@ -712,7 +712,7 @@ public final class RangedWeaponGameTests {
         MinecraftAiConfig old = MinecraftAiConfig.get();
         MinecraftAiConfig.Behaviour b = old.behaviour();
         MinecraftAiConfig next = old.withBehaviour(new MinecraftAiConfig.Behaviour(b.pace(), b.targeting(), b.gear(),
-                b.follow(), b.warden(), new MinecraftAiConfig.CombatBehaviour(new MinecraftAiConfig.Aim(degreesPerSecond))));
+                b.follow(), new MinecraftAiConfig.CombatBehaviour(new MinecraftAiConfig.Aim(degreesPerSecond)), b.perception()));
         installConfig(next);
         return old;
     }

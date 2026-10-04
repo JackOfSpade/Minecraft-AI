@@ -446,7 +446,20 @@ public final class FollowTaskGameTests {
         TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
         String botName = "FollowAirStayGT";
-        AIPlayerEntity bot = spawn(context, botName, c.offset(-5, 0, 0));
+        BlockPos botFeet = c.offset(-5, 0, 0);
+        // Keep the target in open air but leave only the bot's own support. This isolates the
+        // repeated failed-replan policy: any legal local recovery step would reset its stall
+        // clock and make this announcement timing depend on physics scheduling.
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                BlockPos cell = c.offset(dx, 0, dz);
+                if (!cell.equals(botFeet)) {
+                    world.setBlock(cell.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                    world.setBlock(cell.below(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        AIPlayerEntity bot = spawn(context, botName, botFeet);
         FollowTask followTask = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, followTask,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_persistent_unstandable"));

@@ -18,8 +18,8 @@ import net.minecraft.core.BlockPos;
  *   <li><b>structural</b>: cells whose bucket is not {@link PoiBucket#NATURAL}. They are the scorer's
  *       cells and carry the specific-block and habitation flags of their id.</li>
  *   <li><b>flag-only</b> (cap {@value #FLAG_ONLY_CAP}): natural cells that still matter for a
- *       presence flag, chiefly plain sculk and sculk veins (the "6 sculk-family cells" mandatory rule)
- *       and natural blackstone. A sculk field can never push a mineshaft out of the structural window.</li>
+ *       presence flag, such as natural blackstone. They never push structural evidence out of the
+ *       structural window.</li>
  * </ul>
  * A cell that is natural and carries no flag is not evidence and is never stored. Eviction at a cap
  * drops the least recently seen cell; expiry is a full pass, so it does not depend on ticks being

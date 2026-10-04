@@ -63,7 +63,7 @@ import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
-import io.github.zoyluo.minecraftai.task.WardenRefusal;
+import io.github.zoyluo.minecraftai.task.BossRefusal;
 import io.github.zoyluo.minecraftai.task.TradeTask;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -616,15 +616,15 @@ public final class ToolRegistry {
             return ok("equipped_armor_pieces: " + equipped);
         });
 
-        register("attack", "Start a deterministic combat task against nearby entities of a type. The bot equips armor and weapon, attacks on cooldown, and retreats at low health. It never fights a warden.", objectSchema()
+        register("attack", "Start a deterministic combat task against nearby entities of a type. The bot equips armor and weapon, attacks on cooldown, and retreats at low health. It refuses bosses.", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:zombie"))
                 .property("count", integerSchema("number of kills"))
                 .required("entity_type")
                 .build(), (bot, args) -> {
             EntityType<?> attackType = requiredEntityType(args, "entity_type");
-            if (WardenRefusal.refuses(attackType)) {
-                WardenRefusal.logRefused(bot, "tool");
-                return fail(WardenRefusal.MESSAGE);
+            if (BossRefusal.refuses(attackType)) {
+                BossRefusal.logRefused(bot, "tool");
+                return fail(BossRefusal.MESSAGE);
             }
             Task task = new CombatTask(
                     attackType,
@@ -1081,9 +1081,9 @@ public final class ToolRegistry {
                     return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
                 }
             }
-            if ("attack".equals(taskType) && WardenRefusal.refuses(requiredEntityType(params, "entity_type"))) {
-                WardenRefusal.logRefused(bot, "task_type");
-                return fail(WardenRefusal.MESSAGE);
+            if ("attack".equals(taskType) && BossRefusal.refuses(requiredEntityType(params, "entity_type"))) {
+                BossRefusal.logRefused(bot, "task_type");
+                return fail(BossRefusal.MESSAGE);
             }
             Task task = createTask(bot, taskType, params);
             assignLlm(bot, task);

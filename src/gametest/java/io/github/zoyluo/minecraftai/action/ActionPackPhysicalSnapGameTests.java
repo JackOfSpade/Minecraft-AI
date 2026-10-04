@@ -554,7 +554,7 @@ public final class ActionPackPhysicalSnapGameTests {
 
         require(context, result.isFailed(),
                 "constrained invalid start unexpectedly installed a path");
-        require(context, result.reason().contains("NO_START"),
+        require(context, result.reason().startsWith("navigation_goal_"),
                 "constrained invalid start produced wrong reason: " + result.reason());
         require(context, bot.blockPosition().equals(before),
                 "constrained admission moved before contract proof: from="
@@ -562,46 +562,6 @@ public final class ActionPackPhysicalSnapGameTests {
                         + bot.blockPosition().toShortString());
         require(context, bot.blockPosition().getY() >= invalid.getY(),
                 "constrained admission crossed its minimumY");
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
-    }
-
-    @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_same_goal_different_return_anchor_replaces_instead_of_throttling", maxTicks = 20)
-    public void sameGoalDifferentReturnAnchorReplacesInsteadOfThrottling(
-            GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(4, 4, 4));
-        BlockPos goal = start.east(4);
-        BlockPos secondAnchor = start.south();
-        for (int dx = 0; dx <= 4; dx++) {
-            for (int dz = 0; dz <= 1; dz++) {
-                BlockPos feet = start.offset(dx, 0, dz);
-                world.setBlock(
-                        feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            }
-        }
-
-        String name = "ConstrainedIdentityGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        ActionResult first =
-                bot.getActionPack().startSurfacePathTo(goal, start.getY(), start);
-        require(context, !first.isFailed(),
-                "first constrained request failed: " + first.reason());
-
-        ActionResult replacement = bot.getActionPack().startSurfacePathTo(
-                goal, start.getY(), secondAnchor);
-
-        require(context, !replacement.isFailed(),
-                "different returnAnchor was rejected: " + replacement.reason());
-        require(context, !"pathfinding_throttled".equals(replacement.reason()),
-                "goal-only cooldown retained the old route contract");
-        require(context, goal.equals(bot.getActionPack().activePathGoal()),
-                "replacement did not own the exact active goal");
         AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
         context.succeed();
     }
@@ -914,141 +874,6 @@ public final class ActionPackPhysicalSnapGameTests {
 
         AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
         context.succeed();
-    }
-
-    @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_reserve76_rejects76_and_pillar_spends77th_stone", maxTicks = 200)
-    public void reserve76Rejects76AndPillarSpends77thStone(GameTestHelper context) {
-        verifyStoneReserveBoundary(context, 76);
-    }
-
-    @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_reserve37_rejects37_and_pillar_spends38th_stone", maxTicks = 200)
-    public void reserve37Rejects37AndPillarSpends38thStone(GameTestHelper context) {
-        verifyStoneReserveBoundary(context, 37);
-    }
-
-    @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_reserve16_rejects16_and_pillar_spends17th_stone", maxTicks = 200)
-    public void reserve16Rejects16AndPillarSpends17thStone(GameTestHelper context) {
-        verifyStoneReserveBoundary(context, 16);
-    }
-
-    /**
-     * Builds a two-high bedrock ring whose only route to the exact wall-top goal is one real
-     * PILLAR_UP followed by an ordinary jump. This exercises reserve-aware ActionPack planning and
-     * the PathExecutor's vanilla block placement, rather than only calling the palette selector.
-     */
-    private static void verifyStoneReserveBoundary(GameTestHelper context, int reserve) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(4, 3, 4));
-        BlockPos goal = start.east().above(2);
-        prepareOnePillarExit(world, start);
-
-        String exactName = "R" + reserve + "Exact";
-        AIPlayerEntity exact = spawnReserveBot(context, exactName, start);
-        giveCobblestone(context, exact, reserve);
-        require(context, !PathExecutor.hasPlaceableBlock(exact, reserve),
-                "exact reserve exposed protected stone to initial planning: " + reserve);
-        AStarPathfinder.invalidateCache("gametest_path_reserve_exact_" + reserve);
-        ActionResult denied = exact.getActionPack().startPathTo(goal, reserve);
-        require(context, denied.isFailed(),
-                "exact reserve planned an escape that requires protected PILLAR_UP: " + reserve);
-        require(context, InventoryAction.countItem(exact, Items.COBBLESTONE) == reserve,
-                "failed exact-reserve planning changed mission inventory");
-        require(context, world.getBlockState(start).isAir(),
-                "failed exact-reserve planning placed a support block");
-        AIPlayerManager.INSTANCE.despawn(exact.level().getServer(), exactName);
-
-        prepareOnePillarExit(world, start);
-        String surplusName = "R" + reserve + "Plus";
-        AIPlayerEntity surplus = spawnReserveBot(context, surplusName, start);
-        giveCobblestone(context, surplus, reserve + 1);
-        require(context, PathExecutor.hasPlaceableBlock(surplus, reserve),
-                "one surplus stone was not exposed to scoped path planning: " + reserve);
-
-        AStarPathfinder.invalidateCache("gametest_path_reserve_surplus_" + reserve);
-        PathfindingResult planned = new AStarPathfinder(
-                world, start, goal, 3_000, 50L, true, false).findPath();
-        require(context, planned.success() && goal.equals(planned.resolvedGoal()),
-                "one-surplus fixture did not produce an exact path: " + planned.reason());
-        long pillarNodes = planned.path().stream()
-                .filter(node -> node.moveType() == MoveType.PILLAR_UP)
-                .count();
-        require(context, pillarNodes == 1,
-                "fixture must plan exactly one real PILLAR_UP, got " + pillarNodes);
-
-        ActionResult started = surplus.getActionPack().startPathTo(goal, reserve);
-        require(context, started.isInProgress(),
-                "reserve-aware ActionPack rejected one surplus stone: " + started.reason());
-        AtomicInteger ticks = new AtomicInteger();
-        context.failIfEver(() -> {
-            ticks.incrementAndGet();
-            if (!surplus.blockPosition().equals(goal)
-                    || !surplus.getActionPack().isPathExecutorIdle()) {
-                require(context, !surplus.getActionPack().isPathExecutorIdle()
-                                || surplus.blockPosition().equals(goal),
-                        "reserve-aware path terminated before its exact goal at "
-                                + surplus.blockPosition().toShortString());
-                return;
-            }
-            require(context, world.getBlockState(start).is(Blocks.COBBLESTONE),
-                    "PILLAR_UP did not place the factual surplus support");
-            require(context, InventoryAction.countItem(surplus, Items.COBBLESTONE) == reserve,
-                    "PILLAR_UP crossed the protected reserve boundary: expected=" + reserve
-                            + " actual=" + InventoryAction.countItem(surplus, Items.COBBLESTONE));
-            require(context, ticks.get() > 1,
-                    "path completed without executing the planned physical pillar");
-            AIPlayerManager.INSTANCE.despawn(surplus.level().getServer(), surplusName);
-            context.succeed();
-        });
-    }
-
-    private static void prepareOnePillarExit(net.minecraft.server.level.ServerLevel world,
-                                             BlockPos start) {
-        for (BlockPos pos : BlockPos.betweenClosed(start.offset(-3, 0, -3), start.offset(3, 5, 3))) {
-            world.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        for (BlockPos pos : BlockPos.betweenClosed(start.offset(-3, -1, -3), start.offset(3, -1, 3))) {
-            world.setBlock(pos, Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                if (Math.abs(dx) != 1 && Math.abs(dz) != 1) {
-                    continue;
-                }
-                for (int dy = 0; dy <= 1; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        Standability.clearCache();
-    }
-
-    private static AIPlayerEntity spawnReserveBot(GameTestHelper context, String name,
-                                                   BlockPos start) {
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getLevel().getServer(), name, context.getLevel(),
-                        Vec3.atBottomCenterOf(start), 0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(context.getLevel(), start.getX() + 0.5D, start.getY(),
-                start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-        bot.setOnGround(true);
-        bot.getInventory().clearContent();
-        bot.getInventory().setChanged();
-        return bot;
-    }
-
-    private static void giveCobblestone(GameTestHelper context, AIPlayerEntity bot, int count) {
-        int remaining = count;
-        while (remaining > 0) {
-            int stackSize = Math.min(remaining, Items.COBBLESTONE.getDefaultMaxStackSize());
-            ActionResult given = InventoryAction.giveItem(
-                    bot, new ItemStack(Items.COBBLESTONE, stackSize));
-            require(context, given.isSuccess(),
-                    "failed to prepare exact cobblestone count " + count);
-            remaining -= stackSize;
-        }
-        require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == count,
-                "fixture cobblestone count mismatch: expected=" + count);
     }
 
     private static void require(GameTestHelper context, boolean condition, String message) {

@@ -746,12 +746,17 @@ public final class EmergencyShelterTask extends AbstractTask {
         if (result == null) {
             // Cancelled from outside: nothing to finish, and no foreign ActionPack result can
             // affect this shelter's attempt counters. The current phase re-derives from the world.
+            pack.releaseStepLease(lease);
             forgetMotionWithoutResult();
             BotLog.action(bot, "shelter_walked_step_cancelled", "motion", finished);
             return false;
         }
         motion = Motion.NONE;
         motionLease = null;
+        // The completed result above belongs to this exact shelter motion. Release its guarded
+        // lease before retrying an egress; otherwise a failed walked step permanently fences the
+        // next owned doorway attempt even though the task has reconciled that outcome.
+        pack.releaseStepLease(lease);
         if (result.failed()) {
             BotLog.action(bot, "shelter_walked_step_failed", "motion", finished, "why", result.reason());
         }
@@ -831,7 +836,10 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     /** Forgets this task's walked-step admission and the foundation attempt it belonged to. */
-    private void dropMotion() {
+    private void dropMotion(AIPlayerEntity bot) {
+        // Generic stopAll intentionally retains guarded leases. This task may cancel only its
+        // own exact admission before it drops the reference needed to release that fence.
+        bot.getActionPack().cancelStep(motionLease);
         motion = Motion.NONE;
         motionLease = null;
         foundationStage = FoundationStage.NONE;
@@ -922,7 +930,11 @@ public final class EmergencyShelterTask extends AbstractTask {
                         placementBox,
                         entity -> entity != bot
                                 && DangerWatcher.isActiveHostileThreat(bot, entity)
-                                && ObservableWorldQuery.canNoticeCreature(bot, entity))
+                                // The failed placement is already a direct physical observation
+                                // of this exact adjacent cell. It does not justify a hidden scan,
+                                // but it must not wait for the creature-look dwell before the
+                                // shelter can make its single clearance strike or choose egress.
+                                && ObservableWorldQuery.canObserveEntity(bot, entity))
                 .stream()
                 .filter(entity -> placementBox.intersects(entity.getBoundingBox()))
                 .min(Comparator.comparingDouble(bot::distanceToSqr));
@@ -1212,9 +1224,10 @@ public final class EmergencyShelterTask extends AbstractTask {
                 return;
             }
         }
-        // Every branch below either reads this doorway or acts on its owned block. Re-prove the
-        // entire feet/head/support envelope before continuing an old exit transaction.
-        if (!canObserveEgressCells(bot, egressFeet)) {
+        // A sealed shelter occludes its own doorway. It may therefore mine an exact, still-owned
+        // head/foot pair, and then its exact owned foot through an observed open head port. Every
+        // other doorway state needs the full fresh feet/head/support observation before it is read.
+        if (!canOperateOwnedDoorway(bot, egressFeet) && !canObserveEgressCells(bot, egressFeet)) {
             if (forcePressureExit) {
                 retryOrRejectEgress(bot, "shelter_exit_observation_lost", "egress_unobserved");
             } else {
@@ -1234,15 +1247,26 @@ public final class EmergencyShelterTask extends AbstractTask {
             if (status == BlockMiner.Status.DONE) {
                 ownedPlacements.remove(exitMiningTarget);
                 exitMiningTarget = null;
+                // A completed owned-door break may change its admission stage. Re-enter on the
+                // next tick so we never read remaining cells using the earlier door proof.
+                return;
             }
         }
-        if (!forcePressureExit && resealObservedPressure(bot)) {
+        // A fully exact owned pair is still opaque. The pressure probe reads the head cell, so
+        // defer it until the head is actually observable (or the full doorway is observable).
+        if (!forcePressureExit && !ownedSealedDoorway(bot, egressFeet)
+                && resealObservedPressure(bot)) {
             return;
         }
-        if (!forcePressureExit && observationPortDwell(bot)) {
+        if (!forcePressureExit && !ownedSealedDoorway(bot, egressFeet)
+                && observationPortDwell(bot)) {
             return;
         }
-        BlockPos obstruction = firstExitObstruction(bot, egressFeet);
+        BlockPos obstruction = ownedSealedDoorway(bot, egressFeet)
+                ? egressFeet.above().immutable()
+                : ownedFootThroughObservedOpenHead(bot, egressFeet)
+                ? egressFeet.immutable()
+                : firstExitObstruction(bot, egressFeet);
         if (obstruction != null) {
             if (!ownsCurrentPlacement(bot, obstruction)) {
                 rejectCurrentEgress(bot, "shelter_exit_blocked_unowned");
@@ -1793,7 +1817,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         elevatedForRoofSupport = false;
         egressFailureTarget = null;
         egressMotionFailures = 0;
-        dropMotion();
+        dropMotion(bot);
         exitMiningTarget = null;
         cancelHoldEating(bot, "shelter_hold_finished");
         exitMiner.cancel(bot);
@@ -1826,7 +1850,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         phase = Phase.OPEN_EXIT;
         phaseStartedElapsed = elapsed;
         elevatedForRoofSupport = false;
-        dropMotion();
+        dropMotion(bot);
         cancelHoldEating(bot, "shelter_pressure_timeout");
         bot.getActionPack().stopAll();
         BotLog.action(bot, "shelter_pressure_exit_forced",
@@ -1840,7 +1864,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         phase = Phase.HOLD;
         egressFailureTarget = null;
         egressMotionFailures = 0;
-        dropMotion();
+        dropMotion(bot);
         phaseStartedElapsed = elapsed;
         exitMiningTarget = null;
         exitMiner.cancel(bot);
@@ -2162,10 +2186,38 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private boolean isOpenableEgress(AIPlayerEntity bot, BlockPos candidate) {
-        return candidate != null
-                && canObserveEgressCells(bot, candidate)
+        if (candidate == null) {
+            return false;
+        }
+        if (canOperateOwnedDoorway(bot, candidate)) {
+            return true;
+        }
+        return canObserveEgressCells(bot, candidate)
                 && (isOpenCell(bot, candidate) || ownsCurrentPlacement(bot, candidate))
                 && (isOpenCell(bot, candidate.above()) || ownsCurrentPlacement(bot, candidate.above()));
+    }
+
+    /**
+     * The task may operate its own opaque two-cell door in two tightly bounded stages.  The first
+     * mines an exact recorded head/foot pair; the second mines the exact recorded foot only after
+     * the opened head cell is visible.  Neither stage trusts an unseen support or permits movement.
+     */
+    private boolean canOperateOwnedDoorway(AIPlayerEntity bot, BlockPos candidate) {
+        return ownedSealedDoorway(bot, candidate)
+                || ownedFootThroughObservedOpenHead(bot, candidate);
+    }
+
+    private boolean ownedSealedDoorway(AIPlayerEntity bot, BlockPos candidate) {
+        return candidate != null
+                && ownsCurrentPlacement(bot, candidate)
+                && ownsCurrentPlacement(bot, candidate.above());
+    }
+
+    private boolean ownedFootThroughObservedOpenHead(AIPlayerEntity bot, BlockPos candidate) {
+        return candidate != null
+                && ownsCurrentPlacement(bot, candidate)
+                && ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                && isOpenCell(bot, candidate.above());
     }
 
     private BlockPos firstExitObstruction(AIPlayerEntity bot, BlockPos candidate) {
@@ -2391,6 +2443,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     private void settleTerminalOwnership(AIPlayerEntity bot, String cancelReason) {
         exitMiner.cancel(bot);
         cancelHoldEating(bot, cancelReason);
+        dropMotion(bot);
         boolean exitDebtHandedOff = preserveOwnedExitDebt(bot);
         // A partial shell still deserves cleanup, but only after the bot is already outside its
         // anchor or a collision-free side proves that a worker cannot entomb it by removing the
@@ -2438,7 +2491,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             exitStartedElapsed = elapsed;
         }
         elevatedForRoofSupport = false;
-        dropMotion();
+        dropMotion(bot);
         exitMiningTarget = null;
         cancelHoldEating(bot, cancelReason);
         exitMiner.cancel(bot);

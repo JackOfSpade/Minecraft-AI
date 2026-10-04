@@ -53,7 +53,6 @@ public final class MiningAssistState {
 
     private String dimensionKey;
     private String biomeId = "";
-    private boolean deepDark;
     private boolean lush;
 
     private int nextPoiEvalTick = NEVER;
@@ -252,11 +251,6 @@ public final class MiningAssistState {
         return biomeId;
     }
 
-    /** True while the feet biome is the deep dark (used by the deep_dark_biome veto and by logs). */
-    public boolean deepDark() {
-        return deepDark;
-    }
-
     /** True while the feet biome is lush caves (the lexicon's naturalTag input for logs and leaves). */
     public boolean lush() {
         return lush;
@@ -264,7 +258,6 @@ public final class MiningAssistState {
 
     public void setBiome(String id) {
         this.biomeId = id == null ? "" : id;
-        this.deepDark = AssistRules.isDeepDarkBiome(this.biomeId);
         this.lush = AssistRules.isLushBiome(this.biomeId);
     }
 

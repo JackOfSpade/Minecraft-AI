@@ -45,6 +45,7 @@ public final class FarmTask extends AbstractTask {
     private static final int DEPOSIT_INTERVAL_ACTIONS = 16;
     private static final double REACH_SQUARED = 20.25D;
     private static final int PICKUP_BUDGET_TICKS = 100;   // walking over harvest drops before moving on
+    private static final int PICKUP_DROP_SETTLE_TICKS = 10; // allow a just-broken crop's vanilla drops to clear their pickup delay
     private static final double PICKUP_RADIUS = 8.0D;
     private static final int WAIT_SURVEY_INTERVAL = 10;   // while waiting for maturity, re-survey this often
     private static final int BONE_MEAL_INTERVAL = 4;      // ticks between bone meal clicks
@@ -340,11 +341,17 @@ public final class FarmTask extends AbstractTask {
         BlockPos stand = adjacentStandPos(bot, current.ground());
         if (stand == null) {
             note = "unreachable " + BlockPosText.compact(current.ground());
+            markFailed(current.ground());
             phase = Phase.NEXT;
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
-            bot.getActionPack().startPathTo(stand);
+            ActionResult result = bot.getActionPack().startPathTo(stand);
+            if (result.isFailed()) {
+                note = result.reason();
+                markFailed(current.ground());
+                phase = Phase.NEXT;
+            }
         }
     }
 
@@ -547,6 +554,9 @@ public final class FarmTask extends AbstractTask {
      */
     private void pickup(AIPlayerEntity bot) {
         pickupTicks++;
+        if (pickupTicks <= PICKUP_DROP_SETTLE_TICKS) {
+            return;
+        }
         boolean dropsLeft = HarvestCore.walkOverDrops(bot, dropItems(), PICKUP_RADIUS);
         if (dropsLeft && pickupTicks <= PICKUP_BUDGET_TICKS) {
             return;
@@ -628,8 +638,16 @@ public final class FarmTask extends AbstractTask {
         }
         if (!bot.isWithinBlockInteractionRange(target, 0.0D)) {
             BlockPos stand = adjacentStandPos(bot, target.below());
-            if (stand != null && bot.getActionPack().isPathExecutorIdle()) {
-                bot.getActionPack().startPathTo(stand);
+            if (stand == null) {
+                immatureCrops.remove(target);
+                return;
+            }
+            if (bot.getActionPack().isPathExecutorIdle()) {
+                ActionResult result = bot.getActionPack().startPathTo(stand);
+                if (result.isFailed()) {
+                    note = result.reason();
+                    immatureCrops.remove(target);
+                }
             }
             return;
         }
@@ -747,14 +765,24 @@ public final class FarmTask extends AbstractTask {
         return seed;
     }
 
-    private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
+    static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos candidate = target.relative(direction).above();
-            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.level(), candidate)) {
+            if (canObserveStand(bot, candidate)
+                    && io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.level(), candidate)) {
                 return candidate;
             }
         }
         return null;
+    }
+
+    private static boolean canObserveStand(AIPlayerEntity bot, BlockPos stand) {
+        if (stand.equals(bot.blockPosition())) {
+            return true;
+        }
+        return ObservableWorldQuery.canObserveCell(bot, stand)
+                && ObservableWorldQuery.canObserveCell(bot, stand.above())
+                && ObservableWorldQuery.canObserveCollider(bot, stand.below());
     }
 
     private enum Kind {

@@ -151,16 +151,35 @@ public final class GatherToolPolicyGameTests {
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.COBBLESTONE, 4);
         task.start(bot);
         AtomicBoolean sawPickaxeEquippedDuringHarvest = new AtomicBoolean();
+        int[] remainingStone = {9};
 
         context.failIfEver(() -> {
             tickOrFail(context, task, bot);
-            if (task.describe().contains("phase=HARVEST")) {
+            // Tool selection is made by the harvest controller before the scheduled physical
+            // break.  The task may finish its last pickup in that same server tick, so retain
+            // the selection observation across the whole live harvest transaction.
+            sawPickaxeEquippedDuringHarvest.compareAndSet(false,
+                    bot.getMainHandItem().is(Items.STONE_PICKAXE));
+            int stone = 0;
+            for (int dx = 1; dx <= 3; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (bot.level().getBlockState(fixture.start().offset(dx, 0, dz)).is(Blocks.STONE)) {
+                        stone++;
+                    }
+                }
+            }
+            // HARVEST means the controller has accepted a target.  It can precede the next
+            // server ActionPack update that applies the selected hotbar slot, so it is not proof
+            // that a block was mined with the hand item observed in this callback.  Assert the
+            // category at the physical break itself.
+            if (stone < remainingStone[0]) {
                 require(context, bot.getMainHandItem().is(Items.STONE_PICKAXE),
                         "broke stone with a non-pickaxe while a pickaxe was available: " + bot.getMainHandItem());
                 require(context, !bot.getMainHandItem().is(Items.WOODEN_SHOVEL),
                         "used the shovel to mine cobblestone instead of the pickaxe");
                 sawPickaxeEquippedDuringHarvest.set(true);
             }
+            remainingStone[0] = stone;
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }

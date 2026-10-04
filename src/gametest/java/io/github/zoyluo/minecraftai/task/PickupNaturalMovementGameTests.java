@@ -24,9 +24,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * No micro-teleports (R5) for the pickup, water, obsidian and craft moves: the bot walks with its movement keys where the old code
- * moved it a few tenths of a block (the pickup nudge, the walk back to the middle of the cell, the sneak-bridge lean, the last cells
- * to a drop). Every test resets {@link TeleportAudit} for the bot under test after the fixture is built (fixture moves are
+ * No micro-teleports (R5) for pickup, obsidian and craft moves: the bot walks with its movement keys where the old code moved it a
+ * few tenths of a block (the pickup nudge, the walk back to the middle of the cell and the last cells to a pool). Every test resets
+ * {@link TeleportAudit} for the bot under test after the fixture is built (fixture moves are
  * {@code TEST} teleports) and asserts {@code TeleportAudit.corrections(bot) == 0} at the end, in the default strict-survival profile.
  * Each test has its own world layer.
  */
@@ -106,45 +106,7 @@ public final class PickupNaturalMovementGameTests {
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Water: the sneak-bridge lean over the edge is walked
-    // ---------------------------------------------------------------------------------------------------------------
-
-    /**
-     * A climb through an open room needs an isolated pillar: the bot leans out over the edge of its support (sneaking), places the
-     * base block against the side face and walks back to the middle of the cell. The old code teleported 0.55 blocks out and back in
-     * one tick; now both are steps with the movement keys and the placement happens between them.
-     */
-    @GameTest(environment = "minecraftai-gametest:pickup_natural_movement_game_tests_sneak_bridge_climb_leans_from_edge_without_teleport", maxTicks = 900)
-    public void sneakBridgeClimbLeansFromEdgeWithoutTeleport(GameTestHelper context) {
-        Arena arena = Arena.build(context, 0, -6, 6, -6, 6);
-        BlockPos start = arena.feet;
-        AIPlayerEntity bot = arena.spawn("PickupWaterEdgeGT", start);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
-        AcquireWaterTask task = new AcquireWaterTask(start.above(2));
-        task.start(bot);
-        int[] tick = {0};
-        context.onEachTick(() -> {
-            tick[0]++;
-            task.tick(bot);
-            require(context, task.state() != TaskState.FAILED && task.state() != TaskState.CANCELLED,
-                    "the ascent failed: " + task.failureReason() + " checkpoint=" + task.checkpoint());
-            if ("SEARCH".equals(task.checkpoint().get("phase"))) {
-                requireNoCorrections(context, bot, "sneak-bridge ascent");
-                int used = 8 - InventoryAction.countItem(bot, Items.COBBLESTONE);
-                require(context, used >= 2, "the climb did not place the bridge blocks (used=" + used + ")");
-                require(context, bot.blockPosition().getY() >= start.above(2).getY(),
-                        "the climb ended below the surface anchor: " + bot.blockPosition().toShortString());
-                task.cancel(bot, "gametest_complete");
-                arena.finish(bot);
-            }
-            require(context, tick[0] < 880, "timed out at " + bot.blockPosition().toShortString() + " phase="
-                    + task.checkpoint().get("phase"));
-        });
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // Obsidian: the last cells to a drop are walked (dry cells and a water-filled one)
+    // Obsidian: the last cells to a pool are walked (dry cells and a water-filled one)
     // ---------------------------------------------------------------------------------------------------------------
 
     /**
@@ -154,10 +116,12 @@ public final class PickupNaturalMovementGameTests {
     @GameTest(environment = "minecraftai-gametest:pickup_natural_movement_game_tests_create_obsidian_rim_and_pickup_by_walking", maxTicks = 300)
     public void createObsidianRimAndPickupByWalking(GameTestHelper context) {
         Arena arena = Arena.build(context, 1, -3, 8, -3, 3);
-        // A one-cell pool sunk into the floor east of the dry approach: water in the floor cell, stone under it and around it.
-        BlockPos pool = arena.at(3, -1, 0);
-        arena.set(3, -2, 0, Blocks.STONE);
-        arena.set(3, -1, 0, Blocks.WATER);
+        // A one-cell pool at the end of the dry approach.  The level entry is an observable swim
+        // stroke; a diagonal descent into submerged terrain is intentionally not admitted.
+        // From the spawn cell, x=1 is the dry transit and x=2 is the water landing. This makes
+        // the asserted sequence exactly one dry walk followed by one observed swim stroke.
+        BlockPos pool = arena.at(2, 0, 0);
+        arena.set(2, 0, 0, Blocks.WATER);
         AIPlayerEntity bot = arena.spawn("PickupObsidianWalkGT", arena.at(0, 0, 0));
         CreateObsidianTask pickup = new CreateObsidianTask(1);
         int[] tick = {0};
@@ -170,7 +134,7 @@ public final class PickupNaturalMovementGameTests {
                 return;
             }
             if (pack.stepIdle() && tick[0] > 2) {
-                // The two-cell gap first (a dry transit cell, then the pool), asked again as long as the bot is not in the pool.
+                // The two cells first (a dry transit cell, then the pool), asked again as long as the bot is not in the pool.
                 boolean started = pickup.stepTowardPickupCell(bot, pool);
                 require(context, started, "no pickup step could be started from " + bot.blockPosition().toShortString());
             }

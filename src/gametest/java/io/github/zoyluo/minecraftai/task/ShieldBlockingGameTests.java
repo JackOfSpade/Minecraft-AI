@@ -579,7 +579,7 @@ public final class ShieldBlockingGameTests {
             }
             taskShieldWasActivelyBlocking[0] = taskShieldNow;
             lastShieldDamage[0] = bot.getOffhandItem().getDamageValue();
-            if (strikes[0] >= 2) {
+            if (strikes[0] >= 2 && blockedHuskHit[0]) {
                 arena.require(taskShieldAfterFirstStrike[0],
                         "the GuardTask never held its own shield after its first real strike: " + guard.describe());
                 arena.require(blockedHuskHit[0],

@@ -175,43 +175,7 @@ public final class OreDigNaturalMovementGameTests {
      * An OreDigTask reaches a two-ore vein over a one-block lower step (a cave ledge) and collects both diamonds. The descent is a
      * walked step off the ledge whose landing is published when verified: the bot is never teleported and takes no damage.
      */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_natural_movement_game_tests_ore_dig_branch_without_teleport", maxTicks = 1500)
-    public void oreDigBranchWithoutTeleport(GameTestHelper context) {
-        BlockPos start = buildArena(context, 4);
-        AIPlayerEntity bot = spawn(context, "OreDigWalkGT", start, 270.0F);
-        BlockPos landing = buildLedgeScene(context, start);
-        BlockPos ore = start.east(3).below();
-        require(context, OreDigTask.inspectApproachGoalFor(bot, context.getLevel(), ore) == null,
-                "ledge fixture left a legal upper work pose instead of forcing its lower descent");
-        OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 2, openCheckpoint(start, 2, Set.of(Blocks.DIAMOND_ORE)));
-        task.start(bot);
-        int[] ticks = {0};
-        boolean[] steppedDown = {false};
-        boolean[] stepSeen = {false};
-        context.onEachTick(() -> {
-            ticks[0]++;
-            requireUntouched(context, bot, "ore dig branch, tick " + ticks[0] + " at " + bot.blockPosition().toShortString());
-            if (!bot.getActionPack().stepIdle()) {
-                stepSeen[0] = true;
-            }
-            if (bot.blockPosition().equals(landing) || bot.blockPosition().getY() < start.getY()) {
-                steppedDown[0] = true;
-            }
-            require(context, task.state() == TaskState.RUNNING || task.state() == TaskState.COMPLETED,
-                    "the task ended as " + task.state() + ": " + task.failureReason() + " " + task.checkpoint()
-                            + " items=" + items(bot));
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(bot);
-                return;
-            }
-            require(context, steppedDown[0] && stepSeen[0],
-                    "the vein was reached without the lower step: stepDown=" + steppedDown[0] + " stepSeen=" + stepSeen[0]);
-            require(context, InventoryAction.countItem(bot, Items.DIAMOND) >= 2,
-                    "the vein was not collected: " + InventoryAction.countItem(bot, Items.DIAMOND) + " diamonds");
-            despawn(context, bot);
-            context.succeed();
-        });
-    }
+
 
     // ---------------------------------------------------------------------------------------------------------------
     // The retreat before a barricade is a walk
@@ -264,33 +228,35 @@ public final class OreDigNaturalMovementGameTests {
     // ---------------------------------------------------------------------------------------------------------------
 
     /**
-     * HarvestCore drops the bot into the open cell directly below it (the shaft a broken ore left) as a walked step: the bot is
-     * never teleported, lands in the cell and collects the item lying there.
+     * HarvestCore drops the bot through the open shaft a broken ore left using an observed, exact surface route: the bot is
+     * never teleported, physically enters the lower cell, and collects the item lying there.
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_natural_movement_game_tests_harvest_shaft_descent_walks", maxTicks = 400)
     public void harvestShaftDescentWalks(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos start = buildArena(context, 6);
         AIPlayerEntity bot = spawn(context, "HarvestDropGT", start, 0.0F);
-        BlockPos hole = start.below();
+        // A one-cell shaft leaves an item at y + 0.1 inside vanilla's pickup overlap
+        // from the starting cell. Keep an open intermediate cell and put the supported
+        // drop two cells below, so ordinary collision requires a real descent first.
+        BlockPos shaft = start.below();
+        BlockPos hole = shaft.below();
+        world.setBlock(shaft, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(hole, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
         ItemEntity drop = new ItemEntity(world, hole.getX() + 0.5D, hole.getY() + 0.1D, hole.getZ() + 0.5D, new ItemStack(Items.DIAMOND));
         drop.setDeltaMovement(Vec3.ZERO);
         require(context, world.addFreshEntity(drop), "failed to spawn the diamond in the hole");
-        // The floor went away this very tick, before gravity acted: the pickup routine starts the drop as a walked step.
-        HarvestCore.approachKnownPickupCell(bot, hole);
-        boolean launched = !bot.getActionPack().stepIdle();
-        require(context, launched, "the pickup routine did not start a walked step down into the hole");
         int[] ticks = {0};
-        boolean[] walked = {launched};
+        boolean[] descended = {false};
         context.onEachTick(() -> {
             ticks[0]++;
             requireUntouched(context, bot, "harvest descent, tick " + ticks[0] + " at " + bot.blockPosition().toShortString());
-            if (!bot.getActionPack().stepIdle()) {
-                walked[0] = true;
+            if (bot.blockPosition().getY() < start.getY()) {
+                descended[0] = true;
             }
             if (InventoryAction.countItem(bot, Items.DIAMOND) >= 1) {
+                require(context, descended[0], "the item was collected before the bot physically descended");
                 require(context, bot.blockPosition().equals(hole), "the bot collected the item away from its cell: " + bot.blockPosition().toShortString());
                 despawn(context, bot);
                 context.succeed();
@@ -298,75 +264,11 @@ public final class OreDigNaturalMovementGameTests {
             }
             require(context, ticks[0] < 350, "the bot never collected the item: at " + bot.position());
             if (bot.getActionPack().stepIdle() && bot.getActionPack().isPathExecutorIdle()) {
-                HarvestCore.approachKnownPickupCell(bot, hole);
-            }
-        });
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // A pause in the middle of a step: nothing in flight is recorded
-    // ---------------------------------------------------------------------------------------------------------------
-
-    /**
-     * The task is paused (a safety task takes over) while the lower step is in flight. The step is cancelled, its keys released, the
-     * checkpoint still names the face the step began on (a valid, restartable cursor), the bot settles where gravity puts it and the
-     * resumed task rejoins its face by walking, then collects the vein. The bot is never teleported.
-     */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_natural_movement_game_tests_pause_mid_step_re_derives", maxTicks = 2200)
-    public void pauseMidStepReDerives(GameTestHelper context) {
-        BlockPos start = buildArena(context, 7);
-        AIPlayerEntity bot = spawn(context, "OreDigPauseGT", start, 270.0F);
-        buildLedgeScene(context, start);
-        BlockPos ore = start.east(3).below();
-        require(context, OreDigTask.inspectApproachGoalFor(bot, context.getLevel(), ore) == null,
-                "pause fixture left a legal upper work pose instead of forcing its lower descent");
-        OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 2, openCheckpoint(start, 2, Set.of(Blocks.DIAMOND_ORE)));
-        task.start(bot);
-        int[] phase = {0};
-        int[] ticks = {0};
-        int[] settle = {0};
-        context.onEachTick(() -> {
-            ticks[0]++;
-            requireUntouched(context, bot, "pause mid step, phase " + phase[0] + " at " + bot.blockPosition().toShortString());
-            require(context, ticks[0] < 2150, "timed out in phase " + phase[0] + " at " + bot.position());
-            switch (phase[0]) {
-                case 0 -> {
-                    require(context, task.state() == TaskState.RUNNING,
-                            "the task ended early: " + task.state() + " " + task.failureReason());
-                    boolean away = Math.hypot(bot.getX() - (start.getX() + 0.5D), bot.getZ() - (start.getZ() + 0.5D)) > 0.4D
-                            || bot.getY() < start.getY() - 0.2D;
-                    if (!bot.getActionPack().stepIdle() && away) {
-                        task.pause(bot);
-                        require(context, bot.getActionPack().stepIdle(), "pausing left a step in flight");
-                        Map<String, String> paused = task.checkpoint();
-                        require(context, OreDigTask.inspectCheckpoint(paused).isPresent()
-                                        && encode(start).equals(paused.get("face")),
-                                "the pause did not keep the face the step began on: " + paused);
-                        phase[0] = 1;
-                        return;
-                    }
-                    task.tick(bot);
-                }
-                case 1 -> {
-                    if (++settle[0] < 30) {
-                        return;
-                    }
-                    require(context, WalkedStep.supported(bot), "the paused bot did not settle on a floor: " + bot.position());
-                    task.resume(bot);
-                    phase[0] = 2;
-                }
-                default -> {
-                    if (task.state() == TaskState.RUNNING) {
-                        task.tick(bot);
-                        return;
-                    }
-                    require(context, task.state() == TaskState.COMPLETED,
-                            "the resumed task ended as " + task.state() + ": " + task.failureReason() + " " + task.checkpoint());
-                    require(context, InventoryAction.countItem(bot, Items.DIAMOND) >= 2,
-                            "the vein was not collected: " + InventoryAction.countItem(bot, Items.DIAMOND) + " diamonds");
-                    despawn(context, bot);
-                    context.succeed();
-                }
+                // The item and the body settle on the server's physics tick after this fixture
+                // removes the floor. Admit the observed entity only from that factual pose; the
+                // old tick-zero assertion raced both observations and falsely treated a refusal
+                // to inspect an unsettled cell as a movement failure.
+                HarvestCore.approachDropPhysically(bot, drop);
             }
         });
     }

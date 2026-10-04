@@ -38,10 +38,9 @@ public final class PoiDetector {
     /** Most entities that are accepted as evidence per scan. */
     public static final int ENTITY_CANDIDATE_CAP = 48;
     /**
-     * Most entities that get the (raycast) visibility check per scan. The scan visits wardens first and then the
-     * nearest first, and only an entity that passes the check counts toward {@link #ENTITY_CANDIDATE_CAP}, so
-     * evidence-type entities the bot cannot see (a modded mob farm behind a wall) cannot crowd a visible warden
-     * or a nearer structure mob out of the scan.
+     * Most entities that get the (raycast) visibility check per scan. The scan visits nearest entities first, and
+     * only an entity that passes the check counts toward {@link #ENTITY_CANDIDATE_CAP}, so evidence-type entities
+     * the bot cannot see (a modded mob farm behind a wall) cannot crowd a nearer structure mob out of the scan.
      */
     public static final int ENTITY_EXAMINE_CAP = 96;
     /** Mask applied to a bot's uuid hash to pick its first-call stagger: a 0-15 tick offset. */
@@ -66,10 +65,9 @@ public final class PoiDetector {
                          int windowCells,
                          int entitiesCounted,
                          int hits,
-                         String biome,
-                         boolean deepDark) {
+                         String biome) {
         public static final Result NOT_RUN =
-                new Result(false, PoiScorer.Band.NONE, null, "", false, false, null, 0, 0, 0, "", false);
+                new Result(false, PoiScorer.Band.NONE, null, "", false, false, null, 0, 0, 0, "");
 
         /** Key-value pairs for a {@code BotLog} line; only meaningful when {@link #evaluated}. */
         public Object[] logFields() {
@@ -85,14 +83,12 @@ public final class PoiDetector {
                     "label", label,
                     "confirmed", confirmed,
                     "hits", hits,
-                    "trigger", s == null ? "" : s.mandatoryTrigger(),
                     "habitation_like", s != null && s.habitationLike(),
                     "downgraded", s != null && s.downgradedByHabitation(),
                     "window", windowCells,
                     "entities", entitiesCounted,
                     "anchor", anchor == null ? "-" : anchor.getX() + "," + anchor.getY() + "," + anchor.getZ(),
-                    "biome", biome.isEmpty() ? "-" : biome,
-                    "deep_dark", deepDark
+                    "biome", biome.isEmpty() ? "-" : biome
             };
         }
 
@@ -166,7 +162,7 @@ public final class PoiDetector {
 
         Result result = new Result(true, band, score, labelFor(band, signals), confirmed, changed, anchor,
                 state.poiWindow().size(), entities.count(), tracked.hits(),
-                state.biomeId(), state.deepDark());
+                state.biomeId());
 
         long elapsed = System.nanoTime() - started;
         SenseCounters counters = state.counters();
@@ -177,12 +173,11 @@ public final class PoiDetector {
         return result;
     }
 
-    /** The label a log line or notice would use: the labeler's structure label, {@code cavern} or {@code warden_risk}. */
+    /** The label a log line or notice would use: the labeler's structure label or {@code cavern}. */
     static String labelFor(PoiScorer.Band band, PoiSignals signals) {
         return switch (band) {
             case NONE -> "";
             case CAVERN_ONLY -> "cavern";
-            case MANDATORY -> "warden_risk";
             case POSSIBLE, STRUCTURE_CERTAIN -> PoiLabeler.label(signals);
         };
     }
@@ -209,8 +204,8 @@ public final class PoiDetector {
     }
 
     /**
-     * One {@code getEntitiesOfClass} over the perception box. Only entities that could contribute (a score,
-     * a habitation marker or a warden) are candidates, examined wardens first and then nearest first (at most
+     * One {@code getEntitiesOfClass} over the perception box. Only entities that could contribute a score or
+     * habitation marker are candidates, examined nearest first (at most
      * {@value #ENTITY_EXAMINE_CAP} examined, {@value #ENTITY_CANDIDATE_CAP} accepted); each must be
      * visible (not invisible, not a marker armor stand) and pass {@code ObservableWorldQuery.canObserveEntity}.
      */
@@ -220,8 +215,7 @@ public final class PoiDetector {
         List<Entity> candidates = world.getEntitiesOfClass(Entity.class, box,
                 entity -> entity != bot && entity.isAlive() && !entity.isInvisible() && isEvidenceType(entity));
         List<Entity> ordered = new ArrayList<>(candidates);
-        ordered.sort(Comparator.<Entity, Boolean>comparing(entity -> !isWardenType(entity))
-                .thenComparingDouble(entity -> bot.distanceToSqr(entity)));
+        ordered.sort(Comparator.comparingDouble(entity -> bot.distanceToSqr(entity)));
         int examined = 0;
         int accepted = 0;
         for (Entity entity : ordered) {
@@ -242,17 +236,11 @@ public final class PoiDetector {
         return evidence;
     }
 
-    private static boolean isWardenType(Entity entity) {
-        Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
-        return PoiLexicon.isWarden(id.getNamespace(), id.getPath());
-    }
-
     private static boolean isEvidenceType(Entity entity) {
         Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         String namespace = id.getNamespace();
         String path = id.getPath();
         return PoiLexicon.entityScore(namespace, path) > 0.0D
-                || PoiLexicon.isWarden(namespace, path)
                 || PoiLexicon.habitationKey(namespace, path) != null;
     }
 }

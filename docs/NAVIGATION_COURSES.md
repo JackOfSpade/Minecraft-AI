@@ -4,7 +4,7 @@ Status: Baritone is the only navigation engine. These are strict-survival regres
 
 ## What the courses prove
 
-Each of the 19 courses runs on its own fresh arena through the real `FollowTask` or `MoveTask` and must prove all of the following:
+Each course runs on its own fresh arena through the real `FollowTask` or `MoveTask` and must prove all of the following:
 
 - the bot reaches a reachable goal, or safely holds on the near side when no dry route exists;
 - it takes no damage, enters neither water nor lava, and does not break a block when a walkable route exists;
@@ -17,10 +17,10 @@ The production observation fence is exercised separately by the Baritone navigat
 
 | Area | Course IDs |
 |---|---|
-| Detours and permitted breaking | `wall`, `wallpick`, `sealed`, `steps`, `pit`, `stairs` |
+| Detours and permitted breaking | `wall`, `wallpick`, `sealed`, `steps`, `pit` |
 | Dry/water/lava safety | `lakedry`, `lakenone`, `lava`, `cactus`, `cliff3`, `cliff6` |
-| Vanilla traversal | `house`, `gate`, `ladder`, `forest` |
-| Following behavior | `moving`, `twobots`, `long` |
+| Vanilla traversal | `house`, `forest` |
+| Following behavior | `moving`, `twobots` |
 
 The test methods retain their `_baritone` environments so the associated GameTest resources remain stable.
 

@@ -10,9 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Source contract of {@code coordination/PoiCoordinator.java} (mining-assist design 6.5): mandatory is
- * evaluated before the dedupe registry is ever consulted, mandatory never touches the R4 advisor at all (it
- * is keyless and uncapped by design, 6.4/6.6), a deterministic stop ({@code source != FALLBACK} routed
+ * Source contract of {@code coordination/PoiCoordinator.java}: a deterministic stop ({@code source != FALLBACK} routed
  * through consult) always pauses through {@code IntentController}, a consult's own hold pauses only through
  * {@code TaskManager.pauseUserIntent} (design 6.5's "why the hold bypasses IntentController"), and the
  * DigDown descending-task lookup uses the right source at each of its two call sites: {@code stopNow} reads
@@ -61,24 +59,14 @@ class PoiCoordinatorSourceContractTest {
     }
 
     @Test
-    void stopNowConditionallyPausesThroughIntentControllerAndMandatoryFlowRoutesThroughIt() throws IOException {
+    void stopNowConditionallyPausesThroughIntentController() throws IOException {
         String source = source();
         String stopNow = method(source, "private void stopNow(");
-        String mandatoryFlow = method(source, "private void mandatoryFlow(");
         assertTrue(stopNow.contains("IntentController.INSTANCE.pause("),
                 "stopNow must still be able to pause through IntentController (every non-hold stop)");
         assertTrue(stopNow.contains("if (!alreadyPaused)"),
                 "stopNow must skip a second IntentController.pause when a P3 hold already owns the pause "
                         + "(design 6.5: 'if ownsPause: state = STOPPED else IntentController.pause(...)')");
-        assertTrue(mandatoryFlow.contains("stopNow("), "mandatoryFlow routes its stop through stopNow");
-        assertTrue(mandatoryFlow.contains("stopNow(bot, world, dim, anchor, \"warden_risk\""),
-                "mandatoryFlow's own stopNow call");
-        // mandatory never holds (design 6.4: "Mandatory is exempt from ... the holds and consult caps"), so
-        // its call site must pass alreadyPaused=false, i.e. end with ", false)".
-        int callStart = mandatoryFlow.indexOf("stopNow(bot, world, dim, anchor, \"warden_risk\"");
-        int callEnd = mandatoryFlow.indexOf(");", callStart);
-        assertTrue(callStart >= 0 && callEnd > callStart && mandatoryFlow.substring(callStart, callEnd).trim().endsWith(", false"),
-                "mandatoryFlow's stopNow call must pass alreadyPaused=false");
     }
 
     @Test
@@ -91,25 +79,6 @@ class PoiCoordinatorSourceContractTest {
         assertFalse(startConsult.contains("IntentController"),
                 "startConsult must never call IntentController itself; only stopNow (via applyDecision) may, "
                         + "and only for a non-hold stop");
-    }
-
-    @Test
-    void mandatoryIsEvaluatedBeforeTheDedupeRegistryIsEverConsulted() throws IOException {
-        String onCandidate = method(source(), "public void onCandidate(");
-        int mandatoryCheck = onCandidate.indexOf("result.band() == PoiScorer.Band.MANDATORY");
-        int suppressedCheck = onCandidate.indexOf("PoiRegistry.suppressed(");
-        assertTrue(mandatoryCheck >= 0 && suppressedCheck > mandatoryCheck,
-                "a mandatory candidate must branch out (bypassing the registry) before suppressed() is ever called");
-    }
-
-    @Test
-    void mandatoryFlowNeverReferencesTheLlmAdvisorAtAll() throws IOException {
-        String mandatoryFlow = method(code(), "private void mandatoryFlow(");
-        for (String token : new String[] {"consult(", "PoiAdvisor", "PoiConsultBudget", "PoiCache", "startConsult("}) {
-            assertFalse(mandatoryFlow.contains(token),
-                    "mandatory is keyless and uncapped (design 6.4/6.6): it must never touch the R4 advisor, "
-                            + "its budget or its cache, found " + token);
-        }
     }
 
     @Test

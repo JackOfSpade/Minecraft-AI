@@ -40,13 +40,7 @@ class AssistRulesTest {
     }
 
     @Test
-    void biomeRulesAreExactIds() {
-        assertTrue(AssistRules.isDeepDarkBiome("minecraft:deep_dark"));
-        assertTrue(AssistRules.isDeepDarkBiome(" Minecraft:Deep_Dark "));
-        assertFalse(AssistRules.isDeepDarkBiome("minecraft:dripstone_caves"));
-        assertFalse(AssistRules.isDeepDarkBiome("othermod:deep_dark"));
-        assertFalse(AssistRules.isDeepDarkBiome(null));
-
+    void lushBiomeRuleUsesTheExactId() {
         assertTrue(AssistRules.isLushBiome("minecraft:lush_caves"));
         assertFalse(AssistRules.isLushBiome("minecraft:plains"));
         assertFalse(AssistRules.isLushBiome(""));

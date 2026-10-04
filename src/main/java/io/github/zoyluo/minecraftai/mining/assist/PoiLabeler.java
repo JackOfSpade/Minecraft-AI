@@ -14,7 +14,6 @@ import java.util.Objects;
  * presence-only and blackstone is a natural block (Nether, Terralith caves), so it only decides when
  * nothing more specific matched:</p>
  * <ol>
- *   <li>{@code ancient_city}: DEEPSLATE_BUILD plus any sculk;</li>
  *   <li>{@code trial_chamber}: COPPER_TUFF_BUILD or a vault;</li>
  *   <li>{@code fortress_bastion}: nether bricks;</li>
  *   <li>{@code dungeon}: SPAWNER plus mossy cobblestone;</li>
@@ -25,7 +24,6 @@ import java.util.Objects;
  * </ol>
  */
 public final class PoiLabeler {
-    public static final String ANCIENT_CITY = "ancient_city";
     public static final String TRIAL_CHAMBER = "trial_chamber";
     /** The design's "fortress/bastion", written with an underscore so it is safe inside place names. */
     public static final String FORTRESS_BASTION = "fortress_bastion";
@@ -36,19 +34,13 @@ public final class PoiLabeler {
 
     /** Every label {@link #label} can return. */
     public static final List<String> ALL_LABELS = List.of(
-            ANCIENT_CITY, TRIAL_CHAMBER, FORTRESS_BASTION, DUNGEON, STRONGHOLD, MINESHAFT, STRUCTURE_UNKNOWN);
+            TRIAL_CHAMBER, FORTRESS_BASTION, DUNGEON, STRONGHOLD, MINESHAFT, STRUCTURE_UNKNOWN);
 
     private PoiLabeler() {
     }
 
     public static String label(PoiSignals s) {
         Objects.requireNonNull(s, "signals");
-        boolean sculk = s.cellCount(PoiBucket.SCULK_STRUCT) > 0 || s.sculkFamilyWithin12() > 0
-                || s.reinforcedDeepslateCount() > 0 || s.sculkShriekerCount() > 0
-                || s.sculkCatalystCount() > 0 || s.sculkSensorCount() > 0;
-        if (s.cellCount(PoiBucket.DEEPSLATE_BUILD) > 0 && sculk) {
-            return ANCIENT_CITY;
-        }
         if (s.vault() || s.cellCount(PoiBucket.COPPER_TUFF_BUILD) > 0) {
             return TRIAL_CHAMBER;
         }

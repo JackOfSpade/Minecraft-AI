@@ -1,10 +1,13 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.baritone.ObservedNavigationFence;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -77,6 +80,89 @@ final class HuntSurfaceRoutes {
     static int digBreakthroughFloor(BlockPos origin, BlockPos destination, int minimumY) {
         return Math.max(minimumY,
                 Math.min(origin.getY(), destination.getY()) - 1);
+    }
+
+    /**
+     * Returns a factual nearby surface stance in the direction of a distant visible prey pose.
+     *
+     * <p>Prey sight deliberately reaches farther than ordinary terrain admission.  A route may
+     * therefore only advance to the next stance whose feet, head, and support the bot can prove
+     * at the normal navigation radius.  Repeating these bounded legs lets the moving bot earn a
+     * fresh view of the final attack pose without treating the intervening terrain as known.</p>
+     */
+    static BlockPos nextObservedSurfaceLeg(
+            AIPlayerEntity bot, BlockPos destination, int minimumY) {
+        if (bot == null || destination == null) {
+            return null;
+        }
+        BlockPos current = bot.blockPosition();
+        int perception = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        if (ObservableWorldQuery.canObserveCell(bot, destination)
+                && ObservableWorldQuery.canObserveCell(bot, destination.above())
+                && ObservableWorldQuery.canObserveCollider(bot, destination.below())) {
+            return destination;
+        }
+        double dx = destination.getX() - current.getX();
+        double dz = destination.getZ() - current.getZ();
+        // Prefer a full, ordinary-radius leg.  Starting a fresh Baritone route for every
+        // adjacent cell exhausts the path-start cooldown before an open-ground hunt reaches its
+        // prey.  The short adjacent step remains below as the fallback for a steep, exposed
+        // stair whose interpolated landing cannot yet be observed.
+        double horizontal = Math.hypot(dx, dz);
+        if (horizontal >= 1.0E-9D) {
+            double legLength = Math.min(Math.max(1, perception - 3), horizontal);
+            double scale = legLength / horizontal;
+            int x = current.getX() + (int) Math.round(dx * scale);
+            int z = current.getZ() + (int) Math.round(dz * scale);
+            int centreY = current.getY() + (int) Math.round(
+                    (destination.getY() - current.getY()) * scale);
+            // A candidate at the current height can be a slope.  Search a modest,
+            // individually observed vertical slice and only then ask Standability about the
+            // earned cells. If the direct line ends at a newly occluding wall, inspect only a
+            // small perpendicular fan; each detour stance still has to be visible. The caller
+            // proves a reversible route before walking it, so stepping sideways around a wall
+            // cannot become a blind one-way escape.
+            double sideX = -dz / horizontal;
+            double sideZ = dx / horizontal;
+            for (int lateral : new int[]{0, 1, -1, 2, -2, 3, -3}) {
+                int candidateX = x + (int) Math.round(sideX * lateral);
+                int candidateZ = z + (int) Math.round(sideZ * lateral);
+                for (int yOffset = 0; yOffset <= 6; yOffset++) {
+                    for (int signed : yOffset == 0 ? new int[]{0} : new int[]{-yOffset, yOffset}) {
+                        BlockPos candidate = new BlockPos(candidateX, centreY + signed, candidateZ);
+                        if (candidate.equals(current)
+                                || candidate.getY() < minimumY
+                                || !ObservableWorldQuery.canObserveCell(bot, candidate)
+                                || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                                || !ObservableWorldQuery.canObserveCollider(bot, candidate.below())) {
+                            continue;
+                        }
+                        Standability.clearCache();
+                        if (Standability.isStandable(bot.level(), candidate)) {
+                            return candidate.immutable();
+                        }
+                    }
+                }
+            }
+        }
+        int stepX = Integer.signum(destination.getX() - current.getX());
+        int stepZ = Integer.signum(destination.getZ() - current.getZ());
+        int stepY = Integer.signum(destination.getY() - current.getY());
+        for (int localY : new int[]{stepY, 0, -stepY}) {
+            BlockPos adjacent = current.offset(stepX, localY, stepZ);
+            if (adjacent.equals(current)
+                    || adjacent.getY() < minimumY
+                    || !ObservableWorldQuery.canObserveCell(bot, adjacent)
+                    || !ObservableWorldQuery.canObserveCell(bot, adjacent.above())
+                    || !ObservableWorldQuery.canObserveCollider(bot, adjacent.below())) {
+                continue;
+            }
+            Standability.clearCache();
+            if (Standability.isStandable(bot.level(), adjacent)) {
+                return adjacent.immutable();
+            }
+        }
+        return null;
     }
 
     private static HuntTask.SurfaceRouteProof proveExactSurfaceRoute(

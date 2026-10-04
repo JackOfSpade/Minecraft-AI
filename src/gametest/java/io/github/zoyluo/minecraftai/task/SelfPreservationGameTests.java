@@ -125,7 +125,7 @@ public final class SelfPreservationGameTests {
         });
     }
 
-    /** A burning bot without a bucket walks into water it can see. */
+    /** A burning bot without a bucket removes its touching fire source before walking to nearby water. */
     @GameTest(environment = "minecraftai-gametest:self_preservation_game_tests_burning_bot_next_to_observed_water_walks_into_it", maxTicks = 500)
     public void burningBotNextToObservedWaterWalksIntoIt(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PoolWalkerGT", 20, 5, 150, 7);
@@ -137,17 +137,27 @@ public final class SelfPreservationGameTests {
                 world.setBlock(feet.offset(dx, -1, dz), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
+        world.setBlock(feet, Blocks.FIRE.defaultBlockState(), Block.UPDATE_ALL);
         bot.setRemainingFireTicks(300);
         boolean[] sawTask = {false};
         boolean[] sawWater = {false};
+        BlockPos[] touchingFire = {null};
         context.failIfEver(() -> {
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             sawTask[0] |= active instanceof FireExtinguishTask;
             sawWater[0] |= bot.isInWater() || world.getFluidState(bot.blockPosition()).is(net.minecraft.tags.FluidTags.WATER);
+            if (touchingFire[0] == null) {
+                BlockPos fire = FireExtinguishTask.fireBlockTouching(bot);
+                if (fire != null) {
+                    touchingFire[0] = fire.immutable();
+                }
+            }
             require(context, bot.isAlive() && bot.getHealth() > 0.0F, "the burning bot died");
             if (!bot.isOnFire()) {
-                require(context, sawTask[0] && sawWater[0],
-                        "the fire went out without walking into the pool: task=" + sawTask[0] + " water=" + sawWater[0]);
+                boolean removedTouchingFire = touchingFire[0] != null && world.getBlockState(touchingFire[0]).isAir();
+                require(context, sawTask[0] && (sawWater[0] || removedTouchingFire),
+                        "the fire went out without a physical rescue: task=" + sawTask[0]
+                                + " water=" + sawWater[0] + " removedTouchingFire=" + removedTouchingFire);
                 require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 0, "unexpected bucket");
                 cleanUp(bot);
                 context.succeed();
@@ -331,7 +341,8 @@ public final class SelfPreservationGameTests {
         AIPlayerEntity bot = spawnOnPlatform(context, "FireFighterGT", 20, 5, 210, 12);
         ServerLevel world = context.getLevel();
         BlockPos feet = bot.blockPosition();
-        // Water eight blocks off keeps the walking rescue running for a while (no bucket to shortcut it).
+        // Keep a visible pool as an alternate rescue, but give the fire reflex an immediate physical
+        // source so this test isolates pause/resume ownership from long-route admission.
         for (int dx = 6; dx <= 8; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 world.setBlock(feet.offset(dx, -2, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
@@ -339,6 +350,8 @@ public final class SelfPreservationGameTests {
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD, 1));
+        world.setBlock(feet.below(), Blocks.NETHERRACK.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(feet, Blocks.FIRE.defaultBlockState(), Block.UPDATE_ALL);
         bot.setRemainingFireTicks(600);
         int retreatHp = io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp();
         FireExtinguishTask[] rescue = {null};
@@ -384,6 +397,8 @@ public final class SelfPreservationGameTests {
                         // The hostile is gone and the bot has healed: the rescue may go on.
                         husk[0].discard();
                         bot.setHealth(bot.getMaxHealth());
+                        world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                        bot.clearFire();
                         bot.hurtTime = 0;
                         stage[0] = 2;
                     } else {

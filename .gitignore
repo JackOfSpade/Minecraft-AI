@@ -1,4 +1,5 @@
 .gradle/
+/.gradle-user-home/
 build/
 run/
 out/
@@ -73,6 +74,8 @@ node_modules/
 # runner state file tracked for backward compatibility.
 /reports/reliability_*.tsv
 !/reports/reliability_state.tsv
+/reports/full_validation/
+/reports/*.txt
 
 # Immutable harness output is local until a VERIFIED run is explicitly pinned.
 artifacts/evidence/

@@ -8,7 +8,6 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -39,7 +38,6 @@ public final class ResupplyTask extends AbstractTask {
 
     private final Need need;
     private final Item requestedItem;
-    private final boolean localOnly;
     private final List<BlockPos> containers = new ArrayList<>();
     private Phase phase = Phase.FIND_BASE;
     private BlockPos basePos;
@@ -50,26 +48,16 @@ public final class ResupplyTask extends AbstractTask {
     private String note = "";
 
     public static ResupplyTask tool(Item item) {
-        return new ResupplyTask(Need.TOOL, item, false);
-    }
-
-    /** Tool service that may craft from carried materials but must never path away. */
-    public static ResupplyTask toolInPlace(Item item) {
-        return new ResupplyTask(Need.TOOL, item, true);
+        return new ResupplyTask(Need.TOOL, item);
     }
 
     public static ResupplyTask food() {
-        return new ResupplyTask(Need.FOOD, null, false);
+        return new ResupplyTask(Need.FOOD, null);
     }
 
-    boolean localOnly() {
-        return localOnly;
-    }
-
-    private ResupplyTask(Need need, Item requestedItem, boolean localOnly) {
+    private ResupplyTask(Need need, Item requestedItem) {
         this.need = need;
         this.requestedItem = requestedItem;
-        this.localOnly = localOnly;
     }
 
     @Override
@@ -131,15 +119,6 @@ public final class ResupplyTask extends AbstractTask {
     private void findBase(AIPlayerEntity bot) {
         if (alreadySatisfied(bot)) {
             phase = afterSupplyPhase(bot);
-            return;
-        }
-        if (localOnly) {
-            // A paused mining owner may owe an exact physical return from a safety-displaced pose.
-            // Looking up a remembered base here would create a second displacement and corrupt
-            // recovery geometry. Carried recipes remain available, but this mode never starts a
-            // path or searches a remote container.
-            note = "local_only";
-            startCrafting(bot);
             return;
         }
         basePos = BotMemoryStore.INSTANCE.of(bot.getUUID())

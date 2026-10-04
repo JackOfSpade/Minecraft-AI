@@ -599,87 +599,6 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_remembered_kill_cell_routes_around_new_occluding_wall", maxTicks = 900)
-    public void rememberedKillCellRoutesAroundNewOccludingWall(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(8, 5, -40));
-        for (int x = -7; x <= 7; x++) {
-            for (int z = -4; z <= 12; z++) {
-                BlockPos feet = start.offset(x, 0, z);
-                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            }
-        }
-
-        var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
-        require(context, cow != null, "failed to create hidden-drop cow");
-        cow.setNoAi(true);
-        cow.setHealth(1.0F);
-        BlockPos killCell = start.south(6);
-        cow.snapTo(
-                killCell.getX() + 0.5D, killCell.getY(), killCell.getZ() + 0.5D,
-                180.0F, 0.0F);
-        require(context, world.addFreshEntity(cow), "failed to spawn hidden-drop cow");
-
-        String name = "HuntHiddenDropGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
-
-        HuntTask task = anchoredHunt(bot, 1);
-        TaskManager.INSTANCE.assign(bot, task,
-                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunt_hidden_drop"));
-        AtomicBoolean wallBuilt = new AtomicBoolean();
-        AtomicBoolean dropWasOccluded = new AtomicBoolean();
-
-        context.failIfEver(() -> {
-            if (!cow.isAlive() && !wallBuilt.get()) {
-                ItemEntity beef = world.getEntitiesOfClass(
-                                ItemEntity.class, new AABB(killCell).inflate(3.0D),
-                                entity -> entity.getItem().is(Items.BEEF))
-                        .stream().findFirst().orElse(null);
-                if (beef != null) {
-                    BlockPos wall = killCell.north();
-                    for (int dx = -2; dx <= 2; dx++) {
-                        world.setBlock(wall.offset(dx, 0, 0),
-                                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                        world.setBlock(wall.offset(dx, 1, 0),
-                                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                    }
-                    beef.setDeltaMovement(Vec3.ZERO);
-                    wallBuilt.set(true);
-                    dropWasOccluded.set(!bot.hasLineOfSight(beef));
-                    require(context, dropWasOccluded.get(),
-                            "fixture failed to occlude the post-kill beef");
-                }
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("hidden-drop hunt ended as " + task.state()
-                        + ":" + task.failureReason()));
-            }
-            if (task.state() != TaskState.COMPLETED) {
-                return;
-            }
-            require(context, wallBuilt.get() && dropWasOccluded.get(),
-                    "hunt completed without exercising remembered-cell recovery");
-            require(context, InventoryAction.countItem(bot, Items.BEEF) >= 1,
-                    "hidden beef never entered inventory physically");
-            BlockPos wall = killCell.north();
-            for (int dx = -2; dx <= 2; dx++) {
-                require(context, world.getBlockState(wall.offset(dx, 0, 0)).is(Blocks.STONE)
-                                && world.getBlockState(wall.offset(dx, 1, 0)).is(Blocks.STONE),
-                        "hidden-drop route dug through its occluding wall");
-            }
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
     @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_observed_wool_pickup_triggers_physical_recovery_of_missed_mutton", maxTicks = 700)
     public void observedWoolPickupTriggersPhysicalRecoveryOfMissedMutton(GameTestHelper context) {
         var world = context.getLevel();
@@ -826,16 +745,16 @@ public final class HuntCrossRegionGameTests {
         HuntTask task = anchoredHunt(bot, 1);
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunt_wet_prey_rejection"));
-        BlockPos wetCell = start.south(2);
+        // Change the cell the bot already occupies. A test-only teleport would revoke its
+        // observation snapshot and turn this into a route-loss test before Hunt can hand the
+        // real water emergency to NavSafetyNet.
+        BlockPos wetCell = start;
         AtomicBoolean injected = new AtomicBoolean();
         AtomicBoolean rejectionObserved = new AtomicBoolean();
         AtomicInteger dryTicksAfterRescue = new AtomicInteger();
         context.failIfEver(() -> {
             if (!injected.get() && task.describe().contains("phase=APPROACH")) {
                 world.setBlock(wetCell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-                bot.teleportTo(world,
-                        wetCell.getX() + 0.5D, wetCell.getY(), wetCell.getZ() + 0.5D,
-                        Set.of(), bot.getYRot(), bot.getXRot(), true);
                 injected.set(true);
                 return;
             }
@@ -1780,8 +1699,8 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_bounded_hunt_walks_to_prey_outside_initial_perception", maxTicks = 2000)
-    public void boundedHuntWalksToPreyOutsideInitialPerception(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_observable_prey_is_physically_hunted_and_picked_up", maxTicks = 2000)
+    public void observablePreyIsPhysicallyHuntedAndPickedUp(GameTestHelper context) {
         var world = context.getLevel();
         // GameTest lays every structure on the positive-Z grid before executing batches. Reserve a
         // negative-Z lane for this longer live fixture so its prey/corridor cannot overlap another
@@ -1809,8 +1728,9 @@ public final class HuntCrossRegionGameTests {
         // (the seed evidence and planner tests cover multi-kill batches). An adult chicken always
         // drops one raw chicken, removing the cow-loot variance from this navigation contract.
         chicken.setHealth(1.0F);
-        // Default strict perception is 16 blocks. Keep the prey outside that boundary while
-        // minimizing writes beyond EMPTY_STRUCTURE; the unique batch prevents live-test overlap.
+        // Hunt has a distinct 64-block line-of-sight acquisition contract. Keep the prey beyond
+        // ordinary interaction range while inside that observable range; this proves the active
+        // acquisition and physical-pickup path without depending on blind waypoint exploration.
         chicken.snapTo(
                 start.getX() + 20.5D, start.getY(), start.getZ() + 0.5D, 0.0F, 0.0F);
         require(context, world.addFreshEntity(chicken), "failed to spawn cross-region chicken");
@@ -1855,7 +1775,8 @@ public final class HuntCrossRegionGameTests {
                             > pickupBaseline,
                     "hunt meat did not enter through vanilla pickup statistics");
             require(context, bot.blockPosition().getX() >= start.getX() + 12,
-                    "hunt never crossed the initial perception region: " + bot.blockPosition().toShortString());
+                    "hunt never physically approached the observable prey: "
+                            + bot.blockPosition().toShortString());
             AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
             context.succeed();
         });

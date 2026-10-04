@@ -579,11 +579,13 @@ public final class ObservedNavigationFence {
             // capture them cell-by-cell only where the player's eye can prove them.
             observeVisibleElevationColumns(bot, from, to, throughFluids, observed, tick);
         }
-        if (throughFluids && to.getY() < from.getY()) {
-            // A water-bucket descent needs the first actual drop column, not merely diagonal
-            // air samples between a cliff edge and its visible landing. This remains strictly
-            // fail-closed: every cell is independently fluid-transparent ray-proven below.
-            observeVisibleWaterDescentColumn(bot, from, to, observed, tick);
+        if (to.getY() < from.getY()) {
+            // A descent needs the first actual drop column, not merely diagonal air samples
+            // between a cliff edge and its visible landing. This applies to ordinary dry falls
+            // as well as water traversal: Baritone reads the fall column before it can plan a
+            // safe descent. Every cell remains independently ray-proven, so this adds no
+            // terrain authority behind the lip.
+            observeVisibleDescentColumn(bot, from, to, throughFluids, observed, tick);
         }
         int dx = to.getX() - from.getX();
         int dz = to.getZ() - from.getZ();
@@ -639,12 +641,12 @@ public final class ObservedNavigationFence {
     }
 
     /**
-     * Captures the first possible drop column in the route direction for an observed water move.
+     * Captures the first possible drop column in the route direction for an observed descent.
      * The planner receives no fallback terrain: a cell outside the player's actual view remains
      * absent, and therefore impassable, in the immutable snapshot.
      */
-    private static void observeVisibleWaterDescentColumn(AIPlayerEntity bot, BlockPos from, BlockPos to,
-                                                          Map<Long, Cell> observed, int tick) {
+    private static void observeVisibleDescentColumn(AIPlayerEntity bot, BlockPos from, BlockPos to,
+                                                     boolean throughFluids, Map<Long, Cell> observed, int tick) {
         int dx = to.getX() - from.getX();
         int dz = to.getZ() - from.getZ();
         if (dx == 0 && dz == 0) {
@@ -656,12 +658,12 @@ public final class ObservedNavigationFence {
         int minimumY = Math.min(from.getY(), to.getY()) - 1;
         int maximumY = Math.max(from.getY(), to.getY()) + NAVIGATION_HEADROOM;
         observeVisibleColumn(bot, drop.getX(), drop.getZ(), minimumY, maximumY,
-                true, observed, tick);
+                throughFluids, observed, tick);
         // After the visibly proven drop, Baritone needs its actual landing-level approach rather
         // than only the elevated diagonal samples above the cliff. This delegates to the ordinary
-        // fluid-transparent corridor capture; it cannot recurse because both endpoints share Y.
+        // corridor capture; it cannot recurse because both endpoints share Y.
         observeVisibleCorridors(bot, new BlockPos(drop.getX(), to.getY(), drop.getZ()), to,
-                true, observed, tick);
+                throughFluids, observed, tick);
     }
 
     /**

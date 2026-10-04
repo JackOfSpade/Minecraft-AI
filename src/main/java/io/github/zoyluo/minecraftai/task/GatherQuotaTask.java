@@ -3,7 +3,6 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
-import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.KnownCellPickupSweep;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -134,7 +133,11 @@ public final class GatherQuotaTask extends AbstractTask {
     private boolean handLogBreakInFlight;
     // break_blocks only: the bootstrap logs are broken by hand and must still be collected to craft the axe.
     private int bootstrapPickupTicks;
-    private static final int BOOTSTRAP_PICKUP_TICKS = 100;
+    // The origin sweep dwells in each factual stand cell long enough for vanilla's pickup delay.
+    // A capped log can throw its drop two cells away behind the remaining trunk, so one hundred
+    // ticks can expire before that outer ring is reached.  Keep the recovery bounded, but allow
+    // the complete radius-two sweep to visit its candidates before another bare-hand log is used.
+    private static final int BOOTSTRAP_PICKUP_TICKS = 200;
     private int bootstrapPickupBaseline;
     // The cell of the log just broken by hand: a factual coordinate from our own break, the fail-closed
     // fallback when the drop popped out of sight behind the remaining logs (see bootstrapPickup).

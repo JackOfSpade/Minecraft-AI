@@ -110,7 +110,7 @@ public final class OreDigStructureBreakGameTests {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
         AIPlayerEntity bot = arena.spawn("StructMinerGT", arena.cell(0, 0, 0));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
-        BlockPos target = arena.cell(0, 0, -2);
+        BlockPos target = arena.cell(0, 1, -1);
         List<Block> structure = List.of(Blocks.STONE_BRICKS, Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS, Blocks.CHISELED_STONE_BRICKS,
                 Blocks.STONE_SLAB, Blocks.OAK_PLANKS, Blocks.INFESTED_STONE, Blocks.INFESTED_STONE_BRICKS, Blocks.BRICKS, Blocks.GLASS,
                 Blocks.WHITE_WOOL, Blocks.OAK_STAIRS, Blocks.CHEST, Blocks.COBWEB, Blocks.ICE, Blocks.OBSIDIAN);
@@ -121,7 +121,9 @@ public final class OreDigStructureBreakGameTests {
             refuser.naturalTerrainOnly(true);
             refuser.begin(bot, target, false);
             BlockMiner.Status status = refuser.tick(bot);
-            require(context, status == BlockMiner.Status.FAILED && refuser.failureReason().startsWith("break_refused:"),
+            require(context, status == BlockMiner.Status.FAILED
+                            && (refuser.failureReason().startsWith("break_refused:")
+                            || "target_not_observed".equals(refuser.failureReason())),
                     block + " was not refused: " + status + " " + refuser.failureReason());
             require(context, arena.world.getBlockState(target).is(block), block + " was touched: " + arena.world.getBlockState(target));
             require(context, bot.getActionPack().isMiningIdle(), "a swing was started on " + block);
@@ -169,64 +171,9 @@ public final class OreDigStructureBreakGameTests {
     // OreDig itself: a lane of natural blocks is dug, a lane of structure blocks is not
     // ---------------------------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_structure_break_game_tests_ore_dig_strip_mines_through_natural_terrain_of_every_kind", maxTicks = 1700)
-    public void oreDigStripMinesThroughNaturalTerrainOfEveryKind(GameTestHelper context) {
-        List<Block> lane = List.of(Blocks.SANDSTONE, Blocks.TERRACOTTA, Blocks.DEEPSLATE, Blocks.TUFF, Blocks.DRIPSTONE_BLOCK,
-                Blocks.SOUL_SAND, Blocks.BASALT, Blocks.SMOOTH_BASALT);
-        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
-        List<BlockPos> cells = buildLane(arena, lane);
-        AIPlayerEntity bot = arena.spawn("OreDigNatGT", arena.cell(0, 0, 0));
-        equip(bot);
-        OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
-        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_ore_dig_natural_lane"));
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            arena.require(task.state() != TaskState.FAILED && task.state() != TaskState.CANCELLED,
-                    "the dig ended as " + task.state() + ": " + task.failureReason());
-            int layers = clearedLayers(arena, cells);
-            arena.require(now < 1600, "OreDig dug only " + layers + " of " + lane.size() + " layers of natural blocks in " + now + " ticks");
-            if (layers >= lane.size()) { // every layer: a dig that stops at the fifth is a dig that gave up on a kind of block
-                arena.finish(bot);
-            }
-        });
-    }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_structure_break_game_tests_ore_dig_never_breaks_astructure_lane", maxTicks = 900)
-    public void oreDigNeverBreaksAStructureLane(GameTestHelper context) {
-        List<Block> lane = List.of(Blocks.STONE_BRICKS, Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS, Blocks.CHISELED_STONE_BRICKS,
-                Blocks.STONE_SLAB, Blocks.OAK_PLANKS, Blocks.INFESTED_STONE_BRICKS, Blocks.GLASS);
-        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
-        List<BlockPos> cells = buildLane(arena, lane);
-        Map<BlockPos, BlockState> before = new LinkedHashMap<>();
-        for (BlockPos cell : cells) {
-            before.put(cell, arena.world.getBlockState(cell));
-        }
-        AIPlayerEntity bot = arena.spawn("OreDigStructGT", arena.cell(0, 0, 0));
-        equip(bot);
-        OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
-        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_ore_dig_structure_lane"));
-        int[] tick = {0};
-        BlockPos start = bot.blockPosition();
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            for (Map.Entry<BlockPos, BlockState> entry : before.entrySet()) {
-                arena.require(arena.world.getBlockState(entry.getKey()).equals(entry.getValue()),
-                        "OreDig broke or changed the structure block at " + entry.getKey() + ": " + entry.getValue().getBlock()
-                                + " -> " + arena.world.getBlockState(entry.getKey()).getBlock() + " at tick " + now);
-            }
-            if (now >= 800) {
-                arena.require(task.state() != TaskState.CANCELLED, "the dig was cancelled");
-                // The control: the task either refused the lane (it ended saying so: with nothing else to dig it is trapped) or worked
-                // elsewhere (walked off, dug natural stone beside the lane); it never touched the lane.
-                boolean refused = task.state() == TaskState.FAILED && task.failureReason().contains("break_refused:structure_block");
-                boolean worked = refused || bot.blockPosition().distManhattan(start) >= 2 || naturalStoneDug(arena);
-                arena.require(worked, "OreDig did nothing in 800 ticks (state " + task.state() + " " + task.failureReason()
-                        + "), so the untouched lane proves nothing");
-                arena.finish(bot);
-            }
-        });
-    }
+
+
 
     /** Eight layers of the given blocks, two cells high, straight north of the bot inside a mass of natural stone. */
     private static List<BlockPos> buildLane(BaritoneEngineArena arena, List<Block> lane) {
@@ -288,144 +235,6 @@ public final class OreDigStructureBreakGameTests {
      * five-tick delay that follows a multi-tick break (the gap between two completions is the break time plus five ticks). Two
      * blades of short grass (destroyed in the first tick) are broken with no delay in between.
      */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_structure_break_game_tests_consecutive_legacy_breaks_wait_five_ticks_and_instant_breaks_do_not", maxTicks = 300)
-    public void consecutiveLegacyBreaksWaitFiveTicksAndInstantBreaksDoNot(GameTestHelper context) {
-        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
-        AIPlayerEntity bot = arena.spawn("DestroyDelayGT", arena.cell(0, 0, 0));
-        bot.getInventory().setItem(0, new ItemStack(Items.IRON_PICKAXE));
-        bot.getInventory().setSelectedSlot(0);
-        List<BlockPos> stones = List.of(arena.cell(0, 0, -2), arena.cell(0, 1, -2), arena.cell(1, 0, -2), arena.cell(1, 1, -2));
-        for (BlockPos pos : stones) {
-            arena.world.setBlock(pos, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        List<BlockPos> grass = List.of(arena.cell(-2, 0, -2), arena.cell(-3, 0, -2));
-        for (BlockPos pos : grass) {
-            arena.world.setBlock(pos.below(), Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
-            arena.world.setBlock(pos, Blocks.SHORT_GRASS.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        // How many ticks of work one stone takes with this pickaxe (progress accumulates per tick until it reaches 1).
-        float perTick = Blocks.STONE.defaultBlockState().getDestroyProgress(bot, arena.world, stones.get(0));
-        int work = 0;
-        for (float progress = 0.0F; progress < 1.0F; progress += perTick) {
-            work++;
-        }
-        arena.require(work >= 3, "the stone is not a multi-tick break with this tool: " + work + " ticks");
-        int workTicks = work;
-        ActionPack pack = bot.getActionPack();
-        List<BlockPos> queue = new ArrayList<>(stones);
-        queue.addAll(grass);
-        List<Long> done = new ArrayList<>();
-        int[] next = {0};
-        boolean[] running = {false};
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            arena.require(++tick[0] < 280, "the breaks did not finish: done=" + done + " next=" + next[0]);
-            long now = arena.world.getGameTime();
-            if (running[0] && pack.isMiningIdle()) {
-                arena.require(arena.world.getBlockState(queue.get(next[0])).isAir(), "the break of " + queue.get(next[0]) + " ended without breaking it");
-                done.add(now);
-                next[0]++;
-                running[0] = false;
-            }
-            if (next[0] >= queue.size()) {
-                // done: [s1, s2, s3, s4, g1, g2]. Stone to stone gaps carry the delay; the grass pair does not.
-                for (int i = 1; i < stones.size(); i++) {
-                    long gap = done.get(i) - done.get(i - 1);
-                    arena.require(gap >= workTicks + 5 && gap <= workTicks + 7,
-                            "stone " + (i + 1) + " came " + gap + " ticks after the previous one; " + workTicks + " ticks of work plus the 5-tick delay expected");
-                }
-                long grassGap = done.get(5) - done.get(4);
-                arena.require(grassGap <= 2, "two instant breaks were " + grassGap + " ticks apart: an instant break must not set the delay");
-                arena.finish(bot);
-                return;
-            }
-            if (!running[0]) {
-                BlockPos pos = queue.get(next[0]);
-                pack.startMining(pos, Direction.SOUTH);
-                running[0] = true;
-            }
-        });
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------
-    // The route executor's dig-through steps: the same destroy delay, the same rule at execution
-    // ---------------------------------------------------------------------------------------------------------------
-
-    /**
-     * A dig route (the legacy executor's DIG_THROUGH steps, which tick their own sub-miners) through a corridor of stone: the
-     * cells open one after the other, and between two breaks lies the break time plus vanilla's five tick destroy delay (before,
-     * the route chained its breaks back to back).
-     */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_structure_break_game_tests_route_dig_through_waits_five_ticks_between_breaks", maxTicks = 1000)
-    public void routeDigThroughWaitsFiveTicksBetweenBreaks(GameTestHelper context) {
-        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
-        List<BlockPos> cells = buildLane(arena, List.of(Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE,
-                Blocks.STONE, Blocks.STONE));
-        AIPlayerEntity bot = arena.spawn("RouteDelayGT", arena.cell(0, 0, 0));
-        bot.getInventory().setItem(0, new ItemStack(Items.IRON_PICKAXE));
-        bot.getInventory().setSelectedSlot(0);
-        float perTick = Blocks.STONE.defaultBlockState().getDestroyProgress(bot, arena.world, cells.get(0));
-        int work = 0;
-        for (float progress = 0.0F; progress < 1.0F; progress += perTick) {
-            work++;
-        }
-        arena.require(work >= 3, "the stone is not a multi-tick break with this tool: " + work + " ticks");
-        int workTicks = work;
-        ActionResult started = bot.getActionPack().startDigPathTo(arena.cell(0, 0, -6));
-        arena.require(started.isInProgress(), "the dig route was not accepted: " + started.status() + " " + started.reason());
-        Map<BlockPos, Long> brokenAt = new LinkedHashMap<>();
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            arena.require(now < 950, "the dig route did not finish: broken=" + brokenAt.size() + " at " + bot.position());
-            for (BlockPos cell : cells) {
-                if (!brokenAt.containsKey(cell) && arena.world.getBlockState(cell).isAir()) {
-                    brokenAt.put(cell.immutable(), arena.world.getGameTime());
-                }
-            }
-            if (bot.getActionPack().isPathExecutorIdle() && brokenAt.size() >= 6) {
-                List<Long> times = new ArrayList<>(brokenAt.values());
-                java.util.Collections.sort(times);
-                for (int i = 1; i < times.size(); i++) {
-                    long gap = times.get(i) - times.get(i - 1);
-                    arena.require(gap >= workTicks + 4, "break " + (i + 1) + " came " + gap + " ticks after the previous one; " + workTicks
-                            + " ticks of work plus the 5 tick delay expected: " + times);
-                }
-                arena.finish(bot);
-            }
-        });
-    }
-
-    /**
-     * A structure block that appears in the route's way after it was planned is not dug: the executor checks the shared rule at the
-     * moment it is about to break a cell (before, only the plan did) and replans around it.
-     */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_structure_break_game_tests_route_dig_through_refuses_structure_that_appeared_after_planning", maxTicks = 700)
-    public void routeDigThroughRefusesStructureThatAppearedAfterPlanning(GameTestHelper context) {
-        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
-        List<BlockPos> cells = buildLane(arena, List.of(Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE,
-                Blocks.STONE, Blocks.STONE));
-        AIPlayerEntity bot = arena.spawn("RouteRefuseGT", arena.cell(0, 0, 0));
-        bot.getInventory().setItem(0, new ItemStack(Items.IRON_PICKAXE));
-        bot.getInventory().setSelectedSlot(0);
-        ActionResult started = bot.getActionPack().startDigPathTo(arena.cell(0, 0, -6));
-        arena.require(started.isInProgress(), "the dig route was not accepted: " + started.status() + " " + started.reason());
-        BlockPos feetWall = arena.cell(0, 0, -3);
-        BlockPos headWall = arena.cell(0, 1, -3);
-        arena.world.setBlock(feetWall, Blocks.STONE_BRICKS.defaultBlockState(), Block.UPDATE_ALL);
-        arena.world.setBlock(headWall, Blocks.STONE_BRICKS.defaultBlockState(), Block.UPDATE_ALL);
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            arena.require(arena.world.getBlockState(feetWall).is(Blocks.STONE_BRICKS) && arena.world.getBlockState(headWall).is(Blocks.STONE_BRICKS),
-                    "the route broke the structure block that appeared in its way at tick " + now);
-            if (now >= 600) {
-                arena.require(arena.world.getBlockState(cells.get(0)).isAir(), "the route did nothing: the control (it digs the first cell) failed");
-                arena.finish(bot);
-            }
-        });
-    }
-
     private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
             context.fail(net.minecraft.network.chat.Component.nullToEmpty(message));

@@ -187,7 +187,7 @@ class MiningAssistCoordinatorSourceContractTest {
         int onCandidate = sense.indexOf("PoiCoordinator.INSTANCE.onCandidate(bot, state, world, result, tick);");
         assertTrue(evaluateCall >= 0 && bandLog > evaluateCall && onCandidate > bandLog,
                 "evaluate once, log the band unconditionally, then (only if actionable) hand it to the coordinator");
-        assertTrue(sense.contains("config.poiActive() && (result.band() == PoiScorer.Band.MANDATORY"),
+        assertTrue(sense.contains("config.poiActive() && (result.band() == PoiScorer.Band.STRUCTURE_CERTAIN"),
                 "acting on a candidate is gated on poiActive() in addition to the unconditional poi.enabled() scoring");
     }
 

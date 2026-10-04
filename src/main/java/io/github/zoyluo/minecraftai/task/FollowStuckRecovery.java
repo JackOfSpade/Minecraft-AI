@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
@@ -9,6 +10,9 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -53,7 +57,7 @@ import net.minecraft.server.level.ServerPlayer;
  * outright on a waiting task either way, so it can never fire while this class still owns the
  * problem, and no change to {@code StuckWatcher} itself was needed or made.
  *
- * <p>{@link #attemptStep} tries a verified adjacent walk/step-up/step-down first. If none is
+ * <p>{@link #attemptStep} tries a verified adjacent walk/step-up/safe-step-down first. If none is
  * available, recovery requests a fresh observed Baritone route instead of breaking terrain.
  */
 final class FollowStuckRecovery {
@@ -89,7 +93,9 @@ final class FollowStuckRecovery {
         if (stepOwned) {
             ActionPack pack = bot.getActionPack();
             if (pack.stepInFlightFor(stepLease)) {
-                pack.cancelStep();
+                pack.cancelStep(stepLease);
+            } else {
+                pack.releaseStepLease(stepLease);
             }
             stepOwned = false;
             stepLease = null;
@@ -137,6 +143,7 @@ final class FollowStuckRecovery {
             // follower an immediate fresh route instead of treating any unrelated global result
             // as progress.
             WalkedStep.Result result = pack.stepResultFor(lease);
+            pack.releaseStepLease(lease);
             stepOwned = false;
             stepLease = null;
             step = null;
@@ -220,16 +227,21 @@ final class FollowStuckRecovery {
         double currentDistSq = current.distSqr(targetPos);
         double minDistSq = minDistance * minDistance;
 
-        BlockPos best = null;
-        double bestDistSq = currentDistSq;
-        for (int dy = -1; dy <= 1; dy++) {
+        List<BlockPos> candidates = new ArrayList<>();
+        // WalkedStep permits a horizontal landing up to maxSafeFall blocks lower. Keeping
+        // recovery to one level here made a visible three-block descent look permanently
+        // unreachable even though the normal observed navigator and its physical executor both
+        // admit it. Each candidate still has to pass the same exact-cell and refusal-envelope
+        // proof before a key is pressed.
+        int maxStepDown = Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
+        for (int dy = -maxStepDown; dy <= 1; dy++) {
             for (Direction direction : Direction.Plane.HORIZONTAL) {
                 BlockPos candidate = current.relative(direction).offset(0, dy, 0);
                 // SwimRoute's dry-cell admission proves feet, head, and support before its
                 // standability read. A follow recovery is a local physical escape, not an
                 // exception to the shared observed-terrain boundary.
-                if (SwimRoute.observedCell(bot, world, candidate, false)
-                        != SwimRoute.Cell.DRY) {
+                SwimRoute.Cell observed = SwimRoute.observedCell(bot, world, candidate, false);
+                if (observed != SwimRoute.Cell.DRY) {
                     continue;
                 }
                 double distSq = candidate.distSqr(targetPos);
@@ -237,14 +249,14 @@ final class FollowStuckRecovery {
                     // Would land closer than the caller's own floor -- never an "unstick" move.
                     continue;
                 }
-                if (distSq + 0.01D < bestDistSq) {
-                    best = candidate.immutable();
-                    bestDistSq = distSq;
+                if (distSq + 0.01D < currentDistSq) {
+                    candidates.add(candidate.immutable());
                 }
             }
         }
-        if (best != null) {
-            StepStart started = beginStep(bot, current, best);
+        candidates.sort(Comparator.comparingDouble(candidate -> candidate.distSqr(targetPos)));
+        for (BlockPos candidate : candidates) {
+            StepStart started = beginStep(bot, current, candidate);
             if (started != StepStart.REFUSED) {
                 // A guarded owner denied admission, or this exact recovery step started. In both
                 // cases leave the newly opened/verified candidate alone and retry later rather

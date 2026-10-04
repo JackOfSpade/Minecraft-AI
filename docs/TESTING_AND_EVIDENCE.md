@@ -146,7 +146,6 @@ the same world, whatever ran before it:
 ## Baritone GameTests: what to run how
 
 - Every test runs alone (see above), so the Baritone classes can be run together or one class glob at a time.
-- `baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes` proves that the legacy engine loads no Baritone class. Loaded classes cannot be unloaded, so the proof only exists in a fresh JVM: run it alone (`bash gt_filter.sh <repo> <out> baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes`). Selected that way (its own name as the filter, no glob) it FAILS when Baritone was already loaded (inconclusive is a failure there); inside a class glob or the whole suite an earlier test may have used Baritone, the load check is skipped and the result line `gametest_legacy_lazy conclusive=false` says so.
 
 ## Single Isolated Evidence Run
 

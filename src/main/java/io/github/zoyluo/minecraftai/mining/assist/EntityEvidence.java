@@ -13,23 +13,17 @@ import java.util.Set;
  * <p>Scoring follows the design: per-entity vanilla scores add up, any non-{@code minecraft}
  * namespace adds {@link PoiLexicon#ENTITY_SCORE_MODDED} once for the whole group, and the scorer applies
  * the group cap ({@link PoiLexicon#ENTITY_GROUP_CAP}), so {@link #rawScore()} is deliberately uncapped.
- * A visible warden scores 0 and is reported through {@link #wardenVisible()}; item frames and armor
- * stands also feed the habitation set.</p>
+ * Item frames and armor stands also feed the habitation set.</p>
  */
 public final class EntityEvidence {
     private double vanillaSum;
     private boolean modded;
-    private boolean warden;
     private int counted;
     private final Set<PoiSignals.Habitation> habitation = EnumSet.noneOf(PoiSignals.Habitation.class);
 
-    /** Adds one perceivable entity. Returns true when it contributed anything (score, warden or habitation). */
+    /** Adds one perceivable entity. Returns true when it contributed score or habitation evidence. */
     public boolean add(String namespace, String path) {
         boolean contributed = false;
-        if (PoiLexicon.isWarden(namespace, path)) {
-            warden = true;
-            contributed = true;
-        }
         String key = PoiLexicon.habitationKey(namespace, path);
         if (key != null) {
             try {
@@ -57,10 +51,6 @@ public final class EntityEvidence {
     /** Vanilla scores summed plus one modded bonus, not yet capped (the scorer caps the group). */
     public double rawScore() {
         return vanillaSum + (modded ? PoiLexicon.ENTITY_SCORE_MODDED : 0.0D);
-    }
-
-    public boolean wardenVisible() {
-        return warden;
     }
 
     public Set<PoiSignals.Habitation> habitation() {

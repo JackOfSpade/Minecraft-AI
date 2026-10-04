@@ -50,9 +50,9 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
    granularity): a run that starts on tick 0 notices on tick `ceil(requiredSeconds / 0.05)`. Sighting needs no cone once a
    sound has turned the observer to S (see hearing), but it always needs the clear line.
 4. **Hearing is an input, computed by vanilla.** Hearing is not part of the pure model: the caller runs the vanilla
-   vibration system (the same `VibrationSystem` the sculk sensor and the Warden use) and says whether a sound was heard at
+   vibration system and says whether a sound was heard at
    S's position. Vanilla decides everything about the sound: the listener radius (`aggro.hearing.listenerRadius`, 16 = the
-   Warden's; the sculk sensor's is 8), which events are vibrations (`GameEventTags.VIBRATIONS`), that a **sneaking**
+   configured radius), which events are vibrations (`GameEventTags.VIBRATIONS`), that a **sneaking**
    ("stepping carefully") entity's steps make none, that wool blocks vibrations in between (`DAMPENS_VIBRATIONS`), that
    spectators are silent, and how long a vibration takes to arrive. A sound heard at S's position with a clear line to S
    counts as sighted with angle factor 1 (the observer turned to the sound; the formula, sneaking and visibility still
@@ -91,7 +91,7 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
 
 Companion bots are `AIPlayerEntity`s (real `ServerPlayer`s), so the same rules apply to what THEY notice: creatures (mobs,
 players, other bots), never objects. Sight has no engage limit here; the farthest a companion sees is its profile observation
-radius (`perception.radius`, 16 by default; a warden is watched out to 24, the quiet-zone scan), because the 64 block engage limit
+radius (`perception.radius`, 16 by default; the configured observation radius), because the 64 block engage limit
 is a PvP BOT rule. The 64 in the formula is only its slope.
 
 * **State, not rays, at the call sites.** `CreatureSenses.tickBot` runs once per bot per server tick (`BotTickCoordinator`,
@@ -104,7 +104,7 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   is a new reaction. A creature that leaves the observation radius, dies or despawns is forgotten at once.
 * **Hearing** is vanilla's vibration system, called per bot (`BotEars`: `VibrationSystem.Data`/`User`/`Listener`, a
   `DynamicGameEventListener`, `VibrationSystem.Ticker` every tick; radius `behaviour.perception.hearing.listenerRadius`, 16 =
-  the Warden's; vanilla decides sneaking, wool and travel time). A sound whose source is a creature in clear view within 4 blocks
+  the configured radius; vanilla decides sneaking, wool and travel time). A sound whose source is a creature in clear view within 4 blocks
   is where it came from: the bot is "turned to it" for 30 ticks (sight without the cone, the reaction time still applies).
   A sound with nobody in view is an INVESTIGATE hint (`CreatureSenses.hint`; an idle bot, one with no task and no action in
    progress, turns to look; a bot busy with a step, a dig or a route keeps its head on its work). A bot does not hear its own steps
@@ -171,7 +171,7 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
 ## Scope
 
 * IN: every place a bot NOTICES a creature (threat detection, target acquisition, aggro, aggressor checks,
-  perception summaries given to the LLM, warden detection, projectile threat awareness).
+  perception summaries given to the LLM, projectile threat awareness).
 * OUT: object perception (items, containers, crops, blocks, boats), non-hostile task targets a bot deliberately
   searches for (hunt, breed, milk, trade, villagers), strike legality (a physical ray check), and the owner's own
   camera cone (`SharedVision.ownerSees`, already realistic).

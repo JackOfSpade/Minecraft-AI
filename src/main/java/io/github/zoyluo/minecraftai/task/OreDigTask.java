@@ -79,6 +79,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -1647,6 +1648,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         if (RetiredNavigationTask.legacyExcavationDisabled()) {
+            // P5's frontier trigger needs to run before the strict-survival fallback below.  That fallback
+            // deliberately returns after starting an observed search hop, which otherwise makes FRONTIER
+            // unreachable whenever legacy excavation is disabled (the shipped strict-survival policy).
+            // explorationTick itself only accepts a route made from observed standable cells; if its own
+            // gates reject this view, retain the bounded observed-search behaviour unchanged.
+            if (explorationTick(bot, world)) {
+                return;
+            }
             if (startObservedOreSearch(bot)) {
                 return;
             }
@@ -3463,7 +3472,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             bot.getActionPack().stopAll();
         }
         int age = Math.max(0, totalBudget() - pendingPickupStarted);
-        if (age > TARGET_DROP_RECOVERY_LIMIT) {
+        // An item can enter the inventory on the same late task tick that reaches the ordinary
+        // recovery deadline. Give the existing five-tick confirmation window a chance to prove
+        // that the matching visible drop vanished at a settled pose. A visible drop or an
+        // unsettled gain still reaches the same typed deadline immediately after that window.
+        int gainAge = pendingPickupGainTick < 0
+                ? -1 : Math.max(0, totalBudget() - pendingPickupGainTick);
+        if (age > TARGET_DROP_RECOVERY_LIMIT
+                && (pendingPickupGainTick < 0 || gainAge > 5)) {
             bot.getActionPack().stopAll();
             fail("ore_dig_drop_unrecovered:" + pendingPickupPos.toShortString()
                     + ":last_seen=" + (pendingPickupLastSeenPos == null
@@ -3495,6 +3511,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // break cell. The shared pickup approach distinguishes same-level walking from a
                 // vertical path/descent, which matters when a staircase ore drops directly below.
                 net.minecraft.world.entity.item.ItemEntity drop = visibleDrop.orElseThrow();
+                // A GoalBlock route has no physical action for the one cell directly below its
+                // current feet: Baritone can retain that goal while gravity never starts. This is
+                // an already-observed, collision-checked item column, so use the bounded DROP
+                // primitive that the stair controller uses. It does not route, dig, place, or
+                // manufacture a landing; WalkedStep verifies the real landing on a later tick.
+                if (drop.blockPosition().getX() == bot.blockPosition().getX()
+                        && drop.blockPosition().getZ() == bot.blockPosition().getZ()
+                        && drop.blockPosition().getY() == bot.blockPosition().getY() - 1
+                        && beginWalkedMove(bot, drop.blockPosition(),
+                        "ore_dig_pickup_drop_descent", () -> { })) {
+                    return true;
+                }
                 boolean pursuingDrop = false;
                 boolean physicallySupported = HarvestCore.isDropPhysicallySupported(bot, drop);
                 if (physicallySupported) {
@@ -3540,16 +3568,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // collision pickup happen from a diagonal/lower stand, and the vanished entity no longer
         // has a factual coordinate to chase. This closes the old 64-broken/32-collected failure
         // mode without reading hidden entities or accepting a privileged inventory mutation.
-        io.github.zoyluo.minecraftai.pathfinding.Standability.clearCache();
-        // ServerPlayer's onGround bit normally comes from client movement packets and is
-        // therefore not durable for a clientless fake player. The collision-checked support/head
-        // envelope is the authoritative settled-pose invariant here: it rejects the transient
-        // upper cell from an elevated pickup while accepting a physically supported shaft floor.
-        boolean settledOnStandablePose = io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
-                bot.level(), bot.blockPosition());
+        // A high-face pickup can leave the clientless player straddling the edge of the real work
+        // platform. Its integer block cell then has no floor even though vanilla collision has
+        // physically settled the player's bounding box on that adjacent platform. Requiring the
+        // cell itself to be standable turns a completed native pickup into permanent debt. Probe
+        // support beneath the actual box instead; an airborne or unsupported player still cannot
+        // confirm, and the absent visible-drop check remains in force.
+        boolean settledOnPhysicalSupport = hasPickupConfirmationSupport(bot);
         if (pendingPickupGainTick >= 0
                 && totalBudget() - pendingPickupGainTick >= 5
-                && settledOnStandablePose
+                && settledOnPhysicalSupport
                 && visibleDrop.isEmpty()) {
             BotLog.action(bot, "ore_dig_pickup_confirmed",
                     "pos", pendingPickupPos.toShortString(),
@@ -3565,6 +3593,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         return true;
+    }
+
+    private static boolean hasPickupConfirmationSupport(AIPlayerEntity bot) {
+        AABB bounds = bot.getBoundingBox();
+        AABB supportProbe = new AABB(
+                bounds.minX,
+                bounds.minY - 0.08D,
+                bounds.minZ,
+                bounds.maxX,
+                bounds.minY,
+                bounds.maxZ);
+        return bot.level().findSupportingBlock(bot, supportProbe).isPresent();
     }
 
     private void resetPickupRecoveryStall() {
@@ -4766,6 +4806,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         Direction[] order = preferred == null
                 ? new Direction[]{Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST}
                 : new Direction[]{preferred, preferred.getClockWise(), preferred.getCounterClockWise(), preferred.getOpposite()};
+        // A same-level cardinal pose is the ordinary way to mine an exposed foot-height ore and
+        // catch its vanilla drop.  The lower ring below is useful for stepped terrain, but it is
+        // unsupported on a flat floor and used to send an otherwise visible target into the
+        // retired tunnel fallback.  Keep the full observed standability and break-envelope proof.
+        for (Direction direction : order) {
+            BlockPos candidate = ore.relative(direction);
+            if (targetBreakEnvelope(candidate, ore)
+                    && isObservedSafeApproachPose(bot, world, candidate)) {
+                return candidate;
+            }
+        }
         for (Direction direction : order) {
             BlockPos candidate = ore.below().relative(direction);
             if (isObservedSafeApproachPose(bot, world, candidate)) {
@@ -5428,6 +5479,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (adjacentDangerFluidOf(bot, pos).state()
                     == OreScan.Observation.OBSERVED_PRESENT) {
                 continue; // Ore observed adjacent to lava/water is skipped as opportunistic; UNKNOWN must never be silently read as either safe or dangerous
+            }
+            // The ordinary nearby-bonus path does not enter the detour engine, so it must apply
+            // the same durable lava-memory clearance itself.  A source may have been observed
+            // before a later wall occludes it; treating that occlusion as permission here would
+            // let this short-range miner bypass DetourSafetyGate's HAZARD_LAVA veto.
+            MiningAssistState assist = MiningAssistRegistry.getIfPresent(bot.getUUID());
+            if (assist != null && assist.hazards().anyLavaWithin(pos,
+                    MiningAssistRuntime.config().detour().lavaClearRadius())) {
+                continue;
             }
             return pos;
         }

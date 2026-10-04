@@ -426,18 +426,17 @@ public final class MiningAssistRuntime {
         OreClaims.releaseAll(bot.getUUID());
     }
 
-    /** Same as {@link #clearBot} plus the POI dedupe registry and warden mandatory-repeat latch — genuine
+    /** Same as {@link #clearBot} plus the POI dedupe registry — genuine
      * bot-unload/death/reset only. Deliberately NOT folded into {@link #clearBot}: that method is also called
      * from {@code MiningAssistCoordinator.notSensing}'s 2400-tick idle-release path, which fires while a bot
      * is paused mid an open POI hold (a paused bot is, by definition, not being sensed). Clearing PoiRegistry/
-     * MandatoryLatch there would silently drop the hold's dedupe state and trigger a spurious restart-rehydration
+     * PoiRegistry there would silently drop the hold's dedupe state and trigger a spurious restart-rehydration
      * notice roughly every 2 minutes for as long as the hold stays open. */
     public static void clearBotUnload(AIPlayerEntity bot) {
         clearBot(bot);
-        // P2: POI dedupe/registry and the warden mandatory-repeat latch are per-bot transient state too, but
+        // P2: POI dedupe/registry is per-bot transient state too, but
         // only safe to drop on a genuine unload, not on the soft idle-release above.
         PoiRegistry.clear(bot.getUUID());
-        MandatoryLatch.clear(bot.getUUID());
     }
 
     /** The coordinator's exception fence: per-bot failure log throttle and sensing cooldown. */
@@ -465,7 +464,6 @@ public final class MiningAssistRuntime {
         RouteBudget.shared().reset();
         // P2: same reasoning for the POI registry and the mandatory latch.
         PoiRegistry.clearAll();
-        MandatoryLatch.clearAll();
         // P3: the advisor's cross-bot verdict cache and its mission/global consult budget.
         PoiCache.clearAll();
         PoiConsultBudget.clearAll();

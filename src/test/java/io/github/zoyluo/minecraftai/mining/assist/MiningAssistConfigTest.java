@@ -15,7 +15,6 @@ import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.ModeSource;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.NoticeRecipients;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Poi;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Route;
-import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Safety;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Sense;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Tick;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.UnavailablePolicy;
@@ -79,7 +78,6 @@ class MiningAssistConfigTest {
         assertEquals(new Tick(38.0D, 48.0D), c.tick());
         assertEquals(new Route(100), c.route());
         assertEquals(new Detour(true, 25, 1.2D, 12, 6, 2, 300, 200, 24, 3, 4, 4, 90), c.detour());
-        assertEquals(new Safety(true), c.safety());
         assertEquals(new Advisor(true, "", 8, 512, 6, 400, 3, 6000), c.advisor());
         assertEquals(new Edits(true), c.edits());
         assertEquals(new Explore(false, false, 28, 1.0D), c.explore());
@@ -397,7 +395,6 @@ class MiningAssistConfigTest {
         assertEquals(d.sense(), c.sense());
         assertEquals(d.tick(), c.tick());
         assertEquals(d.route(), c.route());
-        assertEquals(d.safety(), c.safety());
         assertEquals(d.edits(), c.edits());
         assertEquals(d.explore(), c.explore());
         assertTrue(c.warnings().isEmpty());
@@ -412,7 +409,6 @@ class MiningAssistConfigTest {
                 + "\"detour\":{\"enabled\":false,\"minValue\":40,\"minScore\":2.5,\"maxRadius\":10,\"maxUp\":5,"
                 + "\"maxDown\":1,\"leaseTicks\":240,\"minIntervalTicks\":400,\"maxPerMission\":10,\"minFreeSlots\":5,"
                 + "\"startHpMargin\":6,\"lavaClearRadius\":6,\"announceMinValue\":100},"
-                + "\"safety\":{\"deepDarkVeto\":false},"
                 + "\"poi\":{\"enabled\":false,\"possibleScore\":0.5,\"structureCertainScore\":0.9,"
                 + "\"cavernOpenFraction\":[0.2,0.5],\"habitationDowngrade\":false,\"useOwnBiome\":false,"
                 + "\"dedupeRadius\":50,\"maxHoldsPerMission\":2,\"holdDeadlineTicks\":200,\"announceHold\":false,"
@@ -429,7 +425,6 @@ class MiningAssistConfigTest {
         assertEquals(new Tick(30.0D, 40.0D), c.tick());
         assertEquals(new Route(150), c.route());
         assertEquals(new Detour(false, 40, 2.5D, 10, 5, 1, 240, 400, 10, 5, 6, 6, 100), c.detour());
-        assertEquals(new Safety(false), c.safety());
         assertEquals(new Poi(false, 0.5D, 0.9D, 0.2D, 0.5D, false, false, 50, 2, 200, false,
                 NoticeRecipients.BROADCAST, UnavailablePolicy.STOP_IF_POSSIBLE, CavernKeylessPolicy.STOP_IF_POSSIBLE,
                 List.of("minecraft:the_nether")), c.poi());
@@ -457,7 +452,6 @@ class MiningAssistConfigTest {
                 + "\"tick\":{\"startWorkMs\":true,\"abortWorkMs\":[1]},"
                 + "\"route\":{\"bucketMs\":{\"a\":1}},"
                 + "\"detour\":{\"enabled\":\"true\",\"minValue\":\"25\",\"minScore\":\"1.2\",\"maxRadius\":false},"
-                + "\"safety\":{\"deepDarkVeto\":0},"
                 + "\"poi\":{\"enabled\":null,\"possibleScore\":\"high\",\"dedupeRadius\":[],\"announceHold\":\"no\","
                 + "\"noticeRecipients\":5,\"unavailablePolicy\":true,\"cavernKeylessPolicy\":{}},"
                 + "\"advisor\":{\"model\":42,\"maxTokens\":\"512\",\"enabled\":1},"
@@ -469,7 +463,6 @@ class MiningAssistConfigTest {
         assertEquals(d.tick(), c.tick());
         assertEquals(d.route(), c.route());
         assertEquals(d.detour(), c.detour());
-        assertEquals(d.safety(), c.safety());
         assertEquals(d.poi(), c.poi());
         assertEquals(d.advisor(), c.advisor());
         assertEquals(d.edits(), c.edits());

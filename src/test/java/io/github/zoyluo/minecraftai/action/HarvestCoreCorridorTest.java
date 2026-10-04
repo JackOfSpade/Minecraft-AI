@@ -50,17 +50,16 @@ final class HarvestCoreCorridorTest {
 
         int corridor = source.indexOf("public static boolean isSafeWalkCorridor");
         String check = source.substring(corridor, source.indexOf("public static void sweepPickup(", corridor));
-        assertTrue(check.contains("canObserveWalkCorridorEnvelope(bot, box)")
-                        && check.indexOf("canObserveWalkCorridorEnvelope(bot, box)") < check.indexOf("world.noCollision(bot, body)"),
-                "the pickup corridor must prove its complete observation envelope before raw collision reads");
+        assertTrue(check.contains("canObserveWalkCorridorBody(bot, box)")
+                        && check.indexOf("canObserveWalkCorridorBody(bot, box)") < check.indexOf("world.noCollision(bot, body)"),
+                "the pickup corridor must prove its body envelope before raw collision reads");
         assertTrue(check.contains("ObservableWorldQuery.canObserveCell(bot, cell)"),
                 "unoccupied corridor cells must have state-free ray evidence before hazard reads");
         assertTrue(check.contains("Standability.isDangerous(state)"), "fire / lava / cactus / magma fail the corridor");
         assertTrue(check.contains("getFluidState().isEmpty()"), "water and lava cells fail the corridor");
-        assertTrue(check.contains("noCollision(bot, box.expandTowards(0.0D, -CORRIDOR_MAX_FALL"),
-                "a cliff (no floor within a harmless fall) fails the corridor");
         assertTrue(check.contains("int floorLimit = belowY - (int) Math.ceil(CORRIDOR_MAX_FALL) - 1;")
-                        && check.indexOf("for (int y = belowY; y >= floorLimit; y--)") > check.indexOf("noCollision(bot, box.expandTowards"),
-                "the fall column down to the floor is scanned for lava, fire and fluid, not only the cell under the feet");
+                        && check.contains("if (!canObserveWalkCorridorCell(bot, cell))")
+                        && check.contains("if (!floorFound)"),
+                "the fall column proves and scans each cell down to a floor, rejecting an unobserved cliff without reading below that floor");
     }
 }

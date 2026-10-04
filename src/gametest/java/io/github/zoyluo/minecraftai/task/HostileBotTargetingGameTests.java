@@ -28,8 +28,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.Pose;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.monster.zombie.Husk;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.animal.cow.Cow;
@@ -522,37 +520,6 @@ public final class HostileBotTargetingGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "aggro_sense_does_not_flag_acalm_warden", maxTicks = 60)
-    public void aggroSenseDoesNotFlagACalmWarden(GameTestHelper context) {
-        Fixture f = new Fixture(context);
-        AIPlayerEntity bot = f.bot("HbtWardenSenseGT", 0, 0);
-        f.owner(bot, -3, 2);
-        Warden warden = f.warden(6, 0);
-        f.require(warden.getPose() != Pose.ROARING, "the fixture warden is roaring");
-        context.onEachTick(() -> {
-            long t = context.getTick();
-            if (t == 2) {
-                AggroSense.Snapshot calm = AggroSense.snapshot(bot);
-                f.require(!calm.pressure() && calm.aggressorCount() == 0 && calm.aggressors().isEmpty(),
-                        "a calm warden counted as pressure: " + calm);
-            }
-            if (t == 4) {
-                // Control: once it hit the bot it is hunting and an aggressor.
-                float before = bot.getHealth();
-                f.require(bot.hurtServer(f.level, f.level.damageSources().mobAttack(warden), 1.0F) && bot.getHealth() < before,
-                        "the warden's hit on the bot was not real");
-            }
-            if (t == 6) {
-                AggroSense.Snapshot hunting = AggroSense.snapshot(bot);
-                f.require(hunting.pressure() && hunting.aggressors().contains(warden),
-                        "a warden that hit the bot is not an aggressor: " + hunting);
-                f.finish();
-            }
-        });
-    }
-
-    // ------------------------------------------------------------------ the killing blow (RecentDamage)
-
     @GameTest(environment = ENV + "killing_blow_is_recorded_and_marks_the_killer", maxTicks = 60)
     public void killingBlowIsRecordedAndMarksTheKiller(GameTestHelper context) {
         Fixture f = new Fixture(context);
@@ -698,14 +665,6 @@ public final class HostileBotTargetingGameTests {
             return add(cow, dx, dz);
         }
 
-        Warden warden(int dx, int dz) {
-            Warden warden = EntityType.WARDEN.create(level, EntitySpawnReason.COMMAND);
-            warden.setPersistenceRequired();
-            warden.setNoAi(true);
-            return add(warden, dx, dz);
-        }
-
-        /** A stone wall across the whole arena at {@code dx} blocks east of the centre, four blocks high. */
         void wall(int dx) {
             for (int dz = -HALF; dz <= HALF; dz++) {
                 for (int dy = 0; dy <= 3; dy++) {

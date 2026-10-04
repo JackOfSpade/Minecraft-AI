@@ -186,14 +186,13 @@ public final class MiningAssistCoordinator {
 
         // The one heavy operation of the tick: shadow POI scoring, logged on band changes only. Scoring and
         // logging stay unconditional of mode (unchanged from P0/P1: SENSE/DETOUR keep shadow-only POI behaviour).
-        // P2: a candidate that is MANDATORY/STRUCTURE_CERTAIN on this single evaluation, or POSSIBLE/CAVERN_ONLY
+        // A candidate that is STRUCTURE_CERTAIN on this single evaluation, or POSSIBLE/CAVERN_ONLY
         // whose hysteresis is now satisfied, is handed to the coordinator -- but only once the mode allows POI
         // to act (poiActive()).
         if (config.poi().enabled() && PoiDetector.due(state, tick)) {
             PoiDetector.Result result = PoiDetector.evaluate(bot, state, world, tick);
             MiningAssistLog.poiBand(bot, state, result, tick);
-            if (config.poiActive() && (result.band() == PoiScorer.Band.MANDATORY
-                    || result.band() == PoiScorer.Band.STRUCTURE_CERTAIN
+            if (config.poiActive() && (result.band() == PoiScorer.Band.STRUCTURE_CERTAIN
                     || result.confirmed())) {
                 PoiCoordinator.INSTANCE.onCandidate(bot, state, world, result, tick);
             }

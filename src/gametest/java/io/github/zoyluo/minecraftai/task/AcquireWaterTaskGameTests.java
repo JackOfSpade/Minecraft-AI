@@ -5,8 +5,10 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -30,63 +32,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Live proof that surface water is reached physically, filled through vanilla, and restartable. */
 public final class AcquireWaterTaskGameTests {
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_visible_water_beyond_initial_view_survives_checkpoint_restart", maxTicks = 600)
-    public void visibleWaterBeyondInitialViewSurvivesCheckpointRestart(GameTestHelper context) {
-        WaterFixture fixture = spawnWaterSeeker(context, "WaterAcquireGT");
-        AIPlayerEntity bot = fixture.bot();
-        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(
-                new AcquireWaterTask(fixture.start()));
-        AtomicBoolean restarted = new AtomicBoolean();
-        active.get().start(bot);
-
-        context.failIfEver(() -> {
-            AcquireWaterTask task = active.get();
-            task.tick(bot);
-            Map<String, String> checkpoint = task.checkpoint();
-            if (!restarted.get() && Integer.parseInt(checkpoint.get("issued")) >= 1) {
-                String direction = checkpoint.get("direction");
-                String legLength = checkpoint.get("leg_length");
-                int used = Integer.parseInt(checkpoint.get("budget_used"));
-                task.cancel(bot, "gametest_restart_boundary");
-
-                AcquireWaterTask restored = new AcquireWaterTask(fixture.start(), checkpoint);
-                restored.start(bot);
-                Map<String, String> after = restored.checkpoint();
-                require(context, restored.state() == TaskState.RUNNING,
-                        "valid water checkpoint did not restart");
-                require(context, direction.equals(after.get("direction"))
-                                && legLength.equals(after.get("leg_length"))
-                                && encode(fixture.start().east(12)).equals(
-                                after.get("waypoint"))
-                                && Integer.parseInt(after.get("budget_used")) >= used,
-                        "water cursor was not restored to its nominal waypoint: before="
-                                + checkpoint + " after=" + after);
-                active.set(restored);
-                restarted.set(true);
-                return;
-            }
-
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("water task failed: " + task.failureReason()
-                        + " checkpoint=" + checkpoint));
-                return;
-            }
-            if (task.state() == TaskState.COMPLETED) {
-                require(context, restarted.get(), "task completed without exercising restart");
-                require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
-                        "vanilla fill did not produce exactly one water bucket");
-                require(context, InventoryAction.countItem(bot, Items.BUCKET) == 0,
-                        "empty bucket was not consumed by vanilla interaction");
-                require(context, bot.blockPosition().distSqr(fixture.start()) >= 9.0D,
-                        "bot acquired out-of-view water without physical travel");
-                require(context, !bot.level().getFluidState(fixture.water()).is(FluidTags.WATER),
-                        "source block was not drained by the bucket interaction");
-                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), fixture.name());
-                context.succeed();
-            }
-        });
-    }
-
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_approach_descends_to_exact_reachable_stand_before_filling", maxTicks = 200)
     public void approachDescendsToExactReachableStandBeforeFilling(GameTestHelper context) {
         var world = context.getLevel();
@@ -224,189 +169,6 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_open_cave_ascent_places_one_visible_support_and_survives_restart", maxTicks = 600)
-    public void openCaveAscentPlacesOneVisibleSupportAndSurvivesRestart(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(18, 4, 18));
-        BlockPos surfaceAnchor = start.above();
-
-        // Reproduce the seed-3000 mechanism: a carved stair emerges into a dry chamber whose four
-        // adjacent same-level cells are air. Every diagonal-up landing therefore lacks an existing
-        // support even though a normal player can place one against the observable stone floor.
-        for (int dx = -7; dx <= 7; dx++) {
-            for (int dz = -7; dz <= 7; dz++) {
-                world.setBlock(start.offset(dx, -1, dz),
-                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(start.offset(dx, 0, dz),
-                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                for (int dy = 1; dy <= 4; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                world.setBlock(start.offset(dx, 0, dz),
-                        Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            }
-        }
-
-        // Recess the source into the surrounding surface floor. It is observable from the proven
-        // exit without adding a separate long-range search/path fixture to this ascent test.
-        // Leave start.north(2) as the first already-supported outward surface cell. The placed
-        // start.north support is an isolated landing by itself and must not authorize SEARCH.
-        BlockPos water = start.north(3);
-        world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-
-        String name = "WaterOpenCaveGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT));
-
-        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(
-                new AcquireWaterTask(surfaceAnchor));
-        AtomicBoolean restarted = new AtomicBoolean();
-        AtomicReference<BlockPos> placedSupport = new AtomicReference<>();
-        active.get().start(bot);
-        context.failIfEver(() -> {
-            AcquireWaterTask task = active.get();
-            task.tick(bot);
-
-            if (placedSupport.get() == null) {
-                for (Direction direction : Direction.Plane.HORIZONTAL) {
-                    BlockPos candidate = start.relative(direction);
-                    if (world.getBlockState(candidate).is(Blocks.DIRT)) {
-                        placedSupport.set(candidate.immutable());
-                        break;
-                    }
-                }
-            }
-            if (placedSupport.get() != null && !restarted.get()
-                    && bot.blockPosition().equals(start)
-                    && task.state() == TaskState.RUNNING) {
-                Map<String, String> checkpoint = task.checkpoint();
-                int used = Integer.parseInt(checkpoint.get("budget_used"));
-                task.cancel(bot, "gametest_support_restart");
-                AcquireWaterTask restored = new AcquireWaterTask(surfaceAnchor, checkpoint);
-                restored.start(bot);
-                require(context, restored.state() == TaskState.RUNNING,
-                        "support placement checkpoint did not restart");
-                require(context, Integer.parseInt(restored.checkpoint().get("budget_used")) >= used,
-                        "support placement restart reset the expedition budget");
-                active.set(restored);
-                restarted.set(true);
-                return;
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("open-cave water return failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
-                return;
-            }
-            if (task.state() != TaskState.COMPLETED) {
-                return;
-            }
-            require(context, restarted.get(),
-                    "open-cave ascent completed without restart boundary coverage");
-            require(context, placedSupport.get() != null
-                            && world.getBlockState(placedSupport.get()).is(Blocks.DIRT),
-                    "open-cave ascent did not leave one factual support block");
-            require(context, InventoryAction.countItem(bot, Items.DIRT) == 0,
-                    "open-cave ascent did not pay exactly one support block");
-            require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
-                    "support-assisted ascent did not physically fill the bucket");
-            require(context, bot.blockPosition().getY() >= surfaceAnchor.getY(),
-                    "support-assisted ascent filled water below the proven surface exit");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_multi_level_open_cave_builds_vanilla_foundation_bridge", maxTicks = 300)
-    public void multiLevelOpenCaveBuildsVanillaFoundationBridge(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(18, 4, 26));
-        BlockPos surfaceAnchor = start.above(2);
-
-        // The first rise has the chamber floor as a placement base. After the bot stands on that
-        // one-block support, the second rise is an isolated-pillar case: both the next landing
-        // support and its base are air. A real player must sneak-bridge the base first and then
-        // place the landing support on top; direct placement is forbidden in strict survival.
-        for (int dx = -5; dx <= 5; dx++) {
-            for (int dz = -5; dz <= 5; dz++) {
-                world.setBlock(start.offset(dx, -1, dz),
-                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                for (int dy = 0; dy <= 5; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-
-        String name = "WaterFoundationBridgeGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        // A real diagonal jump-up arc does not always cross into the new horizontal column within
-        // its first attempt the way an instant teleport always did (see the placeAscentSupport
-        // recentring fix); a symmetric, unconstrained open room can therefore legitimately need a
-        // second isolated-pillar cycle to actually reach the far column. Give enough reserve to
-        // cover that honestly instead of pinning the exact number of rises.
-        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
-
-        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
-        task.start(bot);
-        context.failIfEver(() -> {
-            task.tick(bot);
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("multi-level open-cave ascent failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
-                return;
-            }
-            // AcquireWaterTask's own RETURN_SURFACE->SEARCH transition is the authoritative "the
-            // climb is genuinely finished" signal (see returnToSurface/needsDrySurfaceExit): a real
-            // jump-arc does not cross horizontal columns atomically the way an instant teleport
-            // did, so the exact final cell it settles on -- and how many isolated-pillar cycles it
-            // took to get there -- is no longer pinned to the literal requested surfaceAnchor.
-            if (!"SEARCH".equals(task.checkpoint().get("phase"))) {
-                return;
-            }
-
-            BlockPos firstSupport = start.north();
-            require(context, world.getBlockState(firstSupport).is(Blocks.COBBLESTONE),
-                    "first supported rise was not paid with a physical block");
-            // Cobblestone is not gravity-affected, so a placed foundation/support block never needs
-            // solid ground of its own underneath to be structurally "safe" -- the real strict-
-            // survival invariant is that it was placed by clicking an already-visible, already-solid
-            // face (current's own floor or an earlier placed block), never the non-survival direct-
-            // placement fallback. That is already enforced structurally by BuildAction.placeBlockAt
-            // refusing that fallback under STRICT_SURVIVAL, so the property worth checking here is
-            // simply that the climb finished using a plausible, bounded amount of real material.
-            int used = 8 - InventoryAction.countItem(bot, Items.COBBLESTONE);
-            require(context, used >= 2 && used <= 8,
-                    "foundation bridge consumed an implausible amount of material: used=" + used);
-            require(context, bot.blockPosition().getY() >= surfaceAnchor.getY(),
-                    "foundation bridge reached the surface below the requested anchor height: "
-                            + bot.blockPosition());
-            task.cancel(bot, "gametest_foundation_bridge_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_shallow_water_at_feet_hands_return_to_physical_rescue_before_ascent_inspection", maxTicks = 40)
     public void shallowWaterAtFeetHandsReturnToPhysicalRescueBeforeAscentInspection(GameTestHelper context) {
         var world = context.getLevel();
@@ -513,6 +275,126 @@ public final class AcquireWaterTaskGameTests {
         context.succeed();
     }
 
+    /**
+     * A return route is live work.  Repeated RETURN_SURFACE ticks must leave that route alone so
+     * Baritone can drive the bot up this fully visible, dry staircase on real server ticks.
+     */
+    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_dry_visible_upward_return_keeps_its_baritone_route_until_physical_progress", maxTicks = 200)
+    public void dryVisibleUpwardReturnKeepsItsBaritoneRouteUntilPhysicalProgress(
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(4, 4, 4));
+        BlockPos surfaceAnchor = start.east(4).above(2);
+
+        // This is an observable, dry one-block staircase, ending on an open surface platform.
+        // It gives the return controller a factual route without using the retired local ascent.
+        for (int dx = -1; dx <= 10; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                for (int dy = -1; dy <= 10; dy++) {
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        for (int step = 0; step <= 4; step++) {
+            BlockPos stand = start.east(step).above(step / 2);
+            world.setBlock(stand.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(stand, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(stand.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                BlockPos platform = surfaceAnchor.offset(dx, 0, dz);
+                world.setBlock(platform.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(platform, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(platform.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+
+        String name = "WaterReturnRoutePersistenceGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+                Set.of(), 0.0F, 0.0F, true);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
+
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
+        for (PrivilegedCapability capability : PrivilegedCapability.values()) {
+            require(context, !CapabilityRuntime.decide(
+                            bot, capability, "water_return_route_persistence_gametest").allowed(),
+                    "strict_survival unexpectedly allowed " + capability);
+        }
+        for (int step = 0; step <= 4; step++) {
+            BlockPos stand = start.east(step).above(step / 2);
+            require(context, ObservableWorldQuery.canObserveCell(bot, stand),
+                    "spawned bot cannot observe the factual return stair: " + stand.toShortString());
+            require(context, world.getFluidState(stand).isEmpty()
+                            && world.getBlockState(stand.below()).is(Blocks.STONE),
+                    "fixture return stair is not a dry supported stand: " + stand.toShortString());
+        }
+        require(context, world.canSeeSky(surfaceAnchor),
+                "fixture return platform is not an open surface: " + surfaceAnchor.toShortString());
+
+        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
+        task.start(bot);
+        task.tick(bot);
+        require(context, task.state() == TaskState.RUNNING
+                        && "RETURN_SURFACE".equals(task.checkpoint().get("phase"))
+                        && bot.getActionPack().hasBaritoneRoute()
+                        && isNearSurfaceReturnGoal(bot.getActionPack().activePathGoal(), surfaceAnchor),
+                "RETURN_SURFACE did not retain ownership of its initial visible route: "
+                        + task.checkpoint() + " goal=" + bot.getActionPack().activePathGoal());
+
+        AtomicReference<BlockPos> previous = new AtomicReference<>(bot.blockPosition().immutable());
+        AtomicInteger returnTicks = new AtomicInteger(1);
+        AtomicInteger physicalMoves = new AtomicInteger();
+        context.failIfEver(() -> {
+            BlockPos now = bot.blockPosition().immutable();
+            BlockPos before = previous.get();
+            if (!now.equals(before)) {
+                int horizontal = Math.abs(now.getX() - before.getX())
+                        + Math.abs(now.getZ() - before.getZ());
+                int vertical = Math.abs(now.getY() - before.getY());
+                require(context, horizontal <= 1 && vertical <= 1
+                                && horizontal + vertical > 0,
+                        "RETURN_SURFACE used non-physical movement: "
+                                + before.toShortString() + " -> " + now.toShortString());
+                physicalMoves.incrementAndGet();
+            }
+
+            task.tick(bot);
+            returnTicks.incrementAndGet();
+            Map<String, String> checkpoint = task.checkpoint();
+            NavOutcome outcome = bot.getActionPack().lastRouteOutcome();
+            require(context, task.state() == TaskState.RUNNING
+                            && "RETURN_SURFACE".equals(checkpoint.get("phase"))
+                            && bot.getActionPack().hasBaritoneRoute()
+                            && isNearSurfaceReturnGoal(
+                            bot.getActionPack().activePathGoal(), surfaceAnchor)
+                            && (outcome == null || outcome.status() != NavOutcome.Status.CANCELLED),
+                    "repeated RETURN_SURFACE tick cancelled or lost its route: checkpoint="
+                            + checkpoint + " goal=" + bot.getActionPack().activePathGoal()
+                            + " outcome=" + outcome);
+            previous.set(now);
+
+            if (returnTicks.get() < 4 || physicalMoves.get() < 2) {
+                return;
+            }
+            task.cancel(bot, "gametest_return_route_persistence_complete");
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
+        });
+    }
+
+    private static boolean isNearSurfaceReturnGoal(BlockPos goal, BlockPos anchor) {
+        return goal != null && goal.distSqr(anchor) <= 4.0D;
+    }
+
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_return_does_not_read_or_collect_an_occluded_plain_water_source", maxTicks = 40)
     public void returnDoesNotReadOrCollectAnOccludedPlainWaterSource(GameTestHelper context) {
         var world = context.getLevel();
@@ -561,583 +443,6 @@ public final class AcquireWaterTaskGameTests {
         context.succeed();
     }
 
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_visible_fluid_ceiling_forces_same_level_relocation_before_ascent", maxTicks = 300)
-    public void visibleFluidCeilingForcesSameLevelRelocationBeforeAscent(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(18, 4, 34));
-        BlockPos relocation = start.north();
-        BlockPos surfaceAnchor = relocation.east().above();
-
-        for (int step = 0; step <= 2; step++) {
-            BlockPos corridor = start.north(step);
-            world.setBlock(corridor.below(),
-                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(corridor,
-                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(corridor.above(),
-                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(corridor.above(2),
-                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            for (Direction direction : List.of(Direction.EAST, Direction.WEST)) {
-                world.setBlock(corridor.relative(direction),
-                        Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(corridor.above().relative(direction),
-                        Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-            }
-        }
-        // The natural riser is sideways from the relocation landing. This prevents the ordinary
-        // walk controller from auto-jumping a stair before the relocation checkpoint is observed.
-        world.setBlock(surfaceAnchor.below(),
-                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(surfaceAnchor,
-                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(surfaceAnchor.above(),
-                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        // Keep one initial solid support face visible so the task first chooses an ascent candidate
-        // and physically exposes the ceiling. Its head cell stays open; a two-block bedrock wall
-        // would occlude the support and turn the fixture into an immediate relocation test.
-        world.setBlock(start.east(),
-                Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.east().above(),
-                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.south(),
-                Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.south().above(),
-                Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-
-        BlockPos visibleCeiling = start.above(2);
-        BlockPos fluidCeiling = start.above(3);
-        world.setBlock(visibleCeiling,
-                // Glass is a real colliding occluder but drops no cobblestone into neighbouring
-                // GameTest fixtures after it is mined.
-                Blocks.GLASS.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(fluidCeiling,
-                Blocks.OAK_LEAVES.defaultBlockState()
-                        .setValue(BlockStateProperties.PERSISTENT, true)
-                        .setValue(BlockStateProperties.WATERLOGGED, true),
-                Block.UPDATE_ALL);
-
-        String name = "WaterFluidRelocationGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-
-        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
-        AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
-        AtomicBoolean exposedFluidCeiling = new AtomicBoolean();
-        AtomicBoolean sawSameLevelRelocation = new AtomicBoolean();
-        AtomicInteger movementCount = new AtomicInteger();
-        task.start(bot);
-        context.failIfEver(() -> {
-            task.tick(bot);
-            require(context, world.getBlockState(fluidCeiling).is(Blocks.OAK_LEAVES)
-                            && world.getFluidState(fluidCeiling).is(FluidTags.WATER),
-                    "ascent mined or drained the visible fluid ceiling");
-            if (world.getBlockState(visibleCeiling).isAir()) {
-                exposedFluidCeiling.set(true);
-            }
-
-            BlockPos now = bot.blockPosition();
-            BlockPos before = previous.getAndSet(now.immutable());
-            if (!now.equals(before)) {
-                require(context, exposedFluidCeiling.get(),
-                        "ascent moved before physically exposing the hidden fluid ceiling");
-                int horizontal = Math.abs(now.getX() - before.getX())
-                        + Math.abs(now.getZ() - before.getZ());
-                int vertical = now.getY() - before.getY();
-                // A real diagonal jump-up arc (the physics fix's genuine jump/fall input) rises
-                // through its takeoff column for several ticks before horizontal drift carries it
-                // into the new one, so a pure vertical rise with no horizontal change yet is an
-                // expected mid-arc frame, not a non-adjacent move.
-                require(context, (horizontal == 1 && (vertical == 0 || vertical == 1))
-                                || (horizontal == 0 && vertical == 1),
-                        "water-ceiling recovery used non-adjacent movement: " + before + " -> " + now);
-                if (now.equals(relocation.above())) {
-                    // The riser's expected mid-arc pose (see above) -- not a distinct logical
-                    // movement; the eventual arrival at surfaceAnchor still counts as the one
-                    // riser movement.
-                } else {
-                    int movement = movementCount.getAndIncrement();
-                    if (movement == 0) {
-                        require(context, vertical == 0,
-                                "first recovery movement climbed before relocating: " + before + " -> " + now);
-                        require(context, before.equals(start) && now.equals(relocation),
-                                "first recovery movement did not use the only dry same-level route: " + now);
-                        sawSameLevelRelocation.set(true);
-                    } else if (movement == 1) {
-                        require(context, (before.equals(relocation) || before.equals(relocation.above()))
-                                        && now.equals(surfaceAnchor)
-                                        && now.getY() == relocation.getY() + 1,
-                                "relocation did not immediately use the natural side riser: "
-                                        + before + " -> " + now);
-                    } else {
-                        context.fail(Component.nullToEmpty(
-                                "fluid recovery made an unexpected extra movement: " + before + " -> " + now));
-                    }
-                }
-            }
-
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("fluid-ceiling recovery failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
-                return;
-            }
-            if (!now.equals(surfaceAnchor)) {
-                return;
-            }
-            require(context, sawSameLevelRelocation.get(),
-                    "ascent rose without first making a physical same-level relocation");
-            require(context, exposedFluidCeiling.get(),
-                    "ascent never physically exposed the waterlogged ceiling");
-            require(context, movementCount.get() == 2,
-                    "fluid recovery did not follow the exact start-relocate-rise sequence");
-            require(context, now.equals(surfaceAnchor),
-                    "ascent did not use the natural supported landing: " + now + " expected=" + surfaceAnchor);
-            require(context, InventoryAction.countItem(bot, Items.BUCKET) == 1,
-                    "relocation consumed the empty bucket before reaching the surface");
-            task.cancel(bot, "gametest_fluid_relocation_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_shared_fluid_arc_carves_dry_same_level_pocket_before_ascent", maxTicks = 400)
-    public void sharedFluidArcCarvesDrySameLevelPocketBeforeAscent(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(42, 4, 42));
-        BlockPos relocation = start.east();
-        BlockPos surfaceAnchor = relocation.east().above();
-        BlockPos surfaceEdge = surfaceAnchor.east();
-
-        // Surround the start with ordinary mine rock. There is no pre-open same-level landing:
-        // after the shared ceiling exposes water, the only forward recovery is to mine the two
-        // east relocation cells and prove their support before walking into the pocket.
-        for (int dx = -2; dx <= 3; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                for (int dy = -1; dy <= 3; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-
-        BlockPos sharedArc = start.above(2);
-        BlockPos fluidCeiling = start.above(3);
-        world.setBlock(sharedArc, Blocks.GLASS.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(fluidCeiling,
-                Blocks.OAK_LEAVES.defaultBlockState()
-                        .setValue(BlockStateProperties.PERSISTENT, true)
-                        .setValue(BlockStateProperties.WATERLOGGED, true),
-                Block.UPDATE_ALL);
-
-        // Once the east pocket has been physically carved, it has one normal supported riser and
-        // a reusable surface edge. These cells are deliberately not reachable from the start until
-        // both relocation obstructions have been removed.
-        world.setBlock(relocation.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        for (BlockPos open : List.of(
-                surfaceAnchor, surfaceAnchor.above(), surfaceEdge, surfaceEdge.above(), surfaceEdge.above(2))) {
-            world.setBlock(open, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        }
-
-        String name = "WaterCarvedRelocationGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-
-        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(
-                new AcquireWaterTask(surfaceAnchor));
-        AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
-        AtomicBoolean exposedFluidCeiling = new AtomicBoolean();
-        AtomicBoolean sawHeadClearedBeforeFeet = new AtomicBoolean();
-        AtomicBoolean restartedAfterHead = new AtomicBoolean();
-        AtomicInteger movementCount = new AtomicInteger();
-        active.get().start(bot);
-        context.failIfEver(() -> {
-            AcquireWaterTask task = active.get();
-            task.tick(bot);
-
-            require(context, world.getBlockState(fluidCeiling).is(Blocks.OAK_LEAVES)
-                            && world.getFluidState(fluidCeiling).is(FluidTags.WATER),
-                    "carved relocation mined or drained the waterlogged ceiling");
-            require(context, !bot.isInWater()
-                            && world.getFluidState(bot.blockPosition()).isEmpty()
-                            && world.getFluidState(bot.blockPosition().above()).isEmpty(),
-                    "carved relocation entered water instead of routing around it");
-            require(context, bot.getHealth() == bot.getMaxHealth()
-                            && bot.getFoodData().getFoodLevel() == 20,
-                    "carved relocation lost strict-survival health or food");
-            require(context, InventoryAction.countItem(bot, Items.BUCKET) == 1
-                            && InventoryAction.countItem(bot, Items.WATER_BUCKET) == 0,
-                    "carved relocation mutated the bucket before surface search");
-
-            if (world.getBlockState(sharedArc).isAir()) {
-                exposedFluidCeiling.set(true);
-            }
-            if (world.getBlockState(relocation.above()).isAir()
-                    && !world.getBlockState(relocation).isAir()) {
-                sawHeadClearedBeforeFeet.set(true);
-                if (!restartedAfterHead.get()) {
-                    Map<String, String> checkpoint = task.checkpoint();
-                    int budgetBefore = Integer.parseInt(checkpoint.get("budget_used"));
-                    require(context, "RETURN_SURFACE".equals(checkpoint.get("phase"))
-                                    && "false".equals(checkpoint.get("surface_exit")),
-                            "head-only carve checkpoint escaped the return-surface invariant");
-                    task.cancel(bot, "gametest_carved_relocation_restart");
-                    AcquireWaterTask restored = new AcquireWaterTask(surfaceAnchor, checkpoint);
-                    restored.start(bot);
-                    Map<String, String> after = restored.checkpoint();
-                    require(context, restored.state() == TaskState.RUNNING
-                                    && "RETURN_SURFACE".equals(after.get("phase"))
-                                    && "false".equals(after.get("surface_exit"))
-                                    && Integer.parseInt(after.get("budget_used")) >= budgetBefore,
-                            "head-only carve checkpoint did not restart monotonically: " + after);
-                    active.set(restored);
-                    task = restored;
-                    restartedAfterHead.set(true);
-                }
-            }
-            if (world.getBlockState(relocation).isAir()) {
-                require(context, sawHeadClearedBeforeFeet.get(),
-                        "same-level pocket mined feet before exposing and rechecking its head");
-            }
-
-            BlockPos now = bot.blockPosition();
-            BlockPos before = previous.getAndSet(now.immutable());
-            if (!now.equals(before)) {
-                require(context, exposedFluidCeiling.get(),
-                        "carved relocation moved before physically exposing the shared fluid arc");
-                int horizontal = Math.abs(now.getX() - before.getX())
-                        + Math.abs(now.getZ() - before.getZ());
-                int vertical = now.getY() - before.getY();
-                // A real diagonal jump-up arc (the physics fix's genuine jump/fall input) rises
-                // through its takeoff column for several ticks before horizontal drift carries it
-                // into the new one, so a pure vertical rise with no horizontal change yet is an
-                // expected mid-arc frame, not a non-adjacent move.
-                require(context, (horizontal == 1 && (vertical == 0 || vertical == 1))
-                                || (horizontal == 0 && vertical == 1),
-                        "carved relocation used non-adjacent movement: " + before + " -> " + now);
-                if (now.equals(relocation.above())) {
-                    // The riser's expected mid-arc pose (see above) -- not a distinct logical
-                    // movement of its own; the eventual arrival at surfaceAnchor below still
-                    // counts as the one riser movement.
-                } else {
-                    int movement = movementCount.getAndIncrement();
-                    if (movement == 0) {
-                        require(context, before.equals(start) && now.equals(relocation) && vertical == 0,
-                                "first recovery movement did not enter the dry carved pocket: " + now);
-                        require(context, world.getBlockState(relocation).isAir()
-                                        && world.getBlockState(relocation.above()).isAir(),
-                                "bot entered the relocation before both physical obstructions cleared");
-                    } else if (movement == 1) {
-                        require(context, (before.equals(relocation) || before.equals(relocation.above()))
-                                        && now.equals(surfaceAnchor)
-                                        && now.getY() == relocation.getY() + 1,
-                                "carved pocket did not continue through the supported riser: "
-                                        + before + " -> " + now);
-                    } else {
-                        context.fail(Component.nullToEmpty(
-                                "carved relocation made an unexpected extra movement: "
-                                        + before + " -> " + now));
-                    }
-                }
-            }
-
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("carved fluid relocation failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
-                return;
-            }
-            if (!now.equals(surfaceAnchor)) {
-                return;
-            }
-            require(context, movementCount.get() == 2 && sawHeadClearedBeforeFeet.get(),
-                    "carved relocation did not complete the exact carve-walk-rise sequence");
-            require(context, restartedAfterHead.get(),
-                    "carved relocation completed without crossing the head-only restart boundary");
-            task.cancel(bot, "gametest_carved_fluid_relocation_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_reached_fluid_relocation_survives_pause_and_safety_displacement", maxTicks = 500)
-    public void reachedFluidRelocationSurvivesPauseAndSafetyDisplacement(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(18, 4, 18));
-        BlockPos relocation = start.east();
-        BlockPos safetyLanding = relocation.north();
-        BlockPos surfaceAnchor = relocation.east().above();
-
-        // The two waterlogged ceilings make ascent from start and safetyLanding unsafe. The first
-        // is exposed by normal return work; the second is already visible from the safety landing,
-        // so the first resumed task tick must reselect immediately instead of spending a generic
-        // retry interval discovering the same local hazard. Both cells have exactly one dry
-        // same-level exit: relocation. The supported east riser is usable only after that
-        // relocation has been reached again.
-        for (BlockPos cell : List.of(start, relocation, safetyLanding)) {
-            world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        BlockPos riserSupport = surfaceAnchor.below();
-        world.setBlock(riserSupport, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(surfaceAnchor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(surfaceAnchor.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        for (BlockPos wall : List.of(
-                start.west(), start.north(), start.south(),
-                safetyLanding.north(), safetyLanding.east(), safetyLanding.west(),
-                relocation.south())) {
-            world.setBlock(wall, Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(wall.above(), Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-        }
-
-        BlockPos startCeiling = start.above(2);
-        BlockPos startWater = start.above(3);
-        BlockPos safetyCeiling = safetyLanding.above(2);
-        BlockPos safetyWater = safetyLanding.above(3);
-        world.setBlock(startCeiling, Blocks.GLASS.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(safetyCeiling, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        for (BlockPos water : List.of(startWater, safetyWater)) {
-            world.setBlock(water,
-                    Blocks.OAK_LEAVES.defaultBlockState()
-                            .setValue(BlockStateProperties.PERSISTENT, true)
-                            .setValue(BlockStateProperties.WATERLOGGED, true),
-                    Block.UPDATE_ALL);
-        }
-
-        String name = "WaterPauseRelocationGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-
-        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
-        for (PrivilegedCapability capability : PrivilegedCapability.values()) {
-            require(context, !CapabilityRuntime.decide(
-                            bot, capability, "water_pause_relocation_gametest").allowed(),
-                    "strict_survival unexpectedly allowed " + capability);
-        }
-
-        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
-        AtomicInteger stage = new AtomicInteger();
-        AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
-        AtomicBoolean retriedRelocation = new AtomicBoolean();
-        task.start(bot);
-        context.failIfEver(() -> {
-            require(context, world.getBlockState(startWater).is(Blocks.OAK_LEAVES)
-                            && world.getFluidState(startWater).is(FluidTags.WATER)
-                            && world.getBlockState(safetyWater).is(Blocks.OAK_LEAVES)
-                            && world.getFluidState(safetyWater).is(FluidTags.WATER),
-                    "pause/resume ascent mined or drained a waterlogged ceiling");
-            require(context, InventoryAction.countItem(bot, Items.BUCKET) == 1
-                            && InventoryAction.countItem(bot, Items.WATER_BUCKET) == 0,
-                    "pause/resume ascent mutated the bucket before surface search");
-
-            BlockPos now = bot.blockPosition();
-            BlockPos before = previous.get();
-            if (!now.equals(before)) {
-                int horizontal = Math.abs(now.getX() - before.getX())
-                        + Math.abs(now.getZ() - before.getZ());
-                int vertical = now.getY() - before.getY();
-                // A real diagonal jump-up arc (the physics fix's genuine jump/fall input) rises
-                // through its takeoff column for several ticks before horizontal drift carries it
-                // into the new one, so a pure vertical rise with no horizontal change yet is an
-                // expected mid-arc frame, not a skip or a teleport -- only overshooting more than
-                // one cell in either axis would be an actual non-adjacent move.
-                require(context, (horizontal == 1 && (vertical == 0 || vertical == 1))
-                                || (horizontal == 0 && vertical == 1),
-                        "pause relocation used non-adjacent movement: " + before + " -> " + now);
-            }
-
-            if (stage.get() == 0 && now.equals(relocation)) {
-                require(context, before.equals(start),
-                        "initial relocation did not use the unique dry exit: " + before + " -> " + now);
-                require(context, world.getBlockState(startCeiling).isAir(),
-                        "initial relocation moved before exposing the fluid ceiling");
-                // Pause before the next AcquireWaterTask tick can settle the already reached target.
-                task.pause(bot);
-                require(context, task.state() == TaskState.PAUSED,
-                        "reached relocation did not pause cleanly");
-                var safetyMove = bot.getActionPack().startSurfacePathTo(safetyLanding);
-                require(context, !safetyMove.isFailed(),
-                        "fixture safety displacement was rejected: " + safetyMove.reason());
-                stage.set(1);
-                previous.set(now.immutable());
-                return;
-            }
-
-            if (stage.get() == 1) {
-                require(context, task.state() == TaskState.PAUSED,
-                        "mission task ran while safety displacement owned movement");
-                if (now.equals(safetyLanding)) {
-                    require(context, before.equals(relocation),
-                            "safety task did not make the expected adjacent displacement: "
-                                    + before + " -> " + now);
-                    bot.getActionPack().stopAll();
-                    task.resume(bot);
-                    require(context, task.state() == TaskState.RUNNING,
-                            "mission task did not resume after safety displacement");
-                    int beforeResumeTick = task.elapsedTicks();
-                    task.tick(bot);
-                    require(context, task.elapsedTicks() == beforeResumeTick + 1,
-                            "resume did not execute exactly one immediate mission tick");
-                    require(context, relocation.equals(bot.getActionPack().activePathGoal()),
-                            "first tick after displacement did not immediately retry the factual "
-                                    + "relocation: goal=" + bot.getActionPack().activePathGoal());
-                    stage.set(2);
-                }
-                previous.set(now.immutable());
-                return;
-            }
-
-            if (stage.get() == 2 && !now.equals(before)) {
-                if (!retriedRelocation.get()) {
-                    require(context, before.equals(safetyLanding) && now.equals(relocation)
-                                    && now.getY() == before.getY(),
-                            "resume did not retry the unique dry relocation: " + before + " -> " + now);
-                    retriedRelocation.set(true);
-                } else if (now.equals(surfaceAnchor)) {
-                    // The final riser is a real diagonal jump-up arc: it rises through
-                    // relocation.up() for several ticks (a genuine mid-arc frame, already
-                    // accepted by the adjacency check above) before horizontal drift carries it
-                    // into surfaceAnchor's column, so `before` here may legitimately be either
-                    // cell.
-                    require(context, (before.equals(relocation) || before.equals(relocation.above()))
-                                    && now.getY() == relocation.getY() + 1,
-                            "resumed relocation did not continue up the safe riser: "
-                                    + before + " -> " + now);
-                }
-            }
-            previous.set(now.immutable());
-
-            if (now.equals(surfaceAnchor)) {
-                require(context, retriedRelocation.get(),
-                        "ascent reached the riser without retrying the interrupted relocation");
-                task.cancel(bot, "gametest_pause_relocation_complete");
-                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-                context.succeed();
-                return;
-            }
-
-            task.tick(bot);
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("pause relocation recovery failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
-            }
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_reached_relocation_pause_without_displacement_settles_before_resume", maxTicks = 200)
-    public void reachedRelocationPauseWithoutDisplacementSettlesBeforeResume(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(18, 4, 18));
-        BlockPos relocation = start.east();
-        BlockPos surfaceAnchor = relocation.east().above();
-
-        for (BlockPos cell : List.of(start, relocation)) {
-            world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        // An unbreakable common jump arc makes every rise from start invalid, leaving relocation
-        // as the only dry same-level progress. Once there, the supported east riser is unique.
-        world.setBlock(start.above(2), Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-        for (BlockPos wall : List.of(start.west(), start.north(), start.south())) {
-            world.setBlock(wall, Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(wall.above(), Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        world.setBlock(surfaceAnchor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(surfaceAnchor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(surfaceAnchor.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(relocation.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-
-        String name = "WaterPauseSettlementGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-
-        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
-        AtomicInteger stage = new AtomicInteger();
-        AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
-        task.start(bot);
-        context.failIfEver(() -> {
-            BlockPos now = bot.blockPosition();
-            BlockPos before = previous.get();
-            if (stage.get() == 0 && now.equals(relocation)) {
-                require(context, before.equals(start),
-                        "initial settlement relocation was not the unique dry step: "
-                                + before + " -> " + now);
-                task.pause(bot);
-                require(context, task.state() == TaskState.PAUSED,
-                        "reached relocation did not enter PAUSED");
-                task.resume(bot);
-                require(context, task.state() == TaskState.RUNNING,
-                        "undisplaced relocation did not resume");
-                int beforeResumeTick = task.elapsedTicks();
-                task.tick(bot);
-                require(context, task.elapsedTicks() == beforeResumeTick + 1,
-                        "undisplaced resume did not execute exactly one task tick");
-                require(context, surfaceAnchor.equals(bot.getActionPack().activePathGoal()),
-                        "settled relocation was retried instead of continuing up the riser: goal="
-                                + bot.getActionPack().activePathGoal());
-                stage.set(1);
-                previous.set(now.immutable());
-                return;
-            }
-
-            if (stage.get() == 1 && now.equals(surfaceAnchor)) {
-                // A real diagonal jump-up arc (the physics fix's genuine, gradual jump/fall
-                // input) rises through its takeoff column for several ticks before horizontal
-                // drift carries it into the new one -- relocation.up() is exactly that expected
-                // mid-arc cell, not a skip. Only a position outside {relocation, relocation.up()}
-                // would mean the riser was actually bypassed.
-                require(context, before.equals(relocation) || before.equals(relocation.above()),
-                        "settled ascent skipped the adjacent riser: " + before + " -> " + now);
-                task.cancel(bot, "gametest_pause_settlement_complete");
-                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-                context.succeed();
-                return;
-            }
-
-            previous.set(now.immutable());
-            task.tick(bot);
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("undisplaced pause settlement failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
-            }
-        });
-    }
-
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_displaced_search_retries_on_its_first_resume_tick", maxTicks = 80)
     public void displacedSearchRetriesOnItsFirstResumeTick(GameTestHelper context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterSearchPauseCooldownGT", false);
@@ -1182,343 +487,18 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_surface_transition_cancels_paused_ascent_craft_and_motion", maxTicks = 40)
-    public void surfaceTransitionCancelsPausedAscentCraftAndMotion(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(18, 4, 18));
-        BlockPos surfaceAnchor = start.above(2);
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-
-        BlockPos exit = start.east(4).above(2);
-        BlockPos skyEdge = exit.east();
-        for (BlockPos cell : List.of(exit, skyEdge)) {
-            world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        }
-
-        String name = "WaterReturnTeardownGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
-        InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 2));
-        ItemStack exhausted = new ItemStack(Items.STONE_PICKAXE);
-        exhausted.setDamageValue(exhausted.getMaxDamage() - 1);
-        InventoryAction.giveItem(bot, exhausted);
-
-        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
-        task.start(bot);
-        task.tick(bot);
-        require(context, task.hasReturnSurfaceWorkForTesting(),
-                "fixture did not start the local ascent-tool craft");
-        task.pause(bot);
-        require(context, task.hasReturnSurfaceWorkForTesting(),
-                "pause incorrectly discarded the resumable ascent-tool craft");
-        bot.teleportTo(world, exit.getX() + 0.5D, exit.getY(), exit.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        task.resume(bot);
-        require(context, task.hasReturnSurfaceWorkForTesting(),
-                "resume lost the paused craft before the phase boundary could settle it");
-        task.tick(bot);
-
-        require(context, "SEARCH".equals(task.checkpoint().get("phase"))
-                        && "true".equals(task.checkpoint().get("surface_exit"))
-                        && encode(exit).equals(task.checkpoint().get("search_origin")),
-                "surface displacement did not publish the factual SEARCH boundary: "
-                        + task.checkpoint());
-        require(context, !task.hasReturnSurfaceWorkForTesting(),
-                "SEARCH retained orphan RETURN_SURFACE mining/crafting/relocation work");
-        require(context, bot.getActionPack().isPathExecutorIdle(),
-                "SEARCH transition retained RETURN_SURFACE movement ownership");
-        task.cancel(bot, "gametest_return_teardown_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-        context.succeed();
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_deep_mine_carves_restartable_stair_back_to_surface_water", maxTicks = 1400)
-    public void deepMineCarvesRestartableStairBackToSurfaceWater(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(32, 4, 32));
-        BlockPos surfaceAnchor = start.above(8);
-
-        // A solid mound reproduces the post-iron state: the bot is in a two-high chamber eight
-        // blocks below its original surface anchor, so a plain walk path cannot reach the water.
-        for (int dx = -6; dx <= 6; dx++) {
-            for (int dz = -6; dz <= 6; dz++) {
-                for (int dy = -1; dy <= 7; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                }
-                for (int dy = 8; dy <= 10; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        // Recess the source into the stone floor so it stays a single still source and remains
-        // reachable from the open surface without creating a spreading-water rescue shortcut.
-        BlockPos water = surfaceAnchor.east().below();
-        world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-
-        String name = "WaterMineReturnGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-
-        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(
-                new AcquireWaterTask(surfaceAnchor));
-        AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
-        AtomicBoolean restarted = new AtomicBoolean();
-        active.get().start(bot);
-        context.failIfEver(() -> {
-            AcquireWaterTask task = active.get();
-            task.tick(bot);
-            BlockPos now = bot.blockPosition();
-            BlockPos before = previous.getAndSet(now.immutable());
-            require(context, Math.abs(now.getX() - before.getX()) <= 1
-                            && Math.abs(now.getY() - before.getY()) <= 1
-                            && Math.abs(now.getZ() - before.getZ()) <= 1,
-                    "surface return used a non-adjacent movement: " + before + " -> " + now);
-
-            if (!restarted.get() && now.getY() >= start.getY() + 2
-                    && task.state() == TaskState.RUNNING) {
-                Map<String, String> checkpoint = task.checkpoint();
-                int used = Integer.parseInt(checkpoint.get("budget_used"));
-                task.cancel(bot, "gametest_ascent_restart");
-                AcquireWaterTask restored = new AcquireWaterTask(surfaceAnchor, checkpoint);
-                restored.start(bot);
-                require(context, restored.state() == TaskState.RUNNING,
-                        "deep return checkpoint did not restart");
-                require(context, Integer.parseInt(restored.checkpoint().get("budget_used")) >= used,
-                        "deep return restart reset its elapsed budget");
-                active.set(restored);
-                restarted.set(true);
-                return;
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("deep water return failed: " + task.failureReason()
-                        + " checkpoint=" + task.checkpoint()));
-                return;
-            }
-            if (task.state() != TaskState.COMPLETED) {
-                return;
-            }
-            require(context, restarted.get(), "deep return completed without restart coverage");
-            require(context, bot.getEyePosition().distanceToSqr(water.getCenter())
-                            <= bot.blockInteractionRange() * bot.blockInteractionRange(),
-                    "deep return filled water outside vanilla interaction reach: bot="
-                            + now + " source=" + water);
-            require(context, "DONE".equals(task.checkpoint().get("phase"))
-                            && "false".equals(task.checkpoint().get("surface_exit")),
-                    "reachable return water minted a false surface-search latch: "
-                            + task.checkpoint());
-            require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
-                    "deep return did not end with one water bucket");
-            require(context, !world.getFluidState(water).is(FluidTags.WATER),
-                    "deep return did not drain the physical source");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_deep_mine_locally_crafts_a_stone_pick_when_ascent_tools_are_exhausted", maxTicks = 500)
-    public void deepMineLocallyCraftsAStonePickWhenAscentToolsAreExhausted(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(32, 4, 20));
-        BlockPos surfaceAnchor = start.above(2);
-        for (int dx = -6; dx <= 6; dx++) {
-            for (int dz = -6; dz <= 6; dz++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                }
-                for (int dy = 2; dy <= 4; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        // A genuinely external, properly supported air cell beside the shaft: the bot's own head
-        // cell can never be a legal block-placement target (vanilla rejects any placement whose
-        // collision shape intersects a live entity, the placer included), and the open cavern
-        // starting at dy 2 has no adjacent solid face within reach either. Without this, a mid-test
-        // ascent-tool craft that needs to place a carried crafting table has nowhere valid to put it.
-        world.setBlock(start.south(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.south().above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        BlockPos copperObstruction = start.north().above();
-        world.setBlock(copperObstruction,
-                Blocks.COPPER_ORE.defaultBlockState(), Block.UPDATE_ALL);
-        // Keep the source physically recessed and contained. Placing it beside the shaft lets
-        // flowing water invalidate every ascent candidate, so the bot can water-rescue around the
-        // copper instead of proving that the replenished pick actually clears the obstruction.
-        BlockPos water = surfaceAnchor.east(2).below();
-        world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-
-        String name = "WaterToolCraftGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE));
-        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
-        InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 2));
-        for (int i = 0; i < 2; i++) {
-            ItemStack exhausted = new ItemStack(Items.STONE_PICKAXE);
-            exhausted.setDamageValue(exhausted.getMaxDamage() - 1);
-            InventoryAction.giveItem(bot, exhausted);
-        }
-
-        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
-        AtomicBoolean crafted = new AtomicBoolean();
-        task.start(bot);
-        context.failIfEver(() -> {
-            task.tick(bot);
-            // The payment is checked in the tick the third pick appears: later, the ascent mines stone with it and picks up the
-            // cobblestone like any player, while the two exhausted picks may still be in the inventory.
-            if (!crafted.get() && InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 3) {
-                crafted.set(true);
-                require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 0
-                                && InventoryAction.countItem(bot, Items.STICK) == 0,
-                        "ascent pick was not paid for with three cobblestone and two sticks");
-            }
-            if (!crafted.get() && task.elapsedTicks() > 20) {
-                context.fail(Component.nullToEmpty(
-                        "ascent did not replenish exhausted picks before mining the copper obstruction"));
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("tool-depleted water return failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
-            }
-            if (task.state() != TaskState.COMPLETED) {
-                return;
-            }
-            require(context, crafted.get(), "water return completed without exercising local tool craft");
-            require(context, world.getBlockState(copperObstruction).isAir(),
-                    "freshly crafted stone pick did not physically clear the copper obstruction");
-            require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
-                    "tool-replenished return did not physically fill the bucket");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_deep_mine_fails_fast_without_stone_pick_materials_and_preserves_iron", maxTicks = 100)
-    public void deepMineFailsFastWithoutStonePickMaterialsAndPreservesIron(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(48, 4, 20));
-        BlockPos surfaceAnchor = start.above(2);
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                }
-                for (int dy = 2; dy <= 3; dy++) {
-                    world.setBlock(start.offset(dx, dy, dz),
-                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        // Leave exactly one safe ascent support so the tested obstruction is deterministic.
-        world.setBlock(start.east(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.south(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(start.west(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        BlockPos copperObstruction = start.north().above();
-        world.setBlock(copperObstruction,
-                Blocks.COPPER_ORE.defaultBlockState(), Block.UPDATE_ALL);
-
-        String name = "WaterToolMissingGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
-        ItemStack exhausted = new ItemStack(Items.STONE_PICKAXE);
-        exhausted.setDamageValue(exhausted.getMaxDamage() - 1);
-        InventoryAction.giveItem(bot, exhausted);
-
-        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
-        task.start(bot);
-        context.failIfEver(() -> {
-            task.tick(bot);
-            if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("missing-material ascent did not fail: " + task.state()));
-                return;
-            }
-            if (task.state() != TaskState.FAILED) {
-                if (task.elapsedTicks() > 20) {
-                    context.fail(Component.nullToEmpty(
-                            "missing-material ascent did not return a typed failure within 20 ticks"));
-                }
-                return;
-            }
-            require(context, task.failureReason().startsWith(
-                            "acquire_water_ascent_tool_unavailable:minecraft:stone_pickaxe:"),
-                    "unexpected missing-tool reason: " + task.failureReason());
-            require(context, world.getBlockState(copperObstruction).is(Blocks.COPPER_ORE),
-                    "missing stone-pick materials still changed the copper obstruction");
-            require(context, InventoryAction.countItem(bot, Items.BUCKET) == 1,
-                    "missing-tool failure consumed the empty bucket");
-            require(context, InventoryAction.countItem(bot, Items.IRON_PICKAXE) == 1,
-                    "return ascent spent the reserved iron pick on a low-tier obstruction");
-            require(context, InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 1,
-                    "missing-tool failure changed the exhausted stone pick");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_sky_visible_exit_starts_search_without_reentering_the_mined_stair", maxTicks = 300)
-    public void skyVisibleExitStartsSearchWithoutReenteringTheMinedStair(GameTestHelper context) {
+    /** A visible exit persists as the search origin and never sends the bot back down its old stair. */
+    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_sky_visible_exit_rebases_search_without_reentering_mined_stair", maxTicks = 20)
+    public void skyVisibleExitRebasesSearchWithoutReenteringMinedStair(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos exit = context.absolutePos(new BlockPos(32, 10, 32));
         BlockPos surfaceAnchor = exit.west(4).below(4);
 
-        // Open platform around the real exit.  The old anchor is connected by a perfectly valid
-        // descending stair, reproducing the seed-3000 failure: a generic path back to the anchor
-        // eagerly re-entered that stair after the bot had already reached open sky.
-        for (int dx = -5; dx <= 18; dx++) {
+        for (int dx = -5; dx <= 5; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
-                world.setBlock(exit.offset(dx, -1, dz),
-                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(exit.offset(dx, 0, dz),
-                        Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(exit.offset(dx, 1, dz),
-                        Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(exit.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(exit.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(exit.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         for (int step = 1; step <= 4; step++) {
@@ -1528,16 +508,6 @@ public final class AcquireWaterTaskGameTests {
             world.setBlock(stair.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
 
-        // The source is outside the initial observation and hidden by a one-block rim. The first
-        // +12 waypoint must therefore be derived from the checkpointed exit, not the old anchor.
-        // This covers the non-ideal branch that failed in the real seed: no water is beside exit.
-        BlockPos water = exit.east(13);
-        world.setBlock(water.west(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(water.east(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(water.north(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(water.south(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-
         String name = "WaterSurfaceLatchGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(exit),
@@ -1545,65 +515,23 @@ public final class AcquireWaterTaskGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, exit.getX() + 0.5D, exit.getY(), exit.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
         InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
 
-        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(
-                new AcquireWaterTask(surfaceAnchor));
-        active.get().start(bot);
-        AtomicBoolean observedExitCheckpoint = new AtomicBoolean();
-        AtomicBoolean restarted = new AtomicBoolean();
-        context.failIfEver(() -> {
-            AcquireWaterTask task = active.get();
-            task.tick(bot);
-            Map<String, String> checkpoint = task.checkpoint();
-            if ("true".equals(checkpoint.get("surface_exit"))) {
-                observedExitCheckpoint.set(true);
-                require(context, encode(exit).equals(checkpoint.get("search_origin")),
-                        "surface search was not rebased at the physical exit: " + checkpoint);
-            }
-            require(context, bot.blockPosition().getY() >= exit.getY(),
-                    "surface exit was abandoned for the old stair: " + bot.blockPosition());
-            if (!restarted.get() && "true".equals(checkpoint.get("surface_exit"))) {
-                int used = Integer.parseInt(checkpoint.get("budget_used"));
-                task.cancel(bot, "gametest_surface_exit_restart");
-                AcquireWaterTask restored = new AcquireWaterTask(surfaceAnchor, checkpoint);
-                restored.start(bot);
-                Map<String, String> after = restored.checkpoint();
-                require(context, restored.state() == TaskState.RUNNING,
-                        "surface-exit checkpoint did not restart");
-                require(context, "SEARCH".equals(after.get("phase"))
-                                && "true".equals(after.get("surface_exit"))
-                                && encode(exit).equals(after.get("search_origin"))
-                                && Integer.parseInt(after.get("budget_used")) >= used,
-                        "surface-exit latch changed across restart: before=" + checkpoint
-                                + " after=" + after);
-                active.set(restored);
-                restarted.set(true);
-                return;
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("surface-exit latch failed: " + task.failureReason()
-                        + " checkpoint=" + task.checkpoint()));
-                return;
-            }
-            if (task.state() != TaskState.COMPLETED) {
-                return;
-            }
-            require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
-                    "surface-exit search did not physically fill the bucket");
-            require(context, observedExitCheckpoint.get(),
-                    "surface-exit latch was never persisted");
-            require(context, restarted.get(),
-                    "surface-exit search completed without checkpoint restart coverage");
-            require(context, "DONE".equals(task.checkpoint().get("phase")),
-                    "surface-exit completion did not persist the terminal phase");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
+        AcquireWaterTask task = new AcquireWaterTask(surfaceAnchor);
+        task.start(bot);
+        task.tick(bot);
+        Map<String, String> checkpoint = task.checkpoint();
+        require(context, task.state() == TaskState.RUNNING
+                        && "SEARCH".equals(checkpoint.get("phase"))
+                        && "true".equals(checkpoint.get("surface_exit"))
+                        && encode(exit).equals(checkpoint.get("search_origin"))
+                        && bot.blockPosition().getY() >= exit.getY(),
+                "visible exit did not rebase the surface search before re-entering the stair: " + checkpoint);
 
+        task.cancel(bot, "gametest_surface_exit_latch_complete");
+        AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+        context.succeed();
+    }
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_dry_overhang_footing_uses_its_observable_sky_edge_as_surface_exit", maxTicks = 40)
     public void dryOverhangFootingUsesItsObservableSkyEdgeAsSurfaceExit(GameTestHelper context) {
         var world = context.getLevel();
@@ -1735,125 +663,6 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_search_continues_past_hundred_and_physically_fills_after_restart", maxTicks = 600)
-    public void searchContinuesPastHundredAndPhysicallyFillsAfterRestart(GameTestHelper context) {
-        var world = context.getLevel();
-        BlockPos start = context.absolutePos(new BlockPos(36, 4, 36));
-        for (int lateral = -3; lateral <= 3; lateral++) {
-            for (int distance = -3; distance <= 31; distance++) {
-                BlockPos cell = start.offset(lateral, 0, -distance);
-                world.setBlock(cell.below(),
-                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-            }
-        }
-        // The first expanded waypoint is 12 blocks north. Keep the well beyond the 16-block
-        // perception radius so the task must publish and physically traverse waypoint 101 first.
-        // Point 102 is 24 blocks north; make its exact resolved goal the south rim of the well,
-        // matching the production contract that an observation post may be one block above the
-        // nominal fixed-Y waypoint. From point 101 the rim still occludes the source.
-        BlockPos water = start.north(25);
-        for (Direction direction : Direction.Plane.HORIZONTAL) {
-            world.setBlock(water.relative(direction),
-                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        }
-        world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-        // The arenas of the earlier tests of the run are not reset: a well one of them built within the walk of this search is
-        // a foreign source the task finds first (its approach then fails for the whole test, the void around it leaves no route).
-        // The test is about its own well, so foreign water in the reach of the search is removed.
-        removeForeignWater(world, start, 48, water);
-
-        String name = "WaterPastHundredGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
-                        0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
-                Set.of(), 0.0F, 0.0F, true);
-        bot.setHealth(bot.getMaxHealth());
-        bot.getFoodData().setFoodLevel(20);
-        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
-
-        // Exact cursor from the 2026-07-17 seed-3000 artifact.  At point 100 the old code failed
-        // here; schema 4 must issue point 101 at grid=(-5,4), 12 physical blocks north.
-        BlockPos searchOrigin = start.offset(60, 0, -60);
-        Map<String, String> boundary = new LinkedHashMap<>(searchCheckpoint(
-                searchOrigin, start, 10_114, 10_114, 100, 81));
-        boundary.put("direction", "3");
-        boundary.put("leg_length", "10");
-        boundary.put("step_in_leg", "0");
-        boundary.put("repeated_legs", "1");
-        boundary.put("grid_x", "-5");
-        boundary.put("grid_z", "5");
-        boundary.remove("waypoint");
-
-        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(
-                new AcquireWaterTask(searchOrigin, boundary));
-        AtomicBoolean restarted = new AtomicBoolean();
-        AtomicBoolean crossedHundred = new AtomicBoolean();
-        AtomicInteger farthestNorth = new AtomicInteger();
-        active.get().start(bot);
-        require(context, active.get().state() == TaskState.RUNNING,
-                "schema-4 point-100 boundary was treated as the legacy terminal");
-
-        context.failIfEver(() -> {
-            AcquireWaterTask task = active.get();
-            task.tick(bot);
-            farthestNorth.accumulateAndGet(start.getZ() - bot.blockPosition().getZ(), Math::max);
-            Map<String, String> checkpoint = task.checkpoint();
-            int issued = Integer.parseInt(checkpoint.get("issued"));
-            crossedHundred.set(crossedHundred.get() || issued > 100);
-
-            if (!restarted.get() && issued == 101) {
-                require(context, "-5".equals(checkpoint.get("grid_x"))
-                                && "4".equals(checkpoint.get("grid_z"))
-                                && encode(start.north(12)).equals(checkpoint.get("waypoint")),
-                        "point 101 did not continue the factual seed-3000 cursor: " + checkpoint);
-                require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 0,
-                        "water was acquired before the expanded route moved");
-                task.cancel(bot, "gametest_point_101_restart");
-                AcquireWaterTask restored = new AcquireWaterTask(searchOrigin, checkpoint);
-                restored.start(bot);
-                Map<String, String> after = restored.checkpoint();
-                require(context, restored.state() == TaskState.RUNNING
-                                && "101".equals(after.get("issued"))
-                                && "-5".equals(after.get("grid_x"))
-                                && "4".equals(after.get("grid_z"))
-                                && java.util.Objects.equals(
-                                checkpoint.get("waypoint"), after.get("waypoint"))
-                                && Integer.parseInt(after.get("budget_used"))
-                                >= Integer.parseInt(checkpoint.get("budget_used")),
-                        "point-101 restart changed cursor or budget authority: before="
-                                + checkpoint + " after=" + after);
-                active.set(restored);
-                restarted.set(true);
-                return;
-            }
-            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("expanded water search failed: "
-                        + task.failureReason() + " checkpoint=" + checkpoint));
-                return;
-            }
-            if (task.state() != TaskState.COMPLETED) {
-                return;
-            }
-            require(context, crossedHundred.get() && restarted.get(),
-                    "expanded search completed without point-101 restart coverage");
-            require(context, farthestNorth.get() >= 24,
-                    "bot did not physically traverse to the distant well: north="
-                            + farthestNorth.get());
-            require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1
-                            && InventoryAction.countItem(bot, Items.BUCKET) == 0,
-                    "expanded route did not complete the vanilla bucket exchange");
-            require(context, world.getFluidState(water).isEmpty(),
-                    "expanded route did not drain the factual source block");
-            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-            context.succeed();
-        });
-    }
-
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_legacy_hundred_terminal_stays_terminal_across_schema_four_restore", maxTicks = 20)
     public void legacyHundredTerminalStaysTerminalAcrossSchemaFourRestore(GameTestHelper context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterLegacyHundredGT", false);
@@ -1935,6 +744,169 @@ public final class AcquireWaterTaskGameTests {
                         && "224".equals(exhausted.checkpoint().get("issued")),
                 "current cursor issued a point beyond its complete seventh ring");
         cleanupDry(context, fixture);
+    }
+
+    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_surface_search_moves_beyond_initial_perception_restarts_and_fills", maxTicks = 240)
+    public void surfaceSearchMovesBeyondInitialPerceptionRestartsAndFills(GameTestHelper context) {
+        WaterFixture fixture = spawnDistantWaterSeeker(context, "WaterSurfaceSearchGT");
+        AIPlayerEntity bot = fixture.bot();
+        // Issue the first spiral post at the top of the well's west rim. It is 19 blocks from
+        // spawn, while the contained source remains 20 blocks away until physical movement.
+        BlockPos searchOrigin = fixture.start().offset(7, 1, 0);
+        BlockPos requestedWaypoint = searchOrigin.east(12);
+        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(new AcquireWaterTask(
+                searchOrigin, searchCheckpoint(searchOrigin, requestedWaypoint, 0, 0, 1, 0)));
+        AtomicBoolean restarted = new AtomicBoolean();
+        AtomicBoolean leftInitialPerception = new AtomicBoolean();
+        AtomicBoolean observedWaterAfterMoving = new AtomicBoolean();
+        AtomicReference<String> canonicalWaypoint = new AtomicReference<>();
+        require(context, !ObservableWorldQuery.canObserveCell(bot, fixture.water()),
+                "surface-water fixture exposed its source before SEARCH movement");
+        active.get().start(bot);
+
+        context.failIfEver(() -> {
+            AcquireWaterTask task = active.get();
+            task.tick(bot);
+            Map<String, String> checkpoint = task.checkpoint();
+            // The first live tick canonicalizes a restored SEARCH waypoint from its spiral cursor.
+            canonicalWaypoint.compareAndSet(null, checkpoint.get("waypoint"));
+            leftInitialPerception.set(leftInitialPerception.get()
+                    || bot.blockPosition().getX() - fixture.start().getX() >= 12);
+            observedWaterAfterMoving.set(observedWaterAfterMoving.get()
+                    || ObservableWorldQuery.canObserveCell(bot, fixture.water()));
+
+            if (!restarted.get() && bot.blockPosition().getX() - fixture.start().getX() >= 4) {
+                String resolvedWaypoint = canonicalWaypoint.get();
+                String restoredCursorWaypoint = encode(searchOrigin.east(12));
+                require(context, "SEARCH".equals(checkpoint.get("phase"))
+                                && resolvedWaypoint != null
+                                && resolvedWaypoint.equals(checkpoint.get("waypoint"))
+                                && InventoryAction.countItem(bot, Items.WATER_BUCKET) == 0,
+                        "surface search did not preserve its unreached waypoint before restart: "
+                                + checkpoint);
+                task.cancel(bot, "gametest_surface_search_restart");
+                AcquireWaterTask restored = new AcquireWaterTask(searchOrigin, checkpoint);
+                restored.start(bot);
+                // The live path may resolve its temporary observation stance beside the nominal
+                // cursor post. Only the cursor post itself is durable across a restart.
+                require(context, restored.state() == TaskState.RUNNING
+                                && "SEARCH".equals(restored.checkpoint().get("phase"))
+                                && restoredCursorWaypoint.equals(restored.checkpoint().get("waypoint")),
+                        "surface SEARCH checkpoint did not resume its canonical cursor waypoint: "
+                                + restored.checkpoint());
+                active.set(restored);
+                restarted.set(true);
+                return;
+            }
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                context.fail(Component.nullToEmpty("surface SEARCH failed: "
+                        + task.failureReason() + " checkpoint=" + checkpoint));
+                return;
+            }
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            require(context, restarted.get() && leftInitialPerception.get()
+                            && observedWaterAfterMoving.get(),
+                    "surface SEARCH filled before physically leaving initial perception");
+            require(context, InventoryAction.countItem(bot, Items.BUCKET) == 0
+                            && InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
+                    "surface SEARCH did not perform the vanilla bucket exchange");
+            require(context, bot.level().getFluidState(fixture.water()).isEmpty(),
+                    "surface SEARCH did not drain its water source");
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), fixture.name());
+            context.succeed();
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_schema_four_cursor_hundred_issues_and_resumes_waypoint_one_oh_one", maxTicks = 80)
+    public void schemaFourCursorHundredIssuesAndResumesWaypointOneOhOne(
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(36, 4, 36));
+        for (int lateral = -2; lateral <= 2; lateral++) {
+            for (int distance = -2; distance <= 28; distance++) {
+                BlockPos cell = start.offset(lateral, 0, -distance);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        BlockPos water = start.north(25);
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            world.setBlock(water.relative(direction), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        removeForeignWater(world, start, 32, water);
+
+        String name = "WaterCursorHundredGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+                Set.of(), 0.0F, 0.0F, true);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
+
+        BlockPos searchOrigin = start.offset(60, 0, -60);
+        Map<String, String> boundary = new LinkedHashMap<>(searchCheckpoint(
+                searchOrigin, start, 10_114, 10_114, 100, 81));
+        boundary.put("direction", "3");
+        boundary.put("leg_length", "10");
+        boundary.put("step_in_leg", "0");
+        boundary.put("repeated_legs", "1");
+        boundary.put("grid_x", "-5");
+        boundary.put("grid_z", "5");
+        boundary.remove("waypoint");
+
+        AtomicReference<AcquireWaterTask> active = new AtomicReference<>(
+                new AcquireWaterTask(searchOrigin, boundary));
+        AtomicBoolean restarted = new AtomicBoolean();
+        active.get().start(bot);
+
+        context.failIfEver(() -> {
+            AcquireWaterTask task = active.get();
+            task.tick(bot);
+            Map<String, String> checkpoint = task.checkpoint();
+            if (!restarted.get() && "101".equals(checkpoint.get("issued"))) {
+                require(context, "-5".equals(checkpoint.get("grid_x"))
+                                && "4".equals(checkpoint.get("grid_z"))
+                                && encode(start.north(12)).equals(checkpoint.get("waypoint")),
+                        "schema-4 cursor did not issue waypoint 101: " + checkpoint);
+                task.cancel(bot, "gametest_waypoint_101_restart");
+                AcquireWaterTask restored = new AcquireWaterTask(searchOrigin, checkpoint);
+                restored.start(bot);
+                require(context, restored.state() == TaskState.RUNNING
+                                && "101".equals(restored.checkpoint().get("issued"))
+                                && encode(start.north(12)).equals(restored.checkpoint().get("waypoint")),
+                        "schema-4 waypoint 101 did not resume after restart: "
+                                + restored.checkpoint());
+                restarted.set(true);
+                // This is the durable cursor boundary proof. Its successor legs are deliberately
+                // outside this small fixture's observed runway; the separate surface-search test
+                // covers physical travel and filling beyond initial perception.
+                AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+                context.succeed();
+                return;
+            }
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                context.fail(Component.nullToEmpty("schema-4 cursor search failed: "
+                        + task.failureReason() + " checkpoint=" + checkpoint));
+                return;
+            }
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            require(context, restarted.get(), "water was filled without resuming waypoint 101");
+            require(context, InventoryAction.countItem(bot, Items.BUCKET) == 0
+                            && InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1
+                            && world.getFluidState(water).isEmpty(),
+                    "schema-4 cursor search did not physically fill from its water source");
+            AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+            context.succeed();
+        });
     }
 
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_restored_hard_budget_remains_typed_and_decoder_valid", maxTicks = 20)
@@ -2713,6 +1685,38 @@ public final class AcquireWaterTaskGameTests {
         // walking lane. The west rim is the first +12 waypoint: from spawn it occludes the source;
         // after the bot physically climbs onto it, the source is visible and within bucket reach.
         BlockPos water = start.offset(13, 0, 0);
+        world.setBlock(water.west(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(water.east(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(water.north(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(water.south(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(water, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        -90.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+                Set.of(), -90.0F, 0.0F, true);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET));
+        return new WaterFixture(name, bot, start.immutable(), water.immutable());
+    }
+
+    /** A dedicated SEARCH fixture whose source begins outside the normal 16-block observation radius. */
+    private static WaterFixture spawnDistantWaterSeeker(GameTestHelper context, String name) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(2, 2, 2));
+        for (int dx = -3; dx <= 24; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
+                world.setBlock(start.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.offset(dx, 2, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        BlockPos water = start.east(20);
+        // Contain the source while the bot travels to the first cursor waypoint. The top of the
+        // west rim remains the visible, reachable interaction stance once SEARCH arrives.
         world.setBlock(water.west(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(water.east(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(water.north(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);

@@ -40,7 +40,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.entity.monster.ElderGuardian;
 import net.minecraft.world.entity.monster.Guardian;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -85,8 +84,8 @@ import net.minecraft.world.phys.Vec3;
  * (a hold of a few ticks): the bot normally sprints while hostiles are aggroed (RULES), so there is no pre-emptive hold. The brief
  * vanilla-slowed block ends as soon as the projectile threat ends and sprinting resumes.
  *
- * Never reacted to: thrown splash and lingering potions, experience bottles, snowballs, eggs, ender pearls, a warden's sonic boom,
- * Piercing arrows, evoker fangs, dragon fireballs and breath clouds, lightning, fire, lava and every other damage of
+ * Never reacted to: thrown splash and lingering potions, experience bottles, snowballs, eggs, ender pearls,
+ * Piercing arrows, evoker fangs, lightning, fire, lava and every other damage of
  * {@code #bypasses_shield}; a projectile from behind that nobody heard or saw.
  *
  * <h2>How (vanilla's own paths)</h2>
@@ -402,7 +401,7 @@ public final class ShieldGuard {
     /**
      * The local facts a task needs before it can claim the between-swings rhythm: the bot itself, not only its owner, has noticed a
      * live attacker in reach; the carried shield can block that attack's real vanilla damage source; and the task is not trying to
-     * stand against a threat its combat rules forbid (notably a warden or creeper).
+     * stand against a threat its combat rules forbid.
      */
     static boolean meleeShieldEligible(AIPlayerEntity bot, LivingEntity attacker) {
         if (!(bot.level() instanceof ServerLevel level) || attacker == null || !attacker.isAlive()
@@ -1029,20 +1028,18 @@ public final class ShieldGuard {
 
     /**
      * GuardianAttackGoal's complete damage for hand-priority lethality: its unavoidable indirect-magic opening (one, plus two on
-     * Hard and another two for an elder) followed by the guardian's normal public {@code mob_attack}. The shield only blocks the latter,
-     * but an eating/drawing decision must budget both rather than silently underestimating a hard/elder beam.
+     * Hard) followed by the guardian's normal public {@code mob_attack}. The shield only blocks the latter.
      */
     static float guardianBeamDamage(double attackDamage, boolean hard, boolean elder) {
         return (float) attackDamage + 1.0F + (hard ? 2.0F : 0.0F) + (elder ? 2.0F : 0.0F);
     }
 
     private static float guardianBeamDamage(ServerLevel level, Guardian guardian) {
-        return guardianBeamDamage(guardian.getAttributeValue(Attributes.ATTACK_DAMAGE), level.getDifficulty() == Difficulty.HARD,
-                guardian instanceof ElderGuardian);
+        return guardianBeamDamage(guardian.getAttributeValue(Attributes.ATTACK_DAMAGE), level.getDifficulty() == Difficulty.HARD, false);
     }
 
     /**
-     * The nearest noticed registered vanilla guardian (or elder guardian) whose beam is locked on the bot: the beam is in plain view
+     * The nearest noticed ordinary vanilla guardian whose beam is locked on the bot: the beam is in plain view
      * from its first tick (the synced attack target a client draws it to), so a player sees it charge and raises the shield. On the
      * server the beam's target is the guardian's target while the beam is on ({@code Guardian.getActiveAttackTarget}). A modded
      * {@link Guardian} subclass is unknown rather than assumed to share vanilla beam damage.
@@ -1068,7 +1065,7 @@ public final class ShieldGuard {
 
     /** Guardian beam formulae are vanilla-only: a compatible Java subclass is not evidence of compatible gameplay mechanics. */
     private static boolean isVanillaGuardian(Guardian guardian) {
-        return guardian.getType() == EntityType.GUARDIAN || guardian.getType() == EntityType.ELDER_GUARDIAN;
+        return guardian.getType() == EntityType.GUARDIAN;
     }
 
     /**

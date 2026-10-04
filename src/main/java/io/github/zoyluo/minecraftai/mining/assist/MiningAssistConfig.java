@@ -149,11 +149,6 @@ public final class MiningAssistConfig {
         }
     }
 
-    /** Safety vetoes. */
-    public record Safety(boolean deepDarkVeto) {
-        public static final Safety DEFAULTS = new Safety(true);
-    }
-
     /** R3 point-of-interest detection. */
     public record Poi(
             boolean enabled,
@@ -234,7 +229,6 @@ public final class MiningAssistConfig {
     private final Tick tick;
     private final Route route;
     private final Detour detour;
-    private final Safety safety;
     private final Poi poi;
     private final Advisor advisor;
     private final Edits edits;
@@ -250,7 +244,6 @@ public final class MiningAssistConfig {
             Tick tick,
             Route route,
             Detour detour,
-            Safety safety,
             Poi poi,
             Advisor advisor,
             Edits edits,
@@ -264,7 +257,6 @@ public final class MiningAssistConfig {
         this.tick = tick;
         this.route = route;
         this.detour = detour;
-        this.safety = safety;
         this.poi = poi;
         this.advisor = advisor;
         this.edits = edits;
@@ -338,7 +330,6 @@ public final class MiningAssistConfig {
         Tick tick = parseTick(root.child("tick"));
         Route route = parseRoute(root.child("route"));
         Detour detour = parseDetour(root.child("detour"));
-        Safety safety = parseSafety(root.child("safety"));
         Poi poi = parsePoi(root.child("poi"));
         Advisor advisor = parseAdvisor(root.child("advisor"));
         Edits edits = parseEdits(root.child("edits"));
@@ -346,7 +337,7 @@ public final class MiningAssistConfig {
 
         return new MiningAssistConfig(
                 mode, source, harnessOff, envDeterministic,
-                sense, tick, route, detour, safety, poi, advisor, edits, explore, warnings);
+                sense, tick, route, detour, poi, advisor, edits, explore, warnings);
     }
 
     private static Sense parseSense(Section section, AssistMode mode) {
@@ -389,10 +380,6 @@ public final class MiningAssistConfig {
                 section.integer("startHpMargin", defaults.startHpMargin(), 0, 20),
                 section.integer("lavaClearRadius", defaults.lavaClearRadius(), 1, 16),
                 section.integer("announceMinValue", defaults.announceMinValue(), 0, 1000));
-    }
-
-    private static Safety parseSafety(Section section) {
-        return new Safety(section.bool("deepDarkVeto", Safety.DEFAULTS.deepDarkVeto()));
     }
 
     private static Advisor parseAdvisor(Section section) {
@@ -661,10 +648,6 @@ public final class MiningAssistConfig {
         return detour;
     }
 
-    public Safety safety() {
-        return safety;
-    }
-
     public Poi poi() {
         return poi;
     }
@@ -728,7 +711,6 @@ public final class MiningAssistConfig {
                 && tick.equals(that.tick)
                 && route.equals(that.route)
                 && detour.equals(that.detour)
-                && safety.equals(that.safety)
                 && poi.equals(that.poi)
                 && advisor.equals(that.advisor)
                 && edits.equals(that.edits)
@@ -738,14 +720,14 @@ public final class MiningAssistConfig {
 
     @Override
     public int hashCode() {
-        return Objects.hash(mode, modeSource, harnessOff, envDeterministic, sense, tick, route, detour, safety,
+        return Objects.hash(mode, modeSource, harnessOff, envDeterministic, sense, tick, route, detour,
                 poi, advisor, edits, explore, warnings);
     }
 
     @Override
     public String toString() {
         return "MiningAssistConfig[mode=" + mode + " (" + modeSource + "), harnessOff=" + harnessOff
-                + ", " + sense + ", " + tick + ", " + route + ", " + detour + ", " + safety + ", " + poi
+                + ", " + sense + ", " + tick + ", " + route + ", " + detour + ", " + poi
                 + ", " + advisor + ", " + edits + ", " + explore + "]";
     }
 

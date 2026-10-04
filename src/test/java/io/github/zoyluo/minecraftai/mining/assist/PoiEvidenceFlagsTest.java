@@ -13,35 +13,6 @@ class PoiEvidenceFlagsTest {
     }
 
     @Test
-    void plainSculkAndVeinsAreSculkFamilyEvenThoughTheyAreNatural() {
-        assertTrue(PoiEvidenceFlags.has(flags("sculk"), PoiEvidenceFlags.SCULK_FAMILY));
-        assertTrue(PoiEvidenceFlags.has(flags("sculk_vein"), PoiEvidenceFlags.SCULK_FAMILY));
-        assertEquals(PoiBucket.NATURAL, PoiLexicon.classify("minecraft", "sculk", false, false));
-        assertEquals(PoiBucket.NATURAL, PoiLexicon.classify("minecraft", "sculk_vein", false, false));
-    }
-
-    @Test
-    void wardenTriggerBlocksCarryTheirOwnFlag() {
-        int shrieker = flags("sculk_shrieker");
-        assertTrue(PoiEvidenceFlags.has(shrieker, PoiEvidenceFlags.SCULK_SHRIEKER));
-        assertTrue(PoiEvidenceFlags.has(shrieker, PoiEvidenceFlags.SCULK_FAMILY));
-        assertFalse(PoiEvidenceFlags.has(shrieker, PoiEvidenceFlags.SCULK_CATALYST));
-
-        assertTrue(PoiEvidenceFlags.has(flags("sculk_catalyst"), PoiEvidenceFlags.SCULK_CATALYST));
-        int reinforced = flags("reinforced_deepslate");
-        assertTrue(PoiEvidenceFlags.has(reinforced, PoiEvidenceFlags.REINFORCED_DEEPSLATE));
-        assertFalse(PoiEvidenceFlags.has(reinforced, PoiEvidenceFlags.SCULK_FAMILY),
-                "reinforced deepslate is not sculk family");
-    }
-
-    @Test
-    void bothSensorKindsShareTheSensorFlag() {
-        assertTrue(PoiEvidenceFlags.has(flags("sculk_sensor"), PoiEvidenceFlags.SCULK_SENSOR));
-        assertTrue(PoiEvidenceFlags.has(flags("calibrated_sculk_sensor"), PoiEvidenceFlags.SCULK_SENSOR));
-        assertTrue(PoiEvidenceFlags.has(flags("calibrated_sculk_sensor"), PoiEvidenceFlags.SCULK_FAMILY));
-    }
-
-    @Test
     void labelerPresenceFlags() {
         assertTrue(PoiEvidenceFlags.has(flags("mossy_cobblestone"), PoiEvidenceFlags.MOSSY_STONE));
         assertFalse(PoiEvidenceFlags.has(flags("mossy_stone_bricks"), PoiEvidenceFlags.MOSSY_STONE));
@@ -69,10 +40,10 @@ class PoiEvidenceFlagsTest {
     @Test
     void everyHabitationConstantSurvivesPackingAndDoesNotDisturbTheFlagBits() {
         for (PoiSignals.Habitation habitation : PoiSignals.Habitation.values()) {
-            int packed = PoiEvidenceFlags.withHabitation(PoiEvidenceFlags.SCULK_FAMILY | PoiEvidenceFlags.VAULT,
+            int packed = PoiEvidenceFlags.withHabitation(PoiEvidenceFlags.BLACKSTONE | PoiEvidenceFlags.VAULT,
                     habitation);
             assertEquals(habitation, PoiEvidenceFlags.habitation(packed));
-            assertEquals(PoiEvidenceFlags.SCULK_FAMILY | PoiEvidenceFlags.VAULT, packed & PoiEvidenceFlags.FLAG_MASK);
+            assertEquals(PoiEvidenceFlags.BLACKSTONE | PoiEvidenceFlags.VAULT, packed & PoiEvidenceFlags.FLAG_MASK);
         }
         assertNull(PoiEvidenceFlags.habitation(PoiEvidenceFlags.withHabitation(
                 PoiEvidenceFlags.withHabitation(0, PoiSignals.Habitation.ANVIL), null)));

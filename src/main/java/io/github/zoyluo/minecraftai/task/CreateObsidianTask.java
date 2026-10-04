@@ -378,6 +378,17 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             }
             return;
         }
+        // A persisted four-way closure is already a factual terminal result. Report it before
+        // refusing the retired exploratory SEARCH phase so recovery keeps the specific reason
+        // without re-opening, mining, or moving through an unobserved direction. A live water
+        // recovery obligation above always takes precedence.
+        if (phase == Phase.SEARCH && searchCursor.blockedAllDirections()) {
+            miner.cancel(bot);
+            bot.getActionPack().stopAll();
+            fail("create_obsidian_search_enclosed face=" + searchCursor.face().toShortString()
+                    + " mask=" + searchCursor.blockedDirections());
+            return;
+        }
         if (phase == Phase.RETURN_TO_RIM && returnRim != null
                 && bot.blockPosition().equals(returnRim)) {
             enterScan(bot);
@@ -934,7 +945,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return;
         }
         miner.cancel(bot);
-        if (bot.getActionPack().isWalkToIdle()) {
+        if (bot.getActionPack().isWalkToIdle() && bot.getActionPack().isPathExecutorIdle()) {
             bot.getActionPack().startWalkTo(Vec3.atBottomCenterOf(next));
         }
     }
@@ -2590,7 +2601,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         // executor, which can actually step/jump between levels.
         if (bot.blockPosition().getY() == target.getY()
                 && blockDistance > 0.0D && blockDistance <= 2.25D) {
-            if (bot.getActionPack().isWalkToIdle()) {
+            if (bot.getActionPack().isWalkToIdle() && bot.getActionPack().isPathExecutorIdle()) {
                 bot.getActionPack().startWalkTo(Vec3.atBottomCenterOf(target));
             }
             return;

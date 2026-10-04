@@ -156,9 +156,9 @@ final class BaritoneNavigatorMappingTest {
         String corridors = method(fence, "private static void observeVisibleCorridors(");
         assertTrue(corridors.contains("if (from.getY() != to.getY())")
                         && corridors.contains("observeVisibleElevationColumns(bot, from, to, throughFluids, observed, tick)")
-                        && corridors.contains("if (throughFluids && to.getY() < from.getY())")
-                        && corridors.contains("observeVisibleWaterDescentColumn(bot, from, to, observed, tick)"),
-                "elevation and water descent evidence must be requested only for the matching observed route shape");
+                        && corridors.contains("if (to.getY() < from.getY())")
+                        && corridors.contains("observeVisibleDescentColumn(bot, from, to, throughFluids, observed, tick)"),
+                "elevation and descent evidence must be requested only for the matching observed route shape");
         assertTrue(corridors.contains("int halfWidth = corridorHalfWidth()")
                         && corridors.contains("strip <= halfWidth"),
                 "the ray-proven corridor must use the current capability-scoped lateral envelope");
@@ -184,13 +184,13 @@ final class BaritoneNavigatorMappingTest {
         assertTrue(endpoint.contains("isObservedClimbable(this, target)") && endpoint.contains("target.immutable()"),
                 "goal resolution must retain an observed climbable endpoint instead of snapping it to a dry neighbouring floor");
 
-        String descent = method(fence, "private static void observeVisibleWaterDescentColumn(");
+        String descent = method(fence, "private static void observeVisibleDescentColumn(");
         assertTrue(descent.contains("Integer.signum(dx)")
                         && descent.contains("Integer.signum(dz)")
-                        && descent.contains("true, observed, tick")
+                        && descent.contains("throughFluids, observed, tick")
                         && descent.contains("new BlockPos(drop.getX(), to.getY(), drop.getZ())")
                         && descent.contains("observeVisibleCorridors(bot"),
-                "a water-capable descent must prove the first directional drop column and its visible landing corridor through fluid-transparent rays");
+                "a descent must prove the first directional drop column and its visible landing corridor through perception-approved rays");
 
         String column = method(fence, "private static void observeVisibleColumn(");
         assertTrue(column.contains("feetY - radius") && column.contains("feetY + radius")

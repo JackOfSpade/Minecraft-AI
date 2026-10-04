@@ -35,11 +35,6 @@ public final class AssistRules {
         return namespace == null || namespace.isBlank() || VANILLA.equals(namespace.trim().toLowerCase(Locale.ROOT));
     }
 
-    /** The deep dark biome id ({@code minecraft:deep_dark}); the design's deep_dark_biome veto. */
-    public static boolean isDeepDarkBiome(String biomeId) {
-        return "minecraft:deep_dark".equals(normalize(biomeId));
-    }
-
     /**
      * The lush caves biome id. Logs and leaves are natural terrain only inside it (the lexicon's
      * {@code naturalTag} contract, design 6.2), otherwise they are unclassified building evidence.

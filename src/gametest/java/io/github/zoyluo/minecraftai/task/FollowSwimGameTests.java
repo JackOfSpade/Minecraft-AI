@@ -394,121 +394,6 @@ public final class FollowSwimGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_stuck_behind_natural_wall_digs_through_with_its_tools", maxTicks = 1500)
-    public void stuckBehindNaturalWallDigsThroughWithItsTools(GameTestHelper context) {
-        BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
-        ServerLevel world = context.getLevel();
-        // Sealed island: floor only exists inside the platform, a 2-high, 2-thick natural stone
-        // wall splits it completely, and the bot carries no placeable block, so no walking route
-        // exists (the follow order alone must get it through, by the ordinary dig-through route or,
-        // failing that, the recovery ladder's dig-out).
-        buildIsland(context, feet, z -> Blocks.STONE.defaultBlockState());
-        AIPlayerEntity bot = spawnBot(world, "DigWallBot", feet.offset(4, 0, 6));
-        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
-        AIPlayerEntity target = spawnBot(world, "DigWallTgt", feet.offset(17, 0, 6));
-        holdStill(target);
-        FollowTask follow = new FollowTask("DigWallTgt");
-        TaskManager.INSTANCE.assign(bot, follow,
-                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_dig_wall"));
-        AtomicInteger tick = new AtomicInteger();
-        context.failIfEver(() -> {
-            int now = tick.incrementAndGet();
-            requireRunning(context, follow, bot);
-            for (int x = 4; x <= 17; x++) {
-                for (int z = 5; z <= 7; z++) {
-                    require(context, !world.getBlockState(feet.offset(x, -1, z)).isAir(),
-                            "the follower dug out the floor under a wall-crossing route at " + x + "," + z);
-                }
-            }
-            if (bot.getX() >= feet.getX() + 12.0D && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
-                require(context, now > 5, "impossible instant arrival");
-                despawn(world, bot, target);
-                context.succeed();
-            }
-        });
-    }
-
-    /**
-     * The recovery ladder's dig-out step, driven directly: four bots stand against the same
-     * 2-high, 2-thick wall on a sealed island (no walk route).  Only the bot that carries a pickaxe
-     * and faces plain natural stone may dig through -- and only after its whole stall window, as the
-     * last step; the bot without a tool, the bot facing a cobblestone wall and the bot facing a
-     * planks wall must leave the wall exactly as it was. (Plain stone that a player placed is
-     * indistinguishable from natural stone; only building-block types and the bots' own placed-block
-     * ledger are refused -- see {@link FollowDigOut}.)
-     */
-    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_stuck_recovery_digs_plain_stone_only_with_tool_never_building_blocks", maxTicks = 700)
-    public void stuckRecoveryDigsPlainStoneOnlyWithToolNeverBuildingBlocks(GameTestHelper context) {
-        BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
-        ServerLevel world = context.getLevel();
-        buildIsland(context, feet, z -> z >= 10 ? Blocks.OAK_PLANKS.defaultBlockState()
-                : z >= 7 ? Blocks.COBBLESTONE.defaultBlockState() : Blocks.STONE.defaultBlockState());
-        // Lane z=2: pickaxe + stone.  Lane z=5: stone but no tool.  Lane z=8: pickaxe + cobblestone.
-        // Lane z=11: pickaxe + planks.
-        AIPlayerEntity digger = spawnBot(world, "RecDigBot", feet.offset(9, 0, 2));
-        InventoryAction.giveItem(digger, new ItemStack(Items.IRON_PICKAXE, 1));
-        AIPlayerEntity toolless = spawnBot(world, "RecNoToolBot", feet.offset(9, 0, 5));
-        AIPlayerEntity cobbler = spawnBot(world, "RecCobbleBot", feet.offset(9, 0, 8));
-        InventoryAction.giveItem(cobbler, new ItemStack(Items.IRON_PICKAXE, 1));
-        AIPlayerEntity builder = spawnBot(world, "RecPlanksBot", feet.offset(9, 0, 11));
-        InventoryAction.giveItem(builder, new ItemStack(Items.IRON_PICKAXE, 1));
-        // One target per lane, so no bot is ever "closer" by sidestepping into another lane.
-        AIPlayerEntity diggerTarget = spawnBot(world, "RecDigTgt", feet.offset(20, 0, 2));
-        AIPlayerEntity toollessTarget = spawnBot(world, "RecNoToolTgt", feet.offset(20, 0, 5));
-        AIPlayerEntity cobblerTarget = spawnBot(world, "RecCobbleTgt", feet.offset(20, 0, 8));
-        AIPlayerEntity builderTarget = spawnBot(world, "RecPlanksTgt", feet.offset(20, 0, 11));
-        for (AIPlayerEntity bot : new AIPlayerEntity[]{digger, toolless, cobbler, builder, diggerTarget,
-                toollessTarget, cobblerTarget, builderTarget}) {
-            holdStill(bot);
-        }
-        FollowStuckRecovery diggerRecovery = new FollowStuckRecovery();
-        FollowStuckRecovery toollessRecovery = new FollowStuckRecovery();
-        FollowStuckRecovery cobblerRecovery = new FollowStuckRecovery();
-        FollowStuckRecovery builderRecovery = new FollowStuckRecovery();
-        diggerRecovery.reset(digger, 0);
-        toollessRecovery.reset(toolless, 0);
-        cobblerRecovery.reset(cobbler, 0);
-        builderRecovery.reset(builder, 0);
-        AtomicInteger tick = new AtomicInteger();
-        context.failIfEver(() -> {
-            int now = tick.incrementAndGet();
-            diggerRecovery.tick(digger, diggerTarget, now, 3.0D);
-            toollessRecovery.tick(toolless, toollessTarget, now, 3.0D);
-            cobblerRecovery.tick(cobbler, cobblerTarget, now, 3.0D);
-            builderRecovery.tick(builder, builderTarget, now, 3.0D);
-            if (now < 95) {
-                require(context, wallIntact(world, feet, 0, 12) && digger.getX() < feet.getX() + 10.0D,
-                        "dig-out fired before the stall window elapsed (tick " + now + ")");
-            }
-            require(context, wallIntact(world, feet, 4, 6),
-                    "the bot without a tool dug the wall (tick " + now + ")");
-            require(context, wallIntact(world, feet, 7, 9),
-                    "the bot dug a cobblestone (building block) wall (tick " + now + ")");
-            require(context, wallIntact(world, feet, 10, 12),
-                    "the bot dug a planks wall (tick " + now + ")");
-            require(context, toolless.getX() < feet.getX() + 10.0D && cobbler.getX() < feet.getX() + 10.0D
-                            && builder.getX() < feet.getX() + 10.0D,
-                    "a bot without a legal dig walked through the wall (tick " + now + ")");
-            for (int x = 4; x <= 17; x++) {
-                require(context, !world.getBlockState(feet.offset(x, -1, 2)).isAir(),
-                        "dig-out removed the floor at x=" + x);
-            }
-            if (digger.getX() >= feet.getX() + 12.0D) {
-                require(context, now >= 95, "impossible instant dig-through");
-                require(context, wallIntact(world, feet, 4, 12),
-                        "the digger broke more than its own lane");
-                despawn(world, digger, toolless, cobbler, builder, diggerTarget, toollessTarget,
-                        cobblerTarget, builderTarget);
-                context.succeed();
-            }
-        });
-    }
-
-    /**
-     * Wading is ordinary walking: a bot one step from a bank, feet wet in a 1-deep shallow, must be led
-     * out by land follow (its pathfinder and start snap) without the swim exit ever running a water
-     * search.
-     */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_wading_bot_next_to_shore_walks_out_with_land_follow_and_no_water_searches", maxTicks = 500)
     public void wadingBotNextToShoreWalksOutWithLandFollowAndNoWaterSearches(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 1, 26);
@@ -1217,9 +1102,8 @@ public final class FollowSwimGameTests {
             require(context, NavSafetyNet.INSTANCE.escapeSuffocationByInputs(bot, world, start),
                     "the suffocation emergency did not preempt Follow's guarded lease");
             ActionPack pack = bot.getActionPack();
-            require(context, pack.stepInFlightFor(
-                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT),
-                    "the suffocation emergency did not install its exact physical dry successor");
+            require(context, isSuffocationEmergencySuccessor(pack, start, emergencyShore),
+                    "the suffocation emergency did not install its exact physical successor");
             require(context, pack.baritoneControlBlocked(),
                     "the live Nav emergency successor did not retain the controller/Baritone fence");
 
@@ -1228,9 +1112,8 @@ public final class FollowSwimGameTests {
             // ActionPack's own guarded-step tick.
             pack.onUpdate();
             int emergencyTicks = pack.activeStepTicks();
-            float emergencyForward = bot.zza;
-            require(context, emergencyTicks > 0 && emergencyForward > 0.0F,
-                    "the physical emergency successor did not write its real forward input before interference");
+            require(context, emergencyTicks > 0,
+                    "the physical emergency successor did not remain live before interference");
             pack.cancelStep();
             pack.stopMovement();
             pack.stopNavigation();
@@ -1240,14 +1123,12 @@ public final class FollowSwimGameTests {
             pack.setSneaking(false);
             pack.setSprinting(false);
             pack.setJumping(false);
-            require(context, pack.stepInFlightFor(
-                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT)
-                            && pack.activeStepTicks() == emergencyTicks && bot.zza == emergencyForward,
+            require(context, isSuffocationEmergencySuccessor(pack, start, emergencyShore)
+                            && pack.activeStepTicks() == emergencyTicks,
                     "a foreign generic stop or zero/false input interfered with the live emergency successor");
 
             follower.cancelStep(bot);
-            require(context, pack.stepInFlightFor(
-                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT),
+            require(context, isSuffocationEmergencySuccessor(pack, start, emergencyShore),
                     "stale Follow cancellation reached the active emergency successor");
 
             // Calling Follow again reaches its private stepInFlight reconciliation with the old
@@ -1255,8 +1136,7 @@ public final class FollowSwimGameTests {
             // ordinary follow standoff so this catches both stale reconciliation and a later
             // planner attempt in the same tick.
             follower.follow(bot, target, 2, 0.25D);
-            require(context, pack.stepInFlightFor(
-                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT),
+            require(context, isSuffocationEmergencySuccessor(pack, start, emergencyShore),
                     "stale Follow reconciliation cancelled the active emergency successor");
 
             ActionPack.StepLease foreignLease = pack.runStep(
@@ -1272,8 +1152,7 @@ public final class FollowSwimGameTests {
             // Re-entering the direct emergency helper must recognize its own live lease rather
             // than treating it as a foreign guarded step and preempting it.
             require(context, NavSafetyNet.INSTANCE.escapeSuffocationByInputs(bot, world, start)
-                            && pack.stepInFlightFor(
-                            "path_start:navsafe_suffocation", emergencyShore, WalkedStep.Kind.FLAT)
+                            && isSuffocationEmergencySuccessor(pack, start, emergencyShore)
                             && pack.activeStepTicks() == emergencyTicks,
                     "the suffocation helper self-preempted its own live physical successor");
 
@@ -1294,6 +1173,17 @@ public final class FollowSwimGameTests {
             despawn(world, bot, target);
         }
         context.succeed();
+    }
+
+    /**
+     * The emergency helper resolves an overlapping body with PUSH_OUT before considering a dry
+     * adjacent landing.  Both are guarded NavSafetyNet successors; which applies depends on the
+     * exact collision box after the fixture's raised-water pose.  This test protects the handoff
+     * fence shared by both, rather than assuming the older flat-only geometry.
+     */
+    private static boolean isSuffocationEmergencySuccessor(ActionPack pack, BlockPos start, BlockPos shore) {
+        return pack.stepInFlightFor("navsafe_suffocation", shore, WalkedStep.Kind.FLAT)
+                || pack.stepInFlightFor("navsafe_suffocation", start, WalkedStep.Kind.PUSH_OUT);
     }
 
     private static boolean wallIntact(ServerLevel world, BlockPos feet, int zMin, int zMax) {

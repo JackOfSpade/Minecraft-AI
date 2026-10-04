@@ -98,8 +98,8 @@ class FaceAimTest {
         assertTrue(source.contains("observeShapeFaces(bot, pos, range, true, "), "canObserveBlockWithin: outline fallback on");
         assertTrue(source.contains("observeShapeFaces(bot, pos, range, false, "), "canObserveColliderWithin: outline fallback off");
         assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, true);"));
-        assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, false);"));
-        assertTrue(source.contains("ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);"));
+        assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, false"));
+        assertTrue(source.contains("ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback)"));
     }
 
     @Test

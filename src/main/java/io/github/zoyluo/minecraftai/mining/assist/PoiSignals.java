@@ -24,10 +24,6 @@ import net.minecraft.core.BlockPos;
  *       {@code BotEdits} ledger) and of expired window entries. A position added twice, or under
  *       two buckets, is kept once under the first bucket. {@link PoiBucket#NATURAL} cells are
  *       ignored.</li>
- *   <li>The specific-block counts ({@link Builder#reinforcedDeepslate}, {@link Builder#sculkShrieker},
- *       {@link Builder#sculkCatalyst}, {@link Builder#sculkSensors}) exclude bot-placed blocks too. They
- *       are independent of the cell lists (plain {@code sculk} and {@code sculk_vein} are natural and
- *       never appear as cells, they are only counted in {@link Builder#sculkFamilyWithin12}).</li>
  *   <li>The {@link Habitation} flags and the labeler flags ({@link Builder#mossyStone} ...
  *       {@link Builder#blackstone}) also exclude bot-placed blocks, except {@code blackstone}, which is
  *       presence-only and may come from natural blocks. A bot-placed crafting table or furnace that
@@ -56,11 +52,6 @@ public final class PoiSignals {
 
     private final Map<PoiBucket, List<BlockPos>> cells;
     private final int totalCells;
-    private final int reinforcedDeepslate;
-    private final int sculkShrieker;
-    private final int sculkCatalyst;
-    private final int sculkSensors;
-    private final int sculkFamilyWithin12;
     private final Set<Habitation> habitation;
     private final boolean mossyStone;
     private final boolean vault;
@@ -69,7 +60,6 @@ public final class PoiSignals {
     private final boolean netherBricks;
     private final boolean blackstone;
     private final double entityScore;
-    private final boolean wardenVisible;
     private final boolean opennessValid;
     private final double opennessC;
     private final double perceptionRadius;
@@ -89,11 +79,6 @@ public final class PoiSignals {
         }
         this.cells = Collections.unmodifiableMap(frozen);
         this.totalCells = total;
-        this.reinforcedDeepslate = b.reinforcedDeepslate;
-        this.sculkShrieker = b.sculkShrieker;
-        this.sculkCatalyst = b.sculkCatalyst;
-        this.sculkSensors = b.sculkSensors;
-        this.sculkFamilyWithin12 = b.sculkFamilyWithin12;
         this.habitation = Collections.unmodifiableSet(b.habitation.isEmpty()
                 ? EnumSet.noneOf(Habitation.class) : EnumSet.copyOf(b.habitation));
         this.mossyStone = b.mossyStone;
@@ -103,7 +88,6 @@ public final class PoiSignals {
         this.netherBricks = b.netherBricks;
         this.blackstone = b.blackstone;
         this.entityScore = b.entityScore;
-        this.wardenVisible = b.wardenVisible;
         this.opennessValid = b.opennessValid;
         this.opennessC = b.opennessC;
         this.perceptionRadius = b.perceptionRadius;
@@ -141,28 +125,6 @@ public final class PoiSignals {
     /** Buckets that have at least one cell, weak ones included. */
     public Set<PoiBucket> presentBuckets() {
         return cells.isEmpty() ? Collections.emptySet() : Collections.unmodifiableSet(EnumSet.copyOf(cells.keySet()));
-    }
-
-    public int reinforcedDeepslateCount() {
-        return reinforcedDeepslate;
-    }
-
-    public int sculkShriekerCount() {
-        return sculkShrieker;
-    }
-
-    public int sculkCatalystCount() {
-        return sculkCatalyst;
-    }
-
-    /** {@code sculk_sensor} plus {@code calibrated_sculk_sensor}. */
-    public int sculkSensorCount() {
-        return sculkSensors;
-    }
-
-    /** Sculk-family cells (any sculk block, plain sculk and veins included) within 12 blocks. */
-    public int sculkFamilyWithin12() {
-        return sculkFamilyWithin12;
     }
 
     public Set<Habitation> habitation() {
@@ -206,10 +168,6 @@ public final class PoiSignals {
         return entityScore;
     }
 
-    public boolean wardenVisible() {
-        return wardenVisible;
-    }
-
     public boolean opennessValid() {
         return opennessValid;
     }
@@ -235,11 +193,6 @@ public final class PoiSignals {
     /** Mutable builder; not thread-safe, single use per snapshot. */
     public static final class Builder {
         private final Map<Long, PoiBucket> owner = new LinkedHashMap<>();
-        private int reinforcedDeepslate;
-        private int sculkShrieker;
-        private int sculkCatalyst;
-        private int sculkSensors;
-        private int sculkFamilyWithin12;
         private final Set<Habitation> habitation = EnumSet.noneOf(Habitation.class);
         private boolean mossyStone;
         private boolean vault;
@@ -248,7 +201,6 @@ public final class PoiSignals {
         private boolean netherBricks;
         private boolean blackstone;
         private double entityScore;
-        private boolean wardenVisible;
         private boolean opennessValid;
         private double opennessC;
         private double perceptionRadius = DEFAULT_PERCEPTION_RADIUS;
@@ -274,32 +226,6 @@ public final class PoiSignals {
             for (BlockPos pos : positions) {
                 cell(bucket, pos);
             }
-            return this;
-        }
-
-        public Builder reinforcedDeepslate(int count) {
-            this.reinforcedDeepslate = Math.max(0, count);
-            return this;
-        }
-
-        public Builder sculkShrieker(int count) {
-            this.sculkShrieker = Math.max(0, count);
-            return this;
-        }
-
-        public Builder sculkCatalyst(int count) {
-            this.sculkCatalyst = Math.max(0, count);
-            return this;
-        }
-
-        /** Combined count of {@code sculk_sensor} and {@code calibrated_sculk_sensor}. */
-        public Builder sculkSensors(int count) {
-            this.sculkSensors = Math.max(0, count);
-            return this;
-        }
-
-        public Builder sculkFamilyWithin12(int count) {
-            this.sculkFamilyWithin12 = Math.max(0, count);
             return this;
         }
 
@@ -341,11 +267,6 @@ public final class PoiSignals {
         /** Entity score E; NaN and negatives become 0. The scorer caps it at 0.6. */
         public Builder entityScore(double value) {
             this.entityScore = Double.isNaN(value) ? 0.0D : Math.max(0.0D, value);
-            return this;
-        }
-
-        public Builder wardenVisible(boolean value) {
-            this.wardenVisible = value;
             return this;
         }
 

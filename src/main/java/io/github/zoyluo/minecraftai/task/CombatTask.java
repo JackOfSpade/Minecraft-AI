@@ -16,7 +16,6 @@ import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import java.util.Comparator;
 import java.util.List;
 import java.util.OptionalInt;
 import net.minecraft.core.BlockPos;
@@ -26,9 +25,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
 
 public final class CombatTask extends AbstractTask {
     private enum Phase {
@@ -65,8 +62,6 @@ public final class CombatTask extends AbstractTask {
     private static final int RANGED_SUPPRESS_TICKS = 200;
     /** Peek cycles in a row whose shot a friend on the line of fire (or the lack of a clear line) held back, before the ranged weapon is given up. */
     private static final int FRIENDLY_PEEK_LIMIT = 3;
-    /** A warden's flight must clear its sonic boom range, not the generic six-block retreat step. */
-    private static final int WARDEN_RETREAT_STEP_DISTANCE = CombatCore.WARDEN_ESCAPE_DISTANCE;
     /** "there are other ranged enemies" -- at least one besides whichever one is currently targeted. */
     private static final int PEEKABOO_MIN_RANGED_THREATS = 2;
     private static final double PEEKABOO_SCAN_RANGE = 24.0D;
@@ -353,9 +348,9 @@ public final class CombatTask extends AbstractTask {
                 && ShieldGuard.meleeShieldEligible(bot, target);
     }
 
-    /** A fighting retreat preserves its sprint; any incidental counterstrike is not a stand-and-block melee exchange. */
+    /** A retreat with an admitted movement leg preserves its sprint and must not be slowed by a pre-emptive shield hold. */
     boolean retreating() {
-        return state == TaskState.RUNNING && phase == Phase.RETREAT;
+        return state == TaskState.RUNNING && phase == Phase.RETREAT && retreatDestination != null;
     }
 
     /** A noticed hostile shooter that visibly has its ranged weapon up at the bot: see {@link ShieldGuard#drawingShooterAt}. */
@@ -381,6 +376,11 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         if (!defensiveEngagementAllowed(bot)) {
+            return;
+        }
+        if (CombatCore.isBossThreat(target)) {
+            bot.getActionPack().stopAll();
+            fail("boss_combat_refused");
             return;
         }
         if (CombatCore.isMeleeForbiddenThreat(target)) {
@@ -725,8 +725,21 @@ public final class CombatTask extends AbstractTask {
         if (retreatDestination == null || bot.getActionPack().isPathExecutorIdle()) {
             retreatDestination = EvadeTask.admitBestSurfaceEscapePath(
                     bot, threat, threat.blockPosition(),
-                    threat instanceof Warden ? WARDEN_RETREAT_STEP_DISTANCE : RETREAT_STEP_DISTANCE);
+                    RETREAT_STEP_DISTANCE);
             if (retreatDestination == null) {
+                // A factual contact hostile can leave no walkable way to increase distance.
+                // Keep this safety owner alive so the ready-tick counterstrike above can clear
+                // the contact; failing here would immediately hand the bot back to generic
+                // healing while the hostile is still beside it.
+                if (!meleeForbidden && distance <= CombatCore.ATTACK_RANGE) {
+                    return;
+                }
+                // A ranged attacker with clear sight can still damage a bot that settles to
+                // eat. Keep the defensive owner in RETREAT while that sight line remains even
+                // when this constrained space offers no factual escape hop.
+                if (CombatCore.isRangedThreat(threat) && CombatCore.hasLineOfSight(bot, threat)) {
+                    return;
+                }
                 fail("combat_no_valid_retreat_route");
             }
         }

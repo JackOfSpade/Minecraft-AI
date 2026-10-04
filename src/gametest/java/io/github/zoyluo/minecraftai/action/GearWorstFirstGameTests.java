@@ -18,8 +18,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.monster.Ravager;
 import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.monster.Ravager;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -480,7 +480,7 @@ public final class GearWorstFirstGameTests {
                 new ItemStack(Items.IRON_SWORD));
         OptionalInt slot = EquipAction.equipWeaponForContext(bot, ravager);
         require(context, slot.isPresent() && bot.getMainHandItem().is(Items.DIAMOND_SWORD),
-                "the best sword (diamond) against a 100 health ravager was expected, got " + bot.getMainHandItem().getItem());
+                "the best sword (diamond) against a ravager was expected, got " + bot.getMainHandItem().getItem());
         ravager.discard();
         finish(context, bot);
     }
@@ -517,25 +517,11 @@ public final class GearWorstFirstGameTests {
     @GameTest(environment = ENV + "explicit_attack_target_gets_the_best_weapon", maxTicks = 40)
     public void explicitAttackTargetGetsTheBestWeapon(GameTestHelper context) {
         AIPlayerEntity bot = spawnPlatform(context, "GearExplicitTargetGT");
-        Ravager ravager = EntityType.RAVAGER.create(context.getLevel(), EntitySpawnReason.COMMAND);
-        require(context, ravager != null, "no ravager");
-        ravager.setNoAi(true);
-        ravager.setPersistenceRequired();
-        BlockPos at = bot.blockPosition().south(3);
-        ravager.snapTo(at.getX() + 0.5D, at.getY(), at.getZ() + 0.5D, 0.0F, 0.0F);
-        context.getLevel().addFreshEntity(ravager);
-        require(context, AggroSense.snapshot(bot).aggressorCount() == 0, "the ravager already counts as an aggressor: the fixture proves nothing");
+        Zombie zombie = spawnZombie(context, bot, 3);
+        zombie.setAggressive(false);
+        require(context, AggroSense.snapshot(bot).aggressorCount() == 0, "the zombie already counts as an aggressor: the fixture proves nothing");
         fill(bot, new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.STONE_SWORD), new ItemStack(Items.DIAMOND_SWORD),
                 new ItemStack(Items.IRON_SWORD));
-        CombatCore.ensureMeleeWeapon(bot, ravager);
-        require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
-                "against an unflagged ravager the bot picked " + bot.getMainHandItem().getItem() + " instead of the diamond sword");
-        ravager.discard();
-        // An explicit zombie target gets the best sword as well (no per-target downgrade any more).
-        Zombie zombie = spawnZombie(context, bot, 2);
-        zombie.setAggressive(false);
-        fill(bot, new ItemStack(Items.IRON_SWORD), new ItemStack(Items.WOODEN_SWORD), new ItemStack(Items.DIAMOND_SWORD),
-                new ItemStack(Items.STONE_SWORD));
         CombatCore.ensureMeleeWeapon(bot, zombie);
         require(context, bot.getMainHandItem().is(Items.DIAMOND_SWORD),
                 "against an unflagged zombie the bot picked " + bot.getMainHandItem().getItem() + " instead of the diamond sword");

@@ -126,7 +126,7 @@ public final class NeighborEnumerator {
         return result;
     }
 
-    // NAV-3: same-height diagonal movement. Only allowed when the target cell is standable and both orthogonally adjacent cells are "passable" (no cutting through a wall corner).
+    // NAV-3: same-height diagonal movement. Only allowed when the target cell is standable and both orthogonally adjacent columns are dry and passable (no cutting through a wall corner or water).
     private static void addDiagonals(BlockPos current, ServerLevel world, List<NeighborCandidate> result) {
         Direction[][] pairs = {
                 {Direction.NORTH, Direction.EAST},
@@ -178,7 +178,9 @@ public final class NeighborEnumerator {
     }
 
     private static boolean passableColumn(ServerLevel world, BlockPos feet) {
-        return collisionEmpty(world, feet) && collisionEmpty(world, feet.above());
+        return collisionEmpty(world, feet) && collisionEmpty(world, feet.above())
+                && world.getBlockState(feet).getFluidState().isEmpty()
+                && world.getBlockState(feet.above()).getFluidState().isEmpty();
     }
 
     private static boolean canJumpFrom(ServerLevel world, BlockPos current) {
@@ -200,10 +202,7 @@ public final class NeighborEnumerator {
     }
 
     private static NeighborCandidate findDrop(ServerLevel world, BlockPos target) {
-        if (!collisionEmpty(world, target)) {
-            return null;
-        }
-        if (!collisionEmpty(world, target.above())) {
+        if (!passableColumn(world, target)) {
             return null;
         }
         int maxFall = MinecraftAiConfig.get().nav().maxSafeFall();
@@ -212,7 +211,7 @@ public final class NeighborEnumerator {
             if (Standability.isStandable(world, landing)) {
                 return new NeighborCandidate(landing, MoveType.DROP_DOWN, fall);
             }
-            if (!collisionEmpty(world, landing)) {
+            if (!passableColumn(world, landing)) {
                 return null;
             }
         }

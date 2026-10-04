@@ -33,7 +33,6 @@ class ActionPackAdmissionSourceContractTest {
 
     private static final List<String> MIGRATED_RUN_STEP_SOURCES = List.of(
             "action/InCellWalk.java",
-            "task/AcquireWaterTask.java",
             "task/CreateObsidianTask.java",
             "task/DescendToYTask.java",
             "task/DigDownTask.java",
@@ -119,14 +118,6 @@ class ActionPackAdmissionSourceContractTest {
         assertInOrder(methodBody(createObsidian, "private boolean awaitPickupStep("),
                 "stepInFlightFor(lease)", "stepResultFor(lease)", "releaseStepLease(lease)");
 
-        String acquireWater = source("task/AcquireWaterTask.java");
-        assertInOrder(methodBody(acquireWater, "private boolean settleOnStandableCell("),
-                "ActionPack.StepLease lease = bot.getActionPack().runStep(step)",
-                "if (lease == null)",
-                "ascentSettle = step",
-                "ascentSettleLease = lease");
-        assertExactLeaseReconciliation(acquireWater, "AcquireWaterTask");
-
         String shelter = source("task/EmergencyShelterTask.java");
         assertInOrder(methodBody(shelter, "private boolean startMotion("),
                 "EgressAdmission admission = kind == Motion.EGRESS",
@@ -154,13 +145,6 @@ class ActionPackAdmissionSourceContractTest {
         String descend = source("task/DescendToYTask.java");
         String edgeTick = methodBody(descend, "private void tickEdgePlacement(");
         assertInOrder(edgeTick,
-                "if (!current.step.ended())",
-                "if (!pack.stepIdle())",
-                "edge = null;",
-                "return;",
-                "WalkedStep.Result result = current.step.outcome()");
-        String acquireEdgeTick = methodBody(acquireWater, "private void tickEdgePlacement(");
-        assertInOrder(acquireEdgeTick,
                 "if (!current.step.ended())",
                 "if (!pack.stepIdle())",
                 "edge = null;",

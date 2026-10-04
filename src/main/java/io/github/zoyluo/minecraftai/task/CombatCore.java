@@ -29,6 +29,7 @@ import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.entity.monster.ElderGuardian;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Ghast;
 import net.minecraft.world.entity.monster.MagmaCube;
@@ -40,7 +41,6 @@ import net.minecraft.world.entity.monster.creaking.Creaking;
 import net.minecraft.world.entity.monster.piglin.Piglin;
 import net.minecraft.world.entity.monster.piglin.PiglinAi;
 import net.minecraft.world.entity.monster.spider.Spider;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -59,12 +59,6 @@ public final class CombatCore {
     /** Creepers can erase a zero-death mission before ordinary melee pressure is re-entered. */
     private static final double CREEPER_PRESSURE_RANGE = 16.0D;
     private static final double RANGED_HOSTILE_PRESSURE_RANGE = 20.0D;
-    /** Vanilla Warden sonic boom: horizontal reach (SonicBoom behaviour closerThan(15, 20)). */
-    public static final double WARDEN_SONIC_BOOM_RANGE = 15.0D;
-    /** A warden remains pressure a little beyond its boom range, with or without line of sight. */
-    private static final double WARDEN_PRESSURE_RANGE = WARDEN_SONIC_BOOM_RANGE + 2.0D;
-    /** A flight from a warden must end outside its boom range, not merely at the generic escape distance. */
-    public static final int WARDEN_ESCAPE_DISTANCE = (int) WARDEN_SONIC_BOOM_RANGE + 5;
     /** How long a mob that hurt the bot (or its owner) stays a known aggressor: 10 seconds. */
     private static final int HURT_MEMORY_TICKS = 200;
 
@@ -141,14 +135,10 @@ public final class CombatCore {
 
     /**
      * How far from {@code entity} a heal/settle pause is safe: the ordinary contact margin, the
-     * explosive margin for creepers (vanilla ignition backs off beyond seven blocks) and the sonic
-     * boom range for a warden.
+     * explosive margin for threats that the ordinary combat loop may not engage.
      */
     static double safeDistanceFrom(LivingEntity entity, double contactSafeDistance,
                                    double explosiveSafeDistance) {
-        if (entity instanceof Warden) {
-            return WARDEN_PRESSURE_RANGE;
-        }
         return isMeleeForbiddenThreat(entity) ? explosiveSafeDistance : contactSafeDistance;
     }
 
@@ -206,11 +196,6 @@ public final class CombatCore {
                 && distanceSquared <= CREEPER_PRESSURE_RANGE * CREEPER_PRESSURE_RANGE) {
             return true;
         }
-        if (entity instanceof Warden
-                && distanceSquared <= WARDEN_PRESSURE_RANGE * WARDEN_PRESSURE_RANGE) {
-            // A sonic boom needs no melee contact and ignores armour: hold the whole boom range.
-            return true;
-        }
         return isLongRangeDanger(entity)
                 && distanceSquared
                 <= RANGED_HOSTILE_PRESSURE_RANGE * RANGED_HOSTILE_PRESSURE_RANGE
@@ -218,25 +203,30 @@ public final class CombatCore {
     }
 
     /**
-     * Shared combat policy for mobs that need a dedicated tactic instead of generic melee.
+     * Shared combat policy for mobs that must not enter the generic melee loop.
      * Creepers require explosive spacing; Endermen require a low ceiling/water/leg trap strategy
      * that the ordinary approach/strike loop does not own.  Until those tactics exist, survival
      * safety must create distance rather than turn an interrupted mining mission into a duel.
      */
     static boolean isMeleeForbiddenThreat(LivingEntity entity) {
-        // Never melee: a Warden (30 damage per hit, and a sonic boom that ignores armour), the
-        // Wither and Ender Dragon (bosses; the End is out of scope for melee), ghasts and shulkers
+        // Never melee: bosses, ghasts and shulkers
         // (out of reach or evade-only until they have their own tactic), and a heart-bound Creaking,
         // which cannot be damaged by the bot at all.
         // isHeartBound() only removes an attack option, so it can never hand the bot an advantage.
         return entity instanceof Creeper
                 || entity instanceof EnderMan
-                || entity instanceof Warden
-                || entity instanceof WitherBoss
-                || entity instanceof EnderDragon
+                || isBossThreat(entity)
                 || entity instanceof Ghast
                 || entity instanceof Shulker
                 || entity instanceof Creaking creaking && creaking.isHeartBound();
+    }
+
+    /** Boss sightings remain hostile threats, but combat never takes ownership of them. */
+    static boolean isBossThreat(LivingEntity entity) {
+        return entity instanceof WitherBoss
+                || entity instanceof EnderDragon
+                || entity instanceof ElderGuardian
+                || entity.getType() == EntityType.WARDEN;
     }
 
     /** Owner or another bot: never a target of any strike or shot. */
@@ -269,6 +259,11 @@ public final class CombatCore {
         // A foreign bot (a PvP BOT inhabitant) that hit, or visibly took aim at, the owner or a Minecraft-AI bot is an enemy while the
         // bot or its owner can see it (HostileBotLedger); it is friendly to every strike check until then.
         if (entity instanceof ServerPlayer foreign && HostileBotLedger.isVisibleAggressor(bot, foreign)) {
+            return true;
+        }
+        // Bosses always enter the safety threat flow once seen. Their ordinary Evade response
+        // must not depend on whether a particular vanilla boss class implements Enemy or Monster.
+        if (isBossThreat(entity)) {
             return true;
         }
         if (hasHurtBotOrOwner(bot, entity)) {

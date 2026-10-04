@@ -67,7 +67,7 @@ class PoiBandLogGateTest {
         assertEquals(0, gate.consider(PoiScorer.Band.NONE, true, 10), "the world reloaded: the old tick means nothing");
         gate.reset();
         assertEquals(PoiScorer.Band.NONE, gate.lastLoggedBand());
-        assertEquals(0, gate.consider(PoiScorer.Band.MANDATORY, true, 11));
+        assertEquals(0, gate.consider(PoiScorer.Band.STRUCTURE_CERTAIN, true, 11));
     }
 
     @Test

@@ -36,7 +36,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
@@ -52,7 +51,7 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
 
 /**
  * Real-Minecraft GameTests for the P2 (R3 deterministic POI) stop/notify flow (mining-assist design 6.1-6.5,
- * P2 R3 contract section 4): the actual {@code PoiDetector}/{@code PoiRegistry}/{@code MandatoryLatch}/
+ * P2 R3 contract section 4): the actual {@code PoiDetector}/{@code PoiRegistry}/
  * {@code PoiDecisionPolicy}/{@code PoiNotice}/{@code coordination.PoiCoordinator} running a real server, real
  * blocks and entities and real task/pause plumbing -- never a scripted fake of the classes under test. In the
  * style of the sibling files in this package ({@code OreDigOpportunisticGameTests},
@@ -61,22 +60,21 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
  *
  * <h2>Two harness idioms in this file, both driving real production code</h2>
  * <ul>
- *   <li><b>Organic sensing</b> ({@link #mineshaftPaletteTriggersCertainStopAndNotify},
- *       {@link #wardenRiskAlwaysStops}, {@link #playerBaseDowngradesToConsultNotStop}): real blocks/entities are
+ *   <li><b>Organic sensing</b> ({@link #mineshaftPaletteTriggersCertainStopAndNotify}, {@link #playerBaseDowngradesToConsultNotStop}): real blocks/entities are
  *       placed, a real bot is given a real (frozen, matching {@code MiningAssistSenseGameTests.freeze}) mission
  *       task, and the test waits for {@code MiningAssistCoordinator.sense()} to run the real
  *       {@code PoiDetector.evaluate} and dispatch to the real {@code PoiCoordinator.onCandidate} on its own
  *       schedule -- exactly the path a live bot uses.</li>
- *   <li><b>Direct dispatch</b> (the remaining nine tests): a real bot with a real active task (an actual
+ *   <li><b>Direct dispatch</b> (the remaining tests): a real bot with a real active task (an actual
  *       {@code OreDigTask}/{@code DigDownTask}/frozen {@code MineTask} assigned through {@code TaskManager}) is
  *       handed a hand-built {@code PoiDetector.Result} via one direct call to the real, production
  *       {@code PoiCoordinator.INSTANCE.onCandidate(...)} -- the exact call {@code sense()} itself makes after a
  *       real {@code PoiDetector.evaluate()}. This substitutes only the sensor's evidence-gathering stage (whose
  *       classification is already proven end-to-end by the three organic tests above and exhaustively by
  *       {@code PoiScorerTest}/{@code PoiDetectorTest}); every other class in the chain -- {@code PoiCoordinator},
- *       {@code PoiRegistry}, {@code MandatoryLatch}, {@code MissionAssistLedger}, {@code IntentController},
+ *       {@code PoiRegistry}, {@code MissionAssistLedger}, {@code IntentController},
  *       {@code TaskManager}, {@code DigDownTask} -- runs unmodified, real, and observably. This trade-off is
- *       deliberate: these nine tests are about coordinator/registry/latch/pause-stack/task-notice-variant
+ *       deliberate: these tests are about coordinator/registry/pause-stack/task-notice-variant
  *       <i>mechanics</i>, not about proving the detector can classify a mineshaft from raycast evidence (that is
  *       what the organic tests and {@code PoiScorerTest} already prove), and pinning a bot's exact geometry
  *       relative to hand-placed evidence while it is simultaneously digging (a real {@code DigDownTask} moves
@@ -94,8 +92,8 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
  * inventing new capture plumbing (out of scope for writing test bodies against the existing harness), every
  * test below verifies the literal notice <em>text</em> is {@code PoiNoticeTest}'s job (it already covers all
  * four templates byte-for-byte) and verifies here only what a real server actually leaves observable: the real
- * pause ({@code TaskManager.isUserPaused}/{@code peekPaused}), the real dedupe/latch state
- * ({@code PoiRegistry}/{@code MandatoryLatch}), and the real structured log line
+ * pause ({@code TaskManager.isUserPaused}/{@code peekPaused}), the real dedupe state
+ * ({@code PoiRegistry}), and the real structured log line
  * ({@code BotLog.task(bot, "poi_stop"/"poi_fyi"/"poi_case_closed"/"poi_restart_rehydrated", ...)}, read back the
  * same way the sibling files' own {@code botLog}/event-scan helpers already do). Where the contract's test list
  * names an authorized-vs-broadcast recipient split, this file instead exercises the real
@@ -105,13 +103,6 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
  */
 public final class OreDigPoiGameTests {
 
-    /** See {@link #wardenRiskAlwaysStops}'s javadoc: outside the combat layer's 17-block warden pressure range
-     * ({@code CombatCore.WARDEN_SONIC_BOOM_RANGE} + 2), so it needs a perception radius above the default 16. */
-    private static final int WARDEN_STANDOFF_BLOCKS = 19;
-    /** The perception radius the far-warden fixture runs with: the warden must be inside the POI sensor's radius. */
-    private static final int WARDEN_TEST_PERCEPTION_RADIUS = 22;
-    /** A warden inside {@code CombatCore}'s warden pressure range: real hostile pressure, so the bot evades. */
-    private static final int WARDEN_PRESSURE_STANDOFF_BLOCKS = 9;
 
     // ---------------------------------------------------------------------------------------------
     // Deterministic stop / notify (organic sensing)
@@ -194,167 +185,8 @@ public final class OreDigPoiGameTests {
     }
 
     /**
-     * A real, visible {@code Warden} (AI disabled so it cannot itself hurt the bot mid-test, matching this
-     * package's own {@code setNoAi(true)} convention for fixture hostiles) reaches
-     * {@code PoiScorer.Band.MANDATORY} and stops the bot regardless of two things placed to try to prevent it:
-     * a full mineshaft-certain palette in the very same evidence window (proving MANDATORY is decided before,
-     * and independent of, the certain/habitation path in {@code PoiScorer.evaluate}), and a pre-seeded
-     * {@code PoiRegistry} STOPPED entry at the warden's own centroid (proving {@code PoiCoordinator.onCandidate}
-     * checks {@code band == MANDATORY} before it ever calls {@code PoiRegistry.suppressed}, exactly as design
-     * 6.4's "a DECLINED or STOPPED registry entry never suppresses a mandatory candidate" requires).
-     *
-     * <p>The warden sits {@value #WARDEN_STANDOFF_BLOCKS} blocks from the bot: beyond the combat layer's warden
-     * pressure range ({@code CombatCore.WARDEN_SONIC_BOOM_RANGE} 15 + 2 = 17 blocks) but inside the POI sensor's
-     * radius, which the fixture raises to {@value #WARDEN_TEST_PERCEPTION_RADIUS} for that (the default perception
-     * radius, 16, is smaller than the pressure range, so the two only overlap with a larger radius). A warden
-     * inside the pressure range is real hostile pressure to the bot's separate danger-response system regardless
-     * of AI being disabled: {@code DangerWatcher} evades and pauses the mission before a MANDATORY evaluation
-     * runs. That is the intended behaviour there and is pinned by
-     * {@link #wardenInsidePressureRangeEvadesInsteadOfPoiStop}; this test pins the other side: a warden the bot
-     * can see but is not under pressure from is still a mandatory stop.</p>
-     */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_risk_always_stops", maxTicks = 900)
-    public void wardenRiskAlwaysStops(GameTestHelper context) {
-        Harness h = new Harness(context);
-        h.setPerceptionRadius(WARDEN_TEST_PERCEPTION_RADIUS);
-        Room room = h.newRoom(20, -9, WARDEN_STANDOFF_BLOCKS + 1, -1, 1, 3);
-        for (int x : new int[] {-8, -6, -4, -2, 2, 4, 6, 8}) {
-            room.set(x, 0, 0, Blocks.RAIL);
-        }
-        for (int x : new int[] {-7, -3, 3, 7}) {
-            room.set(x, 0, -1, Blocks.OAK_FENCE);
-            room.set(x, 1, -1, Blocks.OAK_FENCE);
-            room.set(x, 0, 1, Blocks.OAK_FENCE);
-            room.set(x, 1, 1, Blocks.OAK_FENCE);
-            room.set(x, 2, -1, Blocks.OAK_PLANKS);
-            // No z=0 (dead-centre) plank at x=7: round-1 real-server debugging (BotLog diagnostics: a raw
-            // ObservableWorldQuery/Entity#hasLineOfSight raycast between the bot's and warden's eyes) found this exact
-            // cell was the actual cause of a real failure here, not a scorer/coordinator bug. The Warden's eye
-            // height (~2.47) is much higher than the bot's (~1.62), so the straight sightline from the bot's
-            // eye to the warden WARDEN_STANDOFF_BLOCKS away slopes upward and, at x=7 (58% of the way across),
-            // sits inside this cell's y=[2,3) box -- it blocks line of sight to the warden even though the
-            // room is fully open at the bot's own eye height. Every other cell of this palette (including the
-            // z=-1/z=1 planks at x=7 and the z=0 planks at the other three x's) stays, and WOOD_BUILD's
-            // strongMinCells cap (8) means dropping one of 12 plank cells changes nothing about the
-            // STRUCTURE_CERTAIN score this fixture is built to produce.
-            room.set(x, 2, 1, Blocks.OAK_PLANKS);
-            if (x != 7) {
-                room.set(x, 2, 0, Blocks.OAK_PLANKS);
-            }
-        }
-        room.set(-5, 2, 0, Blocks.COBWEB);
-        room.set(5, 2, 0, Blocks.COBWEB);
-
-        AIPlayerEntity bot = h.spawn("PoiWardenGT", room, 0, 0);
-        h.enablePoi(bot, null);
-        UUID id = bot.getUUID();
-
-        BlockPos wardenFeet = room.at(WARDEN_STANDOFF_BLOCKS, 0, 0);
-        Warden warden = EntityType.WARDEN.create(room.world, EntitySpawnReason.COMMAND);
-        h.require(warden != null, "could not create a warden fixture");
-        warden.setPersistenceRequired();
-        warden.setNoAi(true);
-        warden.snapTo(wardenFeet.getX() + 0.5D, wardenFeet.getY(), wardenFeet.getZ() + 0.5D,
-                180.0F, 0.0F);
-        room.world.addFreshEntity(warden);
-        h.onCleanup(warden::discard);
-
-        // A STOPPED registry entry at the warden's own centroid: this must never suppress the mandatory stop
-        // (mandatory never consults PoiRegistry at all -- see PoiCoordinator.onCandidate's branch order).
-        PoiRegistry.record(id, BotEdits.dimensionKey(room.world), wardenFeet, "warden_risk",
-                PoiRegistry.State.STOPPED, 0.9D, 0);
-
-        Progress p = new Progress();
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            p.tick++;
-            if (p.assignedAt < 0) {
-                if (h.settle(bot, p)) {
-                    h.assertStrict(bot, "poi_warden");
-                    freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_warden");
-                    p.assignedAt = p.tick;
-                }
-                return;
-            }
-            if (TaskManager.INSTANCE.isUserPaused(bot)) {
-                PoiRegistry.OpenCase open = PoiRegistry.openCase(id);
-                h.require(open != null, "the bot paused but PoiRegistry has no open case");
-                h.require("MANDATORY".equals(open.source()),
-                        "the stop's source was " + open.source() + ", expected MANDATORY (the warden must win)");
-                h.require("warden_risk".equals(open.label()), "the stop's label was " + open.label());
-                List<String> lines = botLog(bot.getGameProfile().name());
-                h.require(lines != null && hasEvent(lines, "poi_stop"), "no poi_stop log line was written");
-                h.assertStrict(bot, "poi_warden_end");
-                h.pass();
-                return;
-            }
-            h.require(p.tick - p.assignedAt < 800,
-                    "the visible warden never produced a MANDATORY stop within the budget");
-        }));
-    }
-
-    /**
-     * The other half of {@link #wardenRiskAlwaysStops}: a live warden inside the combat layer's warden pressure
-     * range ({@value #WARDEN_PRESSURE_STANDOFF_BLOCKS} blocks, well inside the 17-block range) is hostile pressure
-     * and the intended answer is evasion, not a POI stop. {@code DangerWatcher} pauses the frozen mission under a
-     * SAFETY-origin {@code EvadeTask} for a HOSTILE threat; the mission is kept paused beneath it (evasion has
-     * priority over the notify-and-stop path, exactly as a fight or a fire would).
-     */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_in_pressure_range_evades",
-            maxTicks = 900)
-    public void wardenInsidePressureRangeEvadesInsteadOfPoiStop(GameTestHelper context) {
-        Harness h = new Harness(context);
-        h.setPerceptionRadius(WARDEN_TEST_PERCEPTION_RADIUS);
-        Room room = h.newRoom(20, -9, WARDEN_PRESSURE_STANDOFF_BLOCKS + 1, -1, 1, 3);
-        AIPlayerEntity bot = h.spawn("PoiWardenNearGT", room, 0, 0);
-        h.enablePoi(bot, null);
-
-        BlockPos wardenFeet = room.at(WARDEN_PRESSURE_STANDOFF_BLOCKS, 0, 0);
-        Warden warden = EntityType.WARDEN.create(room.world, EntitySpawnReason.COMMAND);
-        h.require(warden != null, "could not create a warden fixture");
-        warden.setPersistenceRequired();
-        warden.setNoAi(true);
-        warden.snapTo(wardenFeet.getX() + 0.5D, wardenFeet.getY(), wardenFeet.getZ() + 0.5D, 180.0F, 0.0F);
-        room.world.addFreshEntity(warden);
-        h.onCleanup(warden::discard);
-
-        Progress p = new Progress();
-        Task[] mission = {null};
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            p.tick++;
-            if (p.assignedAt < 0) {
-                if (h.settle(bot, p)) {
-                    h.assertStrict(bot, "poi_warden_near");
-                    mission[0] = freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_warden_near");
-                    p.assignedAt = p.tick;
-                }
-                return;
-            }
-            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
-            if (active instanceof EvadeTask evade) {
-                h.require(evade.describe().startsWith("Evading HOSTILE"),
-                        "the evasion was for the wrong threat: " + evade.describe());
-                h.require(TaskManager.INSTANCE.activeOrigin(bot).map(TaskOrigin::safety).orElse(false),
-                        "the warden evasion was not a SAFETY-origin task");
-                h.require(TaskManager.INSTANCE.peekPaused(bot).orElse(null) == mission[0],
-                        "the mission was not kept paused beneath the warden evasion");
-                h.pass();
-                return;
-            }
-            h.require(p.tick - p.assignedAt < 400,
-                    "a warden inside the pressure range never made the bot evade; active="
-                            + (active == null ? "none" : active.name()));
-        }));
-    }
-
-    /**
      * A structure-certain-worthy palette that is deliberately habitation-like (furniture and a bed, no
-     * SPAWNER/SCULK_STRUCT/RAIL/WEB cell anywhere) never hard-stops the bot: {@code PoiScorer.evaluate} downgrades
+     * SPAWNER/RAIL/WEB cell anywhere) never hard-stops the bot: {@code PoiScorer.evaluate} downgrades
      * it from {@code STRUCTURE_CERTAIN} to {@code POSSIBLE}, and the default {@code unavailablePolicy} (
      * {@code STOP_IF_STRUCTURE}) still notify-only's it once the fallback's {@code habitationLike} override
      * fires (design 6.7: "not habitation-like" gates the STOP rows). The bot must keep working, never pause.
@@ -365,7 +197,7 @@ public final class OreDigPoiGameTests {
         Harness h = new Harness(context);
         Room room = h.newRoom(30, -9, 9, -1, 1, 3);
         // Wood floor/walls (WOOD_BUILD) and a stone-brick wall (STONE_BUILD): neither is RAIL/WEB/SPAWNER/
-        // SCULK_STRUCT, so nothing here blocks the habitation-like downgrade once a habitation item is present.
+        // sculk terrain, so nothing here blocks the habitation-like downgrade once a habitation item is present.
         for (int x = -8; x <= 8; x++) {
             room.set(x, 0, -1, Blocks.OAK_PLANKS);
             room.set(x, 0, 1, Blocks.STONE_BRICKS);
@@ -420,113 +252,14 @@ public final class OreDigPoiGameTests {
     // ---------------------------------------------------------------------------------------------
     // Mandatory suppression / registry bypass (direct dispatch)
     // ---------------------------------------------------------------------------------------------
-
-    /** A DECLINED cavern-only site recorded at the exact anchor a mandatory candidate later appears at never
-     * suppresses it: mandatory is decided before {@code PoiRegistry.suppressed} is ever consulted. */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_declined_cavern",
-            maxTicks = 200)
-    public void wardenStopNotSuppressedAfterDeclinedCavern(GameTestHelper context) {
-        Harness h = new Harness(context);
-        Room room = h.newRoom(40, -3, 3, -3, 3, 3);
-        AIPlayerEntity bot = h.spawn("PoiDeclinedCavernGT", room, 0, 0);
-        h.enablePoi(bot, null);
-        UUID id = bot.getUUID();
-        String dim = BotEdits.dimensionKey(room.world);
-        BlockPos anchor = room.at(2, 0, 0);
-
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            if (!h.settle(bot, new Progress())) {
-                return;
-            }
-            h.assertStrict(bot, "poi_declined_cavern");
-            freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_declined_cavern");
-            int tick = MiningAssistRuntime.serverTick(bot);
-            PoiRegistry.record(id, dim, anchor, "cavern", PoiRegistry.State.DECLINED, 0.20D, tick);
-            h.require(PoiRegistry.suppressed(id, dim, anchor, "cavern", 0.20D, tick),
-                    "fixture error: the seeded DECLINED entry does not even suppress a matching non-mandatory candidate");
-
-            MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
-            state.enterDimension(dim);
-            PoiDetector.Result mandatory = syntheticResult(
-                    PoiScorer.Band.MANDATORY, "warden_risk", anchor, 0.95D, false, "reinforced_deepslate");
-            PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, mandatory, tick);
-
-            h.require(TaskManager.INSTANCE.isUserPaused(bot),
-                    "the mandatory candidate was suppressed by an unrelated DECLINED cavern entry");
-            PoiRegistry.OpenCase open = PoiRegistry.openCase(id);
-            h.require(open != null && "MANDATORY".equals(open.source()) && "warden_risk".equals(open.label()),
-                    "the open case after the mandatory candidate was " + open);
-            h.assertStrict(bot, "poi_declined_cavern_end");
-            h.pass();
-        }));
-    }
-
-    /** After the player resumes an earlier, unrelated, non-mandatory stop, a fresh mandatory candidate
-     * elsewhere still stops the bot: resuming one case never leaves any latch or registry state that could
-     * blunt an unrelated later mandatory stop. */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_player_continue",
-            maxTicks = 200)
-    public void wardenStopNotSuppressedAfterPlayerContinue(GameTestHelper context) {
-        Harness h = new Harness(context);
-        Room room = h.newRoom(50, -6, 6, -3, 3, 3);
-        AIPlayerEntity bot = h.spawn("PoiResumeThenWardenGT", room, 0, 0);
-        h.enablePoi(bot, null);
-        UUID id = bot.getUUID();
-        String dim = BotEdits.dimensionKey(room.world);
-        BlockPos earlierAnchor = room.at(-4, 0, 0);
-        BlockPos mandatoryAnchor = room.at(4, 0, 0);
-
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            if (!h.settle(bot, new Progress())) {
-                return;
-            }
-            h.assertStrict(bot, "poi_resume_then_warden");
-            freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_resume_then_warden");
-            MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
-            state.enterDimension(dim);
-            int tick = MiningAssistRuntime.serverTick(bot);
-
-            // An unrelated earlier structure-certain stop, then the player resumes it.
-            PoiDetector.Result earlier = syntheticResult(
-                    PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, earlierAnchor, 0.90D, false, "");
-            PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, earlier, tick);
-            h.require(TaskManager.INSTANCE.isUserPaused(bot), "fixture error: the earlier stop never paused the bot");
-            h.require(PoiRegistry.openCase(id) != null, "fixture error: the earlier stop never opened a case");
-
-            IntentController.INSTANCE.resume(bot, IntentController.ControlOrigin.PLAYER_COMMAND,
-                    "gametest_resume_unrelated");
-            PoiCoordinator.INSTANCE.tick(bot, tick + 1);
-            h.require(!TaskManager.INSTANCE.isUserPaused(bot), "the resume never actually unpaused the bot");
-            h.require(PoiRegistry.openCase(id) == null,
-                    "the earlier case is still open after the resume was tended by PoiCoordinator.tick");
-
-            // A fresh mandatory candidate, at a different site, must still stop the bot.
-            PoiDetector.Result mandatory = syntheticResult(
-                    PoiScorer.Band.MANDATORY, "warden_risk", mandatoryAnchor, 0.95D, false, "reinforced_deepslate");
-            PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, mandatory, tick + 2);
-            h.require(TaskManager.INSTANCE.isUserPaused(bot),
-                    "a fresh mandatory candidate was suppressed after an earlier, unrelated resume");
-            PoiRegistry.OpenCase open = PoiRegistry.openCase(id);
-            h.require(open != null && "MANDATORY".equals(open.source()), "the open case after the mandatory candidate was " + open);
-            h.assertStrict(bot, "poi_resume_then_warden_end");
-            h.pass();
-        }));
-    }
-
     // ---------------------------------------------------------------------------------------------
     // Restart / resume (direct dispatch)
     // ---------------------------------------------------------------------------------------------
 
     /**
      * A STOPPED case survives a genuine unload/restart: {@code MiningAssistRuntime.clearBotUnload} (the actual
-     * production method, called for real) drops {@code MiningAssistState}, {@code PoiRegistry} and
-     * {@code MandatoryLatch} but never touches {@code BotMemory} or the pause flag; the very next real
+     * production method, called for real) drops {@code MiningAssistState} and {@code PoiRegistry} but never
+     * touches {@code BotMemory} or the pause flag; the very next real
      * {@code PoiCoordinator.tick} rebuilds the open case from {@code BotMemory} and resends the notice exactly
      * once (a "poi_restart_rehydrated" line, never a second one on a later tick).
      *
@@ -565,7 +298,7 @@ public final class OreDigPoiGameTests {
                     state.enterDimension(dim);
                     int tick = MiningAssistRuntime.serverTick(bot);
                     PoiDetector.Result certain = syntheticResult(
-                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchor, 0.90D, false, "");
+                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchor, 0.90D, false);
                     PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, certain, tick);
                     h.require(TaskManager.INSTANCE.isUserPaused(bot), "fixture error: the stop never paused the bot");
                     PoiRegistry.OpenCase before = PoiRegistry.openCase(id);
@@ -580,7 +313,7 @@ public final class OreDigPoiGameTests {
 
                     // The genuine-unload variant: simulates a real restart. BotMemory (the poi_hold_<label>
                     // marker) and the TaskManager pause flag are NOT cleared by this call -- only the
-                    // in-memory MiningAssistState/PoiRegistry/MandatoryLatch are.
+                    // in-memory MiningAssistState/PoiRegistry are.
                     MiningAssistRuntime.clearBotUnload(bot);
                     h.require(PoiRegistry.openCase(id) == null, "clearBotUnload did not actually drop the in-memory case");
                     h.require(TaskManager.INSTANCE.isUserPaused(bot), "clearBotUnload touched the pause flag");
@@ -596,10 +329,9 @@ public final class OreDigPoiGameTests {
                         return;
                     }
                     // No BotMemory fact records the original Source (design 2.4/6.4: "No BotMemory facts are
-                    // written"), so a rehydrated non-mandatory case is always reconstructed as FALLBACK, never
-                    // the original CERTAIN -- both render the identical (non-mandatory) notice template and
-                    // never touch MandatoryLatch, so this is a label on an equivalence class, not a real
-                    // behavior change. WARDEN_RISK_LABEL is the one label that must still come back MANDATORY.
+                    // written"), so a rehydrated case is reconstructed as FALLBACK instead of the original
+                    // CERTAIN. Both render the same notice template, so this is a label on an equivalence
+                    // class, not a behavior change.
                     h.require(rebuilt.label().equals(PoiLabeler.MINESHAFT) && "FALLBACK".equals(rebuilt.source()),
                             "the rebuilt case did not match the original: " + rebuilt);
                     List<String> lines = botLog(bot.getGameProfile().name());
@@ -659,7 +391,7 @@ public final class OreDigPoiGameTests {
                     state.enterDimension(dim);
                     int tick = MiningAssistRuntime.serverTick(bot);
                     PoiDetector.Result certain = syntheticResult(
-                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchor, 0.90D, false, "");
+                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchor, 0.90D, false);
                     PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, certain, tick);
                     h.require(TaskManager.INSTANCE.isUserPaused(bot), "fixture error: the stop never paused the bot");
                     h.require(PoiRegistry.openCase(id) != null, "fixture error: the stop never opened a case");
@@ -726,7 +458,7 @@ public final class OreDigPoiGameTests {
             int tick = MiningAssistRuntime.serverTick(bot);
             // S = 0.30, well below PoiDecisionPolicy.FALLBACK_STOP_SCORE (0.75): under the default
             // unavailablePolicy (STOP_IF_STRUCTURE) this must resolve to NOTIFY_ONLY, never a stop.
-            PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "cavern", anchor, 0.30D, false, "");
+            PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "cavern", anchor, 0.30D, false);
             PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
 
             h.require(!TaskManager.INSTANCE.isUserPaused(bot), "a below-threshold POSSIBLE candidate paused the bot");
@@ -738,146 +470,6 @@ public final class OreDigPoiGameTests {
             h.require(lines == null || !hasEvent(lines, "poi_stop"), "a poi_stop line was written for a NOTIFY_ONLY candidate");
             h.assertStrict(bot, "poi_digdown_fallback_end");
             h.pass();
-        }));
-    }
-
-    /**
-     * A stop (structure-certain or fallback) while a real {@code DigDownTask} is descending must read
-     * {@code TaskManager.peekPaused}, not {@code getActive}: {@code IntentController.pause} routes through
-     * {@code pauseUserIntent -> pauseFor}, which removes the task from {@code active} <em>before</em> pushing it
-     * onto the pause stack, so by the time {@code PoiCoordinator} looks for the paused task, {@code getActive} is
-     * unconditionally empty. This is the real-server proof of contract §0 correction #10: with the original
-     * {@code getActive} bug this assertion would fail outright (the paused task would appear to be
-     * {@code Optional.empty()}), which is exactly how that bug should have been caught before it shipped.
-     *
-     * <p>Real-server proof of a second, related timing bug this same GameTest surfaced: {@code
-     * PoiCoordinator.stopNow} must read whether the task being paused is a descending {@code DigDownTask}
-     * from the still-<em>active</em> task, <em>before</em> the {@code IntentController.pause} call below runs
-     * -- not after, even via the correct {@code peekPaused}. {@code DigDownTask.onPause} (design 6.1's table,
-     * independently verified) converts phase DESCEND to RETURN as its own unconditional side effect of being
-     * paused, so by the time this test's own assertions run (after {@code onCandidate} has already paused the
-     * task), the live task correctly reports RETURN: that is what proves {@code stopNow} captured "descending"
-     * before pausing rather than reading the now-mutated phase back out, which is exactly how the pre-fix bug
-     * (always selecting the standard/mandatory template, never the climb-out one, for every DigDown-descend
-     * stop) would have gone undetected without a real paused task to observe.</p>
-     */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_stop_uses_descent_climb_notice",
-            maxTicks = 200)
-    public void digDownStopUsesDescentClimbNotice(GameTestHelper context) {
-        Harness h = new Harness(context);
-        Room room = h.newRoom(90, -3, 3, -3, 3, 4);
-        AIPlayerEntity bot = h.spawn("PoiDigDownStopGT", room, 0, 0);
-        h.enablePoi(bot, null);
-        String dim = BotEdits.dimensionKey(room.world);
-        BlockPos anchor = room.at(2, 0, 0);
-
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            if (!h.settle(bot, new Progress())) {
-                return;
-            }
-            h.assertStrict(bot, "poi_digdown_stop");
-            DigDownTask task = new DigDownTask(Blocks.STONE, 999);
-            TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_poi_digdown_stop"));
-            h.require(task.isDescending(), "fixture error: a freshly assigned DigDownTask is not in DESCEND");
-            MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
-            state.enterDimension(dim);
-            int tick = MiningAssistRuntime.serverTick(bot);
-            PoiDetector.Result certain = syntheticResult(
-                    PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchor, 0.90D, false, "");
-            PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, certain, tick);
-
-            h.require(TaskManager.INSTANCE.isUserPaused(bot), "the stop never paused the bot");
-            // The regression this test guards: getActive must be empty (pauseFor already removed the task)...
-            h.require(TaskManager.INSTANCE.getActive(bot).isEmpty(),
-                    "fixture assumption broken: getActive still returns the task after IntentController.pause");
-            // ...while peekPaused correctly returns the same DigDownTask. PoiCoordinator.stopNow must have
-            // already captured "descending" from the task while it was still active, before this pause ran
-            // (see this test's own javadoc): DigDownTask.onPause (design 6.1, independently verified)
-            // unconditionally converts DESCEND to RETURN as a side effect of being paused, so the live task
-            // now correctly reports RETURN, not DESCEND.
-            Task paused = TaskManager.INSTANCE.peekPaused(bot).orElse(null);
-            h.require(paused == task, "peekPaused did not return the paused DigDownTask: " + paused);
-            h.require(!task.isDescending(),
-                    "onPause should have converted the paused DigDownTask's phase from DESCEND to RETURN by now");
-            PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUUID());
-            h.require(open != null && "CERTAIN".equals(open.source()), "the open case after the stop was " + open);
-            List<String> lines = botLog(bot.getGameProfile().name());
-            h.require(lines != null && hasEvent(lines, "poi_stop"), "no poi_stop log line was written");
-            h.assertStrict(bot, "poi_digdown_stop_end");
-            h.pass();
-        }));
-    }
-
-    /** Same descent-notice-variant proof as {@link #digDownStopUsesDescentClimbNotice} (including the same
-     * pre-pause-capture timing point), off a MANDATORY trigger instead of a structure-certain one: every
-     * source uses the climb-out template while DigDown is descending. */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_mandatory_uses_descent_variant_too",
-            maxTicks = 200)
-    public void digDownMandatoryUsesDescentVariantToo(GameTestHelper context) {
-        Harness h = new Harness(context);
-        Room room = h.newRoom(100, -3, 3, -3, 3, 4);
-        AIPlayerEntity bot = h.spawn("PoiDigDownMandatoryGT", room, 0, 0);
-        h.enablePoi(bot, null);
-        String dim = BotEdits.dimensionKey(room.world);
-        BlockPos anchor = room.at(2, 0, 0);
-        Progress p = new Progress();
-        int[] stage = {0};
-        int[] stageStart = {0};
-
-        context.failIfEver(() -> h.guard(() -> {
-            if (h.done) {
-                return;
-            }
-            p.tick++;
-            switch (stage[0]) {
-                case 0 -> {
-                    if (!h.settle(bot, p)) {
-                        return;
-                    }
-                    h.assertStrict(bot, "poi_digdown_mandatory");
-                    DigDownTask task = new DigDownTask(Blocks.STONE, 999);
-                    TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_poi_digdown_mandatory"));
-                    h.require(task.isDescending(), "fixture error: a freshly assigned DigDownTask is not in DESCEND");
-                    MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
-                    state.enterDimension(dim);
-                    int tick = MiningAssistRuntime.serverTick(bot);
-                    PoiDetector.Result mandatory = syntheticResult(
-                            PoiScorer.Band.MANDATORY, "warden_risk", anchor, 0.95D, false, "reinforced_deepslate");
-                    PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, mandatory, tick);
-
-                    h.require(TaskManager.INSTANCE.isUserPaused(bot), "the mandatory stop never paused the bot");
-                    h.require(TaskManager.INSTANCE.getActive(bot).isEmpty(), "fixture assumption broken: getActive still returns the task");
-                    Task paused = TaskManager.INSTANCE.peekPaused(bot).orElse(null);
-                    h.require(paused == task, "peekPaused did not return the paused DigDownTask: " + paused);
-                    h.require(!task.isDescending(),
-                            "onPause should have converted the paused DigDownTask's phase from DESCEND to RETURN by now");
-                    PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUUID());
-                    h.require(open != null && "MANDATORY".equals(open.source()), "the open case after the mandatory stop was " + open);
-                    stage[0] = 1;
-                    stageStart[0] = p.tick;
-                }
-                case 1 -> {
-                    // BotLogWriter drains its queue on a separate background thread (see BotLogWriter.workerLoop):
-                    // the poi_stop line submitted above is not guaranteed to have reached disk on this very same
-                    // tick, especially with many GameTests logging concurrently. Poll a few ticks for it instead
-                    // of requiring it same-tick, exactly like this file's own restart-rehydration polling
-                    // (restartDuringStopRebuildsCase) already does for the same class of async-log race. Every
-                    // behavioural assertion (pause, getActive, peekPaused, phase, registry source) already ran
-                    // strictly, same-tick, above; only the log-visibility check gets this tolerance.
-                    List<String> lines = botLog(bot.getGameProfile().name());
-                    if (lines == null || !hasEvent(lines, "poi_stop")) {
-                        h.require(p.tick - stageStart[0] < 40, "no poi_stop log line was written");
-                        return;
-                    }
-                    h.assertStrict(bot, "poi_digdown_mandatory_end");
-                    h.pass();
-                }
-                default -> {
-                }
-            }
         }));
     }
 
@@ -937,7 +529,7 @@ public final class OreDigPoiGameTests {
                     freeze(subject[0], TaskOrigin.Kind.MISSION, "gametest_poi_notice_recipients_a");
                     BlockPos anchorA = room.at(-2, 0, 0);
                     PoiDetector.Result certainA = syntheticResult(
-                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchorA, 0.90D, false, "");
+                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchorA, 0.90D, false);
                     PoiCoordinator.INSTANCE.onCandidate(subject[0], state, room.world, certainA, tick);
                     h.require(TaskManager.INSTANCE.isUserPaused(subject[0]), "the AUTHORIZED-policy stop never paused the bot");
                     List<String> linesA = botLog(subject[0].getGameProfile().name());
@@ -960,7 +552,7 @@ public final class OreDigPoiGameTests {
                     h.enablePoi(subject[0], broadcastOverrides());
                     BlockPos anchorB = room.at(2, 0, 0);
                     PoiDetector.Result certainB = syntheticResult(
-                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchorB, 0.90D, false, "");
+                            PoiScorer.Band.STRUCTURE_CERTAIN, PoiLabeler.MINESHAFT, anchorB, 0.90D, false);
                     PoiCoordinator.INSTANCE.onCandidate(subject[0], state, room.world, certainB, tick + 2);
                     h.require(TaskManager.INSTANCE.isUserPaused(subject[0]), "the BROADCAST-policy stop never paused the bot");
                     List<String> linesB = botLog(subject[0].getGameProfile().name());
@@ -1075,7 +667,7 @@ public final class OreDigPoiGameTests {
                 MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
                 state.enterDimension(dim);
                 int tick = MiningAssistRuntime.serverTick(bot);
-                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "mineshaft", anchor, 0.55D, false, "");
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "mineshaft", anchor, 0.55D, false);
                 PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
                 h.require(TaskManager.INSTANCE.isUserPaused(bot),
                         "the hold must pause the bot synchronously, before the (stubbed) advisor ever answers");
@@ -1144,7 +736,7 @@ public final class OreDigPoiGameTests {
                 MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
                 state.enterDimension(dim);
                 int tick = MiningAssistRuntime.serverTick(bot);
-                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "cavern", anchor, 0.50D, false, "");
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "cavern", anchor, 0.50D, false);
                 PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "the hold must pause the bot synchronously");
                 phase[0] = 1;
@@ -1214,7 +806,7 @@ public final class OreDigPoiGameTests {
                 MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
                 state.enterDimension(dim);
                 int tick = MiningAssistRuntime.serverTick(bot);
-                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "dungeon", anchor, 0.55D, false, "");
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "dungeon", anchor, 0.55D, false);
                 PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "the hold must pause the bot synchronously");
                 phase[0] = 1;
@@ -1296,7 +888,7 @@ public final class OreDigPoiGameTests {
                 MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
                 state.enterDimension(dim);
                 int tick = MiningAssistRuntime.serverTick(bot);
-                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false, "");
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false);
                 PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "the hold must pause the bot synchronously");
                 phase[0] = 1;
@@ -1379,7 +971,7 @@ public final class OreDigPoiGameTests {
             int tick = MiningAssistRuntime.serverTick(bot);
             // S = 0.85 >= 0.75: the default STOP_IF_STRUCTURE keyless fallback stops it, synchronously,
             // exactly the P2 code path -- proving degraded TPS skipped the consult/hold machinery entirely.
-            PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false, "");
+            PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false);
             PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
 
             h.require(!transportCalled.get(), "degraded TPS must never reach the advisor transport at all");
@@ -1446,7 +1038,7 @@ public final class OreDigPoiGameTests {
                 MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
                 state.enterDimension(dim);
                 int tick = MiningAssistRuntime.serverTick(bot);
-                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "mineshaft", anchor, 0.55D, false, "");
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "mineshaft", anchor, 0.55D, false);
                 PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
                 h.require(TaskManager.INSTANCE.isUserPaused(bot),
                         "the hold must pause the bot synchronously, before the (stubbed) advisor ever answers");
@@ -1531,7 +1123,7 @@ public final class OreDigPoiGameTests {
                 MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
                 state.enterDimension(dim);
                 int tick = MiningAssistRuntime.serverTick(bot);
-                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false, "");
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false);
                 PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "the hold must pause the bot synchronously");
                 phase[0] = 1;
@@ -1641,7 +1233,7 @@ public final class OreDigPoiGameTests {
                     MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
                     state.enterDimension(dim);
                     int tick = MiningAssistRuntime.serverTick(bot);
-                    PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "dungeon", anchor, 0.55D, false, "");
+                    PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "dungeon", anchor, 0.55D, false);
                     PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
                     h.require(TaskManager.INSTANCE.isUserPaused(bot),
                             "fixture error: the hold never paused the bot before the restart");
@@ -1717,16 +1309,15 @@ public final class OreDigPoiGameTests {
 
     /** Builds a {@code PoiDetector.Result} exactly as {@code PoiDetector.evaluate} would hand one to
      * {@code MiningAssistCoordinator.sense()} -> {@code PoiCoordinator.onCandidate}, but with the caller
-     * choosing the band/label/score/habitation-like/mandatory-trigger directly instead of deriving them from a
+     * choosing the band, label, score and habitation state directly instead of deriving them from a
      * real raycast sweep. See the class javadoc's "direct dispatch" section for why and where this is used. */
     private static PoiDetector.Result syntheticResult(PoiScorer.Band band, String label, BlockPos anchor,
-            double structureScore, boolean habitationLike, String mandatoryTrigger) {
+            double structureScore, boolean habitationLike) {
         PoiScorer.PoiScore score = new PoiScorer.PoiScore(
                 8.0D, structureScore, 0.0D, 0.0D, Math.max(structureScore, 0.5D),
-                8, 3, true, band, false, mandatoryTrigger == null ? "" : mandatoryTrigger,
-                Vec3.atCenterOf(anchor), false, true, false, true, 3, habitationLike);
+                8, 3, true, band, false, Vec3.atCenterOf(anchor), false, true, false, true, 3, habitationLike);
         return new PoiDetector.Result(true, band, score, label, true, true, anchor, 8, 0, 8,
-                "minecraft:the_overworld", false);
+                "minecraft:the_overworld");
     }
 
     /** {@code poi.noticeRecipients = broadcast}, everything else default. */

@@ -8,7 +8,7 @@ set -eu
 [ $# -ge 1 ] || { echo "usage: $0 <results.tsv | log> [...]" >&2; exit 2; }
 grep -h -P "NAVCOURSE\t" "$@" | sed -E 's/^.*NAVCOURSE\t/NAVCOURSE\t/' | awk -F'\t' '
 BEGIN {
-  n = split("wall wallpick sealed steps pit stairs lakedry lakenone lava cactus cliff3 cliff6 house gate ladder forest moving twobots long", order, " ")
+  n = split("wall wallpick sealed steps pit lakedry lakenone lava cactus cliff3 cliff6 house forest moving twobots", order, " ")
 }
 { key = $2 SUBSEP $3; row[key] = $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8 "\t" $9 "\t" $10 "\t" $11 }
 END {

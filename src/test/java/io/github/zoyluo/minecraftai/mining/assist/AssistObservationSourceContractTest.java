@@ -316,7 +316,7 @@ class AssistObservationSourceContractTest {
     }
 
     @Test
-    void theEntityScanExaminesWardensFirstAndCountsOnlyObservedEntitiesTowardItsCap() throws IOException {
+    void theEntityScanOrdersEvidenceCandidatesByDistanceAndCountsOnlyObservedEntitiesTowardItsCap() throws IOException {
         String detector = code(ASSIST.resolve("PoiDetector.java"));
         String scan = method(detector, "private static EntityEvidence scanEntities(");
         int sort = scan.indexOf("ordered.sort(");
@@ -325,7 +325,9 @@ class AssistObservationSourceContractTest {
         int accept = scan.indexOf("accepted++;");
         assertTrue(sort > 0 && loop > sort && observe > loop && accept > observe,
                 "sorted, then visited in that order, then counted only when observed");
-        assertTrue(scan.contains("isWardenType(entity)"), "wardens are visited first");
+        assertTrue(scan.contains("Comparator.comparingDouble(entity -> bot.distanceToSqr(entity))"),
+                "candidates are ordered nearest-first without a creature-specific priority");
+        assertFalse(scan.contains("isWardenType("));
         assertTrue(scan.contains("bot.distanceToSqr(entity)"), "then the nearest first");
         assertTrue(scan.contains("examined >= ENTITY_EXAMINE_CAP || accepted >= ENTITY_CANDIDATE_CAP"));
         assertFalse(scan.contains("examined++ >= ENTITY_CANDIDATE_CAP"),

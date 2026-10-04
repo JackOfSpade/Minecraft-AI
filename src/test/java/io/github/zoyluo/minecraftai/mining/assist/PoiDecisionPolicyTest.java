@@ -27,8 +27,8 @@ class PoiDecisionPolicyTest {
     }
 
     @Test
-    void mandatoryAndStructureCertainAlwaysStopUnderEveryPolicyCombination() {
-        for (PoiScorer.Band band : new PoiScorer.Band[] {PoiScorer.Band.MANDATORY, PoiScorer.Band.STRUCTURE_CERTAIN}) {
+    void structureCertainAlwaysStopsUnderEveryPolicyCombination() {
+        for (PoiScorer.Band band : new PoiScorer.Band[] {PoiScorer.Band.STRUCTURE_CERTAIN}) {
             for (UnavailablePolicy up : UnavailablePolicy.values()) {
                 for (CavernKeylessPolicy cp : CavernKeylessPolicy.values()) {
                     for (boolean habitationLike : new boolean[] {false, true}) {

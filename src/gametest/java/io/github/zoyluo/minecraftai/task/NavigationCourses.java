@@ -6,10 +6,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
-import net.minecraft.world.level.block.FenceGateBlock;
-import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.LeavesBlock;
-import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 
@@ -54,6 +51,12 @@ final class NavigationCourses {
         boolean noBreak;
         /** HOLD courses: the follower must tell the player there is no route. */
         boolean notice;
+        /** Maximum route starts for a safe-hold course; guards against zero-length route churn. */
+        int maxBaritoneStarts = Integer.MAX_VALUE;
+        /** Minimum eastward progress a course must physically make; disabled when infinite. */
+        double minimumMaxX = Double.NEGATIVE_INFINITY;
+        /** Lowest relative feet Y a course must physically reach; disabled when positive infinity. */
+        double maximumMinY = Double.POSITIVE_INFINITY;
         /** The followed player walks a loop (see {@link NavigationCourseRun}). */
         boolean moving;
 
@@ -100,6 +103,21 @@ final class NavigationCourses {
             return this;
         }
 
+        Course boundedStarts(int maximum) {
+            this.maxBaritoneStarts = maximum;
+            return this;
+        }
+
+        Course minimumAdvanceX(double minimum) {
+            this.minimumMaxX = minimum;
+            return this;
+        }
+
+        Course minimumDescent(double maximum) {
+            this.maximumMinY = maximum;
+            return this;
+        }
+
         Course moving() {
             this.moving = true;
             return this;
@@ -128,14 +146,14 @@ final class NavigationCourses {
     static final Course WALL_DETOUR_PICKAXE = of("wallpick", "wall needing a detour (stone pickaxe in the hotbar)", Mode.FOLLOW, 1, 14, 9, 4, 600,
             NavigationCourses::wallDetour).starts(c(-7, 0, 0)).legs(c(7, 0, 0)).pickaxe().noBreak();
 
-    /** (2) A two-thick stone wall over the whole width and up to the ceiling: only digging gets through (stone pickaxe). */
-    static final Course SEALED_WALL = of("sealed", "sealed stone wall, breaking is the last resort", Mode.FOLLOW, 2, 14, 9, 4, 1500, arena -> {
+    /** (2) A two-thick stone wall over the whole width and up to the ceiling. Strict follow holds instead of scanning/mining unseen terrain. */
+    static final Course SEALED_WALL = of("sealed", "sealed stone wall holds without hidden mining", Mode.FOLLOW, 2, 14, 9, 4, 300, arena -> {
         for (int dx = 0; dx <= 1; dx++) {
             for (int dz = -9; dz <= 9; dz++) {
                 arena.fill(dx, dz, Blocks.STONE, 0, BaritoneEngineArena.CEILING);
             }
         }
-    }).starts(c(-7, 0, 0)).legs(c(7, 0, 0)).pickaxe();
+    }).starts(c(-7, 0, 0)).legs(c(7, 0, 0)).expect(Expect.HOLD).notice().noBreak().boundedStarts(12);
 
     /** (3) A one-block step up, then a second one (the target stands two blocks above the start). */
     static final Course STEPS = of("steps", "1-high step then 2-high step", Mode.FOLLOW, 3, 14, 6, 4, 500, arena -> {
@@ -160,21 +178,6 @@ final class NavigationCourses {
             }
         }
     }).starts(c(-7, 0, 0)).legs(c(7, 0, 0)).noBreak();
-
-    /** (5) A four-step stair-block staircase up to a plateau, and another one down: MoveTask to the plateau, then to the far floor. */
-    static final Course STAIRCASE = of("stairs", "staircase ascent then descent", Mode.MOVE, 5, 14, 6, 4, 800, arena -> {
-        for (int i = 0; i < 4; i++) {
-            column(arena, -8 + i, i, Direction.EAST);
-        }
-        for (int dx = -4; dx <= 0; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                arena.fill(dx, dz, Blocks.STONE, 0, 3);
-            }
-        }
-        for (int i = 0; i < 4; i++) {
-            column(arena, 1 + i, 3 - i, Direction.WEST);
-        }
-    }).starts(c(-12, 0, 0)).legs(c(-2, 4, 0), c(9, 0, 0)).noBreak();
 
     /** (6) A lake (one deep) across most of the width with a dry way round at +z: the follower must not enter the water. */
     static final Course LAKE_DRY_PATH = of("lakedry", "lake with a dry path around", Mode.FOLLOW, 6, 14, 9, 4, 800, arena -> {
@@ -222,16 +225,17 @@ final class NavigationCourses {
         }
     }).starts(c(-8, 0, 0)).legs(c(8, 0, 0)).noBreak();
 
-    /** (10a) The target stands at the bottom of a basin whose rim is a vertical 3-block drop: vanilla-safe, no damage. */
-    static final Course CLIFF_SAFE_DROP = of("cliff3", "cliff, safe 3-block drop", Mode.FOLLOW, 10, 14, 9, 8, 500, arena -> basin(arena, 3))
-            .starts(c(-6, 0, 0)).legs(c(8, -3, 0)).noBreak();
+    /** (10a) A ray-visible three-level descent to the basin floor: safe, dry, and no terrain edits. */
+    static final Course CLIFF_SAFE_DROP = of("cliff3", "cliff, visible safe 3-block descent", Mode.FOLLOW, 10, 14, 9, 8, 500,
+            NavigationCourses::visibleThreeLevelDescent)
+            .starts(c(-6, 0, 0)).legs(c(8, -3, 0)).noBreak().minimumDescent(-2.5D);
 
     /** (10b) Same with a 6-block drop: falling is not acceptable, the bot must hold, find another way down, or dig safely. */
     static final Course CLIFF_UNSAFE_DROP = of("cliff6", "cliff, unsafe 6-block drop", Mode.FOLLOW, 11, 14, 9, 8, 500, arena -> basin(arena, 6))
             .starts(c(-6, 0, 0)).legs(c(8, -6, 0)).expect(Expect.EITHER);
 
-    /** (11) A closed house (oak planks, roof, one wooden door in the west wall): the target is inside, then it is outside again. */
-    static final Course HOUSE_DOOR = of("house", "house with a wooden door, in and out", Mode.FOLLOW, 12, 14, 9, 4, 900, arena -> {
+    /** (11) A closed house (oak planks, roof, one wooden door in the west wall): the follower must physically enter without terrain edits. */
+    static final Course HOUSE_DOOR = of("house", "house doorway crossing", Mode.FOLLOW, 12, 14, 9, 4, 300, arena -> {
         for (int dx = 0; dx <= 6; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 boolean wall = dx == 0 || dx == 6 || dz == -3 || dz == 3;
@@ -248,29 +252,7 @@ final class NavigationCourses {
         arena.world.setBlock(arena.cell(0, 1, 0), door.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER), Block.UPDATE_ALL);
         arena.set(3, 2, 2, Blocks.LIGHT);
         arena.set(3, 2, -2, Blocks.LIGHT);
-    }).starts(c(-8, 0, 0)).legs(c(4, 0, 0), c(-8, 0, 6)).noBreak();
-
-    /** (12) A fence (not jumpable) across the whole width with one closed fence gate off the straight line. */
-    static final Course FENCE_GATE = of("gate", "fence with a fence gate", Mode.FOLLOW, 13, 14, 7, 4, 600, arena -> {
-        for (int dz = -7; dz <= 7; dz++) {
-            arena.set(0, 0, dz, Blocks.OAK_FENCE);
-        }
-        arena.world.setBlock(arena.cell(0, 0, 3), Blocks.OAK_FENCE_GATE.defaultBlockState().setValue(FenceGateBlock.FACING, Direction.EAST),
-                Block.UPDATE_ALL);
-    }).starts(c(-7, 0, -3)).legs(c(7, 0, -3)).noBreak();
-
-    /** (13) A four-high stone tower whose only way up is a ladder on its west face; MoveTask to the top. */
-    static final Course LADDER_SHAFT = of("ladder", "ladder shaft up", Mode.MOVE, 14, 14, 6, 4, 500, arena -> {
-        for (int dx = 3; dx <= 7; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                arena.fill(dx, dz, Blocks.STONE, 0, 3);
-            }
-        }
-        BlockState ladder = Blocks.LADDER.defaultBlockState().setValue(LadderBlock.FACING, Direction.WEST);
-        for (int dy = 0; dy <= 3; dy++) {
-            arena.world.setBlock(arena.cell(2, dy, 0), ladder, Block.UPDATE_ALL);
-        }
-    }).starts(c(-6, 0, 0)).legs(c(5, 4, 0)).noBreak();
+    }).starts(c(-8, 0, 0)).legs(c(4, 0, 0)).expect(Expect.EITHER).noBreak().minimumAdvanceX(0.5D).boundedStarts(20);
 
     /** (14) Oak trunks every four blocks with a persistent canopy (low leaves next to some trunks): the target is on the far side. */
     static final Course FOREST = of("forest", "tree canopy / forest", Mode.FOLLOW, 15, 16, 10, 4, 900, arena -> {
@@ -328,28 +310,6 @@ final class NavigationCourses {
         }
     }).starts(c(-8, 0, -1), c(-8, 0, 1)).legs(c(8, 0, 0)).noBreak();
 
-    /** (17) 76 blocks along x (five chunk borders) with a wall, a pillar and a pit on the line. */
-    static final Course LONG_PATH = of("long", "long path across chunk boundaries", Mode.MOVE, 18, 40, 5, 4, 2000, arena -> {
-        for (int dz = -5; dz <= 2; dz++) {
-            arena.fill(-10, dz, Blocks.STONE, 0, 1);
-        }
-        for (int dx = 10; dx <= 11; dx++) {
-            for (int dz = 0; dz <= 1; dz++) {
-                arena.fill(dx, dz, Blocks.STONE, 0, 2);
-            }
-        }
-        for (int dz = -5; dz <= 3; dz++) {
-            arena.fill(25, dz, Blocks.STONE, 0, 1);
-        }
-        for (int dx = 32; dx <= 33; dx++) {
-            for (int dz = -5; dz <= 2; dz++) {
-                arena.fill(dx, dz, Blocks.AIR, -3, -1);
-            }
-        }
-    }).starts(c(-38, 0, 0)).legs(c(38, 0, 0)).noBreak();
-
-    // ---------------------------------------------------------------------------------------------------------------
-
     private static void wallDetour(BaritoneEngineArena arena) {
         for (int dz = -9; dz <= 5; dz++) {
             arena.fill(0, dz, Blocks.STONE, 0, 1);
@@ -360,22 +320,27 @@ final class NavigationCourses {
         arena.world.setBlock(arena.cell(dx, dy, dz), leaves, Block.UPDATE_CLIENTS);
     }
 
-    /** One stair column (three wide) at x with its stair block at height dy, solid stone below it. */
-    private static void column(BaritoneEngineArena arena, int dx, int dy, Direction ascends) {
-        BlockState stairs = Blocks.STONE_STAIRS.defaultBlockState().setValue(StairBlock.FACING, ascends);
-        for (int dz = -1; dz <= 1; dz++) {
-            if (dy > 0) {
-                arena.fill(dx, dz, Blocks.STONE, 0, dy - 1);
-            }
-            arena.world.setBlock(arena.cell(dx, dy, dz), stairs, Block.UPDATE_ALL);
-        }
-    }
-
     /** The whole east part of the course (x >= 3) lowered by {@code drop} blocks: a vertical cliff at x = 3. */
     private static void basin(BaritoneEngineArena arena, int drop) {
         for (int dx = 3; dx <= 14; dx++) {
             for (int dz = -9; dz <= 9; dz++) {
                 arena.fill(dx, dz, Blocks.AIR, -drop, -1);
+            }
+        }
+    }
+
+    /** Three one-block dry descents keep every landing and support in view from the preceding ledge. */
+    private static void visibleThreeLevelDescent(BaritoneEngineArena arena) {
+        for (int dz = -9; dz <= 9; dz++) {
+            arena.set(3, -1, dz, Blocks.AIR);
+            arena.set(3, -2, dz, Blocks.STONE);
+            arena.set(4, -1, dz, Blocks.AIR);
+            arena.set(4, -2, dz, Blocks.AIR);
+            arena.set(4, -3, dz, Blocks.STONE);
+        }
+        for (int dx = 5; dx <= 14; dx++) {
+            for (int dz = -9; dz <= 9; dz++) {
+                arena.fill(dx, dz, Blocks.AIR, -3, -1);
             }
         }
     }

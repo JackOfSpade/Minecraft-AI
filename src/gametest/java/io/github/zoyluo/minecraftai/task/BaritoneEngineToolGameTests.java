@@ -30,52 +30,6 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class BaritoneEngineToolGameTests {
     private static final double ARRIVED = 3.6D;
 
-    /**
-     * A follower with an iron pickaxe in hand and a stone pickaxe in the hotbar has to dig through a three-thick stone wall to reach
-     * the player behind it: every block goes with the stone pickaxe (worn), the iron one keeps all its durability, and the follow
-     * still arrives (the cost model's break time matches the tool that is really used).
-     */
-    @GameTest(environment = "minecraftai-gametest:baritone_engine_tool_game_tests_follow_through_astone_wall_breaks_with_the_stone_pickaxe_not_the_iron_one", maxTicks = 1400)
-    public void followThroughAStoneWallBreaksWithTheStonePickaxeNotTheIronOne(GameTestHelper context) {
-        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 14, 5);
-        for (int dx = 0; dx <= 2; dx++) {
-            for (int dz = -5; dz <= 5; dz++) {
-                arena.fill(dx, dz, Blocks.STONE, 0, BaritoneEngineArena.CEILING - 1);
-            }
-        }
-        AIPlayerEntity target = arena.spawnHolder("BeToolWallTgt", arena.cell(7, 0, 0));
-        AIPlayerEntity bot = arena.spawnOnBaritone("BeToolWall", arena.cell(-7, 0, 0));
-        bot.getInventory().setItem(0, new ItemStack(Items.IRON_PICKAXE));
-        bot.getInventory().setItem(1, new ItemStack(Items.STONE_PICKAXE));
-        bot.getInventory().setItem(2, new ItemStack(Items.DIAMOND_SWORD));
-        bot.getInventory().setSelectedSlot(0);
-        FollowTask follow = new FollowTask("BeToolWallTgt");
-        TaskManager.INSTANCE.assign(bot, follow, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_baritone_follow_tool_wall"));
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            arena.require(follow.state() == TaskState.RUNNING, "follow ended early: " + follow.state() + " " + follow.failureReason());
-            arena.require(now < 1350, "the follower never got through the wall: " + describe(bot, arena)
-                    + " breaks=" + BaritoneEdits.of(bot.getUUID(), BaritoneEdits.Kind.BREAK).size());
-            if (follow.isWaiting() && bot.getX() > arena.origin.getX() + 2.5D && bot.distanceTo(target) <= ARRIVED) {
-                List<BaritoneEdits.Edit> breaks = BaritoneEdits.of(bot.getUUID(), BaritoneEdits.Kind.BREAK);
-                arena.require(breaks.size() >= 4, "too few blocks were dug through a three-thick wall: " + breaks.size());
-                for (BaritoneEdits.Edit edit : breaks) {
-                    arena.require(edit.block().equals("minecraft:stone"), "dug " + edit.block());
-                    arena.require(edit.tool().equals("minecraft:stone_pickaxe"),
-                            "broke " + edit.block() + " with " + edit.tool() + " instead of the stone pickaxe: " + breaks);
-                }
-                ItemStack iron = bot.getInventory().getItem(0);
-                ItemStack stone = bot.getInventory().getItem(1);
-                arena.require(iron.is(Items.IRON_PICKAXE) && iron.getDamageValue() == 0, "the iron pickaxe was worn: " + iron.getDamageValue());
-                arena.require(stone.is(Items.STONE_PICKAXE) && stone.getDamageValue() >= breaks.size(),
-                        "the stone pickaxe was not the one that dug: damage " + stone.getDamageValue() + " for " + breaks.size() + " blocks");
-                arena.require(follow.baritoneStarts() >= 1 && BaritoneRegistry.INSTANCE.find(bot.getUUID()) != null, "the route was not Baritone's");
-                arena.finish(bot, target);
-            }
-        });
-    }
-
     private static String describe(AIPlayerEntity bot, BaritoneEngineArena arena) {
         var baritone = BaritoneRegistry.INSTANCE.find(bot.getUUID());
         String path = "none";
@@ -158,58 +112,4 @@ public final class BaritoneEngineToolGameTests {
         arena.finish(bot);
     }
 
-    /**
-     * A sword is not a mining tool. The tool policy never picks it for leaves or cobweb even when it is the stack in hand and the
-     * only other things are a pickaxe and empty slots, and a Baritone-driven route through a leaf wall breaks every leaf with
-     * something else while the sword keeps all its durability.
-     */
-    @GameTest(environment = "minecraftai-gametest:baritone_engine_tool_game_tests_a_sword_in_the_hotbar_is_never_used_on_leaves_or_cobweb", maxTicks = 900)
-    public void aSwordInTheHotbarIsNeverUsedOnLeavesOrCobweb(GameTestHelper context) {
-        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 14, 5);
-        BlockState leaves = Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
-        for (int dx = 0; dx <= 1; dx++) {
-            for (int dz = -5; dz <= 5; dz++) {
-                for (int dy = 0; dy < BaritoneEngineArena.CEILING; dy++) {
-                    arena.world.setBlock(arena.cell(dx, dy, dz), leaves, Block.UPDATE_ALL);
-                }
-            }
-        }
-        AIPlayerEntity bot = arena.spawnOnBaritone("BeToolSword", arena.cell(-7, 0, 0));
-        bot.getInventory().setItem(0, new ItemStack(Items.DIAMOND_SWORD));
-        bot.getInventory().setItem(1, new ItemStack(Items.IRON_PICKAXE));
-        bot.getInventory().setSelectedSlot(0);
-
-        // The policy itself, with the sword as the stack in hand.
-        for (BlockState state : new BlockState[] {leaves, Blocks.COBWEB.defaultBlockState()}) {
-            bot.getInventory().setSelectedSlot(0);
-            ToolSelector.equipBestTool(bot, state, false);
-            ItemStack held = bot.getMainHandItem();
-            arena.require(!held.is(Items.DIAMOND_SWORD), "the sword was left in hand for " + state.getBlock() + ", held " + held);
-        }
-        bot.getInventory().setSelectedSlot(0);
-
-        BlockPos goal = arena.cell(6, 0, 0);
-        ActionPack pack = bot.getActionPack();
-        ActionResult started = pack.startPathTo(goal);
-        arena.require(started.isInProgress(), "the route was not accepted: " + started.status() + " " + started.reason());
-        int[] tick = {0};
-        context.failIfEver(() -> {
-            int now = ++tick[0];
-            arena.require(now < 850, "the route never ended: " + bot.position());
-            if (pack.hasBaritoneRoute()) {
-                return;
-            }
-            NavOutcome outcome = pack.lastRouteOutcome();
-            arena.require(outcome != null && outcome.status() == NavOutcome.Status.SUCCESS, "the route did not succeed: " + outcome);
-            List<BaritoneEdits.Edit> breaks = BaritoneEdits.of(bot.getUUID(), BaritoneEdits.Kind.BREAK);
-            arena.require(breaks.size() >= 4, "too few leaves were broken: " + breaks.size());
-            for (BaritoneEdits.Edit edit : breaks) {
-                arena.require(edit.block().equals("minecraft:oak_leaves"), "broke " + edit.block());
-                arena.require(!edit.tool().contains("sword"), "leaves were broken with " + edit.tool());
-            }
-            ItemStack sword = bot.getInventory().getItem(0);
-            arena.require(sword.is(Items.DIAMOND_SWORD) && sword.getDamageValue() == 0, "the sword lost durability: " + sword.getDamageValue());
-            arena.finish(bot);
-        });
-    }
 }

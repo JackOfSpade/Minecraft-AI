@@ -5,8 +5,10 @@ import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
@@ -45,6 +47,7 @@ public final class BoatLaunchTask extends AbstractTask {
     private int nextRepathTick;
     private int nextRescanTick;
     private BlockPos waterApproach;
+    private final Set<BlockPos> rejectedWaterApproaches = new HashSet<>();
     private int waterApproaches;
     private int launchAttempts;
     private int boardAttempts;
@@ -99,6 +102,7 @@ public final class BoatLaunchTask extends AbstractTask {
         nextRepathTick = 0;
         nextRescanTick = 0;
         waterApproach = null;
+        rejectedWaterApproaches.clear();
         waterApproaches = 0;
         launchAttempts = 0;
         boardAttempts = 0;
@@ -155,7 +159,7 @@ public final class BoatLaunchTask extends AbstractTask {
             // Water that is visible but not yet beside a shore: walk up to it first (near water is
             // only visible from close by, so it is found again once the bot is on the bank).
             waterApproach = waterApproaches >= MAX_WATER_APPROACHES
-                    ? null : BoatSupport.findWaterApproach(bot).orElse(null);
+                    ? null : BoatSupport.findWaterApproach(bot, rejectedWaterApproaches).orElse(null);
             if (waterApproach == null) {
                 fail("no_nearby_water_shore");
                 return;
@@ -185,6 +189,16 @@ public final class BoatLaunchTask extends AbstractTask {
         boolean arrived = bot.position().distanceToSqr(waterApproach.getCenter()) <= 2.25D;
         if (arrived) {
             bot.getActionPack().stopAll();
+            // An approach is only useful if arriving reveals a real launch site. Reject it here,
+            // rather than rediscovering the same dry cell on the next FIND_WATER pass.
+            launchSite = BoatSupport.findLaunchSite(bot).orElse(null);
+            if (launchSite != null) {
+                nextRepathTick = 0;
+                phase = Phase.APPROACH_SHORE;
+                return;
+            }
+            rejectedWaterApproaches.add(waterApproach.immutable());
+            lastProblem = "water_approach_no_launch_site";
             phase = Phase.FIND_WATER;
             return;
         }
@@ -196,6 +210,7 @@ public final class BoatLaunchTask extends AbstractTask {
             ActionResult walk = bot.getActionPack().startWalkTo(waterApproach.getCenter(), 1.0D);
             if (walk.isFailed()) {
                 lastProblem = "water_unreachable:" + path.reason();
+                rejectedWaterApproaches.add(waterApproach.immutable());
                 phase = Phase.FIND_WATER;
             }
         }

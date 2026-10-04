@@ -12,7 +12,6 @@ public enum PoiBucket {
     SPAWNER(Strength.STRONG, 2.0D, 2, 1),
     /** Strong once at least two container cells are seen. */
     CONTAINER(Strength.STRONG, 1.0D, 3, 2),
-    SCULK_STRUCT(Strength.STRONG, 2.5D, 3, 1),
     /** Strong once at least four cells are seen. */
     DEEPSLATE_BUILD(Strength.STRONG, 1.0D, 6, 4),
     /** Strong once at least two rail cells are seen. */

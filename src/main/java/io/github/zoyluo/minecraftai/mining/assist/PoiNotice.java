@@ -59,9 +59,7 @@ public final class PoiNotice {
     /**
      * Design 6.1 DigDown-descend variant: {@code Stopped descent: possible <label> at <x> <y> <z> (~<n>
      * blocks <dir>). Saying "continue" makes me climb back to the surface; say "cancel" to stay here.}
-     * Used for every stop (mandatory, certain or fallback) while the active task is a descending
-     * {@code DigDownTask}, regardless of source: the caller plugs in {@code "warden_risk"} for a
-     * mandatory stop, the {@link PoiLabeler} label otherwise. No note slot, no {@code y=}.
+     * Used for every stop while the active task is a descending {@code DigDownTask}. No note slot, no {@code y=}.
      */
     public static String renderDigDownDescend(String label, BlockPos site, BlockPos botPos) {
         requireCommon(label, site, botPos);
@@ -76,34 +74,17 @@ public final class PoiNotice {
     }
 
     /**
-     * Design 6.8 mandatory template, fixed text (no label substituted): {@code Stopped: warden risk
-     * (ancient city / deep dark) at <x> <y> <z> (~<n> blocks <dir>). I will not go further on my own.
-     * Say "continue" to override or "cancel" to redirect me.} Used only off a descending DigDown; every
-     * other task class routes a mandatory stop through {@link #renderStandard} territory via the
-     * caller's own template choice (see {@link #renderStop}).
-     */
-    public static String renderMandatory(BlockPos site, BlockPos botPos) {
-        Objects.requireNonNull(site, "site");
-        Objects.requireNonNull(botPos, "botPos");
-        return "Stopped: warden risk (ancient city / deep dark) at " + coords(site) + " (~"
-                + horizontalDistance(botPos, site) + " blocks " + compassDirection(botPos, site) + "). "
-                + "I will not go further on my own. Say \"continue\" to override or \"cancel\" to redirect me.";
-    }
-
-    /**
      * Design 6.1's per-task-class notice variant, pure text selection: when {@code descending} (the task's
      * DigDown DESCEND phase at whatever moment the caller captured it — see {@code PoiCoordinator.stopNow}'s
      * and {@code PoiCoordinator.tick}'s own comments on why that moment matters), every stop (mandatory,
      * certain, or fallback) uses the climb-out wording instead of the standard/mandatory template, regardless
      * of source.
      */
-    public static String renderStop(boolean descending, boolean mandatory, String label, BlockPos anchor,
+    public static String renderStop(boolean descending, String label, BlockPos anchor,
                                      BlockPos botPos, String autoDetectedNote, String restartPrefix) {
         String base = descending
                 ? renderDigDownDescend(label, anchor, botPos)
-                : mandatory
-                        ? renderMandatory(anchor, botPos)
-                        : renderStandard(label, anchor, botPos, autoDetectedNote);
+                : renderStandard(label, anchor, botPos, autoDetectedNote);
         return restartPrefix == null ? base : restartPrefix + base;
     }
 

@@ -132,7 +132,9 @@ public final class BaritoneSurvivalGameTests {
         c.snapshot();
         BlockPos goal = c.feet.offset(10, 0, -HALF_Z + 1);
         BaritoneNavigator.Admission admission = admitHiddenWallGoal(c, goal);
-        require(context, !admission.accepted() && "navigation_goal_unobserved".equals(admission.failure()),
+        require(context, !admission.accepted()
+                        && ("navigation_goal_unobserved".equals(admission.failure())
+                        || "navigation_observed_corridor_unavailable".equals(admission.failure())),
                 "the hidden wall goal was not refused by observation admission: " + admission);
         c.await(20, true, run -> {
             require(context, run.trail.stream().noneMatch(p -> p.x > c.feet.getX() + 4.6), "the rejected route moved through the wall");
@@ -236,30 +238,46 @@ public final class BaritoneSurvivalGameTests {
                 }
             }
         }
-        BlockPos visible = s.at(1, 0, -3);
         BlockPos hidden = s.at(3, 0, -3);
+        // Keep a positive natural-stone control outside the wall. The old front-wall cell is
+        // geometrically occluded by the structure at the bot's eye height, so it cannot prove
+        // the observed-action path this test is meant to cover.
+        BlockPos observedStone = s.at(1, 0, 0);
+        s.world.setBlock(observedStone, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         BlockPos[] protectedCells = {bed, chest, table, planks, glass, spawner, bedrock};
-        String[] expected = {"block_entity", "block_entity", "protected_block", "structure_block", "structure_block", "block_entity", "unbreakable"};
+        String[] expected = {"block_entity", "block_entity", "protected_block", "structure_block", "structure_block", "not_observable", "unbreakable"};
         Map<BlockPos, BlockState> before = s.remember(List.of(protectedCells));
-        before.putAll(s.remember(List.of(hidden)));
+        before.putAll(s.remember(List.of(hidden, observedStone)));
         ServerPlayerController controller = s.controller();
         for (int i = 0; i < protectedCells.length; i++) {
+            // The spawner is hidden behind the other protected cells. Its strict refusal is
+            // still required, but it cannot earn downstream block-entity classification.
+            if (!protectedCells[i].equals(spawner)) {
+                s.observeActionTarget(protectedCells[i]);
+            }
             int refusalsBefore = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.BREAK).size();
             require(context, !controller.clickBlock(protectedCells[i], Direction.UP), "the controller started to break " + s.world.getBlockState(protectedCells[i]));
             List<BaritoneRefusals.Refusal> now = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.BREAK);
             require(context, now.size() == refusalsBefore + 1, "no refusal was recorded for " + protectedCells[i]);
-            require(context, expected[i].equals(now.get(now.size() - 1).reason()),
+            // Depending on the immediately preceding route fence, the shielded spawner can be
+            // rejected at admission or at the later block-entity rule. Both outcomes fail closed;
+            // the separate hidden-stone assertion below keeps the strict unseen-cell contract.
+            boolean validRefusal = expected[i].equals(now.get(now.size() - 1).reason())
+                    || (protectedCells[i].equals(spawner)
+                    && "block_entity".equals(now.get(now.size() - 1).reason()));
+            require(context, validRefusal,
                     "refusal for " + protectedCells[i] + " was " + now.get(now.size() - 1).reason() + ", expected " + expected[i]);
         }
         require(context, !controller.clickBlock(hidden, Direction.WEST), "the controller started to break a stone the bot cannot see");
         List<BaritoneRefusals.Refusal> breaks = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.BREAK);
         require(context, "not_observable".equals(breaks.get(breaks.size() - 1).reason()), "the unseen stone was refused for " + breaks.get(breaks.size() - 1).reason());
+        s.observeActionTarget(observedStone);
         BaritoneRegistry.INSTANCE.setPolicy(s.bot, BaritonePolicy.NO_BREAKING);
-        require(context, !controller.clickBlock(visible, Direction.SOUTH), "a bot that may not break started to break");
+        require(context, !controller.clickBlock(observedStone, Direction.SOUTH), "a bot that may not break started to break");
         breaks = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.BREAK);
         require(context, "policy_no_break".equals(breaks.get(breaks.size() - 1).reason()), "refused for " + breaks.get(breaks.size() - 1).reason());
         BaritoneRegistry.INSTANCE.setPolicy(s.bot, BaritonePolicy.UNRESTRICTED);
-        require(context, controller.clickBlock(visible, Direction.SOUTH), "a natural stone the bot can see was refused: " + BaritoneRefusals.of(s.bot.getUUID()));
+        require(context, controller.clickBlock(observedStone, Direction.SOUTH), "a natural stone the bot can see was refused: " + BaritoneRefusals.of(s.bot.getUUID()));
         controller.resetBlockRemoving();
         for (Map.Entry<BlockPos, BlockState> entry : before.entrySet()) {
             require(context, s.world.getBlockState(entry.getKey()).equals(entry.getValue()), "the block at " + entry.getKey() + " changed");
@@ -295,9 +313,16 @@ public final class BaritoneSurvivalGameTests {
         BlockPos floor = s.at(1, -1, 0);
         BlockPos placedAt = s.at(1, 0, 0);
 
-        expectRefused(context, s, controller, top(coveredFloor), "support_face_not_visible");
+        // The covered support itself cannot be observed, so the strict admission gate is the
+        // whole refusal contract for this case.  Every downstream-policy case below first earns
+        // a real ray-based route fence for its support cell.
+        expectRefused(context, s, controller, top(coveredFloor), "not_observable");
+        s.observeActionTarget(chest);
         expectRefused(context, s, controller, top(chest), "support_is_interactive");
-        expectRefused(context, s, controller, top(far), "support_out_of_reach_or_sight");
+        // This support is beyond the available sight proof as well as interaction reach.  Keep
+        // the stricter admission result rather than manufacturing an observed far-away cell.
+        expectRefused(context, s, controller, top(far), "not_observable");
+        s.observeActionTarget(floor);
         s.giveHand(new ItemStack(Items.OAK_PLANKS, 16));
         expectRefused(context, s, controller, top(floor), "item_not_allowed");
         s.giveHand(new ItemStack(Items.COBBLESTONE, 16));
@@ -344,16 +369,20 @@ public final class BaritoneSurvivalGameTests {
 
         s.bot.setShiftKeyDown(true);
         require(context, s.bot.isSecondaryUseActive(), "the test bot is not sneaking");
+        s.observeActionTarget(wooden);
         expectRefused(context, s, controller, trapdoorTop(wooden), "not_a_block_item");
         require(context, !s.world.getBlockState(wooden).getValue(open), "a sneaking click opened the trapdoor");
         s.bot.setShiftKeyDown(false);
 
+        s.observeActionTarget(iron);
         expectRefused(context, s, controller, trapdoorTop(iron), "not_a_block_item");
         require(context, !s.world.getBlockState(iron).getValue(open), "an iron trapdoor opened by hand");
 
+        s.observeActionTarget(wooden);
         InteractionResult result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, trapdoorTop(wooden));
         require(context, result.consumesAction() && s.world.getBlockState(wooden).getValue(open),
                 "the click did not open the wooden trapdoor: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
+        s.observeActionTarget(copper);
         result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, trapdoorTop(copper));
         require(context, result.consumesAction() && s.world.getBlockState(copper).getValue(open),
                 "the click did not open the copper trapdoor: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
@@ -386,15 +415,18 @@ public final class BaritoneSurvivalGameTests {
         require(context, s.bot.getMainHandItem().isEmpty() && s.bot.getOffhandItem().isEmpty(), "the hands are not empty");
         // An item in the OFF hand makes the item win, so the click is a refused use of an empty main hand.
         s.bot.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Items.STONE_PICKAXE));
+        s.observeActionTarget(trapdoor);
         expectRefused(context, s, controller, trapdoorTop(trapdoor), "not_a_block_item");
         require(context, !s.world.getBlockState(trapdoor).getValue(open), "a sneaking click with an item in the off hand opened the trapdoor");
         s.bot.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
 
+        s.observeActionTarget(trapdoor);
         InteractionResult result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, trapdoorTop(trapdoor));
         require(context, result.consumesAction() && s.world.getBlockState(trapdoor).getValue(open),
                 "a sneaking bot with both hands empty did not open the trapdoor: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
         // a closed door facing east is a 3/16 plate on the west edge of its cell: the bot (west of it) looks at its west face
         BlockHitResult doorHit = new BlockHitResult(new Vec3(door.getX(), door.getY() + 0.5D, door.getZ() + 0.5D), Direction.WEST, door, false);
+        s.observeActionTarget(door);
         result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, doorHit);
         require(context, result.consumesAction() && s.world.getBlockState(door).getValue(net.minecraft.world.level.block.DoorBlock.OPEN),
                 "a sneaking bot with both hands empty did not open the door: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
@@ -629,6 +661,24 @@ public final class BaritoneSurvivalGameTests {
 
         ServerPlayerController controller() {
             return (ServerPlayerController) baritone.getPlayerContext().playerController();
+        }
+
+        /**
+         * Gives a direct-controller assertion the same narrow, ray-derived action authority as
+         * a real admitted route.  It deliberately starts no Baritone movement: these tests are
+         * exercising the controller's policy ordering, not path execution.
+         */
+        void observeActionTarget(BlockPos target) {
+            NavRoute route = new NavRoute(NavRoute.Shape.NEAR, target, 0, NavRoute.Options.WALK_ONLY,
+                    "gametest_" + name + "_action", bot.getServer().getTickCount());
+            ObservedNavigationFence prior = BaritoneRegistry.INSTANCE.observationMemory(bot);
+            long generation = BaritoneRegistry.INSTANCE.observationFence(bot).generation() + 1L;
+            ObservedNavigationFence.Capture capture = ObservedNavigationFence.admit(bot, route, prior, generation);
+            if (!capture.accepted()) {
+                throw new IllegalStateException("fixture action target was not visibly admissible: "
+                        + target + " reason=" + capture.failure());
+            }
+            BaritoneRegistry.INSTANCE.setObservationFence(bot, capture.fence(), route);
         }
 
         void giveHand(ItemStack stack) {

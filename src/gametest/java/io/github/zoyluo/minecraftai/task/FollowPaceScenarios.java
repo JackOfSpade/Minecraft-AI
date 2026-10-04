@@ -6,7 +6,6 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
-import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.phys.Vec3;
 
@@ -253,50 +252,6 @@ final class FollowPaceScenarios {
                 f.require(!(TaskManager.INSTANCE.getActive(bot).orElse(null) instanceof EvadeTask), "the follower evaded instead of following");
                 f.finish();
             }
-        });
-    }
-
-    /** A calm warden 14 blocks away in the dark: no evade, the follower creeps (shift down whenever it moves). */
-    static void sneaksNearCalmWarden(GameTestHelper context, boolean baritone, String prefix) {
-        FollowFieldFixture f = new FollowFieldFixture(context, 24, 18);
-        AIPlayerEntity bot = f.bot(prefix + "Warden", -6, 0, baritone);
-        ServerPlayer target = f.target(1, 0);
-        Warden warden = f.warden(-6.0D, 14.0D);
-        bot.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 4000, 0, false, false));
-        // Perception: the bot knows the warden is there because it has seen it: it looks at it and notices it (the reaction time of the
-        // shared formula) before the follow starts. Once noticed it stays known while the line to it is clear, also behind the bot.
-        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.faceToward(bot, warden);
-        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.afterNoticed(context, bot, java.util.List.of(warden), () -> {
-        FollowTask follow = f.follow(bot, target.getGameProfile().name(), "gametest_follow_pace_warden");
-        Watch watch = new Watch(bot);
-        int[] tick = {0};
-        int[] stats = new int[3]; // moving ticks, moving without shift, sprint ticks
-        io.github.zoyluo.minecraftai.gametest.PerceptionFixtures.everyTick(context, () -> {
-            int now = ++tick[0];
-            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
-            f.require(!(active instanceof EvadeTask), "the follower evaded a calm warden 14 blocks away");
-            f.require(active == follow && follow.state() == TaskState.RUNNING, "follow is not the active task: "
-                    + (active == null ? "none" : active.name()) + " " + follow.state());
-            f.require(warden.getPose() != net.minecraft.world.entity.Pose.ROARING, "fixture: the warden started roaring");
-            bot.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 4000, 0, false, false));
-            f.place(target, 1.0D + now * 0.05D, 0.0D);
-            watch.sample();
-            if (now > 30 && watch.moving) {
-                stats[0]++;
-                if (!bot.isShiftKeyDown()) {
-                    stats[1]++;
-                }
-                if (bot.isSprinting()) {
-                    stats[2]++;
-                }
-            }
-            if (now >= 180) {
-                f.require(stats[0] >= 30, "the follower hardly moved: " + stats[0] + " ticks");
-                f.require(stats[1] <= 2, "the follower moved without sneaking near a calm warden on " + stats[1] + " of " + stats[0] + " ticks");
-                f.require(stats[2] == 0, "the follower sprinted near a calm warden: " + stats[2] + " ticks");
-                f.finish();
-            }
-        });
         });
     }
 

@@ -19,10 +19,10 @@ class BuildActionVisibilitySourceTest {
     @Test
     void supportCenterDistanceCannotRejectAReachableFaceInset() throws IOException {
         String source = Files.readString(SOURCE);
-        int place = source.indexOf("public static ActionResult placeBlock(");
-        int placeAt = source.indexOf("public static ActionResult placeBlockAt(", place);
-        assertTrue(place >= 0 && placeAt > place);
-        String body = source.substring(place, placeAt);
+        int place = source.indexOf("private static ActionResult placeBlock(");
+        int placeUse = source.indexOf("private static Use useItemOnHitCrouching(", place);
+        assertTrue(place >= 0 && placeUse > place);
+        String body = source.substring(place, placeUse);
 
         assertTrue(body.contains("player.isWithinBlockInteractionRange(against, 0.0D)"));
         assertTrue(body.contains("exactPlacementSampleRange("));
@@ -35,7 +35,15 @@ class BuildActionVisibilitySourceTest {
         assertTrue(body.indexOf("visibleSupportFaceHit") < body.indexOf("ObservableWorldQuery.canObserveCell(player, destination)"),
                 "destination observation requires an exact visible support-face proof first");
         assertFalse(body.contains("getBlockState(destination)"),
-                "placement must not read the live destination to infer that a block was placed");
+                "the direct pre-click admission must not infer placement from a destination read");
+
+        int use = source.indexOf("public static Use useItemOnHit(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand,",
+                placeUse);
+        int placementState = source.indexOf("private static BlockState placementStateOf(", use);
+        assertTrue(use >= 0 && placementState > use);
+        String receipt = source.substring(use, placementState);
+        assertTrue(receipt.contains("BlockState destinationBefore") && receipt.contains("BlockState destinationAfter"),
+                "only the exact admitted destination may be compared before and after the vanilla click");
     }
 
     @Test

@@ -9,6 +9,7 @@ import baritone.api.utils.PathCalculationResult;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -216,10 +217,21 @@ public final class BaritoneGlueGameTests {
         BaritoneServerGameTests.preparePlatform(world, feet, 7);
         AIPlayerEntity bot = BaritoneServerGameTests.spawn(context, "BaritoneSupersedeGT", feet);
         IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
+        // Planner jobs may only see terrain that a normal route has admitted. Capture that
+        // fence through the same strict admission used by the navigator, but leave this test in
+        // control of the planner queue rather than starting an unrelated movement route.
+        BlockPos secondGoal = feet.offset(-5, 0, 2);
+        NavRoute observedRoute = new NavRoute(NavRoute.Shape.BLOCK, secondGoal, 0,
+                NavRoute.Options.WALK_ONLY, "supersede_observed_fixture", world.getServer().getTickCount());
+        var capture = ObservedNavigationFence.admit(bot, observedRoute,
+                BaritoneRegistry.INSTANCE.observationMemory(bot),
+                BaritoneRegistry.INSTANCE.observationFence(bot).generation() + 1L);
+        require(context, capture.accepted(), "the supersession fixture was not visibly admissible: " + capture.failure());
+        BaritoneRegistry.INSTANCE.setObservationFence(bot, capture.fence(), observedRoute);
         CountDownLatch release = new CountDownLatch(1);
         occupyEveryWorker(release);
         CompletableFuture<BaritonePlanner.Plan> first = BaritonePlanner.plan(baritone, new GoalBlock(feet.offset(6, 0, 3)));
-        CompletableFuture<BaritonePlanner.Plan> second = BaritonePlanner.plan(baritone, new GoalBlock(feet.offset(-5, 0, 2)));
+        CompletableFuture<BaritonePlanner.Plan> second = BaritonePlanner.plan(baritone, new GoalBlock(secondGoal));
         release.countDown();
         context.onEachTick(() -> {
             if (!first.isDone() || !second.isDone()) {
@@ -228,7 +240,7 @@ public final class BaritoneGlueGameTests {
             try {
                 require(context, first.join().type() == PathCalculationResult.Type.CANCELLATION, "the superseded plan was " + first.join().type());
                 require(context, second.join().reachesGoal(), "the new plan was " + second.join().type());
-                require(context, second.join().path().getDest().equals(new baritone.api.utils.BetterBlockPos(feet.offset(-5, 0, 2))),
+                require(context, second.join().path().getDest().equals(new baritone.api.utils.BetterBlockPos(secondGoal)),
                         "the new plan went to " + second.join().path().getDest());
             } finally {
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), "BaritoneSupersedeGT");

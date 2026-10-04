@@ -63,10 +63,8 @@ public final class MinePickupGameTests {
 
         // Manufactures "some other task paused beneath the active MineTask" exactly the way this
         // codebase's own GameTests already do it: pause a currently-active placeholder task, then
-        // hand a new task the active slot. See DangerWatcherLowHealthGameTests
-        // #pausedMiningOwnerResuppliesInPlaceWithoutBaseTravel for the established pattern this
-        // mirrors (there DigDownTask is the paused owner; HoldTask is used the same way as a bare
-        // paused-task fixture elsewhere in this codebase, e.g. MinecraftAiVerifySubcommand).
+        // hand a new task the active slot. HoldTask is used the same way as a bare paused-task
+        // fixture elsewhere in this codebase, e.g. MinecraftAiVerifySubcommand.
         HoldTask pausedOwner = new HoldTask();
         TaskManager.INSTANCE.assign(bot, pausedOwner,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_mine_pickup_paused_owner"));

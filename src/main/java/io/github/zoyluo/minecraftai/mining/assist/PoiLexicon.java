@@ -9,7 +9,7 @@ import java.util.Set;
 
 /**
  * String-in / enum-out vocabulary of the point-of-interest detector (mining-assist design 6.2 and
- * 6.3): which {@link PoiBucket} a block id belongs to, which ids are habitation, warden-risk or
+ * 6.3): which {@link PoiBucket} a block id belongs to, which ids are habitation or
  * structure-label markers, and how much an entity id contributes as evidence. Pure and stateless: no
  * registry access, no time, no randomness, so it is safe to call from any thread and from plain JUnit.
  *
@@ -26,8 +26,8 @@ import java.util.Set;
  *   <li>Vanilla natural list (ores, stone/soil/snow/ice families, cave vegetation, nether terrain,
  *       plain sculk, air and fluids): {@link PoiBucket#NATURAL}. Built variants (polished, bricks,
  *       chiseled, cut) are not on the list.</li>
- *   <li>Vanilla buckets by id pattern, most specific first: SPAWNER, CONTAINER, SCULK_STRUCT,
- *       DEEPSLATE_BUILD, RAIL, WEB, COPPER_TUFF_BUILD, STONE_BUILD, WOOD_BUILD, FURNISHING,
+ *   <li>Vanilla buckets by id pattern, most specific first: SPAWNER, CONTAINER, DEEPSLATE_BUILD,
+ *       RAIL, WEB, COPPER_TUFF_BUILD, STONE_BUILD, WOOD_BUILD, FURNISHING,
  *       FOSSIL_GEODE, LIGHT_DRESSING, COBBLE.</li>
  *   <li>Any other block entity: CONTAINER. Everything else: UNCLASSIFIED.</li>
  * </ol>
@@ -100,18 +100,15 @@ public final class PoiLexicon {
             "mushroom_stem", "crimson_fungus", "warped_fungus", "crimson_stem", "warped_stem",
             "nether_wart_block", "warped_wart_block", "crimson_nylium", "warped_nylium",
             "nether_sprouts", "shroomlight", "glowstone",
-            // plain sculk is counted separately for the warden rule, not as structure evidence
-            "sculk", "sculk_vein",
+            // Sculk material is ordinary terrain for POI scoring.
+            "sculk", "sculk_vein", "sculk_shrieker", "sculk_sensor", "calibrated_sculk_sensor",
+            "sculk_catalyst", "reinforced_deepslate",
             // stray flames
             "fire", "soul_fire");
 
     // ---- Vanilla bucket vocabularies (design 6.2 step 2) ----
 
     private static final Set<String> SPAWNER_FAMILY = setOf("spawner", "trial_spawner", "vault");
-
-    private static final Set<String> SCULK_STRUCT = setOf(
-            "sculk_shrieker", "sculk_sensor", "calibrated_sculk_sensor", "sculk_catalyst",
-            "reinforced_deepslate");
 
     private static final Set<String> RAILS = setOf(
             "rail", "powered_rail", "detector_rail", "activator_rail");
@@ -140,7 +137,7 @@ public final class PoiLexicon {
 
     private static final Set<String> COBBLE = setOf("cobblestone", "cobbled_deepslate");
 
-    // ---- Habitation, warden and entity vocabularies (design 6.3) ----
+    // ---- Habitation and entity vocabularies (design 6.3) ----
 
     /**
      * Habitation ids mapped to the design's nine canonical names (bed, crafting_table, furnace,
@@ -163,11 +160,6 @@ public final class PoiLexicon {
             Map.entry("item_frame", "item_frame"),
             Map.entry("glow_item_frame", "item_frame"),
             Map.entry("armor_stand", "armor_stand"));
-
-    private static final Set<String> WARDEN_SINGLE_TRIGGER = setOf(
-            "reinforced_deepslate", "sculk_shrieker", "sculk_catalyst");
-
-    private static final Set<String> SCULK_SENSORS = setOf("sculk_sensor", "calibrated_sculk_sensor");
 
     private static final Set<String> VILLAGER_CLASS = setOf(
             "villager", "pillager", "vindicator", "evoker", "illusioner");
@@ -233,9 +225,6 @@ public final class PoiLexicon {
         }
         if (isContainerName(p)) {
             return PoiBucket.CONTAINER;
-        }
-        if (SCULK_STRUCT.contains(p)) {
-            return PoiBucket.SCULK_STRUCT;
         }
         if (isDeepslateBuild(p)) {
             return PoiBucket.DEEPSLATE_BUILD;
@@ -375,7 +364,7 @@ public final class PoiLexicon {
     }
 
     // ---------------------------------------------------------------------------------------
-    // Habitation, sculk and warden helpers (namespace-less overloads accept vanilla ids only)
+    // Habitation helpers (namespace-less overloads accept vanilla ids only)
     // ---------------------------------------------------------------------------------------
 
     /**
@@ -409,50 +398,6 @@ public final class PoiLexicon {
             return "bed";
         }
         return HABITATION_KEYS.get(p);
-    }
-
-    /** Plain sculk, sculk_vein, sculk_sensor, calibrated_sculk_sensor, sculk_shrieker, sculk_catalyst. */
-    public static boolean isSculkFamily(String path) {
-        return isSculkFamily(null, path);
-    }
-
-    public static boolean isSculkFamily(String namespace, String path) {
-        Id id = parse(namespace, path);
-        String p = id.path();
-        return id.vanilla() && (p.equals("sculk") || p.startsWith("sculk_")
-                || p.equals("calibrated_sculk_sensor"));
-    }
-
-    /**
-     * Blocks that make the mandatory warden rule fire: reinforced_deepslate, sculk_shrieker,
-     * sculk_catalyst (one is enough) and sculk_sensor, calibrated_sculk_sensor (two are needed).
-     */
-    public static boolean isWarnBlockForWarden(String path) {
-        return isWarnBlockForWarden(null, path);
-    }
-
-    public static boolean isWarnBlockForWarden(String namespace, String path) {
-        return isWardenSingleTrigger(namespace, path) || isSculkSensor(namespace, path);
-    }
-
-    /** The subset of warn blocks where a single cell fires the mandatory rule. */
-    public static boolean isWardenSingleTrigger(String path) {
-        return isWardenSingleTrigger(null, path);
-    }
-
-    public static boolean isWardenSingleTrigger(String namespace, String path) {
-        Id id = parse(namespace, path);
-        return id.vanilla() && WARDEN_SINGLE_TRIGGER.contains(id.path());
-    }
-
-    /** The subset of warn blocks where two cells are needed: sculk_sensor, calibrated_sculk_sensor. */
-    public static boolean isSculkSensor(String path) {
-        return isSculkSensor(null, path);
-    }
-
-    public static boolean isSculkSensor(String namespace, String path) {
-        Id id = parse(namespace, path);
-        return id.vanilla() && SCULK_SENSORS.contains(id.path());
     }
 
     // ---------------------------------------------------------------------------------------
@@ -544,12 +489,6 @@ public final class PoiLexicon {
             return ENTITY_SCORE_DECOR;
         }
         return 0.0D;
-    }
-
-    /** A visible {@code minecraft:warden} is a mandatory stop on its own. */
-    public static boolean isWarden(String namespace, String path) {
-        Id id = parse(namespace, path);
-        return id.vanilla() && id.path().equals("warden");
     }
 
     // ---------------------------------------------------------------------------------------

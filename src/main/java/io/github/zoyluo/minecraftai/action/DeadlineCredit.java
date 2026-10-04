@@ -3,8 +3,8 @@ package io.github.zoyluo.minecraftai.action;
 /**
  * The extra ticks a route's deadline gets for the part of a tick a slow gait does not count ({@link Gait#clockWeight}), so a bot
  * that deliberately sneaks or walks is not timed out for it. The total is capped for the whole route: without a cap a sneak
- * (3.4 ticks of credit per tick) would move the deadline out faster than time passes and a long SNEAK lease (a sculk quiet zone, a
- * warden) could never reach its deadline, however stuck the bot is.
+ * (3.4 ticks of credit per tick) would move the deadline out faster than time passes and a long SNEAK lease
+ * could never reach its deadline, however stuck the bot is.
  */
 final class DeadlineCredit {
     /** The most a route may be credited, as a multiple of the ticks its deadline first allowed. */

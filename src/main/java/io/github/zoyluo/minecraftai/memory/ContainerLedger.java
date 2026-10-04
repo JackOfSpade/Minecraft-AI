@@ -32,6 +32,12 @@ public final class ContainerLedger {
      */
     public static final long FULL_TRUST_TICKS = 2400L;
     private static final int MAX_ITEM_KINDS = 64;
+    /**
+     * Legacy or user-edited saves can contain a much larger compound than the writer produces.
+     * Inspect at most twice the persisted item budget so malformed leading keys cannot make load
+     * time proportional to arbitrary NBT input, while ordinary persisted ledgers remain exact.
+     */
+    private static final int MAX_LOADED_ITEM_KEYS = MAX_ITEM_KINDS * 2;
 
     private final Map<String, Entry> entries = new LinkedHashMap<>();
 
@@ -69,6 +75,9 @@ public final class ContainerLedger {
         public int totalItems() {
             int total = 0;
             for (int count : items.values()) {
+                if (count > 0 && total > Integer.MAX_VALUE - count) {
+                    return Integer.MAX_VALUE;
+                }
                 total += count;
             }
             return total;
@@ -267,7 +276,11 @@ public final class ContainerLedger {
 
     public synchronized void load(ListTag list) {
         entries.clear();
-        for (int index = 0; index < list.size(); index++) {
+        // toNbt writes the recency-ordered ledger.  When loading an oversized legacy or edited
+        // list, inspect its recent tail only: it preserves useful current records and bounds
+        // recovery work instead of walking every untrusted entry merely to evict it afterwards.
+        int firstLoaded = Math.max(0, list.size() - MAX_ENTRIES);
+        for (int index = firstLoaded; index < list.size(); index++) {
             CompoundTag tag = list.getCompoundOrEmpty(index);
             String dimension = tag.getStringOr("dimension", "");
             if (dimension.isBlank()) {
@@ -275,9 +288,16 @@ public final class ContainerLedger {
             }
             Map<String, Integer> items = new LinkedHashMap<>();
             CompoundTag itemTag = tag.getCompoundOrEmpty("items");
+            int inspectedKeys = 0;
             for (String id : itemTag.keySet()) {
+                if (inspectedKeys++ >= MAX_LOADED_ITEM_KEYS) {
+                    break;
+                }
+                if (items.size() >= MAX_ITEM_KINDS) {
+                    break;
+                }
                 int count = itemTag.getIntOr(id, 0);
-                if (count > 0) {
+                if (!id.isBlank() && count > 0) {
                     items.put(id, count);
                 }
             }
@@ -289,7 +309,9 @@ public final class ContainerLedger {
                     Math.max(0, tag.getIntOr("free", 0)),
                     Math.max(0, tag.getIntOr("slots", 0)),
                     tag.getLongOr("verified", 0L));
-            entries.put(key(entry.dimension(), entry.pos()), entry);
+            // Persisted NBT is user-editable and may come from an older, uncapped version. Route
+            // it through the normal insertion path so loading cannot bypass the memory bound.
+            record(entry);
         }
     }
 
