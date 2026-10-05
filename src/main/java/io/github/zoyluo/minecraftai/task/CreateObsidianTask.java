@@ -4,7 +4,6 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
-import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.BucketAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
@@ -34,7 +33,6 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluids;
@@ -806,7 +804,6 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
         // Only actual forward displacement consumes the durable cursor. Excavating a wall does
         // not pretend that the work face moved.
-        BlockPos previousFace = searchCursor.face();
         ObsidianSearchCursor advanced = searchCursor.advanceTo(current);
         if (!advanced.equals(searchCursor)) {
             searchCursor = advanced;
@@ -817,7 +814,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                     "face", current.toShortString(),
                     "leg", searchCursor.legIndex(),
                     "remaining", searchCursor.stepsLeft());
-            if (!lightSearchTrail(bot, previousFace)) {
+            if (!lightSearchTrail(bot)) {
                 return;
             }
             if (searchCursor.facesSinceScan() >= SEARCH_SCAN_STRIDE) {
@@ -953,30 +950,50 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     /**
      * Keeps the physical branch corridor spawn-safe. Existing torch light is durable checkpoint
      * state in the world, so restart idempotence does not need an invented counter: place only
-     * when the just-reached face is below the configured block-light threshold.
+     * whenever the dimension's native hostile-spawn rule says the underground work face is dark.
+     * The shared selector chooses the darkest immediately reachable safe mount; it never trails a
+     * torch onto a surface face merely because the bot has just left a cave.
      */
-    private boolean lightSearchTrail(AIPlayerEntity bot, BlockPos previousFace) {
-        ServerLevel world = bot.level();
-        if (combinedSearchLight(world, bot.blockPosition()) >= searchLightThreshold()) {
-            return true;
-        }
-        if (!hasSearchLightingResource(bot)) {
-            return false;
-        }
-        return placeSearchTorch(bot, previousFace);
+    private boolean lightSearchTrail(AIPlayerEntity bot) {
+        return ensureAutomaticSearchLighting(bot);
     }
 
     private boolean searchLightingReady(AIPlayerEntity bot) {
-        if (combinedSearchLight(bot.level(), bot.blockPosition()) >= searchLightThreshold()) {
+        return ensureAutomaticSearchLighting(bot);
+    }
+
+    private boolean ensureAutomaticSearchLighting(AIPlayerEntity bot) {
+        ServerLevel world = bot.level();
+        if (!AutomaticLighting.needsUndergroundTorch(world, bot.blockPosition())) {
+            return true;
+        }
+        if (!AutomaticLighting.miningTorchAutomationEnabled()) {
             return true;
         }
         if (!hasSearchLightingResource(bot)) {
             return false;
         }
-        // A standing torch has no collision box, so vanilla permits the same floor placement used
-        // by DescendToYTask/OreDigTask at the bot's current feet. This lights an initial/restored
-        // dark face before SEARCH opens another wall.
-        return placeSearchTorch(bot, bot.blockPosition());
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        if (placement == AutomaticLighting.Placement.PLACED) {
+            lastProgressTick = totalBudget();
+            BotLog.action(bot, "create_obsidian_search_auto_torch",
+                    "face", bot.blockPosition().toShortString());
+            return true;
+        }
+        if (placement == AutomaticLighting.Placement.IN_PROGRESS) {
+            // A reactive shield can own the hand briefly. Preserve this search state until the
+            // vanilla interaction has a chance to settle instead of spending its watchdog budget.
+            lastProgressTick = totalBudget();
+            return false;
+        }
+        if (placement == AutomaticLighting.Placement.FAILED) {
+            fail("create_obsidian_search_torch_failed");
+        } else {
+            // The bot is underground and genuinely spawn-dark, but no observed/ray-reachable
+            // floor can take a torch. Do not walk or dig just to fabricate a lighting mount.
+            fail("create_obsidian_search_no_torch_mount");
+        }
+        return false;
     }
 
     private boolean hasSearchLightingResource(AIPlayerEntity bot) {
@@ -989,57 +1006,6 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return false;
         }
         return true;
-    }
-
-    private boolean placeSearchTorch(AIPlayerEntity bot, BlockPos target) {
-        ServerLevel world = bot.level();
-        int torchSlot = InventoryAction.findItem(bot, Items.TORCH).orElse(-1);
-        if (torchSlot < 0) {
-            fail("create_obsidian_search_missing_torch");
-            return false;
-        }
-        if (target == null
-                || !ObservableWorldQuery.canObserveCell(bot, target)
-                || !ObservableWorldQuery.canObserveBlock(bot, target.below())
-                || !world.getBlockState(target).isAir()
-                || world.getBlockState(target.below()).getCollisionShape(
-                world, target.below()).isEmpty()
-                || !world.getFluidState(target).isEmpty()
-                || !world.getFluidState(target.below()).isEmpty()) {
-            fail("create_obsidian_search_no_torch_mount:"
-                    + (target == null ? "none" : target.toShortString()));
-            return false;
-        }
-        if (InventoryAction.equipFromSlot(bot, torchSlot) < 0) {
-            fail("create_obsidian_search_cannot_equip_torch");
-            return false;
-        }
-        ActionResult placed = BuildAction.placeBlockAt(bot, target);
-        if (placed.isInProgress()) {
-            // A reactive shield may own the hand briefly.  Preserve the search
-            // state and do not let that intentional wait consume its watchdog.
-            lastProgressTick = totalBudget();
-            return false;
-        }
-        if (placed.isFailed()) {
-            fail("create_obsidian_search_torch_failed:" + placed.reason());
-            return false;
-        }
-        lastProgressTick = totalBudget();
-        BotLog.action(bot, "create_obsidian_search_torch",
-                "pos", target.toShortString(),
-                "face", bot.blockPosition().toShortString(),
-                "remaining", InventoryAction.countItem(bot, Items.TORCH));
-        return true;
-    }
-
-    private static int searchLightThreshold() {
-        return Math.max(1, Math.min(14, MinecraftAiConfig.get().night().torchLightThreshold()));
-    }
-
-    private static int combinedSearchLight(ServerLevel world, BlockPos pos) {
-        return Math.max(world.getBrightness(LightLayer.BLOCK, pos),
-                world.getBrightness(LightLayer.SKY, pos));
     }
 
     private BlockMiner.Status beginSearchMine(AIPlayerEntity bot, BlockPos pos) {

@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.coordination;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.task.BlueprintLoader;
 import io.github.zoyluo.minecraftai.task.BuildTask;
 import io.github.zoyluo.minecraftai.task.CraftTask;
@@ -10,6 +11,7 @@ import io.github.zoyluo.minecraftai.task.EatTask;
 import io.github.zoyluo.minecraftai.task.LightAreaTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
@@ -134,7 +136,13 @@ public final class IdleCoordinator {
             Map<String, String> params = job.params();
             return switch (job.kind()) {
                 case "move" -> Optional.of(new MoveTask(bot, blockPos(params, "x", "y", "z")));
-                case "mine" -> Optional.of(new MineTask(requiredBlock(params, "block"), intParam(params, "count", 1)));
+                case "mine" -> {
+                    Block block = requiredBlock(params, "block");
+                    int count = intParam(params, "count", 1);
+                    yield Optional.of(OreScan.isOreBlock(block)
+                            ? new OreDigTask(OreScan.oreFamily(block), count)
+                            : new MineTask(block, count));
+                }
                 case "craft" -> Optional.of(new CraftTask(requiredItem(params, "item"), intParam(params, "count", 1)));
                 case "smelt" -> Optional.of(new SmeltTask(requiredItem(params, "input_item"), requiredItem(params, "output_item"), intParam(params, "count", 1)));
                 case "eat" -> Optional.of(new EatTask());

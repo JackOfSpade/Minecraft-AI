@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.memory.BotMemory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.network.payload.BotChatS2C;
 import io.github.zoyluo.minecraftai.network.payload.BotCommandC2S;
 import io.github.zoyluo.minecraftai.network.payload.BotItemMoveC2S;
@@ -24,6 +25,7 @@ import io.github.zoyluo.minecraftai.task.CraftTask;
 import io.github.zoyluo.minecraftai.task.EatTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
@@ -309,7 +311,13 @@ public final class MinecraftAiServerNetworking {
         String action = payload.action().toLowerCase(Locale.ROOT);
         switch (action) {
             case "move" -> assign(bot, new MoveTask(bot, parseBlockPos(payload.arg1())));
-            case "mine" -> assign(bot, new MineTask(requiredBlock(payload.arg1()), count(payload)));
+            case "mine" -> {
+                Block block = requiredBlock(payload.arg1());
+                int requested = count(payload);
+                assign(bot, OreScan.isOreBlock(block)
+                        ? new OreDigTask(OreScan.oreFamily(block), requested)
+                        : new MineTask(block, requested));
+            }
             case "craft" -> assign(bot, new CraftTask(requiredItem(payload.arg1()), count(payload)));
             case "smelt" -> assign(bot, new SmeltTask(requiredItem(payload.arg1()), requiredItem(payload.arg2()), count(payload)));
             case "eat" -> assign(bot, new EatTask());

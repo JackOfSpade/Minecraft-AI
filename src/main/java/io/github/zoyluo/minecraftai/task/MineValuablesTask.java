@@ -1,11 +1,8 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.BlockMiner;
-import io.github.zoyluo.minecraftai.action.ActionResult;
-import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
-import io.github.zoyluo.minecraftai.action.ToolSelector;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
@@ -22,7 +19,6 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -420,35 +416,33 @@ public final class MineValuablesTask extends AbstractTask {
         complete();
     }
 
-    // Reactive, fully self-contained lighting -- deliberately never touches TaskManager,
-    // DangerWatcher or GoalExecutor (see DescendToYTask.maybePlaceTorch, whose shape this
-    // mirrors). Only fires underground/enclosed, throttled, and never blocks progress on missing
-    // torches.
+    // Reactive, fully self-contained lighting -- deliberately never takes over TaskManager,
+    // DangerWatcher or GoalExecutor. The shared helper accepts only an immediate vanilla-reachable
+    // floor mount, so this frozen-snapshot miner never walks away from its current ore/drop just
+    // to light an area. It is throttled and never blocks progress on missing torches.
     private void maybePlaceTorch(AIPlayerEntity bot) {
-        if (elapsed - lastTorchCheckTick < TORCH_CHECK_INTERVAL_TICKS) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()
+                || elapsed - lastTorchCheckTick < TORCH_CHECK_INTERVAL_TICKS) {
             return;
         }
         lastTorchCheckTick = elapsed;
-        var world = bot.level();
-        BlockPos feet = bot.blockPosition();
-        if (world.canSeeSky(feet)) {
-            return; // "when not on the surface" -- open sky is left to natural light
-        }
-        if (world.getBrightness(LightLayer.BLOCK, feet) >= 8) {
+        // A live block break or physical pickup owns the player controls and drop position.  Wait
+        // for a quiet inter-target/scanning boundary rather than swapping to a torch mid-ledger.
+        if (phase == Phase.PICKING_UP
+                || miner.target() != null
+                || !bot.getActionPack().isPathExecutorIdle()
+                || !bot.getActionPack().isWalkToIdle()) {
             return;
         }
-        var torchSlot = InventoryAction.findItem(bot, Items.TORCH);
-        if (torchSlot.isPresent()) {
-            InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
-            ActionResult placed = BuildAction.placeBlockAt(bot, feet);
-            if (placed.isSuccess()) {
-                BotLog.action(bot, "mine_valuables_torch", "pos", feet.toShortString());
-            }
+        var world = bot.level();
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        if (placement == AutomaticLighting.Placement.PLACED) {
+            BotLog.action(bot, "mine_valuables_torch", "pos", bot.blockPosition().toShortString());
         }
         // Slot identity is not stable once a torch is equipped from a full inventory; restore the
         // active mining tool from the factual in-progress target rather than a stale slot index.
         if (miner.target() != null) {
-            ToolSelector.equipBestTool(bot, world.getBlockState(miner.target()));
+            io.github.zoyluo.minecraftai.action.ToolSelector.equipBestTool(bot, world.getBlockState(miner.target()));
         }
     }
 

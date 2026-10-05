@@ -143,6 +143,19 @@ final class TorchPlacementPlannerTest {
         assertTrue(TorchPlacementPlanner.withoutSurfaceCells(new LinkedHashSet<>(List.of(mouth)), cell -> true).isEmpty());
     }
 
+    @Test
+    void automaticLightingChoosesTheDarkestCellBeforeCoverageOrDistance() {
+        BlockPos dim = new BlockPos(1, 64, 0);
+        BlockPos darkest = new BlockPos(5, 64, 0);
+        BlockPos equallyDarkButBrighterBlockLight = new BlockPos(4, 64, 0);
+        Set<BlockPos> cells = new LinkedHashSet<>(List.of(dim, darkest, equallyDarkButBrighterBlockLight));
+        Map<BlockPos, Integer> raw = Map.of(dim, 4, darkest, 0, equallyDarkButBrighterBlockLight, 0);
+        Map<BlockPos, Integer> block = Map.of(dim, 0, darkest, 0, equallyDarkButBrighterBlockLight, 3);
+
+        assertEquals(darkest, TorchPlacementPlanner.chooseDarkest(
+                cells, raw, block, new BlockPos(0, 64, 0)));
+    }
+
     private static Map<BlockPos, Integer> zeroLight(Set<BlockPos> cells) {
         Map<BlockPos, Integer> light = new HashMap<>();
         for (BlockPos cell : cells) {

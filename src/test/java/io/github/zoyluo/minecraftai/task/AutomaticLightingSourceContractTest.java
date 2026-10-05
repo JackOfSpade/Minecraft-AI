@@ -78,4 +78,68 @@ final class AutomaticLightingSourceContractTest {
                     explicit + " is an explicit request and lights the surface too");
         }
     }
+
+    @Test
+    void activeMiningLightingUsesNativeSpawnRulesAndNeverBlindlyPlacesAtFeet() throws IOException {
+        String automatic = read(MAIN.resolve("task/AutomaticLighting.java"));
+        assertTrue(automatic.contains("monsterSpawnBlockLightLimit()"));
+        assertTrue(automatic.contains("monsterSpawnLightTest().getMaxValue()"));
+        assertTrue(automatic.contains("SurfaceCheck.isOnSurface"));
+        assertTrue(automatic.contains("BuildAction.canAcceptPlacementAt"));
+        assertTrue(automatic.contains("darkestReachableFloor"));
+        assertTrue(automatic.contains("miningTorchAutomationEnabled")
+                        && automatic.contains("mining().placeTorches()"),
+                "active mining must retain its dedicated torch-policy switch");
+        assertFalse(automatic.contains("night().autoLight()"),
+                "the idle night-light setting must not disable active mining torches");
+
+        String descend = read(MAIN.resolve("task/DescendToYTask.java"));
+        String descendLighting = descend.substring(descend.indexOf("private void maybePlaceTorch"),
+                descend.indexOf("static void restoreActiveMiningTool"));
+        assertTrue(descendLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(descendLighting.contains("AutomaticLighting.miningTorchAutomationEnabled"));
+        assertTrue(descendLighting.contains("miner.target() != null")
+                        && descendLighting.contains("isMiningIdle()")
+                        && descendLighting.contains("hasActiveActions()"),
+                "descent may only light at a quiet boundary, never during an in-flight break");
+        assertFalse(descendLighting.contains("BuildAction.placeBlockAt"));
+
+        String valuables = read(MAIN.resolve("task/MineValuablesTask.java"));
+        int valuableLightingStart = valuables.indexOf("private void maybePlaceTorch");
+        String valuableLighting = valuables.substring(valuableLightingStart,
+                valuables.indexOf("    @Override", valuableLightingStart));
+        assertTrue(valuableLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(valuableLighting.contains("AutomaticLighting.miningTorchAutomationEnabled"));
+        assertFalse(valuableLighting.contains("world.canSeeSky"));
+
+        String oreDig = read(MAIN.resolve("task/OreDigTask.java"));
+        assertTrue(oreDig.contains("maybePlaceAutomaticTorchAtSafeBoundary"));
+        assertTrue(oreDig.contains("AutomaticLighting.miningTorchAutomationEnabled"));
+        assertTrue(oreDig.contains("pendingPickupPos != null"));
+        assertTrue(oreDig.contains("activeTargetBreakPos != null"));
+        assertTrue(oreDig.contains("rareDarkBoundary") && oreDig.contains("torchPlacements++"),
+                "rare observed-ore work must light through the shared reflex while preserving its torch budget");
+
+        String obsidian = read(MAIN.resolve("task/CreateObsidianTask.java"));
+        assertTrue(obsidian.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(obsidian.contains("AutomaticLighting.miningTorchAutomationEnabled"));
+        assertFalse(obsidian.contains("combinedSearchLight"));
+
+        String exploration = read(MAIN.resolve("task/MiningExplorationTask.java"));
+        assertTrue(exploration.contains("AutomaticLighting.miningTorchAutomationEnabled"));
+
+        String genericMine = read(MAIN.resolve("task/MineTask.java"));
+        assertTrue(genericMine.contains("maybePlaceAutomaticTorch"));
+        assertTrue(genericMine.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(genericMine.contains("phase != Phase.SEARCHING")
+                        && genericMine.contains("miner.target() != null"),
+                "generic block mining must only light at its own quiet search boundary");
+
+        String stripMine = read(MAIN.resolve("task/StripMineTask.java"));
+        int stripLightingStart = stripMine.indexOf("private void light(AIPlayerEntity bot)");
+        String stripLighting = stripMine.substring(stripLightingStart,
+                stripMine.indexOf("    private void move(AIPlayerEntity bot)", stripLightingStart));
+        assertTrue(stripLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertFalse(stripLighting.contains("BuildAction.placeBlockAt"));
+    }
 }

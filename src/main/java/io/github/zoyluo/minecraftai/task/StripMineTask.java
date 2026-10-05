@@ -2,9 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
-import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.ContainerAction;
-import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -450,26 +448,18 @@ public final class StripMineTask extends AbstractTask {
         if (!MinecraftAiConfig.get().mining().placeTorches()
                 || distanceCompleted == 0
                 || distanceCompleted % 8 != 0
-                || bot.level().getBrightness(net.minecraft.world.level.LightLayer.BLOCK, bot.blockPosition()) >= 8) {
+                || !AutomaticLighting.needsUndergroundTorch(bot.level(), bot.blockPosition())) {
             phase = Phase.MOVE;
             return;
         }
-        int torchSlot = InventoryAction.findItem(bot, Items.TORCH).orElse(-1);
-        if (torchSlot < 0) {
-            note = "no_torch";
-            phase = Phase.MOVE;
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        if (placement == AutomaticLighting.Placement.IN_PROGRESS) {
             return;
         }
-        InventoryAction.equipFromSlot(bot, torchSlot);
-        Optional<BlockPos> torchPos = torchPosition(bot);
-        if (torchPos.isPresent()) {
-            ActionResult result = BuildAction.placeBlockAt(bot, torchPos.get());
-            if (result.isInProgress()) {
-                return;
-            }
-            if (result.isFailed()) {
-                note = "torch_failed:" + result.reason();
-            }
+        if (placement == AutomaticLighting.Placement.NONE) {
+            note = "no_reachable_dark_torch_mount";
+        } else if (placement == AutomaticLighting.Placement.FAILED) {
+            note = "torch_failed";
         }
         // Slot identity is not stable once a torch is equipped (mirrors
         // MineValuablesTask.maybePlaceTorch): restore the active mining tool now, using the
@@ -620,18 +610,6 @@ public final class StripMineTask extends AbstractTask {
                                 veinBlocks.addLast(pos);
                             }
                         }));
-    }
-
-    private Optional<BlockPos> torchPosition(AIPlayerEntity bot) {
-        BlockPos base = bot.blockPosition();
-        for (Direction direction : Direction.Plane.HORIZONTAL) {
-            BlockPos pos = base.relative(direction);
-            if (bot.level().getBlockState(pos).isAir()
-                    && !bot.level().getBlockState(pos.below()).isAir()) {
-                return Optional.of(pos.immutable());
-            }
-        }
-        return Optional.empty();
     }
 
     private static boolean safeStandTarget(ServerLevel world, BlockPos stand) {

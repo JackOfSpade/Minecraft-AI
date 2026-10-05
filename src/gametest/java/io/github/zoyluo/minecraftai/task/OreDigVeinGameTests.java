@@ -8,7 +8,9 @@ import io.github.zoyluo.minecraftai.brain.ToolDefinition;
 import io.github.zoyluo.minecraftai.brain.ToolRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -74,6 +76,119 @@ public final class OreDigVeinGameTests {
             }
             require(context, InventoryAction.countItem(bot, Items.RAW_IRON) == near.size(),
                     "raw iron collected " + InventoryAction.countItem(bot, Items.RAW_IRON));
+            finish(context, fixture);
+        });
+    }
+
+    /**
+     * A normal count request is allowed to exceed its quota only to finish the connected seam it
+     * already opened.  This is the live regression for Moss mining one coal, rejecting adjacent
+     * members as route-required, then starting depth exploration at 1/8.
+     */
+    @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_count_mode_drains_opened_vein_before_returning_to_quota_search", maxTicks = 1500)
+    public void countModeDrainsOpenedVeinBeforeReturningToQuotaSearch(GameTestHelper context) {
+        Fixture fixture = spawn(context, "VeinCountGT", true, true, 20);
+        AIPlayerEntity bot = fixture.bot();
+        var world = bot.level();
+        BlockPos start = fixture.start();
+        Set<BlockPos> near = cells(start, new int[][]{{0, 0, -3}, {1, 0, -3}, {1, 1, -3}, {1, 0, -4}});
+        Set<BlockPos> far = cells(start, new int[][]{{-3, 0, -3}, {-3, 1, -3}, {-2, 1, -3}, {-3, 0, -4}});
+        placeOre(world, near);
+        placeOre(world, far);
+        Map<BlockPos, BlockState> before = snapshot(world, start);
+        int deaths = deathCount(bot);
+
+        // Assign the physical count-mode task directly: tool-level count normally enters the
+        // adaptive goal wrapper, while this regression is specifically its task's seam contract.
+        OreDigTask task = new OreDigTask(OreScan.oreFamily(Blocks.IRON_ORE), 1);
+        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_count_vein"));
+
+        context.failIfEver(() -> {
+            require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                fail(context, "count task ended as " + task.state() + ":" + task.failureReason());
+            }
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            for (BlockPos pos : near) {
+                require(context, world.getBlockState(pos).isAir(),
+                        "count mode left connected ore " + pos.toShortString());
+            }
+            for (BlockPos pos : far) {
+                require(context, world.getBlockState(pos).is(Blocks.IRON_ORE),
+                        "count mode touched disconnected ore " + pos.toShortString());
+            }
+            require(context, InventoryAction.countItem(bot, Items.RAW_IRON) == near.size(),
+                    "raw iron collected " + InventoryAction.countItem(bot, Items.RAW_IRON)
+                            + ", expected all " + near.size() + " connected drops");
+            requireOnlyChanged(context, world, before, near,
+                    "count mode disturbed terrain outside the opened vein");
+            finish(context, fixture);
+        });
+    }
+
+    /**
+     * The connected-seam obligation survives a task/process restore even when the requested
+     * count was already delivered by the first block.  Only factual broken cells are checkpointed;
+     * the restored task must re-observe its neighbours before it mines them.
+     */
+    @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_count_mode_restored_after_first_pickup_drains_opened_vein", maxTicks = 1500)
+    public void countModeRestoredAfterFirstPickupDrainsOpenedVein(GameTestHelper context) {
+        Fixture fixture = spawn(context, "VeinRestartGT", true, true, 20);
+        AIPlayerEntity bot = fixture.bot();
+        var world = bot.level();
+        BlockPos start = fixture.start();
+        Set<BlockPos> near = cells(start, new int[][]{{0, 0, -3}, {1, 0, -3}, {1, 1, -3}, {1, 0, -4}});
+        Set<BlockPos> far = cells(start, new int[][]{{-3, 0, -3}, {-3, 1, -3}, {-2, 1, -3}, {-3, 0, -4}});
+        placeOre(world, near);
+        placeOre(world, far);
+        Map<BlockPos, BlockState> before = snapshot(world, start);
+        int deaths = deathCount(bot);
+        OreDigTask[] active = {new OreDigTask(OreScan.oreFamily(Blocks.IRON_ORE), 1)};
+        boolean[] restarted = {false};
+        TaskManager.INSTANCE.assign(bot, active[0],
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_count_vein_restart"));
+
+        context.failIfEver(() -> {
+            require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
+            OreDigTask task = active[0];
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                fail(context, "count task ended as " + task.state() + ":" + task.failureReason());
+            }
+            int rawIron = InventoryAction.countItem(bot, Items.RAW_IRON);
+            if (!restarted[0] && rawIron >= 1 && rawIron < near.size()) {
+                Map<String, String> checkpoint = task.checkpoint();
+                require(context, checkpoint.containsKey("opened_vein_breaks"),
+                        "first delivered ore did not checkpoint its opened seam: " + checkpoint);
+                TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_count_vein_restart_boundary");
+                OreDigTask restored = new OreDigTask(OreScan.oreFamily(Blocks.IRON_ORE), 1, checkpoint);
+                TaskManager.INSTANCE.assign(bot, restored,
+                        TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_count_vein_restored"));
+                require(context, checkpoint.get("opened_vein_breaks").equals(
+                                restored.checkpoint().get("opened_vein_breaks")),
+                        "restored seam frontier changed: before=" + checkpoint
+                                + " after=" + restored.checkpoint());
+                active[0] = restored;
+                restarted[0] = true;
+                return;
+            }
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            require(context, restarted[0], "count task completed before the forced restart");
+            for (BlockPos pos : near) {
+                require(context, world.getBlockState(pos).isAir(),
+                        "restored count mode left connected ore " + pos.toShortString());
+            }
+            for (BlockPos pos : far) {
+                require(context, world.getBlockState(pos).is(Blocks.IRON_ORE),
+                        "restored count mode touched disconnected ore " + pos.toShortString());
+            }
+            require(context, rawIron == near.size(),
+                    "restored count mode collected " + rawIron + ", expected " + near.size());
+            requireOnlyChanged(context, world, before, near,
+                    "restored count mode disturbed terrain outside the opened vein");
             finish(context, fixture);
         });
     }

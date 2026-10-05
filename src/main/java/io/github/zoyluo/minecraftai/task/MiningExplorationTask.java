@@ -221,6 +221,16 @@ public final class MiningExplorationTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (caveSurveyEntry != null) {
+            // The descent child handles its own active-stair lighting.  A cave survey can also
+            // pause at an observed rim; only then is an immediate ray-reachable torch allowed,
+            // never a detour away from the surveyed entrance.
+            if (AutomaticLighting.miningTorchAutomationEnabled()
+                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+                if (placement == AutomaticLighting.Placement.IN_PROGRESS) {
+                    return;
+                }
+            }
             tickCaveSurvey(bot);
             return;
         }

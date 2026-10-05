@@ -41,6 +41,8 @@ public final class MineTask extends AbstractTask {
     private int pickupTicks;
     private boolean pickupSweepAttempted;
     private boolean directMiningTarget;
+    /** Local cadence for the side-effect-free automatic-light scan at safe task boundaries. */
+    private int lastTorchCheckElapsed = -10;
     /**
      * Count-mode mining searches beyond its first local view by walking only to a short destination
      * selected by the observation fence.  A compass heading is never itself a terrain or route
@@ -112,12 +114,37 @@ public final class MineTask extends AbstractTask {
             fail("mine_timeout");
             return;
         }
+        maybePlaceAutomaticTorch(bot);
         switch (phase) {
             case SEARCHING -> search(bot);
             case EXPLORING -> explore(bot);
             case MOVING -> move(bot);
             case MINING -> mine(bot);
             case PICKING_UP -> pickup(bot);
+        }
+    }
+
+    /**
+     * Generic block mining (cobblestone, obsidian, and other non-ore requests) reaches this task
+     * directly, so it needs the same underground-only safety reflex as the ore-specific tasks.
+     * Keep it at an idle search boundary: it never interrupts a path, an in-flight break, or drop
+     * collection, and the next mining start will factually re-equip its best tool.
+     */
+    private void maybePlaceAutomaticTorch(AIPlayerEntity bot) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()
+                || phase != Phase.SEARCHING
+                || elapsed - lastTorchCheckElapsed < 10
+                || miner.target() != null
+                || !bot.getActionPack().isMiningIdle()
+                || !bot.getActionPack().isPathExecutorIdle()
+                || !bot.getActionPack().isWalkToIdle()
+                || bot.getActionPack().hasActiveActions()) {
+            return;
+        }
+        lastTorchCheckElapsed = elapsed;
+        if (AutomaticLighting.tryPlaceDarkestReachable(bot)
+                == AutomaticLighting.Placement.PLACED) {
+            BotLog.action(bot, "mine_auto_torch", "pos", bot.blockPosition().toShortString());
         }
     }
 

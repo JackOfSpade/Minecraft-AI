@@ -144,9 +144,11 @@ class CreateObsidianSurvivalBoundaryTest {
                 "pool prospecting must replan when stone picks are exhausted, not consume iron");
         assertTrue(task.contains("create_obsidian_search_preserve_mission_tool"),
                 "branch excavation must preserve both iron and diamond mission tools");
-        assertTrue(task.contains("create_obsidian_search_torch"));
-        assertTrue(task.contains("combinedSearchLight"),
-                "SEARCH lighting must account for both block and sky light");
+        assertTrue(task.contains("create_obsidian_search_auto_torch"));
+        assertTrue(task.contains("AutomaticLighting.needsUndergroundTorch"),
+                "SEARCH lighting must use the native hostile-spawn darkness rule under a roof");
+        assertTrue(task.contains("AutomaticLighting.tryPlaceDarkestReachable"),
+                "SEARCH lighting must choose the darkest real-player-reachable mount, not a fixed face");
         assertTrue(task.contains("create_obsidian_search_lighting_disabled")
                         && task.contains("create_obsidian_search_missing_torch"),
                 "a dark branch must fail closed when physical lighting is unavailable");

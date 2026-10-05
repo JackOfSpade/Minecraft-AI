@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 
@@ -358,7 +359,7 @@ class OreDigCheckpointSourceContractTest {
         int torchPlacements = normalizedCheckpoint.indexOf("OreDigCheckpoint withTorchPlacements", resourceEpoch);
         int inventoryService = normalizedCheckpoint.indexOf("OreDigCheckpoint withInventoryServiceUsed", torchPlacements);
         int encode = normalizedCheckpoint.indexOf("Map<String, String> encode", inventoryService);
-        String preservedBreakAndPoseFacts = "activeBreakConfirmedGone,\n                rememberedHighWorkPoses);";
+        String preservedBreakAndPoseFacts = "activeBreakConfirmedGone,\n                rememberedHighWorkPoses, openedVeinBreaks);";
         // Check each derivation method separately. The compatibility constructor intentionally
         // supplies a false value for old schema callers, so a global constructor-call count
         // would no longer prove that all service transforms preserve the factual break state.
@@ -369,7 +370,7 @@ class OreDigCheckpointSourceContractTest {
                 && normalizedCheckpoint.substring(inventoryService, encode).contains(preservedBreakAndPoseFacts);
         assertTrue(codecKey >= 0 && decode > codecKey && exactShape > decode
                         && boundedShape > exactShape && transformsPreserveFacts,
-                "checkpoint codec and all service transforms must preserve bounded pose and break facts");
+                "checkpoint codec and all service transforms must preserve bounded pose, break, and seam facts");
     }
 
     @Test
@@ -552,6 +553,7 @@ class OreDigCheckpointSourceContractTest {
                 "a newly visible replacement must invalidate the old break finalization");
 
         BlockPos breakPos = new BlockPos(3, 12, -4);
+        BlockPos openedSeamBreak = new BlockPos(4, 12, -4);
         assertTrue(OreDigTask.activeBreakStillMining(breakPos, breakPos, false, false),
                 "the matching non-idle controller is the ordinary pre-break target owner");
         assertFalse(OreDigTask.activeBreakStillMining(breakPos, breakPos, true, false),
@@ -565,12 +567,16 @@ class OreDigCheckpointSourceContractTest {
                 MiningBudget.RARE_BATCH_TORCH_LIMIT, 0, 0,
                 MiningCursor.initial(BlockPos.ZERO, OreDigTask.STRIP_SEGMENT),
                 "registry-free-fixture", 0, 0, null, null, null, null, -1, -1, -1,
-                breakPos, 0, true, Map.of());
+                breakPos, 0, true, Map.of(), Set.of(openedSeamBreak));
         assertTrue(checkpoint.activeBreakConfirmedGone());
         assertEquals("true", checkpoint.encode().get("active_break_confirmed_gone"),
                 "the finite exact-break fact must survive a checkpoint while support is deferred");
         assertTrue(checkpoint.withResourceEpoch(0).activeBreakConfirmedGone(),
                 "checkpoint service transforms must preserve the deferred-break fact");
+        assertEquals(Set.of(openedSeamBreak), checkpoint.openedVeinBreaks(),
+                "the opened connected-seam frontier must survive a running checkpoint");
+        assertEquals(OreDigCheckpoint.encodeCheckpointPos(openedSeamBreak),
+                checkpoint.encode().get("opened_vein_breaks"));
 
         OreDigCheckpoint schemaFour = new OreDigCheckpoint(
                 4, 1, true, 0, 0, false,
@@ -586,6 +592,7 @@ class OreDigCheckpointSourceContractTest {
         String codecGameTest = Files.readString(Path.of(
                 "src/gametest/java/io/github/zoyluo/minecraftai/task/ShieldBlockingGameTests.java"));
         int tick = source.indexOf("protected void onTick");
+        int deliveredSeam = source.indexOf("if (targetCount == 0 && !restoringFace)", tick);
         int settlement = source.indexOf("settleObservedActiveBreakBeforeTerminalChecks(bot)", tick);
         int quota = source.indexOf("if (!veinMode && collected >= targetCount)", settlement);
         int capacity = source.indexOf("if (HarvestCore.isInventoryFull(bot))", quota);
@@ -596,13 +603,18 @@ class OreDigCheckpointSourceContractTest {
         int decision = source.indexOf("activeBreakNeedsSettlement(observed, activeTargetBreakConfirmedGone)",
                 presentInvalidation);
         int finish = source.indexOf("finishTargetBreak(bot, active, activeTargetBreakInventory)", decision);
-        assertTrue(settlement > tick && quota > settlement && capacity > quota
+        assertTrue(deliveredSeam > tick && settlement > tick && quota > settlement && capacity > quota
                         && helper > capacity && liveMiner > helper && presentInvalidation > liveMiner
                         && cancelReplacementMiner > liveMiner && cancelReplacementMiner < presentInvalidation
                         && decision > presentInvalidation && finish > decision,
                 "settlement must preserve only a live target miner, invalidate stale replacement mining, then run before quota/capacity and retry the factual break through UNKNOWN");
+        assertTrue(source.indexOf("finishAlreadyDeliveredBatch(bot, world)", deliveredSeam) > deliveredSeam,
+                "a restored quota-complete seam must return to its saved face before discovery or completion");
         assertTrue(checkpointSource.contains("private static final int PREVIOUS_CHECKPOINT_SCHEMA = 4")
                         && checkpointSource.contains("active_break_confirmed_gone")
+                        && checkpointSource.contains("opened_vein_breaks")
+                        && checkpointSource.contains("decodeOpenedVeinBreaks")
+                        && checkpointSource.contains("openedVeinBreakShape")
                         && checkpointSource.contains("taskSchema == CHECKPOINT_SCHEMA")
                         && checkpointSource.contains("boolean activeBreakConfirmedGone = taskSchema == CHECKPOINT_SCHEMA")
                         && checkpointSource.contains("activeBreakInventory == -1 && !activeBreakConfirmedGone")

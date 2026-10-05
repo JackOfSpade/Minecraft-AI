@@ -1136,6 +1136,11 @@ public final class DangerWatcher {
         if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
+        // Night alone is not a reason to spend a torch.  Use the dimension's native spawn-light
+        // settings so a lit underground room (or an already safe Nether corridor) is left alone.
+        if (!AutomaticLighting.isPotentialHostileSpawnDark(bot.level(), bot.blockPosition())) {
+            return false;
+        }
         int now = server.getTickCount();
         if (now < nextNightAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
@@ -1175,10 +1180,10 @@ public final class DangerWatcher {
         return true;
     }
 
-    // Mitigation hardening: underground/dark spots (block light < 8) get lit as soon as the bot is
-    // idle and has a torch -- cutting mob spawns off at the source. Not limited to nighttime
-    // (underground, daytime with light=0 still spawns mobs). Only dispatched when active is empty
-    // (idle/goal step gap) to avoid interrupting mining.
+    // Underground cells that meet the dimension's real hostile-spawn light condition get lit as
+    // soon as an idle bot has a torch. Not limited to nighttime (a roofed cave can be spawn-dark
+    // at noon). Active miners use AutomaticLighting's direct, interaction-range helper instead:
+    // that avoids walking a fresh ore drop away from its pending pickup ledger.
     private boolean maybeLightDarkArea(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
             return false;
@@ -1196,19 +1201,7 @@ public final class DangerWatcher {
         }
         var world = bot.level();
         BlockPos feet = bot.blockPosition();
-        int threshold = MinecraftAiConfig.get().night().torchLightThreshold();
-        if (world.canSeeSky(feet)
-                || world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) >= threshold) {
-            return false;
-        }
-        // Block light alone also fires in broad daylight under a leaf canopy: canSeeSky is
-        // false there (leaves are opaque to the sky-visibility test) even though enough sunlight
-        // filters through to keep the spot above the mob-spawn light level. The combined light --
-        // block light OR sky light reduced by the current ambient darkness, the same value vanilla
-        // uses for spawn eligibility -- stays high there during the day (ambient darkness ~0) and
-        // only drops at night, so require it to actually be spawn-dark too.
-        int combinedLight = world.getMaxLocalRawBrightness(feet, world.getSkyDarken());
-        if (combinedLight >= threshold) {
+        if (!AutomaticLighting.isPotentialHostileSpawnDark(world, feet)) {
             return false;
         }
         if (InventoryAction.countItem(bot, net.minecraft.world.item.Items.TORCH) <= 0) {
@@ -1226,7 +1219,7 @@ public final class DangerWatcher {
         nextNightAttemptTick.put(bot.getUUID(), now + 600);
         BotLog.danger(bot, "dark_area_lit",
                 "light", world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet),
-                "combined_light", combinedLight);
+                "combined_light", AutomaticLighting.rawBrightness(world, feet));
         return true;
     }
 

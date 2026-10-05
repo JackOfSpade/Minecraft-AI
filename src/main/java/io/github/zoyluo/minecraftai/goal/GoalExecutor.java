@@ -4084,7 +4084,9 @@ public final class GoalExecutor {
             // Generic mining selects visible, reachable blocks and may widen the view through
             // bounded observation-fenced walk-only hops.  Its movement is Baritone-owned and it
             // never opens a shaft or paths toward unseen terrain to discover a target.
-            case MINE -> Optional.of(new MineTask(step.block(), step.count()));
+            case MINE -> Optional.of(OreScan.isOreBlock(step.block())
+                    ? new OreDigTask(OreScan.oreFamily(step.block()), step.count())
+                    : new MineTask(step.block(), step.count()));
             // OreDig mines only observed/revalidated finite ore targets.  Count mode may widen
             // its view through bounded observed walk-only hops, but has no layer-seeking or
             // blind-tunnel fallback behind this task boundary.

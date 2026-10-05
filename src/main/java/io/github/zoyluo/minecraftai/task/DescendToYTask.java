@@ -211,8 +211,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // stair tread. See the flat-landing shortcut below for why this distinction matters.
     private BlockPos selfCarvedAheadAt;
     private boolean started;    // whether the descend_started log has already been emitted
-    private int lastTorchY = Integer.MAX_VALUE; // P1: the Y of the last placed torch (one torch every TORCH_EVERY blocks descended)
-    private static final int TORCH_EVERY = 6;   // a torch's light radius comfortably covers a 6-block drop, preventing mob spawns
+    // Kept in checkpoints for schema compatibility with previously running descents.  New active
+    // lighting is selected by AutomaticLighting rather than blindly placing a torch at this Y.
+    private int lastTorchY = Integer.MAX_VALUE;
+    /** Avoid repeatedly scanning the same local floor while a descent is paused at one dark cell. */
+    private int lastTorchCheckBudget = -10;
 
     public DescendToYTask(int targetY) {
         this(targetY, Map.of(), false, Set.of());
@@ -688,7 +691,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             complete();
             return;
         }
-        maybePlaceTorch(bot, world, feet); // P1: place torches at fixed intervals while descending so a deep shaft is no longer pitch black and mob-spawning (observed: descending to Y-58 stayed light=0 throughout and the bot was swarmed by skeletons)
+        maybePlaceTorch(bot, world, feet);
         BlockPos below = feet.below();
         if (below.getY() <= MIN_Y) {
             fail("descend_reached_min_y");
@@ -2476,29 +2479,30 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 && !Standability.isDangerous(support);
     }
 
-    // P1 descent lighting (standard real-player mining practice): every TORCH_EVERY blocks
-    // descended, if light level < 8 and a torch is available, place one at the foot cell. This
-    // fixes "the shaft stays light=0 for the whole descent, letting skeletons/zombies spawn in
-    // and swarm the bot" (observed: real_diamond descending to Y-58 stayed light=0 throughout and
-    // was swarmed by 5 skeletons). Lighting is a nice-to-have, not a prerequisite: lacking torches
-    // never blocks the descent.
+    // Active descents cannot hand their movement controller to a roaming LightAreaTask: a stair
+    // step/miner may own it.  At the ordinary six-block cadence, choose the darkest floor cell
+    // that a real player can place on from this exact stance.  The shared helper only fires under
+    // a roof and only where the dimension's native hostile-spawn rule says a mob could spawn.
+    // Lighting remains a best effort; missing torches or an unreachable mount never block descent.
     private void maybePlaceTorch(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
-        if (lastTorchY != Integer.MAX_VALUE && lastTorchY - feet.getY() < TORCH_EVERY) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()
+                || lastTorchY != Integer.MAX_VALUE && lastTorchY - feet.getY() < 6
+                || totalBudget() - lastTorchCheckBudget < 10
+                // Never swap the held tool or issue a placement while a factual stair break,
+                // physical step, or route owns the action pack.  The next quiet boundary retries.
+                || miner.target() != null
+                || !bot.getActionPack().isMiningIdle()
+                || !bot.getActionPack().isPathExecutorIdle()
+                || !bot.getActionPack().isWalkToIdle()
+                || bot.getActionPack().hasActiveActions()) {
             return;
         }
-        if (world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) >= 8) {
-            lastTorchY = feet.getY(); // already bright enough -- advance the baseline too, to avoid re-checking every tick
-            return;
-        }
-        var torchSlot = InventoryAction.findItem(bot, net.minecraft.world.item.Items.TORCH);
-        if (torchSlot.isPresent()) {
-            InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
-            ActionResult placed = BuildAction.placeBlockAt(bot, feet);
-            if (placed.isSuccess()) {
-                lastTorchY = feet.getY();
-                markStarted(bot, feet);
-                BotLog.action(bot, "descend_torch", "pos", feet.toShortString());
-            }
+        lastTorchCheckBudget = totalBudget();
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        if (placement == AutomaticLighting.Placement.PLACED) {
+            lastTorchY = feet.getY();
+            markStarted(bot, feet);
+            BotLog.action(bot, "descend_torch", "pos", feet.toShortString());
         }
         // Slot identity is not stable: equipping a non-hotbar/offhand torch in a full inventory
         // swaps the selected pick out of its old slot. Restore from the factual active block rather

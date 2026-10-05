@@ -120,6 +120,37 @@ final class TorchPlacementPlanner {
         return best;
     }
 
+    /**
+     * The automatic safety reflex has a different objective from an explicit {@code light_area}
+     * request: it must deal with the darkest natural-spawn risk first.  Keep the coverage-first
+     * chooser above for explicit area-lighting, but make autonomous lighting deterministic by
+     * ranking raw light, then block light, then distance.
+     */
+    static BlockPos chooseDarkest(Set<BlockPos> cells,
+                                  Map<BlockPos, Integer> worldRawLight,
+                                  Map<BlockPos, Integer> worldBlockLight,
+                                  BlockPos botPos) {
+        BlockPos best = null;
+        int bestRaw = Integer.MAX_VALUE;
+        int bestBlock = Integer.MAX_VALUE;
+        long bestDistance = Long.MAX_VALUE;
+        for (BlockPos candidate : cells) {
+            int raw = worldRawLight.getOrDefault(candidate, Integer.MAX_VALUE);
+            int block = worldBlockLight.getOrDefault(candidate, Integer.MAX_VALUE);
+            long distance = squaredDistance(candidate, botPos);
+            boolean better = raw < bestRaw
+                    || raw == bestRaw && block < bestBlock
+                    || raw == bestRaw && block == bestBlock && distance < bestDistance;
+            if (better) {
+                best = candidate;
+                bestRaw = raw;
+                bestBlock = block;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
     private static long squaredDistance(BlockPos a, BlockPos b) {
         long dx = a.getX() - b.getX();
         long dy = a.getY() - b.getY();

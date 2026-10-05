@@ -16,25 +16,31 @@ class MiningTorchReserveSourceContractTest {
     @Test
     void oreDigLightingOnlyUsesCarriedTorches() throws IOException {
         String source = Files.readString(TASKS.resolve("OreDigTask.java"));
-        String lighting = methodSlice(source, "private void stripMine", "static void restoreActiveChannelTool");
+        String lighting = methodSlice(source, "private boolean maybePlaceAutomaticTorchAtSafeBoundary",
+                "private static boolean hasPickupConfirmationSupport");
+        String automatic = Files.readString(TASKS.resolve("AutomaticLighting.java"));
 
-        assertTrue(lighting.contains("Items.TORCH"),
-                "strip mining must retain carried-torch lighting");
-        assertFalse(lighting.contains("Items.COAL"),
-                "strip mining must not convert incidental coal into torches");
-        assertFalse(lighting.contains("Items.STICK"),
-                "strip mining must preserve tool-service sticks");
+        assertTrue(lighting.contains("AutomaticLighting.tryPlaceDarkestReachable"),
+                "ore digging must retain the shared carried-torch lighting reflex");
+        assertTrue(automatic.contains("InventoryAction.countItem(bot, Items.TORCH)"),
+                "automatic lighting must use carried torches");
+        assertFalse(automatic.contains("Items.COAL"),
+                "automatic lighting must not convert incidental coal into torches");
+        assertFalse(automatic.contains("Items.STICK"),
+                "automatic lighting must preserve tool-service sticks");
         assertFalse(lighting.contains("ore_dig_torch_crafted"),
-                "strip mining must not publish a synthetic torch craft");
+                "ore digging must not publish a synthetic torch craft");
     }
 
     @Test
-    void descentLightingOnlyUsesCarriedTorches() throws IOException {
+    void descentLightingUsesTheSharedCarriedTorchReflex() throws IOException {
         String source = Files.readString(TASKS.resolve("DescendToYTask.java"));
         String lighting = methodSlice(source, "private void maybePlaceTorch", "static void restoreActiveMiningTool");
 
-        assertTrue(lighting.contains("Items.TORCH"),
-                "descent must retain carried-torch lighting");
+        assertTrue(lighting.contains("AutomaticLighting.tryPlaceDarkestReachable"),
+                "descent must retain the shared carried-torch lighting reflex");
+        assertFalse(lighting.contains("BuildAction.placeBlockAt"),
+                "descent must not blindly place a torch at its own feet");
         assertFalse(lighting.contains("Items.COAL"),
                 "descent must not convert incidental coal into torches");
         assertFalse(lighting.contains("Items.STICK"),
