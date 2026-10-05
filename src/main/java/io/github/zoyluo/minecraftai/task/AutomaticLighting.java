@@ -22,7 +22,6 @@ import net.minecraft.world.level.LightLayer;
  * favorable roll.  Lighting that cell is therefore useful; anything brighter is left alone.</p>
  */
 final class AutomaticLighting {
-    private static final int VERTICAL_SCAN_RADIUS = 1;
 
     enum Placement {
         /** No torch was needed, available, or safely reachable this tick. */
@@ -86,6 +85,12 @@ final class AutomaticLighting {
      * action useful without violating a mining task's pickup and movement ownership.</p>
      */
     static Placement tryPlaceDarkestReachable(AIPlayerEntity bot) {
+        // Choosing a hotbar slot is itself a player action.  In particular it can interrupt a
+        // bow/food use before BuildAction gets the chance to report that the hand is busy, so
+        // defer before touching inventory rather than only relying on BuildAction's shield guard.
+        if (bot.isUsingItem()) {
+            return Placement.IN_PROGRESS;
+        }
         if (InventoryAction.countItem(bot, Items.TORCH) <= 0) {
             return Placement.NONE;
         }
@@ -120,13 +125,17 @@ final class AutomaticLighting {
     static BlockPos darkestReachableFloor(AIPlayerEntity bot) {
         Level world = bot.level();
         BlockPos feet = bot.blockPosition();
+        // A lower cave ledge or an upper shelf can still be inside the same vanilla interaction
+        // range.  Scan the full interaction-sized cube and let the exact ray/reach proof below
+        // discard positions outside the real reachable volume; a fixed +/-1 Y window silently
+        // missed valid darkest mounts.
         int radius = Math.max(1, (int) Math.ceil(bot.blockInteractionRange()));
         BlockPos best = null;
         int bestRaw = Integer.MAX_VALUE;
         int bestBlock = Integer.MAX_VALUE;
         long bestDistance = Long.MAX_VALUE;
         for (int dx = -radius; dx <= radius; dx++) {
-            for (int dy = -VERTICAL_SCAN_RADIUS; dy <= VERTICAL_SCAN_RADIUS; dy++) {
+            for (int dy = -radius; dy <= radius; dy++) {
                 for (int dz = -radius; dz <= radius; dz++) {
                     BlockPos candidate = feet.offset(dx, dy, dz).immutable();
                     if (!isReachableDarkFloor(bot, candidate)) {

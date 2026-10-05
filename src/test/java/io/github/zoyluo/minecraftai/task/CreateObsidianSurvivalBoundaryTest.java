@@ -152,6 +152,12 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("create_obsidian_search_lighting_disabled")
                         && task.contains("create_obsidian_search_missing_torch"),
                 "a dark branch must fail closed when physical lighting is unavailable");
+        int disabledLighting = task.indexOf("if (!AutomaticLighting.miningTorchAutomationEnabled())");
+        int disabledFailure = task.indexOf("fail(\"create_obsidian_search_lighting_disabled\")", disabledLighting);
+        int lightingResourceCheck = task.indexOf("if (!hasSearchLightingResource(bot))", disabledLighting);
+        assertTrue(disabledLighting >= 0 && disabledFailure > disabledLighting
+                        && lightingResourceCheck > disabledFailure,
+                "disabled active torch automation must fail before dark branch search continues");
         assertTrue(task.contains("blockedAllDirections()"));
         assertTrue(task.contains("create_obsidian_search_enclosed"));
         int enclosedGate = task.indexOf("if (searchCursor.blockedAllDirections())");

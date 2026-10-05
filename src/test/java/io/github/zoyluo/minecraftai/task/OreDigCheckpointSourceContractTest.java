@@ -32,11 +32,16 @@ class OreDigCheckpointSourceContractTest {
         int missionIdentity = source.indexOf(
                 "values, this.targetOres, expectedRareMissionTarget", constructor);
         int invalidGuard = source.indexOf("this.invalidCheckpoint = !values.isEmpty()", constructor);
+        int decoder = checkpointSource.indexOf("static Optional<OreDigCheckpoint> decode(");
         int fingerprintGuard = checkpointSource.indexOf(
                 "!OreDigTask.oreFingerprint(ores).equals(fingerprint)");
+        int queuedHintDecode = checkpointSource.indexOf(
+                "Set<BlockPos> queuedVeinHints = taskSchema == CHECKPOINT_SCHEMA", decoder);
+        int queuedHintShape = checkpointSource.indexOf("boolean queuedVeinHintShape =", queuedHintDecode);
         assertTrue(constructor >= 0 && missionIdentity > constructor && invalidGuard > missionIdentity
-                        && fingerprintGuard >= 0,
-                "OreDig restore must reject another ore family or rare mission identity");
+                        && decoder >= 0 && fingerprintGuard > decoder
+                        && queuedHintDecode > decoder && queuedHintShape > queuedHintDecode,
+                "OreDig restore must validate its ore family and decode queued seam hints separately");
 
         int restoreFlag = source.indexOf(
                 "restoringFace = !bot.blockPosition().equals(cursor.face())", constructor);
@@ -284,6 +289,44 @@ class OreDigCheckpointSourceContractTest {
     }
 
     @Test
+    void remoteQueuedVeinHintUsesBoundedObservedHopsWithoutDiggingOrDroppingTheHint()
+            throws IOException {
+        String source = Files.readString(SOURCE);
+        int helper = source.indexOf("private void tickQueuedVeinHintReobservation");
+        int helperEnd = source.indexOf("// ── Ore vein", helper);
+        String helperBody = source.substring(helper, helperEnd);
+        int advance = source.indexOf("private boolean advanceVein");
+        int unknown = source.indexOf("if (veinState == OreScan.Observation.UNKNOWN)", advance);
+        int hop = source.indexOf("tickQueuedVeinHintReobservation(bot, v)", unknown);
+        int observedGone = source.indexOf(
+                "if (veinState == OreScan.Observation.OBSERVED_GONE)", unknown);
+        String unknownBody = source.substring(unknown, observedGone);
+        assertTrue(advance >= 0 && unknown > advance && hop > unknown && observedGone > hop,
+                "an unknown queued member must take the remote-hint reobservation path first");
+        assertFalse(unknownBody.contains("continueUnknownOwnerApproach")
+                        || unknownBody.contains("digTowardStep")
+                        || unknownBody.contains("startDigPathTo")
+                        || unknownBody.contains("tryRememberedHighWorkPoseRoute")
+                        || unknownBody.contains("settleOwnedTunnelMine")
+                        || unknownBody.contains("miner.tick(bot)")
+                        || unknownBody.contains("veinQueue.pollFirst"),
+                "an unknown queued hint must neither dig nor be discarded/excluded before re-observation");
+
+        assertTrue(helper >= 0 && helperEnd > helper && helper < advance
+                        && helperBody.contains("queuedVeinHintSearch.begin(bot, hint)")
+                        && helperBody.contains("queuedVeinHintSearch.retireObservedGoal")
+                        && helperBody.contains("OBSERVED_SEARCH_MOVE_LIMIT")
+                        && helperBody.contains("noteProgress()"),
+                "remote re-observation must use a finite observed-hop ledger with a per-leg cap");
+
+        String hopSource = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/task/ObservedSearchHops.java"));
+        assertTrue(hopSource.contains("startDirectionalPursuitTo(heading, HOP_DISTANCE, false, false)")
+                        && hopSource.contains("actually observed local stance"),
+                "a remembered remote heading must resolve to an observed walk-only local goal");
+    }
+
+    @Test
     void overheadTargetRequiresARealWorkPoseAndRestoredBreakRechecksTheEnvelope() throws IOException {
         String source = Files.readString(SOURCE);
         int approach = source.indexOf("private void approachTargetOre");
@@ -359,7 +402,7 @@ class OreDigCheckpointSourceContractTest {
         int torchPlacements = normalizedCheckpoint.indexOf("OreDigCheckpoint withTorchPlacements", resourceEpoch);
         int inventoryService = normalizedCheckpoint.indexOf("OreDigCheckpoint withInventoryServiceUsed", torchPlacements);
         int encode = normalizedCheckpoint.indexOf("Map<String, String> encode", inventoryService);
-        String preservedBreakAndPoseFacts = "activeBreakConfirmedGone,\n                rememberedHighWorkPoses, openedVeinBreaks);";
+        String preservedBreakAndPoseFacts = "activeBreakConfirmedGone,\n                rememberedHighWorkPoses, openedVeinBreaks, queuedVeinHints);";
         // Check each derivation method separately. The compatibility constructor intentionally
         // supplies a false value for old schema callers, so a global constructor-call count
         // would no longer prove that all service transforms preserve the factual break state.
@@ -470,11 +513,14 @@ class OreDigCheckpointSourceContractTest {
 
         int tick = source.indexOf("protected void onTick");
         int hardBudget = source.indexOf("if (totalBudget() > maxElapsed)", tick);
+        int restoredQuota = source.indexOf("if (targetCount == 0 && !restoringFace)", hardBudget);
+        int restoredStall = source.indexOf("if (failForNoProgress(bot, world))", restoredQuota);
         int faceRestore = source.indexOf("if (restoringFace)", tick);
-        int noProgress = source.indexOf(
-                "if (totalBudget() - lastProgressBudget > NO_PROGRESS_LIMIT)", faceRestore);
-        assertTrue(hardBudget > tick && faceRestore > hardBudget && noProgress > faceRestore,
-                "hard/no-progress checks must use the durable budget and face return may not bypass hard timeout");
+        int ordinaryStall = source.indexOf("if (failForNoProgress(bot, world))", faceRestore);
+        int stallHelper = source.indexOf("private boolean failForNoProgress", ordinaryStall);
+        assertTrue(hardBudget > tick && restoredQuota > hardBudget && restoredStall > restoredQuota
+                        && faceRestore > hardBudget && ordinaryStall > faceRestore && stallHelper > ordinaryStall,
+                "hard/no-progress checks must bound both ordinary and restored zero-quota seam work");
     }
 
     @Test
@@ -610,18 +656,44 @@ class OreDigCheckpointSourceContractTest {
                 "settlement must preserve only a live target miner, invalidate stale replacement mining, then run before quota/capacity and retry the factual break through UNKNOWN");
         assertTrue(source.indexOf("finishAlreadyDeliveredBatch(bot, world)", deliveredSeam) > deliveredSeam,
                 "a restored quota-complete seam must return to its saved face before discovery or completion");
-        assertTrue(checkpointSource.contains("private static final int PREVIOUS_CHECKPOINT_SCHEMA = 4")
+        assertTrue(checkpointSource.contains("private static final int PREVIOUS_CHECKPOINT_SCHEMA = 5")
+                        && checkpointSource.contains("DELIVERED_CHECKPOINT_SCHEMA = 4")
                         && checkpointSource.contains("active_break_confirmed_gone")
                         && checkpointSource.contains("opened_vein_breaks")
+                        && checkpointSource.contains("queued_vein_hints")
                         && checkpointSource.contains("decodeOpenedVeinBreaks")
                         && checkpointSource.contains("openedVeinBreakShape")
-                        && checkpointSource.contains("taskSchema == CHECKPOINT_SCHEMA")
-                        && checkpointSource.contains("boolean activeBreakConfirmedGone = taskSchema == CHECKPOINT_SCHEMA")
+                        && checkpointSource.contains("queuedVeinHintShape")
+                        && checkpointSource.contains("taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA")
+                        && checkpointSource.contains("boolean activeBreakConfirmedGone = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA")
                         && checkpointSource.contains("activeBreakInventory == -1 && !activeBreakConfirmedGone")
                         && codecGameTest.contains("confirmedGoneCheckpointRoundTripsAcrossSchema5AndSchema4")
                         && codecGameTest.contains("OreDigCheckpoint.decode(checkpoint.encode(), ores)")
                         && codecGameTest.contains("OreDigCheckpoint.decode(schemaFour.encode(), ores)"),
-                "schema-4 checkpoints must decode as unconfirmed while schema-5 pairs the fact with an owner");
+                "schema-4 checkpoints must decode as unconfirmed while newer schemas pair the fact with an owner");
+    }
+
+    @Test
+    void restoredQuotaCompletePresentQueuedBreakReturnsToTheFiniteSeam() throws IOException {
+        String source = Files.readString(SOURCE);
+        int deliveredBatch = source.indexOf("private void finishAlreadyDeliveredBatch");
+        int present = source.indexOf(
+                "if (activeState == OreScan.Observation.OBSERVED_PRESENT)", deliveredBatch);
+        int seamMembership = source.indexOf(
+                "boolean belongsToOpenVein = veinQueue.contains(active) || !veinBroken.isEmpty();", present);
+        int clearBreak = source.indexOf("clearActiveTargetBreak(active);", seamMembership);
+        int clearTarget = source.indexOf("targetOre = null;", clearBreak);
+        int removeQueuedOwner = source.indexOf("veinQueue.remove(active);", clearTarget);
+        int requeue = source.indexOf("veinQueue.addFirst(active.immutable());", removeQueuedOwner);
+        int advance = source.indexOf("if (targetOre == null && advanceVein(bot, world))", requeue);
+        int nextBranch = source.indexOf("            } else {", requeue);
+        assertTrue(deliveredBatch >= 0 && present > deliveredBatch && seamMembership > present
+                        && clearBreak > seamMembership && clearTarget > clearBreak
+                        && removeQueuedOwner > clearTarget && requeue > removeQueuedOwner
+                        && advance > requeue,
+                "a quota-complete present active break must release stale ownership, retain its finite seam owner, and return it to ordinary draining");
+        assertFalse(source.substring(present, nextBranch).contains("veinQueue.clear()"),
+                "a present queued seam member must not be silently discarded at the restored quota boundary");
     }
 
     @Test

@@ -691,7 +691,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             complete();
             return;
         }
-        maybePlaceTorch(bot, world, feet);
+        if (maybePlaceTorch(bot, world, feet)) {
+            return;
+        }
         BlockPos below = feet.below();
         if (below.getY() <= MIN_Y) {
             fail("descend_reached_min_y");
@@ -2484,9 +2486,18 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // that a real player can place on from this exact stance.  The shared helper only fires under
     // a roof and only where the dimension's native hostile-spawn rule says a mob could spawn.
     // Lighting remains a best effort; missing torches or an unreachable mount never block descent.
-    private void maybePlaceTorch(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
-        if (!AutomaticLighting.miningTorchAutomationEnabled()
-                || lastTorchY != Integer.MAX_VALUE && lastTorchY - feet.getY() < 6
+    /** @return true while a deferred vanilla torch placement owns this task tick. */
+    private boolean maybePlaceTorch(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()) {
+            return false;
+        }
+        // A raised shield, food use, or drawn bow owns the hand even before a torch can inspect a
+        // mount. Yield the descent tick rather than skipping lighting and immediately advancing a
+        // stair break with that use still active.
+        if (bot.isUsingItem()) {
+            return true;
+        }
+        if (lastTorchY != Integer.MAX_VALUE && lastTorchY - feet.getY() < 6
                 || totalBudget() - lastTorchCheckBudget < 10
                 // Never swap the held tool or issue a placement while a factual stair break,
                 // physical step, or route owns the action pack.  The next quiet boundary retries.
@@ -2495,10 +2506,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 || !bot.getActionPack().isPathExecutorIdle()
                 || !bot.getActionPack().isWalkToIdle()
                 || bot.getActionPack().hasActiveActions()) {
-            return;
+            return false;
         }
-        lastTorchCheckBudget = totalBudget();
         AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        // A use-owner can appear between the guard above and BuildAction. Preserve the immediate
+        // retry when it clears instead of treating that deferral as a completed ten-tick probe.
+        if (placement != AutomaticLighting.Placement.IN_PROGRESS) {
+            lastTorchCheckBudget = totalBudget();
+        }
         if (placement == AutomaticLighting.Placement.PLACED) {
             lastTorchY = feet.getY();
             markStarted(bot, feet);
@@ -2508,6 +2523,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // swaps the selected pick out of its old slot. Restore from the factual active block rather
         // than selecting the stale index; without an active break, the next miner.begin selects.
         restoreActiveMiningTool(bot, world, miner);
+        return placement == AutomaticLighting.Placement.IN_PROGRESS;
     }
 
     static void restoreActiveMiningTool(AIPlayerEntity bot,

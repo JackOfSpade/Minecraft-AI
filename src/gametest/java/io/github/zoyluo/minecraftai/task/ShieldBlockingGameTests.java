@@ -90,7 +90,7 @@ public final class ShieldBlockingGameTests {
         arena.finish();
     }
 
-    /** World-backed codec proof: factual break completion survives schema 5, while schema 4 cannot invent it. */
+    /** World-backed codec proof: factual break completion survives the current schema, while schema 4 cannot invent it. */
     @GameTest(environment = ENV + "confirmed_gone_checkpoint_round_trips_across_schema5_and_schema4", maxTicks = 20)
     public void confirmedGoneCheckpointRoundTripsAcrossSchema5AndSchema4(GameTestHelper context) {
         Arena arena = new Arena(context);
@@ -103,10 +103,10 @@ public final class ShieldBlockingGameTests {
                 OreDigTask.oreFingerprint(ores), 0, 0, null, null, null, null, -1, -1, -1,
                 breakPos, 0, true, Map.of());
         arena.require("true".equals(checkpoint.encode().get("active_break_confirmed_gone")),
-                "schema-5 checkpoint did not encode the factual completed-break flag");
+                "current-schema checkpoint did not encode the factual completed-break flag");
         OreDigCheckpoint restored = OreDigCheckpoint.decode(checkpoint.encode(), ores).orElse(null);
         arena.require(restored != null && restored.activeBreakConfirmedGone(),
-                "schema-5 checkpoint did not restore the factual completed-break flag");
+                "current-schema checkpoint did not restore the factual completed-break flag");
 
         OreDigCheckpoint schemaFour = new OreDigCheckpoint(
                 4, 1, true, 0, 0, false,
@@ -115,7 +115,7 @@ public final class ShieldBlockingGameTests {
                 OreDigTask.oreFingerprint(ores), 0, 0, null, null, null, null, -1, -1, -1,
                 breakPos, 0, false, Map.of());
         arena.require(!schemaFour.encode().containsKey("active_break_confirmed_gone"),
-                "schema-4 encoder emitted a schema-5 key");
+                "schema-4 encoder emitted a newer-schema key");
         OreDigCheckpoint restoredSchemaFour = OreDigCheckpoint.decode(schemaFour.encode(), ores).orElse(null);
         arena.require(restoredSchemaFour != null && !restoredSchemaFour.activeBreakConfirmedGone(),
                 "schema-4 checkpoint invented a factual completed-break flag");

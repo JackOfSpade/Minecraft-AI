@@ -2977,49 +2977,89 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_restart_rejects_intact_high_active_break_but_preserves_gone_break_debt", maxTicks = 20)
-    public void restartRejectsIntactHighActiveBreakButPreservesGoneBreakDebt(
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_restart_rejects_intact_high_active_break_but_preserves_gone_break_debt", maxTicks = 250)
+    public void restoredGoneActiveBreakSettlesSeamBeforeRecoveringDrop(
             GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreHighActiveRestartGT");
         AIPlayerEntity bot = fixture.bot();
-        BlockPos highOre = fixture.start().above(5);
+        // Keep the restart fixture in the ordinary open gallery. This regression is about a
+        // physically gone active break, so a clearly visible cell avoids conflating that ledger
+        // handoff with the separate high-work-pose admission policy.
+        BlockPos breakPos = fixture.start().north(2);
         var world = context.getLevel();
-        world.setBlock(highOre, Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
-        require(context, OreScan.observeOre(bot, highOre, Set.of(Blocks.COAL_ORE))
-                        == OreScan.Observation.OBSERVED_PRESENT,
-                "intact high restart target was not factually visible");
-
         Map<String, String> checkpoint = new LinkedHashMap<>(
                 openCheckpoint(fixture.start(), 1, Set.of(Blocks.COAL_ORE)));
-        checkpoint.put("active_break_pos", encode(highOre));
+        checkpoint.put("active_break_pos", encode(breakPos));
         checkpoint.put("active_break_inventory", "0");
-        OreDigTask intact = new OreDigTask(Set.of(Blocks.COAL_ORE), 1, checkpoint);
-        intact.start(bot);
-        intact.tick(bot);
-        Map<String, String> rejected = intact.checkpoint();
-        require(context, intact.state() == TaskState.RUNNING
-                        && world.getBlockState(highOre).is(Blocks.COAL_ORE)
-                        && bot.getActionPack().isMiningIdle()
-                        && !rejected.containsKey("active_break_pos")
-                        && !rejected.containsKey("pending_pickup_pos"),
-                "restart resumed an intact high-shaft break or invented pickup debt: " + rejected);
-        intact.cancel(bot, "gametest_intact_high_restart_complete");
 
-        // The same checkpoint must not erase a transaction whose block is already factually gone.
-        // That case still owns a physical ItemEntity debt even though the old break pose is invalid.
-        world.setBlock(highOre, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        require(context, OreScan.observeOre(bot, highOre, Set.of(Blocks.COAL_ORE))
-                        == OreScan.Observation.OBSERVED_GONE,
-                "gone high restart target was not factually observable");
+        // A checkpoint must not erase a transaction whose block is already factually gone.
+        // It has to retain the active owner through one settlement tick so that settlement records
+        // the factual broken seam frontier before it opens the physical ItemEntity debt.  The old
+        // shortcut converted this directly to pending_pickup_pos during start(), losing the vein
+        // fact and making a restart unable to discover an adjacent member.
+
+        ItemEntity recoveredDrop = new ItemEntity(world,
+                bot.getX(), bot.getY() + 0.1D, bot.getZ(), new ItemStack(Items.COAL));
+        recoveredDrop.setDeltaMovement(Vec3.ZERO);
+        // Do not let vanilla's nearby-player pickup race ahead of the restarted task's durable
+        // ledger. The callback releases this real ItemEntity only after the settlement has
+        // checkpointed both the opened seam fact and the pending-drop obligation.
+        recoveredDrop.setNeverPickUp();
+        require(context, world.addFreshEntity(recoveredDrop),
+                "failed to spawn the restored break coal drop");
+
+        int pickupBaseline = bot.getStats().getValue(Stats.ITEM_PICKED_UP.get(Items.COAL));
         OreDigTask gone = new OreDigTask(Set.of(Blocks.COAL_ORE), 1, checkpoint);
+        // This test controls the task tick itself: assigning it through TaskManager would make
+        // GameTest's global task cleanup race the exact recovery ledger being observed here.
         gone.start(bot);
-        Map<String, String> preserved = gone.checkpoint();
-        require(context, encode(highOre).equals(preserved.get("pending_pickup_pos"))
-                        && "0".equals(preserved.get("pending_pickup_inventory"))
-                        && !preserved.containsKey("active_break_pos"),
-                "restart erased or misclassified a factually gone high break: " + preserved);
-        gone.cancel(bot, "gametest_gone_high_restart_complete");
-        finish(context, fixture);
+
+        AtomicBoolean sawFactualSeamBeforePickup = new AtomicBoolean();
+        AtomicBoolean releasedDrop = new AtomicBoolean();
+        AtomicBoolean sawPhysicalPickup = new AtomicBoolean();
+        context.failIfEver(() -> {
+            if (gone.state() == TaskState.FAILED || gone.state() == TaskState.CANCELLED) {
+                context.fail(Component.nullToEmpty(
+                        "gone-break restart ended before recovering its drop: "
+                                + gone.state() + ":" + gone.failureReason()
+                                + " checkpoint=" + gone.checkpoint()));
+                return;
+            }
+            Map<String, String> live = gone.checkpoint();
+            if (encode(breakPos).equals(live.get("pending_pickup_pos"))
+                    && live.getOrDefault("opened_vein_breaks", "").contains(encode(breakPos))) {
+                sawFactualSeamBeforePickup.set(true);
+                if (releasedDrop.compareAndSet(false, true)) {
+                    recoveredDrop.setNoPickUpDelay();
+                }
+            }
+            if (InventoryAction.countItem(bot, Items.COAL) >= 1) {
+                require(context, sawFactualSeamBeforePickup.get(),
+                        "restored break drop entered inventory before its seam fact was durable: "
+                                + live);
+                require(context, bot.getStats().getValue(Stats.ITEM_PICKED_UP.get(Items.COAL))
+                                > pickupBaseline,
+                        "restored break drop bypassed vanilla pickup statistics");
+                sawPhysicalPickup.set(true);
+            }
+            if (gone.state() != TaskState.COMPLETED) {
+                gone.tick(bot);
+                return;
+            }
+            require(context, sawFactualSeamBeforePickup.get(),
+                    "gone restart did not preserve its opened seam fact before pickup");
+            require(context, releasedDrop.get() && sawPhysicalPickup.get(),
+                    "gone restart did not physically collect its guarded ItemEntity debt");
+            require(context, InventoryAction.countItem(bot, Items.COAL) == 1,
+                    "gone restart recovered the wrong coal count");
+            require(context, !recoveredDrop.isAlive(),
+                    "recovered gone-break ItemEntity remained alive after completion");
+            require(context, !live.containsKey("active_break_pos")
+                            && !live.containsKey("pending_pickup_pos"),
+                    "completed gone restart retained a finite ledger: " + live);
+            finish(context, fixture);
+            return;
+        });
     }
 
 

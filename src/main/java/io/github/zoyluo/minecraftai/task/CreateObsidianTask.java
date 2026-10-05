@@ -841,6 +841,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                     + " mask=" + searchCursor.blockedDirections());
             return;
         }
+        // SEARCH can briefly retain a walk, route, foreign mining lease, shield, or another
+        // ActionPack owner after a transition.  It is not a quiet lighting boundary until every
+        // one has actually released; returning leaves that owner to advance on the next server
+        // tick without swapping the selected slot underneath it. A live SEARCH miner remains
+        // the sole exception: it must continue ticking its already-admitted transaction.
+        if (miner.target() == null && searchActionOwned(bot)) {
+            return;
+        }
         if (!searchLightingReady(bot)) {
             return;
         }
@@ -962,13 +970,33 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         return ensureAutomaticSearchLighting(bot);
     }
 
+    /** True while a non-lighting physical controller still owns the SEARCH tick. */
+    private boolean searchActionOwned(AIPlayerEntity bot) {
+        return !bot.getActionPack().isMiningIdle()
+                || !bot.getActionPack().isPathExecutorIdle()
+                || !bot.getActionPack().isWalkToIdle()
+                || bot.getActionPack().hasActiveActions();
+    }
+
     private boolean ensureAutomaticSearchLighting(AIPlayerEntity bot) {
+        // This is also called after a completed search step. Keep it defensive so a future call
+        // site cannot turn the torch helper into a mid-route or mid-break inventory mutation.
+        // Returning true means the current owner may continue; it does not claim that lighting
+        // has been placed.
+        if (miner.target() != null || searchActionOwned(bot)) {
+            return true;
+        }
         ServerLevel world = bot.level();
         if (!AutomaticLighting.needsUndergroundTorch(world, bot.blockPosition())) {
             return true;
         }
         if (!AutomaticLighting.miningTorchAutomationEnabled()) {
-            return true;
+            // This branch is deliberately fail-closed: the search is about to open more terrain
+            // in a genuinely spawn-dark underground corridor, and the operator has disabled the
+            // only permitted safety resource.  Continuing would silently weaken the old search
+            // contract; surface/open-sky work returned above is unaffected.
+            fail("create_obsidian_search_lighting_disabled");
+            return false;
         }
         if (!hasSearchLightingResource(bot)) {
             return false;
@@ -997,10 +1025,6 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private boolean hasSearchLightingResource(AIPlayerEntity bot) {
-        if (!MinecraftAiConfig.get().mining().placeTorches()) {
-            fail("create_obsidian_search_lighting_disabled");
-            return false;
-        }
         if (InventoryAction.countItem(bot, Items.TORCH) <= 0) {
             fail("create_obsidian_search_missing_torch");
             return false;

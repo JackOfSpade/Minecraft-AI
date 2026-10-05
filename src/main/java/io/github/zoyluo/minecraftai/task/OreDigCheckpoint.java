@@ -34,14 +34,32 @@ record OreDigCheckpoint(int taskSchema,
                         int activeBreakInventory,
                         boolean activeBreakConfirmedGone,
                         Map<BlockPos, BlockPos> rememberedHighWorkPoses,
-                        Set<BlockPos> openedVeinBreaks) {
-    static final int CHECKPOINT_SCHEMA = 5;
-    private static final int PREVIOUS_CHECKPOINT_SCHEMA = 4;
+                        Set<BlockPos> openedVeinBreaks,
+                        Set<BlockPos> queuedVeinHints) {
+    static final int CHECKPOINT_SCHEMA = 6;
+    /** Schema 5 first persisted factual opened-seam break anchors. */
+    private static final int PREVIOUS_CHECKPOINT_SCHEMA = 5;
+    /** Schema 4 first persisted delivered counts and high work poses. */
+    private static final int DELIVERED_CHECKPOINT_SCHEMA = 4;
     private static final int MISSION_CHECKPOINT_SCHEMA = 3;
     private static final int RESOURCE_EPOCH_CHECKPOINT_SCHEMA = 2;
     private static final int LEGACY_CHECKPOINT_SCHEMA = 1;
     private static final int MAX_CHECKPOINT_TARGET_COUNT = 4096;
     private static final int MAX_CURSOR_LEGS = 4096;
+    /**
+     * The open-seam ledger is a recovery hint, never mining authority.  Keep it finite even for
+     * an unusually large modded vein: each retained cell is re-observed before it can queue work
+     * after a restart.
+     */
+    private static final int MAX_OPENED_VEIN_BREAKS = MAX_CHECKPOINT_TARGET_COUNT;
+    /**
+     * A factual anchor may be farther from the current face than the ordinary scan radius.  That
+     * is normal for a long, branched count-mode seam, but a finite envelope prevents a corrupted
+     * checkpoint from turning recovery into an unbounded remote observation sweep.
+     */
+    private static final int MAX_OPENED_VEIN_ANCHOR_OFFSET = MAX_CHECKPOINT_TARGET_COUNT;
+    /** Three signed int coordinates plus commas: {@code -2147483648,-2147483648,-2147483648}. */
+    private static final int MAX_CHECKPOINT_POS_TEXT_LENGTH = 35;
 
     static String encodeCheckpointPos(BlockPos pos) {
         return BlockPosText.encodePos(pos);
@@ -105,16 +123,31 @@ record OreDigCheckpoint(int taskSchema,
         if (value.isBlank()) {
             return Optional.empty();
         }
-        String[] encoded = value.split(";", -1);
-        if (encoded.length > MAX_CHECKPOINT_TARGET_COUNT) {
-            return Optional.empty();
-        }
         Set<BlockPos> decoded = new java.util.LinkedHashSet<>();
-        for (String entry : encoded) {
+        int start = 0;
+        while (start < value.length()) {
+            int end = value.indexOf(';', start);
+            if (end < 0) {
+                end = value.length();
+            }
+            // Reject an overlong entry before substring/split can allocate unbounded temporary
+            // arrays for a malformed persisted checkpoint.
+            if (end == start || end - start > MAX_CHECKPOINT_POS_TEXT_LENGTH
+                    || decoded.size() >= MAX_OPENED_VEIN_BREAKS) {
+                return Optional.empty();
+            }
+            String entry = value.substring(start, end);
             BlockPos pos = decodeCheckpointPos(entry).orElse(null);
             if (pos == null || !decoded.add(pos)) {
                 return Optional.empty();
             }
+            if (end == value.length()) {
+                break;
+            }
+            if (end == value.length() - 1) {
+                return Optional.empty();
+            }
+            start = end + 1;
         }
         return Optional.of(Set.copyOf(decoded));
     }
@@ -140,16 +173,19 @@ record OreDigCheckpoint(int taskSchema,
             withMissionKeys(RESOURCE_REQUIRED_KEYS);
     private static final Set<String> MISSION_ALLOWED_KEYS =
             withPickupLastSeenKey(withMissionKeys(RESOURCE_ALLOWED_KEYS));
-    private static final Set<String> PREVIOUS_REQUIRED_KEYS =
+    private static final Set<String> DELIVERED_REQUIRED_KEYS =
             withDeliveredKey(MISSION_REQUIRED_KEYS);
-    private static final Set<String> PREVIOUS_ALLOWED_KEYS =
+    private static final Set<String> DELIVERED_ALLOWED_KEYS =
             withRememberedHighWorkPosesKey(
                     withControlledStripRearKey(
                             withBoundaryRerouteKey(withDeliveredKey(MISSION_ALLOWED_KEYS))));
-    private static final Set<String> REQUIRED_KEYS =
-            withActiveBreakConfirmedGoneKey(PREVIOUS_REQUIRED_KEYS);
+    private static final Set<String> PREVIOUS_REQUIRED_KEYS =
+            withActiveBreakConfirmedGoneKey(DELIVERED_REQUIRED_KEYS);
+    private static final Set<String> PREVIOUS_ALLOWED_KEYS =
+            withOpenedVeinBreaksKey(withActiveBreakConfirmedGoneKey(DELIVERED_ALLOWED_KEYS));
+    private static final Set<String> REQUIRED_KEYS = PREVIOUS_REQUIRED_KEYS;
     private static final Set<String> ALLOWED_KEYS =
-            withOpenedVeinBreaksKey(withActiveBreakConfirmedGoneKey(PREVIOUS_ALLOWED_KEYS));
+            withQueuedVeinHintsKey(PREVIOUS_ALLOWED_KEYS);
 
     OreDigCheckpoint {
         controlledStripRear = controlledStripRear == null
@@ -175,14 +211,188 @@ record OreDigCheckpoint(int taskSchema,
         if (openedVeinBreaks == null || openedVeinBreaks.isEmpty()) {
             openedVeinBreaks = Set.of();
         } else {
-            Set<BlockPos> immutable = new java.util.LinkedHashSet<>();
-            for (BlockPos broken : openedVeinBreaks) {
-                if (broken == null || !immutable.add(broken.immutable())) {
-                    throw new IllegalArgumentException("invalid_opened_vein_break");
+            openedVeinBreaks = normalizeOpenedVeinBreaks(openedVeinBreaks,
+                    cursor == null ? null : cursor.face());
+        }
+        if (queuedVeinHints == null || queuedVeinHints.isEmpty()) {
+            queuedVeinHints = Set.of();
+        } else {
+            queuedVeinHints = normalizeOpenedVeinBreaks(queuedVeinHints,
+                    cursor == null ? null : cursor.face());
+        }
+        if (!java.util.Collections.disjoint(openedVeinBreaks, queuedVeinHints)) {
+            throw new IllegalArgumentException("opened_and_queued_vein_overlap");
+        }
+    }
+
+    /**
+     * Canonicalizes a live seam ledger into a bounded, spatially distributed set of factual
+     * anchors.  Normal gameplay commonly keeps every fact exactly; coalescing runs only when an
+     * exceptional seam exceeds the wire cap.  It prevents a valid running task from encoding a
+     * checkpoint which this same codec would immediately reject on restore.
+     */
+    private static Set<BlockPos> normalizeOpenedVeinBreaks(Set<BlockPos> breaks,
+                                                            BlockPos face) {
+        Set<BlockPos> inEnvelope = new java.util.LinkedHashSet<>();
+        for (BlockPos broken : breaks) {
+            BlockPos immutable = broken == null ? null : broken.immutable();
+            if (immutable == null || !inEnvelope.add(immutable)) {
+                throw new IllegalArgumentException("invalid_opened_vein_break");
+            }
+        }
+        if (face != null) {
+            inEnvelope.removeIf(broken -> !isOpenedVeinBreakAnchorInEnvelope(face, broken));
+        }
+        if (inEnvelope.size() <= MAX_OPENED_VEIN_BREAKS) {
+            return Set.copyOf(inEnvelope);
+        }
+        return spatiallyBoundOpenedVeinBreaks(inEnvelope);
+    }
+
+    /**
+     * Coalesces an oversized seam with an adaptive spatial tree.  Dense old portions get split
+     * repeatedly while a remote branch keeps its own leaf, so a restart retains anchors across
+     * the whole seam rather than retaining only the first coordinate-sorted portion.
+     */
+    private static Set<BlockPos> spatiallyBoundOpenedVeinBreaks(Set<BlockPos> breaks) {
+        java.util.List<VeinAnchorRegion> leaves = new java.util.ArrayList<>();
+        java.util.PriorityQueue<VeinAnchorRegion> splittable = new java.util.PriorityQueue<>(
+                java.util.Comparator
+                        .<VeinAnchorRegion>comparingInt(region -> region.anchors().size())
+                        .reversed()
+                        .thenComparing(java.util.Comparator
+                                .comparingLong(OreDigCheckpoint::longestAnchorRegionSpan)
+                                .reversed())
+                        .thenComparingLong(VeinAnchorRegion::minX)
+                        .thenComparingLong(VeinAnchorRegion::minY)
+                        .thenComparingLong(VeinAnchorRegion::minZ)
+                        .thenComparingLong(VeinAnchorRegion::maxX)
+                        .thenComparingLong(VeinAnchorRegion::maxY)
+                        .thenComparingLong(VeinAnchorRegion::maxZ));
+        VeinAnchorRegion root = VeinAnchorRegion.of(breaks);
+        leaves.add(root);
+        splittable.add(root);
+        while (leaves.size() < MAX_OPENED_VEIN_BREAKS && !splittable.isEmpty()) {
+            VeinAnchorRegion region = splittable.poll();
+            java.util.List<VeinAnchorRegion> children = splitAnchorRegion(region);
+            if (children.size() <= 1
+                    || leaves.size() - 1 + children.size() > MAX_OPENED_VEIN_BREAKS) {
+                continue;
+            }
+            leaves.remove(region);
+            leaves.addAll(children);
+            for (VeinAnchorRegion child : children) {
+                if (child.anchors().size() > 1) {
+                    splittable.add(child);
                 }
             }
-            openedVeinBreaks = Set.copyOf(immutable);
         }
+        java.util.LinkedHashSet<BlockPos> ordered = leaves.stream()
+                .map(VeinAnchorRegion::centerAnchor)
+                .sorted(java.util.Comparator.comparing(OreDigCheckpoint::encodeCheckpointPos))
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        return Set.copyOf(ordered);
+    }
+
+    private static long longestAnchorRegionSpan(VeinAnchorRegion region) {
+        return Math.max(region.maxX() - region.minX(), Math.max(
+                region.maxY() - region.minY(), region.maxZ() - region.minZ()));
+    }
+
+    private static java.util.List<VeinAnchorRegion> splitAnchorRegion(VeinAnchorRegion region) {
+        if (region.anchors().size() <= 1) {
+            return java.util.List.of(region);
+        }
+        long midX = region.minX() + (region.maxX() - region.minX()) / 2L;
+        long midY = region.minY() + (region.maxY() - region.minY()) / 2L;
+        long midZ = region.minZ() + (region.maxZ() - region.minZ()) / 2L;
+        Map<Integer, java.util.List<BlockPos>> partitions = new java.util.HashMap<>();
+        for (BlockPos anchor : region.anchors()) {
+            int partition = (anchor.getX() > midX ? 4 : 0)
+                    | (anchor.getY() > midY ? 2 : 0)
+                    | (anchor.getZ() > midZ ? 1 : 0);
+            partitions.computeIfAbsent(partition, ignored -> new java.util.ArrayList<>()).add(anchor);
+        }
+        return partitions.values().stream()
+                .map(VeinAnchorRegion::of)
+                .sorted(java.util.Comparator
+                        .comparingLong(VeinAnchorRegion::minX)
+                        .thenComparingLong(VeinAnchorRegion::minY)
+                        .thenComparingLong(VeinAnchorRegion::minZ))
+                .toList();
+    }
+
+    private static boolean isOpenedVeinBreakAnchorInEnvelope(BlockPos face, BlockPos anchor) {
+        return face != null && anchor != null
+                && Math.abs((long) anchor.getX() - face.getX()) <= MAX_OPENED_VEIN_ANCHOR_OFFSET
+                && Math.abs((long) anchor.getY() - face.getY()) <= MAX_OPENED_VEIN_ANCHOR_OFFSET
+                && Math.abs((long) anchor.getZ() - face.getZ()) <= MAX_OPENED_VEIN_ANCHOR_OFFSET;
+    }
+
+    private record VeinAnchorRegion(java.util.List<BlockPos> anchors,
+                                    long minX,
+                                    long maxX,
+                                    long minY,
+                                    long maxY,
+                                    long minZ,
+                                    long maxZ) {
+        private static VeinAnchorRegion of(java.util.Collection<BlockPos> anchors) {
+            java.util.List<BlockPos> immutable = java.util.List.copyOf(anchors);
+            long minX = immutable.stream().mapToLong(BlockPos::getX).min().orElseThrow();
+            long maxX = immutable.stream().mapToLong(BlockPos::getX).max().orElseThrow();
+            long minY = immutable.stream().mapToLong(BlockPos::getY).min().orElseThrow();
+            long maxY = immutable.stream().mapToLong(BlockPos::getY).max().orElseThrow();
+            long minZ = immutable.stream().mapToLong(BlockPos::getZ).min().orElseThrow();
+            long maxZ = immutable.stream().mapToLong(BlockPos::getZ).max().orElseThrow();
+            return new VeinAnchorRegion(immutable, minX, maxX, minY, maxY, minZ, maxZ);
+        }
+
+        private BlockPos centerAnchor() {
+            return anchors.stream().min(java.util.Comparator
+                    .comparingLong(this::distanceFromCenter)
+                    .thenComparing(OreDigCheckpoint::encodeCheckpointPos)).orElseThrow();
+        }
+
+        private long distanceFromCenter(BlockPos pos) {
+            return Math.abs(2L * pos.getX() - (minX + maxX))
+                    + Math.abs(2L * pos.getY() - (minY + maxY))
+                    + Math.abs(2L * pos.getZ() - (minZ + maxZ));
+        }
+    }
+
+    /** Compatibility constructor for schema-5 callers before queued seam hints were durable. */
+    OreDigCheckpoint(int taskSchema,
+                     int targetCount,
+                     boolean batchOpen,
+                     int delivered,
+                     int rareMissionTarget,
+                     boolean inventoryServiceUsed,
+                     int torchLimit,
+                     int torchPlacements,
+                     int resourceEpoch,
+                     MiningCursor cursor,
+                     String oreFingerprint,
+                     int budgetUsed,
+                     int lastProgressBudget,
+                     BlockPos controlledStripRear,
+                     BlockPos boundaryRerouteOrigin,
+                     BlockPos pendingPickupPos,
+                     BlockPos pendingPickupLastSeenPos,
+                     int pendingPickupInventory,
+                     int pendingPickupStartedBudget,
+                     int pendingPickupGainBudget,
+                     BlockPos activeBreakPos,
+                     int activeBreakInventory,
+                     boolean activeBreakConfirmedGone,
+                     Map<BlockPos, BlockPos> rememberedHighWorkPoses,
+                     Set<BlockPos> openedVeinBreaks) {
+        this(taskSchema, targetCount, batchOpen, delivered, rareMissionTarget,
+                inventoryServiceUsed, torchLimit, torchPlacements, resourceEpoch, cursor,
+                oreFingerprint, budgetUsed, lastProgressBudget, controlledStripRear,
+                boundaryRerouteOrigin, pendingPickupPos, pendingPickupLastSeenPos,
+                pendingPickupInventory, pendingPickupStartedBudget, pendingPickupGainBudget,
+                activeBreakPos, activeBreakInventory, activeBreakConfirmedGone,
+                rememberedHighWorkPoses, openedVeinBreaks, Set.of());
     }
 
     /** Compatibility constructor for schema-5 callers before open-seam facts were durable. */
@@ -216,7 +426,7 @@ record OreDigCheckpoint(int taskSchema,
                 boundaryRerouteOrigin, pendingPickupPos, pendingPickupLastSeenPos,
                 pendingPickupInventory, pendingPickupStartedBudget, pendingPickupGainBudget,
                 activeBreakPos, activeBreakInventory, activeBreakConfirmedGone,
-                rememberedHighWorkPoses, Set.of());
+                rememberedHighWorkPoses, Set.of(), Set.of());
     }
 
     /** Compatibility constructor for schema-4 callers that already supplied remembered poses. */
@@ -248,7 +458,7 @@ record OreDigCheckpoint(int taskSchema,
                 oreFingerprint, budgetUsed, lastProgressBudget, controlledStripRear,
                 boundaryRerouteOrigin, pendingPickupPos, pendingPickupLastSeenPos,
                 pendingPickupInventory, pendingPickupStartedBudget, pendingPickupGainBudget,
-                activeBreakPos, activeBreakInventory, false, rememberedHighWorkPoses, Set.of());
+                activeBreakPos, activeBreakInventory, false, rememberedHighWorkPoses, Set.of(), Set.of());
     }
 
     /** Compatibility constructor for deterministic fixtures created before the optional key. */
@@ -279,7 +489,7 @@ record OreDigCheckpoint(int taskSchema,
                 oreFingerprint, budgetUsed, lastProgressBudget, controlledStripRear,
                 boundaryRerouteOrigin, pendingPickupPos, pendingPickupLastSeenPos,
                 pendingPickupInventory, pendingPickupStartedBudget, pendingPickupGainBudget,
-                activeBreakPos, activeBreakInventory, false, Map.of(), Set.of());
+                activeBreakPos, activeBreakInventory, false, Map.of(), Set.of(), Set.of());
     }
 
     /** Derives a copy with only {@link #resourceEpoch} replaced; every other field is kept. */
@@ -291,7 +501,7 @@ record OreDigCheckpoint(int taskSchema,
                 pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
                 pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
                 activeBreakConfirmedGone,
-                rememberedHighWorkPoses, openedVeinBreaks);
+                rememberedHighWorkPoses, openedVeinBreaks, queuedVeinHints);
     }
 
     /** Derives a copy with only {@link #torchPlacements} replaced; every other field is kept. */
@@ -303,7 +513,7 @@ record OreDigCheckpoint(int taskSchema,
                 pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
                 pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
                 activeBreakConfirmedGone,
-                rememberedHighWorkPoses, openedVeinBreaks);
+                rememberedHighWorkPoses, openedVeinBreaks, queuedVeinHints);
     }
 
     /**
@@ -318,7 +528,7 @@ record OreDigCheckpoint(int taskSchema,
                 pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
                 pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
                 activeBreakConfirmedGone,
-                rememberedHighWorkPoses, openedVeinBreaks);
+                rememberedHighWorkPoses, openedVeinBreaks, queuedVeinHints);
     }
 
     Map<String, String> encode() {
@@ -326,12 +536,18 @@ record OreDigCheckpoint(int taskSchema,
         values.put("task_schema", String.valueOf(taskSchema));
         values.put("target_count", String.valueOf(targetCount));
         values.put("batch_open", String.valueOf(batchOpen));
-        values.put("delivered", String.valueOf(delivered));
-        values.put("rare_mission_target", String.valueOf(rareMissionTarget));
-        values.put("inventory_service_used", String.valueOf(inventoryServiceUsed));
-        values.put("torch_limit", String.valueOf(torchLimit));
-        values.put("torch_placements", String.valueOf(torchPlacements));
-        values.put("resource_epoch", String.valueOf(resourceEpoch));
+        if (taskSchema >= DELIVERED_CHECKPOINT_SCHEMA) {
+            values.put("delivered", String.valueOf(delivered));
+        }
+        if (taskSchema >= MISSION_CHECKPOINT_SCHEMA) {
+            values.put("rare_mission_target", String.valueOf(rareMissionTarget));
+            values.put("inventory_service_used", String.valueOf(inventoryServiceUsed));
+        }
+        if (taskSchema >= RESOURCE_EPOCH_CHECKPOINT_SCHEMA) {
+            values.put("torch_limit", String.valueOf(torchLimit));
+            values.put("torch_placements", String.valueOf(torchPlacements));
+            values.put("resource_epoch", String.valueOf(resourceEpoch));
+        }
         values.put("budget_used", String.valueOf(budgetUsed));
         values.put("last_progress_budget", String.valueOf(lastProgressBudget));
         values.put("ore_fingerprint", oreFingerprint);
@@ -339,21 +555,22 @@ record OreDigCheckpoint(int taskSchema,
         values.put("pending_pickup_started_budget", String.valueOf(pendingPickupStartedBudget));
         values.put("pickup_gain_budget", String.valueOf(pendingPickupGainBudget));
         values.put("active_break_inventory", String.valueOf(activeBreakInventory));
-        if (taskSchema == CHECKPOINT_SCHEMA) {
+        if (taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA) {
             values.put("active_break_confirmed_gone", String.valueOf(activeBreakConfirmedGone));
         }
-        if (controlledStripRear != null) {
+        if (taskSchema >= DELIVERED_CHECKPOINT_SCHEMA && controlledStripRear != null) {
             values.put("controlled_strip_rear",
                     encodeCheckpointPos(controlledStripRear));
         }
-        if (boundaryRerouteOrigin != null) {
+        if (taskSchema >= DELIVERED_CHECKPOINT_SCHEMA && boundaryRerouteOrigin != null) {
             values.put("boundary_reroute_origin",
                     encodeCheckpointPos(boundaryRerouteOrigin));
         }
         if (pendingPickupPos != null) {
             values.put("pending_pickup_pos", encodeCheckpointPos(pendingPickupPos));
         }
-        if (pendingPickupLastSeenPos != null
+        if (taskSchema >= MISSION_CHECKPOINT_SCHEMA
+                && pendingPickupLastSeenPos != null
                 && !pendingPickupLastSeenPos.equals(pendingPickupPos)) {
             values.put("pending_pickup_last_seen_pos",
                     encodeCheckpointPos(pendingPickupLastSeenPos));
@@ -361,12 +578,18 @@ record OreDigCheckpoint(int taskSchema,
         if (activeBreakPos != null) {
             values.put("active_break_pos", encodeCheckpointPos(activeBreakPos));
         }
-        if (!rememberedHighWorkPoses.isEmpty()) {
+        if (taskSchema >= DELIVERED_CHECKPOINT_SCHEMA && !rememberedHighWorkPoses.isEmpty()) {
             values.put("remembered_high_work_poses",
                     encodeRememberedHighWorkPoses(rememberedHighWorkPoses));
         }
-        if (!openedVeinBreaks.isEmpty()) {
+        // Schema 4 predates the factual open-seam ledger.  Compatibility fixtures may still
+        // construct an older record shape, but its wire form must not smuggle a newer optional
+        // key into a schema whose strict decoder correctly rejects it.
+        if (taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA && !openedVeinBreaks.isEmpty()) {
             values.put("opened_vein_breaks", encodeOpenedVeinBreaks(openedVeinBreaks));
+        }
+        if (taskSchema == CHECKPOINT_SCHEMA && !queuedVeinHints.isEmpty()) {
+            values.put("queued_vein_hints", encodeOpenedVeinBreaks(queuedVeinHints));
         }
         return Map.copyOf(values);
     }
@@ -387,6 +610,7 @@ record OreDigCheckpoint(int taskSchema,
                 case LEGACY_CHECKPOINT_SCHEMA -> LEGACY_REQUIRED_KEYS;
                 case RESOURCE_EPOCH_CHECKPOINT_SCHEMA -> RESOURCE_REQUIRED_KEYS;
                 case MISSION_CHECKPOINT_SCHEMA -> MISSION_REQUIRED_KEYS;
+                case DELIVERED_CHECKPOINT_SCHEMA -> DELIVERED_REQUIRED_KEYS;
                 case PREVIOUS_CHECKPOINT_SCHEMA -> PREVIOUS_REQUIRED_KEYS;
                 case CHECKPOINT_SCHEMA -> REQUIRED_KEYS;
                 default -> Set.of();
@@ -395,6 +619,7 @@ record OreDigCheckpoint(int taskSchema,
                 case LEGACY_CHECKPOINT_SCHEMA -> LEGACY_ALLOWED_KEYS;
                 case RESOURCE_EPOCH_CHECKPOINT_SCHEMA -> RESOURCE_ALLOWED_KEYS;
                 case MISSION_CHECKPOINT_SCHEMA -> MISSION_ALLOWED_KEYS;
+                case DELIVERED_CHECKPOINT_SCHEMA -> DELIVERED_ALLOWED_KEYS;
                 case PREVIOUS_CHECKPOINT_SCHEMA -> PREVIOUS_ALLOWED_KEYS;
                 case CHECKPOINT_SCHEMA -> ALLOWED_KEYS;
                 default -> Set.of();
@@ -405,7 +630,7 @@ record OreDigCheckpoint(int taskSchema,
             }
             int targetCount = requiredInt(values, "target_count");
             boolean batchOpen = strictBoolean(values, "batch_open");
-            int delivered = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
+            int delivered = taskSchema >= DELIVERED_CHECKPOINT_SCHEMA
                     ? requiredInt(values, "delivered") : 0;
             int rareMissionTarget;
             boolean inventoryServiceUsed;
@@ -440,9 +665,9 @@ record OreDigCheckpoint(int taskSchema,
             int stepsLeft = requiredInt(values, "steps_left");
             int legLength = requiredInt(values, "leg_length");
             int batches = requiredInt(values, "batches");
-            BlockPos controlledStripRear = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
+            BlockPos controlledStripRear = taskSchema >= DELIVERED_CHECKPOINT_SCHEMA
                     ? optionalPos(values, "controlled_strip_rear") : null;
-            BlockPos boundaryRerouteOrigin = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
+            BlockPos boundaryRerouteOrigin = taskSchema >= DELIVERED_CHECKPOINT_SCHEMA
                     ? optionalPos(values, "boundary_reroute_origin") : null;
             BlockPos pending = optionalPos(values, "pending_pickup_pos");
             BlockPos pendingLastSeen = taskSchema >= MISSION_CHECKPOINT_SCHEMA
@@ -457,15 +682,18 @@ record OreDigCheckpoint(int taskSchema,
             int pendingGain = requiredInt(values, "pickup_gain_budget");
             BlockPos activeBreak = optionalPos(values, "active_break_pos");
             int activeBreakInventory = requiredInt(values, "active_break_inventory");
-            boolean activeBreakConfirmedGone = taskSchema == CHECKPOINT_SCHEMA
+            boolean activeBreakConfirmedGone = taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
                     && strictBoolean(values, "active_break_confirmed_gone");
             Map<BlockPos, BlockPos> rememberedHighWorkPoses =
-                    taskSchema >= PREVIOUS_CHECKPOINT_SCHEMA
+                    taskSchema >= DELIVERED_CHECKPOINT_SCHEMA
                             ? decodeRememberedHighWorkPoses(
                             values.get("remembered_high_work_poses")).orElseThrow()
                             : Map.of();
             Set<BlockPos> openedVeinBreaks = decodeOpenedVeinBreaks(
                     values.get("opened_vein_breaks")).orElseThrow();
+            Set<BlockPos> queuedVeinHints = taskSchema == CHECKPOINT_SCHEMA
+                    ? decodeOpenedVeinBreaks(values.get("queued_vein_hints")).orElseThrow()
+                    : Set.of();
 
             int maxBudget = OreDigTask.maxElapsedForTarget(
                     ores, targetCount, rareMissionTarget, resourceEpoch);
@@ -499,10 +727,15 @@ record OreDigCheckpoint(int taskSchema,
                     && rememberedHighWorkPoses.entrySet().stream().allMatch(entry ->
                     OreDigTask.isExactHighWorkPose(entry.getKey(), entry.getValue())
                             && OreDigTask.isRememberedHighWorkPoseNearFace(face, entry.getKey()));
-            boolean openedVeinBreakShape = openedVeinBreaks.size() <= MAX_CHECKPOINT_TARGET_COUNT
+            boolean openedVeinBreakShape = openedVeinBreaks.size() <= MAX_OPENED_VEIN_BREAKS
                     && (batchOpen || openedVeinBreaks.isEmpty())
                     && openedVeinBreaks.stream().allMatch(pos ->
-                    OreDigTask.isRememberedHighWorkPoseNearFace(face, pos));
+                    isOpenedVeinBreakAnchorInEnvelope(face, pos));
+            boolean queuedVeinHintShape = queuedVeinHints.size() <= MAX_OPENED_VEIN_BREAKS
+                    && (batchOpen || queuedVeinHints.isEmpty())
+                    && java.util.Collections.disjoint(openedVeinBreaks, queuedVeinHints)
+                    && queuedVeinHints.stream().allMatch(pos ->
+                    isOpenedVeinBreakAnchorInEnvelope(face, pos));
             boolean boundaryRerouteShape = boundaryRerouteOrigin == null
                     || batchOpen && direction >= 0 && stepsLeft > 0
                     && boundaryRerouteOrigin.equals(face);
@@ -535,6 +768,7 @@ record OreDigCheckpoint(int taskSchema,
                     : MiningBudget.RARE_RESOURCE_EPOCHS_PER_BATCH;
             if (taskSchema != CHECKPOINT_SCHEMA
                     && taskSchema != PREVIOUS_CHECKPOINT_SCHEMA
+                    && taskSchema != DELIVERED_CHECKPOINT_SCHEMA
                     && taskSchema != MISSION_CHECKPOINT_SCHEMA
                     && taskSchema != RESOURCE_EPOCH_CHECKPOINT_SCHEMA
                     && taskSchema != LEGACY_CHECKPOINT_SCHEMA
@@ -549,14 +783,14 @@ record OreDigCheckpoint(int taskSchema,
                     || budget < 0 || budget > maxBudget
                     || lastProgress < 0 || lastProgress > budget
                     || !cursorShape || !pendingPair || !pendingLastSeenPair || !activePair
-                    || !rememberedHighWorkPoseShape || !openedVeinBreakShape
+                    || !rememberedHighWorkPoseShape || !openedVeinBreakShape || !queuedVeinHintShape
                     || !boundaryRerouteShape || !controlledStripRearShape
                     || pending != null && activeBreak != null
                     || !committedShape
                     || !deliveredShape
                     // Schemas 1-3 never recorded how much an open batch already delivered to
                     // inventory. Assuming zero would duplicate coal/iron as well as rare output.
-                    || taskSchema < PREVIOUS_CHECKPOINT_SCHEMA && batchOpen
+                    || taskSchema < DELIVERED_CHECKPOINT_SCHEMA && batchOpen
                     || !rareExpedition && (torchPlacements != 0 || resourceEpoch != 0)
                     || !batchOpen && (torchPlacements != 0 || resourceEpoch != 0
                     || inventoryServiceUsed)) {
@@ -573,7 +807,7 @@ record OreDigCheckpoint(int taskSchema,
                     pendingInventory,
                     pendingStarted, pendingGain, activeBreak, activeBreakInventory,
                     activeBreakConfirmedGone,
-                    rememberedHighWorkPoses, openedVeinBreaks));
+                    rememberedHighWorkPoses, openedVeinBreaks, queuedVeinHints));
         } catch (RuntimeException exception) {
             return Optional.empty();
         }
@@ -633,6 +867,12 @@ record OreDigCheckpoint(int taskSchema,
     private static Set<String> withOpenedVeinBreaksKey(Set<String> base) {
         Set<String> keys = new java.util.HashSet<>(base);
         keys.add("opened_vein_breaks");
+        return Set.copyOf(keys);
+    }
+
+    private static Set<String> withQueuedVeinHintsKey(Set<String> base) {
+        Set<String> keys = new java.util.HashSet<>(base);
+        keys.add("queued_vein_hints");
         return Set.copyOf(keys);
     }
 

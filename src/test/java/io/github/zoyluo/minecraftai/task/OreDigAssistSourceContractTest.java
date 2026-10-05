@@ -34,17 +34,22 @@ class OreDigAssistSourceContractTest {
         return found;
     }
 
-    // ---- hook 9: the dispatcher sits between the pending-blind-advance settlement and the vein ladder ---------
+    // ---- hook 9: drain a finite vein before opportunistic work; zero-quota recovery owns its own drain --------
 
     @Test
-    void tickOpportunisticDispatchesAfterPendingBlindAdvanceAndBeforeVeinLadder() throws IOException {
+    void finiteVeinDrainPrecedesOpportunisticDispatchAndZeroQuotaRecoveryHasItsOwnDrain() throws IOException {
         String source = read(SOURCE);
         int tick = source.indexOf("protected void onTick");
         int retryAtRear = source.indexOf("PendingBlindAdvancePhase.RETRY_AT_REAR", tick);
+        int onTickAdvanceVein = source.indexOf("advanceVein(bot, world)", retryAtRear);
         int dispatch = source.indexOf("if (tickOpportunistic(bot, world)) {", retryAtRear);
-        int firstAdvanceVein = source.indexOf("advanceVein(bot, world)", tick);
-        assertTrue(tick >= 0 && retryAtRear > tick && dispatch > retryAtRear && firstAdvanceVein > dispatch,
-                "the opportunistic detour must own its tick before the vein/bonus/target/scan ladder runs");
+        int zeroQuotaFinish = source.indexOf("private void finishAlreadyDeliveredBatch", dispatch);
+        int zeroQuotaAdvanceVein = source.indexOf("advanceVein(bot, world)", zeroQuotaFinish);
+        assertTrue(tick >= 0 && retryAtRear > tick && onTickAdvanceVein > retryAtRear
+                        && dispatch > onTickAdvanceVein && zeroQuotaFinish > dispatch
+                        && zeroQuotaAdvanceVein > zeroQuotaFinish,
+                "ordinary onTick draining must retain priority over opportunistic work, while "
+                        + "zero-quota seam recovery drains through its own helper");
     }
 
     // ---- the literal blacklist of design 8.2 / P1 contract E.4: unchanged counts, no new banned text ----------
@@ -53,7 +58,7 @@ class OreDigAssistSourceContractTest {
     void literalBlacklistCountsAreUnchangedByTheDetourInserts() throws IOException {
         String source = read(SOURCE);
         String checkpointSource = read(CHECKPOINT_SOURCE);
-        assertEquals(1, count(source, "advanceVein(bot, world)"));
+        assertEquals(2, count(source, "advanceVein(bot, world)"));
         assertEquals(1, count(source, "if (activeBonus)"));
         assertEquals(1, count(source, "if (miningTarget)"));
         assertEquals(1, count(source, "if (miningVein)"));
@@ -66,14 +71,14 @@ class OreDigAssistSourceContractTest {
         assertEquals(1, count(source, "startDigPathTo("));
         assertEquals(10, count(source, "digTowardStep"));
         assertEquals(2, count(source, "if (restoringFace)"), "no new if (restoringFace) may be added");
-        // The three service derivations and the schema-4 compatibility constructor each end with
-        // the bare "rememberedHighWorkPoses)" field. The compatibility constructor deliberately
-        // supplies no schema-5 break fact; the three current-schema derivations preserve it.
-        assertEquals(4, count(source, "rememberedHighWorkPoses);")
-                + count(checkpointSource, "rememberedHighWorkPoses);"));
+        // Current checkpoints carry factual break anchors and separately observed queue hints;
+        // old constructors still default both ledgers rather than inventing authority.
+        assertTrue(checkpointSource.contains("openedVeinBreaks, queuedVeinHints")
+                        && checkpointSource.contains("queued_vein_hints"),
+                "the durable seam queue must remain distinct from factual broken anchors");
         assertEquals(1, count(source, "|| !veinQueue.isEmpty() || bonusOre != null"),
                 "the pinned boolean-or literal must stay on one line, unduplicated");
-        assertEquals(4, count(source, "NO_PROGRESS_LIMIT"), "the NO_PROGRESS_LIMIT condition must not be touched");
+        assertEquals(3, count(source, "NO_PROGRESS_LIMIT"), "the NO_PROGRESS_LIMIT condition must not be touched");
         assertEquals(0, count(source, ".teleportTo("), "no detour text may ever write a teleport call");
     }
 

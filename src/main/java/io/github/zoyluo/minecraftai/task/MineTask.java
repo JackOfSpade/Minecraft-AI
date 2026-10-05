@@ -114,7 +114,9 @@ public final class MineTask extends AbstractTask {
             fail("mine_timeout");
             return;
         }
-        maybePlaceAutomaticTorch(bot);
+        if (maybePlaceAutomaticTorch(bot, false)) {
+            return;
+        }
         switch (phase) {
             case SEARCHING -> search(bot);
             case EXPLORING -> explore(bot);
@@ -130,22 +132,40 @@ public final class MineTask extends AbstractTask {
      * Keep it at an idle search boundary: it never interrupts a path, an in-flight break, or drop
      * collection, and the next mining start will factually re-equip its best tool.
      */
-    private void maybePlaceAutomaticTorch(AIPlayerEntity bot) {
-        if (!AutomaticLighting.miningTorchAutomationEnabled()
-                || phase != Phase.SEARCHING
-                || elapsed - lastTorchCheckElapsed < 10
+    /** @return true while a deferred vanilla placement still owns this tick. */
+    private boolean maybePlaceAutomaticTorch(AIPlayerEntity bot, boolean beforeMining) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()) {
+            return false;
+        }
+        // A held use is an owner in its own right. Do not merely skip the lighting attempt and
+        // then let this same tick start a mine with a shield, food, or drawn bow still active.
+        // At the direct pre-break boundary, any ActionPack owner must settle for the same reason.
+        if (bot.isUsingItem()
+                || beforeMining && bot.getActionPack().hasActiveActions()) {
+            return true;
+        }
+        if (!beforeMining && phase != Phase.SEARCHING
+                || !beforeMining && elapsed - lastTorchCheckElapsed < 10
+                || beforeMining && lastTorchCheckElapsed == elapsed
                 || miner.target() != null
                 || !bot.getActionPack().isMiningIdle()
                 || !bot.getActionPack().isPathExecutorIdle()
                 || !bot.getActionPack().isWalkToIdle()
                 || bot.getActionPack().hasActiveActions()) {
-            return;
+            return false;
         }
-        lastTorchCheckElapsed = elapsed;
-        if (AutomaticLighting.tryPlaceDarkestReachable(bot)
-                == AutomaticLighting.Placement.PLACED) {
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        // A temporary owner is not a completed probe. Retrying as soon as it releases avoids a
+        // ten-tick dark gap after a shield/use handoff, while NONE/PLACED/FAILED stay paced.
+        if (placement != AutomaticLighting.Placement.IN_PROGRESS) {
+            lastTorchCheckElapsed = elapsed;
+        }
+        if (placement == AutomaticLighting.Placement.PLACED) {
             BotLog.action(bot, "mine_auto_torch", "pos", bot.blockPosition().toShortString());
         }
+        // BuildAction may yield to a temporary use owner (for example, a raised shield).  Do not
+        // begin a path or a new BlockMiner transaction until that owner reports idle again.
+        return placement == AutomaticLighting.Placement.IN_PROGRESS;
     }
 
     private void search(AIPlayerEntity bot) {
@@ -171,6 +191,12 @@ public final class MineTask extends AbstractTask {
         targetPos = choice.pos();
         directMiningTarget = choice.direct();
         if (directMiningTarget) {
+            // The search-boundary check above is cadence-limited.  A newly selected direct
+            // target can be reached in that same tick, so make one final quiet lighting check
+            // before beginning the physical break.
+            if (maybePlaceAutomaticTorch(bot, true)) {
+                return;
+            }
             startMiningTarget(bot);
             return;
         }
@@ -350,7 +376,19 @@ public final class MineTask extends AbstractTask {
             return;
         }
         if (HarvestCore.canReach(bot, targetPos)) {
+            // stopAll cancels a normal food/bow use (it preserves only a reactive shield), so the
+            // pre-break ownership guard must run before it tears down the just-arrived route.
+            // Keep the target and MOVING phase intact until the held vanilla use settles.
+            if (bot.isUsingItem()) {
+                return;
+            }
             bot.getActionPack().stopAll();
+            // Arriving from a path can put the bot in a dark pocket between SEARCHING cadence
+            // checks.  Do not start a new BlockMiner transaction while a deferred torch use owns
+            // the hand; MOVING remains intact and retries the same observed target next tick.
+            if (maybePlaceAutomaticTorch(bot, true)) {
+                return;
+            }
             startMiningTarget(bot);
             return;
         }

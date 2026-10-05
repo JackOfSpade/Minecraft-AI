@@ -87,6 +87,14 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(automatic.contains("SurfaceCheck.isOnSurface"));
         assertTrue(automatic.contains("BuildAction.canAcceptPlacementAt"));
         assertTrue(automatic.contains("darkestReachableFloor"));
+        assertFalse(automatic.contains("VERTICAL_SCAN_RADIUS"),
+                "darkest-reachable selection must not arbitrarily exclude reachable upper/lower ledges");
+        assertTrue(automatic.contains("for (int dy = -radius; dy <= radius; dy++)"),
+                "the full interaction-sized vertical reach must be considered");
+        int usingItemGuard = automatic.indexOf("if (bot.isUsingItem())");
+        int equipTorch = automatic.indexOf("InventoryAction.equipFromSlot");
+        assertTrue(usingItemGuard >= 0 && equipTorch > usingItemGuard,
+                "a held vanilla use must defer before automatic lighting mutates the selected slot");
         assertTrue(automatic.contains("miningTorchAutomationEnabled")
                         && automatic.contains("mining().placeTorches()"),
                 "active mining must retain its dedicated torch-policy switch");
@@ -94,22 +102,49 @@ final class AutomaticLightingSourceContractTest {
                 "the idle night-light setting must not disable active mining torches");
 
         String descend = read(MAIN.resolve("task/DescendToYTask.java"));
-        String descendLighting = descend.substring(descend.indexOf("private void maybePlaceTorch"),
-                descend.indexOf("static void restoreActiveMiningTool"));
+        int descendLightingStart = descend.lastIndexOf(
+                "maybePlaceTorch(AIPlayerEntity bot, ServerLevel world, BlockPos feet)");
+        int descendLightingEnd = descend.indexOf("static void restoreActiveMiningTool", descendLightingStart);
+        assertTrue(descendLightingStart >= 0 && descendLightingEnd > descendLightingStart,
+                "the descent torch boundary must remain a locally auditable helper");
+        String descendLighting = descend.substring(descendLightingStart, descendLightingEnd);
         assertTrue(descendLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
         assertTrue(descendLighting.contains("AutomaticLighting.miningTorchAutomationEnabled"));
         assertTrue(descendLighting.contains("miner.target() != null")
                         && descendLighting.contains("isMiningIdle()")
                         && descendLighting.contains("hasActiveActions()"),
                 "descent may only light at a quiet boundary, never during an in-flight break");
+        assertTrue(descendLighting.contains("if (bot.isUsingItem())"),
+                "a held item use must yield descent before it can start the next stair break");
+        assertTrue(descendLighting.indexOf("AutomaticLighting.Placement placement")
+                        < descendLighting.indexOf("lastTorchCheckBudget = totalBudget()"),
+                "an in-progress placement must not consume the descent lighting cadence");
         assertFalse(descendLighting.contains("BuildAction.placeBlockAt"));
 
         String valuables = read(MAIN.resolve("task/MineValuablesTask.java"));
-        int valuableLightingStart = valuables.indexOf("private void maybePlaceTorch");
-        String valuableLighting = valuables.substring(valuableLightingStart,
-                valuables.indexOf("    @Override", valuableLightingStart));
+        int valuableLightingStart = valuables.lastIndexOf(
+                "maybePlaceTorch(AIPlayerEntity bot, boolean beforeMining)");
+        int valuableLightingEnd = valuables.indexOf("    @Override", valuableLightingStart);
+        assertTrue(valuableLightingStart >= 0 && valuableLightingEnd > valuableLightingStart,
+                "the valuables torch boundary must remain a locally auditable helper");
+        String valuableLighting = valuables.substring(valuableLightingStart, valuableLightingEnd);
         assertTrue(valuableLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
         assertTrue(valuableLighting.contains("AutomaticLighting.miningTorchAutomationEnabled"));
+        assertTrue(valuableLighting.contains("bot.isUsingItem()")
+                        && valuableLighting.contains("beforeMining && bot.getActionPack().hasActiveActions()"),
+                "valuables mining must yield an imminent break to an existing hand/action owner");
+        assertTrue(valuableLighting.indexOf("AutomaticLighting.Placement placement")
+                        < valuableLighting.indexOf("lastTorchCheckTick = elapsed"),
+                "an in-progress valuables placement must retry without consuming its cadence");
+        int valuableMoveStart = valuables.indexOf("    private void move(AIPlayerEntity bot)");
+        int valuableMoveEnd = valuables.indexOf("    private void startMiningTarget", valuableMoveStart);
+        assertTrue(valuableMoveStart >= 0 && valuableMoveEnd > valuableMoveStart,
+                "valuables arrival handoff must remain locally auditable");
+        String valuableMove = valuables.substring(valuableMoveStart, valuableMoveEnd);
+        int valuableHeldUse = valuableMove.indexOf("if (bot.isUsingItem())");
+        int valuableStopAll = valuableMove.indexOf("bot.getActionPack().stopAll()");
+        assertTrue(valuableHeldUse >= 0 && valuableStopAll > valuableHeldUse,
+                "valuables must preserve a held food/bow use before stopping its arrived route");
         assertFalse(valuableLighting.contains("world.canSeeSky"));
 
         String oreDig = read(MAIN.resolve("task/OreDigTask.java"));
@@ -119,11 +154,48 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(oreDig.contains("activeTargetBreakPos != null"));
         assertTrue(oreDig.contains("rareDarkBoundary") && oreDig.contains("torchPlacements++"),
                 "rare observed-ore work must light through the shared reflex while preserving its torch budget");
+        assertTrue(oreDig.contains("maybePlaceAutomaticTorchAtSafeBoundary(bot, bot.level(), true)"),
+                "a freshly reachable observed ore must re-check lighting before its first swing");
+        assertTrue(oreDig.contains("boolean beforeMining")
+                        && oreDig.contains("beforeMining && lastAutomaticTorchCheckTick == elapsed"),
+                "the pre-break rare-expedition check may bypass cadence but never duplicate a same-tick probe");
+        assertTrue(oreDig.contains("bot.getActionPack().hasActiveActions()"),
+                "OreDig must not swap to a torch or start a fresh target break while another action owns controls");
+        int oreDigLightingStart = oreDig.indexOf("private boolean maybePlaceAutomaticTorchAtSafeBoundary");
+        int oreDigLightingEnd = oreDig.indexOf("private static boolean hasPickupConfirmationSupport", oreDigLightingStart);
+        assertTrue(oreDigLightingStart >= 0 && oreDigLightingEnd > oreDigLightingStart,
+                "OreDig's shared lighting boundary must remain locally auditable");
+        String oreDigLighting = oreDig.substring(oreDigLightingStart, oreDigLightingEnd);
+        assertTrue(oreDigLighting.contains("bot.isUsingItem()")
+                        && oreDigLighting.contains("beforeMining && bot.getActionPack().hasActiveActions()"),
+                "OreDig must yield a new break to a held use or pre-existing action owner");
+        assertTrue(oreDigLighting.indexOf("AutomaticLighting.Placement placement")
+                        < oreDigLighting.indexOf("lastAutomaticTorchCheckTick = elapsed"),
+                "an in-progress OreDig placement must retry without consuming its cadence");
 
         String obsidian = read(MAIN.resolve("task/CreateObsidianTask.java"));
         assertTrue(obsidian.contains("AutomaticLighting.tryPlaceDarkestReachable"));
         assertTrue(obsidian.contains("AutomaticLighting.miningTorchAutomationEnabled"));
         assertFalse(obsidian.contains("combinedSearchLight"));
+        int searchOwner = obsidian.indexOf("if (miner.target() == null && searchActionOwned(bot))");
+        int searchLighting = obsidian.indexOf("if (!searchLightingReady(bot))");
+        assertTrue(searchOwner >= 0 && searchLighting > searchOwner,
+                "obsidian SEARCH must yield route/walk/foreign-action owners before lighting");
+        int ownerHelper = obsidian.indexOf("private boolean searchActionOwned");
+        int lightingHelper = obsidian.indexOf("private boolean ensureAutomaticSearchLighting");
+        assertTrue(ownerHelper >= 0 && lightingHelper > ownerHelper,
+                "obsidian SEARCH ownership helpers must remain locally auditable");
+        String searchOwnership = obsidian.substring(ownerHelper, lightingHelper);
+        assertTrue(searchOwnership.contains("!bot.getActionPack().isMiningIdle()")
+                        && searchOwnership.contains("!bot.getActionPack().isPathExecutorIdle()")
+                        && searchOwnership.contains("!bot.getActionPack().isWalkToIdle()")
+                        && searchOwnership.contains("bot.getActionPack().hasActiveActions()"),
+                "obsidian SEARCH lighting must wait for mining, route, walk, and held-action owners");
+        int lightingOwnerGuard = obsidian.indexOf("if (miner.target() != null || searchActionOwned(bot))",
+                lightingHelper);
+        int torchPlacement = obsidian.indexOf("AutomaticLighting.tryPlaceDarkestReachable", lightingHelper);
+        assertTrue(lightingOwnerGuard > lightingHelper && torchPlacement > lightingOwnerGuard,
+                "the obsidian torch helper must reject a live miner, route, walk, or held action before it can equip a torch");
 
         String exploration = read(MAIN.resolve("task/MiningExplorationTask.java"));
         assertTrue(exploration.contains("AutomaticLighting.miningTorchAutomationEnabled"));
@@ -134,6 +206,26 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(genericMine.contains("phase != Phase.SEARCHING")
                         && genericMine.contains("miner.target() != null"),
                 "generic block mining must only light at its own quiet search boundary");
+        int genericMineLightingStart = genericMine.indexOf("private boolean maybePlaceAutomaticTorch");
+        int genericMineLightingEnd = genericMine.indexOf("    private void search", genericMineLightingStart);
+        assertTrue(genericMineLightingStart >= 0 && genericMineLightingEnd > genericMineLightingStart,
+                "generic mining's shared lighting boundary must remain locally auditable");
+        String genericMineLighting = genericMine.substring(genericMineLightingStart, genericMineLightingEnd);
+        assertTrue(genericMineLighting.contains("bot.isUsingItem()")
+                        && genericMineLighting.contains("beforeMining && bot.getActionPack().hasActiveActions()"),
+                "generic mining must yield a new break to a held use or pre-existing action owner");
+        assertTrue(genericMineLighting.indexOf("AutomaticLighting.Placement placement")
+                        < genericMineLighting.indexOf("lastTorchCheckElapsed = elapsed"),
+                "an in-progress generic-mining placement must retry without consuming its cadence");
+        int genericMoveStart = genericMine.indexOf("    private void move(AIPlayerEntity bot)");
+        int genericMoveEnd = genericMine.indexOf("    private void mine(AIPlayerEntity bot)", genericMoveStart);
+        assertTrue(genericMoveStart >= 0 && genericMoveEnd > genericMoveStart,
+                "generic mining arrival handoff must remain locally auditable");
+        String genericMove = genericMine.substring(genericMoveStart, genericMoveEnd);
+        int genericHeldUse = genericMove.indexOf("if (bot.isUsingItem())");
+        int genericStopAll = genericMove.indexOf("bot.getActionPack().stopAll()");
+        assertTrue(genericHeldUse >= 0 && genericStopAll > genericHeldUse,
+                "generic mining must preserve a held food/bow use before stopping its arrived route");
 
         String stripMine = read(MAIN.resolve("task/StripMineTask.java"));
         int stripLightingStart = stripMine.indexOf("private void light(AIPlayerEntity bot)");

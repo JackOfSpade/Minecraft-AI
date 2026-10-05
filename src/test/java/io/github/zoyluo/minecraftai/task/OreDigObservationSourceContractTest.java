@@ -91,14 +91,46 @@ class OreDigObservationSourceContractTest {
     }
 
     @Test
+    void observedFiniteTargetApproachSurvivesRetiredBlindExcavation() throws IOException {
+        String source = Files.readString(ORE_DIG);
+        int tunnel = source.indexOf("private void digTowardStep(");
+        int retiredBlindExcavation = source.indexOf(
+                "if (RetiredNavigationTask.legacyExcavationDisabled())", tunnel);
+        int targetApproachOnly = source.indexOf(
+                "intent != TunnelIntent.TARGET_APPROACH", retiredBlindExcavation);
+        int observedTarget = source.indexOf(
+                "OreScan.observeOre(bot, goal, targetOres)", targetApproachOnly);
+        int observedPresent = source.indexOf(
+                "OreScan.Observation.OBSERVED_PRESENT", observedTarget);
+        int branchEnd = source.indexOf("BlockPos feet = bot.blockPosition()", observedPresent);
+        assertTrue(tunnel >= 0 && retiredBlindExcavation > tunnel
+                        && targetApproachOnly > retiredBlindExcavation
+                        && observedTarget > targetApproachOnly
+                        && observedPresent > observedTarget
+                        && branchEnd > observedPresent,
+                "retiring blind excavation must retain an observed finite target approach");
+        assertFalse(source.substring(retiredBlindExcavation, branchEnd)
+                        .contains("abandonTargetApproach"),
+                "a visible vein member must not be discarded as a legacy route failure");
+    }
+
+    @Test
     void targetOwnersUsePresentGoneUnknownInsteadOfInferringBreaks() throws IOException {
         String source = Files.readString(ORE_DIG);
         int restored = source.indexOf("OreScan.Observation restoredTarget = OreScan.observeOre(");
         int keepUnknown = source.indexOf(
                 "restoredTarget != OreScan.Observation.OBSERVED_GONE", restored);
-        int promoteDebt = source.indexOf("pendingPickupPos = restoredActiveTargetBreakPos", keepUnknown);
-        assertTrue(restored >= 0 && keepUnknown > restored && promoteDebt > keepUnknown,
-                "an unknown restored active target must retain break ownership, not invent pickup debt");
+        int retainedBreakOwner = source.indexOf(
+                "activeTargetBreakPos = restoredActiveTargetBreakPos", keepUnknown);
+        int retainedTargetOwner = source.indexOf(
+                "targetOre = restoredActiveTargetBreakPos", retainedBreakOwner);
+        int restoredOwnerEnd = source.indexOf("if (restoredCursor != null", retainedTargetOwner);
+        assertTrue(restored >= 0 && keepUnknown > restored
+                        && retainedBreakOwner > keepUnknown && retainedTargetOwner > retainedBreakOwner,
+                "an unknown restored active target must retain its exact break and target ownership");
+        assertFalse(source.substring(keepUnknown, restoredOwnerEnd)
+                        .contains("pendingPickupPos = restoredActiveTargetBreakPos"),
+                "restoration must not invent pickup debt before the retained owner is factually settled");
 
         int bonusOwner = source.indexOf("if (activeBonus)");
         int bonusTick = source.indexOf("BlockMiner.Status st = miner.tick(bot)", bonusOwner);
@@ -118,8 +150,9 @@ class OreDigObservationSourceContractTest {
         int veinTick = source.indexOf("BlockMiner.Status st = miner.tick(bot)", veinGate);
         int vein = source.indexOf("OreScan.Observation veinState = OreScan.observeOre", veinTick);
         int veinUnknown = source.indexOf("veinState == OreScan.Observation.UNKNOWN", vein);
-        int veinContinue = source.indexOf("continueUnknownOwnerApproach(", veinUnknown);
+        int veinReobserve = source.indexOf("tickQueuedVeinHintReobservation(bot, v)", veinUnknown);
         int veinGone = source.indexOf("veinState == OreScan.Observation.OBSERVED_GONE", veinUnknown);
+        String queuedUnknownBody = source.substring(veinUnknown, veinGone);
         assertTrue(bonusOwner >= 0 && bonusTick > bonusOwner && bonus > bonusTick
                         && bonusUnknown > bonus && bonusClear > bonusUnknown
                         && targetOwner > bonusClear && targetGate > targetOwner
@@ -128,9 +161,11 @@ class OreDigObservationSourceContractTest {
                         && targetGone > targetContinue
                         && veinOwner > targetGone && veinGate > veinOwner
                         && veinTick > veinGate && vein > veinTick
-                        && veinUnknown > vein && veinContinue > veinUnknown
-                        && veinGone > veinContinue,
-                "active owners must settle first; inactive owners preserve UNKNOWN until factual GONE");
+                        && veinUnknown > vein && veinReobserve > veinUnknown
+                        && veinGone > veinReobserve,
+                "active owners must settle first; queued UNKNOWN members must use observed re-observation before factual GONE");
+        assertFalse(queuedUnknownBody.contains("continueUnknownOwnerApproach"),
+                "an UNKNOWN queued vein hint must not enter the legacy tunnel continuation path");
 
         int continueHelper = source.indexOf("private void continueUnknownOwnerApproach");
         int nextStep = source.indexOf("BlockPos next = stepToward", continueHelper);
@@ -142,6 +177,41 @@ class OreDigObservationSourceContractTest {
                         && exactOwnerGuard > nextStep && inactiveMiner > exactOwnerGuard
                         && tunnelOnly > inactiveMiner,
                 "UNKNOWN liveness may open only an intermediate body column, never the owner cell");
+    }
+
+    @Test
+    void completedBreakReplacementIsNotRequeuedAsASeamMember() throws IOException {
+        String source = Files.readString(ORE_DIG);
+        int finishDelivered = source.indexOf("private void finishAlreadyDeliveredBatch");
+        int observedPresent = source.indexOf(
+                "activeState == OreScan.Observation.OBSERVED_PRESENT", finishDelivered);
+        int factualGone = source.indexOf(
+                "boolean activeWasFactuallyGone = activeTargetBreakConfirmedGone", observedPresent);
+        int clear = source.indexOf("clearActiveTargetBreak(active)", factualGone);
+        int queueRemoval = source.indexOf("veinQueue.remove(active)", clear);
+        int requeueGate = source.indexOf(
+                "if (belongsToOpenVein && !activeWasFactuallyGone)", queueRemoval);
+        int requeue = source.indexOf("veinQueue.addFirst(active.immutable())", requeueGate);
+        int presentBranchEnd = source.indexOf("} else {\n                if (activeState", requeue);
+        assertTrue(finishDelivered >= 0 && observedPresent > finishDelivered
+                        && factualGone > observedPresent && clear > factualGone
+                        && queueRemoval > clear && requeueGate > queueRemoval
+                        && requeue > requeueGate && presentBranchEnd > requeue,
+                "a factually completed break must remove its stale queue entry but never requeue a replacement ore");
+    }
+
+    @Test
+    void boundedFactualVeinSweepFeedsTheWatchdogOnlyAfterConsumingAnAnchor() throws IOException {
+        String source = Files.readString(ORE_DIG);
+        int discovery = source.indexOf("private void tickVeinDiscovery");
+        int nextMethod = source.indexOf("private void discoverVeinAround", discovery);
+        String body = source.substring(discovery, nextMethod);
+        int poll = body.indexOf("BlockPos center = veinSweep.pollFirst()");
+        int scan = body.indexOf("discoverVeinAround(bot, world, center)", poll);
+        int progress = body.indexOf("noteProgress()", scan);
+        assertTrue(discovery >= 0 && nextMethod > discovery && poll >= 0
+                        && scan > poll && progress > scan,
+                "only a dequeued, already-finite vein-sweep anchor may extend the mining watchdog");
     }
 
     @Test

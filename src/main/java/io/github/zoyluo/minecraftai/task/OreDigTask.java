@@ -230,6 +230,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int observedOreSearchStartedBudget;
     private int observedOreSearchCompletedHops;
     private int observedOreSearchLastScanTick = -SCAN_INTERVAL;
+    /**
+     * A restored queued vein member may be farther than the current view. Its persisted coordinate
+     * is a heading only: each hop resolves to an actually observed walk-only stance, never a dig
+     * route or a claim that the stale ore is still present.
+     */
+    private final ObservedSearchHops queuedVeinHintSearch = new ObservedSearchHops(
+            OBSERVED_SEARCH_MAX_HOPS);
+    private BlockPos queuedVeinHintSearchOwner;
+    private BlockPos queuedVeinHintSearchTarget;
+    private BlockPos queuedVeinHintSearchStart;
+    private int queuedVeinHintSearchStartedBudget;
     /** One fresh depth handoff, plus bounded re-descent only after a real cave survey. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
@@ -283,6 +294,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private final BlockPos restoredActiveTargetBreakPos;
     private final int restoredActiveTargetBreakInventory;
     private final boolean restoredActiveTargetBreakConfirmedGone;
+    /** Previously observed connected members that had not yet broken when a process stopped. */
+    private final Set<BlockPos> restoredQueuedVeinHints;
     private final String oreFingerprint;
     private boolean restoringFace;
     /**
@@ -452,6 +465,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 ? -1 : restoredCheckpoint.activeBreakInventory();
         this.restoredActiveTargetBreakConfirmedGone = restoredCheckpoint != null
                 && restoredCheckpoint.activeBreakConfirmedGone();
+        this.restoredQueuedVeinHints = restoredCheckpoint == null
+                ? Set.of() : restoredCheckpoint.queuedVeinHints();
         this.budgetTargetCount = restoredCheckpoint != null && restoredCheckpoint.batchOpen()
                 ? restoredCheckpoint.targetCount() : Math.max(1, targetCount);
         this.deliveredAtStart = restoredCheckpoint != null && restoredCheckpoint.batchOpen()
@@ -869,6 +884,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         clearObservedOreSearchLeg();
         observedOreSearchCompletedHops = 0;
         observedOreSearchLastScanTick = -SCAN_INTERVAL;
+        clearQueuedVeinHintReobservation();
         miningExploration = null;
         miningExplorationAttempted = false;
         miningExplorationCaveSurveyRequired = false;
@@ -887,6 +903,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // re-observes every candidate before mining it.
             veinBroken.addAll(restoredCheckpoint.openedVeinBreaks());
             veinSweep.addAll(restoredCheckpoint.openedVeinBreaks());
+            // Broken anchors reconstruct exposure; an already-observed but unbroken fork member
+            // needs its own durable hint. Otherwise a long branch can carry the bot beyond the
+            // fork, and a restore has no reason to return to the member that was visible before
+            // shutdown. Each hint is still re-observed by advanceVein before it can be mined.
+            restoredQueuedVeinHints.stream()
+                    .filter(pos -> !veinBroken.contains(pos))
+                    .sorted(java.util.Comparator
+                            .comparingLong((BlockPos pos) -> squaredBlockDistance(bot.blockPosition(), pos))
+                            .thenComparing(OreDigCheckpoint::encodeCheckpointPos))
+                    .forEach(pos -> veinQueue.addLast(pos.immutable()));
         }
         MiningCursor cursor = restoredCursor == null
                 ? MiningCursor.initial(bot.blockPosition(), STRIP_SEGMENT)
@@ -941,12 +967,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 activeTargetBreakInventory = restoredActiveTargetBreakInventory;
                 activeTargetBreakConfirmedGone = restoredActiveTargetBreakConfirmedGone;
                 targetOre = restoredActiveTargetBreakPos;
-            } else if (pendingPickupPos == null) {
-                pendingPickupPos = restoredActiveTargetBreakPos;
-                pendingPickupLastSeenPos = restoredActiveTargetBreakPos;
-                pendingPickupInventory = restoredActiveTargetBreakInventory;
-                pendingPickupStarted = totalBudget();
-                pendingPickupGainTick = -1;
+            } else {
+                // The physical break is visible, but the old process ended before it could run
+                // finishTargetBreak().  Keep the break owner long enough for that single
+                // finalization transaction: it records the factual broken frontier, discovers
+                // adjacent seam members, stabilizes the drop, and only then creates pickup debt.
+                // Converting straight to pendingPickup here lost the opened vein on a restart.
+                activeTargetBreakPos = restoredActiveTargetBreakPos;
+                activeTargetBreakInventory = restoredActiveTargetBreakInventory;
+                activeTargetBreakConfirmedGone = true;
+                targetOre = restoredActiveTargetBreakPos;
             }
         }
         if (restoredCursor != null && !rebaseCommittedCursor) {
@@ -1088,15 +1118,21 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             clearStripMovementOwnership();
             return;
         }
+        // The restored zero-quota seam path below is still an unfinished OreDig transaction.
+        // Keep its hard budget outside the ordinary count-mode branch so an unobservable queued
+        // member cannot bypass the only global timeout after a restart.
+        if (totalBudget() > maxElapsed) {
+            fail("ore_dig_timeout collected=" + collected);
+            return;
+        }
         // A restored zero-quota task can still own the factual frontier of an opened vein.  It
         // must first return to its saved, observable face; otherwise the one discovery scan below
         // could consume that frontier while the adjacent ore is merely out of sight.
         if (targetCount == 0 && !restoringFace) {
+            if (failForNoProgress(bot, world)) {
+                return;
+            }
             finishAlreadyDeliveredBatch(bot, world);
-            return;
-        }
-        if (totalBudget() > maxElapsed) {
-            fail("ore_dig_timeout collected=" + collected);
             return;
         }
         if (restoringFace) {
@@ -1196,7 +1232,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (recoverPendingTargetDrop(bot)) {
             return;
         }
-        if (maybePlaceAutomaticTorchAtSafeBoundary(bot, world)) {
+        if (maybePlaceAutomaticTorchAtSafeBoundary(bot, world, false)) {
             return;
         }
 
@@ -1208,30 +1244,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             noteProgress();
         }
 
-        // No-progress watchdog: if no block is broken within NO_PROGRESS_LIMIT -> fail cleanly.
-        // Dump internal state before failing, so headless tests can diagnose exactly which stage
-        // "found ore but no progress" got stuck at (lost lock / approach failure / can't mine).
-        if (totalBudget() - lastProgressBudget > NO_PROGRESS_LIMIT) {
-            // (The old one-time "amnesty" has been replaced by EpisodeMemory's short TTL exclusion: 30s auto-revival, finer-grained than a blanket amnesty.)
-            BotLog.action(bot, "ore_dig_stall_dump",
-                    "target", targetOre == null ? "none"
-                            : targetOre.getX() + "," + targetOre.getY() + "," + targetOre.getZ(),
-                    "dist", targetOre == null ? "-"
-                            : String.format("%.1f", Math.sqrt(bot.getEyePosition().distanceToSqr(targetOre.getCenter()))),
-                    "miner", miner.target() == null ? "idle"
-                            : miner.target().getX() + "," + miner.target().getY() + "," + miner.target().getZ(),
-                    "ignored", EpisodeMemory.INSTANCE.excludedCount(bot.getUUID()),
-                    "vein_queue", veinQueue.size(),
-                    "strip_left", stripStepsLeft);
-            // Automatic terrain snapshot (the key to diagnosing real_diamond seed777's deep-approach
-            // jitter): dump the geometry between bot and ore as a compact per-Y-layer ASCII map
-            // (#solid/.air/O=ore/~=fluid/B=bot/T=target-ore) into the log (test logs can grep it
-            // back out). Blind changes to deep approach have regressed geo_deep before -- we must
-            // freeze the exact geometry into a deterministic repro before refining further. Zero
-            // behavior change here.
-            dumpStallRegion(bot, world);
-            miner.cancel(bot);
-            fail("ore_dig_no_progress collected=" + collected);
+        if (failForNoProgress(bot, world)) {
             return;
         }
 
@@ -1277,21 +1290,23 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             clearStripMovementOwnership();
             return;
         }
+        // The first scan after each factual break is necessarily taken from the old pickup
+        // stance.  One final re-scan from the settled stance catches a connected member that was
+        // briefly occluded by the break/drop geometry, matching explicit vein mode before a
+        // count request can declare its local seam complete.
+        if (!veinMode && targetOre == null && beginFinalVeinSweepIfNeeded()) {
+            clearStripMovementOwnership();
+            return;
+        }
         if (!veinMode && collected >= targetCount) {
             if (hasPendingCurrentVein()) {
                 return;
             }
-            miner.cancel(bot);
-            HarvestCore.sweepPickupAnyOf(bot, targetDrops, 16);
-            // Per-block pickup debt has already been settled above.  Keep sweeping for a short
-            // quiet window as well, so a second ItemEntity from the final vein break is not left
-            // behind just because the requested quota was reached by the first stack.
-            if (pickupGrace++ >= PICKUP_GRACE_TICKS
-                    && bot.getActionPack().isPathExecutorIdle()
-                    && bot.getActionPack().isWalkToIdle()) {
-                markMineFace(bot);
-                complete();
+            if (waitForFinalCountVeinDrops(bot)) {
+                return;
             }
+            markMineFace(bot);
+            complete();
             return;
         }
 
@@ -1299,6 +1314,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // stances belong only to that vein, so disconnected veins begin with a clean ledger.
         if (!veinMode && !hasPendingCurrentVein() && !veinBroken.isEmpty()) {
             veinBroken.clear();
+            veinFinalSwept = false;
         }
 
         // Capacity is evaluated only after factual inventory gain, pending-drop settlement and the
@@ -2024,8 +2040,32 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             OreScan.Observation activeState = OreScan.observeOre(bot, active, targetOres);
             if (activeState == OreScan.Observation.OBSERVED_PRESENT) {
                 // The block was never committed (or a replacement was visibly placed at the
-                // coordinate). Leave it in the world and discard the old break baseline.
+                // coordinate). Leave an unrelated primary target in the world and discard the
+                // old break baseline.  A matching queued member (or a target from an already
+                // opened seam) is different: quota satisfaction does not authorize abandoning
+                // the rest of that finite seam.  Release the stale break transaction, then put
+                // its still-observed ore back at the front of the ordinary vein owner queue.
+                // Otherwise targetOre would remain non-null while advanceVein is gated on it,
+                // leaving a restored zero-quota seam stuck until its no-progress watchdog.
+                // A factually-gone active break is different: a newly visible ore at its old
+                // coordinate is a replacement block, not a member of the seam that was mined.
+                // Never mine that replacement merely because another factual seam anchor exists.
+                boolean activeWasFactuallyGone = activeTargetBreakConfirmedGone;
+                boolean belongsToOpenVein = veinQueue.contains(active) || !veinBroken.isEmpty();
                 clearActiveTargetBreak(active);
+                if (active.equals(targetOre)) {
+                    targetOre = null;
+                }
+                if (belongsToOpenVein) {
+                    veinQueue.remove(active);
+                }
+                if (belongsToOpenVein && !activeWasFactuallyGone) {
+                    veinQueue.addFirst(active.immutable());
+                    clearQueuedVeinHintReobservation(active);
+                    BotLog.action(bot, "ore_dig_delivered_batch_active_requeued",
+                            "pos", active.toShortString(),
+                            "reason", "observed_present_open_vein");
+                }
             } else {
                 if (activeState == OreScan.Observation.OBSERVED_GONE) {
                     activeTargetBreakConfirmedGone = true;
@@ -2076,7 +2116,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // A count quota is not terminal while it owns an opened connected seam. The durable
         // frontier is reconstructed from factual breaks after restart, so this path always
         // re-observes candidates rather than trusting an old queued target.
-        if (maybePlaceAutomaticTorchAtSafeBoundary(bot, world)) {
+        if (maybePlaceAutomaticTorchAtSafeBoundary(bot, world, false)) {
             return;
         }
         if (!veinSweep.isEmpty()) {
@@ -2086,7 +2126,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             clearStripMovementOwnership();
             return;
         }
+        if (targetOre == null && beginFinalVeinSweepIfNeeded()) {
+            clearStripMovementOwnership();
+            return;
+        }
         if (hasPendingCurrentVein()) {
+            return;
+        }
+        // A restart can land after the requested inventory quota was already delivered but
+        // before a second delayed stack settles.  Give that restored seam the same bounded
+        // physical pickup sweep as the ordinary completion path before publishing completion.
+        if (waitForFinalCountVeinDrops(bot)) {
             return;
         }
         markMineFace(bot);
@@ -2611,6 +2661,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 ? Map.of() : checkpointRememberedHighWorkPoses(face);
         Set<BlockPos> durableOpenedVeinBreaks = committed
                 ? Set.of() : checkpointOpenedVeinBreaks(face);
+        Set<BlockPos> durableQueuedVeinHints = committed
+                ? Set.of() : checkpointQueuedVeinHints(face);
         int batches = completedBatches + (committed ? 1 : 0);
         // The timeout branch observes max+1 because AbstractTask increments elapsed before onTick.
         // Persist the exhausted boundary itself so GoalExecutor cannot turn a hard timeout into a
@@ -2660,7 +2712,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 committed || activeTargetBreakPos == null ? -1 : activeTargetBreakInventory,
                 !committed && activeTargetBreakPos != null && activeTargetBreakConfirmedGone,
                 durableRememberedHighWorkPoses,
-                durableOpenedVeinBreaks);
+                durableOpenedVeinBreaks,
+                durableQueuedVeinHints);
         Map<String, String> encoded = live.encode();
         return OreDigCheckpoint.decode(encoded, targetOres).isPresent() ? encoded : Map.of();
     }
@@ -2704,11 +2757,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /**
-     * Persists only nearby factual break cells from an unfinished seam. They are not future
-     * mining authority: on restore each cell is scanned again and only currently visible
-     * neighbours enter {@link #veinQueue}. Keeping a local frontier avoids serializing a long,
-     * already-drained tail while still preserving every member that can be exposed from the
-     * current work face.
+     * Persists factual break anchors across the unfinished seam, including a remote fork. They
+     * are never future mining authority: restore re-observes every candidate before it can queue
+     * work. Keeping only the current 48-block view lost the fork point after a long branch, so an
+     * adjacent member already observed on the other branch could never be rediscovered. The codec
+     * bounds an exceptional oversized ledger into distributed anchors before encoding.
      */
     private Set<BlockPos> checkpointOpenedVeinBreaks(BlockPos face) {
         if (face == null || veinBroken.isEmpty()) {
@@ -2716,7 +2769,25 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         Set<BlockPos> durable = new LinkedHashSet<>();
         veinBroken.stream()
-                .filter(pos -> isRememberedHighWorkPoseNearFace(face, pos))
+                .sorted(java.util.Comparator.comparing(OreDigCheckpoint::encodeCheckpointPos))
+                .forEach(pos -> durable.add(pos.immutable()));
+        return Set.copyOf(durable);
+    }
+
+    /**
+     * Persists observed, unbroken queue members separately from factual break anchors. Their
+     * restore path is intentionally only a hint: {@link #advanceVein(AIPlayerEntity, ServerLevel)}
+     * must see the ore again before it begins a break, but it can safely approach the known fork
+     * instead of silently forgetting it after a long sibling branch.
+     */
+    private Set<BlockPos> checkpointQueuedVeinHints(BlockPos face) {
+        if (face == null || veinQueue.isEmpty()) {
+            return Set.of();
+        }
+        Set<BlockPos> durable = new LinkedHashSet<>();
+        veinQueue.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(pos -> !veinBroken.contains(pos))
                 .sorted(java.util.Comparator.comparing(OreDigCheckpoint::encodeCheckpointPos))
                 .forEach(pos -> durable.add(pos.immutable()));
         return Set.copyOf(durable);
@@ -2994,6 +3065,38 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         lastProgressBudget = totalBudget();
     }
 
+    /**
+     * Applies the same bounded-stall rule to ordinary mining and restored post-quota seam work.
+     * The latter has no remaining item quota, but it can still own a finite observed member and
+     * must never wait forever for an UNKNOWN cell or an abandoned route owner.
+     */
+    private boolean failForNoProgress(AIPlayerEntity bot, ServerLevel world) {
+        if (totalBudget() - lastProgressBudget <= NO_PROGRESS_LIMIT) {
+            return false;
+        }
+        // Dump internal state before failing, so headless tests can diagnose exactly which stage
+        // "found ore but no progress" got stuck at (lost lock / approach failure / can't mine).
+        BotLog.action(bot, "ore_dig_stall_dump",
+                "target", targetOre == null ? "none"
+                        : targetOre.getX() + "," + targetOre.getY() + "," + targetOre.getZ(),
+                "dist", targetOre == null ? "-"
+                        : String.format("%.1f", Math.sqrt(bot.getEyePosition().distanceToSqr(targetOre.getCenter()))),
+                "miner", miner.target() == null ? "idle"
+                        : miner.target().getX() + "," + miner.target().getY() + "," + miner.target().getZ(),
+                "ignored", EpisodeMemory.INSTANCE.excludedCount(bot.getUUID()),
+                "vein_queue", veinQueue.size(),
+                "strip_left", stripStepsLeft);
+        // Automatic terrain snapshot (the key to diagnosing real_diamond seed777's deep-approach
+        // jitter): dump the geometry between bot and ore as a compact per-Y-layer ASCII map
+        // (#solid/.air/O=ore/~=fluid/B=bot/T=target-ore) into the log (test logs can grep it
+        // back out). Blind changes to deep approach have regressed geo_deep before -- we must
+        // freeze the exact geometry into a deterministic repro before refining further.
+        dumpStallRegion(bot, world);
+        miner.cancel(bot);
+        fail("ore_dig_no_progress collected=" + collected);
+        return true;
+    }
+
     private void returnToSavedFace(AIPlayerEntity bot) {
         if (lastFace == null || bot.blockPosition().equals(lastFace)) {
             bot.getActionPack().stopAll();
@@ -3027,14 +3130,106 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
     }
 
+    /** Clears the ephemeral observed-hop route; the durable queued hint itself remains untouched. */
+    private void clearQueuedVeinHintReobservation() {
+        queuedVeinHintSearch.reset();
+        queuedVeinHintSearchOwner = null;
+        queuedVeinHintSearchTarget = null;
+        queuedVeinHintSearchStart = null;
+        queuedVeinHintSearchStartedBudget = 0;
+    }
+
+    /** Clears a route only when the caller is settling its exact queued owner. */
+    private void clearQueuedVeinHintReobservation(BlockPos owner) {
+        if (owner == null || owner.equals(queuedVeinHintSearchOwner)) {
+            clearQueuedVeinHintReobservation();
+        }
+    }
+
+    private boolean ownsQueuedVeinHintReobservation(BlockPos owner) {
+        return owner != null && owner.equals(queuedVeinHintSearchOwner);
+    }
+
+    /**
+     * Makes bounded, walk-only progress toward an observed-but-now-occluded vein member. The
+     * remembered ore coordinate is merely a compass heading: {@link ObservedSearchHops} admits an
+     * actually observed local stance before Baritone receives a route. This preserves the queued
+     * hint through every refusal or short route and never grants terrain-break authority.
+     */
+    private void tickQueuedVeinHintReobservation(AIPlayerEntity bot, BlockPos hint) {
+        if (hint == null) {
+            clearQueuedVeinHintReobservation();
+            return;
+        }
+        if (!ownsQueuedVeinHintReobservation(hint)) {
+            clearQueuedVeinHintReobservation();
+            queuedVeinHintSearchOwner = hint.immutable();
+        }
+        if (queuedVeinHintSearchTarget != null) {
+            BlockPos observedGoal = queuedVeinHintSearchTarget;
+            boolean arrived = bot.blockPosition().distSqr(observedGoal) <= 9.0D;
+            boolean routeIdle = bot.getActionPack().isPathExecutorIdle()
+                    && bot.getActionPack().isWalkToIdle();
+            int legAge = totalBudget() - queuedVeinHintSearchStartedBudget;
+            if (arrived || legAge > OBSERVED_SEARCH_MOVE_LIMIT || (legAge > 20 && routeIdle)) {
+                boolean moved = queuedVeinHintSearchStart != null
+                        && bot.blockPosition().distSqr(queuedVeinHintSearchStart) > 9.0D;
+                queuedVeinHintSearch.retireObservedGoal(observedGoal);
+                bot.getActionPack().stopAll();
+                queuedVeinHintSearchTarget = null;
+                queuedVeinHintSearchStart = null;
+                queuedVeinHintSearchStartedBudget = 0;
+                BotLog.action(bot, "ore_dig_vein_hint_hop_ended",
+                        "hint", hint.toShortString(),
+                        "to", observedGoal.toShortString(),
+                        "reason", arrived ? "arrived"
+                                : legAge > OBSERVED_SEARCH_MOVE_LIMIT ? "timeout" : "route_ended");
+                if (moved) {
+                    noteProgress();
+                }
+                return;
+            }
+            // An admitted route owns a real, observed local movement leg. Its independent age cap
+            // above prevents a Baritone replan from turning this watchdog refresh into a stall.
+            noteProgress();
+            return;
+        }
+        ObservedSearchHops.Attempt attempt = queuedVeinHintSearch.begin(bot, hint);
+        if (!attempt.started()) {
+            BotLog.action(bot, "ore_dig_vein_hint_hop_refused",
+                    "hint", hint.toShortString(),
+                    "attempt", attempt.number(),
+                    "reason", attempt.reason(),
+                    "remaining", Math.max(0, OBSERVED_SEARCH_MAX_HOPS
+                            - queuedVeinHintSearch.attempts()));
+            // A refusal consumed a finite safe-search attempt. Allow the remaining alternatives
+            // to run, then let the normal no-progress guard terminate without dropping the hint.
+            if (!queuedVeinHintSearch.exhausted()) {
+                noteProgress();
+            }
+            return;
+        }
+        queuedVeinHintSearchTarget = attempt.observedGoal();
+        queuedVeinHintSearchStart = bot.blockPosition().immutable();
+        queuedVeinHintSearchStartedBudget = totalBudget();
+        BotLog.action(bot, "ore_dig_vein_hint_hop",
+                "hint", hint.toShortString(),
+                "attempt", attempt.number(),
+                "to", queuedVeinHintSearchTarget.toShortString(),
+                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+        noteProgress();
+    }
+
     // ── Ore vein: clear out the same-vein ore adjacent to the currently locked ore ──
     private boolean advanceVein(AIPlayerEntity bot, ServerLevel world) {
         if (veinQueue.isEmpty()) {
+            clearQueuedVeinHintReobservation();
             return false;
         }
         BlockPos v = veinQueue.peekFirst();
         if (v == null) {
             veinQueue.pollFirst();
+            clearQueuedVeinHintReobservation();
             return true;
         }
         boolean miningVein = miner.target() != null && miner.target().equals(v);
@@ -3062,19 +3257,36 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         OreScan.Observation veinState = OreScan.observeOre(bot, v, targetOres);
         if (veinState == OreScan.Observation.UNKNOWN) {
             // A queued vein is finite remembered work. Occlusion cannot dequeue it or promote its
-            // active break into a target-drop debt.
-            if (bot.getActionPack().isPathExecutorIdle()
+            // active break into a target-drop debt. A remote checkpoint hint is allowed to widen
+            // the view only through short observation-fenced, no-dig hops toward that known
+            // coordinate; it is never permission to carve toward an UNKNOWN block.
+            if (miner.target() != null) {
+                // This is only a stale channel transaction from before this member became
+                // occluded.  Do not finish it (or begin a replacement) while the queued owner is
+                // UNKNOWN: that would still carve *toward* a hint and the ordinary failed-channel
+                // policy would dequeue the very fact we are trying to re-observe.  Cancelling an
+                // incomplete channel break is safe; the factual queued owner remains intact and
+                // the next idle tick takes the observed-only hop below.
+                BlockPos channel = miner.target();
+                miner.cancel(bot);
+                bot.getActionPack().stopAll();
+                BotLog.action(bot, "ore_dig_vein_hint_channel_cancelled",
+                        "hint", v.toShortString(),
+                        "channel", channel.toShortString());
+            } else if (ownsQueuedVeinHintReobservation(v)) {
+                tickQueuedVeinHintReobservation(bot, v);
+            } else if (bot.getActionPack().isPathExecutorIdle()
                     && bot.getActionPack().isWalkToIdle()) {
-                if (miner.target() != null) {
-                    settleOwnedTunnelMine(bot, v,
-                            TunnelIntent.TARGET_APPROACH, miner.target());
-                } else if (!tryRememberedHighWorkPoseRoute(bot, world, v)) {
-                    continueUnknownOwnerApproach(
-                            bot, world, v, TunnelIntent.TARGET_APPROACH);
-                }
+                // Do not use the remembered high-work-pose route here: its ordinary
+                // unreachable-owner policy deliberately excludes a live target, while this stale
+                // checkpoint hint must remain durable until a fresh observation proves it gone.
+                // Directional hops choose only a new, currently observed stance and retain the
+                // hint on every miss.
+                tickQueuedVeinHintReobservation(bot, v);
             }
             return true;
         }
+        clearQueuedVeinHintReobservation(v);
         if (veinState == OreScan.Observation.OBSERVED_GONE) {
             if (v != null && activeTargetBreakPos != null && activeTargetBreakPos.equals(v)) {
                 if (!finishTargetBreak(bot, v, activeTargetBreakInventory)) {
@@ -3178,6 +3390,35 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /** True while this task has an observed connected vein member or newly opened face to settle. */
     private boolean hasPendingCurrentVein() {
         return !veinQueue.isEmpty() || !veinSweep.isEmpty();
+    }
+
+    /**
+     * Re-observes every factual break once after the queue first drains.  A saved/updated view
+     * can expose an adjacent member that was not visible from the immediate drop-recovery stance;
+     * the scan only adds present, observable cells, so it never grants stale queue authority.
+     */
+    private boolean beginFinalVeinSweepIfNeeded() {
+        if (veinFinalSwept || veinBroken.isEmpty()) {
+            return false;
+        }
+        veinFinalSwept = true;
+        veinSweep.addAll(veinBroken);
+        return !veinSweep.isEmpty();
+    }
+
+    /**
+     * Keeps harvesting final delayed ItemEntities after a count quota is already satisfied.  This
+     * is deliberately shared by normal completion and a restored zero-quota seam so a restart
+     * cannot turn the last physical drop into an orphaned item.
+     *
+     * @return true while the quiet pickup window still owns completion.
+     */
+    private boolean waitForFinalCountVeinDrops(AIPlayerEntity bot) {
+        miner.cancel(bot);
+        HarvestCore.sweepPickupAnyOf(bot, targetDrops, 16);
+        return pickupGrace++ < PICKUP_GRACE_TICKS
+                || !bot.getActionPack().isPathExecutorIdle()
+                || !bot.getActionPack().isWalkToIdle();
     }
 
     /** A queued member is a finite same-vein owner, unlike an ordinary scan candidate. */
@@ -3373,6 +3614,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private BlockMiner.Status beginTargetMine(AIPlayerEntity bot, BlockPos pos) {
+        // A target can become reachable in the same tick that an observed approach or cave
+        // survey settles. The paced top-level reflex may have checked the old pose less than a
+        // second ago, so re-check immediately before the first swing. This is especially
+        // important for rare expeditions: their legacy strip corridor is retired, and this
+        // observed target path is now their only active ore-breaking route. A deferred use
+        // owner keeps the finite target intact and retries it next tick.
+        if (bot.getActionPack().hasActiveActions()
+                || maybePlaceAutomaticTorchAtSafeBoundary(bot, bot.level(), true)) {
+            return BlockMiner.Status.IDLE;
+        }
         MiningEvidenceAudit.observeDiamondOreBeforeBreak(
                 bot, pos, bot.level().getBlockState(pos).getBlock());
         if (activeTargetBreakPos == null || !activeTargetBreakPos.equals(pos)) {
@@ -3466,8 +3717,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (veinBroken.add(pos.immutable())) {
             veinSweep.addLast(pos.immutable());
         }
+        // Both explicit and count-mode seams need one final factual re-scan after their last
+        // break; count mode previously left this flag stale and could complete beside an
+        // occluded connected member.
+        veinFinalSwept = false;
+        pickupGrace = 0;
         if (veinMode) {
-            veinFinalSwept = false;
             veinPickupGrace = 0;
         }
         miner.cancel(bot);
@@ -3813,18 +4068,36 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * @return true only while a temporary use-owner (for example a raised shield) must settle
      * before ordinary mining can safely continue this tick.
      */
-    private boolean maybePlaceAutomaticTorchAtSafeBoundary(AIPlayerEntity bot, ServerLevel world) {
-        if (!AutomaticLighting.miningTorchAutomationEnabled()
-                || elapsed - lastAutomaticTorchCheckTick < AUTOMATIC_TORCH_CHECK_INTERVAL
+    private boolean maybePlaceAutomaticTorchAtSafeBoundary(AIPlayerEntity bot,
+                                                            ServerLevel world,
+                                                            boolean beforeMining) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()) {
+            return false;
+        }
+        // A held use owns the selected slot even before the torch helper selects its own slot.
+        // At a direct pre-break boundary, any other ActionPack owner must likewise settle rather
+        // than allowing this task to open a new BlockMiner transaction around it.
+        if (bot.isUsingItem()
+                || beforeMining && bot.getActionPack().hasActiveActions()) {
+            return true;
+        }
+        // The ordinary search boundary is deliberately paced. A fresh observed ore can become
+        // reachable immediately after an approach or cave survey, though, so that one pre-break
+        // boundary must not inherit a stale "checked recently" result. Do still suppress a
+        // duplicate probe in the same task tick: the top-level boundary may already have selected
+        // a mount before this method reaches the ore.
+        if (!beforeMining
+                && elapsed - lastAutomaticTorchCheckTick < AUTOMATIC_TORCH_CHECK_INTERVAL
+                || beforeMining && lastAutomaticTorchCheckTick == elapsed
                 || pendingPickupPos != null
                 || activeTargetBreakPos != null
                 || miner.target() != null
                 || !bot.getActionPack().isPathExecutorIdle()
                 || !bot.getActionPack().isWalkToIdle()
-                || !bot.getActionPack().stepIdle()) {
+                || !bot.getActionPack().stepIdle()
+                || bot.getActionPack().hasActiveActions()) {
             return false;
         }
-        lastAutomaticTorchCheckTick = elapsed;
         boolean rareDarkBoundary = rareExpeditionBatch
                 && AutomaticLighting.needsUndergroundTorch(world, bot.blockPosition());
         if (rareDarkBoundary && (torchPlacements >= MiningBudget.RARE_BATCH_TORCH_LIMIT
@@ -3832,9 +4105,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             miner.cancel(bot);
             bot.getActionPack().stopAll();
             fail(resourceEpochFailureReason(torchPlacements, resourceEpoch));
-            return false;
+            // Callers use this return as task-tick ownership.  Once the rare safety policy has
+            // failed the mission, never fall through into a scan, route, or fresh break on the
+            // same tick.
+            return true;
         }
         AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        // A temporary use-owner can appear after the quiet-boundary guard.  Do not consume the
+        // ordinary probe interval in that case: the target is still intact and lighting should
+        // retry as soon as its legitimate owner clears.
+        if (placement != AutomaticLighting.Placement.IN_PROGRESS) {
+            lastAutomaticTorchCheckTick = elapsed;
+        }
         if (placement == AutomaticLighting.Placement.PLACED) {
             if (rareExpeditionBatch) {
                 torchPlacements++;
@@ -4130,6 +4412,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BlockPos center = veinSweep.pollFirst();
         if (center != null) {
             discoverVeinAround(bot, world, center);
+            // This is a bounded factual reconciliation ledger, not an UNKNOWN wait or a live
+            // route heartbeat. Consuming one persisted/opened anchor advances the finite seam
+            // transaction even when it exposes no new ore. Without this, a count-mode seam
+            // longer than the ordinary watchdog window can fail midway through its required
+            // final sweep before every already-broken face has been checked.
+            noteProgress();
         }
     }
 
@@ -4202,9 +4490,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             fail("vein_seed_unreachable");
             return;
         }
-        if (!veinFinalSwept) {
-            veinFinalSwept = true;
-            veinSweep.addAll(veinBroken);
+        if (beginFinalVeinSweepIfNeeded()) {
             return;
         }
         HarvestCore.sweepPickupAnyOf(bot, targetDrops, 16);
@@ -4235,13 +4521,26 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                TunnelIntent intent,
                                BlockPos factualRear) {
         if (RetiredNavigationTask.legacyExcavationDisabled()) {
-            miner.cancel(bot);
-            if (intent == TunnelIntent.TARGET_APPROACH) {
-                abandonTargetApproach(bot, goal, "baritone_observed_route_required", goal);
-            } else {
+            if (intent != TunnelIntent.TARGET_APPROACH) {
+                miner.cancel(bot);
                 retireUnobservedOreSearch(bot, "legacy_tunnel_navigation");
+                return;
             }
-            return;
+            // Retiring blind strip navigation must not also retire a real player's ordinary
+            // response to a *currently visible* vein member.  The staged body-column logic below
+            // is already observation-gated, mines at most one natural intermediate block, and
+            // explicitly yields when the finite ore itself becomes the next obstruction.  That is
+            // safe, non-privileged target access; dropping the owner here was what made Moss mine
+            // one coal from a visible vein and immediately descend past the other members.
+            //
+            // Conversely, an UNKNOWN restored/queued owner is only a hint.  Do not use this path
+            // to carve toward it and do not dequeue it: wait for ordinary perception to recover
+            // the fact on a later tick.
+            if (OreScan.observeOre(bot, goal, targetOres)
+                    != OreScan.Observation.OBSERVED_PRESENT) {
+                miner.cancel(bot);
+                return;
+            }
         }
         BlockPos feet = bot.blockPosition();
         // P0 (fixes zero-displacement spinning on deep diagonally-below ore): the target is deep

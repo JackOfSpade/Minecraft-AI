@@ -164,7 +164,9 @@ public final class MineValuablesTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        maybePlaceTorch(bot);
+        if (maybePlaceTorch(bot, false)) {
+            return;
+        }
         if (phase == Phase.SCANNING) {
             if (elapsed > SCAN_TIMEOUT_TICKS) {
                 fail("mine_valuables_scan_timeout");
@@ -253,6 +255,12 @@ public final class MineValuablesTask extends AbstractTask {
     }
 
     private void select(AIPlayerEntity bot) {
+        // A direct snapshot target can be mined in the same tick it is selected.  The periodic
+        // top-of-tick check may have just run before the scan finished, so force one quiet
+        // boundary check before polling that target out of the durable snapshot queue.
+        if (maybePlaceTorch(bot, true)) {
+            return;
+        }
         Sighting sighting = queue.poll();
         if (sighting == null) {
             finishMission(bot);
@@ -294,7 +302,18 @@ public final class MineValuablesTask extends AbstractTask {
             return;
         }
         if (HarvestCore.canReach(bot, targetPos)) {
+            // stopAll cancels a normal food/bow use (it preserves only a reactive shield), so the
+            // pre-break ownership guard must run before it tears down the just-arrived route.
+            // Keep this frozen target in MOVING until the held vanilla use settles.
+            if (bot.isUsingItem()) {
+                return;
+            }
             bot.getActionPack().stopAll();
+            // A path may arrive in a dark pocket between the periodic scans.  Keep MOVING and
+            // retry this same frozen target after a deferred torch-use owner settles.
+            if (maybePlaceTorch(bot, true)) {
+                return;
+            }
             startMiningTarget(bot);
             return;
         }
@@ -420,22 +439,39 @@ public final class MineValuablesTask extends AbstractTask {
     // DangerWatcher or GoalExecutor. The shared helper accepts only an immediate vanilla-reachable
     // floor mount, so this frozen-snapshot miner never walks away from its current ore/drop just
     // to light an area. It is throttled and never blocks progress on missing torches.
-    private void maybePlaceTorch(AIPlayerEntity bot) {
-        if (!AutomaticLighting.miningTorchAutomationEnabled()
-                || elapsed - lastTorchCheckTick < TORCH_CHECK_INTERVAL_TICKS) {
-            return;
+    /** @return true while a deferred vanilla torch placement owns this task tick. */
+    private boolean maybePlaceTorch(AIPlayerEntity bot, boolean beforeMining) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()) {
+            return false;
         }
-        lastTorchCheckTick = elapsed;
+        // A snapshot target must not turn a shield/food/bow handoff into an immediate new mining
+        // controller. The ordinary tick still lets an existing miner/pickup owner run; only a
+        // held use or a fresh pre-break owner claims this task tick.
+        if (bot.isUsingItem()
+                || beforeMining && bot.getActionPack().hasActiveActions()) {
+            return true;
+        }
+        if (!beforeMining && elapsed - lastTorchCheckTick < TORCH_CHECK_INTERVAL_TICKS
+                || beforeMining && lastTorchCheckTick == elapsed) {
+            return false;
+        }
         // A live block break or physical pickup owns the player controls and drop position.  Wait
         // for a quiet inter-target/scanning boundary rather than swapping to a torch mid-ledger.
         if (phase == Phase.PICKING_UP
                 || miner.target() != null
                 || !bot.getActionPack().isPathExecutorIdle()
-                || !bot.getActionPack().isWalkToIdle()) {
-            return;
+                || !bot.getActionPack().isWalkToIdle()
+                || bot.getActionPack().hasActiveActions()) {
+            return false;
         }
         var world = bot.level();
         AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        // IN_PROGRESS means a temporary vanilla use owner won after the quiet-boundary probe.
+        // It is not a completed scan: retry immediately once that owner releases rather than
+        // consuming the normal cadence and continuing through a dark gap.
+        if (placement != AutomaticLighting.Placement.IN_PROGRESS) {
+            lastTorchCheckTick = elapsed;
+        }
         if (placement == AutomaticLighting.Placement.PLACED) {
             BotLog.action(bot, "mine_valuables_torch", "pos", bot.blockPosition().toShortString());
         }
@@ -444,6 +480,7 @@ public final class MineValuablesTask extends AbstractTask {
         if (miner.target() != null) {
             io.github.zoyluo.minecraftai.action.ToolSelector.equipBestTool(bot, world.getBlockState(miner.target()));
         }
+        return placement == AutomaticLighting.Placement.IN_PROGRESS;
     }
 
     @Override

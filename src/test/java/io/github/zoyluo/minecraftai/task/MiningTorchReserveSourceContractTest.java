@@ -35,7 +35,7 @@ class MiningTorchReserveSourceContractTest {
     @Test
     void descentLightingUsesTheSharedCarriedTorchReflex() throws IOException {
         String source = Files.readString(TASKS.resolve("DescendToYTask.java"));
-        String lighting = methodSlice(source, "private void maybePlaceTorch", "static void restoreActiveMiningTool");
+        String lighting = methodSlice(source, "private boolean maybePlaceTorch", "static void restoreActiveMiningTool");
 
         assertTrue(lighting.contains("AutomaticLighting.tryPlaceDarkestReachable"),
                 "descent must retain the shared carried-torch lighting reflex");
