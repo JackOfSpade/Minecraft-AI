@@ -103,8 +103,10 @@ public final class BaritoneGoals {
         }
         // The shape-aware observation helpers read the target state to derive its outline. Earn
         // that read with a shape-free current-cell ray first, as this direct public seam has no
-        // active route fence yet.
-        if (!ObservableWorldQuery.canObserveBlockCellFace(bot, target)
+        // active route fence yet. A partial block such as a snow layer may not touch a unit-cell
+        // face, so its ordinary state-free cell ray is an equally valid preliminary proof.
+        if (!(ObservableWorldQuery.canObserveBlockCellFace(bot, target)
+                || ObservableWorldQuery.canObserveCell(bot, target))
                 || (!ObservableWorldQuery.canObserveBlock(bot, target)
                 && !ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target))) {
             BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, "target_not_observed", "mine_at");

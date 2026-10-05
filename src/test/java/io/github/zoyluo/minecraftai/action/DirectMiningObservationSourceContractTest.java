@@ -39,8 +39,12 @@ class DirectMiningObservationSourceContractTest {
         assertInOrder(observation,
                 "ownBodyEmergencyBlock(player, pos)",
                 "ObservableWorldQuery.canObserveBlockCellFace(player, pos)",
+                "ObservableWorldQuery.canObserveCell(player, pos)",
                 "ObservableWorldQuery.canObserveBlock(player, pos)",
                 "ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos)");
+        assertTrue(observation.contains("ObservableWorldQuery.canObserveBlockCellFace(player, pos)\n"
+                        + "                || ObservableWorldQuery.canObserveCell(player, pos)"),
+                "a partial but exposed block needs the ordinary state-free cell ray when it cannot reach a unit-cell face");
         String crop = body(source, "private static boolean currentObservedCropTarget(AIPlayerEntity player, BlockPos pos)");
         assertInOrder(crop,
                 "ObservableWorldQuery.canObserveFarmCell(player, pos)",

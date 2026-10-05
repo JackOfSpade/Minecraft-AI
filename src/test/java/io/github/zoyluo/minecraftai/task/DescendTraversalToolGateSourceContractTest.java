@@ -39,6 +39,36 @@ class DescendTraversalToolGateSourceContractTest {
                 "both the main stair and lateral-detour tool gates must use the transit-aware rule");
     }
 
+    @Test
+    void failedMiningAttemptsAreNeverRetriedAsTheSameStairOrDetour() throws IOException {
+        String source = Files.readString(SOURCE);
+
+        assertTrue(source.contains("recoverFailedMiningAttempt(bot, world, feet, activeMineTarget, reason);"));
+        assertTrue(source.contains("recoverFailedMiningAttempt(bot, world, feet, solid, reason);"));
+        assertTrue(source.contains("rejectLandingDirection(feet, stairDirIndex);"));
+        assertTrue(source.contains("descend_mine_failed at_y="));
+        assertTrue(source.contains("failedStepEdges.add(edge);"));
+        assertTrue(source.contains("descend_detour_mining_failed"));
+    }
+
+    @Test
+    void delayedDetourMiningFailureRetainsAndPoisonsItsOriginalEdge() throws IOException {
+        String source = Files.readString(SOURCE);
+
+        assertTrue(source.contains("private ActiveMiningAttempt activeMiningAttempt;"));
+        assertTrue(source.contains("new ActiveMiningAttempt(target, detourEdge, detourDirectionIndex)"));
+        assertTrue(source.contains("activeAttempt.detourEdge()"));
+        assertTrue(source.contains("failedStepEdges.add(activeAttempt.detourEdge());"));
+        assertTrue(source.contains("rejectLandingDirection(activeAttempt.detourEdge().origin(), activeAttempt.detourDirectionIndex());"));
+        assertTrue(source.contains("BlockMiner.MINING_PREEMPTED.equals(reason)"));
+        assertTrue(source.contains("ActionPack.GUARDED_STEP_FENCE.equals(reason)"));
+        assertTrue(source.contains("bot.getActionPack().hasActiveActions()"));
+        assertTrue(source.contains("!bot.getActionPack().isPathExecutorIdle()"));
+        assertTrue(source.contains("bot.getActionPack().stepAdmissionBlocked()"));
+        assertTrue(source.contains("clearActiveMiningAttempt(recoveryTarget);"));
+        assertTrue(source.contains("clearActiveMiningAttempt(blocked);"));
+    }
+
     private static int occurrences(String source, String needle) {
         int count = 0;
         int from = 0;

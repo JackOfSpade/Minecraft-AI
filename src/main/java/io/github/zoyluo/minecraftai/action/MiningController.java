@@ -76,8 +76,10 @@ public final class MiningController {
 
     /**
      * Current, state-free-first evidence for a direct break target. The shape-aware observers
-     * necessarily inspect the target state to derive its outline, so the unit-cell first-hit
-     * proof must remain first. A fire or powder-snow cell intersecting the bot's body is one
+     * necessarily inspect the target state to derive its outline, so a state-free current-cell
+     * proof must remain first. A full unit-cell face ray is preferred, while the ordinary cell
+     * ray covers an exposed partial block such as a snow layer whose physical outline never
+     * reaches a unit-cell face. A fire or powder-snow cell intersecting the bot's body is one
      * exception: it is a direct physical hazard rather than hidden terrain. A crop's short
      * outline is the other: its observed outline earns a crop-only state check. This is
      * deliberately live rather than a remembered sighting: mining exposes terrain, and a stale
@@ -87,7 +89,8 @@ public final class MiningController {
      */
     static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos) {
         return player != null && pos != null && (ownBodyEmergencyBlock(player, pos)
-                || ObservableWorldQuery.canObserveBlockCellFace(player, pos)
+                || (ObservableWorldQuery.canObserveBlockCellFace(player, pos)
+                || ObservableWorldQuery.canObserveCell(player, pos))
                 && (ObservableWorldQuery.canObserveBlock(player, pos)
                 || ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos))
                 || currentObservedCropTarget(player, pos));

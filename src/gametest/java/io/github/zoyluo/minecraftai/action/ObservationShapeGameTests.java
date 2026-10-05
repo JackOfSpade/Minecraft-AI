@@ -70,6 +70,31 @@ public final class ObservationShapeGameTests {
         finish(context, failures);
     }
 
+    /** A one-layer snow block is exposed but its outline does not reach the unit-cell faces. */
+    @GameTest(environment = "minecraftai-gametest:observation_shape_game_tests_exposed_snow_uses_the_cell_ray_mining_fallback", maxTicks = 60)
+    public void exposedSnowUsesTheCellRayMiningFallback(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(2, 4, 4));
+        prepare(context, feet);
+        AIPlayerEntity bot = spawn(context, "ObsSnowFallback", feet, Vec3.atBottomCenterOf(feet));
+        BlockPos target = feet.east(3);
+        context.getLevel().setBlock(target, Blocks.SNOW.defaultBlockState(), Block.UPDATE_ALL);
+        List<String> failures = new ArrayList<>();
+        if (ObservableWorldQuery.canObserveBlockCellFace(bot, target)) {
+            failures.add("snow unexpectedly reached a unit-cell face");
+        }
+        if (!ObservableWorldQuery.canObserveCell(bot, target)) {
+            failures.add("canObserveCell(snow)");
+        }
+        if (!ObservableWorldQuery.canObserveBlock(bot, target)) {
+            failures.add("canObserveBlock(snow)");
+        }
+        if (!MiningController.currentObservedTarget(bot, target)) {
+            failures.add("currentObservedTarget(snow)");
+        }
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "ObsSnowFallback");
+        finish(context, failures);
+    }
+
     /** The same blocks with only their top face exposed (bot above on a pillar, walls on the four sides). */
     @GameTest(environment = "minecraftai-gametest:observation_shape_game_tests_shaped_blocks_exposed_only_on_top_are_observable", maxTicks = 60)
     public void shapedBlocksExposedOnlyOnTopAreObservable(GameTestHelper context) {
@@ -335,6 +360,9 @@ public final class ObservationShapeGameTests {
         }
         if (!ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target)) {
             failures.add("canObserveBlockWithInsetFaces(" + name + ")");
+        }
+        if (!MiningController.currentObservedTarget(bot, target)) {
+            failures.add("currentObservedTarget(" + name + ")");
         }
     }
 

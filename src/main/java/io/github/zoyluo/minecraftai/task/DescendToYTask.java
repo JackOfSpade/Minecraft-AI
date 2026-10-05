@@ -159,6 +159,17 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
     }
 
+    /**
+     * The reason a live {@link BlockMiner} target was selected. A delayed failed mine clears the
+     * miner's target before the next task tick, so retaining the factual detour edge here is what
+     * lets that tick blacklist the exact edge rather than re-nominating it from scratch.
+     */
+    private record ActiveMiningAttempt(BlockPos target, DetourEdge detourEdge, int detourDirectionIndex) {
+        private ActiveMiningAttempt {
+            target = target.immutable();
+        }
+    }
+
     /** Ticks a bot that lost a step in the air is given to land before its pose is used anyway (a fall is a few ticks). */
     private static final int UNSETTLED_LIMIT = 100;
 
@@ -175,6 +186,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private String stepBlockedName;
     private String stepReason;
     private EdgePlacement edge;
+    /** Context for the current miner target; never checkpointed because a restored miner is not live work. */
+    private ActiveMiningAttempt activeMiningAttempt;
+    /** A newer ActionPack mining/step owner holds the controller handoff; do not take it back prematurely. */
+    private boolean awaitingMiningHandoff;
     // Steps that failed in this task instance: never retried (the flat landing, detour and relocation choosers skip them).
     private final Set<DetourEdge> failedStepEdges = new HashSet<>();
     // Set when a step was abandoned or failed: the bot may be in the air between two cells, so nothing is decided from its pose
@@ -536,6 +551,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     protected void onAbort(AIPlayerEntity bot) {
         miner.cancel(bot);
         blockedBodyRecoveryTarget = null;
+        awaitingMiningHandoff = false;
         bot.getActionPack().stopAll();
         abandonStep(bot);
     }
@@ -556,6 +572,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // cursor that would immediately reopen that wall when the descent resumes.
         miner.cancel(bot);
         blockedBodyRecoveryTarget = null;
+        awaitingMiningHandoff = false;
         bot.getActionPack().stopAll();
     }
 
@@ -618,6 +635,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // current collision first; continuing to mine the next stair leaves the bot suffocating,
         // and eating cannot remove the block around its head.
         if (recoverBlockedBody(bot, world, feet)) {
+            return;
+        }
+        if (holdForMiningHandoff(bot)) {
             return;
         }
         rememberSafeLanding(world, feet);
@@ -686,12 +706,40 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
 
         // Advance the current mining operation.
+        BlockPos activeMineTarget = miner.target();
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.MINING) {
             return;
         }
+        ActiveMiningAttempt activeAttempt = activeMiningAttemptFor(activeMineTarget);
         if (status == BlockMiner.Status.DONE) {
+            clearActiveMiningAttempt(activeMineTarget);
             lastProgressTick = totalBudget();
+        }
+        if (status == BlockMiner.Status.FAILED) {
+            String reason = miner.failureReason();
+            clearActiveMiningAttempt(activeMineTarget);
+            // Another owner may have taken the mining lease, or a guarded physical step may
+            // still own the controller handoff. Neither case says this factual stair/detour is
+            // unsafe, so wait for that owner rather than poisoning terrain it never refused.
+            if (isTransientMiningHandoffFailure(reason)) {
+                awaitingMiningHandoff = true;
+                return;
+            }
+            if (activeAttempt != null && activeAttempt.detourEdge() != null) {
+                failedStepEdges.add(activeAttempt.detourEdge());
+                rejectLandingDirection(activeAttempt.detourEdge().origin(), activeAttempt.detourDirectionIndex());
+                BotLog.action(bot, "descend_detour_mining_failed",
+                        "origin", activeAttempt.detourEdge().origin().toShortString(),
+                        "landing", activeAttempt.detourEdge().target().toShortString(),
+                        "target", activeMineTarget == null ? "unknown" : activeMineTarget.toShortString(),
+                        "reason", reason);
+            }
+            recoverFailedMiningAttempt(bot, world, feet, activeMineTarget, reason);
+            return;
+        }
+        if (status == BlockMiner.Status.IDLE) {
+            clearActiveMiningAttempt(null);
         }
 
         // Stair-style diagonal descent (human-like + safe): dig "the next stair step" (diagonally
@@ -840,9 +888,18 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 // see the flat-landing shortcut's guard above.
                 selfCarvedAheadAt = feet.immutable();
             }
-            miner.begin(bot, solid);
-            miner.tick(bot);
+            beginMining(bot, solid);
+            BlockMiner.Status miningStatus = miner.tick(bot);
             markStarted(bot, feet);
+            if (miningStatus == BlockMiner.Status.FAILED) {
+                String reason = miner.failureReason();
+                clearActiveMiningAttempt(solid);
+                if (isTransientMiningHandoffFailure(reason)) {
+                    awaitingMiningHandoff = true;
+                    return;
+                }
+                recoverFailedMiningAttempt(bot, world, feet, solid, reason);
+            }
             return;
         }
         // Body space is now clear -> walk diagonally down onto the next stair step (off the edge of the tread; gravity lands it).
@@ -873,6 +930,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * suffocation snap is correctly denied by strict_survival.
      */
     private boolean recoverBlockedBody(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        if (holdForMiningHandoff(bot)) {
+            return true;
+        }
         BlockPos blocked = firstBodyCollision(world, feet);
         if (blocked == null) {
             if (blockedBodyRecoveryTarget == null) {
@@ -902,16 +962,22 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 return true;
             }
             if (miner.target() == null || !miner.target().equals(recoveryTarget)) {
-                miner.begin(bot, recoveryTarget);
+                beginMining(bot, recoveryTarget);
             }
             BlockMiner.Status recoveryStatus = miner.tick(bot);
             markStarted(bot, feet);
             lastProgressTick = totalBudget();
             if (recoveryStatus == BlockMiner.Status.FAILED) {
+                String reason = miner.failureReason();
+                clearActiveMiningAttempt(recoveryTarget);
+                if (isTransientMiningHandoffFailure(reason)) {
+                    awaitingMiningHandoff = true;
+                    return true;
+                }
                 blockedBodyRecoveryTarget = null;
                 fail("descend_blocked_body_clear_failed at=" + feet.toShortString()
                         + " blocked=" + recoveryTarget.toShortString()
-                        + " reason=" + miner.failureReason());
+                        + " reason=" + reason);
             }
             return true;
         }
@@ -939,7 +1005,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (!blocked.equals(blockedBodyRecoveryTarget)
                 || miner.target() == null || !miner.target().equals(blocked)) {
             rejectCollapsedStairForMiningFallback(bot, feet);
-            miner.begin(bot, blocked);
+            beginMining(bot, blocked);
             blockedBodyRecoveryTarget = blocked.immutable();
             BotLog.danger(bot, "descend_blocked_body_clear",
                     "at", feet.toShortString(),
@@ -949,10 +1015,16 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         BlockMiner.Status status = miner.tick(bot);
         markStarted(bot, feet);
         if (status == BlockMiner.Status.FAILED) {
+            String reason = miner.failureReason();
+            clearActiveMiningAttempt(blocked);
+            if (isTransientMiningHandoffFailure(reason)) {
+                awaitingMiningHandoff = true;
+                return true;
+            }
             blockedBodyRecoveryTarget = null;
             fail("descend_blocked_body_clear_failed at=" + feet.toShortString()
                     + " blocked=" + blocked.toShortString()
-                    + " reason=" + miner.failureReason());
+                    + " reason=" + reason);
         }
         // Treat every recovery tick as useful bounded work. The dedicated BlockMiner timeout still
         // rejects an unbreakable obstruction; the ordinary no-progress detour must not interrupt a
@@ -1237,6 +1309,31 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             started = true;
             BotLog.action(bot, "descend_started", "target_y", targetY, "from_y", feet.getY());
         }
+    }
+
+    /**
+     * A failed mine caused by another controller's lease or guarded step must not call
+     * {@link BlockMiner#begin(AIPlayerEntity, BlockPos)} until that owner has released the
+     * ActionPack. begin() deliberately cancels any existing mining controller, so merely
+     * yielding its failure tick would reclaim work from the newer owner on the next one.
+     */
+    private boolean holdForMiningHandoff(AIPlayerEntity bot) {
+        if (!awaitingMiningHandoff) {
+            return false;
+        }
+        if (bot.getActionPack().hasActiveActions()
+                || !bot.getActionPack().isPathExecutorIdle()
+                || bot.getActionPack().stepAdmissionBlocked()) {
+            lastProgressTick = totalBudget();
+            return true;
+        }
+        awaitingMiningHandoff = false;
+        return false;
+    }
+
+    private static boolean isTransientMiningHandoffFailure(String reason) {
+        return BlockMiner.MINING_PREEMPTED.equals(reason)
+                || ActionPack.GUARDED_STEP_FENCE.equals(reason);
     }
 
     /**
@@ -1645,6 +1742,54 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         return !requiresPickaxeForDescent(state) || ToolTier.canHarvestWithInventory(bot, state);
     }
 
+    /**
+     * A retained {@link BlockMiner} target is cleared when its live break proof fails. Never
+     * nominate the same stair obstruction again on the next tick: rotate to another factual
+     * direction, then try the bounded detour, and finally report a typed task failure. This is
+     * especially important for exposed partial terrain, where a conservative sight proof must
+     * not turn into a zero-work retry loop.
+     */
+    private void recoverFailedMiningAttempt(AIPlayerEntity bot,
+                                            ServerLevel world,
+                                            BlockPos feet,
+                                            BlockPos attempted,
+                                            String reason) {
+        miner.cancel(bot);
+        BotLog.action(bot, "descend_mining_failed",
+                "at", feet.toShortString(),
+                "target", attempted == null ? "unknown" : attempted.toShortString(),
+                "reason", reason);
+        rejectLandingDirection(feet, stairDirIndex);
+        if (rotateStair(bot, world, feet)) {
+            return;
+        }
+        if (lateralDetours < MAX_LATERAL && tryLateralDetour(bot, world, feet)) {
+            return;
+        }
+        fail("descend_mine_failed at_y=" + feet.getY() + " reason=" + reason);
+    }
+
+    private void beginMining(AIPlayerEntity bot, BlockPos target) {
+        beginMining(bot, target, null, -1);
+    }
+
+    private void beginMining(AIPlayerEntity bot, BlockPos target,
+                             DetourEdge detourEdge, int detourDirectionIndex) {
+        miner.begin(bot, target);
+        activeMiningAttempt = new ActiveMiningAttempt(target, detourEdge, detourDirectionIndex);
+    }
+
+    private ActiveMiningAttempt activeMiningAttemptFor(BlockPos target) {
+        return activeMiningAttempt != null && target != null && activeMiningAttempt.target().equals(target)
+                ? activeMiningAttempt : null;
+    }
+
+    private void clearActiveMiningAttempt(BlockPos target) {
+        if (target == null || (activeMiningAttempt != null && activeMiningAttempt.target().equals(target))) {
+            activeMiningAttempt = null;
+        }
+    }
+
     /** Package-visible so the snow/air classification behind the descent tool gate has a direct unit test. */
     static boolean requiresPickaxeForDescent(BlockState state) {
         return !state.isAir()
@@ -1724,9 +1869,35 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                         return true;
                     }
                     if (miner.target() == null || !miner.target().equals(solid)) {
-                        miner.begin(bot, solid);
+                        beginMining(bot, solid, edge, directionIndex);
+                    } else {
+                        // The no-progress recovery can repurpose a still-live main-stair mine as
+                        // this detour. Preserve the detour edge if that mine later fails.
+                        activeMiningAttempt = new ActiveMiningAttempt(solid, edge, directionIndex);
                     }
-                    miner.tick(bot);
+                    BlockMiner.Status miningStatus = miner.tick(bot);
+                    if (miningStatus == BlockMiner.Status.FAILED) {
+                        String reason = miner.failureReason();
+                        clearActiveMiningAttempt(solid);
+                        if (isTransientMiningHandoffFailure(reason)) {
+                            awaitingMiningHandoff = true;
+                            return true;
+                        }
+                        // This side was factual and safe enough to consider, but its obstruction
+                        // could not be mined. Poison the whole edge so a later no-progress tick
+                        // cannot keep re-nominating the same cleared BlockMiner target.
+                        failedStepEdges.add(edge);
+                        rejectLandingDirection(feet, directionIndex);
+                        BotLog.action(bot, "descend_detour_mining_failed",
+                                "origin", feet.toShortString(),
+                                "landing", side.toShortString(),
+                                "target", solid.toShortString(),
+                                "reason", reason);
+                        continue;
+                    }
+                    if (miningStatus == BlockMiner.Status.DONE) {
+                        clearActiveMiningAttempt(solid);
+                    }
                     markStarted(bot, feet);
                     return true; // currently mining the path to the side column (counts as progress this tick)
                 }
