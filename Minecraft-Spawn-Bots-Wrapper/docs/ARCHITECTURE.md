@@ -251,9 +251,10 @@ rules. Time, not distance, is what noticing is made of (`Perception` + `Exposure
 limit (`AggroController.ENGAGE_LIMIT`). The hunter acts only on what it perceives (no magic): sight, the last known position,
 hearing and the direction a blow came from.
 
-Hearing is vanilla's own vibration system, called directly by `mc.InhabitantEars` (a `VibrationSystem` with its `Listener` in
-a `DynamicGameEventListener` per inhabitant, `Ticker.tick` every tick, the listener removed on every exit path); the
-controller only consumes the sounds (`AggroWorld.Watcher.drainSounds`). The damage-level reaction gate is
+Hearing is vanilla's own vibration system, used by `mc.InhabitantEars` (a `VibrationSystem` with its `Listener` in
+a `DynamicGameEventListener` per inhabitant, a silent parity ticker every tick, and the listener removed on every exit path).
+The ticker retains vanilla selection, travel, delivery and data-change semantics but omits only the client-visible traveling
+vibration-particle packet. The controller only consumes the sounds (`AggroWorld.Watcher.drainSounds`). The damage-level reaction gate is
 `AggroController.mayAttackPlayer`, asked by `mc.MeleeLegality` (melee blows on players) and `mc.RangedFire` (a loaded
 crossbow). A Baritone-backed `PathPlanner` can replace the vanilla one without touching the state machine.
 

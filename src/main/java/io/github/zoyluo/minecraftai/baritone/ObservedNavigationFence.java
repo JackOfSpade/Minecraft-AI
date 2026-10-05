@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.mining.assist.RayGrid;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -187,10 +188,11 @@ public final class ObservedNavigationFence {
         int before = observed.size();
         BlockPos feet = navigationFeet(bot);
         seedBodyEnvelope(bot, observed, tick);
+        mergeSharedWorldSight(bot, route.target(), observed, tick);
         if (route.shape() == NavRoute.Shape.OWNER_FOLLOW) {
             // A live coordinate of this bot's already-verified owner is intentionally not a terrain observation. The navigator
-            // separately validates the UUID and installs a server-captured full-chunk snapshot in ServerPlayerContext; retaining
-            // only the body envelope here means the ordinary visible-terrain fence never turns into a global allow list.
+            // separately validates the UUID and installs a server-captured full-chunk snapshot in ServerPlayerContext; the only
+            // ordinary terrain evidence merged here is the owner's own line-of-sight rays, never a global allow list.
             ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
             return new Capture(candidate, true, "", TargetProvenance.DIRECTION_ONLY, 0,
                     Math.max(0, observed.size() - before), false);
@@ -346,6 +348,7 @@ public final class ObservedNavigationFence {
         Map<Long, Cell> observed = retained(previous, dimension, tick);
         int before = observed.size();
         seedBodyEnvelope(bot, observed, tick);
+        mergeSharedWorldSight(bot, route.target(), observed, tick);
         if (route.shape() == NavRoute.Shape.OWNER_FOLLOW) {
             // Return a fresh object (rather than `previous`) at the regular refresh cadence. BaritoneNavigator sees the replacement
             // and renews the paired LoadedChunkSnapshot, so newly normal-player-loaded chunks can become available without a force load.
@@ -395,6 +398,20 @@ public final class ObservedNavigationFence {
             }
         }
         return observed;
+    }
+
+    /**
+     * Imports only ray-proven bot/linked-owner sight. SharedWorldSight has already clipped each
+     * ray and returns a bounded, same-dimension memory; this method merely preserves the exact
+     * state/tick in the immutable route fence that Baritone may inspect.
+     */
+    private static void mergeSharedWorldSight(AIPlayerEntity bot, BlockPos target,
+                                              Map<Long, Cell> observed, int tick) {
+        for (SharedWorldSight.Observation observation : SharedWorldSight.routeEvidence(bot, target)) {
+            if ((long) tick - observation.seenTick() <= MEMORY_TTL_TICKS) {
+                put(observed, observation.packedPos(), observation.state(), observation.seenTick());
+            }
+        }
     }
 
     private static void seedBodyEnvelope(AIPlayerEntity bot, Map<Long, Cell> observed, int tick) {

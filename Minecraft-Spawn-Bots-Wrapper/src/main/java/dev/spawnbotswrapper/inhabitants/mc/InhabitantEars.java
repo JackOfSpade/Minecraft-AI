@@ -23,13 +23,13 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * The hearing of the inhabitants: vanilla's own vibration system, CALLED (not copied), used exactly like the Warden and the
- * sculk sensor use it. Per inhabitant there is one {@link VibrationSystem} (vanilla {@code VibrationSystem.Data}, our
+ * The hearing of the inhabitants: vanilla's own vibration system, used like the Warden and the sculk sensor use it. Per inhabitant
+ * there is one {@link VibrationSystem} (vanilla {@code VibrationSystem.Data}, our
  * {@code VibrationSystem.User}), a vanilla {@code VibrationSystem.Listener} wrapped in a vanilla
  * {@link DynamicGameEventListener} (registered in the level's game event registry: {@code add} when the inhabitant is
  * first seen, {@code move} every tick (it only acts when the inhabitant changes chunk section), {@code remove} on every exit
- * path: death, removal, level change, the switch turned off, the server stopping) and the vanilla
- * {@code VibrationSystem.Ticker.tick} once per tick.
+ * path: death, removal, level change, the switch turned off, the server stopping) and {@link SilentVibrationTicker} once per tick.
+ * It preserves vanilla scheduling and delivery while leaving out the otherwise visible vibration-particle packet.
  * <p>
  * What is heard, how far ({@code aggro.hearing.listenerRadius}, 16 = the Warden's), through what (wool blocks vibrations, other
  * blocks do not), what stays silent (a sneaking player's steps, spectators, wool-dampened steps) and how long a vibration takes
@@ -160,7 +160,7 @@ final class InhabitantEars {
             ear.radius = radius;
             try {
                 ear.attach(level);
-                VibrationSystem.Ticker.tick(level, ear.data, ear.user);
+                SilentVibrationTicker.tick(level, ear.data, ear.user);
             } catch (RuntimeException e) {
                 // One bot's ear failing must not stop the others': drop it (it is registered again next tick, and a persistent
                 // failure is reported once).

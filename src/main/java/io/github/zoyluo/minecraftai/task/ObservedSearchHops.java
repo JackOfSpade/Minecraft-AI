@@ -2,6 +2,8 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import java.util.HashSet;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -39,6 +41,8 @@ final class ObservedSearchHops {
     private final int maxAttempts;
     private int attempts;
     private BlockPos anchor;
+    /** Local stances whose admitted routes made no physical progress in this search episode. */
+    private final Set<BlockPos> retiredObservedGoals = new HashSet<>();
 
     ObservedSearchHops(int maxAttempts) {
         this.maxAttempts = Math.max(1, maxAttempts);
@@ -47,6 +51,7 @@ final class ObservedSearchHops {
     void reset() {
         attempts = 0;
         anchor = null;
+        retiredObservedGoals.clear();
     }
 
     int attempts() {
@@ -55,6 +60,22 @@ final class ObservedSearchHops {
 
     boolean exhausted() {
         return attempts >= maxAttempts;
+    }
+
+    /**
+     * Retires one already-admitted local stance after its route stalls or ends short. The remote
+     * heading remains only a compass direction, so retrying the same local goal would reproduce
+     * the same spin without discovering any terrain.
+     */
+    void retireObservedGoal(BlockPos goal) {
+        if (goal != null) {
+            retiredObservedGoals.add(goal.immutable());
+        }
+    }
+
+    /** Package-visible for the focused exploration-progress tests. */
+    boolean isRetiredObservedGoal(BlockPos goal) {
+        return goal != null && retiredObservedGoals.contains(goal);
     }
 
     /**
@@ -83,6 +104,14 @@ final class ObservedSearchHops {
             bot.getActionPack().stopAll();
             return new Attempt(Status.REFUSED, number, heading, null, guided,
                     "directional_hop_missing_observed_goal");
+        }
+        if (isRetiredObservedGoal(observedGoal)) {
+            // Admission may legitimately resolve several compass headings to the same small
+            // visible corridor. Once that exact corridor has already stalled, do not let it turn
+            // another heading into a duplicate route/replan loop.
+            bot.getActionPack().stopAll();
+            return new Attempt(Status.REFUSED, number, heading, null, guided,
+                    "directional_hop_retired_observed_goal");
         }
         return new Attempt(Status.STARTED, number, heading, observedGoal.immutable(), guided, "");
     }

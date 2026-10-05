@@ -2384,6 +2384,15 @@ public final class GoalPlanner {
             if (item == Items.EMERALD) {
                 return Blocks.EMERALD_ORE;
             }
+            if (item == Items.QUARTZ) {
+                return Blocks.NETHER_QUARTZ_ORE;
+            }
+            if (item == Items.GOLD_NUGGET) {
+                return Blocks.NETHER_GOLD_ORE;
+            }
+            if (item == Items.ANCIENT_DEBRIS) {
+                return Blocks.ANCIENT_DEBRIS;
+            }
             return null;
         }
 

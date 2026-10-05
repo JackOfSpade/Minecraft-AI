@@ -24,6 +24,9 @@ public final class BotTickCoordinator {
             // Realistic perception (docs/PERCEPTION.md): what this bot has noticed, read once per tick before anything asks. It never
             // consumes the tick and never throws.
             io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.tickBot(server, bot);
+            // Route evidence is earned by genuine bot/linked-owner sight lines. It is collected
+            // before the goal executor can request a fresh path this tick.
+            io.github.zoyluo.minecraftai.perception.SharedWorldSight.tickBot(bot);
             // Nearly broken gear: one chat line per item and crossing, instantly, never an interruption (behaviour.gear.durabilityWarnings).
             io.github.zoyluo.minecraftai.action.DurabilityWarnings.tickBot(bot);
             // Auto-equips armor (the best piece per slot, the next best the moment one breaks, see GearValue) and the offhand (the best

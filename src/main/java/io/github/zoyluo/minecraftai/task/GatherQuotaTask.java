@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
@@ -12,6 +13,7 @@ import io.github.zoyluo.minecraftai.log.CapabilityTally;
 import io.github.zoyluo.minecraftai.log.GatherConsistency;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import org.slf4j.event.Level;
 
@@ -35,9 +37,11 @@ public final class GatherQuotaTask extends AbstractTask {
     /** Exact block-breaking requests stay local rather than becoming roaming gather missions. */
     private static final int EXACT_BREAK_SEARCH_RADIUS = 16;
     private static final int EXACT_BREAK_TIMEOUT = 1200;
-    // F1: when no resource is found nearby (16 blocks), automatically widen the search radius and
-    // look farther (32→48), instead of failing immediately and handing back to the brain to flail.
-    private static final int MAX_SEARCH_RADIUS = 48;
+    // A gather survey can widen only as far as the configured perception radius.  In strict
+    // survival the default is 16, so a 32/48-block scan would merely enumerate cells that the
+    // observation fence must reject.  An empty local view should instead enter observed
+    // exploration and reveal new terrain through actual movement.
+    private static final int MAX_SEARCH_RADIUS = ObservableSearchBounds.MAX_SURVEY_RADIUS;
     private static final int SEARCH_DOWN = 6;
     private static final int SEARCH_UP = 12;
     private static final int LARGE_SCAN_THROTTLE_TICKS = 10; // Throttle large-radius scans to protect TPS
@@ -47,13 +51,12 @@ public final class GatherQuotaTask extends AbstractTask {
     private static final int SELF_STUCK_LIMIT = 160; // A: self-stuck threshold for gathering (self-managed watchdog; see the isWaiting note)
     private static final int HARVEST_LIMIT = 240;    // Per-block atomic mining cap; the area watchdog must never interrupt HARVEST/PICKUP
     private static final int ROAM_MOVE_LIMIT = 100;  // If roaming hasn't reached its landing point after 5s (target elevated/unreachable, or stuck on a slope) → give up and return to SURVEY
-    // Treeless-area fallback: when neither the 48-block radius nor surfacing finds a resource, use
-    // an OreProspector palette scan over a wide range (96 blocks) to locate the nearest target
-    // block (e.g. logs), then pathfind there. Specifically fixes "treeless plateau / harsh terrain"
-    // cases — roam only shifts sideways within the same patch and can't cross a plateau, while
-    // prospect can lock directly onto a tree at the foot of the mountain or farther away.
-    private static final int PROSPECT_RANGE = 96;
+    // A prospect can cover the full *visible* vertical sphere after a local survey.  It must
+    // never become a hidden-world scan, and an incomplete prospect is deferred to movement after
+    // a few ticks so the bot does not stand visibly idle while it enumerates that sphere.
+    private static final int PROSPECT_RANGE = ObservableSearchBounds.MAX_PROSPECT_RADIUS;
     private static final int PROSPECT_INTERVAL = 40; // Throttle wide-range scans (once per 2s) to protect TPS
+    private static final int PROSPECT_STATIONARY_TICK_LIMIT = 4;
     // Wide scans are spread across ticks: the strict-survival prospect used to run as one 180-420 ms server tick
     // (real session, 01:43-01:44). Each tick now advances the scan for at most this long (observability rules
     // unchanged: OreProspector.Scan still rays each candidate before reading its state).
@@ -66,11 +69,17 @@ public final class GatherQuotaTask extends AbstractTask {
     // goal.  Sixteen 12-block legs let a real player movement/chunk update reveal new terrain
     // without treating a denied scan or an unseen heightmap column as proof of absence.
     private static final int EXPLORE_MAX_HOPS = 16;
+    /** Retry another compass heading on the next tick after an observation-fence refusal. */
+    private static final int EXPLORE_REFUSED_HOP_RETRY_TICKS = 1;
     private static final int EXPLORE_MOVE_LIMIT = 300;   // If a single hop hasn't arrived after 15s → abandon the hop and return to SURVEY
     private static final int EXPLORE_SCAN_INTERVAL = 20; // Throttle light en-route scans (once per 1s, 16 blocks); stop as soon as a target is seen
     private static final int KNOWN_RESOURCE_RANGE = 192; // Max distance for heading toward a knowledge-base remembered point
     private static final int GOTO_FAIL_EXCLUDE = 2;      // N consecutive GOTO failures toward the same target → blacklist it in working memory
     private static final int GOTO_STUCK_LIMIT = 80;      // R1: if the coordinate hasn't moved for this long (4s) while GOTO paths toward a tree → assume airborne/stuck and force recovery
+
+    private static int configuredObservationRadius() {
+        return Math.max(1, MinecraftAiConfig.get().perception().radius());
+    }
 
     private enum Phase {
         SURVEY,
@@ -174,6 +183,10 @@ public final class GatherQuotaTask extends AbstractTask {
     // as travel.  The current target is always the observation-fence's resolved local goal, never
     // the remote compass/memory coordinate.
     private final ObservedSearchHops observedSearchHops = new ObservedSearchHops(EXPLORE_MAX_HOPS);
+    // Keeps one physical-progress budget across the small observed legs of one exploration
+    // episode. A Baritone route can remain non-idle while replanning in place, so idle alone is
+    // not a sufficient completion signal.
+    private final ExplorationProgressWindow explorationProgress = new ExplorationProgressWindow();
     private int exploreHops;
     private BlockPos exploreTarget;
     private BlockPos exploreStart;
@@ -181,6 +194,14 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos exploreHint;
     private boolean exploredSinceFind;
     private int lastExploreScanTick = -100;
+    // A refused direction did not move or inspect terrain.  Keep retrying its bounded alternate
+    // headings directly instead of performing another expensive 48/96-block survey first.
+    private int nextExploreAdmissionTick = -1;
+    /** One fresh descent after all ordinary observed source-search hops are spent. */
+    private MiningExplorationTask miningExploration;
+    private boolean miningExplorationAttempted;
+    /** Nested descent time has its own hard budget and does not consume the outer gather window. */
+    private int miningExplorationTimeoutCredit;
     private BlockPos lastGotoTarget;
     private int gotoFailStreak;
     private boolean treeDigTried; // Whether the current target has already been escalated to dig-approach (tunnel down/through when a cliff-face/below-grade tree can't be reached)
@@ -300,10 +321,15 @@ public final class GatherQuotaTask extends AbstractTask {
         exploreScan = null;
         surveyScan = null;
         observedSearchHops.reset();
+        explorationProgress.reset();
         exploreHops = 0;
         exploreTarget = null;
         exploreStart = null;
         exploreHint = null;
+        nextExploreAdmissionTick = -1;
+        miningExploration = null;
+        miningExplorationAttempted = false;
+        miningExplorationTimeoutCredit = 0;
         stockpileTask = null;
         pickupOrigin = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
@@ -327,6 +353,10 @@ public final class GatherQuotaTask extends AbstractTask {
 
     @Override
     protected void onResume(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.resume(bot);
+            return;
+        }
         prospectScan = null; // a scan begun before the pause reflects a stale position
         exploreScan = null;
         surveyScan = null;
@@ -383,18 +413,41 @@ public final class GatherQuotaTask extends AbstractTask {
             logGatherUnitGains(bot, "unattributed", null);
         }
         if (countSoFar >= targetCount) {
+            if (miningExploration != null) {
+                miningExploration.abort(bot);
+                miningExploration = null;
+            }
             bot.getActionPack().stopAll();
             clearPickupLedger();
             phase = Phase.DONE;
         }
         int timeout = countBrokenBlocks ? EXACT_BREAK_TIMEOUT : 6000;
-        if (elapsed > timeout) {
+        if (miningExploration == null && elapsed - miningExplorationTimeoutCredit > timeout) {
             fail(countBrokenBlocks ? name() + "_timeout" : "gather_timeout");
             return;
         }
         // Do not re-enter SURVEY/EXPLORE every tick while swimming. That used to burn all eight
         // exploration hops in place before NavSafetyNet's low-air threshold could take control.
         if (waitForDryGround(bot)) {
+            return;
+        }
+        if (tickMiningExploration(bot)) {
+            return;
+        }
+        // The current session showed an empty prospect followed by one refused eastward hop,
+        // then a long, visibly idle re-survey. A refusal means the observation fence did not
+        // admit that one local leg; it says nothing about the other compass directions. Give
+        // those directions their bounded chance on successive ticks, without spending the time
+        // rediscovering the same empty local view.
+        if (phase == Phase.SURVEY && nextExploreAdmissionTick >= 0
+                && elapsed >= nextExploreAdmissionTick) {
+            if (!startExplore(bot)) {
+                if (!startMiningExploration(bot)) {
+                    fail(exploreHops > 0
+                            ? "no_observed_resource_after_exploration"
+                            : "no_observed_resource_in_local_view");
+                }
+            }
             return;
         }
         // A: gather self-healing — looks only at "whether new material was gathered" (whether
@@ -407,6 +460,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 selfStuckCount = countSoFar;
                 selfStuckTick = elapsed;
                 observedSearchHops.reset();
+                explorationProgress.reset();
                 exploreHops = 0;          // Gathering something new means this patch produces — reset the explore hop budget
                 exploredSinceFind = true; // The next "found after exploring" is worth recording into memory again
             } else if (elapsed - selfStuckTick > SELF_STUCK_LIMIT) {
@@ -477,12 +531,12 @@ public final class GatherQuotaTask extends AbstractTask {
     /** Test hook: how many upward cells {@link #trySurface} has looked at (none while the capability is denied). */
     static volatile int surfaceScanLookups;
 
-    // Treeless-area fallback: a wide-range palette scan (PROSPECT_RANGE) locates the nearest target
-    // block (e.g. logs) and pathfinds to that column's surface landing point; once there, nearby
-    // SURVEY (16 blocks) takes over for precise gathering. Throttled (PROSPECT_INTERVAL) to protect TPS.
-    // Returns false when this call finds nothing (throttle not elapsed / genuinely no such resource
-    // in range), deferring to roam's blind patch-switching fallback (which can walk beyond the scan range).
-    private boolean prospectAndApproach(AIPlayerEntity bot) {
+    // A visible-sphere palette scan locates the nearest target block (e.g. logs) and pathfinds
+    // to that column's surface landing point.  It can catch a visible target above/below the
+    // shallower local survey, but it must yield to observed exploration rather than block motion.
+    // Returns false when this call finds nothing (throttle not elapsed / genuinely no such
+    // resource in range), deferring to observation-fenced exploration that reveals terrain by movement.
+    private boolean prospectAndApproach(AIPlayerEntity bot, int prospectRadius) {
         int now = bot.level().getServer().getTickCount();
         java.util.UUID botId = bot.getUUID();
         if (prospectScan == null) {
@@ -500,7 +554,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 lastProspectFound = null;
             }
             var scanServer = bot.level().getServer();
-            prospectScan = OreProspector.beginObservable(bot, PROSPECT_RANGE,
+            prospectScan = OreProspector.beginObservable(bot, prospectRadius,
                     state -> harvestBlocks.contains(state.getBlock()),
                     pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, scanServer.getTickCount()));
         }
@@ -515,15 +569,15 @@ public final class GatherQuotaTask extends AbstractTask {
         BlockPos found = scan.result();
         if (found == null) {
             // Observability: silently returning false can't distinguish "genuinely no such
-            // resource within 96 blocks" from "a scanning/blacklist bug" (observed: died in 21
+            // resource within the configured visible range" from "a scanning/blacklist bug" (observed: died in 21
             // ticks with no way to diagnose).
             BotLog.action(bot, "gather_prospect_empty",
-                    "item", targetItem, "range", PROSPECT_RANGE,
+                    "item", targetItem, "range", prospectRadius,
                     "blacklisted", EpisodeMemory.INSTANCE.excludedCount(botId),
                     "scan_steps", scan.steps(),
                     "scan_max_step_us", scan.maxStepNanos() / 1000L,
                     "scan_total_ms", scan.totalNanos() / 1_000_000L);
-            return false; // Does not clear the exclusion (a TTL-backed "genuinely can't get there"); defers to roam's blind patch-switching fallback
+            return false; // Does not clear the exclusion (a TTL-backed "genuinely can't get there"); defers to observed exploration
         }
         // Anchor the landing point to the target's actual position: the target may be in a
         // valley/low ground — the old approach used that column's heightmap, which pushed the
@@ -691,12 +745,16 @@ public final class GatherQuotaTask extends AbstractTask {
                     "heading", attempt.heading() == null ? "none" : attempt.heading().toShortString(),
                     "reason", attempt.reason(),
                     "remaining", Math.max(0, EXPLORE_MAX_HOPS - observedSearchHops.attempts()));
-            // A refused hop means no physical search happened.  Keep surveying/retrying other
-            // headings until the bounded observed frontier is exhausted instead of failing now.
+            // A refused hop means no physical search happened. Retry the next bounded compass
+            // heading immediately rather than leaving the bot idle through another full survey.
+            nextExploreAdmissionTick = observedSearchHops.exhausted()
+                    ? -1 : elapsed + EXPLORE_REFUSED_HOP_RETRY_TICKS;
             return !observedSearchHops.exhausted();
         }
+        nextExploreAdmissionTick = -1;
         exploreTarget = attempt.observedGoal();
         exploreStart = feet.immutable();
+        explorationProgress.beginLeg(exploreStart);
         exploreHopStartTick = elapsed;
         exploredSinceFind = true;
         phase = Phase.EXPLORE;
@@ -719,6 +777,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // reach / the route is a long detour) → abandon the hop and return to SURVEY to rescan
         // (reset scan radius/throttle).
         if (elapsed - exploreHopStartTick > EXPLORE_MOVE_LIMIT) {
+            observedSearchHops.retireObservedGoal(exploreTarget);
             bot.getActionPack().stopAll();
             excludeExploreHint(bot, "timeout");
             exploreTarget = null;
@@ -752,20 +811,27 @@ public final class GatherQuotaTask extends AbstractTask {
                 return;
             }
         }
-        // (3) Arrived at the hop waypoint (≤3 blocks): if memory-guided travel got within 16
+        // (3) A directional-pursuit route ends at an exact observed GoalBlock. Treating "within
+        // three blocks" as arrival used to stop Baritone just short of small hops, then reissue
+        // another local route from almost the same cell. That looks like circling in the client.
+        // On exact arrival, if memory-guided travel got within 16
         // blocks of the memory point without being intercepted by (2), the old intel was stale
         // (nothing there) → retire that resource point, so the next startExplore doesn't head for
         // the same stale intel again; then return to SURVEY (the fail chain keeps exploring
         // outward if there's still nothing).
-        if (exploreTarget == null || bot.blockPosition().distSqr(exploreTarget) <= 9.0D) {
+        if (exploreTarget == null || bot.blockPosition().equals(exploreTarget)) {
             boolean physicallyMoved = exploreStart != null
-                    && bot.blockPosition().distSqr(exploreStart) > 9.0D;
+                    && !bot.blockPosition().equals(exploreStart);
             if (physicallyMoved) {
                 exploreHops++;
                 BotLog.action(bot, "gather_explore_arrived",
                         "hop", exploreHops,
                         "at", bot.blockPosition().toShortString(),
                         "attempts", observedSearchHops.attempts());
+            } else {
+                // A fence may occasionally resolve a heading to the cell already occupied by
+                // the bot. It is not a completed hop and must not be admitted again.
+                observedSearchHops.retireObservedGoal(exploreTarget);
             }
             if (exploreHint != null && bot.blockPosition().distSqr(exploreHint) <= 256.0D) {
                 invalidateKnownResource(bot, exploreHint);
@@ -779,10 +845,32 @@ public final class GatherQuotaTask extends AbstractTask {
             phase = Phase.SURVEY;
             return;
         }
-        // (4) A directional route that goes idle before its locally observed destination is not
+        // (4) Baritone can stay active while recomputing a short route without making the bot
+        // cross a new block cell. Stop that spin well before the coarse 300-tick route timeout,
+        // retire its exact local goal, and let SURVEY choose another observed corridor.
+        if (explorationProgress.stalled(bot.blockPosition())) {
+            BlockPos stalledGoal = exploreTarget;
+            observedSearchHops.retireObservedGoal(stalledGoal);
+            bot.getActionPack().stopAll();
+            excludeExploreHint(bot, "no_progress");
+            BotLog.action(bot, "gather_explore_stalled",
+                    "at", bot.blockPosition().toShortString(),
+                    "goal", stalledGoal == null ? "none" : stalledGoal.toShortString(),
+                    "ticks_without_frontier", explorationProgress.ticksSinceFrontier(),
+                    "attempts", observedSearchHops.attempts());
+            exploreTarget = null;
+            exploreStart = null;
+            searchRadius = SEARCH_RADIUS;
+            lastScanTick = -100;
+            exploreScan = null; // every exit from EXPLORE drops its en-route scan
+            phase = Phase.SURVEY;
+            return;
+        }
+        // (5) A directional route that goes idle before its locally observed destination is not
         // retried against an invented terrain point.  Drop back to SURVEY; the next bounded
         // attempt chooses a fresh observed hop and preserves the fact that no leg was completed.
         if (elapsed - exploreHopStartTick > 20 && bot.getActionPack().isPathExecutorIdle()) {
+            observedSearchHops.retireObservedGoal(exploreTarget);
             bot.getActionPack().stopAll();
             excludeExploreHint(bot, "route_ended");
             exploreTarget = null;
@@ -798,13 +886,32 @@ public final class GatherQuotaTask extends AbstractTask {
             fail("unsupported_resource_type");
             return;
         }
-        // A prospect scan spread over several ticks resumes before anything else scans: survey's own
-        // throttled radius scans below are a full 120-150 ms each and must not run while one is in flight.
+        int now = bot.level().getServer().getTickCount();
+        int configuredRadius = configuredObservationRadius();
+        int surveyRadiusLimit = ObservableSearchBounds.surveyRadius(configuredRadius);
+        int prospectRadiusLimit = ObservableSearchBounds.prospectRadius(configuredRadius);
+        // A task restored from an older build can carry a 32/48-radius survey.  Do not resume it
+        // when the current profile cannot observe that far; it has no possible discovery outcome.
+        if (!countBrokenBlocks && searchRadius > surveyRadiusLimit) {
+            searchRadius = surveyRadiusLimit;
+            surveyScan = null;
+        }
+        // A prospect scan can find a vertically visible target the shallow local survey misses.
+        // It gets a few active ticks, then keeps no one waiting: EXPLORE runs the same observable
+        // scan while the bot is actually revealing new terrain.
         if (prospectScan != null) {
-            if (scanIsStale(bot, prospectScan, SCAN_STALE_DISTANCE_SQ)) {
+            int prospectAge = now - prospectScan.startTick();
+            if (scanIsStale(bot, prospectScan, SCAN_STALE_DISTANCE_SQ)
+                    || prospectAge >= PROSPECT_STATIONARY_TICK_LIMIT) {
+                if (prospectAge >= PROSPECT_STATIONARY_TICK_LIMIT) {
+                    BotLog.action(bot, "gather_prospect_deferred_to_explore",
+                            "range", prospectRadiusLimit,
+                            "active_ticks", prospectAge,
+                            "steps", prospectScan.steps());
+                }
                 prospectScan = null;
             } else {
-                if (!prospectAndApproach(bot)) {
+                if (!prospectAndApproach(bot, prospectRadiusLimit)) {
                     escapeBarrenAreaOrFail(bot); // scan finished with nothing usable: the same tail the synchronous flow ran
                 }
                 return;
@@ -816,7 +923,6 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         // F1: throttle large-radius scans to avoid scanning a 48-block cube every tick and
         // dragging down TPS.
-        int now = bot.level().getServer().getTickCount();
         if (surveyScan != null && scanIsStale(bot, surveyScan.startTick(), surveyScan.origin(), SCAN_STALE_DISTANCE_SQ)) {
             surveyScan = null;
         }
@@ -861,11 +967,11 @@ public final class GatherQuotaTask extends AbstractTask {
                 fail(exactBreakNoNearbyReason());
                 return;
             }
-            // F1: nothing nearby → automatically widen the search radius and look farther,
-            // instead of failing immediately and handing back to the brain to flail / dig
-            // bare-handed / ask for help.
-            if (searchRadius < MAX_SEARCH_RADIUS) {
-                searchRadius = Math.min(MAX_SEARCH_RADIUS, searchRadius * 2);
+            // Expand only through terrain the current profile could actually observe.  Default
+            // strict survival ends at 16, then allows only its short visible-vertical prospect
+            // before taking a bounded observed hop instead of iterating a 32/48 invisible cube.
+            if (searchRadius < surveyRadiusLimit) {
+                searchRadius = Math.min(surveyRadiusLimit, searchRadius * 2);
                 BotLog.action(bot, "gather_expand_search",
                         "radius", searchRadius,
                         "item", BuiltInRegistries.ITEM.getKey(targetItem).toString());
@@ -880,21 +986,17 @@ public final class GatherQuotaTask extends AbstractTask {
                 searchRadius = SEARCH_RADIUS;
                 return;
             }
-            // Treeless-area fallback: nothing found nearby (48 blocks) even after surfacing → a
-            // wide-range palette scan (96 blocks) locates the nearest target block (e.g. logs)
-            // and pathfinds there. Specifically fixes treeless plateaus / harsh terrain — blind
-            // roam only shifts sideways within the same patch and can't cross a plateau, while
-            // prospect can directly locate a tree at the foot of the mountain or farther away.
-            if (prospectAndApproach(bot)) {
+            // The prospect checks the full visible vertical sphere, unlike the shallow local
+            // survey. It is bounded to a few stationary ticks above; an unfinished pass continues
+            // as the matching en-route scan while the bot takes an observed hop.
+            if (prospectAndApproach(bot, prospectRadiusLimit)) {
                 return;
             }
-            // No tree in this patch or in prospect's scan range (96 blocks) → escape the
-            // treeless area: if roam's local patch-switch (28-56 blocks) fails to escape after 2
-            // consecutive hops → prefer explore's long-range escape (160 blocks). Fixes "roam
-            // repeatedly bouncing between the same points in a treeless/harsh area, explore's
-            // budget running out too early, and everything burning down to gather_timeout"
-            // (observed in log 160048: gather_roam×16 ping-ponging between 4 points while
-            // explore only got 4 hops — not a prospect-throttling issue).
+            BotLog.action(bot, "gather_observed_search_exhausted",
+                    "radius", surveyRadiusLimit,
+                    "perception_radius", configuredRadius,
+                    "item", BuiltInRegistries.ITEM.getKey(targetItem).toString());
+            // No resource in the actual view → extend that view only by a finite, admitted hop.
             escapeBarrenAreaOrFail(bot);
             return;
         }
@@ -926,6 +1028,9 @@ public final class GatherQuotaTask extends AbstractTask {
             surfaceTried = false; // New area — allow the "surface fallback" again
             return;
         }
+        if (startMiningExploration(bot)) {
+            return;
+        }
         // Report only what actually happened.  A denied local route is not a completed search;
         // a model must not turn it into an assertion about terrain it never saw.
         if (observedSearchHops.exhausted()) {
@@ -935,6 +1040,105 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         fail("no_observed_resource_in_local_view");
+    }
+
+    /**
+     * Starts the single safe mining handoff for stone/cobblestone-like sources (or a known ore
+     * source family).  Exact {@code break_blocks} jobs intentionally remain local gestures.
+     */
+    private boolean startMiningExploration(AIPlayerEntity bot) {
+        if (countBrokenBlocks || miningExplorationAttempted
+                || !MiningExplorationTask.supports(harvestBlocks)) {
+            return false;
+        }
+        Block source = miningExplorationSource();
+        if (source == null) {
+            return false;
+        }
+        // Match GatherQuotaTask's ordinary source policy: make/carry a pickaxe before opening a
+        // staircase.  This prevents a no-cobblestone request from silently hand-mining stone.
+        if (!GatherToolPolicy.hasTool(bot, GatherToolPolicy.Category.PICKAXE)) {
+            pendingToolCategory = GatherToolPolicy.Category.PICKAXE;
+            toolCraftCandidateIndex = 0;
+            toolCraftTask = null;
+            lastToolCraftFailure = null;
+            targetPos = null;
+            phase = Phase.ENSURE_TOOL;
+            BotLog.action(bot, "gather_mining_exploration_tool_missing",
+                    "category", GatherToolPolicy.token(pendingToolCategory),
+                    "source", BuiltInRegistries.BLOCK.getKey(source));
+            return true;
+        }
+        if (!ToolTier.canHarvestWithInventory(bot, source.defaultBlockState())) {
+            fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(source));
+            return true;
+        }
+        miningExplorationAttempted = true;
+        miningExploration = MiningExplorationTask.forBlocks(harvestBlocks);
+        miningExploration.start(bot);
+        if (miningExploration.state() == TaskState.RUNNING) {
+            BotLog.action(bot, "gather_mining_exploration_handoff",
+                    "item", BuiltInRegistries.ITEM.getKey(targetItem),
+                    "from_y", bot.blockPosition().getY());
+            return true;
+        }
+        if (miningExploration.state() == TaskState.FAILED) {
+            String reason = miningExploration.failureReason();
+            miningExploration = null;
+            fail(reason == null || reason.isBlank() ? "mining_exploration_failed" : reason);
+            return true;
+        }
+        // No depth is appropriate at the current Y; surface the factual observed-search outcome.
+        miningExploration = null;
+        return false;
+    }
+
+    private Block miningExplorationSource() {
+        for (Block block : harvestBlocks) {
+            if (MiningExplorationTask.supports(block)) {
+                return block;
+            }
+        }
+        return null;
+    }
+
+    /** Returns true while the child owns movement/mining, including a terminal child failure. */
+    private boolean tickMiningExploration(AIPlayerEntity bot) {
+        if (miningExploration == null) {
+            return false;
+        }
+        if (miningExploration.state() == TaskState.RUNNING) {
+            miningExploration.tick(bot);
+        }
+        if (miningExploration.state() == TaskState.RUNNING) {
+            return true;
+        }
+        if (miningExploration.state() == TaskState.COMPLETED) {
+            miningExplorationTimeoutCredit += miningExploration.elapsedTicks();
+            miningExploration = null;
+            searchRadius = defaultSearchRadius();
+            lastScanTick = -100;
+            lastProspectTick = -100;
+            prospectScan = null;
+            surveyScan = null;
+            exploreScan = null;
+            observedSearchHops.reset();
+            explorationProgress.reset();
+            exploreHops = 0;
+            exploreTarget = null;
+            exploreStart = null;
+            exploreHint = null;
+            nextExploreAdmissionTick = -1;
+            surfaceTried = false;
+            selfStuckTick = elapsed;
+            selfStuckCount = countSoFar;
+            phase = Phase.SURVEY;
+            return false;
+        }
+        String reason = miningExploration.failureReason();
+        miningExploration = null;
+        fail(reason == null || reason.isBlank() ? "mining_exploration_failed" : reason);
+        return true;
     }
 
     /** Test hook: true while a budgeted prospect scan is in flight (ProspectScanBudgetGameTests). */
@@ -1431,6 +1635,7 @@ public final class GatherQuotaTask extends AbstractTask {
         roamTarget = null;
         exploreTarget = null;
         exploreStart = null;
+        explorationProgress.reset();
         targetPos = null;
         searchRadius = SEARCH_RADIUS;
         phase = Phase.SURVEY;
@@ -1841,9 +2046,22 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     @Override
+    protected void onPause(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.pause(bot);
+            return;
+        }
+        super.onPause(bot);
+    }
+
+    @Override
     protected void onAbort(AIPlayerEntity bot) {
         // abort()/cancel() have already set state+failureReason by the time this runs: "aborted"
         // for abort(), the given reason (or "") for cancel(reason).
+        if (miningExploration != null) {
+            miningExploration.abort(bot);
+            miningExploration = null;
+        }
         logGatherSummary(bot, failureReason.isBlank() ? "cancelled" : failureReason);
         super.onAbort(bot);
     }

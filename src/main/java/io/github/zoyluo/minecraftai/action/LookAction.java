@@ -11,20 +11,28 @@ public final class LookAction {
     private LookAction() {
     }
 
+    /**
+     * Converts any accumulated entity yaw into vanilla's canonical display range.  Baritone and
+     * a restored fake player may legitimately carry an unwrapped angle internally, but persisting
+     * or broadcasting thousands of degrees makes the client interpolate needless full turns.
+     */
+    public static float canonicalYaw(float yaw) {
+        return Mth.wrapDegrees(yaw);
+    }
+
     public static ActionResult setYawPitch(AIPlayerEntity player, float yaw, float pitch) {
+        float canonicalYaw = canonicalYaw(yaw);
         float clampedPitch = Mth.clamp(pitch, -90.0F, 90.0F);
-        player.setYRot(yaw);
-        player.setYHeadRot(yaw);
-        player.setYBodyRot(yaw);
+        player.setYRot(canonicalYaw);
+        player.setYHeadRot(canonicalYaw);
+        player.setYBodyRot(canonicalYaw);
         player.setXRot(clampedPitch);
         return ActionResult.SUCCESS;
     }
 
     public static ActionResult lookAt(AIPlayerEntity player, Vec3 target) {
         player.lookAt(EntityAnchorArgument.Anchor.EYES, target);
-        player.setYHeadRot(player.getYRot());
-        player.setYBodyRot(player.getYRot());
-        return ActionResult.SUCCESS;
+        return setYawPitch(player, player.getYRot(), player.getXRot());
     }
 
     /**

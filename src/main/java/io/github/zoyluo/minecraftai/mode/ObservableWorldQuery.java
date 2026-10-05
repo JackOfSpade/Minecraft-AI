@@ -2,8 +2,11 @@ package io.github.zoyluo.minecraftai.mode;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
+import io.github.zoyluo.minecraftai.task.SharedVision;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
@@ -13,7 +16,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** Strict-survival perception filter: nearby, exposed, and actually on the Bot's line of sight. */
+/** Strict-survival perception filter: exposed on the bot's or its linked owner's real line of sight. */
 public final class ObservableWorldQuery {
     /** Shared inset (in blocks) used to sample points around a face center. Also used by BuildAction. */
     public static final double FACE_SAMPLE_INSET = 0.375D;
@@ -32,8 +35,16 @@ public final class ObservableWorldQuery {
     private ObservableWorldQuery() {
     }
 
+    /** A successful live eye-ray becomes reusable, bounded shared terrain memory. */
+    private static boolean rememberIfVisible(AIPlayerEntity bot, BlockPos pos, boolean visible) {
+        if (visible) {
+            SharedWorldSight.rememberConfirmed(bot, pos);
+        }
+        return visible;
+    }
+
     /**
-     * Whether the bot's eye can see a face of the block at {@code pos}: a block in plain view, as a player
+     * Whether the bot's or its linked owner's eye can see a face of the block at {@code pos}: a block in plain view, as a player
      * sees it. The ray aims at the block's own shape ({@link FaceAim}): its collision shape, or for a block that
      * has none (torch, rail, cobweb, plant, crop, banner, snow layer) its selection outline with an OUTLINE ray. This
      * is a <em>visibility</em> proof, not a solidity proof: a support or standability decision must use
@@ -59,10 +70,13 @@ public final class ObservableWorldQuery {
                 "observable_block_cell_face_query").allowed()) {
             return true;
         }
-        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int radius = botRenderDistanceBlocks(bot);
         double radiusSquared = (double) radius * radius;
         Vec3 eye = bot.getEyePosition();
         AABB cell = new AABB(pos);
+        if (!botTracks(bot, pos)) {
+            return rememberIfVisible(bot, pos, ownerCanObserveCellFace(bot, pos, cell));
+        }
         for (Direction face : Direction.values()) {
             for (double[] offset : FACE_SAMPLE_OFFSETS) {
                 Vec3 endpoint = FaceAim.facePoint(cell, face, FaceAim.OBSERVE_DEPTH, offset[0], offset[1]);
@@ -74,11 +88,11 @@ public final class ObservableWorldQuery {
                 if (hit.getType() == HitResult.Type.BLOCK
                         && pos.equals(hit.getBlockPos())
                         && hit.getDirection() == face) {
-                    return true;
+                    return rememberIfVisible(bot, pos, true);
                 }
             }
         }
-        return false;
+        return rememberIfVisible(bot, pos, ownerCanObserveCellFace(bot, pos, cell));
     }
 
     /**
@@ -117,11 +131,11 @@ public final class ObservableWorldQuery {
                 "observable_water_collider_query").allowed()) {
             return true;
         }
-        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int radius = botRenderDistanceBlocks(bot);
         Vec3 eye = bot.getEyePosition();
         Vec3 target = pos.getCenter();
-        if (eye.distanceToSqr(target) > (double) radius * radius) {
-            return false;
+        if (!botTracks(bot, pos) || eye.distanceToSqr(target) > (double) radius * radius) {
+            return rememberIfVisible(bot, pos, ownerCanObserveColliderThroughFluids(bot, pos));
         }
         // This first-hit collider ray proves both visibility through water and that the target is
         // a real collider, without reading the target BlockState to derive a shape before it has
@@ -129,7 +143,8 @@ public final class ObservableWorldQuery {
         // reject an unusually shaped exposed collider, but can never invent one behind terrain.
         BlockHitResult hit = bot.level().clip(new ClipContext(
                 eye, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
-        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos);
+        boolean visible = hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos);
+        return rememberIfVisible(bot, pos, visible || ownerCanObserveColliderThroughFluids(bot, pos));
     }
 
     private static boolean observeShapeFaces(AIPlayerEntity bot, BlockPos pos, int range,
@@ -147,10 +162,10 @@ public final class ObservableWorldQuery {
         for (Direction direction : Direction.values()) {
             var face = FaceAim.facePoint(aim.box(), direction, FaceAim.OBSERVE_DEPTH, 0.0D, 0.0D);
             if (canObserveFaceAfterPolicy(bot, pos, direction, face, range, aim.clipShape(), fluid)) {
-                return true;
+                return rememberIfVisible(bot, pos, true);
             }
         }
-        return false;
+        return rememberIfVisible(bot, pos, ownerCanObserveShape(bot, pos, outlineFallback, fluid));
     }
 
     /**
@@ -192,11 +207,12 @@ public final class ObservableWorldQuery {
                 "observable_block_inset_face_query").allowed()) {
             return true;
         }
-        double observationRange = Math.min(
-                Math.max(1, MinecraftAiConfig.get().perception().radius()),
-                Math.max(1.0D, rangeLimit));
+        double observationRange = Math.min(botRenderDistanceBlocks(bot), Math.max(1.0D, rangeLimit));
         double observationRangeSquared = observationRange * observationRange;
         Vec3 eye = bot.getEyePosition();
+        if (!botTracks(bot, pos)) {
+            return rememberIfVisible(bot, pos, ownerCanObserveInsetShape(bot, pos, outlineFallback));
+        }
         FaceAim.Target aim = FaceAim.aim(bot.level(), pos, bot.level().getBlockState(pos),
                 ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
         for (Direction direction : Direction.values()) {
@@ -214,11 +230,11 @@ public final class ObservableWorldQuery {
                 if (hit.getType() == HitResult.Type.BLOCK
                         && hit.getBlockPos().equals(pos)
                         && hit.getDirection() == direction) {
-                    return true;
+                    return rememberIfVisible(bot, pos, true);
                 }
             }
         }
-        return false;
+        return rememberIfVisible(bot, pos, ownerCanObserveInsetShape(bot, pos, outlineFallback));
     }
 
     private static boolean canObserveFaceAfterPolicy(AIPlayerEntity bot,
@@ -228,8 +244,8 @@ public final class ObservableWorldQuery {
                                                       int range,
                                                       ClipContext.Block clipShape,
                                                       ClipContext.Fluid fluid) {
-        int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
-        if (bot.getEyePosition().distanceToSqr(endpoint) > (double) radius * radius) {
+        int radius = botRenderDistanceBlocks(bot);
+        if (!botTracks(bot, pos) || bot.getEyePosition().distanceToSqr(endpoint) > (double) radius * radius) {
             return false;
         }
         BlockHitResult hit = bot.level().clip(new ClipContext(
@@ -285,15 +301,185 @@ public final class ObservableWorldQuery {
 
     private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range,
                                                             ClipContext.Fluid fluid) {
-        int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
-        if (bot.getEyePosition().distanceToSqr(pos.getCenter()) > (double) radius * radius) {
-            return false;
+        int radius = botRenderDistanceBlocks(bot);
+        if (!botTracks(bot, pos) || bot.getEyePosition().distanceToSqr(pos.getCenter()) > (double) radius * radius) {
+            return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid));
         }
         BlockHitResult hit = bot.level().clip(new ClipContext(
                 bot.getEyePosition(), pos.getCenter(),
                 ClipContext.Block.COLLIDER, fluid, bot));
+        if (hit.getType() == HitResult.Type.MISS
+                || hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)) {
+            return rememberIfVisible(bot, pos, true);
+        }
+        return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid));
+    }
+
+    /**
+     * A linked owner is a legitimate second observer, but only in the same dimension and only
+     * inside the chunks that server is actively tracking for that player. This remains a real
+     * clip ray; it never turns a loaded chunk or an old memory entry into a current observation.
+     */
+    private static ServerPlayer sharedOwner(AIPlayerEntity bot) {
+        ServerPlayer owner = SharedVision.ownerOnline(bot);
+        if (owner == null || owner == bot || !owner.isAlive() || owner.isSpectator()
+                || owner.level() != bot.level() || owner.level().getServer() == null) {
+            return null;
+        }
+        return owner;
+    }
+
+    /**
+     * A fake player receives the same server-managed chunk tracking view as a human player.
+     * Use that actual view radius for block sight rather than an unrelated action/perception
+     * tuning radius: render distance is supplied in chunks, so its block-space radius is ×16.
+     */
+    private static int botRenderDistanceBlocks(AIPlayerEntity bot) {
+        if (bot == null || bot.level().getServer() == null) {
+            return Math.max(1, MinecraftAiConfig.get().perception().radius());
+        }
+        return renderDistanceBlocks(bot);
+    }
+
+    private static int renderDistanceBlocks(ServerPlayer observer) {
+        int chunks = Math.min(observer.requestedViewDistance(),
+                observer.level().getServer().getPlayerList().getViewDistance());
+        long blocks = (long) Math.max(1, chunks) * 16L;
+        return (int) Math.min(Integer.MAX_VALUE, blocks);
+    }
+
+    private static boolean botTracks(AIPlayerEntity bot, BlockPos pos) {
+        int chunkX = pos.getX() >> 4;
+        int chunkZ = pos.getZ() >> 4;
+        return bot.getChunkTrackingView().contains(chunkX, chunkZ)
+                && bot.level().getChunkSource().hasChunk(chunkX, chunkZ);
+    }
+
+    private static int ownerRenderDistanceBlocks(ServerPlayer owner) {
+        int chunks = Math.min(owner.requestedViewDistance(),
+                owner.level().getServer().getPlayerList().getViewDistance());
+        long blocks = (long) Math.max(1, chunks) * 16L;
+        return (int) Math.min(Integer.MAX_VALUE, blocks);
+    }
+
+    private static boolean ownerTracks(ServerPlayer owner, BlockPos pos) {
+        int chunkX = pos.getX() >> 4;
+        int chunkZ = pos.getZ() >> 4;
+        return owner.getChunkTrackingView().contains(chunkX, chunkZ)
+                && owner.level().getChunkSource().hasChunk(chunkX, chunkZ);
+    }
+
+    private static boolean ownerCanObserveShape(AIPlayerEntity bot, BlockPos pos,
+                                                boolean outlineFallback, ClipContext.Fluid fluid) {
+        ServerPlayer owner = sharedOwner(bot);
+        if (owner == null || !ownerTracks(owner, pos)) {
+            return false;
+        }
+        int radius = ownerRenderDistanceBlocks(owner);
+        Vec3 eye = owner.getEyePosition();
+        FaceAim.Target aim = FaceAim.aim(owner.level(), pos, owner.level().getBlockState(pos),
+                ClipContext.Block.COLLIDER, CollisionContext.of(owner), outlineFallback);
+        for (Direction direction : Direction.values()) {
+            Vec3 endpoint = FaceAim.facePoint(aim.box(), direction, FaceAim.OBSERVE_DEPTH, 0.0D, 0.0D);
+            if (eye.distanceToSqr(endpoint) > (double) radius * radius) {
+                continue;
+            }
+            BlockHitResult hit = owner.level().clip(new ClipContext(eye, endpoint, aim.clipShape(), fluid, owner));
+            if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)
+                    && hit.getDirection() == direction) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** State-free unit-cell face proof for a target nominated from the linked owner's view. */
+    private static boolean ownerCanObserveCellFace(AIPlayerEntity bot, BlockPos pos, AABB cell) {
+        ServerPlayer owner = sharedOwner(bot);
+        if (owner == null || !ownerTracks(owner, pos)) {
+            return false;
+        }
+        Vec3 eye = owner.getEyePosition();
+        double radiusSquared = (double) ownerRenderDistanceBlocks(owner) * ownerRenderDistanceBlocks(owner);
+        for (Direction face : Direction.values()) {
+            for (double[] offset : FACE_SAMPLE_OFFSETS) {
+                Vec3 endpoint = FaceAim.facePoint(cell, face, FaceAim.OBSERVE_DEPTH, offset[0], offset[1]);
+                if (eye.distanceToSqr(endpoint) > radiusSquared) {
+                    continue;
+                }
+                BlockHitResult hit = owner.level().clip(new ClipContext(
+                        eye, endpoint, ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, owner));
+                if (hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos())
+                        && hit.getDirection() == face) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Owner-side counterpart of the transparent-water collider proof used by swim navigation. */
+    private static boolean ownerCanObserveColliderThroughFluids(AIPlayerEntity bot, BlockPos pos) {
+        ServerPlayer owner = sharedOwner(bot);
+        if (owner == null || !ownerTracks(owner, pos)) {
+            return false;
+        }
+        Vec3 eye = owner.getEyePosition();
+        Vec3 target = pos.getCenter();
+        int radius = ownerRenderDistanceBlocks(owner);
+        if (eye.distanceToSqr(target) > (double) radius * radius) {
+            return false;
+        }
+        BlockHitResult hit = owner.level().clip(new ClipContext(
+                eye, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner));
+        return hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos());
+    }
+
+    /** Owner-side counterpart of the conservative inset-face proof used for narrow supports. */
+    private static boolean ownerCanObserveInsetShape(AIPlayerEntity bot, BlockPos pos,
+                                                      boolean outlineFallback) {
+        ServerPlayer owner = sharedOwner(bot);
+        if (owner == null || !ownerTracks(owner, pos)) {
+            return false;
+        }
+        Vec3 eye = owner.getEyePosition();
+        int radius = ownerRenderDistanceBlocks(owner);
+        double radiusSquared = (double) radius * radius;
+        FaceAim.Target aim = FaceAim.aim(owner.level(), pos, owner.level().getBlockState(pos),
+                ClipContext.Block.COLLIDER, CollisionContext.of(owner), outlineFallback);
+        for (Direction direction : Direction.values()) {
+            for (double[] offset : FACE_SAMPLE_OFFSETS) {
+                Vec3 endpoint = FaceAim.facePoint(
+                        aim.box(), direction, FaceAim.OBSERVE_DEPTH, offset[0], offset[1]);
+                if (eye.distanceToSqr(endpoint) > radiusSquared) {
+                    continue;
+                }
+                BlockHitResult hit = owner.level().clip(new ClipContext(
+                        eye, endpoint, aim.clipShape(), ClipContext.Fluid.ANY, owner));
+                if (hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos())
+                        && hit.getDirection() == direction) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean ownerCanObserveCell(AIPlayerEntity bot, BlockPos pos, ClipContext.Fluid fluid) {
+        ServerPlayer owner = sharedOwner(bot);
+        if (owner == null || !ownerTracks(owner, pos)) {
+            return false;
+        }
+        Vec3 eye = owner.getEyePosition();
+        Vec3 target = pos.getCenter();
+        int radius = ownerRenderDistanceBlocks(owner);
+        if (eye.distanceToSqr(target) > (double) radius * radius) {
+            return false;
+        }
+        BlockHitResult hit = owner.level().clip(new ClipContext(
+                eye, target, ClipContext.Block.COLLIDER, fluid, owner));
         return hit.getType() == HitResult.Type.MISS
-                || (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos));
+                || hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos);
     }
 
     /**
@@ -314,11 +500,11 @@ public final class ObservableWorldQuery {
                 "observable_farm_cell_query").allowed()) {
             return true;
         }
-        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int radius = botRenderDistanceBlocks(bot);
         double radiusSquared = (double) radius * radius;
         Vec3 eye = bot.getEyePosition();
-        if (eye.distanceToSqr(pos.getCenter()) > (radius + 1.0D) * (radius + 1.0D)) {
-            return false;
+        if (!botTracks(bot, pos) || eye.distanceToSqr(pos.getCenter()) > (radius + 1.0D) * (radius + 1.0D)) {
+            return rememberIfVisible(bot, pos, ownerCanObserveFarmCell(bot, pos));
         }
         var world = bot.level();
         java.util.List<Vec3> samples = shapeTopSamples(world, pos);
@@ -332,6 +518,35 @@ public final class ObservableWorldQuery {
             BlockHitResult hit = world.clip(new ClipContext(
                     eye, endpoint, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, bot));
             if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)) {
+                return rememberIfVisible(bot, pos, true);
+            }
+        }
+        return rememberIfVisible(bot, pos, ownerCanObserveFarmCell(bot, pos));
+    }
+
+    /** Owner-side counterpart of the crop/farmland top-outline probe. */
+    private static boolean ownerCanObserveFarmCell(AIPlayerEntity bot, BlockPos pos) {
+        ServerPlayer owner = sharedOwner(bot);
+        if (owner == null || !ownerTracks(owner, pos)) {
+            return false;
+        }
+        int radius = ownerRenderDistanceBlocks(owner);
+        Vec3 eye = owner.getEyePosition();
+        if (eye.distanceToSqr(pos.getCenter()) > (radius + 1.0D) * (radius + 1.0D)) {
+            return false;
+        }
+        java.util.List<Vec3> samples = shapeTopSamples(owner.level(), pos);
+        if (samples.isEmpty()) {
+            return ownerCanObserveCell(bot, pos, ClipContext.Fluid.ANY);
+        }
+        double radiusSquared = (double) radius * radius;
+        for (Vec3 endpoint : samples) {
+            if (eye.distanceToSqr(endpoint) > radiusSquared) {
+                continue;
+            }
+            BlockHitResult hit = owner.level().clip(new ClipContext(
+                    eye, endpoint, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, owner));
+            if (hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos())) {
                 return true;
             }
         }
@@ -485,7 +700,7 @@ public final class ObservableWorldQuery {
 
     private static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,
                                         double range, ViewShape shape, ClipContext.Fluid fluid) {
-        double limit = Math.min(range, Math.max(1, MinecraftAiConfig.get().perception().radius()));
+        double limit = Math.min(range, botRenderDistanceBlocks(bot));
         double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (!(limit > 0.0D) || !(length > 1.0E-9D)) {
             return ViewHit.unknown();
@@ -494,8 +709,10 @@ public final class ObservableWorldQuery {
         Vec3 end = eye.add(dx / length * limit, dy / length * limit, dz / length * limit);
         var world = bot.level();
         // Chunk coordinate is the block coordinate shifted right by four bits.
-        if (!world.getChunkSource().hasChunk(
-                (int) Math.floor(end.x) >> 4, (int) Math.floor(end.z) >> 4)) {
+        int endChunkX = (int) Math.floor(end.x) >> 4;
+        int endChunkZ = (int) Math.floor(end.z) >> 4;
+        if (!bot.getChunkTrackingView().contains(endChunkX, endChunkZ)
+                || !world.getChunkSource().hasChunk(endChunkX, endChunkZ)) {
             return ViewHit.unknown();
         }
         BlockHitResult hit = world.clip(new ClipContext(

@@ -102,9 +102,11 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
 * **Awareness.** A creature that has been noticed stays noticed while plain occlusion is clear (no cone, no reaction time: an
   engaged bot faces what it fights). One tick with no line is tolerated; after that it is forgotten, and the next sighting
   is a new reaction. A creature that leaves the observation radius, dies or despawns is forgotten at once.
-* **Hearing** is vanilla's vibration system, called per bot (`BotEars`: `VibrationSystem.Data`/`User`/`Listener`, a
-  `DynamicGameEventListener`, `VibrationSystem.Ticker` every tick; radius `behaviour.perception.hearing.listenerRadius`, 16 =
-  the configured radius; vanilla decides sneaking, wool and travel time). A sound whose source is a creature in clear view within 4 blocks
+* **Hearing** is vanilla's vibration system, used per bot (`BotEars`: `VibrationSystem.Data`/`User`/`Listener`, a
+  `DynamicGameEventListener`, and a silent parity ticker every tick; radius `behaviour.perception.hearing.listenerRadius`, 16 =
+  the configured radius; vanilla decides sneaking, wool and travel time). The parity ticker retains vanilla selection,
+  travel, delivery and data-change semantics but omits only the client-visible traveling vibration-particle packet. A sound
+  whose source is a creature in clear view within 4 blocks
   is where it came from: the bot is "turned to it" for 30 ticks (sight without the cone, the reaction time still applies).
   A sound with nobody in view is an INVESTIGATE hint (`CreatureSenses.hint`; an idle bot, one with no task and no action in
    progress, turns to look; a bot busy with a step, a dig or a route keeps its head on its work). A bot does not hear its own steps
@@ -167,6 +169,28 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   toward it (or lets it make noise, or strike it) and waits the reaction time of the shared formula, computed from the real distance
   and angle plus the scan cadence (`PerceptionFixtures`, never an arbitrary budget). `MINECRAFTAI_HARNESS_PERCEPTION=off` runs the
   suite with the old omnidirectional test, for diagnosis only.
+
+## Shared block sight and navigation
+
+Terrain knowledge is shared between a Minecraft-AI bot and its linked owner. A block/cell becomes
+route knowledge only after a vanilla eye ray from either observer reaches it. The observer's
+effective block range is the lower of its requested client render distance and the server view
+distance, converted from chunks with `chunks × 16`; its endpoint chunk must also be both tracked
+for that observer and loaded by the server. This is deliberately not a loaded-chunk snapshot.
+
+`SharedWorldSight` retains the ray-proven cells (including outline-only blocks such as rails,
+vines, torches, and crops) for 6,000 ticks. A route request adds an exact ray to its requested
+target plus the ray-proven feet/headroom/floor lane needed by the navigator. Baritone receives
+only that bounded memory in `ObservedNavigationFence`, so it can path through terrain either
+observer actually saw without discovering hidden terrain. Mutable targets are re-checked before
+an interaction; owner sight gives navigation knowledge, never remote break/place authority.
+
+Every successful live block or cell observation refreshes that same memory, including a linked
+player's observation. Resource selection checks remembered matching blocks before its smaller
+local survey cube, so a player-looking-at resource can nominate it even when it is farther than
+the bot's interaction-scale search range. That remembered block is still re-proven by a current
+bot-or-owner eye ray before its state is reread or it becomes a route target; stale memory is a
+lead, never a blind-path permission.
 
 ## Scope
 

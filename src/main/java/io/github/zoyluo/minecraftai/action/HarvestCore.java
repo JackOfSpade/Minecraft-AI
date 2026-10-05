@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -31,6 +32,8 @@ public final class HarvestCore {
     // scan responsive.  Route reachability itself belongs to the observed Baritone admission
     // boundary; this selection phase must not inspect loaded-but-unseen terrain with A*.
     private static final int REACH_VERIFY_LIMIT = 8;
+    /** A remembered target is re-proved before use; this only bounds the fresh target checks per survey. */
+    private static final int SHARED_MEMORY_CANDIDATE_LIMIT = 64;
     /** Vanilla item bounces can leave a drop just above a block edge without setting onGround. */
     private static final double PICKUP_SUPPORT_PROBE_DEPTH = 0.26D;
     /** Maximum observed, collision-free fall column that pickup recovery may wait beneath. */
@@ -42,6 +45,10 @@ public final class HarvestCore {
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Block targetBlock, int horizontalRadius, int down, int up) {
         CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_block");
         CapabilityTally.INSTANCE.record(bot.getUUID(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
+        TargetChoice remembered = knownVisibleTarget(bot, Set.of(targetBlock), null, false);
+        if (remembered != null) {
+            return remembered;
+        }
         BlockPos origin = bot.blockPosition();
         return firstWalkReachable(bot, origin,
                 BlockPos.betweenClosedStream(origin.offset(-horizontalRadius, -down, -horizontalRadius), origin.offset(horizontalRadius, up, horizontalRadius))
@@ -130,6 +137,7 @@ public final class HarvestCore {
 
         private final java.util.ArrayList<BlockPos> candidates = new java.util.ArrayList<>();
         private boolean enumerated;
+        private boolean sharedSightChecked;
         private int verifyIndex;
         private int verified;
         private TargetChoice result;
@@ -198,6 +206,18 @@ public final class HarvestCore {
             long deadline = budgetNanos >= Long.MAX_VALUE - start ? Long.MAX_VALUE : start + budgetNanos;
             steps++;
             try {
+                // A linked player may have already seen the requested block far outside this
+                // local survey cube.  Its remembered state is only a lead: knownVisibleTarget
+                // first earns a current bot/owner eye-ray and then rereads that one visible cell.
+                if (!sharedSightChecked) {
+                    sharedSightChecked = true;
+                    TargetChoice remembered = knownVisibleTarget(bot, targetBlocks, posFilter, allowObservableCellFallback);
+                    if (remembered != null) {
+                        result = remembered;
+                        done = true;
+                        return true;
+                    }
+                }
                 if (!enumerated) {
                     enumerate(deadline);
                     if (!enumerated) {
@@ -730,6 +750,15 @@ public final class HarvestCore {
         if (block == Blocks.EMERALD_ORE || block == Blocks.DEEPSLATE_EMERALD_ORE) {
             return Set.of(Items.EMERALD);
         }
+        if (block == Blocks.NETHER_QUARTZ_ORE) {
+            return Set.of(Items.QUARTZ);
+        }
+        if (block == Blocks.NETHER_GOLD_ORE) {
+            return Set.of(Items.GOLD_NUGGET);
+        }
+        if (block == Blocks.ANCIENT_DEBRIS) {
+            return Set.of(Items.ANCIENT_DEBRIS);
+        }
         Item item = block.asItem();
         return item == Items.AIR ? Set.of() : Set.of(item);
     }
@@ -847,6 +876,33 @@ public final class HarvestCore {
     private static boolean withinObservationReach(AIPlayerEntity bot, BlockPos pos) {
         double reach = Math.max(1, io.github.zoyluo.minecraftai.MinecraftAiConfig.get().perception().radius()) + 0.87D;
         return bot.getEyePosition().distanceToSqr(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D) <= reach * reach;
+    }
+
+    /**
+     * Converts a prior bot/owner line-of-sight observation into a candidate only after it is
+     * visible again.  The current block-state read occurs after that exact proof, so stale
+     * memory never becomes a hidden-world scan or a blind path destination.
+     */
+    private static TargetChoice knownVisibleTarget(AIPlayerEntity bot,
+                                                   Set<Block> targetBlocks,
+                                                   Predicate<BlockPos> posFilter,
+                                                   boolean allowObservableCellFallback) {
+        for (SharedWorldSight.Observation observation : SharedWorldSight.knownBlocks(
+                bot, targetBlocks, SHARED_MEMORY_CANDIDATE_LIMIT)) {
+            BlockPos pos = observation.pos();
+            if (posFilter != null && !posFilter.test(pos)) {
+                continue;
+            }
+            if (!canObserveHarvestTarget(bot, pos, allowObservableCellFallback)
+                    || !targetBlocks.contains(bot.level().getBlockState(pos).getBlock())) {
+                continue;
+            }
+            TargetChoice choice = targetChoice(bot, pos);
+            if (choice != null && isWalkReachable(bot, choice)) {
+                return choice;
+            }
+        }
+        return null;
     }
 
     private static boolean canObserveHarvestTarget(AIPlayerEntity bot,

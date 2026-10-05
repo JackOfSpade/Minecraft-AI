@@ -48,6 +48,10 @@ public final class MineTask extends AbstractTask {
     private BlockPos exploreStart;
     private int exploreStartedTick;
     private int completedExploreHops;
+    /** One fresh, bounded descent after observed horizontal exploration is exhausted. */
+    private MiningExplorationTask miningExploration;
+    private boolean miningExplorationAttempted;
+    private int miningExplorationTimeoutCredit;
 
     public MineTask(Block targetBlock, int countNeeded) {
         this.targetBlock = targetBlock;
@@ -77,11 +81,23 @@ public final class MineTask extends AbstractTask {
         exploreTarget = null;
         exploreStart = null;
         completedExploreHops = 0;
+        miningExploration = null;
+        miningExplorationAttempted = false;
+        miningExplorationTimeoutCredit = 0;
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        if (elapsed > 2400) {
+        // The child owns its own bounded descent clock.  Do not let MineTask's much shorter
+        // generic search timeout kill a safe, already-started descent in mid-stair.
+        if (tickMiningExploration(bot)) {
+            return;
+        }
+        // Eligible mining requests may spend their first window revealing terrain through
+        // observed hops, then have a separately bounded staircase.  Keep the historical short
+        // timeout for every unrelated direct mine request.
+        int timeout = MiningExplorationTask.supports(targetBlock) ? 6000 : 2400;
+        if (miningExploration == null && elapsed - miningExplorationTimeoutCredit > timeout) {
             BotLog.action(bot, "mine_timeout_detail", "phase", phase, "count", countSoFar + "/" + countNeeded,
                     "target", BuiltInRegistries.BLOCK.getKey(targetBlock));
             fail("mine_timeout");
@@ -100,6 +116,9 @@ public final class MineTask extends AbstractTask {
         HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6);
         if (choice == null) {
             if (startObservedExploration(bot)) {
+                return;
+            }
+            if (startMiningExploration(bot)) {
                 return;
             }
             fail(noObservedTargetReason());
@@ -197,6 +216,66 @@ public final class MineTask extends AbstractTask {
         return (searched ? "no_observed_resource_after_exploration:" : "no_observed_resource_in_local_view:") + target;
     }
 
+    /**
+     * The direct mine form can reach this point only after every bounded observed walk leg was
+     * tried.  A known ore family or common geological source may then open one fresh safe stair;
+     * arbitrary block requests keep the ordinary observed-only result.
+     */
+    private boolean startMiningExploration(AIPlayerEntity bot) {
+        if (miningExplorationAttempted || !MiningExplorationTask.supports(targetBlock)) {
+            return false;
+        }
+        if (!ToolTier.canHarvestWithInventory(bot, targetBlock.defaultBlockState())) {
+            fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(targetBlock));
+            return true;
+        }
+        miningExplorationAttempted = true;
+        miningExploration = MiningExplorationTask.forBlocks(Set.of(targetBlock));
+        miningExploration.start(bot);
+        if (miningExploration.state() == TaskState.RUNNING) {
+            BotLog.action(bot, "mine_exploration_handoff",
+                    "target", BuiltInRegistries.BLOCK.getKey(targetBlock),
+                    "from_y", bot.blockPosition().getY());
+            return true;
+        }
+        if (miningExploration.state() == TaskState.FAILED) {
+            String reason = miningExploration.failureReason();
+            miningExploration = null;
+            fail(reason == null || reason.isBlank() ? "mining_exploration_failed" : reason);
+            return true;
+        }
+        // Already at/below the target layer (or no matching profile): the caller reports its
+        // normal observed-search result rather than pretending a descent happened.
+        miningExploration = null;
+        return false;
+    }
+
+    /** Returns true while the child owns the bot, including a terminal child failure. */
+    private boolean tickMiningExploration(AIPlayerEntity bot) {
+        if (miningExploration == null) {
+            return false;
+        }
+        if (miningExploration.state() == TaskState.RUNNING) {
+            miningExploration.tick(bot);
+        }
+        if (miningExploration.state() == TaskState.RUNNING) {
+            return true;
+        }
+        if (miningExploration.state() == TaskState.COMPLETED) {
+            miningExplorationTimeoutCredit += miningExploration.elapsedTicks();
+            miningExploration = null;
+            observedSearchHops.reset();
+            clearExploreLeg();
+            completedExploreHops = 0;
+            phase = Phase.SEARCHING;
+            return false;
+        }
+        String reason = miningExploration.failureReason();
+        miningExploration = null;
+        fail(reason == null || reason.isBlank() ? "mining_exploration_failed" : reason);
+        return true;
+    }
+
     private void move(AIPlayerEntity bot) {
         if (targetPos == null || !bot.level().getBlockState(targetPos).is(targetBlock)) {
             phase = Phase.SEARCHING;
@@ -286,9 +365,30 @@ public final class MineTask extends AbstractTask {
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.abort(bot);
+            miningExploration = null;
+        }
         miner.cancel(bot);
         clearExploreLeg();
         bot.getActionPack().stopAll();
+    }
+
+    @Override
+    protected void onPause(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.pause(bot);
+        }
+        miner.cancel(bot);
+        clearExploreLeg();
+        bot.getActionPack().stopAll();
+    }
+
+    @Override
+    protected void onResume(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.resume(bot);
+        }
     }
 
     private static boolean lavaAdjacent(AIPlayerEntity bot, BlockPos pos) {

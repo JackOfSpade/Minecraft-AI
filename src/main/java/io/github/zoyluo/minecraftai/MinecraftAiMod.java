@@ -103,6 +103,7 @@ public class MinecraftAiMod implements ModInitializer {
             io.github.zoyluo.minecraftai.entity.TeleportAudit.clearAll();
             io.github.zoyluo.minecraftai.task.HostileBotLedger.clearAll();
             io.github.zoyluo.minecraftai.task.SharedVision.clearAll();
+            io.github.zoyluo.minecraftai.perception.SharedWorldSight.clearAll();
             io.github.zoyluo.minecraftai.task.AggroSense.clearAll();
         });
         ServerTickEvents.START_SERVER_TICK.register(server -> MiningAssistRuntime.beginTick());

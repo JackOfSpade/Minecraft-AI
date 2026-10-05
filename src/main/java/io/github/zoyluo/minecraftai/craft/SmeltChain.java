@@ -24,6 +24,7 @@ public final class SmeltChain {
         SMELT.put(Items.RAW_IRON, Items.IRON_INGOT);
         SMELT.put(Items.RAW_COPPER, Items.COPPER_INGOT);
         SMELT.put(Items.RAW_GOLD, Items.GOLD_INGOT);
+        SMELT.put(Items.ANCIENT_DEBRIS, Items.NETHERITE_SCRAP);
         SMELT.put(Items.COBBLESTONE, Items.STONE);
         SMELT.put(Items.OAK_LOG, Items.CHARCOAL); // Any log works; the planner defaults to oak
         // Food smelting (used by module B: cooked meat gives far more hunger/saturation than raw meat)

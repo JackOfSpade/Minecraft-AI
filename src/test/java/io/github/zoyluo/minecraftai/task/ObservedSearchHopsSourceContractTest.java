@@ -27,6 +27,9 @@ final class ObservedSearchHopsSourceContractTest {
                 "callers must receive the admitted local goal rather than treating the heading as a destination");
         assertTrue(source.contains("if (observedGoal == null)") && source.contains("bot.getActionPack().stopAll();"),
                 "a directional admission without an observable local endpoint must be refused and cleaned up");
+        assertTrue(source.contains("retiredObservedGoals")
+                        && source.contains("directional_hop_retired_observed_goal"),
+                "a locally observed goal that previously stalled must not be admitted into a repeat route");
         assertTrue(source.contains("private static final int[][] COMPASS"),
                 "an empty local view must still have a bounded, generic way to choose the next heading");
         assertFalse(source.contains("getBlockState("),
@@ -47,15 +50,31 @@ final class ObservedSearchHopsSourceContractTest {
                 "resource surveys must retain an observable-only prospect scan");
         assertFalse(source.contains("OreProspector.begin("),
                 "the hidden-world prospect scan must not be reintroduced into gather");
+        assertTrue(source.contains("ObservableSearchBounds.surveyRadius(configuredRadius)")
+                        && source.contains("PROSPECT_STATIONARY_TICK_LIMIT")
+                        && source.contains("gather_prospect_deferred_to_explore")
+                        && source.contains("gather_observed_search_exhausted"),
+                "an empty strict-survival view must skip unobservable wide scans and defer a slow visible prospect to bounded exploration");
         assertTrue(startExplore.contains("observedSearchHops.begin(bot, exploreHint)"),
                 "the fallback must request an observation-fenced hop rather than build a terrain waypoint");
+        assertTrue(startExplore.contains("nextExploreAdmissionTick")
+                        && source.contains("phase == Phase.SURVEY && nextExploreAdmissionTick >= 0")
+                        && source.contains("elapsed + EXPLORE_REFUSED_HOP_RETRY_TICKS"),
+                "a refused local hop must try its bounded alternate headings directly rather than appearing idle through a re-survey");
         assertFalse(startExplore.contains("findGroundAt(") || startExplore.contains("startPathTo("),
                 "starting exploration must not inspect an unseen column or directly route to one");
         assertTrue(startExplore.contains("exploreTarget = attempt.observedGoal()"),
                 "the task must retain the API-resolved local goal, never the remote heading");
-        assertTrue(exploreMove.contains("bot.blockPosition().distSqr(exploreStart) > 9.0D")
+        assertTrue(exploreMove.contains("bot.blockPosition().equals(exploreTarget)")
+                        && exploreMove.contains("!bot.blockPosition().equals(exploreStart)")
                         && exploreMove.contains("gather_explore_arrived"),
-                "a completed hop must be based on actual movement, not an attempted route");
+                "a completed hop must reach its exact admitted local goal after actual movement");
+        assertFalse(exploreMove.contains("distSqr(exploreTarget) <= 9.0D"),
+                "a GoalBlock hop must not be cancelled two or three cells early and reissued from the same area");
+        assertTrue(exploreMove.contains("explorationProgress.stalled(bot.blockPosition())")
+                        && exploreMove.contains("observedSearchHops.retireObservedGoal(stalledGoal)")
+                        && exploreMove.contains("gather_explore_stalled"),
+                "an active-but-stationary Baritone route must be retired before the coarse route timeout");
         assertTrue(source.contains("no_observed_resource_after_exploration")
                         && source.contains("no_observed_resource_in_local_view"),
                 "failure reporting must distinguish exhausted observed exploration from a local view, "

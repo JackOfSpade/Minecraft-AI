@@ -15,12 +15,13 @@ import net.minecraft.world.level.gameevent.vibrations.VibrationSystem;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The hearing of ONE companion: vanilla's own vibration system, CALLED (not copied), used exactly like the Warden and the sculk sensor
- * use it. A {@link VibrationSystem} (vanilla {@code VibrationSystem.Data}, our {@code VibrationSystem.User}), a vanilla
+ * The hearing of ONE companion: vanilla's own vibration system, used like the Warden and the sculk sensor use it. A
+ * {@link VibrationSystem} (vanilla {@code VibrationSystem.Data}, our {@code VibrationSystem.User}), a vanilla
  * {@code VibrationSystem.Listener} wrapped in a vanilla {@link DynamicGameEventListener} (registered in the level's game event registry:
  * {@code add} when the bot is first seen or arrives in another level, {@code move} every tick (it only acts when the bot changes chunk
  * section), {@code remove} on every exit path: death, despawn, level change, the switch turned off, the server stopping) and the vanilla
- * {@code VibrationSystem.Ticker.tick} once per tick.
+ * {@link SilentVibrationTicker} once per tick. It preserves vanilla scheduling and delivery while leaving out the otherwise visible
+ * vibration-particle packet.
  *
  * <p>What is heard, how far ({@code behaviour.perception.hearing.listenerRadius}, 16 = the Warden's), through what (wool blocks
  * vibrations, other blocks do not), what stays silent (a sneaking player's steps, spectators, wool-dampened steps) and how long a
@@ -88,7 +89,7 @@ final class BotEars implements VibrationSystem {
         } else {
             dynamic.move(level);
         }
-        VibrationSystem.Ticker.tick(level, data, user);
+        SilentVibrationTicker.tick(level, data, user);
     }
 
     /** Unregisters from the level (idempotent). */

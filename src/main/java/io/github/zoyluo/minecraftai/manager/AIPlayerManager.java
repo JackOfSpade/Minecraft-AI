@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.manager;
 
 import com.mojang.authlib.GameProfile;
+import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
@@ -34,6 +35,7 @@ import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.util.Mth;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Locale;
@@ -181,9 +183,13 @@ public final class AIPlayerManager {
         FakeClientConnection connection = new FakeClientConnection(PacketFlow.SERVERBOUND);
         CommonListenerCookie clientData = new CommonListenerCookie(profile, 0, options, false);
         Vec3 safePos = safeSpawnPosition(world, pos, name);
+        // A prior Baritone aim can have accumulated many full turns.  Restore the equivalent
+        // vanilla-facing angle rather than making clients interpolate that historical rotation.
+        float restoredYaw = LookAction.canonicalYaw(yaw);
+        float restoredPitch = Mth.clamp(pitch, -90.0F, 90.0F);
 
         server.getPlayerList().placeNewPlayer(connection, player, clientData);
-        player.teleportTo(world, safePos.x, safePos.y, safePos.z, Collections.emptySet(), yaw, pitch, true);
+        player.teleportTo(world, safePos.x, safePos.y, safePos.z, Collections.emptySet(), restoredYaw, restoredPitch, true);
         player.setHealth(20.0F);
         player.reviveForMinecraftAiSpawn();
         AttributeInstance stepHeight = player.getAttribute(Attributes.STEP_HEIGHT);
@@ -247,6 +253,7 @@ public final class AIPlayerManager {
         RuntimeLifecycleCoordinator.INSTANCE.deleteBot(entity);
         players.remove(entity.getUUID());
         io.github.zoyluo.minecraftai.task.SharedVision.forget(entity.getUUID());
+        io.github.zoyluo.minecraftai.perception.SharedWorldSight.forget(entity.getUUID());
         // The bot's vibration listener leaves the level's registry with it (and its memory of what it noticed is dropped).
         io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.forget(entity.getUUID());
         nameIndex.remove(normalizeName(name));

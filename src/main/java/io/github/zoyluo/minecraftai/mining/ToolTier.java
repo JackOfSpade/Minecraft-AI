@@ -64,6 +64,7 @@ public final class ToolTier {
             return STONE;
         }
         if (block == Blocks.COAL_ORE || block == Blocks.DEEPSLATE_COAL_ORE
+                || block == Blocks.NETHER_QUARTZ_ORE || block == Blocks.NETHER_GOLD_ORE
                 || block == Blocks.STONE || block == Blocks.DEEPSLATE
                 || block == Blocks.COBBLESTONE || block == Blocks.COBBLED_DEEPSLATE) {
             return WOOD;

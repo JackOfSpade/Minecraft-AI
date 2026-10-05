@@ -89,6 +89,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private final Set<DetourEdge> traversedDetourEdges = new LinkedHashSet<>();
     private final RestoreMetadata restoredCheckpoint;
     private final boolean invalidCheckpoint;
+    /**
+     * The generic, durable DESCEND_TO_Y goal was retired because its old checkpoints can no
+     * longer prove an observed navigation intent.  A fresh child created by
+     * {@link MiningExplorationTask} is different: it has no restored cursor and is owned by the
+     * active mining request that just exhausted its observed search.  Keep that narrow exception
+     * in this task rather than reopening the public/goal-executor entry point.
+     */
+    private final boolean miningExplorationChild;
     private boolean committed;
     private int budgetOffset;
     private int budgetLimit;
@@ -186,11 +194,26 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private static final int TORCH_EVERY = 6;   // a torch's light radius comfortably covers a 6-block drop, preventing mob spawns
 
     public DescendToYTask(int targetY) {
-        this(targetY, Map.of());
+        this(targetY, Map.of(), false);
     }
 
     public DescendToYTask(int targetY, Map<String, String> checkpoint) {
+        this(targetY, checkpoint, false);
+    }
+
+    /**
+     * Creates a non-durable, fresh descent owned by {@link MiningExplorationTask}.  Package
+     * visibility is intentional: goal restoration and other packages must continue to use the
+     * retired public DESCEND_TO_Y route rather than accidentally reviving an old checkpoint.
+     */
+    static DescendToYTask forMiningExploration(int targetY) {
+        return new DescendToYTask(targetY, Map.of(), true);
+    }
+
+    private DescendToYTask(int targetY, Map<String, String> checkpoint,
+                           boolean miningExplorationChild) {
         this.targetY = targetY;
+        this.miningExplorationChild = miningExplorationChild;
         Map<String, String> values = checkpoint == null ? Map.of() : checkpoint;
         Optional<RestoreMetadata> restored = inspectCheckpoint(values);
         this.invalidCheckpoint = !values.isEmpty()
@@ -406,7 +429,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
-        if (RetiredNavigationTask.legacyExcavationDisabled()) {
+        if (!miningExplorationChild && RetiredNavigationTask.legacyExcavationDisabled()) {
             RetiredNavigationTask.refuse(bot, "descend_to_y");
             fail(RetiredNavigationTask.OBSERVED_TARGET_REQUIRED);
             return;
@@ -2192,7 +2215,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     @Override
     public Map<String, String> checkpoint() {
-        if (invalidCheckpoint || ownedWaterSeals.size() > MAX_CHECKPOINTED_WATER_SEALS) {
+        // A nested mining-exploration descent deliberately has no durable identity.  Persisting
+        // it as the old DESCEND_TO_Y schema would make a later mission restore indistinguishable
+        // from a retired legacy task, so let its parent restart from ordinary observed search
+        // instead.
+        if (miningExplorationChild || invalidCheckpoint
+                || ownedWaterSeals.size() > MAX_CHECKPOINTED_WATER_SEALS) {
             return Map.of();
         }
         ArrayList<Map.Entry<BlockPos, Block>> sorted = new ArrayList<>(ownedWaterSeals.entrySet());

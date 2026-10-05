@@ -223,6 +223,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int observedOreSearchStartedBudget;
     private int observedOreSearchCompletedHops;
     private int observedOreSearchLastScanTick = -SCAN_INTERVAL;
+    /** One fresh depth handoff after the finite observation-fenced search is exhausted. */
+    private MiningExplorationTask miningExploration;
+    private boolean miningExplorationAttempted;
     private double lastTargetDist = Double.MAX_VALUE; // P0: the historical closest squared distance to the locked ore (monitors whether we're actually approaching)
     private int targetApproachTick;
     private int stripDirIndex = -1;   // Optimization 1: current horizontal digging direction for finding ore at this layer (index into STRIP_DIRS), -1 = not started
@@ -856,6 +859,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         clearObservedOreSearchLeg();
         observedOreSearchCompletedHops = 0;
         observedOreSearchLastScanTick = -SCAN_INTERVAL;
+        miningExploration = null;
+        miningExplorationAttempted = false;
         rememberedHighWorkPoses.clear();
         rememberedHighWorkPoseRouteOwner = null;
         rememberedHighWorkPoseRouteStartedBudget = -1;
@@ -943,6 +948,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.pause(bot);
+            return;
+        }
         endMoveInFlight(bot);
         detourInterrupted(bot);
         publishInterruptionCursor(bot, true);
@@ -954,6 +963,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onResume(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.resume(bot);
+            return;
+        }
         if (lastFace == null) {
             return;
         }
@@ -972,6 +985,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
+        if (miningExploration != null) {
+            miningExploration.abort(bot);
+            // Keep the terminal child marker until this task object is discarded so checkpoint()
+            // cannot serialize the parent strip cursor as if this fresh stair were durable.
+        }
         endMoveInFlight(bot);
         boolean detourWasLive = detourInterrupted(bot);
         publishInterruptionCursor(bot, false);
@@ -1174,6 +1192,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // cursor through one bounded sealed MiningService transaction.
         if (HarvestCore.isInventoryFull(bot)) {
             fail("ore_dig_inventory_service_required");
+            return;
+        }
+
+        // The child owns the staircase and its own no-progress/budget rules.  It runs only
+        // after the normal drop/capacity/safety settlement above, and before this parent's
+        // ordinary no-progress watchdog can mistake an in-progress descent for an idle scan.
+        if (tickMiningExploration(bot)) {
             return;
         }
 
@@ -1828,6 +1853,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         clearStripMovementOwnership();
         bot.getActionPack().stopAll();
         clearObservedOreSearchLeg();
+        if (startMiningExploration(bot)) {
+            return;
+        }
         String reason = observedOreSearchCompletedHops > 0
                 ? "no_observed_ore_after_exploration"
                 : "no_observed_ore_in_local_view";
@@ -1836,6 +1864,70 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "attempts", observedOreSearch.attempts(),
                 "collected", collected + "/" + targetCount);
         fail(reason);
+    }
+
+    /** Starts exactly one fresh, dimension-aware descent after observed ore search is exhausted. */
+    private boolean startMiningExploration(AIPlayerEntity bot) {
+        if (miningExplorationAttempted || !MiningExplorationTask.supports(targetOres)) {
+            return false;
+        }
+        // onTick's normal tool gate has already proven a compatible pickaxe exists.  Keep this
+        // call below that gate so a depth handoff cannot mine source rock by hand.
+        miningExplorationAttempted = true;
+        miningExploration = MiningExplorationTask.forOres(targetOres);
+        miningExploration.start(bot);
+        if (miningExploration.state() == TaskState.RUNNING) {
+            BotLog.action(bot, "ore_dig_exploration_handoff",
+                    "from_y", bot.blockPosition().getY(),
+                    "ores", oreFingerprint(targetOres));
+            noteProgress();
+            return true;
+        }
+        if (miningExploration.state() == TaskState.FAILED) {
+            String reason = miningExploration.failureReason();
+            fail(reason == null || reason.isBlank() ? "mining_exploration_failed" : reason);
+            return true;
+        }
+        // No downward target for this dimension or the bot already reached it.  Preserve the
+        // observed-only failure below rather than fabricating a successful exploration episode.
+        miningExploration = null;
+        return false;
+    }
+
+    /** Returns true while a nested staircase owns the tick, including terminal failure. */
+    private boolean tickMiningExploration(AIPlayerEntity bot) {
+        if (miningExploration == null) {
+            return false;
+        }
+        if (miningExploration.state() == TaskState.RUNNING) {
+            miningExploration.tick(bot);
+        }
+        if (miningExploration.state() == TaskState.RUNNING) {
+            noteProgress();
+            return true;
+        }
+        if (miningExploration.state() == TaskState.COMPLETED) {
+            miningExploration = null;
+            observedOreSearch.reset();
+            clearObservedOreSearchLeg();
+            observedOreSearchCompletedHops = 0;
+            observedOreSearchLastScanTick = -SCAN_INTERVAL;
+            lastScanTick = -SCAN_INTERVAL;
+            consecutiveSkips = 0;
+            // The child moved the physical work face without using this task's retired strip
+            // cursor.  Rebase the parent before any next scan can interpret that factual stair
+            // movement as an unpublished horizontal branch advance.
+            lastFace = bot.blockPosition().immutable();
+            cursorOrigin = lastFace;
+            stripProgressPos = lastFace;
+            restoringFace = false;
+            clearStripMovementOwnership();
+            noteProgress();
+            return false;
+        }
+        String reason = miningExploration.failureReason();
+        fail(reason == null || reason.isBlank() ? "mining_exploration_failed" : reason);
+        return true;
     }
 
     /** Two static reads and a return while L1 is off (design 5.3); see {@link #tickOpportunistic} for the idiom. */
@@ -2441,7 +2533,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     public Map<String, String> checkpoint() {
-        if (invalidCheckpoint || cursorOrigin == null) {
+        // A live MiningExplorationTask is deliberately fresh/non-durable.  Saving this parent
+        // cursor while its child owns a staircase would restore a stale strip face after a
+        // restart, so the normal observed search is restarted instead.
+        if (miningExploration != null || invalidCheckpoint || cursorOrigin == null) {
             return Map.of();
         }
         BlockPos origin = cursorOrigin == null
@@ -5563,7 +5658,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         java.util.Map<BlockPos, Double> costs = ObservedGraphSearch.search(feet, env);
-        int bestY = io.github.zoyluo.minecraftai.mining.MiningChain.bestY(targetOres);
+        int bestY = io.github.zoyluo.minecraftai.mining.MiningChain.bestY(bot.level(), targetOres);
         List<FrontierPlanner.Candidate> scored = new ArrayList<>();
         // Keyed by the Candidate record itself (field-equality hashCode/equals, verified): recovers the
         // winning BlockPos in O(1) with no risk of two candidates colliding on cost+distance alone (a

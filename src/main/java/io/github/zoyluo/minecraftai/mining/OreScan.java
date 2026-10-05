@@ -48,7 +48,10 @@ public final class OreScan {
             Blocks.DIAMOND_ORE,
             Blocks.DEEPSLATE_DIAMOND_ORE,
             Blocks.EMERALD_ORE,
-            Blocks.DEEPSLATE_EMERALD_ORE);
+            Blocks.DEEPSLATE_EMERALD_ORE,
+            Blocks.NETHER_QUARTZ_ORE,
+            Blocks.NETHER_GOLD_ORE,
+            Blocks.ANCIENT_DEBRIS);
 
     private OreScan() {
     }
@@ -157,7 +160,12 @@ public final class OreScan {
     }
 
     public static boolean isOreBlock(Block block) {
-        return COMMON_ORES.contains(block) || BuiltInRegistries.BLOCK.getKey(block).getPath().endsWith("_ore");
+        // Ancient debris is the one vanilla mineable ore-family member whose registry path does
+        // not end in "_ore".  Treat it consistently with Nether gold/quartz so a requested
+        // netherite expedition can use the same observed-target and depth-policy paths.
+        return block == Blocks.ANCIENT_DEBRIS
+                || COMMON_ORES.contains(block)
+                || BuiltInRegistries.BLOCK.getKey(block).getPath().endsWith("_ore");
     }
 
     public static Set<Block> oreFamily(Block block) {
@@ -203,35 +211,8 @@ public final class OreScan {
     }
 
     public static int preferredMiningY(Set<Block> ores) {
-        if (ores == null || ores.isEmpty()) {
-            return 16;
-        }
-        if (containsAny(ores, Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE,
-                Blocks.REDSTONE_ORE, Blocks.DEEPSLATE_REDSTONE_ORE,
-                Blocks.LAPIS_ORE, Blocks.DEEPSLATE_LAPIS_ORE)) {
-            return -54;
-        }
-        if (containsAny(ores, Blocks.GOLD_ORE, Blocks.DEEPSLATE_GOLD_ORE)) {
-            return -16;
-        }
-        if (containsAny(ores, Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE)) {
-            return 16;
-        }
-        if (containsAny(ores, Blocks.COPPER_ORE, Blocks.DEEPSLATE_COPPER_ORE,
-                Blocks.COAL_ORE, Blocks.DEEPSLATE_COAL_ORE,
-                Blocks.EMERALD_ORE, Blocks.DEEPSLATE_EMERALD_ORE)) {
-            return 48;
-        }
-        return 16;
-    }
-
-    private static boolean containsAny(Set<Block> blocks, Block... candidates) {
-        for (Block candidate : candidates) {
-            if (blocks.contains(candidate)) {
-                return true;
-            }
-        }
-        return false;
+        int preferred = MiningChain.bestY(ores);
+        return preferred == Integer.MAX_VALUE ? 16 : preferred;
     }
 
     /** Legacy OPERATOR-profile probe; strict-survival callers must use the bot-aware overload. */
