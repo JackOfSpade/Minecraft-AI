@@ -1,9 +1,7 @@
 package io.github.zoyluo.minecraftai.mining;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
@@ -68,15 +66,14 @@ public final class OreProspector {
 
     /**
      * Starts a resumable search with the same semantics as {@link #nearest(AIPlayerEntity, int, Predicate,
-     * Predicate)} (which is just {@code begin} plus one unbounded {@link Scan#step}). The capability decision
-     * is taken once here. Callers on the server thread drive it with {@link Scan#step} and a small per-tick
-     * nanosecond budget so a wide scan never lands as one 200-400 ms tick.
+     * Predicate)} (which is just {@code begin} plus one unbounded {@link Scan#step}). Hidden-world
+     * scanning is permanently retired, so this always constructs the observable-only scan. Callers on
+     * the server thread drive it with {@link Scan#step} and a small per-tick nanosecond budget so a
+     * wide scan never lands as one 200-400 ms tick.
      */
     public static Scan begin(AIPlayerEntity bot, int range,
                              Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
-        boolean hiddenScanAllowed = CapabilityRuntime.decide(
-                bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_prospector").allowed();
-        return new Scan(bot, range, match, posFilter, hiddenScanAllowed, false);
+        return new Scan(bot, range, match, posFilter, false, false);
     }
 
     /**
@@ -94,13 +91,11 @@ public final class OreProspector {
      * Like {@link #begin}, but a candidate cell counts as seen when {@link ObservableWorldQuery#canObserveFarmCell}
      * says the bot can see its real outline. Crops have an outline but no collider, so the collider-ray
      * face test of {@link #begin} can never see them; farm scans (village crop raiding) use this instead.
-     * The capability decision and the search cube are otherwise identical.
+     * Like every prospector scan, this remains observable-only.
      */
     public static Scan beginFarmCells(AIPlayerEntity bot, int range,
                                       Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
-        boolean hiddenScanAllowed = CapabilityRuntime.decide(
-                bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_prospector").allowed();
-        return new Scan(bot, range, match, posFilter, hiddenScanAllowed, true);
+        return new Scan(bot, range, match, posFilter, false, true);
     }
 
     /** Observable-only counterpart of {@link #beginFarmCells(AIPlayerEntity, int, Predicate, Predicate)}. */

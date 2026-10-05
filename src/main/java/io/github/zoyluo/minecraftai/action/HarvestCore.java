@@ -3,11 +3,7 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.log.CapabilityTally;
-import io.github.zoyluo.minecraftai.mode.CapabilityDecision;
-import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
 import java.util.Comparator;
@@ -43,8 +39,6 @@ public final class HarvestCore {
     }
 
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Block targetBlock, int horizontalRadius, int down, int up) {
-        CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_block");
-        CapabilityTally.INSTANCE.record(bot.getUUID(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
         TargetChoice remembered = knownVisibleTarget(bot, Set.of(targetBlock), null, false);
         if (remembered != null) {
             return remembered;
@@ -52,7 +46,7 @@ public final class HarvestCore {
         BlockPos origin = bot.blockPosition();
         return firstWalkReachable(bot, origin,
                 BlockPos.betweenClosedStream(origin.offset(-horizontalRadius, -down, -horizontalRadius), origin.offset(horizontalRadius, up, horizontalRadius))
-                        .filter(pos -> scanDecision.allowed() || withinObservationReach(bot, pos))
+                        .filter(pos -> withinObservationReach(bot, pos))
                         .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
                         .filter(pos -> bot.level().getBlockState(pos).is(targetBlock))
                         .map(BlockPos::immutable)
@@ -95,18 +89,16 @@ public final class HarvestCore {
 
     /**
      * Starts the same search as {@link #nearestReachableBlock(AIPlayerEntity, Set, int, int, int, Predicate, boolean)}
-     * (which is just this plus one unbounded {@link NearestScan#step}) as a resumable scan. The capability decision
-     * is taken once here. A caller on the server thread advances it a couple of milliseconds per tick, so a radius-48
+     * (which is just this plus one unbounded {@link NearestScan#step}) as a resumable observable-only
+     * scan. A caller on the server thread advances it a couple of milliseconds per tick, so a radius-48
      * survey (about 170,000 positions, 90-165 ms cold in the strict profile) never lands as one server tick.
      */
     public static NearestScan beginNearestScan(AIPlayerEntity bot, Set<Block> targetBlocks,
                                                int horizontalRadius, int down, int up,
                                                Predicate<BlockPos> posFilter,
                                                boolean allowObservableCellFallback) {
-        CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_blocks");
-        CapabilityTally.INSTANCE.record(bot.getUUID(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
         return new NearestScan(bot, targetBlocks, horizontalRadius, down, up, posFilter,
-                allowObservableCellFallback, scanDecision.allowed());
+                allowObservableCellFallback, false);
     }
 
     /**

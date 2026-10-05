@@ -3,9 +3,7 @@ package io.github.zoyluo.minecraftai.log;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.minecraft.core.BlockPos;
@@ -207,7 +205,6 @@ public final class DiagnosticLogger {
     // Only scanned once per rich snapshot (every SNAPSHOT_INTERVAL), not included in the per-tick Sample, to avoid scanning entities every tick and hurting TPS.
     private static String scanNearby(AIPlayerEntity bot) {
         try {
-            CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "diagnostic_nearby");
             AABB box = bot.getBoundingBox().inflate(24.0D);
             List<LivingEntity> ents = bot.level().getEntitiesOfClass(
                     LivingEntity.class, box,

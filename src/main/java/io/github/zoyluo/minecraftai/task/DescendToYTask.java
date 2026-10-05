@@ -819,15 +819,20 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return;
         }
         if (solid != null) {
+            BlockState solidState = world.getBlockState(solid);
             // Tool gate (same as DigDownTask): fail immediately with a typed reason when no
             // qualifying pickaxe is available, letting GoalExecutor work backward to restock a
             // pickaxe; otherwise grinding away at deepslate bare-handed would burn the entire descent
-            // window into an untyped descend_timeout.
-            if (!ToolTier.canHarvestWithInventory(bot, world.getBlockState(solid))) {
+            // window into an untyped descend_timeout. This is a pickaxe gate, not a generic
+            // collision-clearance gate: snow, dirt, leaves and similar non-pickaxe blocks may
+            // still be cleared for a safe staircase even if their drops would prefer another tool.
+            // Using canHarvestWithInventory directly here made a snow layer report
+            // need_better_tool:minecraft:air after it had already been broken successfully.
+            if (!canClearForDescent(bot, solidState)) {
                 miner.cancel(bot);
                 bot.getActionPack().stopAll();
                 fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(
-                        world.getBlockState(solid).getBlock()));
+                        solidState.getBlock()));
                 return;
             }
             if (solid.equals(ahead) || solid.equals(ahead.above())) {
@@ -1628,6 +1633,25 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 || ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos);
     }
 
+    /**
+     * Whether a visible obstruction can be cleared while making a staircase. The descent owns a
+     * travel corridor, not a resource-harvesting request, so only blocks with an actual pickaxe
+     * tier need a matching pickaxe. Other obstructions remain legal to break by hand or with the
+     * best available tool; BlockMiner selects that tool and retains its normal timeout/failure
+     * behavior. The explicit air/fluid guard also keeps a stale state read from ever becoming the
+     * nonsensical {@code need_better_tool:minecraft:air} failure observed under snow.
+     */
+    private static boolean canClearForDescent(AIPlayerEntity bot, BlockState state) {
+        return !requiresPickaxeForDescent(state) || ToolTier.canHarvestWithInventory(bot, state);
+    }
+
+    /** Package-visible so the snow/air classification behind the descent tool gate has a direct unit test. */
+    static boolean requiresPickaxeForDescent(BlockState state) {
+        return !state.isAir()
+                && state.getFluidState().isEmpty()
+                && ToolTier.requiredPickaxeTier(state.getBlock()) != ToolTier.NONE;
+    }
+
     // When the shaft is blocked by lava (or another obstruction), move laterally one cell to an
     // adjacent column that is "lava-free and diggable" to go around it and keep descending. Mine
     // the block leading to that side column (never mine a block touching lava, to prevent a
@@ -1686,16 +1710,17 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 }
                 BlockPos solid = TerrainProbe.firstSolid(world, side, side.above());
                 if (solid != null) {
+                    BlockState solidState = world.getBlockState(solid);
                     // Only a genuinely visible neighbouring lava source (through an already open
                     // gap elsewhere) may reject this block; unmined rock beyond it stays UNKNOWN.
                     if (hasObservedAdjacentLava(bot, world, solid)) {
                         continue; // the block to mine is adjacent to already-visible lava; mining it would cause a lava collapse -- switch direction
                     }
-                    if (!ToolTier.canHarvestWithInventory(bot, world.getBlockState(solid))) {
+                    if (!canClearForDescent(bot, solidState)) {
                         miner.cancel(bot);
                         bot.getActionPack().stopAll();
                         fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(
-                                world.getBlockState(solid).getBlock()));
+                                solidState.getBlock()));
                         return true;
                     }
                     if (miner.target() == null || !miner.target().equals(solid)) {
