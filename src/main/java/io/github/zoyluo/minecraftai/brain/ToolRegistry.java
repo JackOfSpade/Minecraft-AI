@@ -129,7 +129,7 @@ public final class ToolRegistry {
 
     /** Movement and low-level actions plus crafting: say, look/move/mine/place, hotbar, inventory, tool equip, craft/eat/smelt. */
     private void registerMovementAndCraftingTools() {
-        register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the MinecraftAi panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must be paired with an action or goal tool in the same response; purpose=status is for progress or completion after work has started. For a requested specialized mechanic that has no supplied tool, use report_unsupported instead of promising it in say.", objectSchema()
+        register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the MinecraftAi panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must precede an applicable action or goal tool, in the same response when the provider supports multiple calls or in the runtime-forced next call when it does not; purpose=status is for progress or completion after work has started. For a requested specialized mechanic that has no supplied tool, use report_unsupported instead of promising it in say.", objectSchema()
                 .property("message", stringSchema("the text to say"))
                 .property("purpose", enumStringSchema("answer for a pure question, plan before starting work, or status after work", "answer", "plan", "status"))
                 .required("message")

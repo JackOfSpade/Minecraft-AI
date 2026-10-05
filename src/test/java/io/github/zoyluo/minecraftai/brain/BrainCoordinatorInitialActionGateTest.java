@@ -62,6 +62,24 @@ final class BrainCoordinatorInitialActionGateTest {
     }
 
     @Test
+    void admitsAWorkStartInTheImmediateFollowUpToAValidPlanOnlyRound() {
+        List<ChatToolCall> planOnlyRound = List.of(
+                new ChatToolCall("plan", "say",
+                        "{\"message\":\"I will clear three grass plants.\",\"purpose\":\"plan\"}"));
+
+        // Gemini may return exactly one function call. The accepted plan becomes the prerequisite
+        // for the continuation, where say is withheld and this work-start tool is allowed.
+        assertFalse(BrainCoordinator.initialActionGate(planOnlyRound, false).blockedActionCalls());
+        assertTrue(BrainCoordinator.containsValidPlan(planOnlyRound));
+        BrainCoordinator.InitialActionGate actionFollowUp = BrainCoordinator.initialActionGate(List.of(
+                new ChatToolCall("clear", "clear_grass", "{\"count\":3}")),
+                BrainCoordinator.containsValidPlan(planOnlyRound));
+
+        assertFalse(actionFollowUp.blockedActionCalls());
+        assertEquals("clear_grass", actionFollowUp.orderedCalls().get(0).name());
+    }
+
+    @Test
     void onlyAConcreteWorkToolCanMarkTheInitialRequestAsStarted() {
         assertTrue(BrainCoordinator.isWorkStartTool("clear_grass"));
         assertTrue(BrainCoordinator.isWorkStartTool("break_blocks"));

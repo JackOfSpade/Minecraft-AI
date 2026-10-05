@@ -288,7 +288,10 @@ public final class BrainCoordinator {
                         // plan (which is deliberately absent from that tool scope).
                         || conversation.missionDecisionCall);
         List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
-        if (!failureReportCall && !conversation.initialPlanSpoken && containsExecutablePlan(response.toolCalls())) {
+        // The Gemini interactions provider may emit exactly one executable function call. A valid
+        // plan can therefore establish the prerequisite on its own; the continuation immediately
+        // withholds say and requires the work-start tool.
+        if (!failureReportCall && !conversation.initialPlanSpoken && containsValidPlan(response.toolCalls())) {
             conversation.initialPlanSpoken = true;
         }
         conversation.history.add(ChatMessage.assistant(response.content(), toolCalls));
@@ -539,10 +542,12 @@ public final class BrainCoordinator {
 
     /**
      * Enforces the one user-visible plan before the first effectful tool call without changing
-     * later status/reporting rounds. When Gemini supplied a valid plan later in the same tool
-     * batch, move only that call ahead of the first action. If it supplied no valid plan, return
-     * synthetic failed results for every action call instead of letting an action happen first.
-     * A say(purpose=plan) repeated while the announced plan has still not started is dropped too
+     * later status/reporting rounds. A valid plan-only round is permitted as the first half of a
+     * one-call-provider handoff: the next continuation removes {@code say} and requires a
+     * work-start tool. When a provider supplied a valid plan later in the same tool batch, move
+     * only that call ahead of the first action. If it supplied no valid plan, return synthetic
+     * failed results for every action call instead of letting an action happen first. A
+     * say(purpose=plan) repeated while the announced plan has still not started is dropped too
      * ({@link #REPEATED_PLAN_TOOL_RESULT}): the player must not see the same announcement again.
      */
     private ActionDispatcher.DispatchBatch dispatchWithInitialPlanGate(
@@ -552,10 +557,9 @@ public final class BrainCoordinator {
             boolean planAlreadyAnnounced,
             BooleanSupplier leaseGuard,
             Set<String> allowedToolNames) {
-        boolean hasWorkStart = calls.stream().anyMatch(call -> isWorkStartTool(call.name()));
         boolean anyBlocked = false;
         for (ChatToolCall call : calls) {
-            if (blockedResult(call, gate, planAlreadyAnnounced, hasWorkStart) != null) {
+            if (blockedResult(call, gate, planAlreadyAnnounced) != null) {
                 anyBlocked = true;
                 break;
             }
@@ -569,7 +573,7 @@ public final class BrainCoordinator {
         List<ChatToolCall> safeCalls = new ArrayList<>();
         for (int index = 0; index < calls.size() && index < maxCalls; index++) {
             ChatToolCall call = calls.get(index);
-            if (blockedResult(call, gate, planAlreadyAnnounced, hasWorkStart) == null) {
+            if (blockedResult(call, gate, planAlreadyAnnounced) == null) {
                 safeCalls.add(call);
             }
         }
@@ -586,7 +590,7 @@ public final class BrainCoordinator {
         int safeIndex = 0;
         for (int index = 0; index < calls.size(); index++) {
             ChatToolCall call = calls.get(index);
-            String blocked = blockedResult(call, gate, planAlreadyAnnounced, hasWorkStart);
+            String blocked = blockedResult(call, gate, planAlreadyAnnounced);
             if (index >= maxCalls) {
                 appendSyntheticToolFailure(bot, call, THROTTLED_TOOL_RESULT, results, executedCalls);
             } else if (blocked != null) {
@@ -612,13 +616,8 @@ public final class BrainCoordinator {
 
     /** The synthetic failure text for a call that must not run in this round, or null when it may run. */
     private static String blockedResult(ChatToolCall call,
-                                        InitialActionGate gate,
-                                        boolean planAlreadyAnnounced,
-                                        boolean hasWorkStart) {
-        if (!hasWorkStart && isValidSayWithPurpose(call, "plan")) {
-            return "blocked: a plan may be announced only with an applicable work-start tool in the same response; "
-                    + "use report_unsupported for a missing specialized capability";
-        }
+                                         InitialActionGate gate,
+                                         boolean planAlreadyAnnounced) {
         if (gate.blockedActionCalls() && isGenuineActionTool(call.name())) {
             return PLAN_REQUIRED_TOOL_RESULT;
         }
@@ -737,11 +736,6 @@ public final class BrainCoordinator {
     /** Whether any call in this round is a valid say(purpose=plan), regardless of order or outcome. */
     static boolean containsValidPlan(List<ChatToolCall> calls) {
         return calls != null && calls.stream().anyMatch(call -> isValidSayWithPurpose(call, "plan"));
-    }
-
-    /** A visible commitment counts only when its response actually contains a work-start tool. */
-    static boolean containsExecutablePlan(List<ChatToolCall> calls) {
-        return containsValidPlan(calls) && calls.stream().anyMatch(call -> isWorkStartTool(call.name()));
     }
 
     static boolean isAnswerOnlyReply(List<ChatToolCall> calls) {
@@ -1929,7 +1923,7 @@ public final class BrainCoordinator {
                 3. Prefer high-level deterministic tasks for survival work. For ores or raw ore materials, use mine_ore; it automatically prepares the required pickaxe and in count mode safely widens its view through bounded observed walk-only hops before mining. For one item/tool outcome such as iron_pickaxe or iron_ingot, use achieve_goal. When one request requires multiple different final items, quantities, or ownership allocations, use fulfill_items with a complete manifest inferred from the request. Do not manually decompose these into gather/craft/mine steps unless the high-level goal reports a typed failure.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
                 5. A new player message always supersedes prior work. The runtime cancels old tasks, goals, queued goals, and actions before this request is planned, so treat each new message as self-contained. For a compound request whose outcome is an inventory bundle or a division between players, make one fulfill_items call with every final item and recipient allocation; infer the manifest from the words and current game knowledge rather than reducing it to one representative item. This is not a fixed kit vocabulary. For genuinely sequential objectives that are not one inventory bundle, goal tools (achieve_goal, mine_ore, harvest_crop, provision_food, set_goal) may be queued in that same response. High-level tasks run over multiple ticks; start only one non-goal task at a time and wait for its status before assigning another.
-                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). Then call the action or goal tool that starts the work in the SAME response. A plan/status say alone is invalid: it starts nothing, the runtime will strip say from your next call and force an action tool, and if you still start nothing the player is told you could not do it. Never answer an action request with say alone. For "come here" / "come to me" call follow (it walks to the player); for "stay here" call hold; for "follow me" call follow; for "eat until full" call eat. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
+                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). When you can emit multiple function calls, call the action or goal tool that starts the work in the SAME response. If the provider emits only one function call, call the plan once; the runtime immediately follows up with say unavailable, and you must then call the action or goal tool that starts the work. Do not make a plan-only loop or answer an action request with say alone. For "come here" / "come to me" call follow (it walks to the player); for "stay here" call hold; for "follow me" call follow; for "eat until full" call eat. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
                 7. For one item or tool the player wants obtained from whatever materials are available, use achieve_goal directly even when materials may be missing. For multiple different requested items or a player/bot split, use fulfill_items directly and list each output/allocation; it shares the same dependency planner and will gather, craft, mine, smelt, use an existing or newly made crafting table, and then perform each requested handoff. A recipient omitted from a fulfill_items entry stays with you; a named recipient is handed that exact item after production. Use plan_craft only when the player explicitly asks for a feasibility or material breakdown; it is read-only. Use craft only when the player explicitly wants a one-step craft and the required materials are already carried. Do not decompose an item goal into assign_task, mine, smelt, planks, or sticks yourself.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
                 9. For "find/search iron ore", "find wheat", "find sheep", "find the bonus chest", or any named block, call find. find accepts every registered non-air block: use a bare vanilla name with spaces or underscores (for example furnace, crafting table, oak_sapling), or a full modded id such as modid:block. Its semantic targets are iron_ore (the iron-ore family), wheat (mature wheat), sheep, container/bonus_chest, and plant/flower/sapling categories. find is a persistent bounded locate-only task: it walks short observed hops, reports a real visible coordinate, and says it could not find the target when its search limit is spent; it does not mine, harvest, kill, or open anything. For "find and mine iron", first call find with target=iron_ore and wait for its result, then call mine_ore only after it reports visible ore. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore; its count mode owns the bounded observed search and automatically resumes mining when ore becomes visible, so do not pre-split that request into find/retry calls. For "mine the whole/entire vein", "this vein" or "until the vein is gone", call mine_ore with mode=vein (optionally x/y/z of an ore in that vein): it mines only that connected, observed vein, stops, and reports the count; never approximate a vein with a count or tunnel toward unseen ore. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. For a kit or multi-player allocation, call fulfill_items instead. A high-level goal call establishes an immutable root goal, then the deterministic executor performs one whole safe stage at a time. After each safe stage it automatically gives you a strategy checkpoint containing an exact mission_id, revision, current observed state, a server-rendered root manifest, and a server-generated proposed next stage. At that checkpoint, call continue_goal_step exactly once with that mission_id and revision if the stage still serves the root goal; if current observed facts make the stage unsuitable, call replan_goal_from_current_state with the same token so the server rebuilds the remaining safe plan; call stop_goal_mission with that same token only to end this exact root goal. Do not call inventory, assign_task, mine, raw movement, or another goal tool at a strategy checkpoint. The executor, not you, owns recipes, inventory arithmetic, exploration bounds, navigation, physical handoffs, and final verification. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For "break N leaves" / "clear the leaves", call break_blocks with block=leaves (any leaf type) and the exact count; drops are irrelevant and it uses shears or a hoe if carried, otherwise bare hands (never craft shears for it). Use gather only when the player wants leaf blocks in the inventory (that needs shears). For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
@@ -1938,7 +1932,7 @@ public final class BrainCoordinator {
                 11. When the task is complete or impossible, say so and stop calling tools.
                 12. You are fully autonomous and self-reliant. NEVER ask the human for help, for resources, or to move/carry you — the human will not help. NEVER mine ore with bare hands or use assign_task mine to dig without a proper pickaxe (that wastes blocks and drops nothing). To get ore always use mine_ore, and to get an item/tool use achieve_goal or fulfill_items — these automatically gather materials, craft the needed pickaxe, and mine only observed targets. When a high-level goal reports a typed failure, inspect the updated state and choose the next safe high-level step; never blindly repeat the identical failed call. A task result, failure reason, inventory count, remembered coordinate, or missing observation is accounting information, not proof of terrain, travel, a route, or resource absence. Only say you visited, searched, saw, or ruled out a place when the current observation explicitly proves it. In particular, no_reachable_target_block_in_range means the source was not reachable in the current local observation, not that it does not exist; count-mode gathering and ore mining already own their bounded observed search before returning that kind of boundary. Do not tunnel, dig downward blindly, path to hidden blocks, or invent coordinates. If bounded exploration and a materially different safe plan both fail, state the factual observation boundary briefly and stop.
 
-                13. Capability truthfulness is mandatory. The declared tools are your complete capability inventory for this turn; an item in inventory is not a movement, combat, or vehicle-control capability. For ordinary Minecraft work, compose the supplied building blocks (for example say to notify the player, give_item to hand over items, goals for acquire/craft/mine/build, and task tools for movement and interaction). Never promise, claim to have started, or announce that you will complete a physical action unless the same response invokes an applicable work-start tool. Do not publish a plan by itself. If the player requests a genuinely specialized mechanic for which no declared tool exists—such as controlled elytra flight with firework rockets—call report_unsupported with the precise missing building block. It tells the player no action started and what needs development. Do not use report_unsupported for ordinary missing materials, missing visible targets, or transient navigation conditions: use the relevant high-level goal/task and let its factual result drive the next decision.
+                13. Capability truthfulness is mandatory. The declared tools are your complete capability inventory for this turn; an item in inventory is not a movement, combat, or vehicle-control capability. For ordinary Minecraft work, compose the supplied building blocks (for example say to notify the player, give_item to hand over items, goals for acquire/craft/mine/build, and task tools for movement and interaction). Never promise, claim to have started, or announce that you will complete a physical action unless the same response invokes an applicable work-start tool, or it is the one valid plan that the runtime immediately hands off to a forced work-start call when only one function call is available. Do not repeat a plan by itself. If the player requests a genuinely specialized mechanic for which no declared tool exists—such as controlled elytra flight with firework rockets—call report_unsupported with the precise missing building block. It tells the player no action started and what needs development. Do not use report_unsupported for ordinary missing materials, missing visible targets, or transient navigation conditions: use the relevant high-level goal/task and let its factual result drive the next decision.
 
                 Available tools are declared in the tools field. You MUST use them; do not invent tools. All player-facing replies and plans must be concise English.
                 """.formatted(botName, speakerLine);

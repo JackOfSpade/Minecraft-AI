@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pins the no-false-promise boundary without requiring a bootstrapped Minecraft registry. */
@@ -26,12 +27,14 @@ final class CapabilityTruthfulnessContractTest {
     }
 
     @Test
-    void freeTextAndPlanOnlyPromisesAreNotPublishedAsWork() throws IOException {
+    void freeTextIsNotPublishedAndAPlanOnlyCallHasASingleForcedActionHandoff() throws IOException {
         String coordinator = read("brain/BrainCoordinator.java");
 
         assertTrue(coordinator.contains("bot_text_reply\", \"published\", \"false\""));
-        assertTrue(coordinator.contains("containsExecutablePlan"));
-        assertTrue(coordinator.contains("a plan may be announced only with an applicable work-start tool"));
+        assertTrue(coordinator.contains("containsValidPlan(response.toolCalls())"));
+        assertTrue(coordinator.contains("one-call-provider handoff"));
+        assertTrue(coordinator.contains("withholds say and requires the work-start tool"));
+        assertFalse(coordinator.contains("a plan may be announced only with an applicable work-start tool"));
         assertTrue(coordinator.contains("Capability truthfulness is mandatory"));
     }
 }
