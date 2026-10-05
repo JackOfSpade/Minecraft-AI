@@ -147,12 +147,13 @@ class AssistObservationSourceContractTest {
     }
 
     @Test
-    void castViewRayClampsToPerceptionRadiusAndReadsStateOnlyAfterTheBlockTypeCheck() throws IOException {
+    void castViewRayClampsToTrackedRenderDistanceAndReadsStateOnlyAfterTheBlockTypeCheck() throws IOException {
         String source = read(MAIN.resolve("mode/ObservableWorldQuery.java"));
         String body = castViewRayBody();
-        assertTrue(body.contains("perception().radius()"), "range must be clamped to the live perception radius");
-        assertTrue(body.contains("Math.min(range, Math.max(1, MinecraftAiConfig.get().perception().radius()))"),
-                "range is min(range, max(1, radius))");
+        assertTrue(body.contains("botRenderDistanceBlocks(bot)"),
+                "range must be clamped to the bot's current tracked render distance");
+        assertTrue(body.contains("Math.min(range, botRenderDistanceBlocks(bot))"),
+                "range is min(range, tracked render distance in blocks)");
         assertFalse(body.contains("CapabilityRuntime.decide"), "no privileged read exists here");
         assertFalse(body.contains("CapabilityRuntime"), "not even a mention");
         assertTrue(body.contains("bot.getEyePosition()"), "the ray starts at the bot's own eye");

@@ -60,6 +60,7 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -138,6 +139,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /** Short, walk-only observation-fenced legs used when no target ore is in the current view. */
     private static final int OBSERVED_SEARCH_MAX_HOPS = 16;
     private static final int OBSERVED_SEARCH_MOVE_LIMIT = 240;
+    /** A cave must be searched from its visible rim before at most two further safe stair episodes. */
+    private static final int MAX_CAVE_REDESCENTS = 2;
     private static final int PROSPECT_RANGE = 64;       // prospecting (wide-range locate of the nearest ore) radius -- kicks in when nothing is found nearby
     private static final int PROSPECT_INTERVAL = 40;    // prospecting is relatively expensive (scans section by section), once every 2s
     private static final int VERTICAL_SCAN = 10;
@@ -223,9 +226,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int observedOreSearchStartedBudget;
     private int observedOreSearchCompletedHops;
     private int observedOreSearchLastScanTick = -SCAN_INTERVAL;
-    /** One fresh depth handoff after the finite observation-fenced search is exhausted. */
+    /** One fresh depth handoff, plus bounded re-descent only after a real cave survey. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
+    private boolean miningExplorationCaveSurveyRequired;
+    private int miningExplorationCaveRedescents;
+    private final Set<BlockPos> miningExplorationExcludedCavities = new LinkedHashSet<>();
     private double lastTargetDist = Double.MAX_VALUE; // P0: the historical closest squared distance to the locked ore (monitors whether we're actually approaching)
     private int targetApproachTick;
     private int stripDirIndex = -1;   // Optimization 1: current horizontal digging direction for finding ore at this layer (index into STRIP_DIRS), -1 = not started
@@ -861,6 +867,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         observedOreSearchLastScanTick = -SCAN_INTERVAL;
         miningExploration = null;
         miningExplorationAttempted = false;
+        miningExplorationCaveSurveyRequired = false;
+        miningExplorationCaveRedescents = 0;
+        miningExplorationExcludedCavities.clear();
         rememberedHighWorkPoses.clear();
         rememberedHighWorkPoseRouteOwner = null;
         rememberedHighWorkPoseRouteStartedBudget = -1;
@@ -1674,11 +1683,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         if (RetiredNavigationTask.legacyExcavationDisabled()) {
             // P5's frontier trigger needs to run before the strict-survival fallback below.  That fallback
-            // deliberately returns after starting an observed search hop, which otherwise makes FRONTIER
-            // unreachable whenever legacy excavation is disabled (the shipped strict-survival policy).
-            // explorationTick itself only accepts a route made from observed standable cells; if its own
-            // gates reject this view, retain the bounded observed-search behaviour unchanged.
+            // deliberately returns after taking an observed cave route or starting the safe depth
+            // handoff, which otherwise makes FRONTIER unreachable whenever legacy excavation is
+            // disabled (the shipped strict-survival policy). explorationTick itself only accepts a
+            // route made from observed standable cells; if its own gates reject this view, a player
+            // above the requested ore layer starts a staircase before spending the surface-hop budget.
             if (explorationTick(bot, world)) {
+                return;
+            }
+            if (startMiningExploration(bot)) {
                 return;
             }
             if (startObservedOreSearch(bot)) {
@@ -1866,15 +1879,27 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         fail(reason);
     }
 
-    /** Starts exactly one fresh, dimension-aware descent after observed ore search is exhausted. */
+    /** Starts a fresh dimension-aware descent, reopening it only after productive observed cave exploration. */
     private boolean startMiningExploration(AIPlayerEntity bot) {
-        if (miningExplorationAttempted || !MiningExplorationTask.supports(targetOres)) {
+        if (!MiningExplorationTask.supports(targetOres)) {
+            return false;
+        }
+        if (miningExplorationCaveSurveyRequired) {
+            if (!observedOreSearch.exhausted() || observedOreSearchCompletedHops <= 0
+                    || miningExplorationCaveRedescents >= MAX_CAVE_REDESCENTS) {
+                return false;
+            }
+            miningExplorationCaveSurveyRequired = false;
+            miningExplorationAttempted = false;
+            miningExplorationCaveRedescents++;
+        }
+        if (miningExplorationAttempted) {
             return false;
         }
         // onTick's normal tool gate has already proven a compatible pickaxe exists.  Keep this
         // call below that gate so a depth handoff cannot mine source rock by hand.
         miningExplorationAttempted = true;
-        miningExploration = MiningExplorationTask.forOres(targetOres);
+        miningExploration = MiningExplorationTask.forOres(targetOres, miningExplorationExcludedCavities);
         miningExploration.start(bot);
         if (miningExploration.state() == TaskState.RUNNING) {
             BotLog.action(bot, "ore_dig_exploration_handoff",
@@ -1907,6 +1932,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return true;
         }
         if (miningExploration.state() == TaskState.COMPLETED) {
+            boolean openCavity = miningExploration.completedAtOpenCavity();
+            BlockPos caveEntry = miningExploration.completedOpenCavity();
             miningExploration = null;
             observedOreSearch.reset();
             clearObservedOreSearchLeg();
@@ -1922,6 +1949,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             stripProgressPos = lastFace;
             restoringFace = false;
             clearStripMovementOwnership();
+            miningExplorationCaveSurveyRequired = openCavity;
+            if (openCavity && caveEntry != null) {
+                miningExplorationExcludedCavities.add(caveEntry.immutable());
+            }
+            if (openCavity) {
+                BotLog.action(bot, "ore_dig_exploration_cave_survey",
+                        "remaining_redescents", MAX_CAVE_REDESCENTS - miningExplorationCaveRedescents,
+                        "excluded_entries", miningExplorationExcludedCavities.size());
+            }
             noteProgress();
             return false;
         }

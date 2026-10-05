@@ -73,6 +73,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private static final int EXPLORE_REFUSED_HOP_RETRY_TICKS = 1;
     private static final int EXPLORE_MOVE_LIMIT = 300;   // If a single hop hasn't arrived after 15s → abandon the hop and return to SURVEY
     private static final int EXPLORE_SCAN_INTERVAL = 20; // Throttle light en-route scans (once per 1s, 16 blocks); stop as soon as a target is seen
+    /** A cave is worth surveying first; at most this many productive cave surveys may reopen a safe stair. */
+    private static final int MAX_CAVE_REDESCENTS = 2;
     private static final int KNOWN_RESOURCE_RANGE = 192; // Max distance for heading toward a knowledge-base remembered point
     private static final int GOTO_FAIL_EXCLUDE = 2;      // N consecutive GOTO failures toward the same target → blacklist it in working memory
     private static final int GOTO_STUCK_LIMIT = 80;      // R1: if the coordinate hasn't moved for this long (4s) while GOTO paths toward a tree → assume airborne/stuck and force recovery
@@ -197,9 +199,14 @@ public final class GatherQuotaTask extends AbstractTask {
     // A refused direction did not move or inspect terrain.  Keep retrying its bounded alternate
     // headings directly instead of performing another expensive 48/96-block survey first.
     private int nextExploreAdmissionTick = -1;
-    /** One fresh descent after all ordinary observed source-search hops are spent. */
+    /** One safe descent, plus at most two cave-survey re-descents, for a geological source. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
+    /** A visible cave stopped the stair; consume actual observed cave movement before digging again. */
+    private boolean miningExplorationCaveSurveyRequired;
+    private int miningExplorationCaveRedescents;
+    /** Every cave entry this request actually surveyed; fresh re-descents rotate past these rims. */
+    private final Set<BlockPos> miningExplorationExcludedCavities = new LinkedHashSet<>();
     /** Nested descent time has its own hard budget and does not consume the outer gather window. */
     private int miningExplorationTimeoutCredit;
     private BlockPos lastGotoTarget;
@@ -329,6 +336,9 @@ public final class GatherQuotaTask extends AbstractTask {
         nextExploreAdmissionTick = -1;
         miningExploration = null;
         miningExplorationAttempted = false;
+        miningExplorationCaveSurveyRequired = false;
+        miningExplorationCaveRedescents = 0;
+        miningExplorationExcludedCavities.clear();
         miningExplorationTimeoutCredit = 0;
         stockpileTask = null;
         pickupOrigin = null;
@@ -1024,11 +1034,19 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void escapeBarrenAreaOrFail(AIPlayerEntity bot) {
-        if (escapeBarrenArea(bot)) {
-            surfaceTried = false; // New area — allow the "surface fallback" again
+        // At this point the local survey and its observable vertical prospect both found no
+        // source.  For a real mining source (stone/cobblestone or a profiled ore), a player at
+        // surface height should open a safe staircase now, not spend the entire directional-hop
+        // budget walking across another surface patch.  MiningExplorationTask derives only a
+        // downward target from the bot's own Y/dimension and keeps the existing safe descent;
+        // it never supplies a hidden block location.  If this pose is already at/below the
+        // applicable target, the child completes immediately and the normal observed-hop search
+        // below remains the fallback.
+        if (startMiningExploration(bot)) {
             return;
         }
-        if (startMiningExploration(bot)) {
+        if (escapeBarrenArea(bot)) {
+            surfaceTried = false; // New area — allow the "surface fallback" again
             return;
         }
         // Report only what actually happened.  A denied local route is not a completed search;
@@ -1043,12 +1061,25 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     /**
-     * Starts the single safe mining handoff for stone/cobblestone-like sources (or a known ore
-     * source family).  Exact {@code break_blocks} jobs intentionally remain local gestures.
+     * Starts the safe mining handoff for stone/cobblestone-like sources (or a known ore source
+     * family). A cave completion must first exhaust real observed cave movement; only then may a
+     * bounded re-descent continue toward the resource layer. Exact {@code break_blocks} jobs
+     * intentionally remain local gestures.
      */
     private boolean startMiningExploration(AIPlayerEntity bot) {
-        if (countBrokenBlocks || miningExplorationAttempted
-                || !MiningExplorationTask.supports(harvestBlocks)) {
+        if (countBrokenBlocks || !MiningExplorationTask.supports(harvestBlocks)) {
+            return false;
+        }
+        if (miningExplorationCaveSurveyRequired) {
+            if (!observedSearchHops.exhausted() || exploreHops <= 0
+                    || miningExplorationCaveRedescents >= MAX_CAVE_REDESCENTS) {
+                return false;
+            }
+            miningExplorationCaveSurveyRequired = false;
+            miningExplorationAttempted = false;
+            miningExplorationCaveRedescents++;
+        }
+        if (miningExplorationAttempted) {
             return false;
         }
         Block source = miningExplorationSource();
@@ -1074,7 +1105,7 @@ public final class GatherQuotaTask extends AbstractTask {
             return true;
         }
         miningExplorationAttempted = true;
-        miningExploration = MiningExplorationTask.forBlocks(harvestBlocks);
+        miningExploration = MiningExplorationTask.forBlocks(harvestBlocks, miningExplorationExcludedCavities);
         miningExploration.start(bot);
         if (miningExploration.state() == TaskState.RUNNING) {
             BotLog.action(bot, "gather_mining_exploration_handoff",
@@ -1114,6 +1145,8 @@ public final class GatherQuotaTask extends AbstractTask {
             return true;
         }
         if (miningExploration.state() == TaskState.COMPLETED) {
+            boolean openCavity = miningExploration.completedAtOpenCavity();
+            BlockPos caveEntry = miningExploration.completedOpenCavity();
             miningExplorationTimeoutCredit += miningExploration.elapsedTicks();
             miningExploration = null;
             searchRadius = defaultSearchRadius();
@@ -1132,6 +1165,15 @@ public final class GatherQuotaTask extends AbstractTask {
             surfaceTried = false;
             selfStuckTick = elapsed;
             selfStuckCount = countSoFar;
+            miningExplorationCaveSurveyRequired = openCavity;
+            if (openCavity && caveEntry != null) {
+                miningExplorationExcludedCavities.add(caveEntry.immutable());
+            }
+            if (openCavity) {
+                BotLog.action(bot, "gather_mining_exploration_cave_survey",
+                        "remaining_redescents", MAX_CAVE_REDESCENTS - miningExplorationCaveRedescents,
+                        "excluded_entries", miningExplorationExcludedCavities.size());
+            }
             phase = Phase.SURVEY;
             return false;
         }

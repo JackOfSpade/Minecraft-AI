@@ -1,11 +1,13 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.MiningChain;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -25,6 +27,10 @@ public final class MiningExplorationTask extends AbstractTask {
     private static final int GEOLOGICAL_PROBE_DEPTH = 12;
     /** Keep the generic probe away from the dimension floor and DescendToYTask's hard lower bound. */
     private static final int GEOLOGICAL_FLOOR_MARGIN = 5;
+    /** A visible cave entrance gets one bounded, no-dig walk before the staircase resumes. */
+    private static final int CAVE_SURVEY_MOVE_LIMIT = 240;
+    /** Let Baritone settle an admitted route before treating an idle executor as a refusal. */
+    private static final int CAVE_SURVEY_IDLE_GRACE_TICKS = 20;
 
     /**
      * Non-ore blocks for which descending is a meaningful way to reveal an ordinary mining
@@ -49,12 +55,27 @@ public final class MiningExplorationTask extends AbstractTask {
     private final Set<Block> requestedBlocks;
     private final boolean geologicalProbe;
     private final String resourceLabel;
+    /** Caves previously surveyed by the owning request, supplied for its next safe re-descent. */
+    private final Set<BlockPos> initialExcludedOpenCavities;
+    /** Includes locally rejected cave routes as well as the parent-provided surveyed entries. */
+    private final Set<BlockPos> excludedOpenCavities = new LinkedHashSet<>();
     private DescendToYTask descent;
     private int targetY = Integer.MAX_VALUE;
+    /** A cave completion asks the parent to survey newly visible space before one bounded re-descent. */
+    private boolean completedAtOpenCavity;
+    /** The cave entry the parent must exclude when it starts a later fresh staircase. */
+    private BlockPos completedOpenCavity;
+    /** A currently admitted no-dig walk into a dry, observed, standable cave entry. */
+    private BlockPos caveSurveyEntry;
+    private BlockPos caveSurveyOrigin;
+    private int caveSurveyStartedElapsed;
 
-    private MiningExplorationTask(Set<Block> requestedBlocks, boolean geologicalProbe) {
+    private MiningExplorationTask(Set<Block> requestedBlocks, boolean geologicalProbe,
+                                  Set<BlockPos> excludedOpenCavities) {
         this.requestedBlocks = Set.copyOf(requestedBlocks);
         this.geologicalProbe = geologicalProbe;
+        this.initialExcludedOpenCavities = excludedOpenCavities == null
+                ? Set.of() : Set.copyOf(excludedOpenCavities);
         this.resourceLabel = requestedBlocks.stream()
                 .map(block -> BuiltInRegistries.BLOCK.getKey(block).toString())
                 .sorted()
@@ -63,6 +84,11 @@ public final class MiningExplorationTask extends AbstractTask {
 
     /** Builds an ore-depth exploration handoff for a known ore family. */
     public static MiningExplorationTask forOres(Set<Block> ores) {
+        return forOres(ores, Set.of());
+    }
+
+    /** Package-visible continuation used when a parent resumes below an already surveyed cave. */
+    static MiningExplorationTask forOres(Set<Block> ores, Set<BlockPos> excludedOpenCavities) {
         Set<Block> knownOres = new LinkedHashSet<>();
         if (ores != null) {
             for (Block block : ores) {
@@ -71,7 +97,7 @@ public final class MiningExplorationTask extends AbstractTask {
                 }
             }
         }
-        return new MiningExplorationTask(knownOres, false);
+        return new MiningExplorationTask(knownOres, false, excludedOpenCavities);
     }
 
     /**
@@ -79,6 +105,11 @@ public final class MiningExplorationTask extends AbstractTask {
      * dimension-aware table entry; common geological sources get only a short source probe.
      */
     public static MiningExplorationTask forBlocks(Set<Block> blocks) {
+        return forBlocks(blocks, Set.of());
+    }
+
+    /** Package-visible continuation used when a parent resumes below an already surveyed cave. */
+    static MiningExplorationTask forBlocks(Set<Block> blocks, Set<BlockPos> excludedOpenCavities) {
         Set<Block> knownOres = new LinkedHashSet<>();
         Set<Block> geologicalBlocks = new LinkedHashSet<>();
         if (blocks != null) {
@@ -94,8 +125,8 @@ public final class MiningExplorationTask extends AbstractTask {
             }
         }
         return knownOres.isEmpty()
-                ? new MiningExplorationTask(geologicalBlocks, !geologicalBlocks.isEmpty())
-                : new MiningExplorationTask(knownOres, false);
+                ? new MiningExplorationTask(geologicalBlocks, !geologicalBlocks.isEmpty(), excludedOpenCavities)
+                : new MiningExplorationTask(knownOres, false, excludedOpenCavities);
     }
 
     /** True only when an empty observed search is eligible for a mining exploration handoff. */
@@ -132,6 +163,9 @@ public final class MiningExplorationTask extends AbstractTask {
         if (state == TaskState.COMPLETED) {
             return 1.0D;
         }
+        if (caveSurveyEntry != null) {
+            return 0.5D;
+        }
         return descent == null ? 0.0D : descent.progress();
     }
 
@@ -140,8 +174,25 @@ public final class MiningExplorationTask extends AbstractTask {
         return descent != null && descent.isWaiting();
     }
 
+    /** True only when the fresh safe staircase stopped at an observed dry cave mouth. */
+    public boolean completedAtOpenCavity() {
+        return state == TaskState.COMPLETED && completedAtOpenCavity;
+    }
+
+    /** The observed cave stand to exclude from a later fresh staircase, if cave surveying completed. */
+    public BlockPos completedOpenCavity() {
+        return state == TaskState.COMPLETED && completedOpenCavity != null
+                ? completedOpenCavity.immutable() : null;
+    }
+
     @Override
     protected void onStart(AIPlayerEntity bot) {
+        completedAtOpenCavity = false;
+        completedOpenCavity = null;
+        caveSurveyEntry = null;
+        caveSurveyOrigin = null;
+        excludedOpenCavities.clear();
+        excludedOpenCavities.addAll(initialExcludedOpenCavities);
         int currentY = bot.blockPosition().getY();
         targetY = geologicalProbe
                 ? Math.max(bot.level().getMinY() + GEOLOGICAL_FLOOR_MARGIN,
@@ -157,10 +208,7 @@ public final class MiningExplorationTask extends AbstractTask {
             complete();
             return;
         }
-        descent = DescendToYTask.forMiningExploration(targetY);
-        descent.start(bot);
-        if (descent.state() == TaskState.FAILED) {
-            fail("mining_exploration_start_failed:" + descent.failureReason());
+        if (!startDescent(bot, "mining_exploration_start_failed")) {
             return;
         }
         BotLog.action(bot, "mining_exploration_started",
@@ -172,6 +220,10 @@ public final class MiningExplorationTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
+        if (caveSurveyEntry != null) {
+            tickCaveSurvey(bot);
+            return;
+        }
         if (descent == null) {
             complete();
             return;
@@ -180,6 +232,12 @@ public final class MiningExplorationTask extends AbstractTask {
             descent.tick(bot);
         }
         if (descent.state() == TaskState.COMPLETED) {
+            BlockPos caveEntry = descent.completedOpenCavity();
+            descent = null;
+            if (caveEntry != null) {
+                startCaveSurvey(bot, caveEntry);
+                return;
+            }
             BotLog.action(bot, "mining_exploration_reached_depth",
                     "resource", resourceLabel.isBlank() ? "unknown" : resourceLabel,
                     "at_y", bot.blockPosition().getY(),
@@ -190,10 +248,96 @@ public final class MiningExplorationTask extends AbstractTask {
         }
     }
 
+    /** Starts a new safe child, carrying every cave entry that this episode has already rejected. */
+    private boolean startDescent(AIPlayerEntity bot, String failurePrefix) {
+        descent = DescendToYTask.forMiningExploration(targetY, excludedOpenCavities);
+        descent.start(bot);
+        if (descent.state() == TaskState.FAILED) {
+            fail(failurePrefix + ':' + descent.failureReason());
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * The descent has found a fully visible, dry, standable cave floor. Route to exactly that
+     * observed cell without breaking or placing. If Baritone cannot admit it, reopen the stair
+     * while excluding this entrance rather than reporting a cave the bot never entered.
+     */
+    private void startCaveSurvey(AIPlayerEntity bot, BlockPos entry) {
+        caveSurveyEntry = entry.immutable();
+        caveSurveyOrigin = bot.blockPosition().immutable();
+        caveSurveyStartedElapsed = elapsed;
+        ActionResult route = bot.getActionPack().startSurfacePathTo(caveSurveyEntry);
+        if (route.isFailed()) {
+            BotLog.action(bot, "mining_exploration_cave_route_refused",
+                    "at", caveSurveyEntry.toShortString(), "reason", route.reason());
+            resumePastUnroutableCave(bot);
+            return;
+        }
+        BotLog.action(bot, "mining_exploration_cave_survey_started",
+                "at", caveSurveyEntry.toShortString(), "target_y", targetY);
+    }
+
+    private void tickCaveSurvey(AIPlayerEntity bot) {
+        if (caveSurveyEntry == null) {
+            return;
+        }
+        if (bot.blockPosition().equals(caveSurveyEntry)) {
+            completeCaveSurvey(bot);
+            return;
+        }
+        int age = elapsed - caveSurveyStartedElapsed;
+        boolean moved = caveSurveyOrigin != null && bot.blockPosition().distSqr(caveSurveyOrigin) > 1.0D;
+        boolean routeEnded = age > CAVE_SURVEY_IDLE_GRACE_TICKS && bot.getActionPack().isPathExecutorIdle();
+        if (age <= CAVE_SURVEY_MOVE_LIMIT && !routeEnded) {
+            return;
+        }
+        bot.getActionPack().stopAll();
+        if (moved) {
+            // A route can end one cell short after exposing a side passage. The actual movement
+            // still surveyed the cave honestly, so return control to the parent at that new view.
+            completeCaveSurvey(bot);
+            return;
+        }
+        BotLog.action(bot, "mining_exploration_cave_route_unmoved",
+                "at", caveSurveyEntry.toShortString(),
+                "reason", routeEnded ? "route_ended" : "timeout");
+        resumePastUnroutableCave(bot);
+    }
+
+    private void completeCaveSurvey(AIPlayerEntity bot) {
+        BlockPos entry = caveSurveyEntry;
+        caveSurveyEntry = null;
+        caveSurveyOrigin = null;
+        completedAtOpenCavity = true;
+        completedOpenCavity = entry == null ? null : entry.immutable();
+        BotLog.action(bot, "mining_exploration_open_cavity_reached",
+                "resource", resourceLabel.isBlank() ? "unknown" : resourceLabel,
+                "at", bot.blockPosition().toShortString(),
+                "entry", entry == null ? "none" : entry.toShortString(),
+                "target_y", targetY);
+        complete();
+    }
+
+    private void resumePastUnroutableCave(AIPlayerEntity bot) {
+        if (caveSurveyEntry != null) {
+            excludedOpenCavities.add(caveSurveyEntry.immutable());
+        }
+        caveSurveyEntry = null;
+        caveSurveyOrigin = null;
+        if (startDescent(bot, "mining_exploration_cave_reroute_failed")) {
+            BotLog.action(bot, "mining_exploration_cave_reroute",
+                    "excluded_entries", excludedOpenCavities.size(), "target_y", targetY);
+        }
+    }
+
     @Override
     protected void onPause(AIPlayerEntity bot) {
         if (descent != null && descent.state() == TaskState.RUNNING) {
             descent.pause(bot);
+        } else if (caveSurveyEntry != null) {
+            bot.getActionPack().stopAll();
         }
     }
 
@@ -201,6 +345,13 @@ public final class MiningExplorationTask extends AbstractTask {
     protected void onResume(AIPlayerEntity bot) {
         if (descent != null && descent.state() == TaskState.PAUSED) {
             descent.resume(bot);
+        } else if (caveSurveyEntry != null) {
+            caveSurveyOrigin = bot.blockPosition().immutable();
+            caveSurveyStartedElapsed = elapsed;
+            ActionResult route = bot.getActionPack().startSurfacePathTo(caveSurveyEntry);
+            if (route.isFailed()) {
+                resumePastUnroutableCave(bot);
+            }
         }
     }
 
@@ -209,5 +360,6 @@ public final class MiningExplorationTask extends AbstractTask {
         if (descent != null && (descent.state() == TaskState.RUNNING || descent.state() == TaskState.PAUSED)) {
             descent.abort(bot);
         }
+        bot.getActionPack().stopAll();
     }
 }

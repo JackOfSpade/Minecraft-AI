@@ -5,8 +5,6 @@ import io.github.zoyluo.minecraftai.action.HumanAim;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.entity.RecentDamage;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
-import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import io.github.zoyluo.minecraftai.perception.CreaturePerception.Params;
 import io.github.zoyluo.minecraftai.perception.CreaturePerception.Reading;
@@ -573,11 +571,8 @@ public final class CreatureSenses {
      */
     public boolean noticedProjectile(AIPlayerEntity bot, Entity projectile) {
         if (!enabled()) {
-            // Perception off is EXACTLY the old test, the strict capability bypass included.
+            // Perception off is exactly the ordinary observable-entity test.
             return io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, projectile);
-        }
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "observable_entity_query").allowed()) {
-            return true;
         }
         int radius = observationRadius();
         if (bot.distanceToSqr(projectile) > (double) radius * radius) {
@@ -615,13 +610,12 @@ public final class CreatureSenses {
 
     /**
      * Whether visual-object questions use the legacy immediate answer: perception is off or this bot's scan has just failed open.
-     * The retired hidden-scan capability remains an explicit denied boundary in this method for audit coverage. Projectiles and visible
-     * non-creature hazards (for example primed TNT) share this policy.
+     * Hidden-world scans are retired globally, so ordinary visual questions never make an audited
+     * capability decision for each projectile or hazard. Projectiles and visible non-creature
+     * hazards (for example primed TNT) share this policy.
      */
     public boolean legacyObservationAnswers(AIPlayerEntity bot) {
-        return !enabled()
-                || CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "observable_entity_query").allowed()
-                || scanFailedRecently(bot);
+        return !enabled() || scanFailedRecently(bot);
     }
 
     /**

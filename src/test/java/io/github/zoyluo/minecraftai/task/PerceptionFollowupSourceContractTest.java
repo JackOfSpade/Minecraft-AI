@@ -62,17 +62,19 @@ final class PerceptionFollowupSourceContractTest {
     }
 
     @Test
-    void theProjectileTestWithPerceptionOffIsExactlyTheOldTestIncludingTheCapabilityBypass() throws IOException {
+    void theProjectileTestUsesTheObservableBoundaryWithoutPerProjectileCapabilityAudits() throws IOException {
         String senses = read("perception/CreatureSenses.java");
         String projectile = between(senses, "public boolean noticedProjectile(AIPlayerEntity bot, Entity projectile)",
                 "/** The place {@code bot} should turn");
         int off = projectile.indexOf("if (!enabled())");
         assertTrue(off >= 0 && projectile.indexOf("ObservableWorldQuery.canObserveEntity(bot, projectile)") > off,
                 "enabled=false answers with the observable entity proof before anything else");
-        assertTrue(projectile.indexOf("PrivilegedCapability.HIDDEN_BLOCK_SCAN") > off,
-                "with perception on, the former bypass still crosses the centrally retired capability boundary");
-        assertTrue(projectile.indexOf("PrivilegedCapability.HIDDEN_BLOCK_SCAN") < projectile.indexOf("scanFailedRecently(bot)"),
-                "the retired capability boundary is checked before scan state");
+        assertFalse(projectile.contains("CapabilityRuntime.decide"),
+                "the permanently retired scan capability must not be audited once per projectile");
+        String legacy = between(senses, "public boolean legacyObservationAnswers(AIPlayerEntity bot)",
+                "public boolean heardProjectileShot(AIPlayerEntity bot, Entity projectile)");
+        assertTrue(legacy.contains("return !enabled() || scanFailedRecently(bot);"),
+                "legacy visual answers are only perception-off or a fail-open scan, never a hidden-world bypass");
     }
 
     @Test

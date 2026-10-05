@@ -44,6 +44,20 @@ public final class ObservableWorldQuery {
     }
 
     /**
+     * {@link PrivilegedCapability#HIDDEN_BLOCK_SCAN} is retired for every operating profile.
+     *
+     * <p>These predicates run once per candidate cell while a path or an observed scan is being
+     * considered. Calling {@link CapabilityRuntime#decide(AIPlayerEntity, PrivilegedCapability,
+     * String)} here used to turn each ordinary visibility proof into an audited denied privileged
+     * request (hundreds of thousands per session). Keep the stable context strings at each call
+     * site for code review, but fail closed locally: an observation proof can never be bypassed.
+     * Privileged operation entry points retain their one-per-operation capability audit.</p>
+     */
+    private static boolean canBypassObservationWithRetiredHiddenScan(String context) {
+        return false;
+    }
+
+    /**
      * Whether the bot's or its linked owner's eye can see a face of the block at {@code pos}: a block in plain view, as a player
      * sees it. The ray aims at the block's own shape ({@link FaceAim}): its collision shape, or for a block that
      * has none (torch, rail, cobweb, plant, crop, banner, snow layer) its selection outline with an OUTLINE ray. This
@@ -66,8 +80,7 @@ public final class ObservableWorldQuery {
      * that a player-facing ray reached this cell before any target-state read.</p>
      */
     public static boolean canObserveBlockCellFace(AIPlayerEntity bot, BlockPos pos) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_block_cell_face_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_block_cell_face_query")) {
             return true;
         }
         int radius = botRenderDistanceBlocks(bot);
@@ -127,8 +140,7 @@ public final class ObservableWorldQuery {
      * observation policy above.
      */
     public static boolean canObserveColliderThroughFluids(AIPlayerEntity bot, BlockPos pos) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_water_collider_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_water_collider_query")) {
             return true;
         }
         int radius = botRenderDistanceBlocks(bot);
@@ -149,7 +161,7 @@ public final class ObservableWorldQuery {
 
     private static boolean observeShapeFaces(AIPlayerEntity bot, BlockPos pos, int range,
                                              boolean outlineFallback, String reason, ClipContext.Fluid fluid) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, reason).allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan(reason)) {
             return true;
         }
         // Aim at the exposed face of the block's real shape, not the block center or the cell face. A
@@ -203,8 +215,7 @@ public final class ObservableWorldQuery {
                                                   BlockPos pos,
                                                   boolean outlineFallback,
                                                   double rangeLimit) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_block_inset_face_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_block_inset_face_query")) {
             return true;
         }
         double observationRange = Math.min(botRenderDistanceBlocks(bot), Math.max(1.0D, rangeLimit));
@@ -262,8 +273,7 @@ public final class ObservableWorldQuery {
      * result, so callers can gate feet/head reads before asking whether a position is standable.
      */
     public static boolean canObserveCell(AIPlayerEntity bot, BlockPos pos) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_cell_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_cell_query")) {
             return true;
         }
         return canObserveCellWithinAfterPolicy(bot, pos, 0);
@@ -276,8 +286,7 @@ public final class ObservableWorldQuery {
      * into hidden-world knowledge. Callers remain responsible for rejecting hazardous fluids.
      */
     public static boolean canObserveCellThroughFluids(AIPlayerEntity bot, BlockPos pos) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_water_cell_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_water_cell_query")) {
             return true;
         }
         return canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.NONE);
@@ -288,8 +297,7 @@ public final class ObservableWorldQuery {
      * {@link #canObserveBlockWithin(AIPlayerEntity, BlockPos, int)} for the fairness rationale.
      */
     public static boolean canObserveCellWithin(AIPlayerEntity bot, BlockPos pos, int range) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_cell_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_cell_query")) {
             return true;
         }
         return canObserveCellWithinAfterPolicy(bot, pos, range);
@@ -496,8 +504,7 @@ public final class ObservableWorldQuery {
      * at the bot's eye could not see. It is the one farm-specific query: farm code needs nothing else.
      */
     public static boolean canObserveFarmCell(AIPlayerEntity bot, BlockPos pos) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_farm_cell_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_farm_cell_query")) {
             return true;
         }
         int radius = botRenderDistanceBlocks(bot);
@@ -582,8 +589,7 @@ public final class ObservableWorldQuery {
     }
 
     public static boolean canObserveEntity(AIPlayerEntity bot, Entity entity) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_entity_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_entity_query")) {
             return true;
         }
         int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
@@ -605,8 +611,7 @@ public final class ObservableWorldQuery {
                 || !io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled()) {
             return canObserveEntity(bot, entity);
         }
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_entity_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_entity_query")) {
             return true;
         }
         return io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.noticed(bot, living);
@@ -621,8 +626,7 @@ public final class ObservableWorldQuery {
                 || !io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled()) {
             return canObserveEntityWithin(bot, entity, range);
         }
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_entity_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_entity_query")) {
             return true;
         }
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
@@ -638,8 +642,7 @@ public final class ObservableWorldQuery {
      * unaffected, and the strict capability bypass stays exactly as it is.
      */
     public static boolean canObserveEntityWithin(AIPlayerEntity bot, Entity entity, int range) {
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "observable_entity_query").allowed()) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_entity_query")) {
             return true;
         }
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
@@ -672,11 +675,11 @@ public final class ObservableWorldQuery {
 
     /**
      * One honest view ray from the bot's own eye (mining-assist design 3.1): the first surface a real
-     * player would see along the direction, within the perception radius. The result is only a
+     * player would see along the direction, within the bot's tracked render distance. The result is only a
      * nomination; any action still has to re-prove the exact cell. The direction need not be a unit
      * vector. There is deliberately no origin parameter, so a ray can only start at the eye.
      *
-     * <p>The length is {@code min(range, max(1, perception radius))}. The state is read only for the
+     * <p>The length is {@code min(range, tracked render distance in blocks)}. The state is read only for the
      * single first-hit cell, after the ray has reported a block hit; a miss reads nothing. If the chunk
      * holding the ray's end point is not loaded the ray is skipped and reported {@link ViewHit#unknown()}.
      * This is a plain view query with no capability lookup: it sees nothing a player standing at the

@@ -103,14 +103,25 @@ final class ObservedSearchHopsSourceContractTest {
         assertFalse(oreExplore.contains("startPathTo(") || oreExplore.contains("getBlockState(")
                         || oreExplore.contains("OreProspector.begin("),
                 "the replacement ore fallback must not re-enable a direct, hidden, or blind search");
-        int retiredBoundary = oreDig.indexOf("if (RetiredNavigationTask.legacyExcavationDisabled())");
-        int observedStart = oreDig.indexOf("if (startObservedOreSearch(bot))", retiredBoundary);
+        int nearestOreBoundary = oreDig.indexOf("BlockPos found = nearestOre(bot, world);");
+        int emptySurfaceBoundary = oreDig.indexOf("if (RetiredNavigationTask.legacyExcavationDisabled())",
+                nearestOreBoundary);
+        int descent = oreDig.indexOf("if (startMiningExploration(bot))", emptySurfaceBoundary);
+        int observedStart = oreDig.indexOf("if (startObservedOreSearch(bot))", emptySurfaceBoundary);
         int observedFinish = oreDig.indexOf("finishObservedOreSearch(bot);", observedStart);
-        assertTrue(retiredBoundary >= 0 && observedStart > retiredBoundary && observedFinish > observedStart,
-                "the old disabled excavation boundary must now try finite observed discovery before it reports failure");
+        assertTrue(nearestOreBoundary >= 0 && emptySurfaceBoundary > nearestOreBoundary
+                        && descent > emptySurfaceBoundary && observedStart > descent && observedFinish > observedStart,
+                "after an empty observable surface scan, ore mining must try its safe target-Y descent before surface hops");
         assertTrue(oreDig.contains("no_observed_ore_after_exploration")
                         && oreDig.contains("no_observed_ore_in_local_view"),
                 "ore failures must report only the searched observation boundary, never inferred terrain absence");
+
+        String oreDescent = methodBody(oreDig, "private boolean startMiningExploration(");
+        assertTrue(oreDescent.contains("miningExplorationCaveSurveyRequired")
+                        && oreDescent.contains("observedOreSearch.exhausted()")
+                        && oreDescent.contains("observedOreSearchCompletedHops <= 0")
+                        && oreDescent.contains("miningExplorationCaveRedescents >= MAX_CAVE_REDESCENTS"),
+                "an empty observed cave survey may reopen the depth handoff only after actual movement, and only finitely");
     }
 
     private static String methodBody(String source, String signature) {

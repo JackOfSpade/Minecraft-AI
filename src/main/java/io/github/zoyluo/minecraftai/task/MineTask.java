@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
+import java.util.LinkedHashSet;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -18,6 +19,8 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class MineTask extends AbstractTask {
     private static final int EXPLORE_MAX_HOPS = 16;
     private static final int EXPLORE_MOVE_LIMIT = 240;
+    /** Do not cycle at a cave mouth forever; two observed cave surveys may open another safe stair. */
+    private static final int MAX_CAVE_REDESCENTS = 2;
 
     private enum Phase {
         SEARCHING,
@@ -48,9 +51,12 @@ public final class MineTask extends AbstractTask {
     private BlockPos exploreStart;
     private int exploreStartedTick;
     private int completedExploreHops;
-    /** One fresh, bounded descent after observed horizontal exploration is exhausted. */
+    /** One fresh descent, plus a bounded re-descent after a cave has actually been surveyed. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
+    private boolean miningExplorationCaveSurveyRequired;
+    private int miningExplorationCaveRedescents;
+    private final Set<BlockPos> miningExplorationExcludedCavities = new LinkedHashSet<>();
     private int miningExplorationTimeoutCredit;
 
     public MineTask(Block targetBlock, int countNeeded) {
@@ -83,6 +89,9 @@ public final class MineTask extends AbstractTask {
         completedExploreHops = 0;
         miningExploration = null;
         miningExplorationAttempted = false;
+        miningExplorationCaveSurveyRequired = false;
+        miningExplorationCaveRedescents = 0;
+        miningExplorationExcludedCavities.clear();
         miningExplorationTimeoutCredit = 0;
     }
 
@@ -115,6 +124,14 @@ public final class MineTask extends AbstractTask {
     private void search(AIPlayerEntity bot) {
         HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6);
         if (choice == null) {
+            // A player who has already looked around the visible surface for stone or an ore
+            // does not spend a long time walking across more of that same surface before trying
+            // the ground beneath their feet.  MiningExplorationTask still proves the safe
+            // staircase and refuses to descend once this resource's target layer is reached.
+            // Non-geological requests simply return false and retain the observed-hop recovery.
+            if (startMiningExploration(bot)) {
+                return;
+            }
             if (startObservedExploration(bot)) {
                 return;
             }
@@ -217,12 +234,25 @@ public final class MineTask extends AbstractTask {
     }
 
     /**
-     * The direct mine form can reach this point only after every bounded observed walk leg was
-     * tried.  A known ore family or common geological source may then open one fresh safe stair;
-     * arbitrary block requests keep the ordinary observed-only result.
+     * After a normal visible search finds no local source, a known ore family or common
+     * geological source may open one fresh safe stair.  At or below its target layer the child
+     * declines immediately, so arbitrary blocks and same-depth searches retain the ordinary
+     * observed-hop result.
      */
     private boolean startMiningExploration(AIPlayerEntity bot) {
-        if (miningExplorationAttempted || !MiningExplorationTask.supports(targetBlock)) {
+        if (!MiningExplorationTask.supports(targetBlock)) {
+            return false;
+        }
+        if (miningExplorationCaveSurveyRequired) {
+            if (!observedSearchHops.exhausted() || completedExploreHops <= 0
+                    || miningExplorationCaveRedescents >= MAX_CAVE_REDESCENTS) {
+                return false;
+            }
+            miningExplorationCaveSurveyRequired = false;
+            miningExplorationAttempted = false;
+            miningExplorationCaveRedescents++;
+        }
+        if (miningExplorationAttempted) {
             return false;
         }
         if (!ToolTier.canHarvestWithInventory(bot, targetBlock.defaultBlockState())) {
@@ -230,7 +260,7 @@ public final class MineTask extends AbstractTask {
             return true;
         }
         miningExplorationAttempted = true;
-        miningExploration = MiningExplorationTask.forBlocks(Set.of(targetBlock));
+        miningExploration = MiningExplorationTask.forBlocks(Set.of(targetBlock), miningExplorationExcludedCavities);
         miningExploration.start(bot);
         if (miningExploration.state() == TaskState.RUNNING) {
             BotLog.action(bot, "mine_exploration_handoff",
@@ -262,11 +292,22 @@ public final class MineTask extends AbstractTask {
             return true;
         }
         if (miningExploration.state() == TaskState.COMPLETED) {
+            boolean openCavity = miningExploration.completedAtOpenCavity();
+            BlockPos caveEntry = miningExploration.completedOpenCavity();
             miningExplorationTimeoutCredit += miningExploration.elapsedTicks();
             miningExploration = null;
             observedSearchHops.reset();
             clearExploreLeg();
             completedExploreHops = 0;
+            miningExplorationCaveSurveyRequired = openCavity;
+            if (openCavity && caveEntry != null) {
+                miningExplorationExcludedCavities.add(caveEntry.immutable());
+            }
+            if (openCavity) {
+                BotLog.action(bot, "mine_exploration_cave_survey",
+                        "remaining_redescents", MAX_CAVE_REDESCENTS - miningExplorationCaveRedescents,
+                        "excluded_entries", miningExplorationExcludedCavities.size());
+            }
             phase = Phase.SEARCHING;
             return false;
         }

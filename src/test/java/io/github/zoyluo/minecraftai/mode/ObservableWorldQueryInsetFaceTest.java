@@ -66,11 +66,27 @@ class ObservableWorldQueryInsetFaceTest {
 
         String insetBody = source.substring(inset, facePolicy);
         assertTrue(insetBody.contains("Math.min("));
-        assertTrue(insetBody.contains("MinecraftAiConfig.get().perception().radius()"));
+        assertTrue(insetBody.contains("botRenderDistanceBlocks(bot)"),
+                "inset observation is bounded by the actual tracked render distance, then interaction reach");
         assertTrue(insetBody.contains("bot.blockInteractionRange()"));
         assertTrue(insetBody.contains("ClipContext.Fluid.ANY"));
         assertTrue(insetBody.contains("hit.getBlockPos().equals(pos)"));
         assertTrue(insetBody.contains("hit.getDirection() == direction"));
         assertTrue(insetBody.contains("FACE_SAMPLE_OFFSETS"));
+    }
+
+    @Test
+    void retiredHiddenScanNeverTurnsPerCellVisibilityProofsIntoAuditedCapabilityCalls() throws IOException {
+        String source = Files.readString(SOURCE);
+
+        assertTrue(source.contains("private static boolean canBypassObservationWithRetiredHiddenScan"));
+        assertTrue(source.contains("retired for every operating profile"));
+        assertTrue(source.contains("return false;"),
+                "the local fast path must fail closed even if a future config changes");
+        assertFalse(source.contains("CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN"),
+                "ordinary cell/face checks must not audit a permanently denied capability once per candidate");
+        assertTrue(source.contains("canBypassObservationWithRetiredHiddenScan(\"observable_cell_query\")"));
+        assertTrue(source.contains("canBypassObservationWithRetiredHiddenScan(\"observable_entity_query\")"));
+        assertTrue(source.contains("canBypassObservationWithRetiredHiddenScan(\"observable_water_collider_query\")"));
     }
 }

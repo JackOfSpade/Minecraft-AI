@@ -97,7 +97,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * in this task rather than reopening the public/goal-executor entry point.
      */
     private final boolean miningExplorationChild;
+    /** Cave entrances already surveyed by this mining request; a fresh re-descent rotates past them. */
+    private final Set<BlockPos> excludedOpenCavities;
     private boolean committed;
+    /** True only when a fresh mining-exploration child intentionally stopped at a visible cave rim. */
+    private boolean completedAtObservedOpenCavity;
+    /** The actually standable, visible cave entry handed to the owning mining exploration. */
+    private BlockPos completedOpenCavity;
     private int budgetOffset;
     private int budgetLimit;
     private int lastProgressTick;
@@ -194,11 +200,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private static final int TORCH_EVERY = 6;   // a torch's light radius comfortably covers a 6-block drop, preventing mob spawns
 
     public DescendToYTask(int targetY) {
-        this(targetY, Map.of(), false);
+        this(targetY, Map.of(), false, Set.of());
     }
 
     public DescendToYTask(int targetY, Map<String, String> checkpoint) {
-        this(targetY, checkpoint, false);
+        this(targetY, checkpoint, false, Set.of());
     }
 
     /**
@@ -207,13 +213,33 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * retired public DESCEND_TO_Y route rather than accidentally reviving an old checkpoint.
      */
     static DescendToYTask forMiningExploration(int targetY) {
-        return new DescendToYTask(targetY, Map.of(), true);
+        return forMiningExploration(targetY, Set.of());
+    }
+
+    /**
+     * Creates a fresh exploration descent while excluding one cave entry already surveyed by the
+     * same parent request. This prevents a restarted staircase from completing at its old rim
+     * again instead of selecting another proven-safe downward direction.
+     */
+    static DescendToYTask forMiningExploration(int targetY, Set<BlockPos> excludedOpenCavities) {
+        return new DescendToYTask(targetY, Map.of(), true, excludedOpenCavities);
+    }
+
+    /** Whether this fresh child completed because it exposed a dry, visible cave rather than its target layer. */
+    boolean completedAtObservedOpenCavity() {
+        return completedAtObservedOpenCavity;
+    }
+
+    /** The dry, observed stand cell inside the cave when {@link #completedAtObservedOpenCavity()} is true. */
+    BlockPos completedOpenCavity() {
+        return completedOpenCavity == null ? null : completedOpenCavity.immutable();
     }
 
     private DescendToYTask(int targetY, Map<String, String> checkpoint,
-                           boolean miningExplorationChild) {
+                           boolean miningExplorationChild, Set<BlockPos> excludedOpenCavities) {
         this.targetY = targetY;
         this.miningExplorationChild = miningExplorationChild;
+        this.excludedOpenCavities = excludedOpenCavities == null ? Set.of() : Set.copyOf(excludedOpenCavities);
         Map<String, String> values = checkpoint == null ? Map.of() : checkpoint;
         Optional<RestoreMetadata> restored = inspectCheckpoint(values);
         this.invalidCheckpoint = !values.isEmpty()
@@ -429,6 +455,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
+        completedAtObservedOpenCavity = false;
+        completedOpenCavity = null;
         if (!miningExplorationChild && RetiredNavigationTask.legacyExcavationDisabled()) {
             RetiredNavigationTask.refuse(bot, "descend_to_y");
             fail(RetiredNavigationTask.OBSERVED_TARGET_REQUIRED);
@@ -689,9 +717,16 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (containsOwnedWaterSeal(world, ahead, ahead.above(), next)
                 || !isViableDescentDirection(bot, world, feet, stairDirIndex)) {
             // Mining next's tread can reveal that its own support is an already-mined cavity or a
-            // natural cave rather than solid ground -- an unexpectedly opened void, not a hazard
-            // fluid (those are sealed above). Wall it off before rerouting, same as a real player
-            // would rather than leaving a hole into unknown open space behind them.
+            // natural cave rather than solid ground. A mining-exploration child stops at a
+            // genuinely visible dry cave mouth so its parent can survey/explore that real open
+            // space; a generic descent still walls it off before rerouting rather than leaving a
+            // hole into unknown space behind it.
+            if (skipPreviouslySurveyedOpenCavity(bot, world, feet, next)) {
+                return;
+            }
+            if (completeMiningExplorationAtObservedOpenCavity(bot, world, next)) {
+                return;
+            }
             if (trySealOpenCavityLanding(bot, world, feet, next, stairDirIndex)) {
                 return;
             }
@@ -2008,6 +2043,76 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         BotLog.action(bot, "descend_seal_open_cavity", "at", hole.toShortString());
         BrainCoordinator.INSTANCE.sendBotReply(bot,
                 "Sealed off an open cavity found while digging down -- routing around it.");
+        return true;
+    }
+
+    /**
+     * A fresh mining-exploration staircase has found the open space it was meant to expose.
+     * Stop at the current confirmed-safe tread instead of sealing and bypassing that cave; the
+     * owning mine/gather task immediately resumes its ordinary observable survey from this rim.
+     * Generic durable descents retain the conservative sealing behaviour above.
+     */
+    private boolean completeMiningExplorationAtObservedOpenCavity(AIPlayerEntity bot,
+                                                                   ServerLevel world,
+                                                                   BlockPos next) {
+        if (!miningExplorationChild) {
+            return false;
+        }
+        BlockPos hole = next.below();
+        if (!canObservePosition(bot, hole)) {
+            return false;
+        }
+        BlockState state = world.getBlockState(hole);
+        if (!state.getFluidState().isEmpty() || !state.getCollisionShape(world, hole).isEmpty()) {
+            return false;
+        }
+        // A dry void alone is not an entrance: the task must prove a full, currently visible
+        // stand cell (solid floor plus empty feet/head) before the owner may route into it. A
+        // vertical shaft with no visible floor stays in the ordinary seal-and-reroute flow.
+        if (!isObservedDryStandable(bot, world, hole)) {
+            return false;
+        }
+        miner.cancel(bot);
+        committed = true;
+        completedAtObservedOpenCavity = true;
+        completedOpenCavity = hole.immutable();
+        BotLog.action(bot, "mining_exploration_open_cavity",
+                "at", hole.toShortString(), "target_y", targetY);
+        complete();
+        return true;
+    }
+
+    /**
+     * A re-descent must not terminally rediscover the very cave it just surveyed. Leave that
+     * entrance open, reject only this stair edge, and let the established safe rotation/detour
+     * logic choose a different downward route. This is intentionally narrower than a global
+     * cave blacklist: a later position may expose a different safe entrance to the same cavern.
+     */
+    private boolean skipPreviouslySurveyedOpenCavity(AIPlayerEntity bot, ServerLevel world,
+                                                      BlockPos feet, BlockPos next) {
+        if (!miningExplorationChild || excludedOpenCavities.isEmpty()) {
+            return false;
+        }
+        BlockPos hole = next.below();
+        if (!excludedOpenCavities.contains(hole) || !canObservePosition(bot, hole)) {
+            return false;
+        }
+        BlockState state = world.getBlockState(hole);
+        if (!state.getFluidState().isEmpty() || !state.getCollisionShape(world, hole).isEmpty()) {
+            return false;
+        }
+        miner.cancel(bot);
+        rejectLandingDirection(feet, stairDirIndex);
+        BotLog.action(bot, "mining_exploration_skip_surveyed_cavity",
+                "at", hole.toShortString(), "target_y", targetY);
+        if (rotateStair(bot, world, feet)) {
+            return true;
+        }
+        if (lateralDetours < MAX_LATERAL && tryLateralDetour(bot, world, feet)) {
+            lastProgressTick = totalBudget();
+            return true;
+        }
+        fail("descend_no_safe_landing at_y=" + next.getY());
         return true;
     }
 
