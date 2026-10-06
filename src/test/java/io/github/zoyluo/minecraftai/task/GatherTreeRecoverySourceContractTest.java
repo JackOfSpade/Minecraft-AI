@@ -75,7 +75,7 @@ final class GatherTreeRecoverySourceContractTest {
         String pillarStart = methodBody(gather, "private boolean startPillarApproach(");
         String gotoTarget = methodBody(gather, "private void goToTarget(");
         String survey = methodBody(gather, "private void survey(");
-        String pillarPlanning = methodBody(harvest, "private static PillarApproach pillarApproach(");
+        String pillarPlanning = methodBody(harvest, "private static PillarApproach pillarApproachFromFloor(");
         String supports = listBody(palette, "PILLAR_SUPPORT_BLOCKS");
         String nearbySupports = listBody(palette, "NEARBY_PILLAR_SUPPORT_GATHER_ITEMS");
 

@@ -260,6 +260,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private boolean pillarApproachActive;
     /** The one target an unreachable-GOTO pillar has been tried for; a target gets that chance once. */
     private BlockPos pillarRecoveryTried;
+    /** The target a walk onto its pillar column's floor is under way for (see stepOntoPillarBase). */
+    private BlockPos pillarBaseWalk;
     private BlockPos gotoStuckPos; // R1: last coordinate recorded by GOTO (used to detect an airborne/deadlocked bot that hasn't moved in a long time)
     private int gotoStuckTick;
     // Visible-tree recovery: a budgeted 360-degree first-hit sweep nominates a trunk or leaf;
@@ -537,6 +539,7 @@ public final class GatherQuotaTask extends AbstractTask {
         scaffoldSupplyItem = null;
         pillarApproachActive = false;
         pillarRecoveryTried = null;
+        pillarBaseWalk = null;
         nextExploreAdmissionTick = -1;
         miningExploration = null;
         miningExplorationAttempted = false;
@@ -1408,7 +1411,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // end at once, see treeSightingMove), and straight overhead it has no horizontal heading
             // at all. A log that an observed pillar reaches is climbed to now; a leaf only says that
             // a trunk is nearby, which the rest of the sweep finds on its own.
-            return log && pillarToBlock(bot, seen);
+            return log && pillarToBlock(bot, seen, true);
         }
         treeSightingHint = seen.immutable();
         return startTreeSightingPursuit(bot);
@@ -1609,7 +1612,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // Inside the local survey envelope there is no direction left to pursue. A target an
             // observed pillar reaches (above the bot, in its own column or beside it) is climbed to
             // now; one that is out of reach below simply has no use for this look-around.
-            return pillarToBlock(bot, seen);
+            return pillarToBlock(bot, seen, true);
         }
         // A target that is visible but has no currently local mining stance is still a factual
         // direction. The observed route below may bring the bot close enough for the normal
@@ -1780,15 +1783,52 @@ public final class GatherQuotaTask extends AbstractTask {
      * False when the block is not worth a pillar (or the recovery is withheld), in which case the
      * caller carries on as before.
      */
-    private boolean pillarToBlock(AIPlayerEntity bot, BlockPos block) {
+    private boolean pillarToBlock(AIPlayerEntity bot, BlockPos block, boolean mayStepOntoFloor) {
         if (isLocalScaffoldSupply() || !mayUsePillarRecovery()) {
             return false;
         }
         HarvestCore.PillarApproach approach = HarvestCore.pillarApproachFor(bot, block, harvestBlocks);
-        if (approach == null || !admitPillarApproach(bot, approach)) {
+        if (approach == null) {
+            return mayStepOntoFloor && stepOntoPillarBase(bot, block);
+        }
+        if (!admitPillarApproach(bot, approach)) {
             return false;
         }
         pillarApproachScan = null;
+        return true;
+    }
+
+    /**
+     * A block that no pillar column at the bot's level reaches may have one a step up or down (a trunk
+     * rooted on a slope: the column's own floor is terrain, or open air over a drop). The bot walks onto
+     * that floor by an ordinary observed route, and {@link #goToTarget} plans the pillar from there.
+     */
+    private boolean stepOntoPillarBase(AIPlayerEntity bot, BlockPos block) {
+        BlockPos base = HarvestCore.pillarBaseFor(bot, block, harvestBlocks);
+        if (base == null) {
+            return false;
+        }
+        ActionResult route = startGatherPathTo(bot, base);
+        if (route.isFailed()) {
+            BotLog.action(bot, "gather_pillar_base_refused",
+                    "target", block.toShortString(), "base", base.toShortString(), "reason", route.reason());
+            return false;
+        }
+        clearTreeSighting();
+        clearTargetSighting();
+        pillarApproachScan = null;
+        targetPos = block.immutable();
+        pillarBaseWalk = targetPos;
+        lastGotoTarget = targetPos;
+        gotoFailStreak = 0;
+        treeDigTried = false;
+        pillarApproachActive = false;
+        gotoStuckPos = null;
+        searchRadius = SEARCH_RADIUS;
+        selfStuckTick = elapsed;
+        phase = Phase.GOTO;
+        BotLog.action(bot, "gather_pillar_base_walk",
+                "target", targetPos.toShortString(), "base", base.toShortString());
         return true;
     }
 
@@ -2347,7 +2387,12 @@ public final class GatherQuotaTask extends AbstractTask {
             phase = Phase.SURVEY;
             return;
         }
-        if (HarvestCore.canReach(bot, targetPos)) {
+        // A pillar climbs by jumping: at the top of a jump the eye is briefly in reach of a block that the
+        // bot, standing on what it has built so far, cannot yet mine. Cutting the route there leaves it
+        // short of the log for good, so a climbing bot is judged where it lands, also when its route ends
+        // mid-jump.
+        boolean midJump = pillarApproachActive && !bot.onGround();
+        if (HarvestCore.canReach(bot, targetPos) && !midJump) {
             bot.getActionPack().stopAll();
             startHarvest(bot);
             return;
@@ -2379,6 +2424,27 @@ public final class GatherQuotaTask extends AbstractTask {
             gotoStuckTick = elapsed;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
+            if (midJump) {
+                return;
+            }
+            if (targetPos.equals(pillarBaseWalk)) {
+                // The walk onto the column's floor is over: plan the pillar from the new level. A column
+                // that still yields none is not chased on to a third floor (the bot would shuttle
+                // between two), so the target is written off like any other failed pillar.
+                pillarBaseWalk = null;
+                if (pillarToBlock(bot, targetPos, false)) {
+                    return;
+                }
+                EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                        bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+                BotLog.action(bot, "gather_pillar_base_failed",
+                        "target", targetPos.toShortString(), "at", hereNow.toShortString());
+                targetPos = null;
+                lastGotoTarget = null;
+                gotoStuckPos = null;
+                phase = Phase.SURVEY;
+                return;
+            }
             if (pillarApproachActive) {
                 // This route was explicitly admitted to place safe filler but never to mine a
                 // shortcut.  A short/failed pillar must re-survey rather than fall through to
@@ -2437,7 +2503,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // A target is tried once; a failed pillar excludes it on its own.
             if (!targetPos.equals(pillarRecoveryTried)) {
                 pillarRecoveryTried = targetPos.immutable();
-                if (pillarToBlock(bot, targetPos)) {
+                if (pillarToBlock(bot, targetPos, true)) {
                     return;
                 }
             }

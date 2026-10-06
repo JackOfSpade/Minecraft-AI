@@ -127,8 +127,7 @@ public final class GatherOverheadLogGameTests {
         // to move on, find the trunk, and the trunk (out of reach, too) has to be climbed.
         Case c = new Case(context, "GatherOverheadLeafGT", 2);
         BlockPos leaf = c.at(0, 6, 0);
-        c.world().setBlock(leaf, Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true),
-                Block.UPDATE_ALL);
+        c.leaf(0, 6, 0);
         for (int y = 6; y <= 9; y++) {
             c.set(2, y, 0, Blocks.OAK_LOG);
         }
@@ -224,31 +223,181 @@ public final class GatherOverheadLogGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_excluded_log_is_not_sighted_again_every_tick", maxTicks = 400)
-    public void excludedLogIsNotSightedAgainEveryTick(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_excluded_log_overhead_does_not_stop_the_sweep_finding_another", maxTicks = 1300)
+    public void excludedLogOverheadDoesNotStopTheSweepFindingAnother(GameTestHelper context) {
+        // The excluded log straight above answers the sweep's vertical ray on every step. It must be passed over
+        // (neither climbed nor offered again) so the 360-degree raster reaches the second log off to the side.
         Case c = new Case(context, "GatherOverheadExcludedGT", 6);
-        BlockPos log = c.at(0, 7, 0);
+        BlockPos excluded = c.at(0, 7, 0);
+        BlockPos other = c.at(-3, 7, 2);
         c.set(0, 7, 0, Blocks.OAK_LOG);
+        c.set(-3, 7, 2, Blocks.OAK_LOG);
         c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 8));
-        EpisodeMemory.INSTANCE.exclude(c.bot.getUUID(), log, context.getLevel().getServer().getTickCount(),
+        EpisodeMemory.INSTANCE.exclude(c.bot.getUUID(), excluded, context.getLevel().getServer().getTickCount(),
                 EpisodeMemory.TTL_UNREACHABLE);
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
         task.start(c.bot);
 
-        int[] ticks = {0};
-        context.failIfEver(() -> {
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(c.bot);
-            }
-            if (++ticks[0] < 150) {
-                return;
+        c.run(task, () -> {
+            if (InventoryAction.countItem(c.bot, Items.OAK_LOG) < 1) {
+                return false;
             }
             List<String> lines = c.log();
-            c.require(c.count(lines, "gather_tree_sighted", "pos='" + log.toShortString() + "'") <= 1,
-                    "the excluded log answered the sweep over and over: " + c.tail(lines));
-            c.require(c.count(lines, "gather_pillar_start") == 0,
+            c.require(c.world().getBlockState(excluded).is(Blocks.OAK_LOG) && c.world().getBlockState(other).isAir(),
+                    "the sweep took the excluded log instead of the other one: " + c.tail(lines));
+            c.require(c.count(lines, "gather_pillar_start", "target='" + excluded.toShortString() + "'") == 0,
                     "an excluded log was climbed anyway: " + c.tail(lines));
-            c.finish();
+            c.require(c.count(lines, "gather_tree_sighted", "pos='" + excluded.toShortString() + "'") <= 1,
+                    "the excluded log answered the sweep over and over: " + c.tail(lines));
+            return true;
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_log_over_a_leaf_is_climbed_beside_the_leaf", maxTicks = 1300)
+    public void logOverALeafIsClimbedBesideTheLeaf(GameTestHelper context) {
+        // A canopy log seen from a few blocks off, with a leaf directly under it. Its own column looks like the
+        // cheapest pillar (the columns beside it need as many blocks, and it wins ties), but mining straight up
+        // that column crosses the leaf, which the break controller refuses once the pillar stands.
+        Case c = new Case(context, "GatherOverheadUnderLeafGT", -1);
+        BlockPos log = c.at(3, 8, 0);
+        c.set(3, 8, 0, Blocks.OAK_LOG);
+        c.leaf(3, 7, 0);
+        c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 8));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
+        task.start(c.bot);
+
+        c.run(task, () -> {
+            if (InventoryAction.countItem(c.bot, Items.OAK_LOG) < 1) {
+                return false;
+            }
+            List<String> lines = c.log();
+            int start = c.indexOf(lines, "gather_pillar_start", "target='" + log.toShortString() + "'");
+            c.require(start >= 0, "the log was never climbed: " + c.tail(lines));
+            String goal = Case.field(lines.get(start), "goal");
+            c.require(goal != null && !(goal.startsWith(log.getX() + ", ") && goal.endsWith(", " + log.getZ())),
+                    "the pillar went up the log's own column, through the leaf: " + goal);
+            c.require(c.count(lines, "gather_harvest_timeout") == 0 && c.count(lines, "gather_target_excluded") == 0,
+                    "the climbed log was not mined: " + c.tail(lines));
+            return true;
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_log_over_a_hill_is_climbed_from_the_hills_floor", maxTicks = 1500)
+    public void logOverAHillIsClimbedFromTheHillsFloor(GameTestHelper context) {
+        // A trunk rooted on a slope: every column around the log has its floor one block above the bot's. At the
+        // bot's own level each of those cells is terrain, so no pillar can start there; one step up the hill the
+        // column is clear air. The bot has to walk onto that floor and build from it.
+        Case c = new Case(context, "GatherOverheadHillGT", -2, 9);
+        BlockPos log = c.at(0, 8, 5);
+        c.set(0, 8, 5, Blocks.OAK_LOG);
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = 2; dz <= 8; dz++) {
+                if (dx * dx + (dz - 5) * (dz - 5) <= 9) {
+                    c.set(dx, 0, dz, Blocks.STONE);
+                }
+            }
+        }
+        c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 8));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
+        task.start(c.bot);
+
+        c.run(task, () -> {
+            if (InventoryAction.countItem(c.bot, Items.OAK_LOG) < 1) {
+                return false;
+            }
+            List<String> lines = c.log();
+            int walk = c.indexOf(lines, "gather_pillar_base_walk", "target='" + log.toShortString() + "'");
+            int pillar = c.indexOf(lines, "gather_pillar_start", "target='" + log.toShortString() + "'");
+            c.require(walk >= 0 && pillar > walk,
+                    "expected a walk onto the hill, then the pillar (" + walk + "," + pillar + "): " + c.tail(lines));
+            c.require(c.count(lines, "gather_pillar_base_failed") == 0 && c.count(lines, "gather_target_excluded") == 0,
+                    "the log was written off: " + c.tail(lines));
+            c.require(c.maxFeetY >= c.feet.getY() + 3, "the bot never climbed: highest feet y " + c.maxFeetY);
+            return true;
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_pillar_of_three_is_left_by_stepping_off_and_the_next_log_is_climbed", maxTicks = 2400)
+    public void pillarOfThreeIsLeftBySteppingOffAndTheNextLogIsClimbed(GameTestHelper context) {
+        // Two logs eight up, six blocks apart: three supports each, the tallest tower a bot can step down from
+        // (the safe fall). The second log can only be climbed from the floor, so the bot has to get back down
+        // after the first one instead of sitting on its tower.
+        Case c = new Case(context, "GatherOverheadTowerGT", -3, 9);
+        BlockPos first = c.at(0, 8, 0);
+        BlockPos second = c.at(6, 8, 0);
+        c.set(0, 8, 0, Blocks.OAK_LOG);
+        c.set(6, 8, 0, Blocks.OAK_LOG);
+        c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 8));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 2);
+        task.start(c.bot);
+
+        int[] firstTick = {-1};
+        int[] downTick = {-1};
+        c.budget = 2200;
+        c.run(task, () -> {
+            if (firstTick[0] < 0 && c.world().getBlockState(first).isAir()) {
+                firstTick[0] = c.ticks;
+            }
+            if (firstTick[0] >= 0 && downTick[0] < 0 && c.bot.blockPosition().getY() <= c.feet.getY() + 1) {
+                downTick[0] = c.ticks;
+            }
+            if (InventoryAction.countItem(c.bot, Items.OAK_LOG) < 2) {
+                return false;
+            }
+            List<String> lines = c.log();
+            c.require(downTick[0] >= 0, "both logs are in the inventory, but the bot never stood back on the floor: "
+                    + c.tail(lines));
+            c.require(c.count(lines, "gather_pillar_start", "target='" + first.toShortString() + "'") >= 1
+                            && c.count(lines, "gather_pillar_start", "target='" + second.toShortString() + "'") >= 1,
+                    "each log needs its own pillar: " + c.tail(lines));
+            return true;
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_log_needing_a_taller_pillar_than_a_safe_way_down_is_left_alone", maxTicks = 500)
+    public void logNeedingATallerPillarThanASafeWayDownIsLeftAlone(GameTestHelper context) {
+        // Twelve up needs a seven-block tower. The bot never breaks the block it stands on and a route steps down
+        // at most the safe fall, so it could never leave that tower: it must not build it.
+        Case c = new Case(context, "GatherOverheadTooTallGT", -3, 9);
+        c.set(0, 12, 0, Blocks.OAK_LOG);
+        c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 8));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
+        task.start(c.bot);
+
+        c.run(task, () -> {
+            if (c.ticks < 200) {
+                return false;
+            }
+            c.require(c.count(c.log(), "gather_pillar_start") == 0 && c.maxFeetY < c.feet.getY() + 2,
+                    "a bot that could not come down built a tower: " + c.tail(c.log()));
+            return true;
+        });
+    }
+
+
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_fresh_andesite_quota_climbs_and_steps_back_off", maxTicks = 2400)
+    public void freshAndesiteQuotaClimbsAndStepsBackOff(GameTestHelper context) {
+        // Andesite is placeable support, so a fresh quota for it routes surface-only (no digging, no placing).
+        // Its tower of three is still one the bot can leave: surface routes step down the safe fall.
+        Case c = new Case(context, "GatherOverheadAndesiteGT", -4, 9);
+        BlockPos first = c.at(0, 8, 0);
+        BlockPos second = c.at(6, 8, 0);
+        c.set(0, 8, 0, Blocks.ANDESITE);
+        c.set(6, 8, 0, Blocks.ANDESITE);
+        c.give(new ItemStack(Items.WOODEN_PICKAXE), new ItemStack(Items.DIRT, 8));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditionalExact(Items.ANDESITE, 2);
+        task.start(c.bot);
+
+        c.budget = 2200;
+        c.run(task, () -> {
+            if (InventoryAction.countItem(c.bot, Items.ANDESITE) < 2) {
+                return false;
+            }
+            List<String> lines = c.log();
+            c.require(c.count(lines, "gather_pillar_start", "target='" + first.toShortString() + "'") >= 1
+                            && c.count(lines, "gather_pillar_start", "target='" + second.toShortString() + "'") >= 1,
+                    "each block needs its own pillar: " + c.tail(lines));
+            return true;
         });
     }
 
@@ -261,6 +410,8 @@ public final class GatherOverheadLogGameTests {
         final BlockPos feet;
         int ticks;
         int maxFeetY;
+        /** How many ticks {@link #run} lets a case take before it calls it stuck. */
+        int budget = TICK_BUDGET;
         private boolean done;
 
         Case(GameTestHelper context, String name, int slab) {
@@ -302,6 +453,23 @@ public final class GatherOverheadLogGameTests {
             room.set(dx, dy, dz, block);
         }
 
+        /** A leaf that cannot decay: nothing here is a tree it could belong to. */
+        void leaf(int dx, int dy, int dz) {
+            world().setBlock(at(dx, dy, dz), Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true),
+                    Block.UPDATE_ALL);
+        }
+
+        /** The value of {@code key='...'} in a structured log line, or null. */
+        static String field(String line, String key) {
+            int at = line.indexOf(key + "='");
+            if (at < 0) {
+                return null;
+            }
+            int from = at + key.length() + 2;
+            int to = line.indexOf('\'', from);
+            return to < 0 ? null : line.substring(from, to);
+        }
+
         void give(ItemStack... stacks) {
             for (ItemStack stack : stacks) {
                 InventoryAction.giveItem(bot, stack);
@@ -325,8 +493,8 @@ public final class GatherOverheadLogGameTests {
                 }
                 if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                     fail("gather ended as " + task.state() + ":" + task.failureReason() + " " + tail(log()));
-                } else if (ticks > TICK_BUDGET) {
-                    fail("gather did not finish in " + TICK_BUDGET + " ticks: " + task.describe() + " at "
+                } else if (ticks > budget) {
+                    fail("gather did not finish in " + budget + " ticks: " + task.describe() + " at "
                             + bot.blockPosition() + " " + tail(log()));
                 }
             });
