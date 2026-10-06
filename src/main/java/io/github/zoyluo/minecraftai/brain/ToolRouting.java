@@ -14,6 +14,13 @@ import java.util.Set;
  * from the tool list the model sees and, as a backstop, at dispatch. The restriction is lifted for
  * the rest of the instruction chain once the collection has finished, so a handoff the wording did
  * not make explicit (or one that failed) cannot dead-end the request.</p>
+ *
+ * <p>The lift is per chain, not per resource: "get 32 logs and 10 coal" is guarded until the first
+ * collection the chain started completes. Counting the collections a line asks for would need the
+ * conjoined objects parsed ("32 logs and 10 coal" has one verb), and a miscount would withhold
+ * give_item for good, which is the dead end this class exists to prevent. A request for several
+ * different items goes through one fulfill_items call (see the prompt), whose raw allocations are
+ * new quotas by construction.</p>
  */
 final class ToolRouting {
     static final String GIVE_ITEM = "give_item";
@@ -44,6 +51,9 @@ final class ToolRouting {
             + "and this tool cannot keep the new raw quota apart from what you carry (gather_then_give would hand "
             + "over the raw resource itself). Collect with gather (count) first; craft and hand over the result "
             + "when the collection has finished";
+    private static final String PARTIAL_HANDOFF_BLOCKED = "blocked: the player wants only part of the collection "
+            + "handed over, and this tool hands over everything it collects. Collect with gather (count) first; "
+            + "hand over the part with give_item when the collection has finished";
     private static final String QUOTA_ALREADY_GATHERED_BLOCKED = "blocked: the new quota was already collected "
             + "and is still carried; hand it over with give_item instead of collecting again";
 
@@ -96,11 +106,12 @@ final class ToolRouting {
         if (intent.acquiresRaw() && !collectionFinished) {
             withheld.add(GIVE_ITEM);
             withheld.add(ACHIEVE_GOAL);
-            if (intent.craftsOutcome()) {
-                // "Gather 32 logs, craft a table, give it to me": the raw quota is collected first (gather
-                // with a count is a new quota). fulfill_items cannot express a new raw quota beside a
-                // crafted result, and gather_then_give would hand over the logs instead of the table;
-                // the later stages unlock when the collection finishes.
+            if (intent.craftsOutcome() || intent.handsOverPart()) {
+                // "Gather 32 logs, craft a table, give it to me" / "gather 32 logs and give me 16": the raw
+                // quota is collected first (gather with a count is a new quota). gather_then_give would
+                // hand over everything it collected (the logs instead of the table, 32 instead of 16) and
+                // fulfill_items cannot express a new raw quota beside a different handoff; the later stages
+                // unlock when the collection finishes.
                 withheld.add(GATHER_THEN_GIVE);
                 withheld.add(FULFILL_ITEMS);
             } else if (intent.handsOverAcquired() && intent.quantityStated()) {
@@ -122,9 +133,13 @@ final class ToolRouting {
         return switch (toolName) {
             case GIVE_ITEM -> GIVE_ITEM_BLOCKED;
             case ACHIEVE_GOAL -> ACHIEVE_GOAL_BLOCKED;
-            case GATHER_THEN_GIVE -> quotaAlreadyGathered ? QUOTA_ALREADY_GATHERED_BLOCKED : CRAFTED_RESULT_BLOCKED;
-            case FULFILL_ITEMS -> CRAFTED_RESULT_BLOCKED;
+            case GATHER_THEN_GIVE -> quotaAlreadyGathered ? QUOTA_ALREADY_GATHERED_BLOCKED : collectFirstBlocked();
+            case FULFILL_ITEMS -> collectFirstBlocked();
             default -> SPLIT_COLLECTION_BLOCKED;
         };
+    }
+
+    private String collectFirstBlocked() {
+        return intent.craftsOutcome() ? CRAFTED_RESULT_BLOCKED : PARTIAL_HANDOFF_BLOCKED;
     }
 }

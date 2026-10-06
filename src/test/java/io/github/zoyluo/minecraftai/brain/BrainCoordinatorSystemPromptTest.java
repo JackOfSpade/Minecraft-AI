@@ -61,6 +61,26 @@ final class BrainCoordinatorSystemPromptTest {
     }
 
     @Test
+    void theOreRulesNameWhatReplacesMineOreWhereTheRoutingWithholdsIt() {
+        String prompt = BrainCoordinator.systemPrompt("Moss", "JackNotInTheBox");
+        RegistryBootstrap.ensure();
+        ToolRouting routing = new ToolRouting();
+        routing.beginInstruction(RequestIntent.parse("mine 10 iron and give them to me"));
+        assertTrue(routing.withheldTools().contains("mine_ore"), "the premise: the guard hides mine_ore here");
+        assertFalse(routing.withheldTools().contains("fulfill_items"));
+
+        // Rules 3, 9 and 12 each name mine_ore for ore; each says what to call when the guard hides it.
+        assertTrue(prompt.contains("a stated number of ore the player also wants handed over is not offered through it"));
+        assertTrue(prompt.contains("(when the player states a number and also wants that ore handed over, as in \"mine 10 iron "
+                + "and give them to me\", mine_ore is not offered: call fulfill_items with the player as recipient)"));
+        assertTrue(prompt.contains("To get ore for yourself use mine_ore (a stated number of ore the player wants handed over "
+                + "goes through fulfill_items with the player as recipient)"));
+        assertFalse(prompt.contains("To get ore always use mine_ore"));
+        // Only part of a collection is handed over after it, not by gather_then_give.
+        assertTrue(prompt.contains("gather with the count first and give_item the part when it finishes"));
+    }
+
+    @Test
     void thePromptSteersWhereTheRoutingLeavesRoom() {
         String prompt = BrainCoordinator.systemPrompt("Moss", "JackNotInTheBox");
 

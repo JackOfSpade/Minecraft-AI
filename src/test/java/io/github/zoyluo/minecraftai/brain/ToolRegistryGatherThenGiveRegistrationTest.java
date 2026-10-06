@@ -74,6 +74,8 @@ final class ToolRegistryGatherThenGiveRegistrationTest {
                 "give_item must say it never collects and where collection lives");
         assertTrue(gatherThenGive.contains("fulfill_items") && gatherThenGive.contains("give_item"),
                 "gather_then_give must name the routes for ore, crafted results and a missing number");
+        assertTrue(gatherThenGive.contains("give_item the part"),
+                "gather_then_give hands over everything it collects; a partial handoff goes through give_item");
         assertTrue(fulfill.contains("give_item") && fulfill.contains("once per item"),
                 "fulfill_items is production; a carried bundle is handed over item by item");
     }

@@ -132,6 +132,21 @@ final class ToolRoutingTest {
     }
 
     @Test
+    void aPartialHandoffCollectsFirstBecauseGatherThenGiveHandsOverEverything() {
+        ToolRouting routing = routingFor("gather 32 logs and give me 16");
+        assertEquals(Set.of("give_item", "achieve_goal", "gather_then_give", "fulfill_items"), routing.withheldTools());
+        assertNull(routing.blockedResult("gather"), "gather with the count is the new quota");
+        String text = routing.blockedResult("gather_then_give");
+        assertTrue(text.contains("part") && text.contains("gather (count)") && text.contains("give_item"), text);
+        assertEquals(text, routing.blockedResult("fulfill_items"));
+        routing.noteTaskStarted("gather");
+
+        routing.observeTask("gather", TaskState.COMPLETED);
+
+        assertEquals(Set.of(), routing.withheldTools(), "the part is handed over with give_item afterwards");
+    }
+
+    @Test
     void theBlockedTextsNameTheToolsThatCanServeTheRequest() {
         ToolRouting collect = routingFor("get 32 logs");
         String give = collect.blockedResult("give_item");

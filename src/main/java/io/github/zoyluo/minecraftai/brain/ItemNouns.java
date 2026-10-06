@@ -46,9 +46,16 @@ final class ItemNouns {
      * block. The conversion is storage, not the way the bot gets it.
      */
     private static final Pattern NATURAL_FORM = Pattern.compile("(?:_log|_wood|_stem|_hyphae|_ore)$|^raw_[^_]+$");
-    /** Naturally generated "_block" items: the suffix does not make these a storage block. */
+    /**
+     * Blocks the world generates that a recipe also makes from their own pieces (sand to sandstone, clay balls
+     * to clay, andesite from diorite): that recipe is how vanilla compacts them, not how a player gets them.
+     * Listed by id because the recipe tables cannot say so, and because a running server's recipe index holds
+     * these recipes where the unit tests' does not, which would otherwise make them "crafted" only in the game.
+     */
     private static final Set<String> NATURAL_BLOCKS = Set.of(
-            "grass_block", "moss_block", "pale_moss_block", "magma_block", "amethyst_block");
+            "grass_block", "moss_block", "pale_moss_block", "magma_block", "amethyst_block",
+            "andesite", "diorite", "granite", "sandstone", "red_sandstone", "clay", "glowstone",
+            "snow_block", "packed_ice", "blue_ice", "dripstone_block", "bone_block", "nether_wart_block");
     private static final int MAX_PHRASE_WORDS = 6;
 
     private static Map<String, List<Item>> byLastSegment;
@@ -79,15 +86,14 @@ final class ItemNouns {
             return false;
         }
         String path = BuiltInRegistries.ITEM.getKey(item).getPath();
-        if (NATURAL_FORM.matcher(path).find()) {
+        if (NATURAL_FORM.matcher(path).find() || NATURAL_BLOCKS.contains(path)) {
             return false;
         }
         if (item.components().has(DataComponents.MAX_DAMAGE)
                 || RecipeRegistry.find(item).isPresent() || SmeltChain.rawFor(item) != null) {
             return true;
         }
-        return PROCESSED_FORM.matcher(path).find()
-                || (path.endsWith("_block") && !NATURAL_BLOCKS.contains(path));
+        return PROCESSED_FORM.matcher(path).find() || path.endsWith("_block");
     }
 
     /** True when the word is one whole underscore-separated segment of some item id ("porkchop", "cobblestone"). */

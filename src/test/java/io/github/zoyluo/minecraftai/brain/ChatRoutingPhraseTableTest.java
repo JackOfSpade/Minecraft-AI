@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.brain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -8,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -26,8 +28,11 @@ final class ChatRoutingPhraseTableTest {
         /** New raw resources handed over: only gather_then_give / fulfill_items start the collection. */
         COLLECT_AND_GIVE(Set.of("give_item", "achieve_goal", "gather", "assign_task", "forage", "mine_ore",
                 "mine_valuables_in_radius", "harvest_crop", "mine_block")),
-        /** New raw resources plus a crafted result: collect first, craft and hand over afterwards. */
-        COLLECT_THEN_CRAFT(Set.of("give_item", "achieve_goal", "gather_then_give", "fulfill_items"));
+        /**
+         * New raw resources plus a crafted result, or a handoff of only part of them: gather_then_give would
+         * hand over everything it collected, so collect first and craft / hand over afterwards.
+         */
+        COLLECT_FIRST(Set.of("give_item", "achieve_goal", "gather_then_give", "fulfill_items"));
 
         private final Set<String> withheld;
 
@@ -51,8 +56,8 @@ final class ChatRoutingPhraseTableTest {
         return new Phrase(text, Route.COLLECT_AND_GIVE);
     }
 
-    private static Phrase collectThenCraft(String text) {
-        return new Phrase(text, Route.COLLECT_THEN_CRAFT);
+    private static Phrase collectFirst(String text) {
+        return new Phrase(text, Route.COLLECT_FIRST);
     }
 
     private static final Set<String> PLAYERS = Set.of("Steve", "JackNotInTheBox", "Moss");
@@ -212,7 +217,7 @@ final class ChatRoutingPhraseTableTest {
             collect("moss lets mine some coal"),
             collect("mine this iron ore"),
             collect("mine the entire iron ore vein"),
-            collectThenCraft("lets go mine some coal , need more torches"),
+            collectFirst("lets go mine some coal , need more torches"),
             free("get us both a full set of stone tools"),
             free("moss, get full stone tool set for both u and me"),
             free("moss make full cobblestone tool set for both of us, one set for you that you keep and give one set for me"),
@@ -246,8 +251,8 @@ final class ChatRoutingPhraseTableTest {
             collectAndGive("mine 10 iron and give them to me"),
             collectAndGive("collect 64 cobblestone and drop it here"),
             collectAndGive("gather 20 logs and bring them back"),
-            collectAndGive("gather 32 logs and give 16 to me"),
-            collectAndGive("gather 32 logs and give me half"),
+            collectAndGive("gather 32 logs and give me 32"),
+            collectAndGive("gather 32 logs and give me all of them"),
             collectAndGive("gather 32 logs, give me them"),
             collectAndGive("gather 32 logs and send them to me"),
             collectAndGive("gather 32 logs and toss them to me"),
@@ -255,7 +260,6 @@ final class ChatRoutingPhraseTableTest {
             collectAndGive("fetch 32 logs and deliver them to Steve"),
             collectAndGive("get a log and give it to me"),
             collectAndGive("gather 32 logs and give them to Steve"),
-            collectAndGive("mine 10 coal and give Steve half"),
             collectAndGive("get 20 logs and hand them to JackNotInTheBox"),
             collectAndGive("gather 32 logs with an iron pickaxe, then hand them to me"),
             // --- collect and hand over, but no way for gather_then_give to know the number
@@ -271,15 +275,72 @@ final class ChatRoutingPhraseTableTest {
             collect("gather 32 logs and give me your coal"),
             collect("gather 32 logs, then give me the logs you have"),
             // --- collect, then craft
-            collectThenCraft("gather 32 logs then craft a table and give it to me"),
-            collectThenCraft("gather 32 logs, craft an iron pickaxe, then give it to me"),
-            collectThenCraft("chop 32 logs, craft a table, and hand it to me"),
-            collectThenCraft("gather 32 logs and make me a chest"),
-            collectThenCraft("mine 10 coal and craft 4 torches"),
-            collectThenCraft("get 20 logs and make me a crafting table"),
-            collectThenCraft("make an iron pickaxe and mine 10 diamonds"),
-            collectThenCraft("gather 32 logs and give me a table"),
-            collectThenCraft("gather 32 logs, then collect an iron pickaxe"));
+            collectFirst("gather 32 logs then craft a table and give it to me"),
+            collectFirst("gather 32 logs, craft an iron pickaxe, then give it to me"),
+            collectFirst("chop 32 logs, craft a table, and hand it to me"),
+            collectFirst("gather 32 logs and make me a chest"),
+            collectFirst("mine 10 coal and craft 4 torches"),
+            collectFirst("get 20 logs and make me a crafting table"),
+            collectFirst("make an iron pickaxe and mine 10 diamonds"),
+            collectFirst("gather 32 logs and give me a table"),
+            collectFirst("gather 32 logs, then collect an iron pickaxe"),
+            // --- handing over only part of the collection: gather_then_give would hand over all of it
+            collectFirst("gather 32 logs and give 16 to me"),
+            collectFirst("gather 32 logs and give me half"),
+            collectFirst("gather 32 logs, then give half to me"),
+            collectFirst("mine 10 coal and give Steve half"),
+            collectFirst("chop 20 logs and hand me 5"),
+            collectFirst("gather a stack of logs and give me a dozen"),
+            collectFirst("gather 32 logs and give me some"),
+            // --- suggestions and conditions in question shape still ask for work
+            collect("how about gathering 32 logs"),
+            collect("how about you gather 32 logs"),
+            collect("what about getting 32 logs"),
+            collect("why dont you gather some logs"),
+            collect("why don't you mine 10 coal"),
+            collect("why not chop 10 logs"),
+            collect("do you think you could gather 32 logs"),
+            collect("do you think you can mine some coal?"),
+            collect("is it possible to gather 32 logs"),
+            collect("is it possible for you to chop 10 logs?"),
+            collect("when you get a chance, gather 32 logs"),
+            collect("when you can gather 32 logs"),
+            // a question word only opens the question's own part: a later request after a comma still counts
+            collect("how many logs do you have, gather 32 more"),
+            collect("what are you doing, mine some coal"),
+            // --- but these remain questions
+            free("what about the logs you have?"),
+            free("how about the logs you gathered"),
+            free("when did you gather the logs"),
+            free("when will you mine the coal?"),
+            free("why didnt you gather the logs"),
+            free("do you think this is the best spot to mine?"),
+            free("do you think you gathered enough logs"),
+            free("is it possible that you mined the coal"),
+            free("how much coal did you mine, give it to me"),
+            // --- negation reaches the verb it governs, not the next command
+            collect("dont get logs get stone"),
+            collect("don't mine coal mine iron"),
+            collect("dont get logs, get stone"),
+            collect("no problem gather 32 logs"),
+            collect("no worries mine some coal"),
+            free("i dont need to gather logs"),
+            free("dont want you to mine coal"),
+            free("no need to gather logs, give me the ones you have"),
+            // --- natural blocks a recipe also makes are collected like any other resource
+            collect("mine 64 andesite"),
+            collect("dig 20 clay"),
+            collect("mine some glowstone"),
+            collect("gather 20 sandstone"),
+            collect("get 10 granite"),
+            collect("collect 16 diorite"),
+            collect("get 10 snow blocks"),
+            collect("get 16 red sandstone"),
+            // --- words no tool can fetch are not a collection request after a soft verb
+            free("get me 3 steaks"),
+            free("get 5 steaks"),
+            free("i need 20 xp"),
+            free("get 3 levels"));
 
     @BeforeAll
     static void bootstrap() {
@@ -363,5 +424,38 @@ final class ChatRoutingPhraseTableTest {
         assertTrue(RequestIntent.parse("gather 32 logs then craft a table and give it to me").craftsOutcome());
         assertEquals(RequestIntent.NONE, RequestIntent.parse(""));
         assertEquals(RequestIntent.NONE, RequestIntent.parse(null));
+    }
+
+    @Test
+    void aHandoffIsPartialOnlyWhenItNamesAnotherQuantityThanTheCollection() {
+        assertTrue(RequestIntent.parse("gather 32 logs and give me 16").handsOverPart());
+        assertTrue(RequestIntent.parse("gather 32 logs and give me half").handsOverPart());
+        assertFalse(RequestIntent.parse("gather 32 logs and give me 32").handsOverPart());
+        assertFalse(RequestIntent.parse("gather 32 logs and give them to me").handsOverPart());
+        assertFalse(RequestIntent.parse("gather and hand me 32 logs").handsOverPart(),
+                "the handoff supplies the collection's number");
+        assertFalse(RequestIntent.parse("give me 16 logs").handsOverPart());
+    }
+
+    @Test
+    void naturalBlocksAreStillCollectedWhenTheGamesRecipeIndexListsTheirRecipe() {
+        // A running server's recipe index holds the compaction recipes (sand to sandstone, clay balls to clay)
+        // that a bare test JVM does not; without the natural-block list these would read as crafted there.
+        RuntimeRecipeFixture.install(Items.ANDESITE, Items.CLAY, Items.GLOWSTONE, Items.SANDSTONE,
+                Items.SEA_LANTERN, Items.PISTON, Items.IRON_PICKAXE);
+        try {
+            for (String text : List.of("mine 64 andesite", "dig 20 clay", "mine some glowstone",
+                    "gather 20 sandstone", "get 10 sandstone")) {
+                assertEquals(Route.COLLECT.withheld, withheldFor(text), text);
+            }
+            // Not a listed natural block: "mine" cannot mean crafting, so the verb alone keeps it physical.
+            assertEquals(Route.COLLECT.withheld, withheldFor("mine 10 sea lanterns"));
+            // Crafted stays crafted for the verbs that can mean either, so achieve_goal remains usable.
+            assertEquals(Set.of(), withheldFor("get 10 sea lanterns"));
+            assertEquals(Set.of(), withheldFor("get 4 pistons"));
+            assertEquals(Set.of(), withheldFor("collect an iron pickaxe"));
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
     }
 }

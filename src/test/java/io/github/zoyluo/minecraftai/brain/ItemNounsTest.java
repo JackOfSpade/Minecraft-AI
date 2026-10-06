@@ -82,6 +82,23 @@ final class ItemNounsTest {
     }
 
     @Test
+    void naturalBlocksStayRawWhereTheGamesRecipeIndexListsTheirCompactionRecipe() {
+        // The running server's recipe index holds these recipes (4 sand make sandstone ...); the bare test
+        // JVM's does not, so the production classification has to be reproduced to be tested.
+        RuntimeRecipeFixture.install(Items.ANDESITE, Items.DIORITE, Items.GRANITE, Items.SANDSTONE, Items.RED_SANDSTONE,
+                Items.CLAY, Items.GLOWSTONE, Items.SNOW_BLOCK, Items.PACKED_ICE, Items.PISTON);
+        try {
+            for (String noun : List.of("andesite", "diorite", "granite", "sandstone", "red sandstone", "clay",
+                    "glowstone", "snow blocks", "packed ice")) {
+                assertEquals(ItemNouns.Kind.RAW, kind(noun), noun);
+            }
+            assertEquals(ItemNouns.Kind.CRAFTED, kind("pistons"), "an ordinary recipe still makes an item crafted");
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
+    }
+
+    @Test
     void gearIsCraftedBecauseItHasDurability() {
         assertTrue(ItemNouns.isCraftedOutput(Items.IRON_PICKAXE));
         assertTrue(ItemNouns.isCraftedOutput(Items.SHIELD));

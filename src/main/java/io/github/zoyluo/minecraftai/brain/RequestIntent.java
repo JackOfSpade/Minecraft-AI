@@ -23,11 +23,14 @@ import java.util.Set;
  * @param quantityStated    the collection clause (or the handoff that follows it) names a number
  * @param handsOverAcquired a player is asked to receive what was collected (explicit give/hand/bring
  *                          with a player, "me" or an implicit "here" as the recipient)
+ * @param handsOverPart     the handoff names a quantity other than the collected one ("gather 32 logs and
+ *                          give me 16", "... give me half"), so it is not the whole collection
  * @param craftsOutcome     a crafted item is part of the outcome (craft/make/get an iron pickaxe,
  *                          or hand over a table), as opposed to only raw materials
  */
-record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsOverAcquired, boolean craftsOutcome) {
-    static final RequestIntent NONE = new RequestIntent(false, false, false, false);
+record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsOverAcquired,
+                     boolean handsOverPart, boolean craftsOutcome) {
+    static final RequestIntent NONE = new RequestIntent(false, false, false, false, false);
 
     private enum Verb { ACQUIRE_CORE, ACQUIRE_SOFT, HANDOFF, CRAFT }
 
@@ -90,7 +93,15 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
     private static final Set<String> NEGATORS = Set.of(
             "dont", "not", "never", "no", "stop", "cancel", "skip", "without", "forget", "ignore",
             "nevermind", "nvm", "cease", "avoid", "wont", "shouldnt", "cant", "cannot", "quit", "abort", "nah");
+    /** "no problem, gather 32 logs": a courtesy, not a refusal. */
+    private static final Set<String> COURTESY_AFTER_NO = Set.of(
+            "problem", "problems", "prob", "probs", "worries", "worry", "rush", "hurry", "biggie");
     private static final int NEGATION_REACH = 4;
+    /** Verbs that make the player's wish physical whatever the noun is: nothing is mined or chopped by crafting. */
+    private static final Set<String> PHYSICAL_VERBS = Set.of(
+            "mine", "mining", "dig", "digging", "chop", "chopping", "harvest", "harvesting",
+            "forage", "foraging", "farm", "farming");
+    private static final Set<String> COMMA = Set.of(",");
     private static final Set<String> CLAUSE_WORDS = Set.of(
             "then", "and", "also", "plus", "afterwards", "afterward", "next", "after", "before", "once",
             "while", "so", "but", "or", "until", "when", "if", "because", "since");
@@ -133,6 +144,8 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
             "couple", "many", "lots", "lot", "bunch", "ton", "tons", "plenty", "enough", "half", "full",
             "whole", "entire", "rest", "of", "other", "same", "these", "those", "this", "that", "each",
             "every", "my", "our", "his", "her", "their", "your", "ur", "yours");
+    /** Quantity words that name a share rather than a determiner ("give me half"). */
+    private static final Set<String> PART_WORDS = Set.of("half", "some", "few", "several", "couple");
     private static final Set<String> ARTICLES = Set.of("a", "an");
     private static final Set<String> STACK_WORDS = Set.of("stack", "stacks", "dozen", "dozens");
     private static final Set<String> NUMBER_WORDS = Set.of(
@@ -160,14 +173,20 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         }
         Reading reading = new Reading();
         for (Sentence sentence : sentences(text)) {
-            if (isQuestion(sentence)) {
-                continue;
-            }
-            for (List<String> clause : clauses(sentence.words())) {
-                readClause(clause, names, reading);
+            // A comma ends a question too: "how many logs do you have, gather 32 more" still asks for work.
+            List<List<String>> parts = split(sentence.words(), COMMA);
+            for (int part = 0; part < parts.size(); part++) {
+                boolean lastPart = part == parts.size() - 1;
+                if (isQuestion(parts.get(part), sentence.questionMark() && lastPart)) {
+                    continue;
+                }
+                for (List<String> clause : split(parts.get(part), CLAUSE_WORDS)) {
+                    readClause(clause, names, reading);
+                }
             }
         }
-        return new RequestIntent(reading.acquired, reading.quantity, reading.handsOver, reading.crafts);
+        return new RequestIntent(reading.acquired, reading.quantity, reading.handsOver, reading.partial,
+                reading.crafts);
     }
 
     static RequestIntent parse(String text) {
@@ -179,9 +198,12 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         boolean acquired;
         boolean quantity;
         boolean handsOver;
+        boolean partial;
         boolean crafts;
         /** An acquisition verb without an object ("gather and hand me 32 logs") borrows the handoff's object. */
         boolean objectPending;
+        /** The number or share words of the collection clause, to compare with what the handoff names. */
+        List<String> collectQuantity = List.of();
     }
 
     /** What follows one verb: the object phrase and who receives it. */
@@ -195,8 +217,9 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         boolean implicitRecipient;
         /** The object is stock the bot already carries ("your logs", "the logs you collected"). */
         boolean carried;
-        boolean numeric;
         boolean quantified;
+        /** The numbers and share words in front of the noun ("16", "half", "stack"), in order. */
+        final List<String> quantityWords = new ArrayList<>();
         /** "get over here", "get ready": movement, not an object. */
         boolean idiom;
 
@@ -230,10 +253,15 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
                 if (phrase.idiom || phrase.carried) {
                     return;
                 }
+                // An unrecognised noun counts for a core verb only: "get 5 steaks" or "get 3 levels" name
+                // nothing a collection tool can fetch, so hiding give_item for them would only strand the request.
                 boolean core = verb == Verb.ACQUIRE_CORE;
                 boolean collects = switch (noun) {
                     case RAW -> true;
-                    case UNKNOWN -> core || phrase.numeric;
+                    // The recipe that makes a natural block (sandstone, clay) is not how a player gets it, and
+                    // "mine"/"dig" cannot mean crafting: those verbs keep the request physical.
+                    case CRAFTED -> PHYSICAL_VERBS.contains(word);
+                    case UNKNOWN -> core;
                     case NONE -> BARE_VERBS.contains(word);
                     default -> false;
                 };
@@ -241,6 +269,7 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
                     reading.acquired = true;
                     reading.quantity |= phrase.quantified;
                     reading.objectPending = noun == NounPhrase.NONE;
+                    reading.collectQuantity = phrase.quantityWords;
                 } else if (noun == NounPhrase.CRAFTED) {
                     reading.crafts = true;
                 }
@@ -258,6 +287,9 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
                 reading.crafts |= noun == NounPhrase.CRAFTED;
                 if (reading.objectPending) {
                     reading.quantity |= phrase.quantified;
+                    reading.collectQuantity = phrase.quantityWords;
+                } else if (!phrase.quantityWords.isEmpty() && !phrase.quantityWords.equals(reading.collectQuantity)) {
+                    reading.partial = true;
                 }
             }
         }
@@ -303,13 +335,35 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         return !NOUN_USE_BEFORE.contains(before) && !STATEMENT_BEFORE.contains(before);
     }
 
+    /**
+     * Whether a negation in this clause governs the verb at {@code index}. It reaches back a few words
+     * ("do not chop any trees", "no more mining") but stops at an earlier verb with an object of its own:
+     * that verb is what the negation governs, so "dont get logs get stone" still asks for the stone.
+     */
     private static boolean negatedBefore(List<String> clause, int index) {
-        for (int i = Math.max(0, index - NEGATION_REACH); i < index; i++) {
-            if (NEGATORS.contains(clause.get(i))) {
+        for (int i = index - 1; i >= Math.max(0, index - NEGATION_REACH); i--) {
+            if (negates(clause, i)) {
                 return true;
+            }
+            if (verbAt(clause, i) != null && inVerbPosition(clause, i) && !passesOnToNextVerb(clause, i)) {
+                return false;
             }
         }
         return false;
+    }
+
+    /** A negator word, except where it is a courtesy or opens a suggestion: "no problem", "why not", "why dont you". */
+    private static boolean negates(List<String> clause, int index) {
+        String word = clause.get(index);
+        return NEGATORS.contains(word)
+                && !(word.equals("no") && COURTESY_AFTER_NO.contains(at(clause, index + 1)))
+                && !at(clause, index - 1).equals("why");
+    }
+
+    /** "need to gather", "want you to mine": the earlier verb only introduces the next one, so a negation passes through it. */
+    private static boolean passesOnToNextVerb(List<String> clause, int index) {
+        String next = at(clause, index + 1);
+        return next.equals("to") || YOU.contains(next) && at(clause, index + 2).equals("to");
     }
 
     /** Reads everything after a verb: particles, an inline recipient, quantity, the noun and what follows it. */
@@ -341,12 +395,14 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         while (j < clause.size()) {
             String word = clause.get(j);
             if (isNumber(word) || STACK_WORDS.contains(word)) {
-                phrase.numeric = true;
                 phrase.quantified = true;
+                phrase.quantityWords.add(word);
             } else if (ARTICLES.contains(word)) {
                 phrase.quantified = true;
             } else if (!VAGUE_QUANTITY.contains(word)) {
                 break;
+            } else if (PART_WORDS.contains(word)) {
+                phrase.quantityWords.add(word);
             }
             phrase.carried |= YOURS.contains(word);
             consumed++;
@@ -397,35 +453,58 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
     }
 
     /** A question about the past or about state ("how many logs did you gather?") asks for no work. */
-    private static boolean isQuestion(Sentence sentence) {
-        List<String> words = sentence.words();
+    private static boolean isQuestion(List<String> words, boolean questionMark) {
         for (int i = 0; i < Math.min(QUESTION_OPENING_WORDS, words.size()); i++) {
             String word = words.get(i);
             if (VERBS.containsKey(word) || POLITE_OPENERS.contains(word)) {
                 return false;
             }
             if (QUESTION_WORDS.contains(word)) {
-                return true;
+                return !suggestsWork(words, i);
             }
             if (QUESTION_AUXILIARIES.contains(word)) {
                 String next = at(words, i + 1);
                 // "do you mind getting me wood" is a request; "have the logs ready" is a command.
-                if (YOU.contains(next) && REQUESTS_AFTER_YOU.contains(at(words, i + 2))) {
+                if (YOU.contains(next) && REQUESTS_AFTER_YOU.contains(at(words, i + 2)) || asksPolitely(words, i)) {
                     return false;
                 }
-                return SUBJECTS.contains(next) || sentence.questionMark();
+                return SUBJECTS.contains(next) || questionMark;
             }
         }
         return false;
     }
 
-    private static List<List<String>> clauses(List<String> sentence) {
-        List<List<String>> clauses = new ArrayList<>();
+    /**
+     * A question word that opens a suggestion or a condition, not a question: "how about gathering logs",
+     * "why dont you gather some", "why not mine coal", "when you get a chance, gather 32 logs".
+     */
+    private static boolean suggestsWork(List<String> words, int index) {
+        String word = words.get(index);
+        String next = at(words, index + 1);
+        return (word.equals("how") || word.equals("what")) && next.equals("about")
+                || word.equals("why") && (next.equals("not") || next.equals("dont") && SUBJECTS.contains(at(words, index + 2)))
+                || word.equals("when") && SUBJECTS.contains(next);
+    }
+
+    /** "is it possible to gather 32 logs", "is it possible for you to ...", "do you think you could ...". */
+    private static boolean asksPolitely(List<String> words, int index) {
+        String next = at(words, index + 1);
+        if (words.get(index).equals("is") && next.equals("it") && at(words, index + 2).equals("possible")) {
+            String after = at(words, index + 3);
+            return after.equals("to") || after.equals("for") && YOU.contains(at(words, index + 4));
+        }
+        return YOU.contains(next) && at(words, index + 2).equals("think") && YOU.contains(at(words, index + 3))
+                && POLITE_OPENERS.contains(at(words, index + 4));
+    }
+
+    /** The non-empty runs of words between separator words. */
+    private static List<List<String>> split(List<String> words, Set<String> separators) {
+        List<List<String>> runs = new ArrayList<>();
         List<String> current = new ArrayList<>();
-        for (String word : sentence) {
-            if (word.equals(",") || CLAUSE_WORDS.contains(word)) {
+        for (String word : words) {
+            if (separators.contains(word)) {
                 if (!current.isEmpty()) {
-                    clauses.add(current);
+                    runs.add(current);
                     current = new ArrayList<>();
                 }
             } else {
@@ -433,9 +512,9 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
             }
         }
         if (!current.isEmpty()) {
-            clauses.add(current);
+            runs.add(current);
         }
-        return clauses;
+        return runs;
     }
 
     /** Lowercased words per sentence; apostrophes vanish ("don't" -> "dont") and "," stays as a word. */
