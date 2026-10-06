@@ -10,6 +10,7 @@ import baritone.api.pathing.goals.GoalYLevel;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.MiningController;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.List;
@@ -104,15 +105,14 @@ public final class BaritoneGoals {
         // The shape-aware observation helpers read the target state to derive its outline. Earn
         // that read with a shape-free current-cell ray first, as this direct public seam has no
         // active route fence yet. A partial block such as a snow layer may not touch a unit-cell
-        // face, so its ordinary state-free cell ray is an equally valid preliminary proof. These are
-        // the strict (vanilla clip) predicates, like the miner's own gate: a log seen through a leaf is
-        // not a target a hand can mine from here.
-        if (!(ObservableWorldQuery.canObserveBlockCellFaceStrict(bot, target)
-                || ObservableWorldQuery.canObserveCellStrict(bot, target))
-                || (!ObservableWorldQuery.canObserveBlockStrict(bot, target)
-                && !ObservableWorldQuery.canObserveBlockWithInsetFacesStrict(bot, target))) {
-            BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, "target_not_observed", "mine_at");
-            return Outcome.refused("target_not_observed");
+        // face, so its ordinary state-free cell ray is an equally valid preliminary proof. This is the
+        // miner's own admission: the strict (vanilla clip) proof of a target a hand reaches, or, for a log
+        // seen through a leaf, a way that the miner can clear by breaking the leaf first. A target whose
+        // every line crosses a block that may not be broken is refused with a typed reason.
+        String admission = MiningController.admissionRefusal(bot, target);
+        if (admission != null) {
+            BaritoneBreakPlacePolicy.refuse(bot, BaritoneRefusals.Op.GOAL, target, admission, "mine_at");
+            return Outcome.refused(admission);
         }
         // The observation proof above authorises this one live read of the exact target, not a
         // path scan or any neighbouring terrain read.

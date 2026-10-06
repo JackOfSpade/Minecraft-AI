@@ -109,6 +109,8 @@ public final class OreDigStructureBreakGameTests {
     public void blockMinerRefusesStructureBlocksWithoutTouchingThemAndMinesNaturalTerrain(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
         AIPlayerEntity bot = arena.spawn("StructMinerGT", arena.cell(0, 0, 0));
+        // The chunk tracking view follows a teleport on the next tick, and every sight question needs it at once.
+        arena.world.getChunkSource().move(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         BlockPos target = arena.cell(0, 1, -1);
         List<Block> structure = List.of(Blocks.STONE_BRICKS, Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS, Blocks.CHISELED_STONE_BRICKS,

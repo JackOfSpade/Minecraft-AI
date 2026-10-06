@@ -29,7 +29,8 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 public final class ObservableWorldQuery {
     /** Shared inset (in blocks) used to sample points around a face center. Also used by BuildAction. */
     public static final double FACE_SAMPLE_INSET = 0.375D;
-    private static final double[][] FACE_SAMPLE_OFFSETS = {
+    /** The 3x3 grid of aim points on a face; {@link ReachObstructions} aims the same lines the strict proofs do. */
+    static final double[][] FACE_SAMPLE_OFFSETS = {
             {0.0D, 0.0D},
             {-FACE_SAMPLE_INSET, 0.0D},
             {FACE_SAMPLE_INSET, 0.0D},

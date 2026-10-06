@@ -403,6 +403,7 @@ public final class OffhandExecutionGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        world.getChunkSource().move(bot); // the tracking view follows a teleport on the next tick; sight questions at tick 0 need it now
         bot.setHealth(bot.getMaxHealth());
         bot.getFoodData().setFoodLevel(20);
         return new Fixture(name, bot, feet);

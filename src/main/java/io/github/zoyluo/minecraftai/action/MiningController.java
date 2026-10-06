@@ -6,7 +6,10 @@ import io.github.zoyluo.minecraftai.mining.BreakRule;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistHooks;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.ReachObstructions;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
@@ -21,24 +24,38 @@ public final class MiningController {
     private static final int MAX_TICKS = 600;
     /** A direct break may inspect or affect only a block the player can currently see. */
     static final String TARGET_NOT_OBSERVED = "target_not_observed";
+    /** The target is seen, but every line to it crosses a see-through block that may not be broken (see {@link MiningObstruction}). */
+    static final String TARGET_OBSTRUCTED = "target_obstructed";
 
     private final BlockPos pos;
     private final Direction face;
     /** The caller aims and picks the tool itself (see {@link #driven}); this controller only runs the break. */
     private final boolean driven;
+    /**
+     * Whether this controller breaks the see-through blocks in front of its target when no line to it is clear ({@link
+     * MiningObstruction}). A driver's controller does not: Baritone clicks what its own pick ray meets, which is the leaf. Nor
+     * does one of this controller's own clearing steps.
+     */
+    private final boolean clearsObstructions;
     private boolean started;
     private BlockState targetState;
     private float progress;
     private int elapsed;
+    /** The break of the see-through block in front of the target that is running now; the target waits for it. */
+    private MiningController clearing;
+    private ReachObstructions.Obstruction clearingFor;
+    /** The see-through blocks this controller has broken to get at its target. */
+    private final List<BlockPos> cleared = new ArrayList<>();
 
     public MiningController(BlockPos pos, Direction face) {
-        this(pos, face, false);
+        this(pos, face, false, true);
     }
 
-    private MiningController(BlockPos pos, Direction face, boolean driven) {
+    private MiningController(BlockPos pos, Direction face, boolean driven, boolean clearsObstructions) {
         this.pos = pos;
         this.face = face;
         this.driven = driven;
+        this.clearsObstructions = clearsObstructions;
     }
 
     /**
@@ -49,7 +66,7 @@ public final class MiningController {
      * vanilla START/STOP/ABORT handshake, progress, reach, timeout, cache invalidation, the assist hook) is identical.
      */
     public static MiningController driven(BlockPos pos, Direction face) {
-        return new MiningController(pos, face, true);
+        return new MiningController(pos, face, true, false);
     }
 
     /** The cell this controller is (or was) mining. Lets a caller react once it finishes. */
@@ -122,6 +139,32 @@ public final class MiningController {
                 && player.level().getBlockState(pos).isAir();
     }
 
+    /**
+     * What a break of {@code pos} needs from here. A target a hand reaches (the strict proof above) needs nothing. One the bot sees
+     * only through see-through blocks (a log behind leaves) is still admitted when {@link MiningObstruction} can clear the way:
+     * the controller then breaks those blocks first, one at a time, and the target only once the strict proof passes. Otherwise
+     * the plan is refused with the typed reason, which every caller turns into "not mineable from this stand".
+     */
+    static MiningObstruction.Plan admission(AIPlayerEntity player, BlockPos pos) {
+        if (player == null || pos == null) {
+            return MiningObstruction.Plan.NOT_SEEN;
+        }
+        return currentObservedTarget(player, pos)
+                ? MiningObstruction.Plan.REACHABLE : MiningObstruction.plan(player, pos, List.of());
+    }
+
+    /**
+     * {@link #admission} for a caller outside this package: {@code null} when the break may start, else the typed refusal (a
+     * target behind a block that may not be broken is logged here, like at every other refusal).
+     */
+    public static String admissionRefusal(AIPlayerEntity player, BlockPos pos) {
+        MiningObstruction.Plan plan = admission(player, pos);
+        if (plan.kind() == MiningObstruction.Kind.PROTECTED) {
+            MiningObstruction.logRefused(player, pos, plan.obstruction(), plan.reason());
+        }
+        return plan.refusal();
+    }
+
     public ActionResult tick(ActionPack pack) {
         AIPlayerEntity player = pack.player();
         var world = player.level();
@@ -130,10 +173,14 @@ public final class MiningController {
         // A visibly empty cell is the narrowly safe completion case (for example the controller
         // finished on the preceding scheduler tick); it cannot start a new break.
         if (visiblyAir(player, pos)) {
+            abortClearing(player);
             return settleVisibleAir(player);
         }
+        if (clearing != null) {
+            return tickClearing(pack, player);
+        }
         if (!currentObservedTarget(player, pos)) {
-            return visibilityRefused(player);
+            return clearsObstructions && !started ? clearTheWay(pack, player) : visibilityRefused(player);
         }
         // A target can become a support after the controller was admitted (another player walks
         // onto it, or a bot lands on its own bridge). Stop the live break before another progress
@@ -211,6 +258,72 @@ public final class MiningController {
     }
 
     /**
+     * No line to the target is clear. If the eyes do see it, the way is cleared one real block at a time: the see-through block
+     * nearest the eye on the best line is broken like any other block (its own tool, break delay, safety and drops), and this
+     * method runs again from the strict proof once it is gone. A target the eyes do not see is refused as before, and so is one
+     * that every line only reaches through a block that may not be broken, with the typed {@link #TARGET_OBSTRUCTED}.
+     */
+    private ActionResult clearTheWay(ActionPack pack, AIPlayerEntity player) {
+        MiningObstruction.Plan plan = MiningObstruction.plan(player, pos, cleared);
+        switch (plan.kind()) {
+            case CLEAR -> {
+                clearing = new MiningController(plan.obstruction().pos(), faceToward(player, plan.obstruction().pos()), false, false);
+                clearingFor = plan.obstruction();
+                MiningObstruction.logDetected(player, pos, plan);
+                return tickClearing(pack, player);
+            }
+            case PROTECTED -> {
+                MiningObstruction.logRefused(player, pos, plan.obstruction(), plan.reason());
+                clearProgress(player);
+                return ActionResult.failed(TARGET_OBSTRUCTED);
+            }
+            default -> {
+                return visibilityRefused(player);
+            }
+        }
+    }
+
+    /**
+     * Runs the break of the see-through block in front of the target through the pack's own break tick, so it keeps vanilla's break
+     * delay and the shield rule. A finished break is recorded like any other and the method returns in progress: like a hand,
+     * the bot starts its next break on a later tick, and that is where the strict proof is asked again.
+     */
+    private ActionResult tickClearing(ActionPack pack, AIPlayerEntity player) {
+        ActionResult result = pack.tickBreak(clearing);
+        if (result.isInProgress()) {
+            return ActionResult.IN_PROGRESS;
+        }
+        MiningController step = clearing;
+        ReachObstructions.Obstruction obstruction = clearingFor;
+        clearing = null;
+        clearingFor = null;
+        if (result.isSuccess()) {
+            cleared.add(step.pos());
+            if (step.brokenBlockState() != null) {
+                pack.recordBreak(step, pos); // a block that was already gone when the step looked is nobody's break to audit
+            }
+            MiningObstruction.logCleared(player, pos, obstruction, step.elapsedTicks());
+            return ActionResult.IN_PROGRESS;
+        }
+        MiningObstruction.logRefused(player, pos, obstruction, result.reason());
+        clearProgress(player);
+        return ActionResult.failed(TARGET_OBSTRUCTED);
+    }
+
+    /** Cancels the break of a see-through block in front of the target, if one is running: no half-broken block stays marked. */
+    private void abortClearing(AIPlayerEntity player) {
+        if (clearing != null) {
+            clearing.abort(player);
+            clearing = null;
+            clearingFor = null;
+        }
+    }
+
+    private static Direction faceToward(AIPlayerEntity player, BlockPos block) {
+        return Direction.getApproximateNearest(player.getEyePosition().subtract(block.getCenter()));
+    }
+
+    /**
      * A cell overlapping the player's own body is direct physical evidence, never a hidden
      * terrain read. Fire and powder snow remain immediate hazards. A solid escape cell must also
      * be breakable natural terrain: this exception never authorizes an unbreakable, interactive,
@@ -230,6 +343,7 @@ public final class MiningController {
     }
 
     public void abort(AIPlayerEntity player) {
+        abortClearing(player);
         if (!started) {
             return;
         }

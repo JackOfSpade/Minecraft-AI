@@ -105,6 +105,8 @@ public final class BlockMinerOwnershipGameTests {
         bot.teleportTo(context.getLevel(), feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
+        // The chunk tracking view follows a teleport on the next tick, and every sight question needs it at once.
+        context.getLevel().getChunkSource().move(bot);
         return new Fixture(bot, feet, name);
     }
 

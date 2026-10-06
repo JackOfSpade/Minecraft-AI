@@ -225,12 +225,41 @@ The two families live side by side in `ObservableWorldQuery`. The ordinary predi
 target. Each one an actuator needs has a `Strict` twin, the plain vanilla clip that the first leaf, fence, pane or water cell
 stops. A break, an open or a use sends no pick ray of its own, so each of those actuators re-proves with the strict twin itself:
 `MiningController.currentObservedTarget` (the sole break gate; `visiblyAir` only settles a finished break and may use sight),
-`ContainerAction.canSee`, `FarmAction.harvestProof`, `BaritoneGoals.mineAt`, the break proof of `BaritoneBreakPlacePolicy`, a
+`ContainerAction.canSee`, `FarmAction.harvestProof`, `BaritoneGoals.mineAt` (through the miner's admission, below), the break proof of `BaritoneBreakPlacePolicy`, a
 furnace or depot the bot reaches into (`SmeltTask`, `StripMineTask`, `MiningServiceTask`, `WorkshopLocator`) and
 `InteractAction.useItemOnEntity` (the vanilla collider line of `StrikeLegality`). Placement, bucket and strike rays were always plain
 vanilla clips. `SightVersusReachSourceContractTest` pins both lists. A log seen through two leaves is therefore a target (navigation
-admits it and the shared memory knows the leaves and the log), but a break through the leaf is refused with `target_not_observed`
-until the leaf is gone.
+admits it and the shared memory knows the leaves and the log), but a break through the leaf is never sent: the leaf is broken first
+(next section).
+
+### Mining what is seen through something
+
+The bot first tries the target itself: the strict gate above, six face centres and the 3x3 inset grid on each face with the plain
+vanilla clip, is the "natural" line, and a log behind a fence line's gap, or in the open, is mined exactly as before. Only when no
+line passes the strict gate but the eyes do see the block (the sight proofs, state-free first) does `MiningController` clear the way,
+and it does so inside the one operation every caller already uses (`ActionPack.startMining`, `BlockMiner`, `HarvestCore`,
+`BaritoneGoals.mineAt`, the legacy path executor's dig steps), so Gather, OreDig, farming and the rest need no change and see one
+coherent break: it starts as in progress, keeps the generation, the break delay and the cancel semantics (a cancel aborts the step
+that is running), and succeeds when the target is gone.
+
+`mode/ReachObstructions` lists, for each of the strict gate's own aim lines, the see-through blocks that gate would meet first: it
+traces the same plain vanilla ray (every fluid hit stops it) and, each time that ray hits a see-through block, records it and goes on
+as if it were broken. What is left on a line is exactly what must disappear for the strict gate to pass along it. (That is not
+`SightClipContext.obstructions()`, which models the crosshair's `OUTLINE` ray: it lists a flower that the strict ray walks through and
+misses a fence whose collision arms stop the strict ray above the rails.) `MiningObstruction` then picks the line with the fewest
+blocks, then the nearest first block, and breaks that block like any other: through a normal `MiningController` with its own tool
+(`ToolSelector`), break delay, safety, drops and audit (`mine_complete` with `obstruction_of`, the edits ledger). It re-plans after
+each break, so each step removes one real block and the target is started only once the strict gate passes, never while an intact
+see-through block is what a hand would hit. A break the server did not carry out ends the operation (`obstruction_persisted`) instead
+of looping; no count or timer was invented for it.
+
+What may be broken is the mod-wide `BreakRule`: natural terrain, which for something in the way means leaves and the small plants
+that grow in the way. A fence, a gate, glass, a pane, bars, a ladder, a chain or ice was put there by somebody (or releases water),
+so a line that crosses one is skipped altogether, even with a leaf in front of it. A block the bot or another player stands on and a
+leaf beside lava the bot can see are kept too. When no line is left the operation fails with the typed `target_obstructed` (the
+callers' "not mineable from this stand": a task tries another stand), and `mining_obstruction_refused` says which block and why;
+`target_not_observed` stays for a target the eyes do not see (an opaque block, water, lava, out of reach). A Baritone driver's
+controller does not clear anything on top of that: Baritone clicks what its own pick ray meets, which is the leaf.
 
 `castViewRay` stays the strict first-hit view ray: the mining assist's sweeper and the suffocation escape's dig choice use it,
 because an occupancy grid that writes air for every traversed cell and a hazard field that takes a water surface for a fluid hit

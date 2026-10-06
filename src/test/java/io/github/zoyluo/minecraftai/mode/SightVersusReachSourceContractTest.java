@@ -69,9 +69,9 @@ class SightVersusReachSourceContractTest {
                 "canObserveCellStrict(");
         assertStrictOnly("harvesting a crop", body(read("action/FarmAction.java"), "public static ActionResult harvestProof("),
                 "canObserveFarmCellStrict(");
+        // The seam asks the miner's own admission, which is the strict break gate or a way the miner clears (MiningObstruction).
         assertStrictOnly("the direct mining seam", body(read("baritone/BaritoneGoals.java"), "public static Outcome mineAt("),
-                "canObserveBlockCellFaceStrict(", "canObserveCellStrict(", "canObserveBlockStrict(",
-                "canObserveBlockWithInsetFacesStrict(");
+                "MiningController.admissionRefusal(bot, target)");
         assertStrictOnly("Baritone's break authority",
                 body(read("baritone/BaritoneBreakPlacePolicy.java"), "private static boolean currentObservedNavigationCell("),
                 "canObserveCellStrict(");

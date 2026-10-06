@@ -32,7 +32,7 @@ import net.minecraft.world.phys.Vec3;
 /**
  * Sight is not reach, in a real server with the real tags and a real bot. A log behind two leaves, a fence, a pane, glass or
  * water is OBSERVED (the bot's eyes pass through them, so navigation admits it and the shared memory keeps the foliage as
- * foliage), but the strict gate every actuator re-proves with is the vanilla clip, which the first leaf stops: nothing is mined,
+ * foliage), but the strict gate every actuator re-proves with is the vanilla clip, which the first leaf stops: nothing is mined through it (the leaf is broken first),
  * opened or used through a leaf. What the eyes cannot pass (a wall, a door, a slab, lava) hides the block as it always did.
  */
 public final class ObservationSeeThroughGameTests {
@@ -243,16 +243,22 @@ public final class ObservationSeeThroughGameTests {
         if (MiningController.currentObservedTarget(bot, log)) {
             failures.add("the mining gate admits the log behind the leaf");
         }
-        ActionResult refused = bot.getActionPack().startMining(log, Direction.WEST);
-        if (!refused.isFailed() || !MiningController.TARGET_NOT_OBSERVED.equals(refused.reason())) {
-            failures.add("startMining through the leaf was not refused with target_not_observed: " + refused);
+        // The log is admitted (the miner breaks the leaf first, see MiningObstructionGameTests), but nothing is ever started
+        // on the log itself while the leaf stands: a controller's first tick begins on the leaf and never touches the log.
+        ActionResult admitted = bot.getActionPack().startMining(log, Direction.WEST);
+        if (!admitted.isInProgress()) {
+            failures.add("startMining behind a leaf was not admitted for clearing: " + admitted);
         }
+        bot.getActionPack().stopMining();
+        MiningController controller = new MiningController(log, Direction.WEST);
+        ActionResult tick = controller.tick(bot.getActionPack());
+        if (!tick.isInProgress() || controller.brokenBlockState() != null || !world.getBlockState(log).is(Blocks.OAK_LOG)
+                || !world.getBlockState(leaf).is(Blocks.OAK_LEAVES)) {
+            failures.add("a controller whose strict gate fails began on the log through the leaf: " + tick);
+        }
+        controller.abort(bot);
         if (!world.getBlockState(log).is(Blocks.OAK_LOG)) {
             failures.add("the log was broken through the leaf");
-        }
-        ActionResult tick = new MiningController(log, Direction.WEST).tick(bot.getActionPack());
-        if (!tick.isFailed() || !MiningController.TARGET_NOT_OBSERVED.equals(tick.reason()) || !world.getBlockState(log).is(Blocks.OAK_LOG)) {
-            failures.add("a running controller was not refused with target_not_observed: " + tick);
         }
         if (!MiningController.currentObservedTarget(bot, leaf)) {
             failures.add("the leaf itself, the block a hand meets first, is not minable");
