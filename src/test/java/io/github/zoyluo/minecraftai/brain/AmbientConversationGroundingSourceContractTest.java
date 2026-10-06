@@ -75,10 +75,16 @@ final class AmbientConversationGroundingSourceContractTest {
         assertTrue(start.contains("hasEnoughParticipants(eligible.size(), cfg)")
                         && start.contains("requiredParticipants(cfg)"),
                 "a conversation starts only with two or more eligible companions, whatever the configured minimum");
+        assertTrue(start.contains("indexOfOpener(chosen, ObservableWorldQuery::canNoticeCreature)")
+                        && start.indexOf("indexOfOpener(") < start.indexOf("new ActiveConversation("),
+                "nothing starts unless its first speaker has noticed another participant");
         String turn = methodBody(source, "private void fireNextTurn(");
         assertTrue(turn.indexOf("addresseePresent(conversation, speakerId)") >= 0
                         && turn.indexOf("addresseePresent(conversation, speakerId)") < turn.indexOf("ambientSocialFallback("),
                 "the canned fallback line is chosen only after an addressee is confirmed");
+        int noticed = turn.indexOf("ObservableWorldQuery.canNoticeCreature(speaker, other)");
+        assertTrue(noticed > turn.indexOf("if (!hasSceneObservation(") && noticed < turn.indexOf("ambientSocialFallback("),
+                "the canned fallback line, which speaks of company, is chosen only when the speaker has noticed a participant");
         String reveal = methodBody(source, "private void revealAndAdvance(");
         assertTrue(reveal.indexOf("addresseePresent(conversation, speakerId)") >= 0
                         && reveal.indexOf("addresseePresent(conversation, speakerId)") < reveal.indexOf("sendBotReply("),

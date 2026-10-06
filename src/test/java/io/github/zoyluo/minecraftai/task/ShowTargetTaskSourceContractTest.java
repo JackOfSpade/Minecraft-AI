@@ -94,9 +94,8 @@ final class ShowTargetTaskSourceContractTest {
                 "a real visible discovery may become the default target, but a plain find must ask and complete without starting a demonstration");
         assertTrue(tools.contains("register(\"show_location\"")
                         && tools.contains("showLocationTask(bot, args)")
-                        && tools.contains("if (explicit != null)")
-                        && tools.contains("return new ShowTargetTask(explicit, DiscoveryTask.FoundTarget.labelFor(")
-                        && tools.contains("DiscoveryTask.latestFound(bot)")
+                        && tools.contains("DiscoveryTask.FoundTarget.forShowing(DiscoveryTask.latestFound(bot)")
+                        && tools.contains("return new ShowTargetTask(shown.pos(), shown.label())")
                         && tools.contains("case \"show_location\" -> showLocationTask(bot, params)"),
                 "the LLM needs a first-class show-location tool plus the high-level task alias");
         assertTrue(brain.contains("\"find\", \"show_location\", \"follow\"")

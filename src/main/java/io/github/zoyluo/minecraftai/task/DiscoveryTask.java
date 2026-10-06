@@ -45,12 +45,17 @@ public final class DiscoveryTask extends AbstractTask {
     /** A same-dimension successful discovery that can be demonstrated physically later. */
     public record FoundTarget(BlockPos pos, String label) {
         /**
-         * What a show-location demonstration calls {@code pos}. A coordinate that is the latest real find keeps the label the
-         * discovery proved ("a chest or other storage container"): a name the model picked for it ("the bonus chest") is a claim
-         * nothing the bot observed supports. Any other coordinate keeps the requested label.
+         * What a show-location call demonstrates: the explicit coordinate, or the latest real find when none is given (empty if
+         * there is neither). A target that is the latest find keeps the label the discovery proved ("a chest or other storage
+         * container"), however the call was phrased: a name the model picked for it ("the bonus chest") is a claim nothing the
+         * bot observed supports. Any other coordinate keeps the requested label.
          */
-        public static String labelFor(Optional<FoundTarget> latestFind, BlockPos pos, String requestedLabel) {
-            return latestFind.filter(found -> found.pos().equals(pos)).map(FoundTarget::label).orElse(requestedLabel);
+        public static Optional<FoundTarget> forShowing(Optional<FoundTarget> latestFind, BlockPos explicit, String requestedLabel) {
+            if (explicit == null) {
+                return latestFind;
+            }
+            return Optional.of(latestFind.filter(found -> found.pos().equals(explicit))
+                    .orElseGet(() -> new FoundTarget(explicit, requestedLabel)));
         }
     }
 

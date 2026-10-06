@@ -1,6 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
+import com.google.gson.JsonObject;
 import io.github.zoyluo.minecraftai.brain.ChatTranscript;
+import io.github.zoyluo.minecraftai.brain.ToolDefinition;
+import io.github.zoyluo.minecraftai.brain.ToolRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -178,6 +181,48 @@ public final class ShowTargetTaskGameTests {
                 return;
             }
             fixture.require(context.getTick() < 120, "find did not complete: " + task.describe());
+        });
+    }
+
+    /**
+     * The tool call the model makes after a find ("show me", with the label it believes in): the demonstration is announced under the
+     * observed label, whether or not the call repeats the coordinates, never as "the bonus chest".
+     */
+    @GameTest(maxTicks = 200)
+    public void showLocationAfterFindingABonusChestAnnouncesTheObservedChestNotTheModelsLabel(GameTestHelper context) {
+        FollowFieldFixture fixture = new FollowFieldFixture(context, 8, 8);
+        AIPlayerEntity bot = fixture.bot("ShowBonusGT", 0, 0, true);
+        fixture.owner(bot, 1, 0);
+        BlockPos chest = fixture.cell(0, 4);
+        fixture.level.setBlock(chest, Blocks.CHEST.defaultBlockState(), Block.UPDATE_ALL);
+        DiscoveryTask find = DiscoveryTask.find("bonus_chest", 24);
+        TaskManager.INSTANCE.assign(bot, find, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_find_chest"));
+        ToolDefinition show = new ToolRegistry().get("show_location").orElseThrow();
+        boolean[] asked = {false};
+
+        context.failIfEver(() -> {
+            fixture.require(find.state() != TaskState.FAILED, "find failed: " + find.failureReason());
+            if (find.state() != TaskState.COMPLETED) {
+                fixture.require(context.getTick() < 120, "find did not complete: " + find.describe());
+                return;
+            }
+            if (!asked[0]) {
+                asked[0] = true;
+                JsonObject args = new JsonObject();
+                args.addProperty("label", "the bonus chest");
+                ToolDefinition.ToolResult result = show.handler().invoke(bot, args);
+                fixture.require(result.ok(), "show_location was refused: " + result);
+                return;
+            }
+            String chat = ChatTranscript.renderRecentChat(bot.getUUID());
+            if (chat.contains("I'll show you where")) {
+                fixture.require(chat.contains("I'll show you where a chest or other storage container is."),
+                        "the demonstration was not announced under the observed label: " + chat);
+                fixture.require(!chat.contains("the bonus chest is"), "the model's unsupported name was repeated: " + chat);
+                fixture.finish();
+                return;
+            }
+            fixture.require(context.getTick() < 180, "the demonstration was never announced: " + chat);
         });
     }
 }

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -163,5 +164,24 @@ class AmbientConversationCoordinatorTest {
                 "a one-bot conversation has no addressee");
         assertFalse(AmbientConversationCoordinator.hasAddressee(order, iron, id -> false),
                 "every other participant is gone");
+    }
+
+    @Test
+    void theOpenerIsTheFirstParticipantWhoHasNoticedAnother() {
+        // "iron" has noticed "moss", nobody else has noticed anybody.
+        BiPredicate<String, String> noticed = (who, whom) -> who.equals("iron") && whom.equals("moss");
+
+        assertEquals(1, AmbientConversationCoordinator.indexOfOpener(List.of("moss", "iron"), noticed));
+        assertEquals(0, AmbientConversationCoordinator.indexOfOpener(List.of("iron", "moss"), noticed));
+        assertEquals(1, AmbientConversationCoordinator.indexOfOpener(List.of("moss", "iron", "gold"), noticed));
+    }
+
+    @Test
+    void companionsWhoHaveNotNoticedEachOtherOpenNothing() {
+        assertEquals(-1, AmbientConversationCoordinator.indexOfOpener(List.of("moss", "iron"), (who, whom) -> false),
+                "two bots far apart or behind a wall");
+        assertEquals(-1, AmbientConversationCoordinator.indexOfOpener(List.of("moss"), (who, whom) -> true),
+                "a lone bot has nobody to notice, and noticing itself does not count");
+        assertEquals(-1, AmbientConversationCoordinator.indexOfOpener(List.<String>of(), (who, whom) -> true));
     }
 }

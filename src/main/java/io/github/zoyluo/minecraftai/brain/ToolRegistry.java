@@ -1273,14 +1273,10 @@ public final class ToolRegistry {
 
     /** Explicit verified coordinates work independently; omitting them makes “show me” use the latest real discovery. */
     private static Task showLocationTask(AIPlayerEntity bot, JsonObject args) {
-        BlockPos explicit = optionalBlockPos(args, "x", "y", "z");
-        String label = optionalString(args, "label", "");
-        if (explicit != null) {
-            return new ShowTargetTask(explicit, DiscoveryTask.FoundTarget.labelFor(DiscoveryTask.latestFound(bot), explicit, label));
-        }
-        DiscoveryTask.FoundTarget found = DiscoveryTask.latestFound(bot)
+        DiscoveryTask.FoundTarget shown = DiscoveryTask.FoundTarget.forShowing(DiscoveryTask.latestFound(bot),
+                        optionalBlockPos(args, "x", "y", "z"), optionalString(args, "label", ""))
                 .orElseThrow(() -> new IllegalArgumentException("no_recent_find_in_this_dimension"));
-        return new ShowTargetTask(found.pos(), label.isBlank() ? found.label() : label);
+        return new ShowTargetTask(shown.pos(), shown.label());
     }
 
     private void register(String name, String description, JsonObject schema, ToolDefinition.Handler handler) {

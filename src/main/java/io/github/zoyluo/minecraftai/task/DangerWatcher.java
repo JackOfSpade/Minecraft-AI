@@ -1305,14 +1305,19 @@ public final class DangerWatcher {
         LIGHT,
         /** It carries the makings of torches (coal or charcoal, and sticks or planks): craft them first, in the inventory grid. */
         CRAFT_TORCHES,
-        /** Nothing to light the cell with (or automatic lighting is switched off). */
-        NONE
+        /** Nothing to light the cell with. */
+        NONE,
+        /** Automatic lighting is switched off ({@code night.autoLight}), like the other lighting reflexes: whatever the bot carries stays put. */
+        LIGHTING_OFF
     }
 
     /** One torch craft (a coal and a stick) yields four, which is plenty to light a pocket. */
     private static final int DARK_TRAP_TORCHES = 4;
 
-    static DarkTrapResponse darkTrapResponse(int torchesCarried, boolean torchesCraftable) {
+    static DarkTrapResponse darkTrapResponse(boolean autoLight, int torchesCarried, boolean torchesCraftable) {
+        if (!autoLight) {
+            return DarkTrapResponse.LIGHTING_OFF;
+        }
         if (torchesCarried > 0) {
             return DarkTrapResponse.LIGHT;
         }
@@ -1320,17 +1325,23 @@ public final class DangerWatcher {
     }
 
     private static DarkTrapResponse darkTrapResponse(AIPlayerEntity bot) {
-        if (!MinecraftAiConfig.get().night().autoLight()) {
-            return DarkTrapResponse.NONE; // like the other automatic lighting, this is off when night.autoLight is
-        }
-        int torches = InventoryAction.countItem(bot, net.minecraft.world.item.Items.TORCH);
+        boolean autoLight = MinecraftAiConfig.get().night().autoLight();
+        int torches = autoLight ? InventoryAction.countItem(bot, net.minecraft.world.item.Items.TORCH) : 0;
         boolean craftable = false;
-        if (torches == 0) {
+        if (autoLight && torches == 0) {
             var plan = io.github.zoyluo.minecraftai.craft.CraftingHelper.plan(
                     bot, net.minecraft.world.item.Items.TORCH, DARK_TRAP_TORCHES);
             craftable = plan.success() && !plan.needsCraftingTable();
         }
-        return darkTrapResponse(torches, craftable);
+        return darkTrapResponse(autoLight, torches, craftable);
+    }
+
+    /** What the bot tells its player when it can do nothing about being stuck in the dark; the reason is the one that is true. */
+    static String darkTrapReport(String botName, BlockPos feet, DarkTrapResponse response) {
+        String reason = response == DarkTrapResponse.LIGHTING_OFF
+                ? "automatic lighting is switched off (night.autoLight)."
+                : "has nothing to light it with.";
+        return botName + " is stuck in the dark at (" + feet.getX() + "," + feet.getY() + "," + feet.getZ() + ") and " + reason;
     }
 
     /**
@@ -1360,14 +1371,13 @@ public final class DangerWatcher {
         Task task = switch (response) {
             case LIGHT -> LightAreaTask.automatic(8, 8);
             case CRAFT_TORCHES -> new CraftTask(net.minecraft.world.item.Items.TORCH, DARK_TRAP_TORCHES);
-            case NONE -> null;
+            case NONE, LIGHTING_OFF -> null;
         };
         if (task == null) {
             int now = server.getTickCount();
             if (now >= nextEscapeHelpTick.getOrDefault(bot.getUUID(), 0)) {
                 BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                        bot.getGameProfile().name() + " is stuck in the dark at (" + feet.getX() + "," + feet.getY() + "," + feet.getZ()
-                                + ") and has nothing to light it with.");
+                        darkTrapReport(bot.getGameProfile().name(), feet, response));
                 nextEscapeHelpTick.put(bot.getUUID(), now + TRAP_HELP_INTERVAL);
             }
             return false;

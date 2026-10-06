@@ -55,7 +55,9 @@ denies the teleport, so the bot answers with what it carries (`dark_trap_respons
   a stuck `move` is paused first and resumes once the lighting ends;
 * `CRAFT_TORCHES`: it carries no torch but coal or charcoal and sticks (or planks), so it crafts torches in the
   inventory grid; the lighting follows once it has them;
-* `NONE`: nothing to light the cell with, so it tells the player once and does nothing else.
+* `NONE`: nothing to light the cell with, so it tells the player once and does nothing else;
+* `LIGHTING_OFF`: `night.autoLight` is `false`, so it places nothing, whatever it carries, and says that automatic
+  lighting is switched off (once, like `NONE`).
 
 A cell is answered with the same thing at most once: it is announced again only after the bot has moved or its
 means changed (a torch used up, coal crafted), so the same trap is never reported every eight seconds. Digging out

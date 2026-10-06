@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static io.github.zoyluo.minecraftai.task.DangerWatcher.DarkTrapResponse.CRAFT_TORCHES;
 import static io.github.zoyluo.minecraftai.task.DangerWatcher.DarkTrapResponse.LIGHT;
+import static io.github.zoyluo.minecraftai.task.DangerWatcher.DarkTrapResponse.LIGHTING_OFF;
 import static io.github.zoyluo.minecraftai.task.DangerWatcher.DarkTrapResponse.NONE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,18 +15,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class DarkTrapResponseTest {
     @Test
     void aCarriedTorchLightsTheCellWhetherOrNotMoreCouldBeCrafted() {
-        assertEquals(LIGHT, DangerWatcher.darkTrapResponse(1, false));
-        assertEquals(LIGHT, DangerWatcher.darkTrapResponse(7, true));
+        assertEquals(LIGHT, DangerWatcher.darkTrapResponse(true, 1, false));
+        assertEquals(LIGHT, DangerWatcher.darkTrapResponse(true, 7, true));
     }
 
     @Test
     void withoutATorchTheMakingsAreCraftedFirst() {
-        assertEquals(CRAFT_TORCHES, DangerWatcher.darkTrapResponse(0, true));
+        assertEquals(CRAFT_TORCHES, DangerWatcher.darkTrapResponse(true, 0, true));
     }
 
     @Test
     void withNeitherTheBotHasNothingToDo() {
-        assertEquals(NONE, DangerWatcher.darkTrapResponse(0, false));
+        assertEquals(NONE, DangerWatcher.darkTrapResponse(true, 0, false));
+    }
+
+    @Test
+    void withAutomaticLightingOffNothingIsDoneWhateverTheBotCarries() {
+        assertEquals(LIGHTING_OFF, DangerWatcher.darkTrapResponse(false, 20, true));
+        assertEquals(LIGHTING_OFF, DangerWatcher.darkTrapResponse(false, 0, true));
+        assertEquals(LIGHTING_OFF, DangerWatcher.darkTrapResponse(false, 0, false));
+    }
+
+    @Test
+    void theReportNamesTheReasonThatIsTrue() {
+        BlockPos cell = new BlockPos(13, 137, -6);
+        String nothing = DangerWatcher.darkTrapReport("Moss", cell, NONE);
+        String off = DangerWatcher.darkTrapReport("Moss", cell, LIGHTING_OFF);
+
+        assertEquals("Moss is stuck in the dark at (13,137,-6) and has nothing to light it with.", nothing);
+        assertTrue(off.contains("automatic lighting is switched off"), off);
+        assertFalse(off.contains("nothing to light it with"), "a bot carrying torches is not out of torches: " + off);
     }
 
     @Test
