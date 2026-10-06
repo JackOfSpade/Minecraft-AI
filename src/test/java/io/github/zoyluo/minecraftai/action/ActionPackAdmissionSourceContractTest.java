@@ -37,6 +37,7 @@ class ActionPackAdmissionSourceContractTest {
             "task/CreateObsidianTask.java",
             "task/DescendToYTask.java",
             "task/DigDownTask.java",
+            "task/DigOutTask.java",
             "task/EmergencyShelterTask.java",
             "task/FollowDigOut.java",
             "task/FollowStuckRecovery.java",

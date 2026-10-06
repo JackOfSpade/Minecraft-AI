@@ -385,27 +385,37 @@ public final class SurvivalReflexGameTests {
     }
 
     /**
-     * Nothing to light the cell with and nothing to make a torch from: it is reported once and left alone, instead of being judged
-     * trapped again every eight seconds (the repeating DANGER line the session log showed).
+     * Nothing to light the cell with and nothing to make a torch from: the bot does not stand in the dark being judged trapped again
+     * every eight seconds (the repeating DANGER line the session log showed), it digs a stair up out of it ({@link DigOutTask},
+     * covered further in DigOutTaskGameTests) and is judged trapped once.
      */
-    @GameTest(maxTicks = 700)
-    public void darkTrapWithNothingToLightItWithIsReportedOnceNotEveryEightSeconds(GameTestHelper context) {
+    @GameTest(maxTicks = 1500)
+    public void darkTrapWithNothingToLightItWithDigsItsWayOutAndIsJudgedTrappedOnce(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(20, 5, 780));
         sealedDarkPocket(world, feet);
         world.setDayTime(NOON);
         AIPlayerEntity bot = spawnAt(context, "DarkNothingGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
+        boolean[] digging = {false};
         int[] ticks = {0};
         context.failIfEver(() -> {
-            require(context, bot.blockPosition().equals(feet), "the bot left its pocket: " + bot.blockPosition());
-            require(context, TaskManager.INSTANCE.getActive(bot).isEmpty(),
-                    "the bot started work with nothing to work with: " + TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse(""));
-            // Three full dwell windows after the first detection: the old behaviour detected the same trap at each of them.
-            if (++ticks[0] >= 560) {
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            if (active instanceof DigOutTask) {
+                digging[0] = true;
+            }
+            require(context, active == null || active instanceof DigOutTask,
+                    "the bot started other work with nothing to work with: " + (active == null ? "" : active.name()));
+            if (digging[0] && active == null) {
                 require(context, DangerWatcher.INSTANCE.darkTrapDetections(bot) == 1,
                         "the same dark trap was detected " + DangerWatcher.INSTANCE.darkTrapDetections(bot) + " times");
+                require(context, !DangerWatcher.isDarkTrapCell(world, bot.blockPosition()),
+                        "the dig-out ended in a cell that is still a dark trap: " + bot.blockPosition());
                 despawnAndComplete(context, bot);
+                return;
             }
+            require(context, ++ticks[0] < 1400, "the bot never dug its way out: active="
+                    + (active == null ? "none" : active.name()) + " at " + bot.blockPosition());
         });
     }
 
