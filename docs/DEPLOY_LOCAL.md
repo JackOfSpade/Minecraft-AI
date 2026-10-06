@@ -28,8 +28,11 @@ Google's `generativelanguage.googleapis.com` host. In `config/minecraftai.json`:
   bot's planning call is retried with exponential backoff and jitter for up to five minutes, honouring
   `Retry-After`. These retries do not use up the per-instruction model-call budget, the bot's running
   task carries on meanwhile, and a new message or a cancel ends the wait. If the provider stays down the
-  bot says so in chat (and stays silent when the request had already finished). Any other error
-  (rejected key, bad request, unusable reply) fails at once; its reason is the `brain_hiccup` log line.
+  bot says so in chat (and stays silent when the request had already finished), and its autonomous
+  long-term-goal wake-ups pause for another five minutes instead of starting a new retry cycle at once.
+  A reply the provider sent back unusable (empty, garbled, a function call without a name) is not an
+  outage: the bot asks again as an ordinary planner call, which does use the model-call budget. Any other
+  error (rejected key, bad request) fails at once; its reason is the `brain_hiccup` log line.
   `llm.retryCount` / `retryBackoffMs` therefore only govern the helper calls (chat routing, ambient chat).
 * `deploy_profile.sh`'s own `.env` parsing separately accepts the pre-rename interim names
   `AIBOT_LLM_API_KEY` / `AIBOT_LLM_BASE_URL` / `AIBOT_LLM_MODEL` as a per-variable fallback (in the

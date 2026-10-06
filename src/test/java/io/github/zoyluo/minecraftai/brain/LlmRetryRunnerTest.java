@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,19 +49,19 @@ final class LlmRetryRunnerTest {
     }
 
     @Test
-    void transientRetriesDoNotSpendTheModelCallBudget() {
-        PlayerInstructionCallBudget budget = new PlayerInstructionCallBudget(PlayerInstructionCallBudget.DEFAULT_MAX_CALLS);
-        budget.beginPlayerInstruction();
-        assertTrue(budget.tryAcquireModelCall()); // what BrainCoordinator.submit reserves for the one request
-        Script service = new Script(time, repeat(OVERLOADED, 11), "answer");
+    void anUnusableReplyIsHandedBackAtOnceSoTheBrainMetersTheRepairAsAModelCall() {
+        // HTTP 200 with a garbled body is not an outage: replaying it here would be a free extra planner
+        // turn outside the instruction's call budget. The one outcome per request is the failure itself.
+        LlmApiException garbled = LlmApiException.unusableReply("bad_response: not an object", null);
+        Script service = new Script(time, List.of(garbled), "never reached");
 
         start(service);
         time.advanceBy(Duration.ofMinutes(10).toMillis());
 
-        assertEquals(12, service.callTimes.size());
-        assertEquals(1, budget.callsUsed());
-        assertEquals(PlayerInstructionCallBudget.DEFAULT_MAX_CALLS - 1, budget.callsRemaining());
-        assertFalse(budget.exhausted());
+        assertEquals(1, service.callTimes.size());
+        assertEquals(List.of(garbled), failures);
+        assertTrue(answers.isEmpty());
+        assertTrue(time.delays.isEmpty());
     }
 
     @Test

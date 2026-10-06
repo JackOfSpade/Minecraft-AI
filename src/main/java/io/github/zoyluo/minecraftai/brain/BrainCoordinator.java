@@ -1058,14 +1058,22 @@ public final class BrainCoordinator {
         }
         // The executor has already replayed every transient failure with backoff, outside this
         // conversation's model-call budget (LlmRetryRunner), so an error that reaches here is final:
-        // the service stayed unavailable for the whole patience, or no retry could have helped. It
-        // is not a planner turn, so it spends no call and adds nothing to the history; the bot's
-        // own task or goal was never touched and keeps running.
+        // the service stayed unavailable for the whole patience, or no retry could have helped. The
+        // bot's own task or goal was never touched and keeps running.
         LlmApiException failure = LlmApiException.classify(throwable);
         BotLog.error(bot, "brain_hiccup", throwable,
                 "message", conciseFailureMessage(failure.getMessage()),
                 "kind", failure.kind(),
                 "status", failure.httpStatus());
+        if (ApiFailureReport.repairWithAnotherCall(failure.kind(), conversation.failureReportCall,
+                currentDecisionBudgetExhausted(conversation), lease.equals(conversation.repairLease))) {
+            resubmitAfterUnusableReply(bot, conversation, failure);
+            return;
+        }
+        // Nothing more will be asked of the service for this call: an autonomous goal wake must not
+        // start another full retry cycle against it ten seconds from now.
+        nextGoalWakeTick.put(bot.getUUID(),
+                bot.level().getServer().getTickCount() + ApiFailureReport.GOAL_WAKE_COOLDOWN_TICKS);
         if (conversation.failureReportCall) {
             // The model was to report a failed task; the deterministic line still tells the player.
             reportPendingFailureWithoutModel(bot, conversation);
@@ -1076,6 +1084,28 @@ public final class BrainCoordinator {
             return;
         }
         reportApiFailure(bot, conversation, failure);
+    }
+
+    /**
+     * The service answered but the reply was unusable. Unlike an outage this is a planner turn: it
+     * is metered by the call budget (submit reserves the call) and the model is told what was wrong.
+     * A failed HTTP/model turn did not apply any game action, so the original instruction, the native
+     * interaction id and the function-result batch stay intact for the fresh attempt.
+     */
+    private void resubmitAfterUnusableReply(AIPlayerEntity bot, BotConversation conversation, LlmApiException failure) {
+        String reason = conciseFailureMessage(failure.getMessage());
+        conversation.history.add(ChatMessage.user(
+                "Your previous reply could not be used (" + reason + "). Answer the same request again now with a "
+                        + "complete, well-formed reply. If a prior tool result is present, correct its error "
+                        + "instead of repeating it unchanged."));
+        trimHistory(conversation);
+        DecisionLease retryLease = conversation.decision.beginEpoch();
+        conversation.repairLease = retryLease;
+        BotLog.warn(LogCategory.COMM, bot, "model_call_retry_scheduled",
+                "model_call", callsUsedForCurrentDecision(conversation) + 1,
+                "model_calls_remaining_before_retry", callsRemainingForCurrentDecision(conversation),
+                "reason", reason);
+        submit(bot, conversation, retryLease);
     }
 
     /** Whether {@code lease} is still the request its conversation waits on: a backoff is dropped once it is not. */
@@ -1099,6 +1129,7 @@ public final class BrainCoordinator {
                 conversation.requestStarted,
                 workActive,
                 TaskManager.INSTANCE.peekFailure(bot).isPresent(),
+                BotMemoryStore.INSTANCE.of(bot.getUUID()).hasActiveGoal(),
                 TaskManager.INSTANCE.status(bot).state(),
                 io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.lastResult(bot)
                         .map(io.github.zoyluo.minecraftai.goal.GoalResult::status).orElse(null));
@@ -1208,6 +1239,23 @@ public final class BrainCoordinator {
      * back without going through the heavier {@link #status}/conversation machinery. */
     public boolean isAwaitingTaskForTest(AIPlayerEntity bot) {
         return Boolean.TRUE.equals(awaitingTask.get(bot.getUUID()));
+    }
+
+    /**
+     * Test seam: fails the bot's in-flight model call the way the executor does once the retry patience
+     * is spent. A real outage takes five minutes to get there, too long for a GameTest.
+     * {@code requestStarted} stands for "a work-start tool of this instruction already succeeded".
+     */
+    void deliverFinalFailureForTest(AIPlayerEntity bot, LlmApiException failure, boolean requestStarted) {
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUUID(), BotConversation::new);
+        conversation.requestStarted = requestStarted;
+        onError(bot, conversation.decision.beginEpoch(), failure);
+    }
+
+    /** Test seam: how many model calls the bot's current player instruction has spent. */
+    int modelCallsUsedForTest(AIPlayerEntity bot) {
+        BotConversation conversation = conversations.get(bot.getUUID());
+        return conversation == null ? 0 : conversation.callBudget.callsUsed();
     }
 
     public void setManualMode(AIPlayerEntity bot, boolean enabled) {
@@ -2230,6 +2278,10 @@ public final class BrainCoordinator {
         private boolean requestStarted;
         // The call in flight is a failure report (set per call by submit, read by onResponse).
         private boolean failureReportCall;
+        // The request that is the one repair of an unusable reply: if it comes back unusable too, that is
+        // reported to the player instead of being asked for a third time. Leases are never reused, so a
+        // stale value can never match a later request.
+        private DecisionLease repairLease;
         // Distinct from requestStarted (which requires the paired action to have actually
         // succeeded/be active): a plan already spoken this turn should not be demanded again just
         // because the FOLLOWING action call failed on unrelated grounds (e.g. a bad tool argument).

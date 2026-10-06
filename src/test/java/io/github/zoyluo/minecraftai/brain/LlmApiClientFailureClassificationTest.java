@@ -18,6 +18,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -112,12 +113,27 @@ final class LlmApiClientFailureClassificationTest {
     }
 
     @Test
-    void anUnusableGeminiReplyIsPermanent() {
-        script.add(new Canned(200, null, "{\"id\":\"\"}"));
+    void anUnusableGeminiReplyIsAnUnusableReplyNotAnOutage() {
+        // Each of these arrives as HTTP 200: the service is up, the body is not usable. Asking again can
+        // work (model output varies), so the brain meters it as a planner call instead of waiting it out.
+        List<String> bodies = List.of(
+                "{\"id\":\"\"}",
+                "not json at all",
+                "   ",
+                // a function_call step with neither id nor name
+                "{\"id\":\"interaction-1\",\"steps\":[{\"type\":\"function_call\",\"arguments\":{}}]}");
+        for (String body : bodies) {
+            requests.set(0);
+            script.clear();
+            script.add(new Canned(200, null, body));
 
-        LlmApiException failure = assertThrows(LlmApiException.class, () -> gemini().begin("prompt", List.of()));
+            LlmApiException failure = assertThrows(LlmApiException.class, () -> gemini().begin("prompt", List.of()));
 
-        assertEquals(LlmApiException.Kind.PERMANENT, failure.kind());
+            assertEquals(LlmApiException.Kind.UNUSABLE_REPLY, failure.kind(), body);
+            assertEquals(200, failure.httpStatus(), body);
+            assertFalse(failure.isTransient(), body);
+            assertEquals(1, requests.get(), "the client itself never replays: " + body);
+        }
     }
 
     @Test
@@ -188,14 +204,22 @@ final class LlmApiClientFailureClassificationTest {
     }
 
     @Test
-    void anEmptyChatReplyIsPermanent() {
-        script.add(new Canned(200, null, "{\"choices\":[]}"));
+    void anUnusableChatReplyIsAnUnusableReplyNotAnOutage() {
+        List<String> bodies = List.of(
+                "{\"choices\":[]}", "not json at all", "   ", "{\"choices\":[{\"finish_reason\":\"stop\"}]}");
+        for (String body : bodies) {
+            requests.set(0);
+            script.clear();
+            script.add(new Canned(200, null, body));
 
-        LlmApiException failure = assertThrows(LlmApiException.class,
-                () -> OpenAiCompatibleApiClient.singleAttempt(config("http://127.0.0.1:" + server.getAddress().getPort(), 0))
-                        .chat(List.of(ChatMessage.user("hi")), List.of()));
+            LlmApiException failure = assertThrows(LlmApiException.class,
+                    () -> OpenAiCompatibleApiClient.singleAttempt(config("http://127.0.0.1:" + server.getAddress().getPort(), 0))
+                            .chat(List.of(ChatMessage.user("hi")), List.of()));
 
-        assertEquals(LlmApiException.Kind.PERMANENT, failure.kind());
+            assertEquals(LlmApiException.Kind.UNUSABLE_REPLY, failure.kind(), body);
+            assertEquals(200, failure.httpStatus(), body);
+            assertEquals(1, requests.get(), body);
+        }
     }
 
     private GeminiInteractionsApiClient gemini() {

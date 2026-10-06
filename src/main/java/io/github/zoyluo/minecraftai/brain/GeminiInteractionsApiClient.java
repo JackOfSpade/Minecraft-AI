@@ -264,7 +264,7 @@ public final class GeminiInteractionsApiClient {
 
     static InteractionResponse parseResponse(String body, int maxFunctionCalls) throws GeminiInteractionsApiException {
         if (body == null || body.isBlank()) {
-            throw new GeminiInteractionsApiException("empty_response");
+            throw GeminiInteractionsApiException.unusableReply("empty_response", null);
         }
         try {
             JsonObject root = JsonParser.parseString(body).getAsJsonObject();
@@ -277,7 +277,7 @@ public final class GeminiInteractionsApiClient {
                 interactionId = stringField(root, "id");
             }
             if (interactionId == null || interactionId.isBlank()) {
-                throw new GeminiInteractionsApiException("missing_interaction_id");
+                throw GeminiInteractionsApiException.unusableReply("missing_interaction_id", null);
             }
             String status = firstNonBlank(stringField(interaction, "status"), stringField(root, "status"), "unknown");
             String output = firstNonBlank(
@@ -316,7 +316,7 @@ public final class GeminiInteractionsApiClient {
         } catch (RuntimeException exception) {
             BotLog.error("gemini_interaction_parse_error", exception,
                     "body_excerpt", body.substring(0, Math.min(400, body.length())));
-            throw new GeminiInteractionsApiException("bad_response: " + exception.getMessage(), exception);
+            throw GeminiInteractionsApiException.unusableReply("bad_response: " + exception.getMessage(), exception);
         }
     }
 
@@ -341,7 +341,7 @@ public final class GeminiInteractionsApiClient {
             String id = firstNonBlank(stringField(call, "id"), stringField(call, "call_id"));
             String name = stringField(call, "name");
             if (id == null || id.isBlank() || name == null || name.isBlank()) {
-                throw new GeminiInteractionsApiException("malformed_function_call");
+                throw GeminiInteractionsApiException.unusableReply("malformed_function_call", null);
             }
             calls.add(new ChatToolCall(id, name, jsonText(call.get("arguments"))));
         }
@@ -518,6 +518,11 @@ public final class GeminiInteractionsApiClient {
 
         GeminiInteractionsApiException(String message, Kind kind, int httpStatus, Duration retryAfter, Throwable cause) {
             super(message, kind, httpStatus, retryAfter, cause);
+        }
+
+        /** A reply that came back as HTTP 200 but could not be used; see {@link Kind#UNUSABLE_REPLY}. */
+        static GeminiInteractionsApiException unusableReply(String message, Throwable cause) {
+            return new GeminiInteractionsApiException(message, Kind.UNUSABLE_REPLY, HTTP_OK, null, cause);
         }
     }
 }

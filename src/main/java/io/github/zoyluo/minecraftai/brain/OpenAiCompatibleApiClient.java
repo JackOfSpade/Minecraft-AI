@@ -74,7 +74,7 @@ public final class OpenAiCompatibleApiClient {
             HttpResponse<String> response = sendWithRetry(request);
             if (response.statusCode() == 200) {
                 if (response.body() == null || response.body().isBlank()) {
-                    throw new LlmApiException("empty_response");
+                    throw LlmApiException.unusableReply("empty_response", null);
                 }
                 return parseResponse(response.body());
             }
@@ -315,7 +315,7 @@ public final class OpenAiCompatibleApiClient {
                     ? root.getAsJsonArray("choices")
                     : null;
             if (choices == null || choices.isEmpty()) {
-                throw new LlmApiException("empty_choices");
+                throw LlmApiException.unusableReply("empty_choices", null);
             }
             JsonObject choice = choices.get(0).getAsJsonObject();
             JsonObject message = choice.getAsJsonObject("message");
@@ -361,7 +361,7 @@ public final class OpenAiCompatibleApiClient {
             throw exception;
         } catch (RuntimeException exception) {
             BotLog.error("api_parse_error", exception, "body_excerpt", body.substring(0, Math.min(200, body.length())));
-            throw new LlmApiException("bad_response: " + exception.getMessage(), exception);
+            throw LlmApiException.unusableReply("bad_response: " + exception.getMessage(), exception);
         }
     }
 

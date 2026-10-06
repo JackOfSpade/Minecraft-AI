@@ -15,9 +15,20 @@ public class LlmApiException extends Exception {
         TRANSIENT,
         /** Retrying cannot help, and only the server owner can fix it: missing or rejected credentials (401/403). */
         AUTH,
-        /** Retrying cannot help: the request was rejected (other 4xx), the reply was unusable, or the code failed. */
-        PERMANENT
+        /** Retrying cannot help: the request was rejected (other 4xx) or the code failed. */
+        PERMANENT,
+        /**
+         * The service answered (HTTP 200) but the body was empty, unparsable or structurally invalid, such
+         * as an empty choice list or a function call without id or name. The same request is not doomed:
+         * model output is not deterministic, so asking again may give a usable reply. That is another
+         * planner turn, not a transport retry, so the brain spends one call of the instruction's model-call
+         * budget on it (see {@link ApiFailureReport#repairWithAnotherCall}) instead of the retry runner
+         * replaying it for free.
+         */
+        UNUSABLE_REPLY
     }
+
+    static final int HTTP_OK = 200;
 
     private final Kind kind;
     private final int httpStatus;
@@ -41,6 +52,11 @@ public class LlmApiException extends Exception {
         this.kind = kind;
         this.httpStatus = httpStatus;
         this.retryAfter = retryAfter;
+    }
+
+    /** A reply that came back as HTTP 200 but could not be used; see {@link Kind#UNUSABLE_REPLY}. */
+    static LlmApiException unusableReply(String message, Throwable cause) {
+        return new LlmApiException(message, Kind.UNUSABLE_REPLY, HTTP_OK, null, cause);
     }
 
     public Kind kind() {
