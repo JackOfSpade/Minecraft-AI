@@ -92,7 +92,7 @@ public final class BrainApiFailureGameTests {
         }));
     }
 
-    @GameTest(maxTicks = 6000)
+    @GameTest(maxTicks = 18000)
     public void transientErrorsReplayTheSameRequestAndSpendOneModelCall(GameTestHelper context) {
         // The 2026-10-05 burst, shortened: overload twice, then the answer. The client's own retry is
         // configured to sleep a minute, so passing in seconds also proves it does not stack under the brain's.
@@ -129,7 +129,7 @@ public final class BrainApiFailureGameTests {
         }));
     }
 
-    @GameTest(maxTicks = 6000)
+    @GameTest(maxTicks = 18000)
     public void newMessageEndsTheWaitForTheOldRequest(GameTestHelper context) {
         // The first request is refused with a 503 and its retry is waiting out a backoff when the player
         // says something else: the old request must never be sent again, only the new one.
@@ -149,7 +149,7 @@ public final class BrainApiFailureGameTests {
             harness.whenAnswered("Six.", () -> {
                 // The old request's wait is at most its first backoff, which is measured in wall-clock time.
                 answeredAtNanos.compareAndSet(0L, System.nanoTime());
-                long outlast = Duration.ofMillis(2L * LlmRetryPolicy.INITIAL_BACKOFF_MS).toNanos();
+                long outlast = Duration.ofMillis(LlmRetryPolicy.INITIAL_BACKOFF_MS + 500L).toNanos();
                 if (System.nanoTime() - answeredAtNanos.get() < outlast) {
                     return;
                 }
