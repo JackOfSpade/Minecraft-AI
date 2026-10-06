@@ -152,8 +152,10 @@ public final class BuildActionEdgeVisibilityGameTests {
             setConfig(withPerceptionRadius(original, 1));
             require(context, MinecraftAiConfig.get().perception().radius() == 1,
                     "fixture failed to lower the configured perception radius");
-            require(context, !ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, support),
-                    "inset observation escaped the one-block perception radius");
+            // Block sight is bounded by the bot's render distance and, for this inset query, its interaction reach, not by the
+            // perception radius: the support is seen. What the low radius still limits is the placement's own face proof below.
+            require(context, ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, support),
+                    "the perception radius limited block sight, which follows the render distance");
 
             ActionResult result = BuildAction.placeBlock(
                     bot, support, Direction.WEST, InteractionHand.MAIN_HAND);

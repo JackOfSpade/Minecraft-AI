@@ -339,7 +339,7 @@ class OreDigCheckpointSourceContractTest {
         int rememberedRoute = source.indexOf(
                 "tryRememberedHighWorkPoseRoute(bot, world, ore)", missingPose);
         int highColumn = source.indexOf(
-                "ore.getY() - feet.getY() > MAX_TARGET_BREAK_DY", rememberedRoute);
+                "isOverheadInOwnColumn(bot, ore)", rememberedRoute);
         int typedAbandon = source.indexOf(
                 "\"overhead_drop_catch_unproven\"", highColumn);
         int approachPath = source.indexOf("startSurfacePathTo(workPose)", typedAbandon);

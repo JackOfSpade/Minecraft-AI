@@ -162,7 +162,6 @@ public final class AutomaticLightingSurfaceGameTests {
         buildEnclosure(world, feet, radius);
         AIPlayerEntity bot = spawn(context, "AutoLightRoomGT", feet);
         giveTorches(bot, 16);
-        int threshold = MinecraftAiConfig.get().night().torchLightThreshold();
         boolean[] sawLightArea = {false};
         int[] settle = {0};
         TimeLockedRun.run(context, 1500, () -> {
@@ -177,10 +176,12 @@ public final class AutomaticLightingSurfaceGameTests {
             }
             int torches = torchCells(world, feet, radius + 1).size();
             require(context, torches >= 1, "the room was not lit: no torch placed");
+            // Automatic lighting removes a spawn risk, it does not light a room up to the torch threshold: a torch's 14 reaches
+            // every cell of this room, and what is asked is that no floor cell can still spawn a hostile.
             for (BlockPos cell : floorCells(feet, radius)) {
-                int light = world.getBrightness(LightLayer.BLOCK, cell);
-                require(context, light >= threshold,
-                        "floor cell " + cell + " is still dark (" + light + ") with " + torches + " torches placed");
+                require(context, !AutomaticLighting.isPotentialHostileSpawnDark(world, cell),
+                        "floor cell " + cell + " can still spawn a hostile (block light "
+                                + world.getBrightness(LightLayer.BLOCK, cell) + ") with " + torches + " torches placed");
             }
             return true;
         }, () -> cleanUp(bot, "AutoLightRoomGT"));

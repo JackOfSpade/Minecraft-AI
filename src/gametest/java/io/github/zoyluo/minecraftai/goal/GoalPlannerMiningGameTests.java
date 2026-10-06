@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.goal;
 
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningChain;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
@@ -686,7 +687,7 @@ public final class GoalPlannerMiningGameTests {
         int preKitSticks = rareBudget.spareToolSticks()
                 + rareBudget.tunnelingPickaxes() * MiningBudget.STONE_PICKAXE_STICK_COST;
         GoalStep kit = GoalStep.rareDescentKitService(diamonds, 64);
-        GoalStep descent = GoalStep.descendToY(-59);
+        GoalStep descent = GoalStep.descendToY(MiningChain.bestY(diamonds));
         GoalStep boundaryZero = GoalStep.rareOreService(diamonds, 0, 64);
         GoalStep firstBatch = GoalStep.mineOre(diamonds, 8);
         GoalStep laterService = GoalStep.rareOreService(diamonds, 8, 64);

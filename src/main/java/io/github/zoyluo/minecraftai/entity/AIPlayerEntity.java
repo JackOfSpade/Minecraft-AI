@@ -231,6 +231,7 @@ public class AIPlayerEntity extends ServerPlayer {
             boolean moved = super.teleportTo(level, x, y, z, relatives, yaw, pitch, resetCamera);
             if (moved) {
                 fallEndedByTeleport();
+                settleChunkTracking();
             }
             return moved;
         } finally {
@@ -244,6 +245,7 @@ public class AIPlayerEntity extends ServerPlayer {
         try {
             super.teleportTo(x, y, z);
             fallEndedByTeleport();
+            settleChunkTracking();
         } finally {
             endAuditedTeleport();
         }
@@ -256,10 +258,24 @@ public class AIPlayerEntity extends ServerPlayer {
             ServerPlayer moved = super.teleport(transition);
             if (moved != null) {
                 fallEndedByTeleport();
+                settleChunkTracking();
             }
             return moved;
         } finally {
             endAuditedTeleport();
+        }
+    }
+
+    /**
+     * Re-centres the bot's chunk tracking on where a teleport put it. A real client does that with the movement packets it sends after
+     * a teleport; a bot has no client, and its own tick starts with the same {@code move} (see {@link #tick}), so until that tick
+     * its tracking would stay on the old position and every cell of the chunk it stands in would be unobservable
+     * ({@code ObservableWorldQuery} only sees tracked chunks). That window is the tick of a spawn or a teleport, where a task started
+     * at once (a restored mission, a recovery after respawn) would refuse its first route as unobserved.
+     */
+    private void settleChunkTracking() {
+        if (this.connection != null && !this.isRemoved()) {
+            this.level().getChunkSource().move(this);
         }
     }
 
