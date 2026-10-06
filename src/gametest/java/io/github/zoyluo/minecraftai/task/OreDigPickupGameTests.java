@@ -1165,17 +1165,6 @@ public final class OreDigPickupGameTests {
                 highChainIntact &= world.getBlockState(shaft.above(dy)).is(Blocks.COAL_ORE);
             }
             Map<String, String> live = task.checkpoint();
-            if (task.state() == TaskState.FAILED) {
-                require(context, "no_observed_ore_after_exploration".equals(task.failureReason())
-                                && highChainIntact
-                                && coal == 0
-                                && !live.containsKey("active_break_pos")
-                                && !live.containsKey("pending_pickup_pos"),
-                        "unreachable queued ore did not end as a clean observed-frontier exhaustion: "
-                                + task.failureReason() + " " + live);
-                finish(context, fixture);
-                return;
-            }
             failIfTerminalError(context, task);
             if (coal >= 1 && highChainIntact) {
                 recoveredReachableLower.set(true);
@@ -1188,19 +1177,22 @@ public final class OreDigPickupGameTests {
             require(context, highChainIntact,
                     "queued release modified a high ore outside the recoverable break envelope");
 
-            boolean cursorResumed = Integer.parseInt(live.get("direction")) >= 0
-                    && Integer.parseInt(live.get("steps_left")) > 0;
-            if (cursorResumed) {
+            // Released, the queued chain no longer holds the task at the shaft: it goes on looking at the factual mining
+            // level, walking away from the column (an OreDig search no longer ends by itself, so there is no terminal
+            // outcome to wait for).
+            if (horizontalChebyshev(now, shaft) >= 3) {
                 require(context, now.getY() == shaft.getY(),
                         "queued release abandoned the factual mining level: "
                                 + now.toShortString());
+                require(context, !live.containsKey("active_break_pos") && !live.containsKey("pending_pickup_pos"),
+                        "queued release left unsafe work or physical debt behind: " + live);
                 task.cancel(bot, "gametest_complete");
                 finish(context, fixture);
                 return;
             }
-            if (ticksAfterLower.incrementAndGet() > 40) {
+            if (ticksAfterLower.incrementAndGet() > 300) {
                 context.fail(Component.nullToEmpty(
-                        "queued ore beyond reach retained the vein head for over 40 ticks: "
+                        "queued ore beyond reach held the task at its shaft for over 300 ticks: "
                                 + live + " bot=" + now.toShortString()));
             }
         });
@@ -2256,23 +2248,27 @@ public final class OreDigPickupGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
 
         Map<String, String> nearlyExhausted = new LinkedHashMap<>(
-                openCheckpoint(fixture.start(), 2, Set.of(Blocks.DIAMOND_ORE)));
-        // The observation-bounded search exhausts after roughly 187 ticks. Start close enough
-        // to the hard cap that its typed terminal outcome still leaves the saved mission within
-        // the final timeout window, where the restart assertion proves only the transient stall
-        // clock was rebased.
-        nearlyExhausted.put("budget_used", "23810");
-        nearlyExhausted.put("last_progress_budget", "23810");
+                openCheckpoint(fixture.start(), 2, Set.of(Blocks.EMERALD_ORE)));
+        // Start close enough to the hard cap that the attempt's failure leaves the saved mission within the final
+        // timeout window, where the restart assertion proves only the transient stall clock was rebased.
+        nearlyExhausted.put("budget_used", "23990");
+        nearlyExhausted.put("last_progress_budget", "23990");
         nearlyExhausted.put("direction", "0");
         nearlyExhausted.put("steps_left", "12");
 
         AtomicReference<OreDigTask> active = new AtomicReference<>(
-                new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 2, nearlyExhausted));
+                new OreDigTask(Set.of(Blocks.EMERALD_ORE), 2, nearlyExhausted));
         TaskManager.INSTANCE.assign(bot, active.get(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_ore_partial_retry_budget"));
         // Assignment starts the task and captures its inventory baseline. This item therefore
         // represents a real delivery made by the running attempt, not pre-existing inventory.
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND));
+        InventoryAction.giveItem(bot, new ItemStack(Items.EMERALD));
+        // A search with no ore in view no longer ends by itself (an exhausted search episode is reset, and only the hard
+        // budget ends the task), so the attempt is failed with its delivery already counted: it loses its iron pickaxe, and
+        // the tool gate ends it as a partial delivery. The ore is emerald (a rare ore like diamond), not diamond: the depth
+        // an emerald search wants is above the bot, so the search itself owns the bot and its checkpoint stays durable, while
+        // a diamond search would first hand the bot to a descent, which publishes none.
+        context.runAfterDelay(3, () -> InventoryAction.removeItems(bot, Items.IRON_PICKAXE, 1));
         int deathBaseline = deathCount(bot);
         AtomicBoolean restored = new AtomicBoolean();
         AtomicInteger restoredTicks = new AtomicInteger();
@@ -2287,14 +2283,12 @@ public final class OreDigPickupGameTests {
                 if (task.state() != TaskState.FAILED) {
                     return;
                 }
-                require(context, task.failureReason().startsWith("ore_dig_no_progress")
-                                || task.failureReason().startsWith(
-                                "no_observed_ore_after_exploration"),
-                        "fixture did not reach a bounded terminal search/stall boundary: "
+                require(context, task.failureReason().startsWith("need_better_tool"),
+                        "fixture did not fail as a partial delivery that lost its tool: "
                                 + task.failureReason());
                 Map<String, String> successor = task.checkpoint();
                 int budget = Integer.parseInt(successor.get("budget_used"));
-                require(context, budget > 23990 && budget < 24000,
+                require(context, budget >= 23990 && budget < 24000,
                         "fixture did not retain the nearly exhausted hard budget: " + successor);
                 require(context, successor.get("last_progress_budget").equals(String.valueOf(budget)),
                         "partial delivery did not publish a fresh transient stall boundary: " + successor);
@@ -2303,7 +2297,8 @@ public final class OreDigPickupGameTests {
                         "partial delivery committed or resized the original batch: " + successor);
 
                 world.setBlock(channel, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                OreDigTask retry = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1, successor);
+                InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
+                OreDigTask retry = new OreDigTask(Set.of(Blocks.EMERALD_ORE), 1, successor);
                 TaskManager.INSTANCE.assign(bot, retry,
                         TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                                 "gametest_ore_partial_retry_budget_restored"));
@@ -2341,14 +2336,19 @@ public final class OreDigPickupGameTests {
         world.setBlock(channel, Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
 
         Map<String, String> open = new LinkedHashMap<>(openCheckpoint(
-                fixture.start(), 8, Set.of(Blocks.DIAMOND_ORE), 64));
+                fixture.start(), 8, Set.of(Blocks.EMERALD_ORE), 64));
         open.put("direction", "0");
         open.put("steps_left", "12");
         AtomicReference<OreDigTask> active = new AtomicReference<>(
-                new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 8, 64, open));
+                new OreDigTask(Set.of(Blocks.EMERALD_ORE), 8, 64, open));
         TaskManager.INSTANCE.assign(bot, active.get(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_rare_partial_delivery"));
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 4));
+        InventoryAction.giveItem(bot, new ItemStack(Items.EMERALD, 4));
+        // A search with no ore in view no longer ends by itself (an exhausted search episode is reset, and only the hard
+        // budget ends the task), so the attempt is failed with its delivery already counted: it loses its pickaxe, and the
+        // tool gate ends it as a partial delivery. The ore is emerald (a rare ore like diamond), not diamond: see
+        // partialDeliveryRebasesOnlyTheTransientStallWindow.
+        context.runAfterDelay(3, () -> InventoryAction.removeItems(bot, Items.IRON_PICKAXE, 1));
         AtomicBoolean restarted = new AtomicBoolean();
 
         context.failIfEver(() -> {
@@ -2360,10 +2360,8 @@ public final class OreDigPickupGameTests {
                 if (task.state() != TaskState.FAILED) {
                     return;
                 }
-                require(context, task.failureReason().startsWith("ore_dig_no_progress")
-                                || task.failureReason().startsWith(
-                                "no_observed_ore_after_exploration"),
-                        "partial rare fixture failed outside the bounded search/stall outcomes: "
+                require(context, task.failureReason().startsWith("need_better_tool"),
+                        "partial rare fixture did not fail as a partial delivery that lost its tool: "
                                 + task.failureReason());
                 Map<String, String> successor = task.checkpoint();
                 require(context, "4".equals(successor.get("delivered"))
@@ -2380,19 +2378,20 @@ public final class OreDigPickupGameTests {
                 world.setBlock(channel, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 // A process restart replays the persisted GoalStep(8). OreDig must still request
                 // only the four items not already named by delivered=4.
+                InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
                 OreDigTask replay = new OreDigTask(
-                        Set.of(Blocks.DIAMOND_ORE), 8, 64, successor);
+                        Set.of(Blocks.EMERALD_ORE), 8, 64, successor);
                 TaskManager.INSTANCE.assign(bot, replay,
                         TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                                 "gametest_rare_partial_delivery_restarted"));
                 active.set(replay);
-                InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 4));
+                InventoryAction.giveItem(bot, new ItemStack(Items.EMERALD, 4));
                 restarted.set(true);
                 return;
             }
 
             if (task.state() == TaskState.COMPLETED) {
-                require(context, InventoryAction.countItem(bot, Items.DIAMOND) == 8,
+                require(context, InventoryAction.countItem(bot, Items.EMERALD) == 8,
                         "restart mined more than the four-item remainder");
                 Map<String, String> committed = task.checkpoint();
                 require(context, "false".equals(committed.get("batch_open"))
@@ -2409,7 +2408,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_restart_at_fully_delivered_open_batch_settles_debt_without_breaking_another_ore", maxTicks = 30)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_restart_at_fully_delivered_open_batch_settles_debt_without_breaking_another_ore", maxTicks = 100)
     public void restartAtFullyDeliveredOpenBatchSettlesDebtWithoutBreakingAnotherOre(
             GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreRareDeliveredGraceGT");
@@ -2423,50 +2422,54 @@ public final class OreDigPickupGameTests {
         Map<String, String> fullyDelivered = new LinkedHashMap<>(openCheckpoint(
                 fixture.start(), 8, Set.of(Blocks.DIAMOND_ORE), 64));
         fullyDelivered.put("delivered", "8");
-        fullyDelivered.put("budget_used", "24000");
-        fullyDelivered.put("last_progress_budget", "24000");
+        // Nearly out of hard budget, but with room for the quiet pickup window (PICKUP_GRACE_TICKS) that precedes the commit:
+        // a restored zero-quota transaction is bounded by the hard timeout like any other, which is checked before the
+        // delivered-batch settlement.
+        fullyDelivered.put("budget_used", "23900");
+        fullyDelivered.put("last_progress_budget", "23900");
         fullyDelivered.put("active_break_pos", encode(untouched));
         fullyDelivered.put("active_break_inventory", "8");
         OreDigTask restored = new OreDigTask(
                 Set.of(Blocks.DIAMOND_ORE), 8, 64, fullyDelivered);
         restored.start(bot);
-        restored.tick(bot);
 
-        require(context, restored.state() == TaskState.COMPLETED,
-                "fully delivered restart required a tool or timed out: "
-                        + restored.failureReason());
-        require(context, bot.level().getBlockState(untouched).is(Blocks.DIAMOND_ORE)
-                        && InventoryAction.countItem(bot, Items.DIAMOND) == 8,
-                "fully delivered restart broke a ninth ore");
-        Map<String, String> committed = restored.checkpoint();
-        require(context, "false".equals(committed.get("batch_open"))
-                        && "0".equals(committed.get("delivered"))
-                        && "1".equals(committed.get("batches")),
-                "fully delivered grace checkpoint did not commit exactly once: " + committed);
-        finish(context, fixture);
+        tickUntil(context, restored, bot, () -> restored.state() == TaskState.COMPLETED, 60,
+                "fully delivered restart commit", () -> {
+                    require(context, bot.level().getBlockState(untouched).is(Blocks.DIAMOND_ORE)
+                                    && InventoryAction.countItem(bot, Items.DIAMOND) == 8,
+                            "fully delivered restart broke a ninth ore");
+                    Map<String, String> committed = restored.checkpoint();
+                    require(context, "false".equals(committed.get("batch_open"))
+                                    && "0".equals(committed.get("delivered"))
+                                    && "1".equals(committed.get("batches")),
+                            "fully delivered grace checkpoint did not commit exactly once: " + committed);
+                    finish(context, fixture);
+                });
     }
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_completed_batch_publishes_zero_budget_successor", maxTicks = 20)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_pickup_game_tests_completed_batch_publishes_zero_budget_successor", maxTicks = 80)
     public void completedBatchPublishesZeroBudgetSuccessor(GameTestHelper context) {
         PickupFixture fixture = spawnMiner(context, "OreCommittedBudgetGT");
         OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1);
         task.start(fixture.bot());
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.DIAMOND));
-        task.tick(fixture.bot());
 
-        require(context, task.state() == TaskState.COMPLETED,
-                "inventory-satisfied batch did not commit");
-        Map<String, String> successor = task.checkpoint();
-        require(context, "false".equals(successor.get("batch_open")),
-                "completed batch remained open: " + successor);
-        require(context, "0".equals(successor.get("budget_used"))
-                        && "0".equals(successor.get("last_progress_budget")),
-                "completed batch leaked its budget into the next batch: " + successor);
-        require(context, "1".equals(successor.get("batches"))
-                        && !successor.containsKey("pending_pickup_pos")
-                        && !successor.containsKey("active_break_pos"),
-                "completed successor retained active-batch debt: " + successor);
-        finish(context, fixture);
+        // The batch commits after the quiet pickup window (PICKUP_GRACE_TICKS) that follows its last drop, not on the tick the
+        // drop arrives.
+        tickUntil(context, task, fixture.bot(), () -> task.state() == TaskState.COMPLETED, 60,
+                "inventory-satisfied batch commit", () -> {
+                    Map<String, String> successor = task.checkpoint();
+                    require(context, "false".equals(successor.get("batch_open")),
+                            "completed batch remained open: " + successor);
+                    require(context, "0".equals(successor.get("budget_used"))
+                                    && "0".equals(successor.get("last_progress_budget")),
+                            "completed batch leaked its budget into the next batch: " + successor);
+                    require(context, "1".equals(successor.get("batches"))
+                                    && !successor.containsKey("pending_pickup_pos")
+                                    && !successor.containsKey("active_break_pos"),
+                            "completed successor retained active-batch debt: " + successor);
+                    finish(context, fixture);
+                });
     }
 
 
@@ -2757,7 +2760,6 @@ public final class OreDigPickupGameTests {
         assertStrictCapabilities(context, bot);
         var world = context.getLevel();
         BlockPos start = fixture.start();
-        BlockPos firstForeignStep = start.north();
         BlockPos zone = start.north(20);
         for (int north = 0; north <= 22; north++) {
             for (int east = -2; east <= 2; east++) {
@@ -2798,12 +2800,14 @@ public final class OreDigPickupGameTests {
             Map<String, String> live = task.checkpoint();
             require(context, "17".equals(live.get("steps_left")),
                     "foreign rich-zone path spent blind cursor budget: " + live);
+            // The remembered rich zone is no longer walked to (the blind path to a remembered coordinate is retired; OreDig
+            // only searches by observed hops), so the foreign walk is whatever observed hop the search takes: the first
+            // moment the bot is under way off its start, it holds no blind ownership.
             if (!bot.getActionPack().isPathExecutorIdle()
-                    && bot.blockPosition().equals(firstForeignStep)) {
-                require(context, encode(firstForeignStep).equals(live.get("face"))
-                                && !live.containsKey("controlled_strip_rear")
+                    && horizontalChebyshev(bot.blockPosition(), start) >= 2) {
+                require(context, !live.containsKey("controlled_strip_rear")
                                 && OreDigTask.inspectCheckpoint(live).isPresent(),
-                        "aligned foreign first step acquired blind ownership: " + live);
+                        "a foreign walk acquired blind ownership: " + live);
                 io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.clearFor(bot.getUUID());
                 io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.resetFor(bot.getUUID());
                 task.cancel(bot, "gametest_complete");
@@ -2812,7 +2816,7 @@ public final class OreDigPickupGameTests {
             }
             if (ticks.incrementAndGet() > 440) {
                 context.fail(Component.nullToEmpty(
-                        "rich-zone path never exposed its aligned first step: "
+                        "the search never took a walk away from its start: "
                                 + live + " pos=" + bot.blockPosition().toShortString()));
             }
         });
@@ -2965,13 +2969,15 @@ public final class OreDigPickupGameTests {
         restored.tick(bot);
         Map<String, String> after = restored.checkpoint();
 
+        // An unknown restored active target keeps its exact break and target ownership until it is seen again (see
+        // OreDigObservationSourceContractTest): nothing is settled, released or promoted to pickup debt while it is occluded.
         require(context, restored.state() == TaskState.RUNNING
                         && encode(hiddenOre).equals(before.get("active_break_pos"))
-                        && !after.containsKey("active_break_pos")
+                        && encode(hiddenOre).equals(after.get("active_break_pos"))
                         && !before.containsKey("pending_pickup_pos")
                         && !after.containsKey("pending_pickup_pos")
                         && world.getBlockState(hiddenOre).is(Blocks.COAL_ORE),
-                "unknown restart target was not safely released without inventing pickup debt: before="
+                "unknown restart target was dropped or promoted to pickup debt: before="
                         + before + " after=" + after);
         restored.cancel(bot, "gametest_complete");
         finish(context, fixture);

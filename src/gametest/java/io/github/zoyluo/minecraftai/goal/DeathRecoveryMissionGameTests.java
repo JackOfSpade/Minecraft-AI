@@ -26,10 +26,12 @@ import java.util.UUID;
 public final class DeathRecoveryMissionGameTests {
     private static final int SUSPENDED_ASSERT_TICK = 10;
     private static final int RESUMED_ASSERT_TICK = 115;
-    private static final int ACTIVE_COMPLETE_ASSERT_TICK = 135;
-    private static final int ALL_COMPLETE_ASSERT_TICK = 155;
+    // A mining mission does not complete the tick its drop arrives: OreDigTask keeps a quiet pickup window
+    // (PICKUP_GRACE_TICKS, 30) after its last drop before it reports the quota done. So each completion is waited for, with room
+    // for that window, instead of being asserted at a fixed tick.
+    private static final int RESULT_WAIT_TICKS = 80;
 
-    @GameTest(maxTicks = 200)
+    @GameTest(maxTicks = 300)
     public void mineOreSurvivesDeathRecoveryAndPreservesQueuedHaveItem(GameTestHelper context) {
         runScenario(
                 context,
@@ -40,7 +42,7 @@ public final class DeathRecoveryMissionGameTests {
                 Items.SWEET_BERRIES);
     }
 
-    @GameTest(maxTicks = 200)
+    @GameTest(maxTicks = 300)
     public void haveItemSurvivesDeathRecoveryAndPreservesQueuedMineOre(GameTestHelper context) {
         runScenario(
                 context,
@@ -63,16 +65,37 @@ public final class DeathRecoveryMissionGameTests {
         context.runAtTickTime(RESUMED_ASSERT_TICK, () -> {
             assertResumed(probe);
             InventoryAction.giveItem(probe.bot(), new ItemStack(activeReward, 1));
+            whenResultAfter(probe, probe.resultBaseline(), () -> {
+                assertActiveMissionCompletedAndQueuePromoted(probe);
+                long activeSequence = latestSequence(probe);
+                InventoryAction.giveItem(probe.bot(), new ItemStack(queuedReward, 1));
+                whenResultAfter(probe, activeSequence, () -> {
+                    assertAllCompleted(probe);
+                    cleanup(probe);
+                    context.succeed();
+                });
+            });
         });
-        context.runAtTickTime(ACTIVE_COMPLETE_ASSERT_TICK, () -> {
-            assertActiveMissionCompletedAndQueuePromoted(probe);
-            InventoryAction.giveItem(probe.bot(), new ItemStack(queuedReward, 1));
-        });
-        context.runAtTickTime(ALL_COMPLETE_ASSERT_TICK, () -> {
-            assertAllCompleted(probe);
-            cleanup(probe);
-            context.succeed();
-        });
+    }
+
+    private static long latestSequence(Probe probe) {
+        return GoalExecutor.INSTANCE.lastResult(probe.bot()).map(GoalResult::sequence).orElse(0L);
+    }
+
+    /**
+     * Runs {@code next} on the tick a result newer than {@code sequence} exists. If none comes within RESULT_WAIT_TICKS it runs
+     * anyway, so that its own assertions name what is missing.
+     */
+    private static void whenResultAfter(Probe probe, long sequence, Runnable next) {
+        waitForResult(probe, sequence, RESULT_WAIT_TICKS, next);
+    }
+
+    private static void waitForResult(Probe probe, long sequence, int ticksLeft, Runnable next) {
+        if (latestSequence(probe) > sequence || ticksLeft <= 0) {
+            next.run();
+            return;
+        }
+        probe.context().runAfterDelay(1, () -> waitForResult(probe, sequence, ticksLeft - 1, next));
     }
 
     private static Probe startSuspendedMission(GameTestHelper context,

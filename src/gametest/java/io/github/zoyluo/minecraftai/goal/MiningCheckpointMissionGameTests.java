@@ -209,7 +209,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(maxTicks = 1200)
     public void satisfiedGoalRestoresFullyDeliveredOpenOreLedgerBeforeCommit(
             GameTestHelper context) {
         String name = "FullyDeliveredOreLedgerGT";
@@ -219,16 +219,19 @@ public final class MiningCheckpointMissionGameTests {
         require(context, GoalExecutor.INSTANCE.submit(bot, goal),
                 "fully-delivered mining goal setup failed");
         AtomicBoolean restored = new AtomicBoolean();
+        AtomicInteger restoredAtTick = new AtomicInteger();
 
         context.failIfEver(() -> {
             MissionRuntimeRecord runtime = GoalExecutor.INSTANCE.captureRuntime(bot);
             Map<String, String> checkpoint = runtime.active() == null
                     ? Map.of() : runtime.active().checkpoint();
             if (!restored.get()) {
+                // OreDig publishes no durable checkpoint while its depth handoff (a descent through the deepslate the fixture
+                // is made of) owns the bot; that takes a few hundred ticks at a stone pickaxe's pace.
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))
                         || Integer.parseInt(checkpoint.getOrDefault(
                         "task.budget_used", "0")) <= 0) {
-                    if (context.getTick() > 250) {
+                    if (context.getTick() > 800) {
                         context.fail(Component.nullToEmpty(
                                 "fully-delivered fixture never reached OreDig"));
                     }
@@ -261,6 +264,7 @@ public final class MiningCheckpointMissionGameTests {
                         "satisfied fast path discarded the fully-delivered open ledger");
                 require(context, GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
                         "fully-delivered ledger was acknowledged before task commit");
+                restoredAtTick.set((int) context.getTick());
                 restored.set(true);
                 return;
             }
@@ -273,7 +277,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.status() + ":" + result.reason());
                 AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
                 context.succeed();
-            } else if (context.getTick() > 350) {
+            } else if (context.getTick() - restoredAtTick.get() > 150) {
                 context.fail(Component.nullToEmpty(
                         "fully-delivered open ledger never committed"));
             }
@@ -2144,7 +2148,7 @@ public final class MiningCheckpointMissionGameTests {
      * miningCheckpoint, so the next rare batch that successfully committed would die at the
      * moment of success with rare_batch_commit_checkpoint_invalid.
      */
-    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_failed_capacity_handoff_without_parent_family_rolls_back_debt_and_rare_batch_settles", maxTicks = 550)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_failed_capacity_handoff_without_parent_family_rolls_back_debt_and_rare_batch_settles", maxTicks = 800)
     public void failedCapacityHandoffWithoutParentFamilyRollsBackDebtAndRareBatchSettles(
             GameTestHelper context) {
         String name = "CapacityOrphanRollbackGT";
@@ -2307,43 +2311,42 @@ public final class MiningCheckpointMissionGameTests {
                             "commit-window restore did not replay the delivered rare batch: "
                                     + (oreTask == null
                                     ? "none" : oreTask.getClass().getSimpleName()));
-                    // Drive the commit synchronously (a nested failIfEver would break the
-                    // GameTest scheduler's iterator): a fully delivered batch reaches
-                    // COMPLETED within a few ticks via the finishAlreadyDeliveredBatch fast
-                    // path; abort is a no-op on a COMPLETED task, it just clears the
+                    // A fully delivered batch reaches COMPLETED through the finishAlreadyDeliveredBatch
+                    // fast path, once the restored task has walked back to its saved face (a step that
+                    // only runs over real game ticks, which the TaskManager gives it with the bot) and
+                    // the quiet pickup window (PICKUP_GRACE_TICKS, 30) after its last drop has passed;
+                    // abort is a no-op on a COMPLETED task, it just clears the
                     // TaskManager slot so tickBot can settle.
-                    for (int tick = 0; tick < 12
-                            && oreTask.state() == TaskState.RUNNING; tick++) {
-                        oreTask.tick(bot);
-                    }
-                    require(context, oreTask.state() == TaskState.COMPLETED,
-                            "delivered rare batch did not commit: "
-                                    + oreTask.state() + ":" + oreTask.failureReason());
-                    TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.level().getServer(), bot);
+                    whenTaskEnds(context, oreTask, 200, () -> {
+                        require(context, oreTask.state() == TaskState.COMPLETED,
+                                "delivered rare batch did not commit: "
+                                        + oreTask.state() + ":" + oreTask.failureReason());
+                        TaskManager.INSTANCE.abort(bot);
+                        GoalExecutor.INSTANCE.tickBot(bot.level().getServer(), bot);
 
-                    GoalResult settledResult = GoalExecutor.INSTANCE.lastResult(bot)
-                            .orElse(null);
-                    require(context, settledResult == null
-                                    || !"rare_batch_commit_checkpoint_invalid".equals(
-                                    settledResult.reason()),
-                            "settled rare batch still died at the moment of success: "
-                                    + (settledResult == null
-                                    ? "none" : settledResult.reason()));
-                    require(context, settledResult == null
-                                    && GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "rare batch settlement lost the active mission: "
-                                    + (settledResult == null
-                                    ? "plan_lost" : settledResult.reason()));
-                    Map<String, String> settled = GoalExecutor.INSTANCE
-                            .captureRuntime(bot).active().checkpoint();
-                    require(context, "false".equals(settled.get("mining.batch_open"))
-                                    && "0".equals(
-                                    settled.get("rare_resource_retries_used")),
-                            "rare commit did not settle the durable mining namespace: "
-                                    + checkpointSummary(settled));
-                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-                    context.succeed();
+                        GoalResult settledResult = GoalExecutor.INSTANCE.lastResult(bot)
+                                .orElse(null);
+                        require(context, settledResult == null
+                                        || !"rare_batch_commit_checkpoint_invalid".equals(
+                                        settledResult.reason()),
+                                "settled rare batch still died at the moment of success: "
+                                        + (settledResult == null
+                                        ? "none" : settledResult.reason()));
+                        require(context, settledResult == null
+                                        && GoalExecutor.INSTANCE.hasActivePlan(bot),
+                                "rare batch settlement lost the active mission: "
+                                        + (settledResult == null
+                                        ? "plan_lost" : settledResult.reason()));
+                        Map<String, String> settled = GoalExecutor.INSTANCE
+                                .captureRuntime(bot).active().checkpoint();
+                        require(context, "false".equals(settled.get("mining.batch_open"))
+                                        && "0".equals(
+                                        settled.get("rare_resource_retries_used")),
+                                "rare commit did not settle the durable mining namespace: "
+                                        + checkpointSummary(settled));
+                        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                        context.succeed();
+                    });
                 });
     }
 
@@ -2470,7 +2473,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_completed_inter_batch_service_promotes_aux_cursor_to_next_batch", maxTicks = 220)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_completed_inter_batch_service_promotes_aux_cursor_to_next_batch", maxTicks = 420)
     public void completedInterBatchServicePromotesAuxCursorToNextBatch(
             GameTestHelper context) {
         String name = "ProtectedRareAuxCompleteGT";
@@ -2558,43 +2561,65 @@ public final class MiningCheckpointMissionGameTests {
                     TaskManager.INSTANCE.cancelIntentTasks(
                             bot, "gametest_completed_aux_continuation_restore");
                     GoalExecutor.INSTANCE.unload(bot);
+                    // The service's checkpoint was taken where the bot stood (its work face is bound to the closed cursor's face).
+                    // The live OreDig it was taken from has gone on digging its descent since, so the face is no longer a cell
+                    // the bot can stand in, and the service returns to exactly that cell. The face is given its floor back and
+                    // the bot is put on it.
+                    BlockPos serviceFace = decodePos(serviceCheckpoint.get("work_face"));
+                    bot.level().setBlock(serviceFace.below(), Blocks.DEEPSLATE.defaultBlockState(), Block.UPDATE_ALL);
+                    bot.level().setBlock(serviceFace, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                    bot.level().setBlock(serviceFace.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                    bot.teleportTo(bot.level(), serviceFace.getX() + 0.5D, serviceFace.getY(),
+                            serviceFace.getZ() + 0.5D, Set.of(), bot.getYRot(), bot.getXRot(), true);
                     GoalExecutor.INSTANCE.restoreRuntime(bot, restart);
 
                     Task service = TaskManager.INSTANCE.getActive(bot).orElse(null);
                     require(context, service instanceof MiningServiceTask,
                             "completed-continuation fixture did not restore its service first");
-                    for (int tick = 0; tick < 80
-                            && service.state() == TaskState.RUNNING; tick++) {
-                        service.tick(bot);
-                    }
-                    require(context, service.state() == TaskState.COMPLETED,
-                            "inter-batch service did not complete from ready inventory: "
-                                    + service.state() + ":" + service.failureReason());
-                    TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.level().getServer(), bot);
+                    // The restored service walks to its saved face first, and that route only runs over real
+                    // game ticks, which the TaskManager gives it with the bot: wait for it instead of ticking it here.
+                    whenTaskEnds(context, service, 200, () -> {
+                        require(context, service.state() == TaskState.COMPLETED,
+                                "inter-batch service did not complete from ready inventory: "
+                                        + service.state() + ":" + service.failureReason());
+                        TaskManager.INSTANCE.abort(bot);
+                        GoalExecutor.INSTANCE.tickBot(bot.level().getServer(), bot);
 
-                    MissionRuntimeRecord continued = GoalExecutor.INSTANCE.captureRuntime(bot);
-                    require(context, continued.active() != null
-                                    && GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
-                            "completed service lost its same-family continuation");
-                    assertAuxiliaryContinuationOrPromotion(
-                            context, continued.active().checkpoint(), protectedRare,
-                            closedAux, ironFingerprint);
+                        MissionRuntimeRecord continued = GoalExecutor.INSTANCE.captureRuntime(bot);
+                        require(context, continued.active() != null
+                                        && GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
+                                "completed service lost its same-family continuation");
+                        assertAuxiliaryContinuationOrPromotion(
+                                context, continued.active().checkpoint(), protectedRare,
+                                closedAux, ironFingerprint);
 
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_completed_aux_continuation_restart");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(bot, continued);
-                    MissionRuntimeRecord restored = GoalExecutor.INSTANCE.captureRuntime(bot);
-                    require(context, restored.active() != null
-                                    && GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
-                            "completed service continuation failed after restart");
-                    assertAuxiliaryContinuationOrPromotion(
-                            context, restored.active().checkpoint(), protectedRare,
-                            closedAux, ironFingerprint);
-                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
-                    context.succeed();
+                        TaskManager.INSTANCE.cancelIntentTasks(
+                                bot, "gametest_completed_aux_continuation_restart");
+                        GoalExecutor.INSTANCE.unload(bot);
+                        GoalExecutor.INSTANCE.restoreRuntime(bot, continued);
+                        MissionRuntimeRecord restored = GoalExecutor.INSTANCE.captureRuntime(bot);
+                        require(context, restored.active() != null
+                                        && GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
+                                "completed service continuation failed after restart");
+                        assertAuxiliaryContinuationOrPromotion(
+                                context, restored.active().checkpoint(), protectedRare,
+                                closedAux, ironFingerprint);
+                        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                        context.succeed();
+                    });
                 });
+    }
+
+    /**
+     * Runs {@code next} on the first tick {@code task} is no longer running, or after {@code maxTicks}. The task is ticked by the
+     * TaskManager, with the bot, so whatever it starts (a route) really runs.
+     */
+    private static void whenTaskEnds(GameTestHelper context, Task task, int maxTicks, Runnable next) {
+        if (task.state() != TaskState.RUNNING || maxTicks <= 0) {
+            next.run();
+            return;
+        }
+        context.runAfterDelay(1, () -> whenTaskEnds(context, task, maxTicks - 1, next));
     }
 
     @GameTest(maxTicks = 260)
@@ -3505,8 +3530,9 @@ public final class MiningCheckpointMissionGameTests {
                     }
                     bot.getInventory().setChanged();
                     giveItemToAtLeast(bot, Items.DIAMOND, 7);
+                    // The retry commits once the quiet pickup window (PICKUP_GRACE_TICKS, 30) after its last drop has passed.
                     for (int attempt = 0;
-                         attempt < 4 && missionTask.state() == TaskState.RUNNING;
+                         attempt < 60 && missionTask.state() == TaskState.RUNNING;
                          attempt++) {
                         missionTask.tick(bot);
                     }
@@ -4877,7 +4903,9 @@ public final class MiningCheckpointMissionGameTests {
         checkpoint.put(prefix + "pickup_gain_budget", "-1");
         checkpoint.remove(prefix + "active_break_pos");
         checkpoint.put(prefix + "active_break_inventory", "-1");
-        if ("5".equals(checkpoint.get(prefix + "task_schema"))) {
+        // Schema 5 first persisted whether the active break is confirmed gone; every later schema requires it too.
+        String schema = checkpoint.get(prefix + "task_schema");
+        if (schema != null && Integer.parseInt(schema) >= 5) {
             checkpoint.put(prefix + "active_break_confirmed_gone", "false");
         } else {
             checkpoint.remove(prefix + "active_break_confirmed_gone");

@@ -41,11 +41,13 @@ public final class ProspectScanBudgetGameTests {
      *   <li>the average step stays within 10 budgets, so the work was cut into budget-sized pieces;</li>
      *   <li>when there was real work (at least 20 ms in at least 4 steps) no single step carried half of it; a
      *       lone hiccup cannot trip that because the many other steps sum to more than it does;</li>
-     *   <li>when the synchronous run was long, the scan needed more than one step.</li>
+     *   <li>when the scan itself did more than four budgets of work, it took more than one step. (The synchronous run is no
+     *       measure of that: it is the first, cold run of the class and runs several times longer than the same work warm,
+     *       and the palette prefilter can leave a scan of a small fixture less than one budget of work.)</li>
      * </ul>
      */
     private static void requireSpread(GameTestHelper context, String label, int steps, long maxStepNanos,
-                                      long totalNanos, long syncNanos) {
+                                      long totalNanos) {
         require(context, steps >= 1, label + " never stepped");
         require(context, totalNanos / steps <= 10L * BUDGET_NANOS,
                 label + ": average step " + totalNanos / steps / 1_000L + " us is not budget-sized (" + steps + " steps)");
@@ -53,8 +55,8 @@ public final class ProspectScanBudgetGameTests {
             require(context, 2L * maxStepNanos <= totalNanos,
                     label + ": one step carried " + maxStepNanos / 1_000_000L + " of " + totalNanos / 1_000_000L + " ms");
         }
-        if (syncNanos > 8_000_000L) {
-            require(context, steps > 1, label + ": a " + syncNanos / 1_000_000L + " ms scan was not spread across ticks");
+        if (totalNanos > 4L * BUDGET_NANOS) {
+            require(context, steps > 1, label + ": " + totalNanos / 1_000_000L + " ms of scanning was not spread across steps");
         }
     }
 
@@ -93,9 +95,9 @@ public final class ProspectScanBudgetGameTests {
             require(context, log.equals(scan.result()),
                     "budgeted scan disagrees with the synchronous one: " + scan.result() + " vs " + syncFound);
             require(context, emptyScan.result() == null, "budgeted empty scan found " + emptyScan.result());
-            requireSpread(context, "budgeted hit scan", scan.steps(), scan.maxStepNanos(), scan.totalNanos(), 0L);
+            requireSpread(context, "budgeted hit scan", scan.steps(), scan.maxStepNanos(), scan.totalNanos());
             requireSpread(context, "budgeted empty scan", emptyScan.steps(), emptyScan.maxStepNanos(),
-                    emptyScan.totalNanos(), emptyNanos);
+                    emptyScan.totalNanos());
             finish(context, fixture);
         });
     }
@@ -172,8 +174,8 @@ public final class ProspectScanBudgetGameTests {
             require(context, hit.result() != null && syncHit.equals(hit.result()),
                     "budgeted survey disagrees with the synchronous one: " + hit.result() + " vs " + syncHit);
             require(context, empty.result() == null, "budgeted empty survey found " + empty.result());
-            requireSpread(context, "budgeted survey hit", hit.steps(), hit.maxStepNanos(), hit.totalNanos(), 0L);
-            requireSpread(context, "budgeted survey empty", empty.steps(), empty.maxStepNanos(), empty.totalNanos(), emptyNanos);
+            requireSpread(context, "budgeted survey hit", hit.steps(), hit.maxStepNanos(), hit.totalNanos());
+            requireSpread(context, "budgeted survey empty", empty.steps(), empty.maxStepNanos(), empty.totalNanos());
             finish(context, fixture);
         });
     }

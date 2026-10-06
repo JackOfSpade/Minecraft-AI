@@ -422,8 +422,8 @@ public final class FarmSurvivalGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_farm_task_in_a_dark_room_fails_typed_and_plants_nothing", maxTicks = 200)
-    public void farmTaskInADarkRoomFailsTypedAndPlantsNothing(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_farm_task_in_a_dark_room_plants_nothing_and_keeps_looking", maxTicks = 300)
+    public void farmTaskInADarkRoomPlantsNothingAndKeepsLooking(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(14, 4, 174));
         forceChunks(context, feet, 12);
@@ -444,7 +444,10 @@ public final class FarmSurvivalGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HOE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 9));
 
+        // A produce request widens its observed search for a lit field instead of failing in a dark one (see
+        // FarmTask#isResourceCollection), and spends no seed in the dark meanwhile.
         FarmTask task = new FarmTask(feet, 2, Items.WHEAT_SEEDS, Blocks.WHEAT, false, false, Items.WHEAT, 1);
+        int[] ticksLooking = {0};
         context.failIfEver(() -> {
             long tick = context.getTick();
             if (tick < 12) {
@@ -455,16 +458,9 @@ public final class FarmSurvivalGameTests {
                 task.start(bot);
                 return;
             }
-            if (task.state() == TaskState.RUNNING) {
-                task.tick(bot);
-                if (tick > 150) {
-                    context.fail(Component.nullToEmpty("dark farm neither failed nor finished: " + task.describe()));
-                }
-                return;
-            }
-            require(context, task.state() == TaskState.FAILED
-                            && task.failureReason().startsWith("farm_area_too_dark"),
-                    "expected farm_area_too_dark, got " + task.state() + " " + task.failureReason());
+            require(context, task.state() == TaskState.RUNNING,
+                    "the search for a lit field ended: " + task.state() + " " + task.failureReason() + " " + task.describe());
+            task.tick(bot);
             require(context, InventoryAction.countItem(bot, Items.WHEAT_SEEDS) == 9,
                     "seeds were spent in the dark");
             for (int dx = -2; dx <= 2; dx++) {
@@ -473,7 +469,11 @@ public final class FarmSurvivalGameTests {
                             "a seed was planted in the dark");
                 }
             }
-            context.succeed();
+            if (++ticksLooking[0] >= 120) {
+                task.cancel(bot, "gametest_complete");
+                AIPlayerManager.INSTANCE.despawn(world.getServer(), "FarmDarkTaskGT");
+                context.succeed();
+            }
         });
     }
 
