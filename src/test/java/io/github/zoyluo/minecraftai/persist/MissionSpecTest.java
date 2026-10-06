@@ -65,6 +65,36 @@ class MissionSpecTest {
     }
 
     @Test
+    void theIncrementalMarkerIsPersistedStrictlyAndAbsentMeansAbsolute() {
+        Goal.MineOre incremental = Goal.MineOre.additional(Set.of(), 1, 0);
+        MissionSpec encoded = MissionSpec.fromGoal(incremental);
+
+        assertEquals("true", encoded.params().get("incremental"));
+        assertEquals(incremental, encoded.toGoal().orElseThrow());
+        assertTrue(((Goal.MineOre) encoded.toGoal().orElseThrow()).incremental(),
+                "a request that held nothing must stay distinguishable from an absolute goal");
+
+        // An absolute goal keeps the wire format it always had, whatever baseline it carries.
+        for (Goal.MineOre absolute : List.of(new Goal.MineOre(Set.of(), 4), new Goal.MineOre(Set.of(), 1, 63))) {
+            MissionSpec spec = MissionSpec.fromGoal(absolute);
+            assertTrue(!spec.params().containsKey("incremental"));
+            assertEquals(absolute, spec.toGoal().orElseThrow());
+        }
+
+        // A record written before the marker existed carries a baseline but no marker: it reads
+        // back as absolute, so promotion can never turn it into an incremental request.
+        MissionSpec preMarker = new MissionSpec("mine_ore",
+                java.util.Map.of("count", "1", "initial_drop_count", "63"), List.of());
+        assertTrue(!((Goal.MineOre) preMarker.toGoal().orElseThrow()).incremental());
+
+        for (String corrupt : List.of("false", "TRUE", "1", "")) {
+            assertTrue(new MissionSpec("mine_ore",
+                    java.util.Map.of("count", "1", "initial_drop_count", "0", "incremental", corrupt),
+                    List.of()).toGoal().isEmpty(), "incremental=" + corrupt + " must be isolated, not guessed");
+        }
+    }
+
+    @Test
     void timedMineCollectionRoundTripsWithoutChangingLegacyFixedMissionWireFormat() {
         Goal.MineOre timed = Goal.MineOre.timedCollection(Set.of(), 63);
         MissionSpec timedSpec = MissionSpec.fromGoal(timed);
@@ -93,6 +123,8 @@ class MissionSpecTest {
         assertTrue(source.contains("nonNegativeIntegerOrDefault(\"initial_produce_count\", 0)"));
         assertTrue(source.contains("putTimedCollectionMode(params, g.collectionMode());"));
         assertTrue(source.contains("collectionModeOrDefault()"));
+        assertTrue(source.contains("putIncrementalMarker(params, g.incremental());"));
+        assertTrue(source.contains("incrementalMarker());"));
     }
 
     @Test

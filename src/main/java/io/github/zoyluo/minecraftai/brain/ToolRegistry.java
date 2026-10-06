@@ -453,7 +453,7 @@ public final class ToolRegistry {
             int heldProduce = HarvestCore.countInventoryItems(bot, Set.of(produce));
             boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
                     args.has("count")
-                            ? new Goal.HarvestCrop(spec.crop(), spec.seed(), produce,
+                            ? Goal.HarvestCrop.additional(spec.crop(), spec.seed(), produce,
                                     optionalInt(args, "count", 1), heldProduce)
                             : Goal.HarvestCrop.timedCollection(spec.crop(), spec.seed(), produce, heldProduce));
             return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
@@ -1133,7 +1133,7 @@ public final class ToolRegistry {
                         ? Items.WHEAT : spec.seed();
                 int heldProduce = HarvestCore.countInventoryItems(bot, Set.of(produce));
                 boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, params.has("count")
-                        ? new Goal.HarvestCrop(spec.crop(), spec.seed(), produce,
+                        ? Goal.HarvestCrop.additional(spec.crop(), spec.seed(), produce,
                                 optionalInt(params, "count", 1), heldProduce)
                         : Goal.HarvestCrop.timedCollection(spec.crop(), spec.seed(), produce, heldProduce));
                 return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
@@ -1408,7 +1408,7 @@ public final class ToolRegistry {
      */
     private static Goal.MineOre additionalOreGoal(AIPlayerEntity bot, Set<Block> ores, int requestedDrops) {
         int heldDrops = HarvestCore.countInventoryItems(bot, HarvestCore.expectedDropsFor(ores));
-        return new Goal.MineOre(ores, requestedDrops, heldDrops);
+        return Goal.MineOre.additional(ores, requestedDrops, heldDrops);
     }
 
     /**

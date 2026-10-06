@@ -60,6 +60,7 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 // Preserve the captured inventory baseline: without it, a restarted public
                 // "mine one more" request could regress into an already-satisfied absolute goal.
                 params.put("initial_drop_count", String.valueOf(g.initialDropCount()));
+                putIncrementalMarker(params, g.incremental());
                 putTimedCollectionMode(params, g.collectionMode());
                 values = g.ores().stream().map(block -> BuiltInRegistries.BLOCK.getKey(block).toString()).sorted().toList();
             }
@@ -70,6 +71,7 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 params.put("produce", BuiltInRegistries.ITEM.getKey(g.produce()).toString());
                 params.put("count", String.valueOf(g.count()));
                 params.put("initial_produce_count", String.valueOf(g.initialProduceCount()));
+                putIncrementalMarker(params, g.incremental());
                 putTimedCollectionMode(params, g.collectionMode());
             }
             case Goal.Armor ignored -> type = "armor";
@@ -123,10 +125,12 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                         .map(Identifier::parse)
                         .map(id -> BuiltInRegistries.BLOCK.getOptional(id).orElseThrow())
                         .collect(java.util.stream.Collectors.toSet()), integer("count"),
-                        nonNegativeIntegerOrDefault("initial_drop_count", 0), collectionModeOrDefault());
+                        nonNegativeIntegerOrDefault("initial_drop_count", 0), collectionModeOrDefault(),
+                        incrementalMarker());
                 case "harvest_crop" -> new Goal.HarvestCrop(
                         block("crop"), item("seed"), item("produce"), integer("count"),
-                        nonNegativeIntegerOrDefault("initial_produce_count", 0), collectionModeOrDefault());
+                        nonNegativeIntegerOrDefault("initial_produce_count", 0), collectionModeOrDefault(),
+                        incrementalMarker());
                 case "armor" -> new Goal.Armor();
                 case "workstation" -> new Goal.Workstation();
                 case "stockpile" -> new Goal.Stockpile(item("item"), integer("count"));
@@ -174,6 +178,30 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
         if (mode != null && mode.isTimedCollection()) {
             params.put("collection_mode", mode.persistedValue());
         }
+    }
+
+    /**
+     * The incremental marker is persisted only when set, so an absolute goal keeps the exact wire
+     * format it always had and a record written before the marker existed reads back as absolute:
+     * it must never become incremental, because promotion would then re-measure a quota that was
+     * meant as a total.
+     */
+    private static void putIncrementalMarker(Map<String, String> params, boolean incremental) {
+        if (incremental) {
+            params.put("incremental", "true");
+        }
+    }
+
+    /** Strict: absent means absolute, {@code true} means incremental, anything else is corrupt. */
+    private boolean incrementalMarker() {
+        String value = params.get("incremental");
+        if (value == null) {
+            return false;
+        }
+        if (!"true".equals(value)) {
+            throw new IllegalArgumentException("invalid_mission_param:incremental");
+        }
+        return true;
     }
 
     private Goal.CollectionMode collectionModeOrDefault() {
