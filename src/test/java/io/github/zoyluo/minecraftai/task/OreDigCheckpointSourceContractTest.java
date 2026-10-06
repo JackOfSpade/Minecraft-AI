@@ -323,7 +323,7 @@ class OreDigCheckpointSourceContractTest {
 
         String hopSource = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/task/ObservedSearchHops.java"));
-        assertTrue(hopSource.contains("startDirectionalPursuitTo(heading, HOP_DISTANCE, false, false)")
+        assertTrue(hopSource.contains("startDirectionalPursuitTo(heading, hopDistance(), false, false)")
                         && hopSource.contains("actually observed local stance"),
                 "a remembered remote heading must resolve to an observed walk-only local goal");
     }

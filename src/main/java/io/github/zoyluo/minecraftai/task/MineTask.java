@@ -694,7 +694,7 @@ public final class MineTask extends AbstractTask {
                 "attempt", attempt.number(),
                 "heading", attempt.heading().toShortString(),
                 "to", exploreTarget.toShortString(),
-                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+                "max_hop", ObservedSearchHops.hopDistance());
         return true;
     }
 

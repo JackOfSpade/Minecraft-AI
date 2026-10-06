@@ -120,7 +120,68 @@ class PillarSearchMemoTest {
     }
 
     @Test
+    void aFullExclusionTableShedsTargetsEarlyAndTheFindingThatReliedOnThemEnds() {
+        UUID bot = UUID.randomUUID();
+        BlockPos skipped = new BlockPos(20, 128, -50);
+        EpisodeMemory.INSTANCE.exclude(bot, skipped, 100, EpisodeMemory.TTL_SHORT);
+        try {
+            PillarSearchMemo memo = new PillarSearchMemo();
+            assertFalse(memo.scanFilter(bot, 150).test(skipped));
+            memo.rememberEmpty(STANCE, HINT, 4L, 160);
+            assertTrue(memo.knownEmpty(STANCE, HINT, 4L, 170), "the skipped target is excluded until tick 700");
+
+            // 128 more exclusions that end later fill the table: the skipped one, which ends first, is shed.
+            for (int index = 0; index < 128; index++) {
+                EpisodeMemory.INSTANCE.exclude(bot, new BlockPos(index, 70, 0), 200, EpisodeMemory.TTL_UNREACHABLE);
+            }
+
+            assertFalse(EpisodeMemory.INSTANCE.isExcluded(bot, skipped, 171), "fixture: the table dropped the target early");
+            assertFalse(memo.knownEmpty(STANCE, HINT, 4L, 171),
+                    "the target revived long before tick 700, so the empty finding no longer holds");
+        } finally {
+            EpisodeMemory.INSTANCE.reset(bot);
+        }
+    }
+
+    @Test
+    void anEpisodeResetRevivesEveryExclusionAndEndsTheFinding() {
+        UUID bot = UUID.randomUUID();
+        BlockPos skipped = new BlockPos(20, 128, -50);
+        EpisodeMemory.INSTANCE.exclude(bot, skipped, 100, EpisodeMemory.TTL_SHORT);
+        PillarSearchMemo memo = new PillarSearchMemo();
+        assertFalse(memo.scanFilter(bot, 150).test(skipped));
+        memo.rememberEmpty(STANCE, HINT, 4L, 160);
+        assertTrue(memo.knownEmpty(STANCE, HINT, 4L, 170));
+
+        EpisodeMemory.INSTANCE.reset(bot);
+
+        assertFalse(memo.knownEmpty(STANCE, HINT, 4L, 171));
+    }
+
+    @Test
+    void anUnrelatedBotsFullTableStillOnlyCostsOneRescan() {
+        // The counter is shared by every bot: a finding is dropped, never kept wrongly.
+        UUID bot = UUID.randomUUID();
+        UUID other = UUID.randomUUID();
+        PillarSearchMemo memo = new PillarSearchMemo();
+        memo.rememberEmpty(STANCE, HINT, 4L, 100);
+        try {
+            for (int index = 0; index <= 128; index++) {
+                EpisodeMemory.INSTANCE.exclude(other, new BlockPos(index, 70, 0), 100, EpisodeMemory.TTL_UNREACHABLE);
+            }
+            assertFalse(memo.knownEmpty(STANCE, HINT, 4L, 101));
+
+            memo.rememberEmpty(STANCE, HINT, 4L, 102);
+            assertTrue(memo.knownEmpty(STANCE, HINT, 4L, 103), "the next finding holds again");
+        } finally {
+            EpisodeMemory.INSTANCE.reset(other);
+            EpisodeMemory.INSTANCE.reset(bot);
+        }
+    }
+
+    @Test
     void clearForgetsTheFinding() {
+
         PillarSearchMemo memo = new PillarSearchMemo();
         memo.rememberEmpty(STANCE, HINT, 4L, 100);
         memo.clear();

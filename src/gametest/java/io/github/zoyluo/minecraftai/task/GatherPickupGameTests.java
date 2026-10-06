@@ -405,6 +405,54 @@ public final class GatherPickupGameTests {
         });
     }
 
+    /**
+     * The pickup window is a wait for a drop that cannot be seen. Once the sweep around the break cell has visited
+     * every cell it can see to be standable and the drop has had the time vanilla's physics gives it to land, there
+     * is nothing left to try and nothing left to wait for: the rest of the window (120 ticks, six seconds at a full
+     * 20 TPS) was the bot standing about. Here exactly three cells can be stood in around the break cell.
+     */
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_unseen_drop_window_ends_when_the_sweep_has_nothing_left_and_the_drop_had_time_to_land", maxTicks = 500)
+    public void unseenDropWindowEndsWhenTheSweepHasNothingLeftAndTheDropHadTimeToLand(GameTestHelper context) {
+        Fixture fixture = fixture(context, "GatherSettledWindowGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
+        BlockPos log = fixture.start().east(2);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        for (int dx = 0; dx <= 4; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dz == 0 && dx <= 2) {
+                    continue; // the bot's cell, the one between, and the break cell itself
+                }
+                BlockPos wall = fixture.start().offset(dx, 0, dz);
+                bot.level().setBlock(wall, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                bot.level().setBlock(wall.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
+        task.start(bot);
+        int[] enteredPickup = {-1};
+
+        context.failIfEver(() -> {
+            tickOrFail(context, task, bot);
+            boolean picking = task.describe().contains("phase=PICKUP");
+            if (picking && enteredPickup[0] < 0) {
+                ItemEntity drop = nearestOakDrop(bot, log, 3.0D);
+                require(context, drop != null, "the harvest produced no removable test drop");
+                drop.discard(); // the drop nobody can see
+                enteredPickup[0] = (int) context.getTick();
+            }
+            if (enteredPickup[0] < 0 || picking) {
+                return;
+            }
+            int waited = (int) context.getTick() - enteredPickup[0];
+            require(context, waited >= ItemDropSettle.ticksToSettle(1.0D),
+                    "the window ended after " + waited + " ticks, before the drop could have landed");
+            require(context, waited < 90,
+                    "the bot stood about for " + waited + " ticks with nothing left to try: " + task.describe());
+            finish(context, fixture);
+        });
+    }
+
     private static Fixture fixture(GameTestHelper context, String name, BlockPos relativeStart, int east) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(relativeStart);

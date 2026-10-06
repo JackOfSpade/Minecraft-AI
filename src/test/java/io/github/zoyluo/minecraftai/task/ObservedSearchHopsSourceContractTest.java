@@ -21,7 +21,7 @@ final class ObservedSearchHopsSourceContractTest {
     void helperTurnsOnlyHeadingsIntoShortObservedNavigationLegs() throws IOException {
         String source = Files.readString(TASKS.resolve("ObservedSearchHops.java"));
 
-        assertTrue(source.contains("startDirectionalPursuitTo(heading, HOP_DISTANCE, false, false)"),
+        assertTrue(source.contains("startDirectionalPursuitTo(heading, hopDistance(), false, false)"),
                 "a remote heading must be resolved by the observation-fenced directional pursuit API");
         assertTrue(source.contains("BlockPos observedGoal = bot.getActionPack().activePathGoal()"),
                 "callers must receive the admitted local goal rather than treating the heading as a destination");

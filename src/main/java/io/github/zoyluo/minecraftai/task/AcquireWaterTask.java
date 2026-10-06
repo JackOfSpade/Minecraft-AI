@@ -664,7 +664,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         ActionResult result;
         if (directionalSearchHop) {
             result = bot.getActionPack().startDirectionalPursuitTo(
-                    target, ObservedSearchHops.HOP_DISTANCE, false, false);
+                    target, ObservedSearchHops.hopDistance(), false, false);
         } else if (surfaceOnly) {
             result = bot.getActionPack().startSurfacePathTo(target);
             // Seeing the cursor post does not prove that every cell on a route to it is admitted.
@@ -673,7 +673,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             if (phase == Phase.SEARCH && isObservedCorridorAdmissionFailure(result.reason())) {
                 directionalSearchHop = true;
                 result = bot.getActionPack().startDirectionalPursuitTo(
-                        target, ObservedSearchHops.HOP_DISTANCE, false, false);
+                        target, ObservedSearchHops.hopDistance(), false, false);
             }
         } else {
             result = bot.getActionPack().startPathTo(target);

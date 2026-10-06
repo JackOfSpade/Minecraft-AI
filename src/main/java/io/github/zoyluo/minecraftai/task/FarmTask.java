@@ -435,7 +435,7 @@ public final class FarmTask extends AbstractTask implements CheckpointableTask {
                 "attempt", attempt.number(),
                 "heading", attempt.heading().toShortString(),
                 "to", exploreTarget.toShortString(),
-                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+                "max_hop", ObservedSearchHops.hopDistance());
         return true;
     }
 

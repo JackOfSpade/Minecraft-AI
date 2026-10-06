@@ -5,8 +5,6 @@ import io.github.zoyluo.minecraftai.mining.assist.RayGrid;
 import io.github.zoyluo.minecraftai.task.SharedVision;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -66,8 +64,8 @@ public final class SharedWorldSight {
         int lastPruneTick = Integer.MIN_VALUE;
         long lastRouteTarget = Long.MIN_VALUE;
         int lastRouteEnvelopeTick = Integer.MIN_VALUE;
-        /** Access order makes eviction O(1) and retains the most recently seen terrain. */
-        final LinkedHashMap<Long, Observation> cells = new LinkedHashMap<>(256, 0.75F, true);
+        /** Kept in the order the cells were last seen: eviction and expiry only ever look at the oldest end. */
+        final SeenCellMemory<Observation> cells = new SeenCellMemory<>(Observation::seenTick, MAX_CELLS_PER_BOT);
 
         Memory(String dimension) {
             this.dimension = dimension;
@@ -145,7 +143,7 @@ public final class SharedWorldSight {
         if (memory.cells.isEmpty()) {
             return List.of();
         }
-        List<Observation> all = new ArrayList<>(memory.cells.values());
+        List<Observation> all = new ArrayList<>(memory.cells.sightings());
         int from = Math.max(0, all.size() - ROUTE_IMPORT_LIMIT);
         return List.copyOf(all.subList(from, all.size()));
     }
@@ -175,7 +173,7 @@ public final class SharedWorldSight {
         Memory memory = memoryFor(bot);
         prune(memory, tick);
         List<Observation> matches = new ArrayList<>();
-        for (Observation observation : memory.cells.values()) {
+        for (Observation observation : memory.cells.sightings()) {
             if (stateFilter.test(observation.state())) {
                 matches.add(observation);
             }
@@ -391,15 +389,7 @@ public final class SharedWorldSight {
     }
 
     private static void remember(Memory memory, Observation observation) {
-        memory.cells.put(observation.packedPos(), observation);
-        while (memory.cells.size() > MAX_CELLS_PER_BOT) {
-            Iterator<Long> iterator = memory.cells.keySet().iterator();
-            if (!iterator.hasNext()) {
-                return;
-            }
-            iterator.next();
-            iterator.remove();
-        }
+        memory.cells.remember(observation.packedPos(), observation);
     }
 
     private static void prune(Memory memory, int tick) {
@@ -407,12 +397,6 @@ public final class SharedWorldSight {
             return;
         }
         memory.lastPruneTick = tick;
-        Iterator<Observation> iterator = memory.cells.values().iterator();
-        while (iterator.hasNext()) {
-            Observation observation = iterator.next();
-            if ((long) tick - observation.seenTick() > MEMORY_TTL_TICKS) {
-                iterator.remove();
-            }
-        }
+        memory.cells.expire(tick, MEMORY_TTL_TICKS);
     }
 }
