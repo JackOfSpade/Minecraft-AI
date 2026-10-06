@@ -80,7 +80,7 @@ final class GatherTreeRecoverySourceContractTest {
         String nearbySupports = listBody(palette, "NEARBY_PILLAR_SUPPORT_GATHER_ITEMS");
 
         assertTrue(gather.contains("HarvestCore.beginNearestPillarApproachScan(")
-                        && gather.contains("SEARCH_RADIUS, SEARCH_DOWN, scanUp")
+                        && gather.contains("SEARCH_RADIUS, SEARCH_DOWN, PILLAR_SEARCH_UP")
                         && gather.contains("MaterialPalette.countPillarSupportBlocks(bot)")
                         && resupply.contains("MaterialPalette.nearbyPillarSupportGatherItems()")
                         && resupply.contains("collectNearbyPillarSupport(")

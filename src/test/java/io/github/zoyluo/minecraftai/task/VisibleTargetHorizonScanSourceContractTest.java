@@ -43,6 +43,7 @@ final class VisibleTargetHorizonScanSourceContractTest {
         String gather = read("task/GatherQuotaTask.java");
         String survey = methodBody(gather, "private void survey(");
         String seek = methodBody(gather, "private boolean seekVisibleTarget(");
+        String act = methodBody(gather, "private boolean actOnTargetSighting(");
         String pursuit = methodBody(gather, "private boolean startTargetSightingPursuit(");
         String move = methodBody(gather, "private void targetSightingMove(");
 
@@ -56,7 +57,8 @@ final class VisibleTargetHorizonScanSourceContractTest {
                         && gather.contains("private boolean hasPendingExactVisibleSearch()"),
                 "an exact visual-only request must finish its bounded sight raster rather than failing after the initial glance");
         assertTrue(seek.contains("new VisibleTargetHorizonScan(harvestBlocks)")
-                        && seek.contains("approachVisibleTarget(bot, sighting.pos())")
+                        && seek.contains("actOnTargetSighting(bot, sighting.pos())")
+                        && act.contains("approachVisibleTarget(bot, seen)")
                         && gather.contains("case TARGET_SIGHTING -> targetSightingMove(bot)"),
                 "a directly sighted gather block should either use its local stance or a dedicated observed pursuit");
         assertTrue(pursuit.contains("isCurrentVisibleTargetLandmark(bot, targetSightingHint)")

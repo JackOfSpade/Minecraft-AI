@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
@@ -150,7 +151,9 @@ public final class StockpileTask extends AbstractTask {
         }
         // A parent may reserve a fresh handoff target. Reaching storage must not spend that
         // target as disposable Baritone support before the deposit filter has a chance to keep it.
-        ActionResult result = retainedItems.isEmpty()
+        // Only an item a route can actually place needs that restriction: logs never are placed,
+        // and a surface-only walk would only take away the dig and bridge routes to the chest.
+        ActionResult result = retainedItems.stream().noneMatch(MaterialPalette::isPathSupportItem)
                 ? bot.getActionPack().startPathTo(stand)
                 : bot.getActionPack().startSurfacePathTo(stand);
         if (result.isFailed()) {
