@@ -1376,6 +1376,11 @@ public final class DangerWatcher {
         return !observableActiveHostilePressure(bot).isEmpty();
     }
 
+    /**
+     * Hostiles that press on the bot: seen, inside the pressure envelope and on a physical line. The line matters here because the
+     * bot's eyes see through leaves, fences, glass and water: a zombie in a glass-walled farm or behind a hedge is seen, but it can
+     * neither reach the bot nor be reached, so it must not stop the bot eating, healing or cleaning up (nor gate a detour).
+     */
     private static List<LivingEntity> observableActiveHostilePressure(AIPlayerEntity bot) {
         return bot.level()
                 .getEntitiesOfClass(
@@ -1383,7 +1388,8 @@ public final class DangerWatcher {
                         bot.getBoundingBox().inflate(CombatCore.hostilePressureScanRange()),
                         entity -> isActiveHostileThreat(bot, entity)
                                 && SharedVision.seenByBotOrOwner(bot, entity)
-                                && CombatCore.isWithinHostilePressureEnvelope(bot, entity));
+                                && CombatCore.isWithinHostilePressureEnvelope(bot, entity)
+                                && CombatCore.hasLineOfSightOrOwnerSees(bot, entity));
     }
 
     /**
@@ -1732,7 +1738,9 @@ public final class DangerWatcher {
     // for judging "is there a wall in the way". A melee mob without line of sight can't hit it, a
     // ranged mob without line of sight can't shoot it, and a Creeper without line of sight can't blow
     // it up either -- none of these count as a current threat (they'll be re-detected once they come
-    // around or into view).
+    // around or into view). This is the physical collider line, not the bot's sight: its eyes see
+    // through leaves, fences, glass and water (canNoticeCreature), so a mob it merely sees through
+    // one of them is noticed but is no threat to run from or fight until it has a line.
     private static boolean canReachThreat(AIPlayerEntity bot, LivingEntity mob) {
         // A foreign bot the owner is looking at counts as reachable: the owner nominates it, the strike gate still needs the bot's own line.
         return CombatCore.hasLineOfSightOrOwnerSees(bot, mob);

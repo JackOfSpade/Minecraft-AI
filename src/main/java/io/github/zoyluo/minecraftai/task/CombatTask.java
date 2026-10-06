@@ -257,9 +257,11 @@ public final class CombatTask extends AbstractTask {
         // Target is blocked by a block and unreachable (behind a wall/tunnel) -> end combat, don't
         // foolishly keep swinging/chasing into empty air until timeout (observed bug: a blocked
         // hostile kept the bot stuck "in combat", interrupting normal mining). A momentary occlusion
-        // doesn't count; only a sustained 2.5s of no line of sight ends it. Unreachable is inherently
-        // safe, so use complete() to end cleanly and let the original task resume, instead of fail()
-        // which would alarm the brain.
+        // doesn't count; only a sustained 2.5s of no line of sight ends it. The line is the physical
+        // one (the vanilla collider ray), not the bot's sight: its eyes see through leaves, fences and
+        // panes, which a blow cannot cross, so a target it sees but can never strike must end the
+        // fight just the same. Unreachable is inherently safe, so use complete() to end cleanly and let
+        // the original task resume, instead of fail() which would alarm the brain.
         boolean hidingOnPurpose = phase == Phase.COVER_BUILD
                 || phase == Phase.COVER_HIDE || phase == Phase.COVER_PEEK;
         if (hidingOnPurpose) {

@@ -655,19 +655,28 @@ public final class ObservableWorldQuery {
                 new Vec3(centerX + spanX, topY, centerZ + spanZ));
     }
 
+    /**
+     * Whether the bot SEES {@code entity}: within the observation radius with a clear eye-to-eye line, and the eyes pass through
+     * leaves, fences, glass and water ({@link SightClip#hasLineOfSight}; lava and every other block still hide it). Sight is not
+     * reach: an animal or a villager seen this way is still only touched, fed or struck along a plain vanilla line
+     * ({@code InteractAction.useItemOnEntity}, {@code StrikeLegality}, {@code TradeTask}).
+     */
     public static boolean canObserveEntity(AIPlayerEntity bot, Entity entity) {
         if (canBypassObservationWithRetiredHiddenScan("observable_entity_query")) {
             return true;
         }
         int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
-        return bot.distanceToSqr(entity) <= (double) radius * radius && bot.hasLineOfSight(entity);
+        return bot.distanceToSqr(entity) <= (double) radius * radius && SightClip.hasLineOfSight(bot, entity);
     }
 
     /**
      * Whether the bot has NOTICED a creature (a mob, a player, another bot): the realistic perception shared with the PvP BOT
      * wrapper (see {@code docs/PERCEPTION.md}). Unlike {@link #canObserveEntity} it is not omnidirectional: the creature must be in the
      * view cone of the bot's real look vector with a clear line for the reaction time, or be heard (vanilla vibrations) and in clear
-     * view, or have struck the bot; once noticed it is tracked by plain line of sight. It answers from the state kept by
+     * view, or have struck the bot; once noticed it is tracked by plain line of sight (eyes that see through leaves, fences, glass
+     * and water, see {@link SightClip}). Noticing is not threat: a creature noticed through a leaf can neither strike nor be struck
+     * through it, so the code that engages a hostile, counts it as pressure or as a creeper risk also asks the physical collider
+     * line ({@code CombatCore.hasLineOfSight}). It answers from the state kept by
      * {@link io.github.zoyluo.minecraftai.perception.CreatureSenses} (one lookup, no ray). With
      * {@code behaviour.perception.enabled=false}, for a non-creature, and under the strict capability bypass it is exactly
      * {@link #canObserveEntity}. Objects (items, containers, crops, boats) and deliberate searches for animals and villagers keep
@@ -713,7 +722,7 @@ public final class ObservableWorldQuery {
             return true;
         }
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
-        return bot.distanceToSqr(entity) <= (double) radius * radius && bot.hasLineOfSight(entity);
+        return bot.distanceToSqr(entity) <= (double) radius * radius && SightClip.hasLineOfSight(bot, entity);
     }
 
     /** Which shape a view ray tests against. */

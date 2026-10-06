@@ -28,8 +28,10 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
      `theta <= fullAttentionHalfAngleDeg` (30) is full attention; the field reaches out to `peripheralHalfAngleDeg` (100,
      a 200 degree field); beyond that S is behind, never sighted.
    * *Occlusion.* A ray from O's eye to S's eye; if blocked, a second ray to S's body centre (a head over a wall counts).
-     Vanilla clip rules (collider blocks, fluids ignored: what vanilla mobs cannot see through). The rays run LAST, after
-     the cheap angle filter, and at most once.
+     Vanilla clip rules (collider blocks, fluids ignored: what vanilla mobs cannot see through); a Minecraft-AI companion's
+     eyes also pass through leaves, fences, glass and water, and only its eyes (see "Creatures: noticing is sight, a fight is
+     physical" below). The model takes the answer as an input (`occlusionClear`), so the vectors are the same either way.
+     The rays run LAST, after the cheap angle filter, and at most once.
 2. **Reaction time**, ONE continuous formula in real seconds (doubles, no steps, no rounding):
 
    ```
@@ -60,8 +62,8 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
 5. **Unplaced sound.** A sound with no valid subject in clear view near it is only an INVESTIGATE hint: a place to turn and
    look (idle) or to search (pursuing, searching). Vibrations pass through ordinary walls, so a sound behind a wall is a hint,
    never a notice. NO MAGIC: the hint is the position of the sound only (not who made it).
-6. **Perception off** (`enabled=false`) is exactly vanilla `hasLineOfSight`: a clear line is `SIGHT` at once (required = 0),
-   with no cone, no sneaking, no invisibility and no reaction time.
+6. **Perception off** (`enabled=false`) is exactly vanilla `hasLineOfSight` (for a Minecraft-AI companion with its see-through
+   eyes): a clear line is `SIGHT` at once (required = 0), with no cone, no sneaking, no invisibility and no reaction time.
 7. **Awareness and confirmation.** In the wrapper the hunt keeps a CONFIRMED flag: an engagement is confirmed only after the
    target has been continuously visible for the full reaction time. It ends on the FIRST unseen tick and EVERY re-sighting
    restarts the exposure from zero (no instant resume after a blink behind a tree, corner or pillar). PvP BOT gets the
@@ -99,9 +101,10 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   then the body-centre ray last), counts the continuous exposure per creature (`ExposureTracker`: one missed tick tolerated,
   every re-sighting after a gap starts again from zero) and keeps the set of creatures the bot has NOTICED.
   `ObservableWorldQuery.canNoticeCreature(bot, creature)` is then a lookup.
-* **Awareness.** A creature that has been noticed stays noticed while plain occlusion is clear (no cone, no reaction time: an
-  engaged bot faces what it fights). One tick with no line is tolerated; after that it is forgotten, and the next sighting
-  is a new reaction. A creature that leaves the observation radius, dies or despawns is forgotten at once.
+* **Awareness.** A creature that has been noticed stays noticed while occlusion is clear (no cone, no reaction time: an
+  engaged bot faces what it fights; the eyes see through foliage, fences, glass and water). One tick with no line is tolerated;
+  after that it is forgotten, and the next sighting is a new reaction. A creature that leaves the observation radius, dies or
+  despawns is forgotten at once.
 * **Hearing** is vanilla's vibration system, used per bot (`BotEars`: `VibrationSystem.Data`/`User`/`Listener`, a
   `DynamicGameEventListener`, and a silent parity ticker every tick; radius `behaviour.perception.hearing.listenerRadius`, 16 =
   the configured radius; vanilla decides sneaking, wool and travel time). The parity ticker retains vanilla selection,
@@ -115,9 +118,11 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
    entity or projectile owner. Listeners are removed on despawn, death, level change, when perception is switched off and when the
    server stops (`CreatureSenses.listenerCount()` is the test seam).
 * **Blows.** A melee blow makes its (adjacent) striker known at once (`RecentDamage` attribution). A projectile from an unseen
-  shooter gives only the direction it came from (the reverse of its velocity at impact, traced back to the first block): a
-  hint, never the shooter.
-* **Projectiles.** A projectile in flight is sensed when it is itself in view (inside the view field, clear line). Heard-shot awareness
+  shooter gives only the direction it came from (the reverse of its velocity at impact, traced back to the first block with the
+  plain vanilla ray: a projectile never crossed a leaf or a fence): a hint, never the shooter.
+* **Projectiles.** A projectile in flight is sensed when it is itself in view (inside the view field, clear line; one loosed from
+  behind foliage or glass is in view like any other; the arrow itself cannot cross the leaf, so a shield raised for it is an early,
+  harmless flinch). Heard-shot awareness
   is deliberately narrower: only an exact vanilla arrow, spectral arrow, trident, or llama spit can additionally be matched when its
   observable ballistic motion back-projects to the delivered `PROJECTILE_SHOOT` source block and its age agrees with that vibration's
   original travel time; it must still have a clear line to the projectile. Fireballs, wither skulls, shulker bullets, rockets, wind
@@ -133,6 +138,9 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   neither grants a hidden scan nor turns a heard event into knowledge of a hidden shooter or future trajectory.
 * **The owner's sight** still nominates: `SharedVision.seenByBotOrOwner` is "the bot noticed it, or its owner sees it" (foreign
   bots only), and `HostileBotIntent` only samples the intent of a foreign bot that someone on the protected side has noticed.
+  The owner's eyes see through foliage, fences, glass and water like the bot's (`SharedVision.ownerSees`); the bookkeeping of a
+  fight (`CombatCore.hasLineOfSightOrOwnerSees`: the lost-line timer, whether a threat is worth a task) reads the owner's plain
+  collider line instead (`ownerSeesStrict`), so an owner looking through a window cannot keep the bot in a fight it can never strike in.
 * **Config** `behaviour.perception`: `enabled` (default true; false = today's omnidirectional line of sight exactly, no listener),
   `reactionBaseSeconds`, `reactionAt64Seconds`, `fullAttentionHalfAngleDeg`, `peripheralHalfAngleDeg`, `peripheralMultiplier`,
   `sneakMultiplier` and `hearing.listenerRadius` (see OPERATING_PROFILES.md).
@@ -141,6 +149,8 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision, ShieldGuard,
   HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance), objects and deliberate searches (kept
   omnidirectional: drops, boats, prey, the discovery task's deliberate sheep survey, breeding, milking, trading, the landmark evidence of the mining assist) and physical strike legality (kept).
+  Where a decision needs both ("noticed" and "can be hit"), the pair is written out and pinned by `SightVersusReachSourceContractTest`
+  (see "Creatures: noticing is sight, a fight is physical").
   The `attack_entity` command only considers creatures the bot has noticed (animals and villagers stay omnidirectional) and is refused with `busy` while another task runs (never replaces it, and a refused call does not turn the bot's head: a busy bot
   only strikes what is already under its crosshair).
 * **Cost.** The scan is throttled (`CreatureSenses`): passive creatures (a mob that is neither an `Enemy` nor a `NeutralMob` and
@@ -157,7 +167,9 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   100 ticks with the cost limits off, then 100 ticks with them on; the figure is the sum over the five bots of the mean
   `perception_scan` time per tick. Three runs on the 4-CPU cloud machine shared with another test server (2026-09-30): unthrottled
   0.663 / 1.500 / 1.407 ms/tick, throttled 0.242 / 0.614 / 0.255 ms/tick (median 1.41 -> 0.26 ms/tick); rays cast 234 -> 60 per tick in
-  every run (the deterministic part: wall times vary with the machine's load). A scan that throws never leaves the bot blind: for that tick (and the next) every
+  every run (the deterministic part: wall times vary with the machine's load). With the eyes that see through foliage and glass
+  (`SightClip` rays, 2026-10-06, one run): unthrottled 0.529 ms/tick, throttled 0.205 ms/tick, rays cast 234 -> 60 per tick as before
+  (the scene has nothing see-through in it, which is the point: a ray that crosses nothing costs what a vanilla one does). A scan that throws never leaves the bot blind: for that tick (and the next) every
   creature question is answered by the old omnidirectional test, and the failure is logged once per bot.
 * **Peeking takes the reaction time.** A creature out of sight for more than a tick is forgotten and is noticed again only after the
   reaction time of looking at it, so a bot that peeks (round its cover column, through the observation port of its shelter) must
@@ -227,7 +239,8 @@ stops. A break, an open or a use sends no pick ray of its own, so each of those 
 `MiningController.currentObservedTarget` (the sole break gate; `visiblyAir` only settles a finished break and may use sight),
 `ContainerAction.canSee`, `FarmAction.harvestProof`, `BaritoneGoals.mineAt` (through the miner's admission, below), the break proof of `BaritoneBreakPlacePolicy`, a
 furnace or depot the bot reaches into (`SmeltTask`, `StripMineTask`, `MiningServiceTask`, `WorkshopLocator`) and
-`InteractAction.useItemOnEntity` (the vanilla collider line of `StrikeLegality`). Placement, bucket and strike rays were always plain
+`InteractAction.useItemOnEntity` and `TradeTask` (the vanilla collider line of `StrikeLegality`: opening a trade sends no pick ray either).
+Placement, bucket and strike rays were always plain
 vanilla clips. `SightVersusReachSourceContractTest` pins both lists. A log seen through two leaves is therefore a target (navigation
 admits it and the shared memory knows the leaves and the log), but a break through the leaf is never sent: the leaf is broken first
 (next section).
@@ -270,13 +283,51 @@ ray crosses, and `ObservedNavigationFence.scanRay` stores what the ray passed th
 a ray that crossed water and then met lava remembers both. The linked owner's eyes (`SharedVision.ownerSees`) see through the same
 things as the bot's.
 
+### Creatures: noticing is sight, a fight is physical
+
+A creature behind leaves, a fence, glass or water is noticed like any other: `CreatureSenses` casts `SightClip` rays for the scan
+(the eye ray and the body-centre ray), the sound match, the awareness check, a projectile in flight and the omnidirectional
+fail-safe, and `canObserveEntity` (animals, villagers, boats, drops, prey) is the same eye-to-eye ray as vanilla's
+`hasLineOfSight` with the same 128 block limit. Lava and every opaque block (stone, walls, doors, slabs) still hide it, and so does
+a creature behind lava: vanilla's ray passed lava because it ignores every fluid, a bot's eyes do not. Nothing else about the
+creature changes: a blow, an arrow or a blast cannot cross what the eyes pass, so **seeing is not threatening**.
+
+| Question | Line | Where |
+| --- | --- | --- |
+| Is it noticed? Is it still tracked? What the LLM is told, avoidance routing, a sound matched to a creature, a projectile in view, prey and drops discovered, the owner's nomination | sight (see-through) | `CreatureSenses`, `canNoticeCreature`, `canObserveEntity`, `SharedVision.ownerSees` |
+| Can it be struck or shot? Does it press on the bot? Is it a threat to fight or flee, a target to acquire, a creeper to run from? Is a fight still worth keeping? | physical (the vanilla collider ray) | `CombatCore.hasLineOfSight`, `StrikeLegality`, `DangerWatcher.canReachThreat`, the pressure sets, `nearestTarget`, `nearestHostileAround`, `CreeperDefenseTask`, `EvadeTask`, the lost-line timers of `CombatTask` and `GuardTask`, `SharedVision.ownerSeesStrict` |
+| Where did a projectile that hit the bot come from? | physical | `CreatureSenses.traceBack` |
+| May a hand milk, feed, board or trade? | physical, proved before the click | `InteractAction.useItemOnEntity`, `TradeTask` |
+
+The split exists because a creature noticed through a leaf used to imply a physical line (sight and the line were the same ray),
+and a lot of code leans on that. A bot that fought what it merely sees would walk up to a pane, find no line and give up, then
+engage the same target again for ever (the guard's cooldown cycle); it would stop eating and cleaning up beside a glass-walled mob
+farm; it would flee a creeper whose blast cannot cross the glass, and hold the escape open for as long as the creeper stays in
+view (`docs/FINDINGS_DIAMOND64.md` F10, "visible but unreachable"). So every decision that commits the bot to a creature asks the
+physical line as well as the notice, written out where it is made and pinned by `SightVersusReachSourceContractTest`:
+target acquisition (`CombatCore.nearestTarget` for a hostile, `nearestHostileAround`, which is the guard's), the hostile-pressure
+sets (`DangerWatcher.observableActiveHostilePressure`, `CombatTask.observableActiveHostiles`), the threat itself
+(`canReachThreat`), a creeper as a risk (`CreeperDefenseTask.observableCreeperSnapshots`) and as an unsettled flight
+(`EvadeTask`), and the two lost-line timers (`CombatTask`, `GuardTask`): they end a fight the bot can never strike in, which is
+about what a blow can cross, so they stay physical and a target seen but never reachable is dropped (and the guard leaves it alone
+for a while) exactly as one seen across a gap always was. The owner's nomination in that bookkeeping is the owner's collider line
+too. What the shelter's exit and the shield guard ask of a noticed creature stay sight: they plan for what is out there, and the
+mob's own vanilla AI (opaque) gates what it can do to the bot.
+
+The PvP BOT wrapper is not changed: its inhabitants keep vanilla's opaque ray (`AggroDriver`, `AggroWorld`), as they do for any
+player, and the shared model stays the same (`occlusionClear` is only an input, `perception/vectors.json` is untouched). The
+asymmetry is deliberate: the request was for Minecraft-AI's bots. A bot that sees an inhabitant through a hedge notices it, and
+that is all it gains; to strike it needs the same physical line any player needs, and the inhabitant still notices the bot only
+through a clear line.
+
 ## Scope
 
 * IN: every place a bot NOTICES a creature (threat detection, target acquisition, aggro, aggressor checks,
-  perception summaries given to the LLM, projectile threat awareness).
+  perception summaries given to the LLM, projectile threat awareness), through the see-through eyes of the bot.
 * OUT: object perception (items, containers, crops, blocks, boats), non-hostile task targets a bot deliberately
-  searches for (hunt, breed, milk, trade, villagers), strike legality (a physical ray check), and the owner's own
-  camera cone (`SharedVision.ownerSees`, which uses the same see-through eyes as the bot's).
+  searches for (hunt, breed, milk, trade, villagers), strike legality and every other physical ray check (they keep the
+  vanilla collider line), and the owner's own camera cone (`SharedVision.ownerSees`, which uses the same see-through eyes as
+  the bot's).
 * Light level and darkness are not modelled (vanilla mobs ignore them too); a possible later option.
 
 ## Vectors

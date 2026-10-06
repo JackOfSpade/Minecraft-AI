@@ -58,6 +58,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - Citations: CreeperDefenseTask.java:288-299, 347-352, 868-871, 559-583, 364-378; DangerWatcher.java:247-267; SurvivalGuard.java:31-36; TaskManager.java:435-443.
 - Trigger: a visible but unreachable creeper (behind a gap/fence at 8–15 blocks) underground: not wall-urgent, visibility forbids completion, escape goal stays null → infinite ESCAPE; `scanBot` early-returns so eat/resupply never run; the bot starves with the mining task paused beneath it.
 - Smallest fix: add a "stalemate N ticks at ≥ safe distance" downgrade exit, and permit hold-eat during ESCAPE stalls.
+- Note (see-through sight): the bots' eyes now see through leaves, fences, glass and water, which would make "visible but unreachable" far more common. A creeper is therefore a visible risk only when noticed AND on a physical collider line (`CreeperDefenseTask.observableCreeperSnapshots`), as before; a creeper behind glass or a hedge never holds this escape open. The stalemate for a creeper in a plain gap is still open.
 
 **[Fixed · Stage 6] F11 — `targetCount==0` fast path bypasses hard timeout and face restore → unbounded post-restart freeze** (blocker; OreDigTask; from: oredig B1)
 - Citations: OreDigTask onTick:879-881 (before 883-886 hard timeout and 887-890 restoringFace), 1433-1441, 1442-1445, 366-370 (`isWaiting` suppresses StuckWatcher), onStart:746-755.

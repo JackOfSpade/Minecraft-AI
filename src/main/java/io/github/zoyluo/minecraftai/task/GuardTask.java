@@ -152,8 +152,10 @@ public final class GuardTask extends AbstractTask {
     /**
      * Ends the engagement, returning true, when the target is gone or dead, is no longer a legal
      * melee target (a never-melee threat such as a creeper or an angry enderman, or a mob that is
-     * calm again), or has been out of sight (behind a wall) for longer than a momentary occlusion.
-     * The guard never keeps swinging at, or chasing, something it cannot legally hit.
+     * calm again), or has been off the physical line (behind a wall, a pane or a leaf) for longer than
+     * a momentary occlusion. The guard never keeps swinging at, or chasing, something it cannot legally
+     * hit, and "sight" does not count here: its eyes see through a pane or a hedge, which a blow cannot
+     * cross, so a target seen but never reachable is dropped (and left alone for a while) all the same.
      */
     private boolean disengageIfInvalid(AIPlayerEntity bot, String phaseName) {
         String reason = null;

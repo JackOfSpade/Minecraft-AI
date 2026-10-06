@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.action.HumanAim;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.entity.RecentDamage;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.SightClip;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import io.github.zoyluo.minecraftai.perception.CreaturePerception.Params;
 import io.github.zoyluo.minecraftai.perception.CreaturePerception.Reading;
@@ -46,8 +47,9 @@ import net.minecraft.world.phys.Vec3;
  * <ul>
  *   <li><b>Sight</b> of a creature: same level, within the profile observation radius ({@code perception.radius}), inside the view
  *       cone of the bot's REAL look vector (full attention up to 30
- *       degrees, peripheral to 100, behind never), a clear line (an eye ray, then a body-centre ray, collider shapes) and not fully
- *       invisible. Rays are cast last.</li>
+ *       degrees, peripheral to 100, behind never), a clear line (an eye ray, then a body-centre ray, collider shapes; the eyes see
+ *       through leaves, fences, glass and water, see {@link SightClip}) and not fully invisible. Rays are cast last. Noticing is
+ *       SIGHT only: what a creature can strike or be struck through stays the physical line the combat code asks for itself.</li>
  *   <li><b>Noticing</b> takes the continuous reaction time of {@link CreaturePerception}, counted per (bot, creature) by an
  *       {@link ExposureTracker}: continuous exposure with one missed tick tolerated, so EVERY re-sighting after a gap starts again
  *       from zero.</li>
@@ -271,10 +273,10 @@ public final class CreatureSenses {
         return false;
     }
 
-    /** The old omnidirectional test: within the observation radius and a vanilla line of sight. */
+    /** The old omnidirectional test: within the observation radius and vanilla's line of sight, with eyes that see through foliage and water. */
     private static boolean legacyNoticed(AIPlayerEntity bot, Entity creature) {
         int radius = observationRadius();
-        return bot.distanceToSqr(creature) <= (double) radius * radius && bot.hasLineOfSight(creature);
+        return bot.distanceToSqr(creature) <= (double) radius * radius && SightClip.hasLineOfSight(bot, creature);
     }
 
     /**
@@ -447,7 +449,9 @@ public final class CreatureSenses {
 
     /**
      * A clear view from {@code from}'s eye to {@code to}: a ray to its eye and, when that is blocked, a second to its body centre.
-     * Collider shapes, fluids ignored: the blocks a vanilla mob cannot see through.
+     * Collider shapes, water ignored, and the bot's eyes also pass through leaves, fences, glass and the like ({@link SightClip};
+     * lava and every other block stay opaque). This is SIGHT: noticing a creature says nothing about whether it can be struck
+     * or can strike, which stay the physical collider line ({@code CombatCore.hasLineOfSight}, {@code StrikeLegality}).
      */
     static boolean clearView(Entity from, Entity to) {
         if (to.level() != from.level()) {
@@ -465,8 +469,7 @@ public final class CreatureSenses {
 
     private static boolean clear(Entity from, Vec3 start, Vec3 end) {
         rays++;
-        return from.level().clip(new ClipContext(start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, from))
-                .getType() == HitResult.Type.MISS;
+        return SightClip.clear(from.level(), from, start, end);
     }
 
     // ------------------------------------------------------------------ hits
@@ -526,7 +529,11 @@ public final class CreatureSenses {
         track.lastClear = now;
     }
 
-    /** The last free point on the line from the bot's eye along {@code toward} (a unit vector), up to {@code limit} blocks. */
+    /**
+     * The last free point on the line from the bot's eye along {@code toward} (a unit vector), up to {@code limit} blocks. It
+     * reconstructs where a projectile physically came from, and a projectile never passed a leaf or a fence, so this is the
+     * plain vanilla clip and not an eye ray.
+     */
     static Vec3 traceBack(AIPlayerEntity bot, Vec3 toward, double limit) {
         Vec3 start = bot.getEyePosition();
         Vec3 end = start.add(toward.scale(limit));
@@ -579,7 +586,7 @@ public final class CreatureSenses {
             return false;
         }
         if (scanFailedRecently(bot)) {
-            return bot.hasLineOfSight(projectile); // fail-safe: the legacy answer
+            return SightClip.hasLineOfSight(bot, projectile); // fail-safe: the legacy answer
         }
         Params params = config().params();
         BotState s = bots.get(bot.getUUID());
@@ -744,9 +751,9 @@ public final class CreatureSenses {
                 && estimatedEventPosition.z <= sourceBlock.getZ() + 1.0D + HEARD_PROJECTILE_EVENT_EPSILON;
     }
 
+    /** Seeing a projectile in flight is sight: an arrow loosed from behind foliage or glass is in view like any other. */
     private static boolean clearLine(AIPlayerEntity bot, Entity projectile) {
-        return bot.level().clip(new ClipContext(bot.getEyePosition(), projectile.position(), ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE, bot)).getType() == HitResult.Type.MISS;
+        return SightClip.clear(bot.level(), bot, bot.getEyePosition(), projectile.position());
     }
 
     /** The place {@code bot} should turn to look at or search: a sound with nobody in view, or where a projectile that hit it came from. */

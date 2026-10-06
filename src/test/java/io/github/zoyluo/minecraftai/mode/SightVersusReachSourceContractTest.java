@@ -194,7 +194,7 @@ class SightVersusReachSourceContractTest {
                 }
             }
         }
-        assertEquals(Set.of("mode/ObservableWorldQuery.java",
+        assertEquals(Set.of("mode/ObservableWorldQuery.java", "perception/CreatureSenses.java",
                         "perception/SharedWorldSight.java", "task/BoatSupport.java", "task/FireExtinguishTask.java",
                         "task/NavSafetyNet.java", "task/SharedVision.java", "task/TreeHorizonScan.java",
                         "task/VisibleTargetHorizonScan.java"),
@@ -202,6 +202,76 @@ class SightVersusReachSourceContractTest {
         assertEquals(Set.of("baritone/ObservedNavigationFence.java", "mode/ObservableWorldQuery.java",
                         "task/TreeHorizonScan.java", "task/VisibleTargetHorizonScan.java"),
                 sightRay);
+    }
+
+    /** Noticing a creature is sight; what is struck, shot at or blown up is not. These are the two halves and where they meet. */
+    @Test
+    void creaturesAreNoticedThroughFoliageButFoughtOnlyAlongThePhysicalLine() throws IOException {
+        String senses = read("perception/CreatureSenses.java");
+        assertTrue(body(senses, "private static boolean clear(").contains("SightClip.clear(")
+                        && body(senses, "private static boolean legacyNoticed(").contains("SightClip.hasLineOfSight(bot, creature)")
+                        && body(senses, "private static boolean clearLine(").contains("SightClip.clear("),
+                "the scan, the omnidirectional fail-safe and a projectile in flight are seen with eyes that pass through leaves, fences, glass and water");
+        String traceBack = body(senses, "static Vec3 traceBack(");
+        assertTrue(traceBack.contains("new ClipContext(") && !traceBack.contains("SightClip"),
+                "where a projectile physically came from is a flight path, which no leaf or fence ever let through");
+        String query = read("mode/ObservableWorldQuery.java");
+        for (String entityQuery : new String[] {"public static boolean canObserveEntity(", "public static boolean canObserveEntityWithin("}) {
+            String code = body(query, entityQuery);
+            assertTrue(code.contains("SightClip.hasLineOfSight(bot, entity)") && !code.contains("bot.hasLineOfSight("), entityQuery);
+        }
+
+        String core = read("task/CombatCore.java");
+        assertFalse(core.contains("SightClip"), "CombatCore asks the physical line: it decides what can be hit, shot at or blown up");
+        assertTrue(body(core, "public static boolean hasLineOfSight(").contains("ClipContext.Block.COLLIDER"));
+        assertTrue(body(core, "public static Optional<LivingEntity> nearestTarget(")
+                        .contains("canNoticeCreature(bot, entity) && hasLineOfSight(bot, entity)"),
+                "a hostile is a target when it is noticed AND on a physical line");
+        String acquire = body(core, "java.util.function.Predicate<LivingEntity> allowed)");
+        assertTrue(acquire.indexOf("seenByBotOrOwner(bot, entity)") > 0
+                        && acquire.indexOf("hasLineOfSightOrOwnerSees(bot, entity)") > acquire.indexOf("seenByBotOrOwner(bot, entity)"),
+                "the guard acquires a hostile it sees AND can strike, or it would walk up to a pane and give up in a cycle");
+        assertTrue(body(core, "public static boolean hasLineOfSightOrOwnerSees(").contains("SharedVision.ownerSeesStrict(bot, target)")
+                        && !body(core, "public static boolean hasLineOfSightOrOwnerSees(").contains("ownerSees(bot"),
+                "an owner looking through a window must not hold a fight alive: the owner's nomination is its plain collider line");
+
+        String vision = read("task/SharedVision.java");
+        assertTrue(body(vision, "public static boolean ownerSees(").contains("SightClip.hasLineOfSight(owner, entity)")
+                        && body(vision, "public static boolean ownerSeesStrict(").contains("owner.hasLineOfSight(entity)")
+                        && !body(vision, "public static boolean ownerSeesStrict(").contains("SightClip"),
+                "ownerSees is sight, ownerSeesStrict the vanilla collider ray");
+
+        assertTrue(body(read("task/DangerWatcher.java"), "private static List<LivingEntity> observableActiveHostilePressure(")
+                        .contains("CombatCore.hasLineOfSightOrOwnerSees(bot, entity)"),
+                "a zombie seen through a glass farm or a hedge presses on nobody: it must not stop the bot eating or gate a detour");
+        assertTrue(body(read("task/DangerWatcher.java"), "private static boolean canReachThreat(")
+                        .contains("CombatCore.hasLineOfSightOrOwnerSees(bot, mob)"));
+        String combat = read("task/CombatTask.java");
+        assertTrue(body(combat, "private List<LivingEntity> observableActiveHostiles(")
+                        .contains("CombatCore.hasLineOfSightOrOwnerSees(bot, entity)"));
+        assertTrue(combat.contains("!CombatCore.hasLineOfSightOrOwnerSees(bot, target)"),
+                "the fight's lost-line timer is the physical line: a target seen through a pane must still end it");
+        assertTrue(body(read("task/GuardTask.java"), "private boolean disengageIfInvalid(")
+                        .contains("CombatCore.hasLineOfSight(bot, target)"),
+                "the guard drops a target it sees but can never reach (and leaves it alone for a while)");
+        String creepers = body(read("task/CreeperDefenseTask.java"), "private static List<VisibleCreeper> observableCreeperSnapshots(");
+        assertTrue(creepers.contains("ObservableWorldQuery.canNoticeCreature(bot, entity)")
+                        && creepers.contains("CombatCore.hasLineOfSight(bot, entity)"),
+                "a creeper behind a leaf or a pane is no risk: its blast's exposure rays are collider rays");
+        assertTrue(body(read("task/EvadeTask.java"), "private boolean hasObservedUnsettledPressure(")
+                        .contains("!CombatCore.hasLineOfSight(bot, source)"),
+                "the flight does not stay unsettled for a source seen only through foliage or glass");
+    }
+
+    @Test
+    void aVillagerSeenThroughAPaneIsWalkedToAndNotTradedWith() throws IOException {
+        String trade = read("task/TradeTask.java");
+        assertTrue(body(trade, "private boolean inTradeReach(").contains("StrikeLegality.hasStrikeLineOfSight(bot, villager)"));
+        assertEquals(3, count(trade, "inTradeReach(bot)"), "the two arrival checks and the trade itself");
+        String tradeBody = body(trade, "private void trade(");
+        assertTrue(tradeBody.indexOf("inTradeReach(bot)") >= 0
+                        && tradeBody.indexOf("inTradeReach(bot)") < tradeBody.indexOf("setTradingPlayer(bot)"),
+                "opening a trade has no pick ray: the plain vanilla line is proved first");
     }
 
     private static int count(String source, String needle) {

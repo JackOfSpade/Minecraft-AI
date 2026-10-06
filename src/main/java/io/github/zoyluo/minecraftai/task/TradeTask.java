@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mixin.VillagerInvokerMixin;
@@ -89,7 +90,7 @@ public final class TradeTask extends AbstractTask {
             fail("no_villager_nearby");
             return;
         }
-        if (bot.distanceTo(villager) <= TRADE_RANGE) {
+        if (inTradeReach(bot)) {
             bot.getActionPack().stopAll();
             transition(Phase.TRADE);
             return;
@@ -101,13 +102,22 @@ public final class TradeTask extends AbstractTask {
         transition(Phase.MOVE_TO_VILLAGER);
     }
 
+    /**
+     * Close enough and along a plain vanilla line. Opening a trade sends no pick ray of its own, and the eyes that chose this
+     * villager see through glass, fences and leaves, which a hand cannot reach across: a villager behind a pane is walked to, not
+     * traded with.
+     */
+    private boolean inTradeReach(AIPlayerEntity bot) {
+        return bot.distanceTo(villager) <= TRADE_RANGE && StrikeLegality.hasStrikeLineOfSight(bot, villager);
+    }
+
     private void moveToVillager(AIPlayerEntity bot) {
         if (villager == null || !villager.isAlive()) {
             transition(Phase.FIND_VILLAGER);
             return;
         }
         LookAction.lookAt(bot, villager.position().add(0.0D, villager.getBbHeight() * 0.5D, 0.0D));
-        if (bot.distanceTo(villager) <= TRADE_RANGE) {
+        if (inTradeReach(bot)) {
             bot.getActionPack().stopAll();
             transition(Phase.TRADE);
             return;
@@ -124,6 +134,10 @@ public final class TradeTask extends AbstractTask {
     private void trade(AIPlayerEntity bot) {
         if (villager == null || !villager.isAlive()) {
             fail("villager_lost");
+            return;
+        }
+        if (!inTradeReach(bot)) {
+            transition(Phase.MOVE_TO_VILLAGER); // it walked off, or a pane or a leaf came between: the trade itself has no pick ray
             return;
         }
         // Villager#mobInteract's own gate: a sleeping, baby or busy villager (or one with nothing to sell) does not trade.

@@ -31,6 +31,7 @@
       "io.github.zoyluo.minecraftai.action.ObservationSeeThroughGameTests",
       "io.github.zoyluo.minecraftai.action.MiningObstructionGameTests",
       "io.github.zoyluo.minecraftai.task.HorizonScanSeeThroughGameTests",
+      "io.github.zoyluo.minecraftai.task.CreatureSeeThroughGameTests",
       "io.github.zoyluo.minecraftai.action.OffhandExecutionGameTests",
       "io.github.zoyluo.minecraftai.action.BlockMinerOwnershipGameTests",
       "io.github.zoyluo.minecraftai.action.GearWorstFirstGameTests",
