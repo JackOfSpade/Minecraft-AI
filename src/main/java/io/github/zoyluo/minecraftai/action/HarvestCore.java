@@ -1103,15 +1103,18 @@ public final class HarvestCore {
         }
         BlockPos feet = bot.blockPosition();
         PillarApproach best = null;
+        boolean bestOwnColumn = false;
         int minY = feet.getY() + 1;
-        // The cells directly next to an upper target are often obstructed. Search the
-        // observed one-to-three-block ring, then choose the lowest clear altitude that is still
-        // within ordinary 4.5-block mining reach from the eventual pillar eye position.
+        // The cells directly next to an upper target are often obstructed. Search the target's own
+        // column and the observed one-to-three-block ring around it, then choose the lowest clear
+        // altitude that is still within ordinary 4.5-block mining reach from the eventual pillar eye
+        // position. The own column is the plain answer for a log left hanging above a felled trunk:
+        // it needs the fewest supports and no sideways walk. A goal whose headroom would run into the
+        // target fails the air check, so the target itself can never end up inside the chosen column.
         for (int dx = -PILLAR_MAX_HORIZONTAL_OFFSET; dx <= PILLAR_MAX_HORIZONTAL_OFFSET; dx++) {
             for (int dz = -PILLAR_MAX_HORIZONTAL_OFFSET; dz <= PILLAR_MAX_HORIZONTAL_OFFSET; dz++) {
                 int horizontalSquared = dx * dx + dz * dz;
-                if (horizontalSquared == 0
-                        || horizontalSquared > PILLAR_MAX_HORIZONTAL_OFFSET * PILLAR_MAX_HORIZONTAL_OFFSET) {
+                if (horizontalSquared > PILLAR_MAX_HORIZONTAL_OFFSET * PILLAR_MAX_HORIZONTAL_OFFSET) {
                     continue;
                 }
                 for (int goalY = minY; goalY <= target.getY(); goalY++) {
@@ -1124,11 +1127,17 @@ public final class HarvestCore {
                     }
                     PillarApproach candidate = new PillarApproach(target, goal,
                             Math.max(1, goalY - feet.getY()));
+                    // On equal supports the target's own column wins: the felled log then drops onto
+                    // the bot instead of onto the ground beside the pillar, out of its pickup reach.
+                    boolean ownColumn = horizontalSquared == 0;
                     if (best == null
                             || candidate.supports() < best.supports()
                             || candidate.supports() == best.supports()
-                            && candidate.goal().distSqr(feet) < best.goal().distSqr(feet)) {
+                            && (ownColumn != bestOwnColumn
+                                    ? ownColumn
+                                    : candidate.goal().distSqr(feet) < best.goal().distSqr(feet))) {
                         best = candidate;
+                        bestOwnColumn = ownColumn;
                     }
                     // This is the lowest usable level in this air column; a higher one would
                     // consume more of the user's throwaway material for no benefit.

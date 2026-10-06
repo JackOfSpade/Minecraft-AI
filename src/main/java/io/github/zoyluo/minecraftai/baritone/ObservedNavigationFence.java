@@ -273,7 +273,11 @@ public final class ObservedNavigationFence {
             // ascent movement. The subsequent corridor capture still independently proves every
             // cell the planner may inspect.
             boolean climbableGoal = isObservedClimbable(candidate, route.target());
-            BlockPos stance = climbableGoal ? route.target().immutable() : nearestStandable(candidate, route.target());
+            // An explicit pillar route never snaps either: its goal is the top of a column it has to
+            // build, so any standable cell within one block of it (the bot's own cell for a one-block
+            // pillar, a step of terrain beside the column) would end the route before a block is placed.
+            BlockPos stance = climbableGoal ? route.target().immutable()
+                    : route.requiresPillarPlacementColumn() ? null : nearestStandable(candidate, route.target());
             if (stance == null) {
                 // A vertical build goal begins unsupported. Admit it only when the actual goal is
                 // visible now and a real, dry base plus every cell of the future pillar/body
