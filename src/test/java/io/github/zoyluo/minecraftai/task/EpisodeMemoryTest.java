@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,5 +25,22 @@ class EpisodeMemoryTest {
         memory.reset(bot);
         assertFalse(memory.nearTrail(bot, "gather", new BlockPos(10, 64, 20), 4.0D));
         assertFalse(memory.nearTrail(bot, "hunt", new BlockPos(-8, 70, 3), 4.0D));
+    }
+
+    @Test
+    void anExclusionReportsTheLastTickItHoldsAndRevivesTheNextOne() {
+        UUID bot = UUID.randomUUID();
+        EpisodeMemory memory = EpisodeMemory.INSTANCE;
+        BlockPos log = new BlockPos(3, 70, 9);
+        memory.reset(bot);
+        assertEquals(-1, memory.excludedUntil(bot, log, 50), "nothing is excluded yet");
+
+        memory.exclude(bot, log, 100, EpisodeMemory.TTL_SHORT);
+
+        assertEquals(100 + EpisodeMemory.TTL_SHORT, memory.excludedUntil(bot, log, 400));
+        assertTrue(memory.isExcluded(bot, log, 100 + EpisodeMemory.TTL_SHORT), "excluded through its last tick");
+        assertFalse(memory.isExcluded(bot, log, 101 + EpisodeMemory.TTL_SHORT), "revived on the next one");
+        assertEquals(-1, memory.excludedUntil(bot, log, 101 + EpisodeMemory.TTL_SHORT));
+        memory.reset(bot);
     }
 }

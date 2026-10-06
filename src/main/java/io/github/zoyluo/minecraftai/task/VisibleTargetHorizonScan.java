@@ -45,6 +45,7 @@ final class VisibleTargetHorizonScan {
     }
 
     private final Set<Block> targetBlocks;
+    private final DeclinedSightings declined = new DeclinedSightings();
     /** The physical eye position this raster was sampled from; a moved bot starts a fresh pass. */
     private BlockPos origin;
     private int sampleCursor;
@@ -60,6 +61,15 @@ final class VisibleTargetHorizonScan {
         return complete;
     }
 
+    /**
+     * The caller could do nothing with this sighting from where the bot stands now. It is not
+     * offered again until the bot stands in another cell, so one unusable block (an excluded
+     * target, one straight below in a shaft) cannot answer every ray of every step.
+     */
+    void decline(AIPlayerEntity bot, BlockPos sighting) {
+        declined.decline(bot.blockPosition(), sighting);
+    }
+
     /** True only for the short initial look-around that may defer ordinary exploration. */
     boolean shouldHoldFallback() {
         return !complete && steps < FALLBACK_HOLD_STEPS;
@@ -72,9 +82,13 @@ final class VisibleTargetHorizonScan {
             return null;
         }
         resetIfMoved(bot);
+        BlockPos feet = bot.blockPosition();
         if (steps % SHARED_SIGHT_RECHECK_STEPS == 0) {
-            Sighting remembered = sharedSight(bot);
+            Sighting remembered = sharedSight(bot, feet);
             if (remembered != null) {
+                // Advance the cadence like any other step: a shared lead the caller cannot use
+                // would otherwise be re-checked at step zero forever and starve the raster.
+                steps++;
                 return remembered;
             }
         }
@@ -83,12 +97,12 @@ final class VisibleTargetHorizonScan {
         // Exact vertical targets have no meaningful azimuth. Probe both axes every slice so an
         // overhead/underfoot block is not left between finite angular bands.
         Sighting vertical = targetSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, 1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE));
+                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
         if (vertical != null) {
             return vertical;
         }
         Sighting downward = targetSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, -1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE));
+                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
         if (downward != null) {
             return downward;
         }
@@ -112,7 +126,7 @@ final class VisibleTargetHorizonScan {
                     Math.cos(azimuth) * horizontal, Math.sin(elevation), Math.sin(azimuth) * horizontal,
                     range, ObservableWorldQuery.ViewShape.OUTLINE);
             advance();
-            Sighting sighting = targetSighting(hit);
+            Sighting sighting = targetSighting(hit, feet);
             if (sighting != null) {
                 return sighting;
             }
@@ -120,11 +134,14 @@ final class VisibleTargetHorizonScan {
         return null;
     }
 
-    private Sighting sharedSight(AIPlayerEntity bot) {
+    private Sighting sharedSight(AIPlayerEntity bot, BlockPos feet) {
         List<SharedWorldSight.Observation> observations = SharedWorldSight.knownBlocks(bot,
                 targetBlocks, SHARED_SIGHT_LIMIT);
         for (SharedWorldSight.Observation observation : observations) {
             BlockPos pos = observation.pos();
+            if (declined.isDeclined(feet, pos)) {
+                continue;
+            }
             // Memory can nominate a cell, never authorize a state read or a route by itself.
             if (!ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 continue;
@@ -137,10 +154,11 @@ final class VisibleTargetHorizonScan {
     }
 
     /** Converts one already cast first-hit ray into a target sighting without any extra read. */
-    private Sighting targetSighting(ObservableWorldQuery.ViewHit hit) {
+    private Sighting targetSighting(ObservableWorldQuery.ViewHit hit, BlockPos feet) {
         raysCast++;
         if (hit.hit() && hit.pos() != null && hit.state() != null
-                && targetBlocks.contains(hit.state().getBlock())) {
+                && targetBlocks.contains(hit.state().getBlock())
+                && !declined.isDeclined(feet, hit.pos())) {
             return new Sighting(hit.pos(), raysCast);
         }
         return null;
@@ -168,6 +186,7 @@ final class VisibleTargetHorizonScan {
         raysCast = 0;
         steps = 0;
         complete = false;
+        declined.clear();
     }
 
     private static double elevation(int sample, double subcellOffset) {

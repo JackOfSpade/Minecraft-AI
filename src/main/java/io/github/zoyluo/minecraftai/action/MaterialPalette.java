@@ -215,6 +215,15 @@ public final class MaterialPalette {
         return item != null && PILLAR_SUPPORT_BLOCKS.contains(item);
     }
 
+    /**
+     * True when an ordinary path may spend this item as disposable support. A parent that has to
+     * keep such an item for a later handoff must route without placing; anything else (logs above
+     * all) can never be placed by a route, so keeping it needs no routing restriction.
+     */
+    public static boolean isPathSupportItem(Item item) {
+        return item != null && PATH_SUPPORT_BLOCKS.contains(item);
+    }
+
     /** Counts the broader stable, non-wood, non-ore supports eligible for an ordinary path. */
     public static int countPathSupportBlocks(AIPlayerEntity bot) {
         int total = 0;

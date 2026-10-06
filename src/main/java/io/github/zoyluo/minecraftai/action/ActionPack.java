@@ -62,6 +62,8 @@ public final class ActionPack {
     private long miningGeneration;
     /** One-shot evidence that a specific observed direct break completed. */
     private MiningCompletion completedMining;
+    /** One-shot evidence that a specific direct break ended without breaking its block. */
+    private MiningFailure failedMining;
     /** Vanilla client destroyDelay: ticks a finished multi-tick break makes the next one wait (see {@link #tickMining}). */
     static final int DESTROY_DELAY_TICKS = 5;
     /** Game time before which the running mining controller does nothing (the post-break delay); 0 when none. */
@@ -69,6 +71,12 @@ public final class ActionPack {
 
     private record MiningCompletion(long generation, BlockPos pos) {
         private MiningCompletion {
+            pos = pos.immutable();
+        }
+    }
+
+    private record MiningFailure(long generation, BlockPos pos, String reason) {
+        private MiningFailure {
             pos = pos.immutable();
         }
     }
@@ -1319,6 +1327,7 @@ public final class ActionPack {
         }
         claim("mining");
         completedMining = null;
+        failedMining = null;
         miningGeneration++;
         this.mining = new MiningController(pos, face);
         clearRouteLease();
@@ -1340,6 +1349,23 @@ public final class ActionPack {
         }
         completedMining = null;
         return true;
+    }
+
+    /**
+     * Consumes why the controller of this generation ended without breaking {@code pos}: its
+     * refusal reason (for example {@code target_not_observed} once the block left the bot's line
+     * of sight), or null when it has not failed. Like the success receipt it carries no world
+     * authority, only the outcome of a break this pack already ran.
+     */
+    public String consumeFailedMining(BlockPos pos, long generation) {
+        if (pos == null || failedMining == null
+                || failedMining.generation() != generation
+                || !failedMining.pos().equals(pos)) {
+            return null;
+        }
+        String reason = failedMining.reason();
+        failedMining = null;
+        return reason;
     }
 
     /** Generation of the controller most recently admitted through {@link #startMining}. */
@@ -1778,6 +1804,7 @@ public final class ActionPack {
             }
         } else {
             BotLog.warn(LogCategory.ERROR, player, "mine_failed", "reason", result.reason());
+            failedMining = new MiningFailure(miningGeneration, mining.pos(), result.reason());
         }
         mining = null;
     }

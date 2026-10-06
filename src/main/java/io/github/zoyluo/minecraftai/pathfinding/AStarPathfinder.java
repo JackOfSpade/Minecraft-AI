@@ -186,6 +186,14 @@ public final class AStarPathfinder {
         this.maxMillis = maxMillis * (applyHarnessTimeScale ? harnessTimeScale : 1L);
     }
 
+    /**
+     * Counts the block changes bots made (break, place, use, bucket) and world-boundary resets, so a
+     * caller that cached a finding about the terrain can tell that the terrain may have changed.
+     */
+    public static long cacheVersion() {
+        return cacheVersion;
+    }
+
     public static void invalidateCache(String reason) {
         synchronized (RESULT_CACHE) {
             cacheVersion++;

@@ -63,6 +63,7 @@ final class TreeHorizonScan {
     }
 
     private final Set<Block> targetBlocks;
+    private final DeclinedSightings declined = new DeclinedSightings();
     /** The physical eye position this raster was sampled from; a moved bot starts a fresh pass. */
     private BlockPos origin;
     private int sampleCursor;
@@ -78,6 +79,15 @@ final class TreeHorizonScan {
         return complete;
     }
 
+    /**
+     * The caller could do nothing with this sighting from where the bot stands now. It is not
+     * offered again until the bot stands in another cell, so one unusable block (a leaf straight
+     * overhead, an excluded log) cannot answer every vertical and lattice ray of every step.
+     */
+    void decline(AIPlayerEntity bot, BlockPos sighting) {
+        declined.decline(bot.blockPosition(), sighting);
+    }
+
     /** True only for the initial brief look-around before ordinary safe exploration resumes. */
     boolean shouldHoldFallback() {
         return !complete && steps < FALLBACK_HOLD_STEPS;
@@ -90,14 +100,14 @@ final class TreeHorizonScan {
             return null;
         }
         resetIfMoved(bot);
+        BlockPos feet = bot.blockPosition();
         if (steps % SHARED_SIGHT_RECHECK_STEPS == 0) {
-            Sighting remembered = sharedSight(bot);
+            Sighting remembered = sharedSight(bot, feet);
             if (remembered != null) {
                 // A shared-sight lead is a useful shortcut, not a reason to pin this cursor at
-                // its initial cadence forever.  In particular, a same-column leaf has no
-                // directional heading; without advancing steps here, the next call re-checks
-                // the identical shared observation at step zero and GatherQuotaTask can never
-                // reach its bounded pillar/exploration fallback.
+                // its initial cadence forever.  Without advancing steps here, the next call
+                // re-checks the identical shared observation at step zero and a lead the caller
+                // cannot use would keep the rest of the sweep from ever running.
                 steps++;
                 return remembered;
             }
@@ -107,12 +117,12 @@ final class TreeHorizonScan {
         // A trunk or canopy directly overhead/underfoot has no azimuth; keep those factual
         // vertical rays outside the finite angular lattice.
         Sighting vertical = treeSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, 1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE));
+                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
         if (vertical != null) {
             return vertical;
         }
         Sighting downward = treeSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, -1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE));
+                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
         if (downward != null) {
             return downward;
         }
@@ -136,7 +146,7 @@ final class TreeHorizonScan {
                     Math.cos(azimuth) * horizontal, Math.sin(elevation), Math.sin(azimuth) * horizontal,
                     range, ObservableWorldQuery.ViewShape.OUTLINE);
             advance();
-            Sighting sighting = treeSighting(hit);
+            Sighting sighting = treeSighting(hit, feet);
             if (sighting != null) {
                 return sighting;
             }
@@ -144,11 +154,14 @@ final class TreeHorizonScan {
         return null;
     }
 
-    private Sighting sharedSight(AIPlayerEntity bot) {
+    private Sighting sharedSight(AIPlayerEntity bot, BlockPos feet) {
         List<SharedWorldSight.Observation> observations = SharedWorldSight.knownBlocks(bot,
                 state -> kindOf(state) != null, SHARED_SIGHT_LIMIT);
         for (SharedWorldSight.Observation observation : observations) {
             BlockPos pos = observation.pos();
+            if (declined.isDeclined(feet, pos)) {
+                continue;
+            }
             // Shared memory is only a lead. Re-prove the cell before its live state is read.
             if (!ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 continue;
@@ -163,13 +176,16 @@ final class TreeHorizonScan {
     }
 
     /** Converts one already cast first-hit ray into a tree feature without a second world read. */
-    private Sighting treeSighting(ObservableWorldQuery.ViewHit hit) {
+    private Sighting treeSighting(ObservableWorldQuery.ViewHit hit, BlockPos feet) {
         raysCast++;
         if (!hit.hit() || hit.pos() == null || hit.state() == null) {
             return null;
         }
         Kind kind = kindOf(hit.state());
-        return kind == null ? null : new Sighting(hit.pos(), kind, raysCast);
+        if (kind == null || declined.isDeclined(feet, hit.pos())) {
+            return null;
+        }
+        return new Sighting(hit.pos(), kind, raysCast);
     }
 
     private Kind kindOf(BlockState state) {
@@ -201,6 +217,7 @@ final class TreeHorizonScan {
         raysCast = 0;
         steps = 0;
         complete = false;
+        declined.clear();
     }
 
     private static double elevation(int sample, double subcellOffset) {
