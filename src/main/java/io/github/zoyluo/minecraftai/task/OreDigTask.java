@@ -4277,7 +4277,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * <p>Nothing is opened before it has been seen. A cell and the one above it (which is what
      * floods or falls into an opening) must be free of fluid and falling blocks, the cell must be
      * natural terrain that no player stands on, and no fluid may be seen beside it. The ore is
-     * never one of the cells.</p>
+     * never one of the cells. What an opening itself reveals overhead is seen on the next tick and
+     * stops the stair before any further cell of the step is opened.</p>
+     *
+     * <p>The stair only ever digs, so it needs rock to dig through and to stand on: an ore on an
+     * open cliff face or high in a cave, where a tread has no floor, is still given up as
+     * {@code open_drop} or {@code overhead_drop_catch_unproven}. Reaching it would take building
+     * up with placed blocks, which is a different approach and not part of this one.</p>
      */
     private void climbTowardHighTarget(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
         ActionPack pack = bot.getActionPack();
@@ -4329,6 +4335,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (refusal != null) {
                 return refusal;
             }
+            // The cell above floods or buries this one. Rock hides it, so it only comes into view once
+            // this cell is open: the check has to run for a cell that is already air as well, or what the
+            // opening revealed overhead would never be looked at.
+            if (canObserveWorldState(bot, cell.above())) {
+                refusal = climbHazard(world.getBlockState(cell.above()));
+                if (refusal != null) {
+                    return refusal;
+                }
+            }
             if (state.isAir()) {
                 continue;
             }
@@ -4341,12 +4356,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             if (OreScan.adjacentHazard(bot, cell) == OreScan.Observation.OBSERVED_PRESENT) {
                 return "adjacent_fluid";
-            }
-            if (canObserveWorldState(bot, cell.above())) {
-                refusal = climbHazard(world.getBlockState(cell.above()));
-                if (refusal != null) {
-                    return refusal;
-                }
             }
         }
         BlockPos floor = OreClimb.landing(feet, move).below();

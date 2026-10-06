@@ -5,12 +5,16 @@ import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.BotFixtureMoves;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
@@ -35,24 +39,9 @@ public final class DescendDetourSupportGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:descend_detour_support_game_tests_lean_starts_from_the_near_edge_of_the_cell", maxTicks = 1200)
     public void leanStartsFromTheNearEdgeOfTheCell(GameTestHelper context) {
-        BlockPos start = context.absolutePos(new BlockPos(6, 12, 6));
-        for (int dx = -5; dx <= 5; dx++) {
-            for (int dz = -5; dz <= 5; dz++) {
-                for (int dy = -6; dy <= 3; dy++) {
-                    context.getLevel().setBlock(start.offset(dx, dy, dz),
-                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
-        context.getLevel().setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-
+        BlockPos start = pillar(context);
         String name = "DetourEdgeGT";
-        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getLevel().getServer(), name, context.getLevel(),
-                        Vec3.atBottomCenterOf(start), 0.0F, 0.0F, GameType.SURVIVAL)
-                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        BotFixtureMoves.place(bot, new Vec3(start.getX() + 0.5D, start.getY(), start.getZ() + 0.95D));
-        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 64));
+        AIPlayerEntity bot = spawnOnNearEdge(context, name, start);
 
         DescendToYTask task = DescendToYTask.forMiningExploration(start.getY() - 6);
         task.start(bot);
@@ -98,6 +87,80 @@ public final class DescendDetourSupportGameTests {
                     AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
                     context.succeed();
                 }));
+    }
+
+    /**
+     * The walk to the middle of the cell that comes before the lean was given up for good on its first failure, and the edge
+     * with it. A mob that stands in the middle of the cell for a moment must not cost the detour that edge: once it has moved on,
+     * the same edge is tried again and a support is built.
+     */
+    @GameTest(environment = "minecraftai-gametest:descend_detour_support_game_tests_a_mob_in_the_cell_does_not_retire_the_edge", maxTicks = 1200)
+    public void aMobInTheCellDoesNotRetireTheEdge(GameTestHelper context) {
+        BlockPos start = pillar(context);
+        String name = "DetourEdgeMobGT";
+        AIPlayerEntity bot = spawnOnNearEdge(context, name, start);
+        var stand = EntityType.ARMOR_STAND.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        require(context, stand != null, "could not create the mob");
+        stand.snapTo(start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D, 0.0F, 0.0F);
+        context.getLevel().addFreshEntity(stand);
+
+        DescendToYTask task = DescendToYTask.forMiningExploration(start.getY() - 6);
+        task.start(bot);
+
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 300,
+                        "the mob in the middle of the cell never stopped the bot walking there",
+                        () -> {
+                            WalkedStep.Result last = bot.getActionPack().stepResult();
+                            return last != null && last.failed();
+                        }),
+                DescendTickStages.once(stand::discard),
+                DescendTickStages.tickUntil(context, task, bot, 600,
+                        "no detour support was placed once the mob had moved on",
+                        () -> SIDES.stream().anyMatch(side -> hasSupport(context, start, side))),
+                DescendTickStages.once(() -> {
+                    require(context, failedStepEdges(task).isEmpty(),
+                            "the edge was retired by one refused walk to the middle of the cell: " + failedStepEdges(task));
+                    TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
+                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                    context.succeed();
+                }));
+    }
+
+    /** A one-block stone pillar in the middle of open air, and the cell on top of it. */
+    private static BlockPos pillar(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(6, 12, 6));
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dz = -5; dz <= 5; dz++) {
+                for (int dy = -6; dy <= 3; dy++) {
+                    context.getLevel().setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        context.getLevel().setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        return start;
+    }
+
+    /** A bot on the south edge of {@code start}, as a flat step that has just crossed into the cell leaves it. */
+    private static AIPlayerEntity spawnOnNearEdge(GameTestHelper context, String name, BlockPos start) {
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        context.getLevel().getServer(), name, context.getLevel(),
+                        Vec3.atBottomCenterOf(start), 0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        BotFixtureMoves.place(bot, new Vec3(start.getX() + 0.5D, start.getY(), start.getZ() + 0.95D));
+        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 64));
+        return bot;
+    }
+
+    private static Set<?> failedStepEdges(DescendToYTask task) {
+        try {
+            Field field = DescendToYTask.class.getDeclaredField("failedStepEdges");
+            field.setAccessible(true);
+            return (Set<?>) field.get(task);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("could not inspect the failed detour edges", exception);
+        }
     }
 
     private static boolean hasSupport(GameTestHelper context, BlockPos start, Direction side) {

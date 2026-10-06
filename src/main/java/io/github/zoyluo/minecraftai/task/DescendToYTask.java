@@ -225,6 +225,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private boolean awaitingMiningHandoff;
     // Steps that failed in this task instance: never retried (the flat landing, detour and relocation choosers skip them).
     private final Set<DetourEdge> failedStepEdges = new HashSet<>();
+    // The detour edge whose walk to the middle of its cell has failed once. A first failure can be a mob that stood there for a moment, so
+    // the edge is kept for another try; a second failure on the same edge retires it like any other failed step.
+    private DetourEdge centreFailedEdge;
     // Set when a step was abandoned or failed: the bot may be in the air between two cells, so nothing is decided from its pose
     // until it stands on something again.
     private boolean poseUnsettled;
@@ -2424,15 +2427,20 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 poseUnsettled = true;
                 unsettledTicks = 0;
                 if (result != null && !"not_supported".equals(result.reason())) {
-                    failedStepEdges.add(detour);
-                    BotLog.action(bot, "descend_detour_support_failed",
-                            "origin", current.origin.toShortString(),
-                            "landing", current.landing.toShortString(),
-                            "support", current.support.toShortString(),
-                            "reason", "support_centre_unreachable");
+                    if (detour.equals(centreFailedEdge)) {
+                        failedStepEdges.add(detour);
+                        BotLog.action(bot, "descend_detour_support_failed",
+                                "origin", current.origin.toShortString(),
+                                "landing", current.landing.toShortString(),
+                                "support", current.support.toShortString(),
+                                "reason", "support_centre_unreachable");
+                    } else {
+                        centreFailedEdge = detour;
+                    }
                 }
                 return;
             }
+            centreFailedEdge = null;
             WalkedStep lean = InCellWalk.beginEdgeShift(
                     bot, current.origin, current.direction, "descend_detour_support");
             if (lean == null) {

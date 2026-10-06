@@ -145,6 +145,45 @@ public final class OreDigHighTargetGameTests {
         refusedWithoutDigging(context, fixture, opened, "lava");
     }
 
+    /**
+     * Lava in the rock over the cell above the bot's head, on the stair's second rise. The rock hides it, so nothing forbids opening
+     * that cell; opening it is what shows the lava, and the stair must stop there instead of digging on past it.
+     */
+    @GameTest(environment = "minecraftai-gametest:ore_dig_high_target_game_tests_lava_above_an_opened_cell_stops_the_stair_before_the_next_cell", maxTicks = 1800)
+    public void lavaAboveAnOpenedCellStopsTheStairBeforeTheNextCell(GameTestHelper context) {
+        Fixture fixture = build(context, "HighCoalLavaRoofGT", true);
+        AIPlayerEntity bot = fixture.bot();
+        ServerLevel world = bot.level();
+        BlockPos ore = fixture.ore();
+        // The second rise stands at ore+(1,-6,1) and opens ore+(1,-4,1), then its landing ore+(0,-5,1) and that landing's head cell.
+        BlockPos standing = ore.offset(1, -HEIGHT + 1, 1);
+        BlockPos roof = ore.offset(1, -4, 1);
+        BlockPos landing = ore.offset(0, -5, 1);
+        world.setBlock(roof.above(), Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
+        int deaths = deathCount(bot);
+        float health = bot.getHealth();
+
+        OreDigTask task = new OreDigTask(OreScan.oreFamily(Blocks.COAL_ORE), 1);
+        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_high_coal_lava_roof"));
+
+        context.failIfEver(() -> {
+            require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
+            require(context, bot.getHealth() >= health, "the bot was hurt");
+            require(context, world.getBlockState(ore).is(Blocks.COAL_ORE), "the coal was mined past the lava");
+            if (!EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), ore, world.getServer().getTickCount())) {
+                return;
+            }
+            require(context, world.getBlockState(roof).isAir(),
+                    "the stair gave the coal up before it opened the cell under the lava: the fixture did not play out");
+            require(context, world.getBlockState(landing).is(Blocks.STONE)
+                            && world.getBlockState(landing.above()).is(Blocks.STONE),
+                    "the stair went on digging after it had seen the lava overhead");
+            require(context, bot.blockPosition().equals(standing),
+                    "the bot stepped on toward the lava: " + bot.blockPosition().toShortString());
+            finish(context, fixture);
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:ore_dig_high_target_game_tests_open_cell_under_the_coal_refuses_the_stair_as_drop_catch_unproven", maxTicks = 900)
     public void openCellUnderTheCoalRefusesTheStairAsDropCatchUnproven(GameTestHelper context) {
         Fixture fixture = build(context, "HighCoalOpenGT", true);
