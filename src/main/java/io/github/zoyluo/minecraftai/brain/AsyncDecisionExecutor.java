@@ -4,11 +4,8 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
@@ -44,11 +41,7 @@ public final class AsyncDecisionExecutor {
         this.apiClient = apiClient;
         this.geminiInteractionsClient = geminiInteractionsClient;
         this.leaseInFlight = leaseInFlight;
-        this.retryRunner = new LlmRetryRunner(
-                executor,
-                (delayMillis, task) -> CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS).execute(task),
-                () -> System.nanoTime() / 1_000_000L,
-                new LlmRetryPolicy(() -> ThreadLocalRandom.current().nextDouble()));
+        this.retryRunner = LlmRetryRunner.standard(executor);
     }
 
     public boolean usesGeminiInteractions() {
@@ -78,6 +71,23 @@ public final class AsyncDecisionExecutor {
                        boolean requireToolCall,
                        BiConsumer<DecisionLease, ChatResponse> onResponse,
                        BiConsumer<DecisionLease, Throwable> onError) {
+        submit(bot, lease, historySnapshot, tools, geminiRequest, requireToolCall, onResponse, onError, null);
+    }
+
+    /**
+     * @param onWaiting called on the server thread, at most once per request, when the request has gone
+     *                  unanswered long enough that a waiting player should hear the bot is still trying
+     *                  (see {@link LlmRetryPolicy#NOTICE_AFTER_MS}); null for a request nobody waits on
+     */
+    public void submit(AIPlayerEntity bot,
+                       DecisionLease lease,
+                       List<ChatMessage> historySnapshot,
+                       List<ToolDefinition> tools,
+                       GeminiInteractionRequest geminiRequest,
+                       boolean requireToolCall,
+                       BiConsumer<DecisionLease, ChatResponse> onResponse,
+                       BiConsumer<DecisionLease, Throwable> onError,
+                       BiConsumer<DecisionLease, LlmApiException> onWaiting) {
         var server = bot.level().getServer();
         var botId = bot.getUUID();
         String botName = bot.getGameProfile().name();
@@ -100,6 +110,7 @@ public final class AsyncDecisionExecutor {
                     }
                 },
                 () -> leaseInFlight.test(lease),
+                onWaiting == null ? null : failure -> server.execute(() -> onWaiting.accept(lease, failure)),
                 response -> server.execute(() -> onResponse.accept(lease, response)),
                 failure -> server.execute(() -> onError.accept(lease, failure)));
     }

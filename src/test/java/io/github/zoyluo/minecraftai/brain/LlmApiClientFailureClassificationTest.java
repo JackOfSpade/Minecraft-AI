@@ -98,7 +98,47 @@ final class LlmApiClientFailureClassificationTest {
     }
 
     @Test
+    void geminiRateLimitNamesItsOwnWaitInTheErrorBodyAndThatWaitIsHonoured() {
+        String body = "{\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"details\":["
+                + "{\"@type\":\"type.googleapis.com/google.rpc.RetryInfo\",\"retryDelay\":\"34s\"}]}}";
+        script.add(new Canned(429, null, body));
+        script.add(new Canned(429, "7", body));
+        script.add(new Canned(429, "60", body));
+
+        assertEquals(Duration.ofSeconds(34), assertThrows(LlmApiException.class, () -> gemini().begin("prompt", List.of())).retryAfter());
+        assertEquals(Duration.ofSeconds(34), assertThrows(LlmApiException.class, () -> gemini().begin("prompt", List.of())).retryAfter(),
+                "the longer of header and body is the service's real request");
+        assertEquals(Duration.ofSeconds(60), assertThrows(LlmApiException.class, () -> gemini().begin("prompt", List.of())).retryAfter());
+        requests.set(0);
+        script.clear();
+        script.add(new Canned(429, null, "[" + body + "]"));
+        assertEquals(Duration.ofSeconds(34), assertThrows(LlmApiException.class,
+                () -> OpenAiCompatibleApiClient.singleAttempt(config("http://127.0.0.1:" + server.getAddress().getPort(), 0))
+                        .chat(List.of(ChatMessage.user("hi")), List.of())).retryAfter(),
+                "the OpenAI-compatible endpoint answers in an array");
+    }
+
+    @Test
+    void aWrongApiKeyThatGoogleAnswersWithABadRequestFailsAsAuthOnBothClients() {
+        script.add(new Canned(400, null, "{\"error\":{\"code\":400,\"message\":\"API key not valid. Please pass a valid API key.\","
+                + "\"status\":\"INVALID_ARGUMENT\",\"details\":[{\"reason\":\"API_KEY_INVALID\"}]}}"));
+
+        LlmApiException interactions = assertThrows(LlmApiException.class, () -> gemini().begin("prompt", List.of()));
+        LlmApiException chat = assertThrows(LlmApiException.class,
+                () -> OpenAiCompatibleApiClient.singleAttempt(config("http://127.0.0.1:" + server.getAddress().getPort(), 0))
+                        .chat(List.of(ChatMessage.user("hi")), List.of()));
+
+        for (LlmApiException failure : List.of(interactions, chat)) {
+            assertEquals(LlmApiException.Kind.AUTH, failure.kind());
+            assertEquals(400, failure.httpStatus());
+            assertTrue(failure.getMessage().startsWith("auth_error: status=400"), failure.getMessage());
+        }
+        assertEquals(2, requests.get(), "no retry of either call");
+    }
+
+    @Test
     void geminiConnectionFailureIsTransient() throws IOException {
+
         int closedPort;
         try (ServerSocket socket = new ServerSocket(0, 0, InetAddress.getLoopbackAddress())) {
             closedPort = socket.getLocalPort();

@@ -59,7 +59,9 @@ public final class AmbientConversationCoordinator {
             if (executor != null) {
                 executor.shutdownNow();
             }
-            client = new OpenAiCompatibleApiClient(config.llm());
+            // One attempt, no sleeping retry: a conversation that fails ends, and its cooldown is the wait before
+            // the next try (nobody is blocked on an ambient line, so there is no point holding a worker for it).
+            client = OpenAiCompatibleApiClient.singleAttempt(config.llm());
             executor = Executors.newFixedThreadPool(2);
         }
     }

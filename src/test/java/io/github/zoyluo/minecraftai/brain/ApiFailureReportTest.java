@@ -118,7 +118,60 @@ final class ApiFailureReportTest {
     }
 
     @Test
+    void aRejectedContinuationMeansTheStoredInteractionIsGone() {
+        LlmApiException notFound = new LlmApiException("http_error: status=404", LlmApiException.Kind.PERMANENT, 404, null, null);
+        LlmApiException badRequest = new LlmApiException("http_error: status=400", LlmApiException.Kind.PERMANENT, 400, null, null);
+
+        assertTrue(ApiFailureReport.interactionLost(notFound, true, false, false));
+        assertTrue(ApiFailureReport.interactionLost(badRequest, true, false, false));
+
+        assertFalse(ApiFailureReport.interactionLost(notFound, false, false, false),
+                "a fresh interaction names no earlier one: nothing can be lost, report the failure");
+        assertFalse(ApiFailureReport.interactionLost(notFound, true, true, false),
+                "a failure report has its deterministic fallback line");
+        assertFalse(ApiFailureReport.interactionLost(notFound, true, false, true),
+                "the recovery is one more planner call and the budget is spent");
+        assertFalse(ApiFailureReport.interactionLost(OVERLOADED, true, false, false), "an outage is waited out, not abandoned");
+        assertFalse(ApiFailureReport.interactionLost(new LlmApiException("auth_error: status=400", LlmApiException.Kind.AUTH, 400, null, null),
+                true, false, false), "a rejected key is not a lost interaction");
+        assertFalse(ApiFailureReport.interactionLost(
+                new LlmApiException("http_error: status=422", LlmApiException.Kind.PERMANENT, 422, null, null),
+                true, false, false), "only the statuses a missing or expired interaction answers with");
+    }
+
+    @Test
+    void aWaitingPlayerHearsOnceThatTheBotIsStillTrying() {
+        assertTrue(ApiFailureReport.tellPlayerStillTrying(false, false, false, false));
+
+        assertFalse(ApiFailureReport.tellPlayerStillTrying(true, false, false, false), "once per instruction");
+        assertFalse(ApiFailureReport.tellPlayerStillTrying(false, true, false, false),
+                "a failure report has its own fallback line");
+        assertFalse(ApiFailureReport.tellPlayerStillTrying(false, false, true, false),
+                "a bot that visibly works is not a bot the player waits on");
+        assertFalse(ApiFailureReport.tellPlayerStillTrying(false, false, false, true),
+                "a request that already finished needs no word about its closing call");
+    }
+
+    @Test
+    void theStillTryingNoticeIsOneShortTruthfulSentence() {
+        String message = ApiFailureReport.stillTryingMessage();
+
+        assertTrue(message.length() <= 240);
+        assertTrue(message.contains("still trying"));
+        assertFalse(message.contains("Sorry"), "the bot has not given up");
+    }
+
+    @Test
+    void aPlanThatNamesFurtherStepsIsNotFinishedWhenItsFirstTaskIs() {
+        // "Gather logs, then craft a table": the gather finished and the call that would have started the
+        // craft failed. moreWorkExpected carries the plan's own declaration.
+        assertTrue(ApiFailureReport.requestCompleted(true, false, false, false, TaskState.COMPLETED, null));
+        assertFalse(ApiFailureReport.requestCompleted(true, false, false, true, TaskState.COMPLETED, null));
+    }
+
+    @Test
     void aGoalWakeWaitsOneRetryPatienceAfterAFinalFailure() {
+
         // 5 minutes at 50 ms per tick.
         assertEquals(6_000, ApiFailureReport.GOAL_WAKE_COOLDOWN_TICKS);
         assertEquals(LlmRetryPolicy.TOTAL_PATIENCE_MS, ApiFailureReport.GOAL_WAKE_COOLDOWN_TICKS * 50L);

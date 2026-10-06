@@ -159,7 +159,8 @@ public final class GeminiInteractionsApiClient {
         }
         int status = response.statusCode();
         throw new GeminiInteractionsApiException(classifyStatus(status, response.body()),
-                LlmHttpStatus.kind(status), status, LlmHttpStatus.retryAfter(response), null);
+                LlmHttpStatus.kind(status, response.body()), status,
+                LlmHttpStatus.retryAfter(response, response.body()), null);
     }
 
     private JsonObject baseBody() {

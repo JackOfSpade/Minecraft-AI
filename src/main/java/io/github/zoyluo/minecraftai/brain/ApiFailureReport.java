@@ -56,23 +56,65 @@ final class ApiFailureReport {
     }
 
     /**
+     * Whether a call that failed on a Gemini continuation failed because the service no longer has the
+     * stored interaction it names: it rejected the request itself (HTTP 400/404, not a credentials
+     * problem and not an outage) while the call pointed at an earlier interaction. Interactions are
+     * kept only for a limited time (a day on the free tier), and such a request can never succeed, so
+     * the conversation carries on in a fresh interaction rebuilt from the brain's own history. That is
+     * another planner call, metered by the call budget; and since a fresh interaction names no earlier
+     * one, a second rejection is no longer a lost interaction and is reported like any other failure.
+     *
+     * @param continuationCall the failed request named a previous interaction id
+     */
+    static boolean interactionLost(LlmApiException failure,
+                                   boolean continuationCall,
+                                   boolean failureReportCall,
+                                   boolean budgetExhausted) {
+        return continuationCall && !failureReportCall && !budgetExhausted
+                && failure.kind() == LlmApiException.Kind.PERMANENT
+                && (failure.httpStatus() == 400 || failure.httpStatus() == 404);
+    }
+
+    /**
+     * Whether the player who waits on a request the service keeps failing is told, once, that the bot
+     * is still trying. Only a player who is actually waiting hears it: nothing of the request runs yet
+     * (a running task is a bot that visibly works, whatever its next planner call does), the request
+     * did not already finish, and the same instruction did not already say so.
+     *
+     * @param failureReportCall the waiting call only words a task failure, which has its own fallback line
+     */
+    static boolean tellPlayerStillTrying(boolean alreadyTold,
+                                         boolean failureReportCall,
+                                         boolean workActive,
+                                         boolean requestCompleted) {
+        return !alreadyTold && !failureReportCall && !workActive && !requestCompleted;
+    }
+
+    /** What the player hears while the service keeps failing: the bot is not stuck, it is waiting. */
+    static String stillTryingMessage() {
+        return "Hold on, my thinking service is slow to answer right now. I'm still trying.";
+    }
+
+    /**
      * Whether the work this instruction started has demonstrably finished successfully: the request
      * began, nothing is running or paused any more, no task failure is waiting to be reported, no
-     * long-term goal is still unfinished, and the last task (and last goal, if any) ended COMPLETED.
+     * further work is expected, and the last task (and last goal, if any) ended COMPLETED.
      * Anything less is unknown, and an unknown outcome is never worth silence.
      *
+     * @param moreWorkExpected a long-term goal is still unfinished, or the plan the model announced for
+     *                         this instruction names further steps after the task that just finished
      * @param lastGoalStatus the status of the bot's latest goal result, or null when it has none
      */
     static boolean requestCompleted(boolean requestStarted,
                                     boolean workActive,
                                     boolean failurePending,
-                                    boolean longTermGoalActive,
+                                    boolean moreWorkExpected,
                                     TaskState lastTaskState,
                                     GoalResult.Status lastGoalStatus) {
         return requestStarted
                 && !workActive
                 && !failurePending
-                && !longTermGoalActive
+                && !moreWorkExpected
                 && lastTaskState == TaskState.COMPLETED
                 && (lastGoalStatus == null || lastGoalStatus == GoalResult.Status.COMPLETED);
     }

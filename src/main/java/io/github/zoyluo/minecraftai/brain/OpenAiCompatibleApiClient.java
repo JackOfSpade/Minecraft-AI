@@ -80,8 +80,8 @@ public final class OpenAiCompatibleApiClient {
             }
 
             String reason = classifyStatus(response.statusCode(), response.body());
-            lastFailure = new LlmApiException(reason, LlmHttpStatus.kind(response.statusCode()),
-                    response.statusCode(), LlmHttpStatus.retryAfter(response), null);
+            lastFailure = new LlmApiException(reason, LlmHttpStatus.kind(response.statusCode(), response.body()),
+                    response.statusCode(), LlmHttpStatus.retryAfter(response, response.body()), null);
             if (!shouldTryNextModel(response.statusCode(), models, index)) {
                 throw lastFailure;
             }

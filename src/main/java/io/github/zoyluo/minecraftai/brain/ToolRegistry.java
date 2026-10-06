@@ -136,6 +136,7 @@ public final class ToolRegistry {
         register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the MinecraftAi panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must precede an applicable action or goal tool, in the same response when the provider supports multiple calls or in the runtime-forced next call when it does not; purpose=status is for progress or completion after work has started. For a requested specialized mechanic that has no supplied tool, use report_unsupported instead of promising it in say.", objectSchema()
                 .property("message", stringSchema("the text to say"))
                 .property("purpose", enumStringSchema("answer for a pure question, plan before starting work, or status after work", "answer", "plan", "status"))
+                .property("more_steps", booleanSchema("only for purpose=plan: true when the plan has further steps to run one after another after the first task (for example gather, then craft, then hand over); leave it out when the work you start now finishes the whole request"))
                 .required("message")
                 .required("purpose")
                 .build(), (bot, args) -> {

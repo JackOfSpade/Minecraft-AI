@@ -145,7 +145,8 @@ public final class DecisionSession {
         return true;
     }
 
-    private DecisionLease currentLease() {
+    /** The lease of the request this session is on now; a test drives a callback of it directly. */
+    synchronized DecisionLease currentLease() {
         return new DecisionLease(botId, sessionId, epoch, requestSequence);
     }
 

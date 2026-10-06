@@ -18,6 +18,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -34,6 +35,7 @@ public final class ChatRecipientRouter {
     private static final Gson GSON = new Gson();
     private final Object lifecycleLock = new Object();
     private OpenAiCompatibleApiClient apiClient;
+    private LlmRetryRunner retry;
     private ExecutorService executor;
     private long generation;
 
@@ -47,8 +49,11 @@ public final class ChatRecipientRouter {
             if (executor != null) {
                 executor.shutdownNow();
             }
-            apiClient = new OpenAiCompatibleApiClient(config.llm());
+            // One request is one HTTP exchange: a failed one is retried by the runner, which waits without
+            // holding one of the two worker threads and drops a line the player has since replaced.
+            apiClient = OpenAiCompatibleApiClient.singleAttempt(config.llm());
             executor = Executors.newFixedThreadPool(2);
+            retry = LlmRetryRunner.standard(executor);
         }
     }
 
@@ -60,6 +65,7 @@ public final class ChatRecipientRouter {
                 executor = null;
             }
             apiClient = null;
+            retry = null;
         }
     }
 
@@ -70,6 +76,24 @@ public final class ChatRecipientRouter {
     public void select(ServerPlayer sender,
                        String message,
                        List<Candidate> candidates,
+                       Consumer<Decision> onDecision,
+                       Consumer<Throwable> onFailure) {
+        select(sender, message, candidates, () -> true, null, onDecision, onFailure);
+    }
+
+    /**
+     * As above, for a caller that retires a line once a newer one replaced it. A model service that fails
+     * transiently is retried with backoff, never blocking a thread, for as long as {@code stillWanted}.
+     *
+     * @param stillWanted false once this line was replaced; a retry that waits is then dropped, unsent
+     * @param onWaiting run on the server thread, at most once, when the line has waited long enough on a
+     *                  failing service that the player should hear the bot is still trying; may be null
+     */
+    public void select(ServerPlayer sender,
+                       String message,
+                       List<Candidate> candidates,
+                       BooleanSupplier stillWanted,
+                       Runnable onWaiting,
                        Consumer<Decision> onDecision,
                        Consumer<Throwable> onFailure) {
         if (sender == null || message == null || message.isBlank() || candidates == null || candidates.isEmpty()) {
@@ -94,14 +118,16 @@ public final class ChatRecipientRouter {
         }
 
         OpenAiCompatibleApiClient client;
+        LlmRetryRunner runner;
         ExecutorService worker;
         long requestGeneration;
         synchronized (lifecycleLock) {
             client = apiClient;
+            runner = retry;
             worker = executor;
             requestGeneration = generation;
         }
-        if (client == null || worker == null || worker.isShutdown()) {
+        if (client == null || runner == null || worker == null || worker.isShutdown()) {
             onFailure.accept(new IllegalStateException("chat_router_unavailable"));
             return;
         }
@@ -112,23 +138,36 @@ public final class ChatRecipientRouter {
         ToolDefinition routingTool = routingTool(snapshot);
         MinecraftServer server = sender.level().getServer();
         try {
-            worker.submit(() -> {
-                try {
-                    ChatResponse response = client.chatRequiringToolCall(history, List.of(routingTool));
-                    Optional<Decision> decision = parseDecision(response, snapshot);
-                    invokeOnServer(server, requestGeneration, worker, () -> {
-                        if (decision.isPresent()) {
-                            onDecision.accept(decision.get());
-                        } else {
-                            onFailure.accept(new IllegalStateException("invalid_chat_recipient_response"));
+            runner.run(
+                    sender.getGameProfile().name(),
+                    () -> client.chatRequiringToolCall(history, List.of(routingTool)),
+                    () -> isCurrent(requestGeneration, worker) && stillWanted.getAsBoolean(),
+                    onWaiting == null ? null : failure -> invokeOnServer(server, requestGeneration, worker, onWaiting),
+                    response -> {
+                        Optional<Decision> decision;
+                        try {
+                            decision = parseDecision(response, snapshot);
+                        } catch (RuntimeException exception) {
+                            invokeOnServer(server, requestGeneration, worker, () -> onFailure.accept(exception));
+                            return;
                         }
-                    });
-                } catch (Exception exception) {
-                    invokeOnServer(server, requestGeneration, worker, () -> onFailure.accept(exception));
-                }
-            });
+                        invokeOnServer(server, requestGeneration, worker, () -> {
+                            if (decision.isPresent()) {
+                                onDecision.accept(decision.get());
+                            } else {
+                                onFailure.accept(new IllegalStateException("invalid_chat_recipient_response"));
+                            }
+                        });
+                    },
+                    failure -> invokeOnServer(server, requestGeneration, worker, () -> onFailure.accept(failure)));
         } catch (RuntimeException exception) {
             onFailure.accept(exception);
+        }
+    }
+
+    private boolean isCurrent(long requestGeneration, ExecutorService requestExecutor) {
+        synchronized (lifecycleLock) {
+            return generation == requestGeneration && executor == requestExecutor;
         }
     }
 
