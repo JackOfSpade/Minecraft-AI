@@ -18,10 +18,11 @@ import java.util.SplittableRandom;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Predicate;
 
 /**
  * Occasional, unprompted bot-to-bot chat: at most once per {@code conversation.cooldownTicks},
- * 1+ currently-eligible companions have a short in-character exchange, each line its own
+ * 2+ currently-eligible companions have a short in-character exchange, each line its own
  * independent LLM call. Modeled on {@link ChatRecipientRouter}: its own client, its own thread
  * pool and lifecycle, entirely outside {@link BrainCoordinator}'s per-bot planner/tool-loop, so it
  * never disrupts, consumes the call budget of, or is throttled by whatever a bot is actually doing.
@@ -101,10 +102,10 @@ public final class AmbientConversationCoordinator {
         }
 
         List<AIPlayerEntity> eligible = eligibleBots();
-        if (eligible.size() < cfg.minParticipants()) {
+        if (!hasEnoughParticipants(eligible.size(), cfg)) {
             return;
         }
-        int count = pickParticipantCount(eligible.size(), cfg.minParticipants(), cfg.maxParticipants(), random);
+        int count = pickParticipantCount(eligible.size(), requiredParticipants(cfg), cfg.maxParticipants(), random);
         List<AIPlayerEntity> chosen = shuffleAndTake(eligible, count, random);
 
         ActiveConversation conversation = new ActiveConversation(chosen.stream().map(AIPlayerEntity::getUUID).toList());
@@ -127,6 +128,10 @@ public final class AmbientConversationCoordinator {
         return eligible;
     }
 
+    private static boolean addresseePresent(ActiveConversation conversation, UUID speakerId) {
+        return hasAddressee(conversation.order, speakerId, id -> AIPlayerManager.INSTANCE.getByUuid(id).isPresent());
+    }
+
     private void driveActive(MinecraftServer server) {
         ActiveConversation conversation = active;
         if (conversation == null) {
@@ -143,6 +148,10 @@ public final class AmbientConversationCoordinator {
         AIPlayerEntity speaker = AIPlayerManager.INSTANCE.getByUuid(speakerId).orElse(null);
         if (speaker == null) {
             endConversation(server, "speaker_gone");
+            return;
+        }
+        if (!addresseePresent(conversation, speakerId)) {
+            endConversation(server, "no_addressee");
             return;
         }
         String line = conversation.pendingLine;
@@ -177,6 +186,11 @@ public final class AmbientConversationCoordinator {
         AIPlayerEntity speaker = AIPlayerManager.INSTANCE.getByUuid(speakerId).orElse(null);
         if (speaker == null) {
             endConversation(server, "speaker_gone");
+            return;
+        }
+        // Every line, canned or model-written, is spoken to the other participants: with none of them left there is nobody to hear it.
+        if (!addresseePresent(conversation, speakerId)) {
+            endConversation(server, "no_addressee");
             return;
         }
         MinecraftAiConfig.Conversation cfg = MinecraftAiConfig.get().conversation();
@@ -436,6 +450,27 @@ public final class AmbientConversationCoordinator {
 
     static boolean isEligible(boolean inSafetyTask, boolean brainBusy) {
         return !inSafetyTask && !brainBusy;
+    }
+
+    /** A conversation is an exchange between companions: a lone bot has nobody to address, whatever the configured minimum. */
+    static final int MIN_CONVERSATION_PARTICIPANTS = 2;
+
+    static int requiredParticipants(MinecraftAiConfig.Conversation cfg) {
+        return Math.max(MIN_CONVERSATION_PARTICIPANTS, cfg.minParticipants());
+    }
+
+    static boolean hasEnoughParticipants(int eligibleCount, MinecraftAiConfig.Conversation cfg) {
+        return eligibleCount >= requiredParticipants(cfg);
+    }
+
+    /** Whether a participant other than the speaker is still around to hear the line. */
+    static boolean hasAddressee(List<UUID> order, UUID speakerId, Predicate<UUID> present) {
+        for (UUID id : order) {
+            if (!id.equals(speakerId) && present.test(id)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static int pickParticipantCount(int eligibleCount, int minParticipants, int maxParticipants, SplittableRandom random) {

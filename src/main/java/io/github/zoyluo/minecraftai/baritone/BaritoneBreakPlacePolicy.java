@@ -7,7 +7,6 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mining.BreakRule;
 import io.github.zoyluo.minecraftai.mining.BreakVerdictCache;
 import io.github.zoyluo.minecraftai.mixin.TrapDoorBlockTypeInvokerMixin;
-import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
@@ -305,14 +304,13 @@ public final class BaritoneBreakPlacePolicy {
     }
 
     /**
-     * Whether a process that finds its targets by scanning the loaded world may start for the bot: only with the hidden-scan
-     * privilege (a strict-survival bot never has it). Logged and recorded when refused.
+     * Whether a process that finds its targets by scanning the loaded world may start for the bot. It never may: that needs the
+     * hidden-scan privilege, {@link PrivilegedCapability#HIDDEN_BLOCK_SCAN}, which is retired in every profile (see
+     * {@code CapabilityPolicy}). The answer is fixed, so the capability is not asked for (each ask was one more logged decision
+     * for the same refusal); the refusal is logged and recorded.
      */
     public static boolean allowScanningProcess(AIPlayerEntity bot, String process) {
         if (!SCANNING_PROCESSES.contains(process)) {
-            return true;
-        }
-        if (CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "baritone_scan_process:" + process).allowed()) {
             return true;
         }
         refuse(bot, BaritoneRefusals.Op.SCAN_PROCESS, null, "scan_process_refused", process);

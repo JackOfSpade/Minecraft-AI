@@ -282,7 +282,7 @@ public record MinecraftAiConfig(
                 new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.BARITONE.configValue(), BaritoneCaps.defaults()),
                 new Pickup(8.0D),
-                new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100),
+                new Conversation(true, 12000, 200, 0.03D, 2, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100),
                 new Storage(64, 16, 3, 24, true),
                 Behaviour.defaults());
     }
@@ -1081,7 +1081,7 @@ public record MinecraftAiConfig(
     }
 
     /**
-     * Ambient bot-to-bot conversations: occasionally, when nobody is instructing them, 1+ eligible
+     * Ambient bot-to-bot conversations: occasionally, when nobody is instructing them, 2+ eligible
      * companions have a short in-character back-and-forth, each line an independent LLM call (see
      * {@link io.github.zoyluo.minecraftai.brain.AmbientConversationCoordinator}). Never routes through the
      * per-bot planner/tool-loop, so it never disrupts whatever a bot is doing.

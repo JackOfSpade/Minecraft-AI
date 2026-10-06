@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Set;
 import java.util.SplittableRandom;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -107,5 +108,60 @@ class AmbientConversationCoordinatorTest {
         String longMessage = "word ".repeat(200);
         int delay = AmbientConversationCoordinator.computeDelayTicks(longMessage, cfg);
         assertEquals((int) Math.round(cfg.maxReplyDelaySeconds() * 20), delay);
+    }
+
+    @Test
+    void aLoneEligibleBotNeverStartsAConversationWhateverTheConfiguredMinimum() {
+        // The shipped config of an older install still says minParticipants=1: a single bot has nobody to talk to.
+        MinecraftAiConfig.Conversation cfg = conversation(200, 0.15, 2, 25);
+        assertEquals(1, cfg.minParticipants());
+        assertEquals(2, AmbientConversationCoordinator.requiredParticipants(cfg));
+        assertFalse(AmbientConversationCoordinator.hasEnoughParticipants(0, cfg));
+        assertFalse(AmbientConversationCoordinator.hasEnoughParticipants(1, cfg));
+        assertTrue(AmbientConversationCoordinator.hasEnoughParticipants(2, cfg));
+    }
+
+    @Test
+    void aHigherConfiguredMinimumStillApplies() {
+        MinecraftAiConfig.Conversation cfg = new MinecraftAiConfig.Conversation(
+                true, 12000, 200, 0.03D, 3, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100);
+        assertEquals(3, AmbientConversationCoordinator.requiredParticipants(cfg));
+        assertFalse(AmbientConversationCoordinator.hasEnoughParticipants(2, cfg));
+        assertTrue(AmbientConversationCoordinator.hasEnoughParticipants(3, cfg));
+    }
+
+    @Test
+    void theDefaultConfigAsksForTwoParticipants() {
+        assertEquals(2, MinecraftAiConfig.defaults().conversation().minParticipants());
+    }
+
+    @Test
+    void everyStartableConversationHasAtLeastTwoParticipants() {
+        MinecraftAiConfig.Conversation cfg = conversation(200, 0.15, 2, 25);
+        SplittableRandom random = new SplittableRandom(5);
+        for (int eligible = 2; eligible <= 6; eligible++) {
+            for (int trial = 0; trial < 50; trial++) {
+                int count = AmbientConversationCoordinator.pickParticipantCount(
+                        eligible, AmbientConversationCoordinator.requiredParticipants(cfg), cfg.maxParticipants(), random);
+                assertTrue(count >= 2 && count <= eligible, "picked " + count + " of " + eligible);
+            }
+        }
+        // A configured maximum of one cannot shrink the conversation below two either.
+        assertEquals(2, AmbientConversationCoordinator.pickParticipantCount(5, 2, 1, random));
+    }
+
+    @Test
+    void aLineNeedsAnotherParticipantStillPresentToHearIt() {
+        UUID moss = UUID.randomUUID();
+        UUID iron = UUID.randomUUID();
+        List<UUID> order = List.of(moss, iron);
+
+        assertTrue(AmbientConversationCoordinator.hasAddressee(order, moss, id -> true));
+        assertFalse(AmbientConversationCoordinator.hasAddressee(order, moss, id -> id.equals(moss)),
+                "the speaker alone is not an addressee");
+        assertFalse(AmbientConversationCoordinator.hasAddressee(List.of(moss), moss, id -> true),
+                "a one-bot conversation has no addressee");
+        assertFalse(AmbientConversationCoordinator.hasAddressee(order, iron, id -> false),
+                "every other participant is gone");
     }
 }

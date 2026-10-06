@@ -1,4 +1,4 @@
-IPlayerContext.allowScanningProcess(name): the processes that choose their targets by scanning every loaded chunk (mine, get-to-block, farm, explore, build) ask the player context before they start and do nothing when refused. A host whose players may only act on what they can observe refuses them; the default allows all, as upstream does.
+IPlayerContext.allowScanningProcess(name): the processes that choose their targets by scanning every loaded chunk (mine, get-to-block, farm, explore, build) ask the player context before they start and do nothing when refused. A host whose players may only act on what they can observe refuses them; the default allows all, as upstream does. mine(quantity, null) is Baritone's own reset on every lost control, not a start, so it asks nothing.
 
 diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
 index b39c7a1..b537b07 100644
@@ -86,7 +86,7 @@ index dad6cc7..69d9d17 100644
  
      @Override
      public void mine(int quantity, BlockOptionalMetaLookup filter) {
-+        if (!ctx.allowScanningProcess("mine")) {
++        if (filter != null && !ctx.allowScanningProcess("mine")) {
 +            return;
 +        }
          this.filter = filter;

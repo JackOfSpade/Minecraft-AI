@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.brain.ChatTranscript;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -137,6 +138,46 @@ public final class ShowTargetTaskGameTests {
             }
             fixture.require(context.getTick() < 500,
                     "show target did not reach the water surface: " + task.describe());
+        });
+    }
+
+    /**
+     * A bonus chest is an ordinary chest that nothing the bot can observe sets apart, so finding "the bonus chest" reports a chest and says
+     * it cannot tell which one it is; the label a later show-location uses stays the observed one.
+     */
+    @GameTest(maxTicks = 140)
+    public void findBonusChestReportsAChestAndAdmitsItCannotTellWhichOne(GameTestHelper context) {
+        findVisibleChest(context, "FindBonusGT", "bonus_chest", true);
+    }
+
+    @GameTest(maxTicks = 140)
+    public void findContainerReportsAChestWithoutTheBonusChestCaveat(GameTestHelper context) {
+        findVisibleChest(context, "FindChestGT", "container", false);
+    }
+
+    private static void findVisibleChest(GameTestHelper context, String botName, String requested, boolean bonusCaveat) {
+        FollowFieldFixture fixture = new FollowFieldFixture(context, 8, 8);
+        AIPlayerEntity bot = fixture.bot(botName, 0, 0, true);
+        fixture.level.setBlock(fixture.cell(0, 4), Blocks.CHEST.defaultBlockState(), Block.UPDATE_ALL);
+        DiscoveryTask task = DiscoveryTask.find(requested, 24);
+        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_find_chest"));
+
+        context.failIfEver(() -> {
+            fixture.require(task.state() != TaskState.FAILED, "find failed: " + task.failureReason());
+            if (task.state() == TaskState.COMPLETED) {
+                String chat = ChatTranscript.renderRecentChat(bot.getUUID());
+                fixture.require(chat.contains("I found a chest or other storage container at"),
+                        "the report did not name what was seen: " + chat);
+                fixture.require(chat.contains("I can't tell whether it is the bonus chest.") == bonusCaveat,
+                        "the bonus-chest caveat was " + (bonusCaveat ? "missing" : "present") + ": " + chat);
+                DiscoveryTask.FoundTarget found = DiscoveryTask.latestFound(bot).orElse(null);
+                fixture.require(found != null && found.pos().equals(fixture.cell(0, 4))
+                                && "a chest or other storage container".equals(found.label()),
+                        "the remembered find is not the observed chest: " + found);
+                fixture.finish();
+                return;
+            }
+            fixture.require(context.getTick() < 120, "find did not complete: " + task.describe());
         });
     }
 }

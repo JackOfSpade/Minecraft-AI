@@ -95,7 +95,7 @@ final class ShowTargetTaskSourceContractTest {
         assertTrue(tools.contains("register(\"show_location\"")
                         && tools.contains("showLocationTask(bot, args)")
                         && tools.contains("if (explicit != null)")
-                        && tools.contains("return new ShowTargetTask(explicit, label)")
+                        && tools.contains("return new ShowTargetTask(explicit, DiscoveryTask.FoundTarget.labelFor(")
                         && tools.contains("DiscoveryTask.latestFound(bot)")
                         && tools.contains("case \"show_location\" -> showLocationTask(bot, params)"),
                 "the LLM needs a first-class show-location tool plus the high-level task alias");

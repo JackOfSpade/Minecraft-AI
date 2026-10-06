@@ -21,16 +21,16 @@ exact vanilla behaviour and no statistic is edited. Phantoms that already exist 
 
 ## Automatic lighting never happens on the surface
 
-Two reflexes in `DangerWatcher` light an idle bot's surroundings on their own when it carries torches:
+Two reflexes in `DangerWatcher` light an idle bot's surroundings on their own when it carries torches (a third, for a bot stuck in the dark, is below):
 
 * the night top-up: at night, idle, with torches, start `light_area` (radius 8, up to 8 torches);
 * the dark-spot reflex: the spot is below the torch threshold in both block light and combined light.
 
-Both are gated by `night.autoLight` in `minecraftai.json` (default `true`). The pre-rename key
+They are gated by `night.autoLight` in `minecraftai.json` (default `true`), as is the stuck-in-the-dark answer. The pre-rename key
 `night.autoSleep` is still read (it never controlled sleeping); when both are present `autoLight` wins.
 `night.torchLightThreshold` (default 8) is the light level below which a cell counts as dark.
 
-Neither reflex spends torches on the surface. `SurfaceCheck.isOnSurface` looks straight up from the bot: air
+None of them spends torches on the surface. `SurfaceCheck.isOnSurface` looks straight up from the bot: air
 and fluids do not block, natural tree and mushroom growth does not block (logs, leaves, vines, cocoa, bee
 nests, mangrove roots and propagules, moss carpets, snow layers, big and small mushrooms, fungi, wart blocks,
 shroomlight, plus tall grass and other plants a bot walks through), and any other block is a roof. Reaching
@@ -43,3 +43,21 @@ drops every candidate cell that is itself on the surface, so torches only go und
 
 Explicit requests (the `light_area` tool, `assign_task light_area`, `/minecraftai task assign <bot> light_area`
 and task-board jobs) light wherever they are asked to, surface included.
+
+## Stuck in the dark
+
+A bot that stands for eight seconds in one dark cell under a roof (`DangerWatcher.isDarkTrapCell`: below the torch
+threshold in block and combined light, and not on the surface) while idle or running a stuck `move` is judged
+trapped (`dark_trap_detected`). An operator profile that allows `emergencyTeleport` surfaces it. Strict survival
+denies the teleport, so the bot answers with what it carries (`dark_trap_response`):
+
+* `LIGHT`: it carries a torch, so it starts `LightAreaTask.automatic` (underground only, like the reflexes above);
+  a stuck `move` is paused first and resumes once the lighting ends;
+* `CRAFT_TORCHES`: it carries no torch but coal or charcoal and sticks (or planks), so it crafts torches in the
+  inventory grid; the lighting follows once it has them;
+* `NONE`: nothing to light the cell with, so it tells the player once and does nothing else.
+
+A cell is answered with the same thing at most once: it is announced again only after the bot has moved or its
+means changed (a torch used up, coal crafted), so the same trap is never reported every eight seconds. Digging out
+toward the sky is not implemented: the dig helpers only go down or sideways, and a bot sealed in a pocket has observed
+nothing that says which way is out.

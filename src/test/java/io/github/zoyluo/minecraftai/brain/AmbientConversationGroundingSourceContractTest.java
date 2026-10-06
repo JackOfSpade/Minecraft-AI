@@ -67,6 +67,24 @@ final class AmbientConversationGroundingSourceContractTest {
                 "the no-evidence fallback must not itself narrate a scene or a journey");
     }
 
+    /** The decisions themselves are unit-tested in AmbientConversationCoordinatorTest; this pins that every line passes through them. */
+    @Test
+    void noLineIsSpokenWithoutAnAddresseeStillPresent() throws IOException {
+        String source = Files.readString(AMBIENT);
+        String start = methodBody(source, "private void maybeStart(");
+        assertTrue(start.contains("hasEnoughParticipants(eligible.size(), cfg)")
+                        && start.contains("requiredParticipants(cfg)"),
+                "a conversation starts only with two or more eligible companions, whatever the configured minimum");
+        String turn = methodBody(source, "private void fireNextTurn(");
+        assertTrue(turn.indexOf("addresseePresent(conversation, speakerId)") >= 0
+                        && turn.indexOf("addresseePresent(conversation, speakerId)") < turn.indexOf("ambientSocialFallback("),
+                "the canned fallback line is chosen only after an addressee is confirmed");
+        String reveal = methodBody(source, "private void revealAndAdvance(");
+        assertTrue(reveal.indexOf("addresseePresent(conversation, speakerId)") >= 0
+                        && reveal.indexOf("addresseePresent(conversation, speakerId)") < reveal.indexOf("sendBotReply("),
+                "a line whose listeners left during the reading pause is dropped, not spoken to nobody");
+    }
+
     private static String methodBody(String source, String signature) {
         int signatureAt = source.indexOf(signature);
         assertTrue(signatureAt >= 0, () -> "missing method signature: " + signature);

@@ -44,6 +44,14 @@ public final class DiscoveryTask extends AbstractTask {
 
     /** A same-dimension successful discovery that can be demonstrated physically later. */
     public record FoundTarget(BlockPos pos, String label) {
+        /**
+         * What a show-location demonstration calls {@code pos}. A coordinate that is the latest real find keeps the label the
+         * discovery proved ("a chest or other storage container"): a name the model picked for it ("the bonus chest") is a claim
+         * nothing the bot observed supports. Any other coordinate keeps the requested label.
+         */
+        public static String labelFor(Optional<FoundTarget> latestFind, BlockPos pos, String requestedLabel) {
+            return latestFind.filter(found -> found.pos().equals(pos)).map(FoundTarget::label).orElse(requestedLabel);
+        }
     }
 
     private enum TargetKind {
@@ -89,8 +97,8 @@ public final class DiscoveryTask extends AbstractTask {
             return new Target(TargetKind.SHEEP, "sheep", "sheep", null, null);
         }
 
-        static Target container() {
-            return new Target(TargetKind.CONTAINER, "container", "chest or other storage container", null, null);
+        static Target container(String id) {
+            return new Target(TargetKind.CONTAINER, id, "a chest or other storage container", null, null);
         }
     }
 
@@ -119,7 +127,12 @@ public final class DiscoveryTask extends AbstractTask {
     private static final Target MATURE_WHEAT = Target.blocks("mature_wheat", "mature wheat",
             DiscoveryTask::isMatureWheat, BlockObservation.OUTLINE_OR_CELL);
     private static final Target SHEEP = Target.sheep();
-    private static final Target CONTAINER = Target.container();
+    private static final Target CONTAINER = Target.container("container");
+    /**
+     * The same search as {@link #CONTAINER}: a bonus chest is an ordinary chest, and nothing a bot can observe tells it from
+     * another one (its loot table is not visible), so a find for it never claims to have found that particular chest.
+     */
+    private static final Target BONUS_CHEST = Target.container("bonus_chest");
     private static final Target FLOWERS = Target.blocks("flowers", "flowers",
             state -> state.is(BlockTags.FLOWERS), BlockObservation.BLOCK);
     private static final Target SAPLINGS = Target.blocks("saplings", "saplings",
@@ -202,7 +215,8 @@ public final class DiscoveryTask extends AbstractTask {
             case "iron", "iron_ore", "raw_iron", "minecraft:iron_ore", "minecraft:raw_iron" -> IRON_ORE;
             case "wheat", "mature_wheat", "wheat_crop", "wheat_crops", "minecraft:wheat" -> MATURE_WHEAT;
             case "sheep", "sheeps", "minecraft:sheep" -> SHEEP;
-            case "bonus_chest", "container", "storage", "storage_container" -> CONTAINER;
+            case "bonus_chest" -> BONUS_CHEST;
+            case "container", "storage", "storage_container" -> CONTAINER;
             case "flower", "flowers" -> FLOWERS;
             case "sapling", "saplings" -> SAPLINGS;
             case "plant", "plants" -> PLANTS;
@@ -492,9 +506,10 @@ public final class DiscoveryTask extends AbstractTask {
         BotMemoryStore.INSTANCE.of(bot.getUUID()).remember(LAST_FOUND_LABEL, target.displayName());
         double distance = Math.sqrt(horizontalDistanceSquared(bot.blockPosition(), found));
         String location = found.getX() + ", " + found.getY() + ", " + found.getZ();
+        String caveat = target == BONUS_CHEST ? " I can't tell whether it is the bonus chest." : "";
         BrainCoordinator.INSTANCE.sendBotReply(bot, "I found " + target.displayName()
                 + " at " + location + " (about " + Math.round(distance)
-                + " blocks away). Would you like me to show you where it is?");
+                + " blocks away)." + caveat + " Would you like me to show you where it is?");
         BotLog.action(bot, "discovery_found", "target", target.id(),
                 "pos", found.toShortString(), "distance", Math.round(distance), "hops", hopsAttempted);
         complete();
