@@ -2083,7 +2083,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         VisibleTargetHorizonScan.Sighting sighting = nextVisibleOreSighting(bot);
-        if (sighting == null || oreExcluded(bot, sighting.pos())) {
+        if (sighting == null) {
+            return false;
+        }
+        if (oreExcluded(bot, sighting.pos())) {
+            declineVisibleOre(bot, sighting.pos());
             return false;
         }
         BotLog.action(bot, "ore_dig_target_sighted",
@@ -2102,7 +2106,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // paired with an apparently live observed-search owner.
         bot.getActionPack().stopAll();
         clearObservedOreSearchLeg();
-        return startVisibleOreSightingPursuit(bot);
+        if (startVisibleOreSightingPursuit(bot)) {
+            return true;
+        }
+        declineVisibleOre(bot, sighting.pos());
+        return false;
     }
 
     /**
@@ -2116,9 +2124,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 yieldVisibleOreToLocalScan();
                 return false;
             }
+            BlockPos refusedHint = visibleOreSightingHint;
             if (startVisibleOreSightingPursuit(bot)) {
                 return true;
             }
+            declineVisibleOre(bot, refusedHint);
         }
         VisibleTargetHorizonScan.Sighting sighting = nextVisibleOreSighting(bot);
         if (sighting == null) {
@@ -2128,7 +2138,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         if (oreExcluded(bot, sighting.pos())) {
-            return false; // this one first-hit cell was consumed; keep normal local work live
+            // This one first-hit cell was consumed; keep normal local work live. The sweep must be told,
+            // or its next ray (the vertical one, for an ore overhead) answers with the same cell again
+            // and the rest of the raster never runs.
+            declineVisibleOre(bot, sighting.pos());
+            return false;
         }
         BotLog.action(bot, "ore_dig_target_sighted",
                 "pos", sighting.pos().toShortString(),
@@ -2142,7 +2156,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (startVisibleOreSightingPursuit(bot)) {
             return true;
         }
+        declineVisibleOre(bot, sighting.pos());
         return false;
+    }
+
+    /** A sighting this task could do nothing with is not offered again from this stance (see {@link DeclinedSightings}). */
+    private void declineVisibleOre(AIPlayerEntity bot, BlockPos sighting) {
+        if (visibleOreHorizonScan != null && sighting != null) {
+            visibleOreHorizonScan.decline(bot, sighting);
+        }
     }
 
     /** Re-checks a live render-distance landmark route before it can influence another tick. */

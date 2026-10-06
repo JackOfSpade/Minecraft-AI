@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -151,5 +152,17 @@ class ExplorationMemoryTest {
         }
 
         assertEquals(once, memory.unsearchedProbes(10, 30, RADIUS));
+    }
+
+    @Test
+    void aRefusedHopTowardARememberedResourceIsNotAskedForAgainFromTheSameStance() {
+        ExplorationMemory memory = new ExplorationMemory();
+        assertFalse(memory.isGuidedRefused(10, 20, 60, 20), "nothing was refused yet");
+
+        memory.noteGuidedRefused(10, 20, 60, 20);
+
+        assertTrue(memory.isGuidedRefused(10, 20, 60, 20), "the same hop from the same stance is not asked for again");
+        assertFalse(memory.isGuidedRefused(11, 20, 60, 20), "from another stance it is a new question");
+        assertFalse(memory.isGuidedRefused(10, 20, 61, 20), "another remembered resource is another question");
     }
 }
