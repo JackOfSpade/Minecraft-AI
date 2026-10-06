@@ -11,6 +11,7 @@ import io.github.zoyluo.minecraftai.network.MinecraftAiServerNetworking;
 import io.github.zoyluo.minecraftai.perception.PerceptionCollector;
 import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import io.github.zoyluo.minecraftai.perception.SpeakerViewCollector;
+import io.github.zoyluo.minecraftai.task.GatherThenGiveTask;
 import io.github.zoyluo.minecraftai.task.MemoryStore;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
@@ -18,6 +19,7 @@ import io.github.zoyluo.minecraftai.runtime.IntentController;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,7 +28,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
-import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -82,109 +83,6 @@ public final class BrainCoordinator {
     private static final String REPEATED_PLAN_TOOL_RESULT =
             "blocked: your plan was already announced; do not say it again, call the action or goal tool now";
     static final String SAY_TOOL_NAME = "say";
-    private static final String GATHER_TOOL_NAME = "gather";
-    private static final String GIVE_ITEM_TOOL_NAME = "give_item";
-    private static final String FULFILL_ITEMS_TOOL_NAME = "fulfill_items";
-    private static final String ACHIEVE_GOAL_TOOL_NAME = "achieve_goal";
-    // A combined fresh acquire-and-handoff request must stay within one transaction. These entry
-    // points otherwise create an ordinary collection task, after which the direct handoff remains
-    // intentionally unavailable and the model is left with no truthful way to finish.
-    private static final Set<String> FRESH_HANDOFF_SPLIT_COLLECTION_TOOLS = Set.of(
-            GATHER_TOOL_NAME, "assign_task", "forage", "mine_ore", "mine_valuables_in_radius",
-            "mine_valuables", "harvest_crop", "mine_block");
-    private static final String ACQUISITION_GIVE_ITEM_BLOCKED_RESULT =
-            "blocked: give_item is only for an explicit handoff of existing inventory; "
-                    + "the player requested newly acquired resources, so start an appropriate collection task instead";
-    private static final String ACQUISITION_INVENTORY_GOAL_BLOCKED_RESULT =
-            "blocked: achieve_goal can be satisfied by carried inventory, but this request requires a newly "
-                    + "collected resource quota; use a collection task or fresh fulfill_items instead";
-    private static final String FRESH_HANDOFF_GATHER_BLOCKED_RESULT =
-            "blocked: this request combines a fresh collection quota with a handoff; use gather_then_give so "
-                    + "the newly collected exact stack is retained through delivery";
-    // Direct handoff and acquisition sound similar in natural chat ("give me logs" versus
-    // "get logs").  A resource-acquisition verb always wins: even if the bot happens to be
-    // carrying matching items, a player asking to get/gather/chop them expects a new physical
-    // collection quota rather than an inventory dump.  A one-resource combined acquire-and-handoff
-    // request must use gather_then_give, which owns the fresh quota and final delivery.
-    private static final Pattern RESOURCE_ACQUISITION_VERB = Pattern.compile(
-            "\\b(?:gather|collect|obtain|acquire|chop|harvest|forage|farm)\\b",
-            Pattern.CASE_INSENSITIVE);
-    // Outcome verbs such as "obtain" and "acquire" can name either a raw resource or a crafted
-    // item.  Only the former needs a fresh-collection boundary; an "obtain an iron pickaxe"
-    // request must keep the normal goal planners available.
-    private static final Pattern PHYSICAL_COLLECTION_VERB = Pattern.compile(
-            "\\b(?:gather|collect|chop|harvest|forage|farm)\\b", Pattern.CASE_INSENSITIVE);
-    private static final String OPTIONAL_RESOURCE_RECIPIENT = "(?:(?:me|us|them|him|her)\\s+)?";
-    private static final String OPTIONAL_RESOURCE_QUANTITY =
-            "(?:(?:\\d+|some|more|all|a|an|the)\\s+|(?:an?\\s+)?stack\\s+of\\s+)?";
-    private static final String RAW_RESOURCE_NOUN =
-            "(?:(?:coal|iron|gold|copper|diamond|emerald|redstone|lapis|quartz|debris|stone|"
-                    + "cobblestone|obsidian|log|wood|dirt|sand|gravel)s?|[a-z0-9:]+(?:[_ ]ores?|[_ ]logs?))";
-    private static final String CRAFTED_ITEM_NOUN =
-            "(?:swords?|pickaxes?|axes?|shovels?|hoes?|helmets?|chestplates?|leggings|boots|"
-                    + "shields?|bows?|crossbows?|rods?)";
-    // A material word can introduce an outcome item ("diamond sword", "iron pickaxe") rather
-    // than name a raw collection target. Keep those outcome requests on the normal goal path.
-    private static final String RAW_RESOURCE_END = "\\b(?!\\s+" + CRAFTED_ITEM_NOUN + "\\b)";
-    // A count normally makes a request a fresh quota even for an unfamiliar resource. Preserve
-    // that useful default, but do not misclassify a quantified crafted-output request as mining.
-    private static final String MATERIAL_QUALIFIED_CRAFTED_ITEM =
-            "(?:(?:[a-z0-9:]+[_ ]){0,2}" + CRAFTED_ITEM_NOUN + ")";
-    // Gathering verbs can name an outcome item too ("collect an iron pickaxe"). Preserve the
-    // normal craft/goal route for that wording; only physical raw-resource collection hides
-    // inventory-total goals. This mirrors the existing get/obtain/acquire distinction below.
-    private static final Pattern PHYSICAL_COLLECTION_CRAFTED_ITEM_VERB = Pattern.compile(
-            "\\b(?:gather|collect|chop|harvest|forage|farm)\\s+" + OPTIONAL_RESOURCE_RECIPIENT
-                    + OPTIONAL_RESOURCE_QUANTITY + MATERIAL_QUALIFIED_CRAFTED_ITEM + "\\b",
-            Pattern.CASE_INSENSITIVE);
-    /** A raw collection clause wins even when the same sentence also asks for a crafted output. */
-    private static final Pattern PHYSICAL_RAW_RESOURCE_COLLECTION_VERB = Pattern.compile(
-            "\\b(?:gather|collect|chop|harvest|forage|farm)\\s+" + OPTIONAL_RESOURCE_RECIPIENT
-                    + OPTIONAL_RESOURCE_QUANTITY + RAW_RESOURCE_NOUN + RAW_RESOURCE_END,
-            Pattern.CASE_INSENSITIVE);
-    /** A compound request that actively asks for a crafted result needs the normal goal/craft route. */
-    private static final Pattern CRAFTED_ITEM_OUTCOME = Pattern.compile(
-            "\\b(?:gather|collect|chop|harvest|forage|farm|craft|make|build|create|obtain|acquire|get|"
-                    + "give|hand|deliver|drop|bring)\\s+" + OPTIONAL_RESOURCE_RECIPIENT
-                    + OPTIONAL_RESOURCE_QUANTITY + MATERIAL_QUALIFIED_CRAFTED_ITEM + "\\b",
-            Pattern.CASE_INSENSITIVE);
-    private static final String HANDOFF_RECIPIENT = "(?:me|us|them|him|her|[a-z0-9_]{1,16})";
-    // Require an item/pronoun-shaped object around the handoff verb. A bare "give me a status"
-    // must not turn a normal fresh gather into a forced physical delivery.
-    private static final Pattern FRESH_HANDOFF_PHRASE = Pattern.compile(
-            "\\b(?:give|hand|deliver|drop|bring)\\s+(?:over\\s+)?(?:"
-                    + "(?:(?:them|it|these|those)\\s+(?:(?:to|for)\\s+)?" + HANDOFF_RECIPIENT
-                    + "|(?:them|it|these|those)\\s+over\\b"
-                    + "|" + OPTIONAL_RESOURCE_QUANTITY + RAW_RESOURCE_NOUN + RAW_RESOURCE_END
-                    + "\\s+(?:(?:to|for)\\s+)?" + HANDOFF_RECIPIENT + ")"
-                    + "|" + HANDOFF_RECIPIENT + "\\s+" + OPTIONAL_RESOURCE_QUANTITY
-                    + RAW_RESOURCE_NOUN + RAW_RESOURCE_END + ")",
-            Pattern.CASE_INSENSITIVE);
-    // "Mine" can be possessive ("give me mine now"), so recognize a mining verb only when it
-    // names a conventional raw resource rather than treating every following word as an object.
-    private static final Pattern MINE_RESOURCE_VERB = Pattern.compile(
-            "\\bmine\\s+(?:(?:\\d+|some|more|all|a|an|the)\\s+)?" + RAW_RESOURCE_NOUN + RAW_RESOURCE_END,
-            Pattern.CASE_INSENSITIVE);
-    private static final Pattern ACQUIRE_RAW_RESOURCE_VERB = Pattern.compile(
-            "\\b(?:obtain|acquire)\\s+" + OPTIONAL_RESOURCE_RECIPIENT + OPTIONAL_RESOURCE_QUANTITY
-                    + RAW_RESOURCE_NOUN + RAW_RESOURCE_END,
-            Pattern.CASE_INSENSITIVE);
-    private static final Pattern GET_RAW_RESOURCE_VERB = Pattern.compile(
-            "\\bget\\s+" + OPTIONAL_RESOURCE_RECIPIENT + OPTIONAL_RESOURCE_QUANTITY
-                    + RAW_RESOURCE_NOUN + RAW_RESOURCE_END,
-            Pattern.CASE_INSENSITIVE);
-    // "Get" is ambiguous: "get 32 logs" is acquisition, while "get over here and give me
-    // your logs" is plainly a movement instruction followed by an existing-inventory handoff.
-    // Keep the strong acquisition boundary for the former without making the latter impossible.
-    private static final Pattern GET_RESOURCE_VERB = Pattern.compile(
-            "\\bget\\b(?!\\s+(?:over|to|here|there|back|away|up|down|out|closer|close|inside|outside)\\b)",
-            Pattern.CASE_INSENSITIVE);
-    // A numbered "get" request is usually a concrete new-resource quota like "get 32 logs".
-    // Explicit crafted outputs such as "get 32 iron pickaxes" still use achieve_goal normally.
-    private static final Pattern GET_NUMBERED_RESOURCE_QUOTA = Pattern.compile(
-            "\\bget\\s+" + OPTIONAL_RESOURCE_RECIPIENT + "\\d+\\s+(?!"
-                    + MATERIAL_QUALIFIED_CRAFTED_ITEM + "\\b)",
-            Pattern.CASE_INSENSITIVE);
     private static final int MAX_INSTRUCTION_ECHO_CHARS = 60;
 
     private final Map<UUID, BotConversation> conversations = new ConcurrentHashMap<>();
@@ -310,13 +208,7 @@ public final class BrainCoordinator {
         conversation.lastToolRoundPlanBlockedAction = false;
         conversation.withholdSayNextCall = false;
         conversation.lastInstruction = text;
-        boolean freshResourceQuota = requiresFreshResourceQuotaForInstruction(text);
-        // A crafted outcome does not erase an earlier raw-resource acquisition clause.  The
-        // fresh Fulfill path now carries an immutable baseline, so keep it available for a
-        // compound request while still hiding direct handoff and the legacy absolute goal.
-        conversation.suppressDirectGiveItem = freshResourceQuota || suppressDirectGiveItemForInstruction(text);
-        conversation.suppressInventorySatisfiedResourceGoals = freshResourceQuota;
-        conversation.suppressBareGatherForFreshHandoff = requiresFreshQuotaHandoffForInstruction(text);
+        conversation.routing.beginInstruction(RequestIntent.parse(text, onlinePlayerNames(bot, senderName)));
         conversation.missionDecisionCall = false;
         conversation.strategyCheckpoint = null;
         conversation.exhaustedStrategyCheckpointKey = "";
@@ -429,9 +321,7 @@ public final class BrainCoordinator {
                 planAlreadyAnnounced,
                 () -> conversation.decision.isApplying(lease),
                 conversation.missionDecisionCall ? STRATEGY_CHECKPOINT_TOOLS : null,
-                conversation.suppressDirectGiveItem,
-                conversation.suppressInventorySatisfiedResourceGoals,
-                conversation.suppressBareGatherForFreshHandoff);
+                conversation.routing);
         if (!conversation.decision.isApplying(lease)) {
             logStaleDecision(lease, "tool_batch");
             return;
@@ -488,6 +378,11 @@ public final class BrainCoordinator {
         // work-start tool of this instruction that succeeded moves the flag (it then stays set).
         boolean workStartToolSucceeded = dispatchBatch.executedCalls().stream()
                 .anyMatch(call -> call.ok() && isWorkStartTool(call.name()));
+        if (workStartToolSucceeded && !io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+            // A task a tool started directly: its completion ends the collection. A goal mission is
+            // not one task (it chains several), so it reports through its terminal result instead.
+            TaskManager.INSTANCE.getActive(bot).ifPresent(task -> conversation.routing.noteTaskStarted(task.name()));
+        }
         InstructionRoundEvaluator.RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
                 new InstructionRoundEvaluator.ToolRound(
                         conversation.requestStarted,
@@ -671,13 +566,10 @@ public final class BrainCoordinator {
             boolean planAlreadyAnnounced,
             BooleanSupplier leaseGuard,
             Set<String> allowedToolNames,
-            boolean suppressDirectGiveItem,
-            boolean suppressInventorySatisfiedResourceGoals,
-            boolean suppressBareGatherForFreshHandoff) {
+            ToolRouting routing) {
         boolean anyBlocked = false;
         for (ChatToolCall call : calls) {
-            if (blockedResult(call, gate, planAlreadyAnnounced, suppressDirectGiveItem,
-                    suppressInventorySatisfiedResourceGoals, suppressBareGatherForFreshHandoff) != null) {
+            if (blockedResult(call, gate, planAlreadyAnnounced, routing) != null) {
                 anyBlocked = true;
                 break;
             }
@@ -691,8 +583,7 @@ public final class BrainCoordinator {
         List<ChatToolCall> safeCalls = new ArrayList<>();
         for (int index = 0; index < calls.size() && index < maxCalls; index++) {
             ChatToolCall call = calls.get(index);
-            if (blockedResult(call, gate, planAlreadyAnnounced, suppressDirectGiveItem,
-                    suppressInventorySatisfiedResourceGoals, suppressBareGatherForFreshHandoff) == null) {
+            if (blockedResult(call, gate, planAlreadyAnnounced, routing) == null) {
                 safeCalls.add(call);
             }
         }
@@ -709,8 +600,7 @@ public final class BrainCoordinator {
         int safeIndex = 0;
         for (int index = 0; index < calls.size(); index++) {
             ChatToolCall call = calls.get(index);
-            String blocked = blockedResult(call, gate, planAlreadyAnnounced, suppressDirectGiveItem,
-                    suppressInventorySatisfiedResourceGoals, suppressBareGatherForFreshHandoff);
+            String blocked = blockedResult(call, gate, planAlreadyAnnounced, routing);
             if (index >= maxCalls) {
                 appendSyntheticToolFailure(bot, call, THROTTLED_TOOL_RESULT, results, executedCalls);
             } else if (blocked != null) {
@@ -738,17 +628,10 @@ public final class BrainCoordinator {
     private static String blockedResult(ChatToolCall call,
                                          InitialActionGate gate,
                                          boolean planAlreadyAnnounced,
-                                         boolean suppressDirectGiveItem,
-                                         boolean suppressInventorySatisfiedResourceGoals,
-                                         boolean suppressBareGatherForFreshHandoff) {
-        if (suppressDirectGiveItem && GIVE_ITEM_TOOL_NAME.equals(call.name())) {
-            return ACQUISITION_GIVE_ITEM_BLOCKED_RESULT;
-        }
-        if (suppressInventorySatisfiedResourceGoals && ACHIEVE_GOAL_TOOL_NAME.equals(call.name())) {
-            return ACQUISITION_INVENTORY_GOAL_BLOCKED_RESULT;
-        }
-        if (suppressBareGatherForFreshHandoff && FRESH_HANDOFF_SPLIT_COLLECTION_TOOLS.contains(call.name())) {
-            return FRESH_HANDOFF_GATHER_BLOCKED_RESULT;
+                                         ToolRouting routing) {
+        String withheld = routing.blockedResult(call.name());
+        if (withheld != null) {
+            return withheld;
         }
         if (gate.blockedActionCalls() && isGenuineActionTool(call.name())) {
             return PLAN_REQUIRED_TOOL_RESULT;
@@ -780,121 +663,38 @@ public final class BrainCoordinator {
                 missingRequiredAction, planBlockedAction, requestStarted, roundAnnouncedPlan);
     }
 
-    /** The tools offered to a model call: everything, or everything except an inapplicable tool. */
-    static List<ToolDefinition> toolsForCall(List<ToolDefinition> tools, boolean withholdSay) {
-        return toolsForCall(tools, withholdSay, false, false, false);
-    }
-
     /**
-     * Hides direct inventory handoff for an instruction that explicitly asks to acquire resources.
-     * This is a safety boundary in addition to the prompt: tool schemas influence model choice, but
-     * they must not allow a carried stack to substitute for a requested physical collection quota.
+     * The tools offered to a model call: everything except say when it is withheld and the tools
+     * {@link ToolRouting} withholds for this instruction. The routing is a safety boundary in
+     * addition to the prompt: tool schemas steer the model, but a carried stack must not be able to
+     * stand in for a requested physical collection quota.
      */
-    static List<ToolDefinition> toolsForCall(List<ToolDefinition> tools,
-                                             boolean withholdSay,
-                                             boolean suppressDirectGiveItem) {
-        return toolsForCall(tools, withholdSay, suppressDirectGiveItem, false, false);
-    }
-
-    /**
-     * Removes tools whose normal completion semantics can reuse carried inventory when a player
-     * explicitly requested a fresh physical resource quota.
-     */
-    static List<ToolDefinition> toolsForCall(List<ToolDefinition> tools,
-                                             boolean withholdSay,
-                                             boolean suppressDirectGiveItem,
-                                             boolean suppressInventorySatisfiedResourceGoals) {
-        return toolsForCall(tools, withholdSay, suppressDirectGiveItem,
-                suppressInventorySatisfiedResourceGoals, false);
-    }
-
-    /**
-     * A combined fresh acquire-and-handoff request must remain inside gather_then_give: splitting
-     * it into ordinary gather plus a later direct give would re-open the inventory shortcut.
-     */
-    static List<ToolDefinition> toolsForCall(List<ToolDefinition> tools,
-                                             boolean withholdSay,
-                                             boolean suppressDirectGiveItem,
-                                             boolean suppressInventorySatisfiedResourceGoals,
-                                             boolean suppressBareGatherForFreshHandoff) {
-        if ((!withholdSay && !suppressDirectGiveItem && !suppressInventorySatisfiedResourceGoals
-                && !suppressBareGatherForFreshHandoff)
-                || tools == null) {
+    static List<ToolDefinition> toolsForCall(List<ToolDefinition> tools, boolean withholdSay, Set<String> withheld) {
+        if ((!withholdSay && withheld.isEmpty()) || tools == null) {
             return tools;
         }
-        List<ToolDefinition> withoutSay = new ArrayList<>(tools.size());
+        List<ToolDefinition> offered = new ArrayList<>(tools.size());
         for (ToolDefinition tool : tools) {
             if (tool != null
                     && (!withholdSay || !SAY_TOOL_NAME.equals(tool.name()))
-                    && (!suppressDirectGiveItem || !GIVE_ITEM_TOOL_NAME.equals(tool.name()))
-                    && (!suppressInventorySatisfiedResourceGoals
-                    || !ACHIEVE_GOAL_TOOL_NAME.equals(tool.name()))
-                    && (!suppressBareGatherForFreshHandoff
-                    || !FRESH_HANDOFF_SPLIT_COLLECTION_TOOLS.contains(tool.name()))) {
-                withoutSay.add(tool);
+                    && !withheld.contains(tool.name())) {
+                offered.add(tool);
             }
         }
-        return List.copyOf(withoutSay);
+        return List.copyOf(offered);
     }
 
-    /**
-     * Direct handoff is valid only for an existing-inventory transfer.  Requests that use an
-     * acquisition verb require the appropriate collection/goal task even when the requested
-     * stack happens to be in inventory already.
-     */
-    static boolean suppressDirectGiveItemForInstruction(String instruction) {
-        if (instruction == null) {
-            return false;
+    /** The names a handoff may give as its recipient: the speaker and everyone online (bots included). */
+    private static Set<String> onlinePlayerNames(AIPlayerEntity bot, String senderName) {
+        Set<String> names = new HashSet<>();
+        if (senderName != null) {
+            names.add(senderName);
         }
-        // A compound sentence can name both a raw acquisition and a crafted final outcome;
-        // the raw clause still makes direct inventory handoff unsafe.
-        if (requiresFreshResourceQuotaForInstruction(instruction)) {
-            return true;
+        var server = bot.level().getServer();
+        if (server != null) {
+            server.getPlayerList().getPlayers().forEach(player -> names.add(player.getGameProfile().name()));
         }
-        if (hasCraftedItemOutcome(instruction)) {
-            return false;
-        }
-        if (RESOURCE_ACQUISITION_VERB.matcher(instruction).find()
-                || MINE_RESOURCE_VERB.matcher(instruction).find()) {
-            return true;
-        }
-        return GET_RESOURCE_VERB.matcher(instruction).find();
-    }
-
-    /**
-     * True only for wording that explicitly requests resource collection, rather than an
-     * inventory outcome such as "get an iron pickaxe". Goal tools with inventory-total terminal
-     * predicates are hidden here so an already carried stack cannot satisfy a fresh quota.
-     */
-    static boolean requiresFreshResourceQuotaForInstruction(String instruction) {
-        return instruction != null && (PHYSICAL_RAW_RESOURCE_COLLECTION_VERB.matcher(instruction).find()
-                || (PHYSICAL_COLLECTION_VERB.matcher(instruction).find()
-                && !PHYSICAL_COLLECTION_CRAFTED_ITEM_VERB.matcher(instruction).find())
-                || MINE_RESOURCE_VERB.matcher(instruction).find()
-                || ACQUIRE_RAW_RESOURCE_VERB.matcher(instruction).find()
-                || GET_RAW_RESOURCE_VERB.matcher(instruction).find()
-                || GET_NUMBERED_RESOURCE_QUOTA.matcher(instruction).find());
-    }
-
-    /** A fresh resource request that also names a handoff needs one atomic gather/deliver task. */
-    static boolean requiresFreshResourceHandoffForInstruction(String instruction) {
-        return !hasCraftedItemOutcome(instruction)
-                && requiresFreshQuotaHandoffForInstruction(instruction);
-    }
-
-    /**
-     * Any raw quota plus a requested handoff must keep ordinary gather out of the tool surface.
-     * Unlike the raw-only helper above, this also covers a compound crafted outcome so it can
-     * reach fresh {@code fulfill_items} without a split gather/give escape hatch.
-     */
-    static boolean requiresFreshQuotaHandoffForInstruction(String instruction) {
-        return requiresFreshResourceQuotaForInstruction(instruction)
-                && instruction != null && FRESH_HANDOFF_PHRASE.matcher(instruction).find();
-    }
-
-    /** True when a request names a crafted outcome rather than only raw-material collection. */
-    static boolean hasCraftedItemOutcome(String instruction) {
-        return instruction != null && CRAFTED_ITEM_OUTCOME.matcher(instruction).find();
+        return names;
     }
 
     /** Restricts an adaptive boundary to server-generated mission continuation, never raw movement/mining. */
@@ -1280,6 +1080,8 @@ public final class BrainCoordinator {
             return false;
         }
         if (hasGoal && maybeInjectGoalContinuation(bot, conversation, "There is no active task, but the long-term goal is unfinished. Continue the current step and assign a high-level task when needed.")) {
+            // The long-term goal continues on its own, not as part of the last player instruction.
+            conversation.routing.beginGoalContinuation();
             awaitingTask.remove(bot.getUUID());
             nextGoalWakeTick.put(bot.getUUID(), bot.level().getServer().getTickCount() + 200);
             trimHistory(conversation);
@@ -1291,9 +1093,10 @@ public final class BrainCoordinator {
         if (taskJustFinished) {
             awaitingTask.remove(bot.getUUID());
             TaskStatus status = TaskManager.INSTANCE.status(bot);
+            conversation.routing.observeTask(status.name(), status.state());
             PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
             conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-            conversation.history.add(wakeUserMessage(bot, conversation, 
+            conversation.history.add(wakeUserMessage(bot, conversation,
                     "The previous task ended: " + status.name() + " (state " + status.state() + ": " + status.description()
                     + "). If the player's overall request is complete, use say to report that in English and stop; "
                     + "otherwise continue with the next high-level task.\n\nCurrent state:\n" + snapshot.toJson()));
@@ -1412,10 +1215,7 @@ public final class BrainCoordinator {
                     brainConfig,
                     brainConfig.exposesLowLevelTools() || manualMode(bot),
                     BotRuntimeOptions.INSTANCE.memoryToolsEnabled(bot),
-                    brainConfig.coordinationToolsEnabled()), withholdSay,
-                    conversation.suppressDirectGiveItem,
-                    conversation.suppressInventorySatisfiedResourceGoals,
-                    conversation.suppressBareGatherForFreshHandoff);
+                    brainConfig.coordinationToolsEnabled()), withholdSay, conversation.routing.withheldTools());
             List<ToolDefinition> toolsSnapshot = missionDecision
                     ? toolsForStrategyCheckpoint(availableTools) : availableTools;
             AsyncDecisionExecutor.GeminiInteractionRequest geminiRequest = executor.usesGeminiInteractions()
@@ -1620,6 +1420,7 @@ public final class BrainCoordinator {
                             return;
                         }
                         TaskStatus status = TaskManager.INSTANCE.status(bot);
+                        conversation.routing.observeTask(status.name(), status.state());
                         if (status.state() == io.github.zoyluo.minecraftai.task.TaskState.COMPLETED
                                 && maybeInjectGoalContinuation(bot, conversation, "The previous task completed: " + status.description() + ". Advance the next step for the long-term goal; call advance_goal first if this step is complete.")) {
                             trimHistory(conversation);
@@ -1982,6 +1783,7 @@ public final class BrainCoordinator {
                 .map(failure -> {
                     conversation.lastFailureName = failure.name();
                     conversation.lastFailureReason = failure.reason();
+                    conversation.routing.observeFailure(failure.reason());
                     int maxRetries = MinecraftAiConfig.get().brain().maxTaskRetries();
                     String retryHint = failure.count() >= maxRetries
                             ? " The same failure has happened repeatedly; prefer a different approach or explain the limitation with say."
@@ -2023,6 +1825,9 @@ public final class BrainCoordinator {
                 .resultAfter(bot, conversation.lastGoalResultSequence)
                 .map(result -> {
                     conversation.lastGoalResultSequence = result.sequence();
+                    if (result.status() == io.github.zoyluo.minecraftai.goal.GoalResult.Status.COMPLETED) {
+                        conversation.routing.observeGoalCompleted();
+                    }
                     PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
                     conversation.lastPerceptionDigest = perceptionDigest(snapshot);
                     conversation.history.add(ChatMessage.user(
@@ -2047,6 +1852,11 @@ public final class BrainCoordinator {
 
     private static String executableFailureHint(TaskManager.FailureRecord failure) {
         String reason = failure.reason() == null ? "" : failure.reason();
+        if (reason.startsWith(GatherThenGiveTask.HANDOFF_FAILED_PREFIX)) {
+            return " Actionable guidance: the new quota was already collected and is still carried; do not collect"
+                    + " it again. Hand it over with give_item once the player is reachable, or tell the player"
+                    + " what stopped the handoff.";
+        }
         if (reason.startsWith("no_observed_resource_after_exploration")
                 || reason.startsWith("no_observed_ore_after_exploration")) {
             return " Actionable guidance: the task completed its bounded observed search without a target."
@@ -2159,11 +1969,11 @@ public final class BrainCoordinator {
                 1. Understand the human's intent first, then break it into tool calls.
                 2. Coordinates are integers (block positions).
                 3. Prefer high-level deterministic tasks for survival work. For ores or raw ore materials, use mine_ore; it automatically prepares the required pickaxe and in count mode safely widens its view through bounded observed walk-only hops before mining. For one item/tool outcome such as iron_pickaxe or iron_ingot, use achieve_goal. When one request requires multiple different final items, quantities, or ownership allocations, use fulfill_items with a complete manifest inferred from the request. Do not manually decompose these into gather/craft/mine steps unless the high-level goal reports a typed failure.
-                   For gather, forage, mine_ore, and harvest_crop: if the player states a number, pass count and it is a NEW/additional-resource quota even if the bot already carries some. If the player does not state a number, OMIT count. The task then collects as much as it can for up to ten minutes, actively explores through repeated short safe observed hops, and rescans terrain revealed by those hops. Do not say none was found, stop after the first visible patch, or switch to blind digging/pathing toward hidden terrain before that collection window ends. Direct give_item is only for an explicit handoff of existing inventory; never substitute it for "get", "gather", "collect", "chop", "mine", "harvest", or another request to acquire a new resource quota. If one resource must first be newly collected and then handed over, use gather_then_give; it owns both stages and cannot use an existing stack to skip collection. If a raw quota is combined with a crafted final output or bundle, use fulfill_items for every final allocation; it newly produces those allocations above the inventory held when the call begins, so do not shortcut it with give_item or achieve_goal. For an unspecified plural "logs", call gather_then_give with item="logs"; use an exact minecraft:<species>_log only when the player names that species.
+                   For gather, forage, mine_ore, and harvest_crop: if the player states a number, pass count and it is a NEW/additional-resource quota even if the bot already carries some. If the player does not state a number, OMIT count. The task then collects as much as it can for up to ten minutes, actively explores through repeated short safe observed hops, and rescans terrain revealed by those hops. Do not say none was found, stop after the first visible patch, or switch to blind digging/pathing toward hidden terrain before that collection window ends. A request to get, gather, collect, mine, chop, harvest or otherwise acquire raw resources is never met from what you carry: while that collection is unfinished give_item and achieve_goal are not offered (a carried stack could satisfy them), and they come back when it finishes. If the resource needs a tool you may lack (stone, ore) or a quantity has to be produced, fulfill_items also works: a raw allocation is newly collected above what you carry, and a named recipient is handed it afterwards. To collect one resource and hand it to a player, call gather_then_give with the number the player stated (item="logs" for an unspecified plural "logs"; an exact minecraft:<species>_log only when the player names that species); it owns both stages and cannot use an existing stack to skip collection. If the player gives no number, collect with gather, mine_ore or harvest_crop without count and, once it finishes, hand over what it collected with give_item. If the final result is a crafted item (gather 32 logs, craft a table, give it to me), collect first with gather and the count; gather_then_give would hand over the logs, not the table. Craft the item and hand it over after the collection finishes. Direct give_item is only for handing over what you already carry ("give me 32 logs", "give me your logs", "bring me the logs you collected"): hand over a bundle with one give_item call per item. fulfill_items is for production, never for handing over carried stock.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
-                5. A new player message always supersedes prior work. The runtime cancels old tasks, goals, queued goals, and actions before this request is planned, so treat each new message as self-contained. For a compound request whose outcome is an inventory bundle or a division between players, make one fulfill_items call with every final item and recipient allocation; infer the manifest from the words and current game knowledge rather than reducing it to one representative item. Every such final allocation is newly produced/additional to matching inventory held at submission, never a pre-existing handoff. This is not a fixed kit vocabulary. For genuinely sequential objectives that are not one inventory bundle, goal tools (achieve_goal, mine_ore, harvest_crop, provision_food, set_goal) may be queued in that same response. High-level tasks run over multiple ticks; start only one non-goal task at a time and wait for its status before assigning another.
+                5. A new player message always supersedes prior work. The runtime cancels old tasks, goals, queued goals, and actions before this request is planned, so treat each new message as self-contained. For a compound request whose outcome is an inventory bundle or a division between players, make one fulfill_items call with every final item and recipient allocation; infer the manifest from the words and current game knowledge rather than reducing it to one representative item. Everything handed to a player and every raw resource you keep is newly produced or collected, additional to matching inventory held at submission, never a pre-existing handoff; a crafted item you keep (your own tool or armor) counts if you already carry it. A bundle of items you already carry is not production: hand it over with one give_item call per item. This is not a fixed kit vocabulary. For genuinely sequential objectives that are not one inventory bundle, goal tools (achieve_goal, mine_ore, harvest_crop, provision_food, set_goal) may be queued in that same response. High-level tasks run over multiple ticks; start only one non-goal task at a time and wait for its status before assigning another.
                 6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). When you can emit multiple function calls, call the action or goal tool that starts the work in the SAME response. If the provider emits only one function call, call the plan once; the runtime immediately follows up with say unavailable, and you must then call the action or goal tool that starts the work. Never answer an action request with say alone. Do not make a plan-only loop. For "come here" / "come to me" call follow (it walks to the player); for "stay here" call hold; for "follow me" call follow; for "eat until full" call eat. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
-                7. For one item or tool the player wants obtained from whatever materials are available, use achieve_goal directly even when materials may be missing. For multiple different requested items or a player/bot split, use fulfill_items directly and list each output/allocation; it shares the same dependency planner and will gather, craft, mine, smelt, use an existing or newly made crafting table, and then perform each requested handoff. Its final allocations are always newly produced/additional to matching inventory present at submission. A recipient omitted from a fulfill_items entry stays with you; a named recipient is handed that exact newly produced item after production. Use plan_craft only when the player explicitly asks for a feasibility or material breakdown; it is read-only. Use craft only when the player explicitly wants a one-step craft and the required materials are already carried. Do not decompose an item goal into assign_task, mine, smelt, planks, or sticks yourself.
+                7. For one item or tool the player wants obtained from whatever materials are available, use achieve_goal directly even when materials may be missing. For multiple different requested items or a player/bot split, use fulfill_items directly and list each output/allocation; it shares the same dependency planner and will gather, craft, mine, smelt, use an existing or newly made crafting table, and then perform each requested handoff. Everything it hands to a player and every raw resource it keeps is newly produced or collected, additional to matching inventory present at submission; a crafted item kept on you counts if you already carry it. A recipient omitted from a fulfill_items entry stays with you; a named recipient is handed that exact newly produced item after production. Use plan_craft only when the player explicitly asks for a feasibility or material breakdown; it is read-only. Use craft only when the player explicitly wants a one-step craft and the required materials are already carried. Do not decompose an item goal into assign_task, mine, smelt, planks, or sticks yourself.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
                 9. For "find/search iron ore", "find wheat", "find sheep", "find the bonus chest", or any named block, call find. find accepts every registered non-air block: use a bare vanilla name with spaces or underscores (for example furnace, crafting table, oak_sapling), or a full modded id such as modid:block. Its semantic targets are iron_ore (the iron-ore family), wheat (mature wheat), sheep, container/bonus_chest, and plant/flower/sapling categories. find is a persistent bounded locate-only task: it walks short observed hops, reports a real visible coordinate, and says it could not find the target when its search limit is spent; it does not mine, harvest, kill, or open anything. For "find and mine iron", first call find with target=iron_ore and wait for its result, then call mine_ore only after it reports visible ore. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore; its count mode owns the bounded observed search and automatically resumes mining when ore becomes visible, so do not pre-split that request into find/retry calls. For "mine the whole/entire vein", "this vein" or "until the vein is gone", call mine_ore with mode=vein (optionally x/y/z of an ore in that vein): it mines only that connected, observed vein, stops, and reports the count; never approximate a vein with a count or tunnel toward unseen ore. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. For a kit or multi-player allocation, call fulfill_items instead. A high-level goal call establishes an immutable root goal, then the deterministic executor performs one whole safe stage at a time. After each safe stage it automatically gives you a strategy checkpoint containing an exact mission_id, revision, current observed state, a server-rendered root manifest, and a server-generated proposed next stage. At that checkpoint, call continue_goal_step exactly once with that mission_id and revision if the stage still serves the root goal; if current observed facts make the stage unsuitable, call replan_goal_from_current_state with the same token so the server rebuilds the remaining safe plan; call stop_goal_mission with that same token only to end this exact root goal. Do not call inventory, assign_task, mine, raw movement, or another goal tool at a strategy checkpoint. The executor, not you, owns recipes, inventory arithmetic, exploration bounds, navigation, physical handoffs, and final verification. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For "break N leaves" / "clear the leaves", call break_blocks with block=leaves (any leaf type) and the exact count; drops are irrelevant and it uses shears or a hoe if carried, otherwise bare hands (never craft shears for it). Use gather only when the player wants leaf blocks in the inventory (that needs shears). For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
                 When a player says only "gather coal", "mine iron", "get berries", or "harvest wheat" without a quantity, use the applicable resource tool with no count. That opens a ten-minute collection window, not a one-item default: continue safe observed exploration and rescan newly revealed terrain throughout it. An explicit count still completes once its additional quota is physically collected. The no-count task may report none only after its ten-minute window expires without any new matching resource.
@@ -2210,14 +2020,8 @@ public final class BrainCoordinator {
         private boolean withholdSayNextCall;
         private String lastInstruction = "";
         // A request to acquire physical resources must not be satisfied by dropping an existing
-        // matching stack. This remains in force across continuations for the same instruction.
-        private boolean suppressDirectGiveItem;
-        // Explicit physical quota wording also hides goal tools whose normal terminal predicate
-        // can be met by a stack already carried when this instruction began.
-        private boolean suppressInventorySatisfiedResourceGoals;
-        // When the wording also asks for delivery, ordinary gather must not split the transaction
-        // into a fresh count followed by a direct inventory handoff.
-        private boolean suppressBareGatherForFreshHandoff;
+        // matching stack. This remains in force across continuations of the same instruction.
+        private final ToolRouting routing = new ToolRouting();
         private final InstructionRoundEvaluator.InstructionChain instructionChain =
                 new InstructionRoundEvaluator.InstructionChain();
         private String lastFailureName;

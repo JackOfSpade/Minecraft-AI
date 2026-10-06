@@ -76,6 +76,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.ToIntFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -262,9 +263,9 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("gather_then_give", "Collect a NEW quota of one gatherable resource, then hand that exact count to a nearby player. Existing inventory never satisfies the collection phase. For generic tree logs, pass item=logs so the task uses a species it actually gathers; use an exact minecraft:<species>_log id only when that species was named. Use this for one-resource requests that explicitly combine gathering/collecting with giving/handing the result to a player; use give_item only for an existing-inventory handoff.", objectSchema()
+        register("gather_then_give", "Collect a NEW quota of one gatherable resource, then hand that exact count to a nearby player. Existing inventory never satisfies the collection phase. For generic tree logs, pass item=logs so the task uses a species it actually gathers (a mix of species is delivered one drop per species); use an exact minecraft:<species>_log id only when that species was named. Use this for one-resource requests that explicitly combine gathering/collecting with giving/handing the result to a player and state a number. It collects only what the bot can gather with the tools it carries: for ore or stone that needs a pickaxe use fulfill_items with the player as recipient. It hands over the raw resource itself, so for a crafted result (gather logs, craft a table, give it) gather first and craft/give afterwards. Without a stated number, collect with gather/mine_ore without count and then give_item what it collected. Use give_item only for an existing-inventory handoff.", objectSchema()
                 .property("item", stringSchema("exact item id, or the literal logs for any tree-log species"))
-                .property("count", integerSchema("positive number of new items to collect before the handoff", 1, Integer.MAX_VALUE))
+                .property("count", integerSchema("positive number of new items to collect before the handoff, exactly as the player stated it", 1, Integer.MAX_VALUE))
                 .property("player", stringSchema("optional recipient player name; defaults to owner"))
                 .required("item")
                 .required("count")
@@ -325,7 +326,7 @@ public final class ToolRegistry {
 
     /** Goal-driven high-level actions: gather/break/fish/trade plus every deterministic-goal task. */
     private void registerGoalTools() {
-        register("fulfill_items", "Newly produce and fulfill an arbitrary compound item request with deterministic dependency planning and exact player handoffs. Use when the player asks for multiple different final items, a kit, a bundle, or a split between players. Every final allocation is additional to matching inventory held when this call starts; it cannot hand over a pre-existing matching stack. Put every final allocation in items; recipient omitted means keep it on this bot, while a named recipient is handed that newly produced item after all production is complete. The model chooses the manifest from the player's request; this tool does not assume a fixed kit or recipe.", objectSchema()
+        register("fulfill_items", "Newly produce and fulfill an arbitrary compound item request with deterministic dependency planning and exact player handoffs. Use when the player asks for multiple different final items, a kit, a bundle, a split between players, or a new quantity of a raw resource that needs a tool you may lack (stone, ore). Put every final allocation in items; recipient omitted means keep it on this bot, while a named recipient is handed that newly produced item after all production is complete. Everything handed to a player and every raw resource kept is additional to matching inventory held when this call starts; it cannot hand over a pre-existing matching stack. A crafted item kept on the bot (your own tool or armor) is satisfied by one already carried. It is for production only: to hand over what the bot already carries, call give_item once per item. The model chooses the manifest from the player's request; this tool does not assume a fixed kit or recipe.", objectSchema()
                 .property("items", allocationArraySchema("complete final item allocations for this request"))
                 .required("items")
                 .build(), (bot, args) -> {
@@ -430,7 +431,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("achieve_goal", "Achieve an item/tool inventory goal with deterministic planning. Use this for requests like make an iron pickaxe or obtain 10 iron ingots; do not manually decompose the steps.", objectSchema()
+        register("achieve_goal", "Achieve an item/tool inventory goal with deterministic planning. Use this for requests like make an iron pickaxe or obtain 10 iron ingots; do not manually decompose the steps. The goal is met by a matching stack the bot already carries, so it is not offered for a request to newly gather/mine/chop raw resources: use gather, mine_ore, harvest_crop or fulfill_items there.", objectSchema()
                 .property("item", stringSchema("target item/tool id, for example minecraft:iron_pickaxe or minecraft:iron_ingot"))
                 .property("count", integerSchema("desired inventory count"))
                 .required("item")
@@ -630,7 +631,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("give_item", "Hand real items to a nearby player: walks within reach, then drops exactly the requested item/count toward them using the same vanilla drop path a human player uses with Q (no teleport or forced pickup). Use this whenever the player asks to be given/handed an item directly, as opposed to deposit (containers) or trade (villagers). Omit player to give to this bot's owner.", objectSchema()
+        register("give_item", "Hand real items to a nearby player: walks within reach, then drops exactly the requested item/count toward them using the same vanilla drop path a human player uses with Q (no teleport or forced pickup). Use this whenever the player asks to be given/handed an item the bot already carries ('give me 32 logs', 'give me your logs'; one call per item for a bundle), as opposed to deposit (containers) or trade (villagers). It never collects anything: a request to get/gather/mine new resources is served by the collection tools (gather_then_give, fulfill_items, gather, mine_ore) and give_item only after that finishes. Omit player to give to this bot's owner.", objectSchema()
                 .property("item", stringSchema("item id to give, for example minecraft:stone_pickaxe"))
                 .property("count", integerSchema("item count to give"))
                 .property("player", stringSchema("optional recipient player name; defaults to owner"))
@@ -1393,7 +1394,7 @@ public final class ToolRegistry {
     }
 
     /** The only non-registry item spelling accepted by gather_then_give: generic tree logs. */
-    private static boolean isGenericLogHandoff(String item) {
+    static boolean isGenericLogHandoff(String item) {
         return item != null && ("logs".equalsIgnoreCase(item.trim())
                 || "minecraft:logs".equalsIgnoreCase(item.trim()));
     }
@@ -1421,12 +1422,39 @@ public final class ToolRegistry {
      */
     private static Goal.Fulfill freshFulfillGoal(AIPlayerEntity bot, List<Goal.Allocation> allocations) {
         Goal.Fulfill canonical = new Goal.Fulfill(allocations);
-        Map<Item, Integer> baselines = new LinkedHashMap<>();
-        for (Goal.Allocation allocation : canonical.allocations()) {
-            baselines.putIfAbsent(allocation.item(),
-                    GoalSnapshotCollector.inventoryCount(bot, allocation.item()));
+        return new Goal.Fulfill(canonical.allocations(), freshBaselines(canonical.allocations(),
+                item -> GoalSnapshotCollector.inventoryCount(bot, item)));
+    }
+
+    /**
+     * The count of each requested item that the request must be additional to. Everything handed to a
+     * player, and every raw resource, is a quota of new units above what is carried. A crafted item the
+     * bot keeps for itself is different: "make yourself a pickaxe and make me one" is already half done
+     * when the bot carries a pickaxe, so a kept tool or armor piece is satisfied by what is held (baseline
+     * zero), and next to a handoff of the same item only the units beyond the kept ones are new. The
+     * key is present for every item so the request stays a fresh one even when the baseline is zero.
+     */
+    static Map<Item, Integer> freshBaselines(List<Goal.Allocation> allocations, ToIntFunction<Item> carried) {
+        Map<Item, Integer> kept = new LinkedHashMap<>();
+        Set<Item> delivered = new HashSet<>();
+        for (Goal.Allocation allocation : allocations) {
+            if (allocation.delivery()) {
+                delivered.add(allocation.item());
+                kept.putIfAbsent(allocation.item(), 0);
+            } else {
+                kept.merge(allocation.item(), allocation.count(), Integer::sum);
+            }
         }
-        return new Goal.Fulfill(canonical.allocations(), baselines);
+        Map<Item, Integer> baselines = new LinkedHashMap<>();
+        kept.forEach((item, keptCount) -> {
+            int held = carried.applyAsInt(item);
+            if (!ItemNouns.isCraftedOutput(item)) {
+                baselines.put(item, held);
+            } else {
+                baselines.put(item, delivered.contains(item) ? Math.max(0, held - keptCount) : 0);
+            }
+        });
+        return baselines;
     }
 
     /**

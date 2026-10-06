@@ -52,9 +52,29 @@ final class BrainCoordinatorSystemPromptTest {
     void distinguishesNewResourceCollectionFromAnExistingInventoryHandoff() {
         String prompt = BrainCoordinator.systemPrompt("Moss", "JackNotInTheBox");
 
-        assertTrue(prompt.contains("Direct give_item is only for an explicit handoff of existing inventory"));
-        assertTrue(prompt.contains("never substitute it for \"get\", \"gather\", \"collect\", \"chop\", \"mine\", \"harvest\""));
-        assertTrue(prompt.contains("use gather_then_give"));
-        assertTrue(prompt.contains("For an unspecified plural \"logs\", call gather_then_give with item=\"logs\""));
+        assertTrue(prompt.contains("Direct give_item is only for handing over what you already carry"));
+        assertTrue(prompt.contains("give_item and achieve_goal are not offered"));
+        assertTrue(prompt.contains("gather_then_give with the number the player stated"));
+        assertTrue(prompt.contains("item=\"logs\" for an unspecified plural \"logs\""));
+        assertTrue(prompt.contains("fulfill_items is for production, never for handing over carried stock"));
+        assertTrue(prompt.contains("hand over a bundle with one give_item call per item"));
+    }
+
+    @Test
+    void thePromptSteersWhereTheRoutingLeavesRoom() {
+        String prompt = BrainCoordinator.systemPrompt("Moss", "JackNotInTheBox");
+
+        // No number stated: gather_then_give needs one, so the plain collection tools stay and the prompt says so.
+        assertTrue(prompt.contains("If the player gives no number, collect with gather, mine_ore or harvest_crop without count"));
+        // A crafted result cannot go through gather_then_give (it would hand over the raw resource).
+        assertTrue(prompt.contains("gather_then_give would hand over the logs, not the table"));
+        // The prompt must not call for tools exactly where the routing hides them.
+        assertTrue(prompt.contains("For \"make an iron pickaxe\" or \"get iron ingots\", call achieve_goal"));
+        RegistryBootstrap.ensure();
+        for (String phrase : new String[] {"make an iron pickaxe", "get iron ingots"}) {
+            ToolRouting routing = new ToolRouting();
+            routing.beginInstruction(RequestIntent.parse(phrase));
+            assertFalse(routing.withheldTools().contains("achieve_goal"), phrase);
+        }
     }
 }
