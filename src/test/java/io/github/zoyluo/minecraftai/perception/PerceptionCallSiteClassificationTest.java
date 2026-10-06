@@ -45,6 +45,7 @@ class PerceptionCallSiteClassificationTest {
         Map<String, Counts> m = new TreeMap<>();
         // ---- the predicates themselves
         m.put("mode/ObservableWorldQuery.java", Counts.of(2, 4, 2));            // definitions: canNoticeCreature(+Within), canObserveEntity(+Within), plain rays
+        m.put("mode/SightClip.java", Counts.of(0, 0, 1));                      // definition: LivingEntity.hasLineOfSight with eyes that see through foliage and water (a sight ray, not a strike)
         m.put("perception/CreatureSenses.java", Counts.of(0, 1, 2));           // perception off (and a passive animal, a failed scan): today's plain line-of-sight test; the projectile with perception off is exactly canObserveEntity
         // ---- creature noticing (converted)
         m.put("task/DangerWatcher.java", Counts.of(4, 0, 2));                  // death-site hostiles, fight-before-rescue, trapped fight back, last-resort shelter; physical: canReachThreat (owner-aware ray)

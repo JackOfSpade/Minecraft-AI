@@ -16,6 +16,7 @@ import io.github.zoyluo.minecraftai.mode.CapabilityPolicy;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.mode.SeeThrough;
 import io.github.zoyluo.minecraftai.observe.TpsGuard;
 import io.github.zoyluo.minecraftai.persist.BotPersistence;
 import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
@@ -82,6 +83,9 @@ public class MinecraftAiMod implements ModInitializer {
         // are loaded or reloaded (BreakVerdictCache names no Baritone type, so this stays free with the legacy engine).
         ServerLifecycleEvents.SERVER_STARTING.register(server -> BreakVerdictCache.invalidate());
         CommonLifecycleEvents.TAGS_LOADED.register((registries, client) -> BreakVerdictCache.invalidate());
+        // The see-through verdict of a block (leaves, fences ... are tags) is cached the same way, for the same reasons.
+        ServerLifecycleEvents.SERVER_STARTING.register(server -> SeeThrough.invalidate());
+        CommonLifecycleEvents.TAGS_LOADED.register((registries, client) -> SeeThrough.invalidate());
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             BotLog.lifecycle("server_started", "motd", server.getMotd());
             RuntimeLifecycleCoordinator.INSTANCE.onServerStarted(server, config);

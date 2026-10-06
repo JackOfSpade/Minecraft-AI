@@ -192,6 +192,28 @@ the bot's interaction-scale search range. That remembered block is still re-prov
 bot-or-owner eye ray before its state is reread or it becomes a route target; stale memory is a
 lead, never a blind-path permission.
 
+## See-through sight
+
+A bot's eyes pass through what a player looks straight past: leaves, fences and fence gates, glass, panes and bars, ice, slime
+and honey, chains, ladders, scaffolding, crops, and every plant, torch, rail, web or vine nothing collides with, and water
+(waterlogged or not). Lava never is, and neither are walls, doors, trapdoors, slabs, stairs, chests, beds, signs, buttons or any
+solid cube. `mode/SeeThrough` decides per block from vanilla's own classes, tags and collision shapes (so a modded block falls
+into a rule instead of needing a list entry) and `SeeThroughGoldenTest` pins the verdict of all 1166 vanilla blocks (248
+see-through): a block a later Minecraft adds fails the test until somebody decides on purpose.
+
+`mode/SightClip` is `level.clip` with those cells skipped. `SightClipContext` is a vanilla `ClipContext` whose two per-cell hooks
+answer an empty shape for what is skipped, so vanilla's own traversal and nearest-hit rule do the rest and a ray that crosses
+nothing see-through is exactly vanilla's. The cell being observed (the target) is never skipped, an eye inside a see-through cell
+sees out of it, and lava keeps its shape even for a ray that asked for `Fluid.NONE`.
+
+**Sight is not reach.** Seeing a block behind a leaf does not let a hand reach it: every actuator (break, place, open, interact,
+strike, bucket) keeps its own vanilla `ClipContext` and refuses what a real pick ray would not reach. The context therefore also
+reports `obstructions()`: the see-through blocks a vanilla pick ray along the same segment would hit, nearest the eye first. A pick
+ray is an `OUTLINE` ray with `Fluid.NONE` (`Entity.pick`), so that is the shape the list is modelled with whatever shape the sight
+ray used: water is never an obstruction, a block with no collision but an outline (grass, a torch, an open gate) is, and a ray
+that slips past a lone fence post or a pane's post is not. `crossed()` lists every skipped cell with the state it really holds, so
+a recorder never stores a leaf, a fence or water as air.
+
 ## Scope
 
 * IN: every place a bot NOTICES a creature (threat detection, target acquisition, aggro, aggressor checks,
