@@ -95,6 +95,13 @@ final class BrainCoordinatorSystemPromptTest {
         compound.beginInstruction(RequestIntent.parse("gather 32 logs, craft a table and give it to me"));
         assertFalse(compound.withheldTools().contains("fulfill_items"));
         assertTrue(compound.withheldTools().contains("gather_then_give"));
+        // A result made of the collected resource itself would be collected twice by one manifest: the routing
+        // withholds fulfill_items there, and the prompt says to collect first.
+        assertTrue(prompt.contains("a result made of the collected resource itself (\"mine 5 iron, smelt it, give it to me\")"));
+        ToolRouting smelted = new ToolRouting();
+        smelted.beginInstruction(RequestIntent.parse("mine 5 iron, smelt it and give it to me"));
+        assertTrue(smelted.withheldTools().contains("fulfill_items"));
+        assertFalse(smelted.withheldTools().contains("mine_ore"));
         // Without a number gather_then_give collects for the ten-minute window; several resources are each collected.
         assertTrue(prompt.contains("call gather_then_give without count: it collects for up to ten minutes"));
         assertTrue(prompt.contains("every resource the player asked for"));

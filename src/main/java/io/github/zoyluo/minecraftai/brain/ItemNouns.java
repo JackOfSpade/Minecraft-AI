@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.brain;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.craft.SmeltChain;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -70,11 +71,15 @@ final class ItemNouns {
             "prismarine", "dark_prismarine", "sea_lantern", "leather", "magma_cream");
     /** Item ids contain a few grammar words ("lily_of_the_valley", "flint_and_steel"): they name nothing alone. */
     private static final Set<String> GRAMMAR_WORDS = Set.of("the", "of", "on", "a", "an", "and", "or", "in", "at", "to", "for");
-    /** Words that say how much or which kind, not what: "stack of", "iron ore", "stone blocks". */
+    /**
+     * Words that say how much or which kind, not what: "stack of", "iron ore", "stone blocks". "Raw" is one: raw
+     * iron is what mining iron ore yields, so a collection that names the ore is a collection of it; a vein is the
+     * ore it is made of.
+     */
     private static final Set<String> GENERIC_NOUN_WORDS = Set.of(
             "ore", "ores", "block", "blocks", "item", "items", "stack", "stacks", "piece", "pieces", "pile",
-            "piles", "dozen", "dozens", "of");
-    /** Several words for one thing: the match keys of "wood" and "trees" are the log items' own word. */
+            "piles", "dozen", "dozens", "of", "raw", "vein", "veins");
+    /** Several words for one thing: the spellings of "wood" and "trees" include the log items' own word. */
     private static final Map<String, String> NOUN_SYNONYMS = Map.of(
             "wood", "log", "woods", "log", "tree", "log", "trees", "log", "trunk", "log", "timber", "log",
             "stone", "cobblestone", "cobble", "cobblestone", "pork", "porkchop");
@@ -188,38 +193,70 @@ final class ItemNouns {
     }
 
     /**
-     * The words an item has to contain (as one whole id segment) to be what a noun phrase names: "oak logs"
-     * gives {oak, log, logs}, "wood" gives {log}. Empty when the phrase says nothing specific ("stacks of").
+     * What a noun phrase names, as the words an item id has to contain to be it: one set per word of the
+     * phrase, holding the spellings that word can have ("oak logs" is {oak} and {log, logs}, "wood" is
+     * {wood, log}). An item is what the phrase names when each set has one of its spellings as a whole id
+     * segment, so "oak logs" is no birch log and "raw copper" is no raw iron. No sets at all (a phrase that
+     * says nothing an item id can be checked against, "stacks of") is any item.
      */
-    static Set<String> matchWords(List<String> noun) {
-        Set<String> keys = new LinkedHashSet<>();
-        for (String word : noun) {
-            if (GENERIC_NOUN_WORDS.contains(word)) {
-                continue;
-            }
-            for (String variant : singularVariants(word)) {
-                keys.add(variant);
-                String synonym = NOUN_SYNONYMS.get(variant);
-                if (synonym != null) {
-                    keys.add(synonym);
+    record Words(List<Set<String>> groups) {
+        static final Words ANY = new Words(List.of());
+
+        /** Whether an item id ("minecraft:oak_log", "raw_iron", the literal "logs") has every word of the phrase. */
+        boolean matches(String itemId) {
+            return matchedWords(itemId) == groups.size();
+        }
+
+        /** How many of the phrase's words the item id has: all of them when it is what the phrase names. */
+        int matchedWords(String itemId) {
+            String path = itemId.substring(itemId.indexOf(':') + 1).toLowerCase(java.util.Locale.ROOT);
+            List<String> segments = List.of(path.split("_"));
+            int matched = 0;
+            for (Set<String> spellings : groups) {
+                if (segments.stream().anyMatch(spellings::contains)) {
+                    matched++;
                 }
             }
+            return matched;
         }
-        return keys;
+
+        /**
+         * Whether two phrases name the same resource: each of the words of either has a spelling in common
+         * with a word of the other ("logs" and "wood" are both the log items; "oak logs" is not "birch logs").
+         */
+        boolean sameAs(Words other) {
+            return coveredBy(groups, other.groups) && coveredBy(other.groups, groups);
+        }
+
+        private static boolean coveredBy(List<Set<String>> words, List<Set<String>> by) {
+            return words.stream().allMatch(word -> by.stream().anyMatch(other -> !Collections.disjoint(word, other)));
+        }
     }
 
-    /** Whether an item id ("minecraft:oak_log", "raw_iron", the literal "logs") is what {@link #matchWords} describes. */
-    static boolean matchesItem(Set<String> keys, String itemId) {
-        if (keys.isEmpty()) {
-            return true;
-        }
-        String path = itemId.substring(itemId.indexOf(':') + 1).toLowerCase(java.util.Locale.ROOT);
-        for (String segment : path.split("_")) {
-            if (keys.contains(segment)) {
-                return true;
+    /**
+     * The words of a noun phrase that an item id is held to ({@link Words}). Words that say how much or which
+     * kind ("stack of", "iron ore", "raw iron": the ore and the raw item are the same collection) and words no
+     * item can be recognised by ("fresh", "steaks", "the") are left out, so they cannot make a real item miss.
+     */
+    static Words matchWords(List<String> noun) {
+        List<Set<String>> groups = new ArrayList<>();
+        for (String word : noun) {
+            if (GENERIC_NOUN_WORDS.contains(word) || GRAMMAR_WORDS.contains(word)) {
+                continue;
+            }
+            Set<String> spellings = new LinkedHashSet<>();
+            for (String variant : singularVariants(word)) {
+                spellings.add(variant);
+                String synonym = NOUN_SYNONYMS.get(variant);
+                if (synonym != null) {
+                    spellings.add(synonym);
+                }
+            }
+            if (isNounWord(word) || spellings.stream().anyMatch(ItemNouns::isItemSegment)) {
+                groups.add(spellings);
             }
         }
-        return false;
+        return new Words(List.copyOf(groups));
     }
 
     /** The spellings a plural player word can have as a registry word ("torches" -> "torch"). */
@@ -334,6 +371,9 @@ final class ItemNouns {
                 continue;
             }
             String path = BuiltInRegistries.ITEM.getKey(item).getPath();
+            if (path.startsWith("music_disc_")) {
+                continue; // named after songs: "wait", "far", "mall" are ordinary words in chat, not resources
+            }
             String[] parts = path.split("_");
             all.addAll(List.of(parts));
             last.computeIfAbsent(parts[parts.length - 1], key -> new ArrayList<>()).add(item);

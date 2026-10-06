@@ -90,7 +90,7 @@ public final class BrainRoutingGameTests {
     }
 
     // The continuation waits a few seconds of wall-clock time, which the test server ticks through many times over.
-    @GameTest(maxTicks = 20000)
+    @GameTest(maxTicks = 16000)
     public void aGoalWakeAfterAFinishedTaskIsNotPartOfTheLastCollectionRequest(GameTestHelper context) {
         // The first call answers with a tool that starts nothing, so the instruction goes on; when its
         // continuation finds the bot idle after a finished task, the long-term goal is what wakes the model.
@@ -115,7 +115,7 @@ public final class BrainRoutingGameTests {
     }
 
     // The wait for the gather's follow-up call is wall-clock time too.
-    @GameTest(maxTicks = 20000)
+    @GameTest(maxTicks = 16000)
     public void theCarriedCoalStaysBlockedAfterTheLogsOfALogsAndCoalRequestAreCollected(GameTestHelper context) {
         Harness harness = collectOneLog(context, "RouteTwoGT", "get 1 log and 1 coal");
 
@@ -135,7 +135,7 @@ public final class BrainRoutingGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20000)
+    @GameTest(maxTicks = 16000)
     public void theCarriedStockOpensOnceTheOnlyRequestedResourceIsCollected(GameTestHelper context) {
         Harness harness = collectOneLog(context, "RouteOneGT", "get 1 log");
 

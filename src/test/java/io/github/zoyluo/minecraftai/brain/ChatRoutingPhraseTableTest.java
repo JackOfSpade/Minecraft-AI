@@ -35,9 +35,10 @@ final class ChatRoutingPhraseTableTest {
          */
         CRAFT_RESULT(Set.of("give_item", "achieve_goal", "gather_then_give")),
         /**
-         * A handoff of only part of the collection, or a crafted result the bot keeps: gather_then_give would hand over
-         * everything it collected, and fulfill_items cannot keep the rest beside the part (nor does it make a second
-         * tool for the bot), so collect first and craft or hand the part over afterwards.
+         * A handoff of only part of the collection, a crafted result the bot keeps, or a result made of the collection
+         * itself ("smelt it"): gather_then_give would hand over everything it collected, and fulfill_items cannot keep
+         * the rest beside the part (nor does it make a second tool for the bot, nor collect the quota once as the
+         * result's material and once as the raw quota), so collect first and craft or hand the part over afterwards.
          */
         COLLECT_FIRST(Set.of("give_item", "achieve_goal", "gather_then_give", "fulfill_items"));
 
@@ -72,6 +73,10 @@ final class ChatRoutingPhraseTableTest {
     }
 
     private static Phrase keptResult(String text) {
+        return new Phrase(text, Route.COLLECT_FIRST);
+    }
+
+    private static Phrase transformedResult(String text) {
         return new Phrase(text, Route.COLLECT_FIRST);
     }
 
@@ -499,7 +504,15 @@ final class ChatRoutingPhraseTableTest {
             keptResult("gather 20 logs and make a chest"),
             keptResult("chop 10 logs and craft 40 planks"),
             keptResult("farm 10 wheat and bake bread"),
-            craftResult("mine 5 iron, smelt it and give it to me"),
+            transformedResult("mine 5 iron, smelt it and give it to me"),
+            transformedResult("mine 5 iron then smelt it and give it to me"),
+            transformedResult("mine 5 iron and smelt the iron and give it to me"),
+            transformedResult("farm 10 wheat, bake it into bread and give it to me"),
+            transformedResult("chop 10 logs, craft them into planks and give them to me"),
+            craftResult("mine 5 iron, make me an iron pickaxe"),
+            craftResult("gather 32 logs and make a table out of them for me"),
+            craftResult("gather 32 logs, then make a table out of them and hand it over"),
+            keptResult("gather 32 logs and craft a table out of them"),
             // === natural resources a recipe also makes: collected, like any other resource
             collect("collect 10 white wool"),
             collect("gather 20 white wool"),
@@ -551,6 +564,16 @@ final class ChatRoutingPhraseTableTest {
             collect("moss go get me 10 coal"),
             collect("go gather 32 logs"),
             collect("gonna need 10 iron"),
+            // wanting is no doing: what the player will need is still asked of the bot
+            collect("i will need 32 logs"),
+            collect("ill need 5 iron"),
+            collect("im going to need 10 logs"),
+            collect("i'll need a stack of cobblestone"),
+            collect("i will want 16 coal"),
+            collect("im gonna want some wood"),
+            collect("i am going to need 10 sand"),
+            collect("ill need you to gather 32 logs"),
+            collect("i will watch you mine coal"),
             collect("need 32 logs asap"),
             collect("get to chopping trees"),
             collect("time to mine some iron"),
@@ -745,6 +768,7 @@ final class ChatRoutingPhraseTableTest {
             collect("start mining"),
             collect("start chopping"),
             collect("keep gathering"),
+            collect("get 32 logs and wait"),
             collect("continue mining"),
             collect("continue gathering logs"),
             collect("resume mining"),
@@ -881,9 +905,22 @@ final class ChatRoutingPhraseTableTest {
         assertEquals(3, RequestIntent.parse("gather logs, coal and iron").resources().size());
         assertEquals(1, RequestIntent.parse("gather logs and wood").resources().size(),
                 "two words for the same thing are one resource");
-        assertEquals(List.of(Set.of()), RequestIntent.parse("start gathering").resources(),
+        assertEquals(List.of(ItemNouns.Words.ANY), RequestIntent.parse("start gathering").resources(),
                 "a request that names nothing is answered by any collection");
         assertEquals(List.of(), RequestIntent.parse("give me 32 logs").resources());
+        assertEquals(2, RequestIntent.parse("get 32 oak logs and 32 birch logs").resources().size(),
+                "two species share the word logs, not the resource");
+        assertEquals(2, RequestIntent.parse("get 10 raw iron and 10 raw copper").resources().size());
+        assertEquals(1, RequestIntent.parse("get 10 raw iron and iron ore").resources().size(),
+                "the raw drop and its ore are one collection");
+        assertEquals(1, RequestIntent.parse("get 32 oak logs and oak wood").resources().size());
+        assertEquals(1, RequestIntent.parse("get 32 logs and wait").resources().size(),
+                "wait is a music disc's name, not a second resource");
+        assertEquals(List.of(ItemNouns.matchWords(List.of("logs"))),
+                RequestIntent.parse("gather and hand me 32 logs").resources(),
+                "the handoff names what the bare gather collects");
+        assertEquals(List.of(ItemNouns.matchWords(List.of("iron"))),
+                RequestIntent.parse("mine the entire iron ore vein").resources(), "a vein is its ore");
         assertTrue(RequestIntent.parse("get 32 logs and 10 coal").quantityStated());
     }
 

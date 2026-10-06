@@ -1,7 +1,6 @@
 package io.github.zoyluo.minecraftai.brain;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -33,13 +32,17 @@ import java.util.Set;
  *                          give me 16", "... give me half"), so it is not the whole collection
  * @param craftsOutcome     a crafted item is part of the outcome (craft/make/get an iron pickaxe,
  *                          or hand over a table), as opposed to only raw materials
+ * @param transformsAcquired the crafted result is the collected stock itself made into something else ("smelt
+ *                          it", "cook the beef", "craft them into planks"), so the raw quota cannot also stay
+ *                          beside it: collecting that quota once is all the request asks for
  * @param resources         one entry per raw resource asked for, each the words an item id must contain to be
- *                          it (see {@link ItemNouns#matchWords}); an empty set stands for a request that names
- *                          none ("start gathering"), which any collection answers
+ *                          it (see {@link ItemNouns#matchWords}); {@link ItemNouns.Words#ANY} stands for a
+ *                          request that names none ("start gathering"), which any collection answers
  */
 record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsOverAcquired,
-                     boolean handsOverPart, boolean craftsOutcome, List<Set<String>> resources) {
-    static final RequestIntent NONE = new RequestIntent(false, false, false, false, false, List.of());
+                     boolean handsOverPart, boolean craftsOutcome, boolean transformsAcquired,
+                     List<ItemNouns.Words> resources) {
+    static final RequestIntent NONE = new RequestIntent(false, false, false, false, false, false, List.of());
 
     private enum Verb { ACQUIRE_CORE, ACQUIRE_SOFT, HUNT, HANDOFF, CRAFT }
 
@@ -117,6 +120,10 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
     /** After "i" or "im": the player says what they will do themselves ("i will mine it", "im going to chop"). */
     private static final Set<String> OWN_ACTION_AUXILIARIES = Set.of(
             "will", "am", "can", "could", "should", "might", "shall", "gonna", "going", "wanna");
+    /** Verbs that say what the player wants rather than what they do: "i will need 32 logs" is still a request. */
+    private static final Set<String> WISH_VERBS = Set.of("need", "want", "require");
+    /** Crafting verbs that change what is collected into another form instead of making something new from it. */
+    private static final Set<String> PROCESSING_VERBS = Set.of("smelt", "smelting", "cook", "cooking", "bake");
     /** Verbs that make the player's wish physical whatever the noun is: nothing is mined or chopped by crafting. */
     private static final Set<String> PHYSICAL_VERBS = Set.of(
             "mine", "mining", "dig", "digging", "chop", "chopping", "harvest", "harvesting",
@@ -146,7 +153,7 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
             "plz", "thanks", "thx", "too", "again", "then", "and", "or", "but", "you", "youve", "youre", "u", "ya",
             "which", "who", "what", "whatever", "that", "is", "are", "was", "were", "will", "would", "can", "could",
             "should", "asap", "soon", "later", "today", "tonight", "quickly", "fast", "over", "around", "round",
-            "together", "nearby", "close", "closer");
+            "together", "nearby", "close", "closer", "into");
     private static final Set<String> YOU = Set.of("you", "youve", "youre", "u", "ya");
     private static final Set<String> YOURS = Set.of("your", "ur", "yours", "urs");
     /** "the logs that/what you have": a relative clause about the bot's own stock. */
@@ -227,11 +234,11 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
                 }
             }
         }
-        List<Set<String>> resources = reading.acquired && reading.resources.isEmpty()
-                ? List.of(Set.of()) : List.copyOf(reading.resources);
+        List<ItemNouns.Words> resources = reading.acquired && reading.resources.isEmpty()
+                ? List.of(ItemNouns.Words.ANY) : List.copyOf(reading.resources);
         return new RequestIntent(reading.acquired, reading.quantity,
                 reading.handsOver || reading.acquired && reading.craftedForPlayer, reading.partial,
-                reading.crafts, resources);
+                reading.crafts, reading.transforms, resources);
     }
 
     static RequestIntent parse(String text) {
@@ -245,6 +252,8 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         boolean handsOver;
         boolean partial;
         boolean crafts;
+        /** A crafted result is made out of the collected stock itself ("smelt it"). */
+        boolean transforms;
         /** An acquisition verb without an object ("gather and hand me 32 logs") borrows the handoff's object. */
         boolean objectPending;
         /** A crafted item is made for the player ("make me a table"), a handoff of the crafted result. */
@@ -253,13 +262,13 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         boolean huntPending;
         /** The number or share words of the collection clause, to compare with what the handoff names. */
         List<String> collectQuantity = List.of();
-        final List<Set<String>> resources = new ArrayList<>();
+        final List<ItemNouns.Words> resources = new ArrayList<>();
         /** The verb the next object or verb of the same sentence continues, with whether a negation governs it. */
         Carry carry;
 
-        /** Two phrases that share a word name the same resource ("logs", "wood": both the log items). */
-        void addResource(Set<String> words) {
-            if (resources.stream().noneMatch(known -> known.equals(words) || !Collections.disjoint(known, words))) {
+        /** Two words for one resource ("logs", "wood": both the log items) are asked for once. */
+        void addResource(ItemNouns.Words words) {
+            if (resources.stream().noneMatch(known -> known.sameAs(words))) {
                 resources.add(words);
             }
         }
@@ -346,10 +355,20 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         }
     }
 
-    /** "i will mine some coal myself": the player says what they will do, which asks nothing of the bot. */
+    /**
+     * "i will mine some coal myself": the player says what they will do, which asks nothing of the bot. Wishing
+     * is no doing: "i will need 32 logs" and "im going to want some coal" are requests, and so is what the player
+     * asks of someone else after it ("ill need you to gather 32 logs", "i will watch you mine").
+     */
     private static boolean ownAction(List<String> clause, int index) {
+        if (WISH_VERBS.contains(clause.get(index))) {
+            return false;
+        }
         for (int i = index - 1; i >= Math.max(0, index - NEGATION_REACH); i--) {
             String word = clause.get(i);
+            if (WISH_VERBS.contains(word) || YOU.contains(word)) {
+                return false;
+            }
             if (word.equals("ill") || (word.equals("i") || word.equals("im")) && OWN_ACTION_AUXILIARIES.contains(at(clause, i + 1))) {
                 return true;
             }
@@ -415,6 +434,8 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
                 boolean makes = noun == NounPhrase.CRAFTED || noun == NounPhrase.RAW || noun == NounPhrase.PRONOUN;
                 reading.crafts |= makes;
                 reading.craftedForPlayer |= makes && phrase.recipient();
+                // What is smelted or cooked, or crafted as "it", is the collected stock itself in another form.
+                reading.transforms |= makes && (noun == NounPhrase.PRONOUN || PROCESSING_VERBS.contains(word));
             }
             case HANDOFF -> {
                 // Only handing over what was just collected matters. A handoff of carried stock, of
@@ -437,6 +458,9 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
                 } else if (reading.objectPending) {
                     reading.quantity |= phrase.quantified;
                     reading.collectQuantity = phrase.quantityWords;
+                    if (noun == NounPhrase.RAW) {
+                        reading.addResource(ItemNouns.matchWords(phrase.noun)); // "gather and hand me 32 logs"
+                    }
                 } else if (!phrase.quantityWords.isEmpty() && !phrase.quantityWords.equals(reading.collectQuantity)) {
                     reading.partial = true;
                 }
@@ -497,7 +521,7 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
         }
         items.add(current);
         boolean quantified = false;
-        Set<Set<String>> resources = new LinkedHashSet<>();
+        Set<ItemNouns.Words> resources = new LinkedHashSet<>();
         for (List<String> item : items) {
             if (item.isEmpty()) {
                 continue; // "32 logs, thanks"
@@ -523,8 +547,8 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
                     || ItemNouns.classify(noun, false) != ItemNouns.Kind.RAW) {
                 return false;
             }
-            Set<String> words = ItemNouns.matchWords(noun);
-            if (words.isEmpty()) {
+            ItemNouns.Words words = ItemNouns.matchWords(noun);
+            if (words.groups().isEmpty()) {
                 return false; // "3 blocks": a unit word, not a resource
             }
             quantified |= itemQuantified;
@@ -653,6 +677,15 @@ record RequestIntent(boolean acquiresRaw, boolean quantityStated, boolean handsO
             j++;
         }
         while (j < clause.size() && !OBJECT_ENDS.contains(clause.get(j)) && !VERBS.containsKey(clause.get(j))) {
+            if (clause.get(j).equals("out") && at(clause, j + 1).equals("of")) {
+                // "make a table OUT OF them for me": what it is made of is no part of the object ("mine out the vein"
+                // has no "of")
+                j += 2;
+                while (j < clause.size() && !OBJECT_ENDS.contains(clause.get(j)) && !VERBS.containsKey(clause.get(j))) {
+                    j++;
+                }
+                break;
+            }
             phrase.noun.add(clause.get(j));
             j++;
         }

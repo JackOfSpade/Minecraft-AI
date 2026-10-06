@@ -166,27 +166,78 @@ final class ItemNounsTest {
         assertFalse(ItemNouns.isCreature(List.of()));
     }
 
+    private static ItemNouns.Words words(String... noun) {
+        return ItemNouns.matchWords(List.of(noun));
+    }
+
     @Test
     void aNounPhraseKeepsTheWordsAnItemMustContainToBeIt() {
-        assertEquals(java.util.Set.of("oak", "logs", "log"), ItemNouns.matchWords(List.of("oak", "logs")));
-        assertTrue(ItemNouns.matchWords(List.of("wood")).contains("log"), "wood is the log items' own word");
-        assertTrue(ItemNouns.matchWords(List.of("trees")).contains("log"));
-        assertTrue(ItemNouns.matchWords(List.of("stone")).contains("cobblestone"), "breaking stone drops cobblestone");
-        assertTrue(ItemNouns.matchWords(List.of("stack", "of", "logs")).contains("log"));
-        assertFalse(ItemNouns.matchWords(List.of("stack", "of", "logs")).contains("stack"));
-        assertEquals(java.util.Set.of(), ItemNouns.matchWords(List.of("stacks", "of")));
+        assertEquals(List.of(java.util.Set.of("oak"), java.util.Set.of("logs", "log")), words("oak", "logs").groups());
+        assertTrue(words("wood").groups().get(0).contains("log"), "wood is the log items' own word");
+        assertTrue(words("trees").groups().get(0).contains("log"));
+        assertTrue(words("stone").groups().get(0).contains("cobblestone"), "breaking stone drops cobblestone");
+        assertEquals(1, words("stack", "of", "logs").groups().size(), "stack and of say how much, not what");
+        assertEquals(ItemNouns.Words.ANY, words("stacks", "of"));
+        assertEquals(words("iron"), words("raw", "iron"), "raw iron is what mining iron ore yields");
+        assertEquals(words("logs"), words("fresh", "logs"), "no item is called fresh: the word cannot make a log miss");
+        assertEquals(ItemNouns.Words.ANY, words("steaks"), "no item id says steak: nothing to hold an item to");
+        assertEquals(words("iron"), words("iron", "vein"), "a vein is the ore it is made of");
+        assertEquals(ItemNouns.Words.ANY, words("vein"));
 
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("logs")), "minecraft:oak_log"));
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("logs")), "logs"), "the gather_then_give sentinel");
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("coal")), "minecraft:coal_ore"));
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("coal")), "minecraft:deepslate_coal_ore"));
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("iron")), "minecraft:raw_iron"));
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("diamonds")), "minecraft:diamond"));
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("berries")), "minecraft:sweet_berries"));
-        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("pork")), "minecraft:porkchop"));
-        assertFalse(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("logs")), "minecraft:coal"));
-        assertFalse(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("coal")), "minecraft:oak_log"));
-        assertTrue(ItemNouns.matchesItem(java.util.Set.of(), "minecraft:anything"), "no words: any item");
+        assertTrue(words("logs").matches("minecraft:oak_log"));
+        assertTrue(words("logs").matches("logs"), "the gather_then_give sentinel");
+        assertTrue(words("coal").matches("minecraft:coal_ore"));
+        assertTrue(words("coal").matches("minecraft:deepslate_coal_ore"));
+        assertTrue(words("iron").matches("minecraft:raw_iron"));
+        assertTrue(words("raw", "iron").matches("minecraft:iron_ore"), "the ore and its raw drop are one collection");
+        assertTrue(words("diamonds").matches("minecraft:diamond"));
+        assertTrue(words("berries").matches("minecraft:sweet_berries"));
+        assertTrue(words("pork").matches("minecraft:porkchop"));
+        assertFalse(words("logs").matches("minecraft:coal"));
+        assertFalse(words("coal").matches("minecraft:oak_log"));
+        assertTrue(ItemNouns.Words.ANY.matches("minecraft:anything"), "no words: any item");
+    }
+
+    @Test
+    void aSongsNameIsNoResourceTheChatNames() {
+        // music_disc_wait, _far, _mall, _blocks: the discs are named after songs, and "and wait" is no second resource
+        assertFalse(ItemNouns.isNounWord("wait"));
+        assertFalse(ItemNouns.isItemSegment("mall"));
+        assertEquals(ItemNouns.Kind.UNKNOWN, ItemNouns.classify(List.of("wait")));
+        assertTrue(ItemNouns.isNounWord("logs"), "the other words keep their meaning");
+    }
+
+    @Test
+    void anItemHasToHaveEveryWordOfThePhraseToBeIt() {
+        assertTrue(words("oak", "logs").matches("minecraft:oak_log"));
+        assertTrue(words("oak", "logs").matches("minecraft:stripped_oak_log"));
+        assertFalse(words("oak", "logs").matches("minecraft:birch_log"), "a species is part of what was asked for");
+        assertFalse(words("birch", "logs").matches("minecraft:oak_log"));
+        assertFalse(words("raw", "copper").matches("minecraft:raw_iron"));
+        assertFalse(words("raw", "iron").matches("minecraft:raw_copper"));
+        assertTrue(words("oak", "wood").matches("minecraft:oak_log"), "oak wood is the oak log items");
+        assertTrue(words("dark", "oak", "logs").matches("minecraft:dark_oak_log"));
+
+        assertEquals(1, words("lapis", "lazuli").matchedWords("minecraft:lapis_ore"));
+        assertEquals(2, words("lapis", "lazuli").matchedWords("minecraft:lapis_lazuli"));
+        assertFalse(words("lapis", "lazuli").matches("minecraft:lapis_ore"));
+        assertEquals(0, words("oak", "logs").matchedWords("minecraft:coal"));
+    }
+
+    @Test
+    void twoPhrasesNameTheSameResourceOnlyWhenTheirWordsPairUp() {
+        assertTrue(words("logs").sameAs(words("wood")), "two words for the log items");
+        assertTrue(words("logs").sameAs(words("log")));
+        assertTrue(words("oak", "logs").sameAs(words("oak", "wood")));
+        assertTrue(words("stone").sameAs(words("cobblestone")), "breaking stone drops cobblestone");
+        assertTrue(words("iron").sameAs(words("raw", "iron")));
+        assertTrue(ItemNouns.Words.ANY.sameAs(words("steaks")), "neither says anything an item can be held to");
+
+        assertFalse(words("oak", "logs").sameAs(words("birch", "logs")), "they share the word logs, not the resource");
+        assertFalse(words("raw", "iron").sameAs(words("raw", "copper")));
+        assertFalse(words("logs").sameAs(words("oak", "logs")), "any log is not the oak ones");
+        assertFalse(words("coal").sameAs(words("iron")));
+        assertFalse(ItemNouns.Words.ANY.sameAs(words("coal")));
     }
 
     @Test

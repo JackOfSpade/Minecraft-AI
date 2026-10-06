@@ -1,17 +1,18 @@
 package io.github.zoyluo.minecraftai.brain;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.github.zoyluo.minecraftai.goal.Goal;
 import io.github.zoyluo.minecraftai.task.GatherThenGiveTask;
 import io.github.zoyluo.minecraftai.task.TaskState;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
 
 /**
  * Which tools one player instruction may use, so that stock the bot already carries can never
@@ -24,10 +25,11 @@ import java.util.Set;
  * not make explicit (or one that failed) cannot dead-end the request.</p>
  *
  * <p>The guard is per requested resource: "get 32 logs and 10 coal" asks for two collections, and the
- * logs finishing does not open the carried coal. Each collection the chain starts names the items it
- * collects (the tool's own arguments), and its completion answers the requested resources those items
- * are. A collection that names no item, or one that matches no requested resource, answers the whole
- * request: the instruction can never be left withholding a handoff it has no way to finish.</p>
+ * logs finishing does not open the carried coal. A finished collection answers the requested resources its
+ * items are: a task the chain started names them through the tool's own arguments, a goal through what it
+ * collected, so only the collection that actually finished answers, however many the instruction queued. A
+ * collection that names no item, or one that matches no requested resource, answers the whole request: the
+ * instruction can never be left withholding a handoff it has no way to finish.</p>
  */
 final class ToolRouting {
     static final String GIVE_ITEM = "give_item";
@@ -79,6 +81,10 @@ final class ToolRouting {
             + "a result you keep: gather_then_give would hand over the raw resource, and fulfill_items counts a crafted "
             + "item you already carry as done. Collect with gather (count) first; craft the result when the collection "
             + "has finished";
+    private static final String TRANSFORMED_RESULT_BLOCKED = "blocked: the crafted result is made of the resources "
+            + "this request collects, so one fulfill_items manifest would collect them twice (as the raw quota and as "
+            + "the material). Collect with gather/mine_ore (count) first; smelt or craft the result from what you "
+            + "collected and hand it over when the collection has finished";
     private static final String PARTIAL_HANDOFF_BLOCKED = "blocked: the player wants only part of the collection "
             + "handed over, and this tool hands over everything it collects. Collect with gather (count) first; "
             + "hand over the part with give_item when the collection has finished";
@@ -87,12 +93,12 @@ final class ToolRouting {
 
     private RequestIntent intent = RequestIntent.NONE;
     /** The raw resources of this instruction chain that no finished collection has answered yet. */
-    private final List<Set<String>> pending = new ArrayList<>();
+    private final List<ItemNouns.Words> pending = new ArrayList<>();
     /** gather_then_give collected its quota but could not deliver it. */
     private boolean quotaAlreadyGathered;
     /** The direct task (not a goal mission) this chain started, so a stale or unrelated completion is ignored. */
     private String startedTask = "";
-    /** What the collection the chain started is collecting; null when it names no item. */
+    /** What the task the chain started is collecting; null when its tool names no item. */
     private Set<String> startedItems;
 
     /** A new player instruction: everything starts from what its own wording asks for. */
@@ -123,21 +129,36 @@ final class ToolRouting {
         startedItems = items == null ? null : Set.copyOf(items);
     }
 
-    /** A goal mission was started that collects {@code items}, or null when its tool names none. */
-    void noteGoalStarted(Collection<String> items) {
+    /**
+     * A goal mission was started. Goals queue behind one another, so none is tracked by name: each reports what
+     * it collected when it completes ({@link #observeGoalCompleted(Collection)}).
+     */
+    void noteGoalStarted() {
         startedTask = "";
-        startedItems = items == null ? null : Set.copyOf(items);
+        startedItems = null;
     }
 
     /** The status of the active or last task. Only the completion of the task this chain started counts. */
     void observeTask(String taskName, TaskState state) {
         if (state == TaskState.COMPLETED && !startedTask.isEmpty() && startedTask.equals(taskName)) {
-            collectionFinished();
+            // A finished collection is answered once, however often its status is read.
+            Set<String> items = startedItems;
+            startedTask = "";
+            startedItems = null;
+            answer(items);
         }
     }
 
+    /** A goal mission completed whose items are not known: it answers the whole request. */
     void observeGoalCompleted() {
-        collectionFinished();
+        observeGoalCompleted(null);
+    }
+
+    /** A goal mission completed that collected {@code items} (item or block ids); none when it names no item. */
+    void observeGoalCompleted(Collection<String> items) {
+        startedTask = "";
+        startedItems = null;
+        answer(items);
     }
 
     /** A failure reason from the task manager; only a failed handoff proves the quota is already in hand. */
@@ -149,31 +170,49 @@ final class ToolRouting {
     }
 
     /**
-     * The collection the chain started has finished: it answers the requested resources its items are. An
-     * unknown or unmatched collection answers the whole request (the instruction must not be left withholding a
-     * handoff it cannot finish), and a finished collection is answered once, however often its status is read.
+     * A collection of {@code items} finished: it answers the requested resources those items are. An unknown or
+     * unmatched collection answers the whole request (the instruction must not be left withholding a handoff it
+     * cannot finish).
      */
-    private void collectionFinished() {
-        Set<String> items = startedItems;
-        startedTask = "";
-        startedItems = null;
+    private void answer(Collection<String> items) {
         if (items == null || items.isEmpty()) {
             pending.clear();
             return;
         }
         boolean answered = false;
         for (String item : items) {
-            for (Iterator<Set<String>> resources = pending.iterator(); resources.hasNext(); ) {
-                if (ItemNouns.matchesItem(resources.next(), item)) {
-                    resources.remove();
-                    answered = true;
-                    break;
-                }
-            }
+            answered |= answerOne(item);
         }
         if (!answered) {
             pending.clear();
         }
+    }
+
+    /**
+     * One collected item answers one requested resource: the first it is in full ("oak_log" is "oak logs", not
+     * "birch logs"), or failing that the one it shares most words with ("lapis_ore" for "lapis lazuli"), or
+     * failing that a request that names no resource.
+     */
+    private boolean answerOne(String item) {
+        ItemNouns.Words closest = null;
+        int closestWords = 0;
+        for (ItemNouns.Words resource : pending) {
+            if (resource.groups().isEmpty()) {
+                continue;
+            }
+            if (resource.matches(item)) {
+                return pending.remove(resource);
+            }
+            int words = resource.matchedWords(item);
+            if (words > closestWords) {
+                closest = resource;
+                closestWords = words;
+            }
+        }
+        if (closest == null) {
+            closest = pending.stream().filter(resource -> resource.groups().isEmpty()).findFirst().orElse(null);
+        }
+        return closest != null && pending.remove(closest);
     }
 
     Set<String> withheldTools() {
@@ -193,9 +232,11 @@ final class ToolRouting {
                 // the table. fulfill_items expresses it in one call (the raw quota as an allocation without a
                 // recipient, always new, beside the crafted item for the player), so it stays; the dispatch check
                 // holds the manifest to that. A crafted result the bot keeps ("gather 32 logs and craft a table") is
-                // different: fulfill_items counts one the bot already carries as done, so collect first.
+                // different: fulfill_items counts one the bot already carries as done, so collect first. So is a result
+                // made of the collection itself ("mine 5 iron, smelt it, give it to me"): the manifest would need the
+                // iron once as the kept quota and once as the material, and mine both.
                 withheld.add(GATHER_THEN_GIVE);
-                if (!intent.handsOverAcquired()) {
+                if (!intent.handsOverAcquired() || intent.transformsAcquired()) {
                     withheld.add(FULFILL_ITEMS);
                 }
             } else if (intent.handsOverAcquired() && intent.quantityStated()) {
@@ -225,7 +266,8 @@ final class ToolRouting {
      */
     String blockedResult(String toolName, JsonObject arguments) {
         if (FULFILL_ITEMS.equals(toolName) && collecting() && intent.craftsOutcome() && intent.handsOverAcquired()
-                && !intent.handsOverPart() && arguments != null && !hasRawAllocation(arguments)) {
+                && !intent.handsOverPart() && !intent.transformsAcquired()
+                && arguments != null && !hasRawAllocation(arguments)) {
             return RAW_QUOTA_MISSING_BLOCKED;
         }
         if (!withheldTools().contains(toolName)) {
@@ -243,6 +285,9 @@ final class ToolRouting {
     private String collectFirstBlocked() {
         if (intent.handsOverPart()) {
             return PARTIAL_HANDOFF_BLOCKED;
+        }
+        if (intent.transformsAcquired()) {
+            return TRANSFORMED_RESULT_BLOCKED;
         }
         return intent.handsOverAcquired() ? CRAFTED_RESULT_BLOCKED : KEPT_RESULT_BLOCKED;
     }
@@ -268,37 +313,59 @@ final class ToolRouting {
     }
 
     /**
-     * What the successful tool calls of one round start as collection: the item ids they name (empty when they
-     * name none), or empty when none of them could collect (a follow, a craft, a walk).
+     * What a round's successful tool calls leave the bot collecting: the item ids the call that owns its task names
+     * (empty when it names none), or empty when that call could not collect (a follow, a craft, a walk). Assigning a
+     * task aborts the one before it, so only the last work-start call counts.
      */
     static Optional<Set<String>> collectionStartedBy(List<ChatToolCall> calls, Set<String> succeededCallIds) {
-        boolean started = false;
-        Set<String> items = new LinkedHashSet<>();
+        Optional<Set<String>> started = Optional.empty();
         for (ChatToolCall call : calls) {
-            if (!succeededCallIds.contains(call.id()) || NON_COLLECTING_TOOLS.contains(call.name())
-                    || !BrainCoordinator.isWorkStartTool(call.name())) {
+            if (!succeededCallIds.contains(call.id()) || !BrainCoordinator.isWorkStartTool(call.name())) {
                 continue;
             }
-            started = true;
-            JsonObject arguments = call.parsedArguments();
-            for (String argument : ITEM_ARGUMENTS) {
-                String item = text(arguments, argument);
+            started = NON_COLLECTING_TOOLS.contains(call.name()) ? Optional.empty() : Optional.of(itemsNamedBy(call));
+        }
+        return started;
+    }
+
+    private static Set<String> itemsNamedBy(ChatToolCall call) {
+        Set<String> items = new LinkedHashSet<>();
+        JsonObject arguments = call.parsedArguments();
+        for (String argument : ITEM_ARGUMENTS) {
+            String item = text(arguments, argument);
+            if (item != null && !item.isBlank()) {
+                items.add(item.trim());
+            }
+        }
+        JsonElement allocations = arguments.get("items");
+        if (allocations != null && allocations.isJsonArray()) {
+            for (JsonElement allocation : allocations.getAsJsonArray()) {
+                String item = allocation.isJsonObject() ? text(allocation.getAsJsonObject(), "item") : null;
                 if (item != null && !item.isBlank()) {
                     items.add(item.trim());
                 }
             }
-            JsonElement allocations = arguments.get("items");
-            if (allocations != null && allocations.isJsonArray()) {
-                JsonArray array = allocations.getAsJsonArray();
-                for (JsonElement allocation : array) {
-                    String item = allocation.isJsonObject() ? text(allocation.getAsJsonObject(), "item") : null;
-                    if (item != null && !item.isBlank()) {
-                        items.add(item.trim());
-                    }
-                }
+        }
+        return items;
+    }
+
+    /** The item or block ids a goal mission collects; empty for a goal that names none (a tier, a build, food). */
+    static Set<String> itemsCollectedBy(Goal goal) {
+        Set<String> items = new LinkedHashSet<>();
+        switch (goal) {
+            case Goal.HaveItem have -> items.add(idOf(have.item()));
+            case Goal.Stockpile stockpile -> items.add(idOf(stockpile.item()));
+            case Goal.HarvestCrop harvest -> items.add(idOf(harvest.produce()));
+            case Goal.MineOre mine -> mine.ores().forEach(ore -> items.add(BuiltInRegistries.BLOCK.getKey(ore).toString()));
+            case Goal.Fulfill fulfill -> fulfill.allocations().forEach(allocation -> items.add(allocation.itemId()));
+            default -> {
             }
         }
-        return started ? Optional.of(items) : Optional.empty();
+        return items;
+    }
+
+    private static String idOf(Item item) {
+        return BuiltInRegistries.ITEM.getKey(item).toString();
     }
 
     private static String text(JsonObject object, String name) {
