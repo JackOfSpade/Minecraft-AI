@@ -80,6 +80,60 @@ public final class GatherThenGiveGameTests {
         });
     }
 
+    @GameTest(maxTicks = 2400)
+    public void aQuotaWithNoStatedNumberIsWhatTheWindowCollectedAndOldLogsStay(GameTestHelper context) {
+        Fixture fixture = fixture(context, new BlockPos(40, 4, 8), "TimedGT");
+        AIPlayerEntity giver = fixture.giver();
+        BlockPos feet = giver.blockPosition();
+        column(giver, feet.east(3), Blocks.OAK_LOG, 3);
+        column(giver, feet.west(3), Blocks.BIRCH_LOG, 2);
+        InventoryAction.giveItem(giver, new ItemStack(Items.WOODEN_AXE));
+        InventoryAction.giveItem(giver, new ItemStack(Items.OAK_LOG, 4)); // carried before the request
+
+        // "Gather some wood and give it to me": the number is whatever a short window collects.
+        GatherThenGiveTask task = GatherThenGiveTask.timedLogs(fixture.recipientName(), 300);
+        task.start(giver);
+        context.failIfEver(() -> {
+            if (task.state() == TaskState.RUNNING || task.state() == TaskState.PAUSED) {
+                task.tick(giver);
+                return;
+            }
+            require(context, task.state() == TaskState.COMPLETED,
+                    "gather_then_give with no count did not complete: " + task.failureReason());
+            require(context, InventoryAction.countItem(giver, Items.OAK_LOG) == 4,
+                    "the four oak logs carried before the request must stay with the bot");
+            require(context, heldOrDropped(context, fixture.recipient(), Items.OAK_LOG) == 3,
+                    "the player must receive the 3 oak logs the window collected");
+            require(context, heldOrDropped(context, fixture.recipient(), Items.BIRCH_LOG) == 2,
+                    "and the 2 birch logs: with no number every new log of any species is handed over");
+            cleanup(context, fixture);
+        });
+    }
+
+    @GameTest(maxTicks = 1800)
+    public void aWindowThatCollectedNothingHandsNothingOver(GameTestHelper context) {
+        Fixture fixture = fixture(context, new BlockPos(56, 4, 8), "EmptyWindowGT");
+        AIPlayerEntity giver = fixture.giver();
+        InventoryAction.giveItem(giver, new ItemStack(Items.OAK_LOG, 4)); // carried, and no tree in reach
+
+        GatherThenGiveTask task = GatherThenGiveTask.timedLogs(fixture.recipientName(), 100);
+        task.start(giver);
+        context.failIfEver(() -> {
+            if (task.state() == TaskState.RUNNING || task.state() == TaskState.PAUSED) {
+                task.tick(giver);
+                return;
+            }
+            require(context, task.state() == TaskState.FAILED, "a window without a log is no handoff");
+            require(context, !task.failureReason().startsWith(GatherThenGiveTask.HANDOFF_FAILED_PREFIX),
+                    "nothing was collected, so this is a collection failure: " + task.failureReason());
+            require(context, InventoryAction.countItem(giver, Items.OAK_LOG) == 4,
+                    "the carried logs must not be handed over for a collection that found none");
+            require(context, heldOrDropped(context, fixture.recipient(), Items.OAK_LOG) == 0,
+                    "the player receives nothing");
+            cleanup(context, fixture);
+        });
+    }
+
     private static void column(AIPlayerEntity bot, BlockPos base, Block log, int height) {
         for (int dy = 0; dy < height; dy++) {
             bot.level().setBlock(base.above(dy), log.defaultBlockState(), Block.UPDATE_ALL);

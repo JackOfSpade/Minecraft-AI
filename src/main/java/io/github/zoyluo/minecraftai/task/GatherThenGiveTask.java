@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.ToIntFunction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
@@ -22,6 +23,10 @@ import net.minecraft.world.item.Items;
  * Generic "logs" accepts any log species while collecting and is handed over species by species,
  * each drop limited to the new logs of that species. The child tasks remain private; only this
  * parent is assigned to {@link TaskManager}.</p>
+ *
+ * <p>When the player named no number the quota is open: the child collects for the ten-minute window
+ * ({@link GatherQuotaTask#collectForDurationForHandoff}) and everything it collected above what was carried
+ * at the start is handed over, kept out of deposits until then like an exact quota.</p>
  */
 public final class GatherThenGiveTask extends AbstractTask {
     /**
@@ -40,7 +45,10 @@ public final class GatherThenGiveTask extends AbstractTask {
     }
 
     private final Item item;
+    /** The exact quota; zero for an open one, where the collection window decides how much there is. */
     private final int count;
+    /** Positive only for an open quota: how long the collection runs. */
+    private final int durationTicks;
     private final String playerName;
     /** Generic "logs" accepts any tree species; an explicit id remains species-exact. */
     private final boolean genericLogs;
@@ -53,17 +61,37 @@ public final class GatherThenGiveTask extends AbstractTask {
     private GiveItemTask giveTask;
 
     public GatherThenGiveTask(Item item, int count, String playerName) {
-        this(item, count, playerName, false);
+        this(item, Math.max(1, count), 0, playerName, false);
     }
 
     /** Creates the generic-tree-log form used only when the player said "logs", not a species. */
     public static GatherThenGiveTask genericLogs(int count, String playerName) {
-        return new GatherThenGiveTask(Items.OAK_LOG, count, playerName, true);
+        return new GatherThenGiveTask(Items.OAK_LOG, Math.max(1, count), 0, playerName, true);
     }
 
-    private GatherThenGiveTask(Item item, int count, String playerName, boolean genericLogs) {
+    /** No number stated: collect {@code item} for the ten-minute window, then hand over all of what was collected. */
+    public static GatherThenGiveTask timed(Item item, String playerName) {
+        return timed(item, playerName, GatherQuotaTask.DEFAULT_COLLECTION_DURATION_TICKS);
+    }
+
+    /** The same for generic tree logs. */
+    public static GatherThenGiveTask timedLogs(String playerName) {
+        return timedLogs(playerName, GatherQuotaTask.DEFAULT_COLLECTION_DURATION_TICKS);
+    }
+
+    /** The window is a parameter so that the timing rule is testable without waiting ten minutes. */
+    static GatherThenGiveTask timed(Item item, String playerName, int durationTicks) {
+        return new GatherThenGiveTask(item, 0, Math.max(1, durationTicks), playerName, false);
+    }
+
+    static GatherThenGiveTask timedLogs(String playerName, int durationTicks) {
+        return new GatherThenGiveTask(Items.OAK_LOG, 0, Math.max(1, durationTicks), playerName, true);
+    }
+
+    private GatherThenGiveTask(Item item, int count, int durationTicks, String playerName, boolean genericLogs) {
         this.item = item;
-        this.count = Math.max(1, count);
+        this.count = count;
+        this.durationTicks = durationTicks;
         this.playerName = playerName == null ? "" : playerName;
         this.genericLogs = genericLogs;
     }
@@ -76,7 +104,7 @@ public final class GatherThenGiveTask extends AbstractTask {
     @Override
     public String describe() {
         String requested = genericLogs ? "logs" : BuiltInRegistries.ITEM.getKey(item).toString();
-        return "Gathering new " + requested + " x" + count
+        return "Gathering new " + requested + (durationTicks > 0 ? " for up to " + durationTicks + " ticks" : " x" + count)
                 + " then giving to " + (playerName.isBlank() ? "owner" : playerName)
                 + " phase=" + phase;
     }
@@ -108,9 +136,14 @@ public final class GatherThenGiveTask extends AbstractTask {
         for (Item species : handedOverItems()) {
             carriedAtStart.put(species, InventoryAction.countItem(bot, species));
         }
-        gatherTask = genericLogs
-                ? GatherQuotaTask.collectAdditionalLogsForHandoff(count)
-                : GatherQuotaTask.collectAdditionalExact(item, count);
+        if (durationTicks > 0) {
+            gatherTask = GatherQuotaTask.collectForDurationForHandoff(
+                    item, Set.copyOf(handedOverItems()), durationTicks);
+        } else {
+            gatherTask = genericLogs
+                    ? GatherQuotaTask.collectAdditionalLogsForHandoff(count)
+                    : GatherQuotaTask.collectAdditionalExact(item, count);
+        }
         gatherTask.start(bot);
     }
 
@@ -196,7 +229,12 @@ public final class GatherThenGiveTask extends AbstractTask {
     }
 
     private void beginHandoff(AIPlayerEntity bot) {
-        List<Delivery> plan = planDeliveries(handedOverItems(), species -> freshCount(bot, species), count);
+        // An open quota is whatever the window collected: every new unit of the handed-over species.
+        int quota = durationTicks > 0
+                ? handedOverItems().stream().mapToInt(species -> freshCount(bot, species)).sum()
+                : count;
+        List<Delivery> plan = quota > 0
+                ? planDeliveries(handedOverItems(), species -> freshCount(bot, species), quota) : null;
         if (plan == null) {
             // The child normally cannot complete without the new units in inventory. Keep this
             // explicit fail-closed check at the transaction boundary so a future gather behavior
