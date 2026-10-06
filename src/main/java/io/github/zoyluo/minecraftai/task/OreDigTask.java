@@ -89,8 +89,9 @@ import net.minecraft.world.phys.Vec3;
  * direct {@link BlockMiner} work is limited to the currently visible target and newly exposed
  * visible vein members. It never strips, descends, prospects through loaded terrain, or opens a
  * tunnel toward an unseen resource. An ore it saw that hangs out of reach is reached by a stair
- * dug up to it ({@link #climbTowardHighTarget}); that stair may hide the ore from view, and the
- * ore is mined only where it is seen again.
+ * dug up to it ({@link #climbTowardHighTarget}), or, on open terrain, by a pillar of placed
+ * blocks built up beside it ({@link #startOrePillar}); that stair may hide the ore from view, and
+ * the ore is mined only where it is seen again.
  *
  * Self-contained state machine (Iron Rule G1), no internal assign; runs entirely on the main thread (G2).
  */
@@ -184,6 +185,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     };
     private static final int MIN_TARGET_BREAK_DY = -1;
     private static final int MAX_TARGET_BREAK_DY = 2;
+    /** A pillar route may place one block more than the column it admits (the same cushion MineTask keeps). */
+    private static final int ORE_PILLAR_SUPPORT_CUSHION = 1;
     private static final int BONUS_CAP = 8;            // R3 opportunistic-ore per-task cap: free pickups are good, but not at the cost of the main job
     private static final int APPROACH_LIMIT = 80;       // P0: if locked ore still hasn't been approached after this many ticks -> judge it unreachable, give up and switch ore/dig down
     static final int STRIP_SEGMENT = 48;        // Coverage efficiency: the scan is an omniscient 24-block sphere, so a tunnel's value is the ground it covers by moving; a long straight segment reduces turning and overlapping scans
@@ -286,6 +289,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * nothing yet, so it waits to see its ore again like any other restored owner.
      */
     private BlockPos highTargetClimbOwner;
+    /** The cell the pillar route that is being run for the climb owner is to end on, or null when no pillar is under way ({@link #startOrePillar}). */
+    private BlockPos orePillarGoal;
+    /** The foot of that pillar's column while the bot is still walking to it, or null once it builds. */
+    private BlockPos orePillarBase;
+    /** The height the bot stood at when that pillar began: a pillar that ends short of its pose has to have risen to be planned again. */
+    private int orePillarStartY;
+    /** The natural ground under the tower the bot stands on, so a second pillar on top of the first cannot outgrow the safe fall. */
+    private Integer orePillarFloorY;
     /** One fresh depth handoff, plus bounded re-descent only after a real cave survey. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
@@ -1162,7 +1173,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         clearObservedOreSearchLeg();
         clearVisibleOreSighting();
         clearHighTargetStairSearch();
-        highTargetClimbOwner = null;
+        clearHighTargetClimb(null);
         markMineFace(bot);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
@@ -1583,6 +1594,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 }
                 return;
             }
+            if (tickOrePillar(bot, world, targetOre)) {
+                return;
+            }
             OreScan.Observation targetState = OreScan.observeOre(bot, targetOre, targetOres);
             if (targetState == OreScan.Observation.UNKNOWN && ownsHighTargetClimb(targetOre)) {
                 // The stair that is being dug to this ore is what hides it. It was seen when the
@@ -1836,7 +1850,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
 
         clearHighTargetStairSearch();
-        highTargetClimbOwner = null;
+        clearHighTargetClimb(null);
 
         if (veinMode) {
             tickVeinWithoutTarget(bot, world);
@@ -3744,10 +3758,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return owner != null && owner.equals(highTargetClimbOwner);
     }
 
-    /** Ends the climb's claim on {@code owner}, or on whichever ore holds it when {@code owner} is null. */
+    /** Ends the climb's claim, stair or pillar, on {@code owner}, or on whichever ore holds it when {@code owner} is null. */
     private void clearHighTargetClimb(BlockPos owner) {
         if (owner == null || owner.equals(highTargetClimbOwner)) {
             highTargetClimbOwner = null;
+            orePillarGoal = null;
+            orePillarBase = null;
         }
     }
 
@@ -3811,6 +3827,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         if (ownsHighTargetStairSearch(ore) && highTargetStairSearch.exhausted()) {
             return false;
+        }
+        // Building up is cheaper than any wander: an ore on open terrain with a pillar to its pose gets it before the hops.
+        if (!ownsHighTargetStairSearch(ore) && startOrePillar(bot, world, ore)) {
+            return true;
         }
         if (!ownsHighTargetStairSearch(ore)) {
             clearHighTargetStairSearch();
@@ -3990,7 +4010,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             return true;
         }
+        if (tickOrePillar(bot, world, v)) {
+            return true;
+        }
         OreScan.Observation veinState = OreScan.observeOre(bot, v, targetOres);
+        if (veinState == OreScan.Observation.UNKNOWN && ownsHighTargetClimb(v)) {
+            // The stair that is being dug to this member is what hides it, as for the primary target:
+            // keep climbing toward the remembered coordinate.
+            climbTowardHighTarget(bot, world, v);
+            return true;
+        }
         if (veinState == OreScan.Observation.UNKNOWN) {
             // A queued vein is finite remembered work. Occlusion cannot dequeue it or promote its
             // active break into a target-drop debt. A remote checkpoint hint is allowed to widen
@@ -4043,20 +4072,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             veinQueue.pollFirst();
             return true;
         }
-        BlockPos veinFeet = bot.blockPosition();
-        if (v.getX() == veinFeet.getX() && v.getZ() == veinFeet.getZ()
-                && v.getY() - veinFeet.getY() > MAX_TARGET_BREAK_DY
-                && !withinReach(bot, v)) {
-            // A queued vertical vein can extend one block beyond vanilla reach after every lower
-            // member has been recovered. There is no legal upward body step or drop shaft left to
-            // create; release this finite queue owner so ordinary scanning/strip work can resume.
-            abandonTargetApproach(bot, v, "overhead_beyond_reach", v);
-            return true;
-        }
         if (!miningVein && !canBreakTargetFromHere(bot, v)) {
             // Vein ores carry the same physical-drop debt as the primary target.  Do not exploit
             // the full interaction reach here: a dx/dz=2 break can launch its drop behind a low
-            // pedestal edge where neither the entity nor a return pose remains observable.
+            // pedestal edge where neither the entity nor a return pose remains observable. A member
+            // that hangs out of reach (a vein that goes on over the bot's head) is climbed to like
+            // the primary target, and released with the reason when nothing reaches it.
             approachTargetOre(bot, world, v);
             return true;
         }
@@ -4201,23 +4222,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (tryRememberedHighWorkPoseRoute(bot, world, ore)) {
                 return;
             }
+            // An ore out of reach is climbed or built up to, or released with the reason (a vertical air
+            // column is not a sealed item funnel: a drop launched into one can leave it and settle on an
+            // unreachable ledge, so an ore with no floor under it is kept intact, see climbTowardHighTarget).
             if (climbsTo(bot, ore)) {
                 climbTowardHighTarget(bot, world, ore);
-                return;
-            }
-            BlockPos feet = bot.blockPosition();
-            if (ore.getX() == feet.getX()
-                    && ore.getZ() == feet.getZ()
-                    && ore.getY() - feet.getY() > MAX_TARGET_BREAK_DY) {
-                // A vertical air column is not a sealed item funnel. Vanilla block drops start at
-                // a random X/Z offset and retain horizontal velocity, so a high drop can leave the
-                // shaft and settle on an unreachable ledge before entering player collision range.
-                // Keep the ore intact unless this task previously observed and durably retained a
-                // standable high side pose before the lower shaft/pickup occluded it. (Only the
-                // primary target has a stair dug up to it; a queued vein member stays a finite
-                // owner released here.)
-                abandonTargetApproach(
-                        bot, ore, "overhead_drop_catch_unproven", ore.below());
                 return;
             }
             // No observed standable side exists yet. Open one controlled cell at a time; never use
@@ -4253,12 +4262,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /**
-     * Whether {@code ore} is reached by digging a stair up to it: it is the primary target and
-     * either hangs out of reach or already has a stair under way, which is finished around the ore
-     * rather than by the level tunnel that serves an ore within reach.
+     * Whether {@code ore} is reached by digging a stair up to it: it is the primary target or the
+     * queued vein member that is worked next, and it either hangs out of reach or already has a
+     * stair under way, which is finished around the ore rather than by the level tunnel that serves
+     * an ore within reach.
      */
     private boolean climbsTo(AIPlayerEntity bot, BlockPos ore) {
-        return ore.equals(targetOre)
+        return (ore.equals(targetOre) || isQueuedVeinMember(ore))
                 && (ore.getY() - bot.blockPosition().getY() > MAX_TARGET_BREAK_DY || ownsHighTargetClimb(ore));
     }
 
@@ -4274,18 +4284,21 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * cell holds its drop right beside the bot. A floor under the ore that is observed to be open
      * cannot, and such an ore is still refused.</p>
      *
-     * <p>Nothing is opened before it has been seen. A cell and the one above it (which is what
-     * floods or falls into an opening) must be free of fluid and falling blocks, the cell must be
-     * natural terrain that no player stands on, and no fluid may be seen beside it. The ore is
-     * never one of the cells. What an opening itself reveals overhead is seen on the next tick and
-     * stops the stair before any further cell of the step is opened.</p>
+     * <p>Nothing is opened before it has been seen ({@link StairDig}). A cell, the one above it
+     * (which is what floods or falls into an opening) and its sides must be free of fluid and
+     * falling blocks, and the cell must be natural terrain that no player stands on. The ore is
+     * never one of the cells. What an opening itself reveals over or beside it is seen on the next
+     * tick and stops the stair before any further cell of the step is opened.</p>
      *
-     * <p>The stair only ever digs, so it needs rock to dig through and to stand on: an ore on an
-     * open cliff face or high in a cave, where a tread has no floor, is still given up as
-     * {@code open_drop} or {@code overhead_drop_catch_unproven}. Reaching it would take building
-     * up with placed blocks, which is a different approach and not part of this one.</p>
+     * <p>The stair only ever digs, so it needs rock to dig through and to stand on. An ore on open
+     * terrain, a cliff face or a cave wall where a tread has no floor ({@code open_drop}), is built
+     * up to instead ({@link #startOrePillar}); one whose own floor is open is still refused as
+     * {@code overhead_drop_catch_unproven}, because its drop would fall out of reach.</p>
      */
     private void climbTowardHighTarget(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
+        if (tickOrePillar(bot, world, ore)) {
+            return;
+        }
         ActionPack pack = bot.getActionPack();
         if (!pack.isPathExecutorIdle() || !pack.isWalkToIdle() || !pack.stepIdle()
                 || hasRecoverableTargetBreakPose(bot, ore)) {
@@ -4297,7 +4310,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             abandonTargetApproach(bot, ore, "overhead_drop_catch_unproven", support);
             return;
         }
-        if (elapsed - targetApproachTick > APPROACH_LIMIT) {
+        if (ownsHighTargetClimb(ore) && elapsed - targetApproachTick > APPROACH_LIMIT) {
             // The ore can be out of sight, which the ordinary approach monitor does not see.
             abandonTargetApproach(bot, ore, "climb_stalled", feet);
             return;
@@ -4305,10 +4318,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         String refusal = null;
         for (OreClimb.Move move : OreClimb.moves(
                 feet.getX() - ore.getX(), feet.getZ() - ore.getZ(), ore.getY() - feet.getY())) {
-            refusal = climbRefusal(bot, world, feet, move);
+            refusal = StairDig.refusal(bot, world, feet, move);
             if (refusal == null) {
                 if (!ownsHighTargetClimb(ore)) {
                     highTargetClimbOwner = ore.immutable();
+                    targetApproachTick = elapsed;
                     BotLog.action(bot, "ore_dig_high_climb_started",
                             "ore", ore.toShortString(), "from", feet.toShortString(),
                             "height", ore.getY() - feet.getY());
@@ -4317,68 +4331,150 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return;
             }
         }
+        // A tread without a floor, or no stair at all, is open terrain: the ore is built up to rather than dug up to.
+        if ((refusal == null || StairDig.OPEN_DROP.equals(refusal)) && startOrePillar(bot, world, ore)) {
+            return;
+        }
         abandonTargetApproach(bot, ore, refusal == null ? "no_climb_route" : refusal, feet);
     }
 
     /**
-     * The first reason, from what the bot can see, that {@code move} cannot be opened safely, or
-     * null when nothing seen forbids it. A cell that is not in view yet is judged once the cells
-     * opened before it have brought it into view.
+     * Builds up to an observed ore on open terrain with placed blocks, the way a player pillars up a
+     * cliff face or a cave wall: the pillar route of {@link HarvestCore#pillarApproachFor} (the one
+     * the gather and mine tasks use), asked to end on a pose from which this task mines an ore
+     * ({@link #isRecoverableBreakPose}: the ore beside the bot, no more than a block or two over its
+     * feet), where the ore's own floor is a solid block that holds the drop beside the bot.
+     *
+     * <p>Nothing here is new to vanilla or to the bot's rules: the route places only common
+     * throwaway blocks, only in a column of cells it has seen are air, from a stack that holds the
+     * pillar beyond the mission's protected stone, and the tower is never taller than the bot can
+     * step down from again
+     * ({@link HarvestCore#maxPillarSupports()}, counted from the ground the first pillar of the
+     * ore began on, so a second pillar on top of the first cannot strand it). An ore that none of
+     * that reaches, or that the bot carries no blocks for, is left to the other ways.</p>
+     *
+     * @return true when a pillar route was started for {@code ore}
      */
-    private String climbRefusal(AIPlayerEntity bot, ServerLevel world, BlockPos feet, OreClimb.Move move) {
-        for (BlockPos cell : OreClimb.bodyCells(feet, move)) {
-            if (!canObserveWorldState(bot, cell)) {
-                continue;
-            }
-            var state = world.getBlockState(cell);
-            String refusal = climbHazard(state);
-            if (refusal != null) {
-                return refusal;
-            }
-            // The cell above floods or buries this one. Rock hides it, so it only comes into view once
-            // this cell is open: the check has to run for a cell that is already air as well, or what the
-            // opening revealed overhead would never be looked at.
-            if (canObserveWorldState(bot, cell.above())) {
-                refusal = climbHazard(world.getBlockState(cell.above()));
-                if (refusal != null) {
-                    return refusal;
-                }
-            }
-            if (state.isAir()) {
-                continue;
-            }
-            String denial = BreakRule.legacyDenialOf(state);
-            if (denial != null) {
-                return "break_refused:" + denial;
-            }
-            if (hasPlayerSupportedBodyBlock(bot, cell)) {
-                return MiningSafety.PLAYER_SUPPORT;
-            }
-            if (OreScan.adjacentHazard(bot, cell) == OreScan.Observation.OBSERVED_PRESENT) {
-                return "adjacent_fluid";
-            }
+    private boolean startOrePillar(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
+        ActionPack pack = bot.getActionPack();
+        if (!pack.isPathExecutorIdle() || !pack.isWalkToIdle() || !pack.stepIdle()
+                || OreScan.observeOre(bot, ore, targetOres) != OreScan.Observation.OBSERVED_PRESENT
+                || !ToolTier.canHarvestWithInventory(bot, world.getBlockState(ore))
+                || !hasReliableObservedDropCatch(bot, world, ore.below())
+                || adjacentDangerFluidOf(bot, ore).state() == OreScan.Observation.OBSERVED_PRESENT) {
+            return false;
         }
-        BlockPos floor = OreClimb.landing(feet, move).below();
-        if (canObserveWorldState(bot, floor)) {
-            var floorState = world.getBlockState(floor);
-            if (!floorState.getFluidState().isEmpty()) {
-                return observedFluidReason(floorState.getFluidState());
-            }
-            if (Standability.isDangerous(floorState)
-                    || floorState.getCollisionShape(world, floor).isEmpty()) {
-                // Nothing is placed under a tread: a floor that is not there ends the stair.
-                return "open_drop";
-            }
+        BlockPos feet = bot.blockPosition();
+        if (orePillarFloorY == null || feet.getY() <= orePillarFloorY) {
+            orePillarFloorY = feet.getY();
         }
-        return null;
+        int highestGoalY = orePillarFloorY + HarvestCore.maxPillarSupports();
+        HarvestCore.PillarApproach approach = HarvestCore.pillarApproachFor(bot, ore, targetOres,
+                goal -> goal.getY() <= highestGoalY
+                        && isRecoverableBreakPose(goal, ore)
+                        && OreScan.adjacentHazard(bot, goal) != OreScan.Observation.OBSERVED_PRESENT);
+        if (approach == null) {
+            return false;
+        }
+        int required = approach.supports() + ORE_PILLAR_SUPPORT_CUSHION;
+        int available = MaterialPalette.spendableFirstPillarSupports(bot, protectedStoneLikeReserve);
+        if (available < required) {
+            BotLog.action(bot, "ore_dig_pillar_support_unavailable",
+                    "ore", ore.toShortString(), "needed", required, "available", available,
+                    "protected_stone", protectedStoneLikeReserve);
+            return false;
+        }
+        BlockPos goal = approach.goal();
+        BlockPos base = new BlockPos(goal.getX(), feet.getY(), goal.getZ());
+        if (feet.equals(base)) {
+            if (!beginOrePillarRoute(bot, ore, goal)) {
+                return false;
+            }
+        } else {
+            // The route that builds admits a column only above a base the bot stands at, so the bot first walks to
+            // the foot of the column: an ordinary route over cells it can see.
+            ActionResult walk = pack.startSurfacePathTo(base);
+            if (walk.isFailed()) {
+                BotLog.action(bot, "ore_dig_pillar_base_refused",
+                        "ore", ore.toShortString(), "base", base.toShortString(), "reason", walk.reason());
+                return false;
+            }
+            orePillarBase = base;
+        }
+        highTargetClimbOwner = ore.immutable();
+        orePillarGoal = goal;
+        orePillarStartY = feet.getY();
+        targetApproachTick = elapsed;
+        noteProgress();
+        BotLog.action(bot, "ore_dig_pillar_started",
+                "ore", ore.toShortString(), "goal", goal.toShortString(),
+                "supports", approach.supports(), "available", available, "walk_to_base", orePillarBase != null);
+        return true;
     }
 
-    /** Fluid and falling blocks are what turn an opened cell into a flood or a burial. */
-    private static String climbHazard(BlockState state) {
-        if (!state.getFluidState().isEmpty()) {
-            return observedFluidReason(state.getFluidState());
+    /**
+     * Starts the route that places the blocks of the pillar from the foot of its column. The route
+     * cannot be given the protected stone reserve, so the stack it will place from has to hold the
+     * pillar (and its cushion) beyond that reserve.
+     */
+    private boolean beginOrePillarRoute(AIPlayerEntity bot, BlockPos ore, BlockPos goal) {
+        int supports = goal.getY() - bot.blockPosition().getY() + ORE_PILLAR_SUPPORT_CUSHION;
+        ActionResult route = bot.getActionPack().startPillarPathTo(goal, supports, protectedStoneLikeReserve);
+        if (route.isFailed()) {
+            BotLog.action(bot, "ore_dig_pillar_refused",
+                    "ore", ore.toShortString(), "goal", goal.toShortString(), "reason", route.reason());
+            return false;
         }
-        return state.getBlock() instanceof FallingBlock ? "gravity" : null;
+        return true;
+    }
+
+    /**
+     * Keeps the pillar route of {@link #startOrePillar} running while it builds, and settles it when
+     * it ends: on its pose the ordinary gates mine the ore; short of it, a pillar that rose is planned
+     * again from where it stopped (the bot is higher, so the next one is shorter), and one that did not
+     * releases the ore.
+     *
+     * @return true while the route, or the release of the ore, owns this tick
+     */
+    private boolean tickOrePillar(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
+        if (orePillarGoal == null || !ownsHighTargetClimb(ore)) {
+            return false;
+        }
+        ActionPack pack = bot.getActionPack();
+        if (!pack.isPathExecutorIdle() || !pack.isWalkToIdle() || !pack.stepIdle()) {
+            if (OreScan.observeOre(bot, ore, targetOres) == OreScan.Observation.OBSERVED_GONE) {
+                // Mined by someone else on the way: the ordinary gates settle its drop.
+                pack.stopAll();
+                clearHighTargetClimb(ore);
+                return false;
+            }
+            // The approach monitor does not see a climb: the route is the progress.
+            targetApproachTick = elapsed;
+            noteProgress();
+            return true;
+        }
+        if (orePillarBase != null) {
+            // The walk to the foot of the column has ended: build from there, or release the ore.
+            BlockPos base = orePillarBase;
+            orePillarBase = null;
+            if (bot.blockPosition().equals(base) && beginOrePillarRoute(bot, ore, orePillarGoal)) {
+                targetApproachTick = elapsed;
+                return true;
+            }
+            abandonTargetApproach(bot, ore, "pillar_base_unreachable", bot.blockPosition());
+            return true;
+        }
+        clearHighTargetClimb(ore);
+        if (hasRecoverableTargetBreakPose(bot, ore)) {
+            BotLog.action(bot, "ore_dig_pillar_arrived", "ore", ore.toShortString(), "at", bot.blockPosition().toShortString());
+            targetApproachTick = elapsed;
+            return false;
+        }
+        if (bot.blockPosition().getY() > orePillarStartY && startOrePillar(bot, world, ore)) {
+            return true;
+        }
+        abandonTargetApproach(bot, ore, "pillar_route_ended", bot.blockPosition());
+        return true;
     }
 
     /** Mines the next closed cell of {@code move}, or walks onto its landing once every cell is open. */
@@ -8383,17 +8479,25 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 && bot.getActionPack().isWalkToIdle();
     }
 
-    /** Geometry from which a natural target drop remains inside an ordinary recovery envelope. */
-    private static boolean hasRecoverableTargetBreakPose(AIPlayerEntity bot, BlockPos pos) {
-        BlockPos feet = bot.blockPosition();
+    /**
+     * The cell geometry of a pose from which a natural target drop stays inside an ordinary recovery
+     * envelope: standing at {@code feet}, an ore at {@code pos} is at most one block below the feet
+     * (the drop falls into the bot's reach), at most two above, and beside the bot or, at two above,
+     * straight over it.
+     */
+    static boolean isRecoverableBreakPose(BlockPos feet, BlockPos pos) {
         int vertical = pos.getY() - feet.getY();
         int horizontalManhattan = Math.abs(feet.getX() - pos.getX())
                 + Math.abs(feet.getZ() - pos.getZ());
         return vertical >= MIN_TARGET_BREAK_DY
                 && vertical <= MAX_TARGET_BREAK_DY
                 && horizontalManhattan <= 1
-                && (vertical < MAX_TARGET_BREAK_DY || horizontalManhattan == 0)
-                && withinReach(bot, pos);
+                && (vertical < MAX_TARGET_BREAK_DY || horizontalManhattan == 0);
+    }
+
+    /** The bot stands where a natural target drop remains inside an ordinary recovery envelope ({@link #isRecoverableBreakPose}) and in reach. */
+    private static boolean hasRecoverableTargetBreakPose(AIPlayerEntity bot, BlockPos pos) {
+        return isRecoverableBreakPose(bot.blockPosition(), pos) && withinReach(bot, pos);
     }
 
     /**

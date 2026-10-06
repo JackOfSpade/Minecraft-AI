@@ -20,10 +20,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OreClimbTest {
     private static final int ORE_Y = 20;
 
-    /** The break envelope of {@code OreDigTask.hasRecoverableTargetBreakPose}, without the reach test. */
+    /** The break envelope OreDig mines from (the geometry of its recoverable pose, without the reach test); the ore is at (0, ORE_Y, 0). */
     private static boolean atWorkPose(int rx, int rz, int v) {
-        int manhattan = Math.abs(rx) + Math.abs(rz);
-        return v >= -1 && v <= 2 && manhattan <= 1 && (v < 2 || manhattan == 0);
+        return OreDigTask.isRecoverableBreakPose(new BlockPos(rx, ORE_Y - v, rz), new BlockPos(0, ORE_Y, 0));
     }
 
     @Test

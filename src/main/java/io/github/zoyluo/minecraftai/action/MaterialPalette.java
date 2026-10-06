@@ -242,6 +242,24 @@ public final class MaterialPalette {
         return total;
     }
 
+    /**
+     * How many blocks a pillar route can place from the stack it will use without reaching into the
+     * protected mining-stone reserve. The route places from the first of its throwaway items
+     * ({@link #PILLAR_SUPPORT_BLOCKS}, Baritone's own order) that the bot carries, until that stack is
+     * gone, so that stack alone has to cover the pillar: dirt and the other unprotected supports are
+     * spendable whole, cobblestone only beyond {@code protectedStoneLikeReserve} stone-like blocks.
+     */
+    public static int spendableFirstPillarSupports(AIPlayerEntity bot, int protectedStoneLikeReserve) {
+        for (Item item : PILLAR_SUPPORT_BLOCKS) {
+            int carried = InventoryAction.countItem(bot, item);
+            if (carried > 0) {
+                int spendableStoneLike = Math.max(0, protectedMiningStoneLikeCount(bot) - Math.max(0, protectedStoneLikeReserve));
+                return isProtectedMiningStoneLike(item) ? Math.min(carried, spendableStoneLike) : carried;
+            }
+        }
+        return 0;
+    }
+
     /** Natural, normally obtainable candidates for a short emergency pillar-material refill. */
     public static List<Item> nearbyPillarSupportGatherItems() {
         return NEARBY_PILLAR_SUPPORT_GATHER_ITEMS;
