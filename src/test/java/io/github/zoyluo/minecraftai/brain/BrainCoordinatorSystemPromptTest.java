@@ -80,6 +80,17 @@ final class BrainCoordinatorSystemPromptTest {
         assertTrue(prompt.contains("gather with the count first and give_item the part when it finishes"));
     }
 
+    /** A bonus chest is an ordinary chest: nothing a bot observes sets it apart, so the prompt must not teach the model the name. */
+    @Test
+    void theFindExampleDoesNotPromiseABonusChestTheBotCannotTellApart() {
+        String prompt = BrainCoordinator.systemPrompt("Moss", "JackNotInTheBox");
+
+        assertFalse(prompt.contains("\"find the bonus chest\""),
+                "the bot cannot know which chest is the bonus chest, so it is not an example request");
+        assertTrue(prompt.contains("\"find a chest\""));
+        assertTrue(prompt.contains("an ordinary chest cannot be told from a bonus chest, so never call a find result the bonus chest"));
+    }
+
     @Test
     void thePromptSteersWhereTheRoutingLeavesRoom() {
         String prompt = BrainCoordinator.systemPrompt("Moss", "JackNotInTheBox");

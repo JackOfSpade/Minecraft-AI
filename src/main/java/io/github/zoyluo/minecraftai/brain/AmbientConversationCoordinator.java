@@ -221,8 +221,8 @@ public final class AmbientConversationCoordinator {
         // failure.  This is deliberately based on evidence availability, not a list of words such
         // as "cliff" or "stone".
         if (!hasSceneObservation(snapshot.highlights())) {
-            // The canned line speaks of company ("keeping each other company"): unless the speaker has noticed a participant,
-            // nothing it observed says there is any.
+            // The canned line claims no company (it used to say "keeping each other company") and is spoken only once the speaker has
+            // noticed a participant, so a bot that is alone never addresses anyone.
             if (!hasAddressee(conversation.order, speakerId, id -> AIPlayerManager.INSTANCE.getByUuid(id)
                     .filter(other -> ObservableWorldQuery.canNoticeCreature(speaker, other)).isPresent())) {
                 endConversation(server, "no_addressee_in_view");
@@ -401,7 +401,7 @@ public final class AmbientConversationCoordinator {
     private static String ambientSocialFallback(boolean mustBeStatement) {
         return mustBeStatement
                 ? "I'm glad we got to chat."
-                : "I'm glad we're keeping each other company.";
+                : "It's nice to stop and chat for a bit.";
     }
 
     private static int appendObservationFacts(StringBuilder builder, PerceptionSnapshot.Highlights highlights) {
