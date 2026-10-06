@@ -40,13 +40,25 @@ public final class GiveItemTask extends AbstractTask {
     private final String requestedPlayerName;
     /** Mission-owned receipt commit that runs only after the exact inventory debit is proved. */
     private final BooleanSupplier receiptCommitter;
+    /** A fresh-handoff parent must never spend its reserved output as disposable route support. */
+    private final boolean surfaceOnlyApproach;
+    /**
+     * Optional parent-owned conservation check.  It runs before pathing and before the physical
+     * drop so a fresh delivery can replan if another action consumed its reserved output.
+     */
+    private final BooleanSupplier deliveryGuard;
 
     private Phase phase = Phase.FIND_PLAYER;
     private Player target;
     private int phaseTicks;
 
     public GiveItemTask(Item item, int count, String playerName) {
-        this(item, count, playerName, () -> true);
+        this(item, count, playerName, () -> true, false, () -> true);
+    }
+
+    /** Creates an ordinary handoff that reaches the player without disposable pillar support. */
+    GiveItemTask(Item item, int count, String playerName, boolean surfaceOnlyApproach) {
+        this(item, count, playerName, () -> true, surfaceOnlyApproach, () -> true);
     }
 
     /**
@@ -58,10 +70,25 @@ public final class GiveItemTask extends AbstractTask {
                         int count,
                         String playerName,
                         BooleanSupplier receiptCommitter) {
+        this(item, count, playerName, receiptCommitter, false, () -> true);
+    }
+
+    /**
+     * Creates a parent-guarded physical handoff.  The guard must be side-effect free and return
+     * false before any route/debit when a higher-level conservation invariant no longer holds.
+     */
+    public GiveItemTask(Item item,
+                        int count,
+                        String playerName,
+                        BooleanSupplier receiptCommitter,
+                        boolean surfaceOnlyApproach,
+                        BooleanSupplier deliveryGuard) {
         this.item = item;
         this.count = Math.max(1, count);
         this.requestedPlayerName = FollowTargetResolver.normalize(playerName);
         this.receiptCommitter = Objects.requireNonNull(receiptCommitter, "receiptCommitter");
+        this.surfaceOnlyApproach = surfaceOnlyApproach;
+        this.deliveryGuard = Objects.requireNonNull(deliveryGuard, "deliveryGuard");
     }
 
     @Override
@@ -108,6 +135,9 @@ public final class GiveItemTask extends AbstractTask {
     }
 
     private void findPlayer(AIPlayerEntity bot) {
+        if (!guardSatisfied()) {
+            return;
+        }
         if (InventoryAction.countItem(bot, item) < count) {
             fail("need: " + BuiltInRegistries.ITEM.getKey(item) + " x" + count);
             return;
@@ -127,6 +157,9 @@ public final class GiveItemTask extends AbstractTask {
     }
 
     private void moveToPlayer(AIPlayerEntity bot) {
+        if (!guardSatisfied()) {
+            return;
+        }
         if (target == null || !target.isAlive()) {
             fail("give_item_player_not_found");
             return;
@@ -149,13 +182,18 @@ public final class GiveItemTask extends AbstractTask {
     }
 
     private void approach(AIPlayerEntity bot) {
-        ActionResult result = bot.getActionPack().startPathTo(target.blockPosition());
+        ActionResult result = surfaceOnlyApproach
+                ? bot.getActionPack().startSurfacePathTo(target.blockPosition())
+                : bot.getActionPack().startPathTo(target.blockPosition());
         if (result.isFailed()) {
             bot.getActionPack().startWalkTo(target.position());
         }
     }
 
     private void give(AIPlayerEntity bot) {
+        if (!guardSatisfied()) {
+            return;
+        }
         if (target == null || !target.isAlive()) {
             fail("give_item_player_not_found");
             return;
@@ -170,6 +208,11 @@ public final class GiveItemTask extends AbstractTask {
         }
         LookAction.lookAt(bot, target.position().add(0.0D, target.getEyeHeight(), 0.0D));
         int before = InventoryAction.countItem(bot, item);
+        // Recheck immediately before the irreversible vanilla debit. A move/look tick cannot
+        // normally consume inventory, but the parent guard is intentionally authoritative.
+        if (!guardSatisfied()) {
+            return;
+        }
         if (!InventoryAction.dropItems(bot, item, count)) {
             fail("give_item_drop_failed");
             return;
@@ -188,6 +231,18 @@ public final class GiveItemTask extends AbstractTask {
             return;
         }
         complete();
+    }
+
+    private boolean guardSatisfied() {
+        try {
+            if (deliveryGuard.getAsBoolean()) {
+                return true;
+            }
+        } catch (RuntimeException ignored) {
+            // A parent accounting failure cannot safely be treated as permission to debit items.
+        }
+        fail("give_item_fresh_quota_lost");
+        return false;
     }
 
     private void transition(Phase next) {

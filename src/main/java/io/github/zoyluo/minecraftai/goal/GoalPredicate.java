@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.world.item.Item;
 
 public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
         GoalPredicate.PickaxeTier,
@@ -163,11 +164,42 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
      * requested count left the bot's inventory while it was beside the named player.
      */
     record Fulfillment(List<Goal.Allocation> allocations,
-                       Set<Goal.Allocation> completedDeliveries) implements GoalPredicate {
+                       Set<Goal.Allocation> completedDeliveries,
+                       Map<Item, Integer> initialItemCounts,
+                       List<Goal.FreshGatherQuota> freshGatherQuotas,
+                       Set<Goal.FreshGatherQuota> completedFreshGatherQuotas) implements GoalPredicate {
+        /** Legacy/internal fulfillment remains an absolute inventory predicate. */
+        public Fulfillment(List<Goal.Allocation> allocations,
+                           Set<Goal.Allocation> completedDeliveries) {
+            this(allocations, completedDeliveries, Map.of(), List.of(), Set.of());
+        }
+
+        /** Preserve the immutable fresh-request baseline carried by the declarative goal. */
+        public Fulfillment(Goal.Fulfill fulfill,
+                           Set<Goal.Allocation> completedDeliveries) {
+            this(fulfill == null ? List.of() : fulfill.allocations(), completedDeliveries,
+                    fulfill == null ? Map.of() : fulfill.initialItemCounts(),
+                    fulfill == null ? List.of() : fulfill.freshGatherQuotas(), Set.of());
+        }
+
+        /** Preserve both fresh final-output and ordered raw-collection receipt boundaries. */
+        public Fulfillment(Goal.Fulfill fulfill,
+                           Set<Goal.Allocation> completedDeliveries,
+                           Set<Goal.FreshGatherQuota> completedFreshGatherQuotas) {
+            this(fulfill == null ? List.of() : fulfill.allocations(), completedDeliveries,
+                    fulfill == null ? Map.of() : fulfill.initialItemCounts(),
+                    fulfill == null ? List.of() : fulfill.freshGatherQuotas(),
+                    completedFreshGatherQuotas);
+        }
+
         public Fulfillment {
             allocations = allocations == null ? List.of() : List.copyOf(allocations);
             completedDeliveries = completedDeliveries == null
                     ? Set.of() : Set.copyOf(completedDeliveries);
+            initialItemCounts = initialItemCounts == null ? Map.of() : Map.copyOf(initialItemCounts);
+            freshGatherQuotas = freshGatherQuotas == null ? List.of() : List.copyOf(freshGatherQuotas);
+            completedFreshGatherQuotas = completedFreshGatherQuotas == null
+                    ? Set.of() : Set.copyOf(completedFreshGatherQuotas);
         }
 
         @Override
@@ -176,6 +208,18 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
             int required = 0;
             List<String> unmet = new java.util.ArrayList<>();
             Map<String, String> evidence = new LinkedHashMap<>();
+            for (Goal.FreshGatherQuota quota : freshGatherQuotas) {
+                required = Math.addExact(required, quota.count());
+                String key = "fresh_gather." + quota.mode().persistedValue() + "." + quota.itemId();
+                boolean completed = completedFreshGatherQuotas.contains(quota);
+                evidence.put(key, completed ? String.valueOf(quota.count()) : "0");
+                if (completed) {
+                    matched = Math.addExact(matched, quota.count());
+                } else {
+                    unmet.add("fresh_gather_not_completed:" + quota.mode().persistedValue()
+                            + ":" + quota.itemId());
+                }
+            }
             for (Goal.Allocation allocation : allocations) {
                 int count = allocation.count();
                 required = Math.addExact(required, count);
@@ -192,9 +236,16 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
                     continue;
                 }
                 int actual = snapshot.inventoryCount(allocation.itemId());
+                int baseline = initialItemCounts.getOrDefault(allocation.item(), 0);
+                int requiredActual = Math.addExact(baseline, count);
+                int fresh = Math.max(0, actual - baseline);
                 evidence.put("inventory." + allocation.itemId(), String.valueOf(actual));
-                matched = Math.addExact(matched, Math.min(actual, count));
-                if (actual < count) {
+                if (!initialItemCounts.isEmpty()) {
+                    evidence.put("inventory." + allocation.itemId() + ".baseline", String.valueOf(baseline));
+                    evidence.put("inventory." + allocation.itemId() + ".fresh", String.valueOf(fresh));
+                }
+                matched = Math.addExact(matched, Math.min(fresh, count));
+                if (actual < requiredActual) {
                     unmet.add("missing_item:" + allocation.itemId());
                 }
             }

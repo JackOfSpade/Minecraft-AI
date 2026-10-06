@@ -22,6 +22,7 @@ import io.github.zoyluo.minecraftai.craft.AcquisitionHints;
 import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.goal.Goal;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.goal.GoalSnapshotCollector;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.memory.BotMemory;
@@ -49,6 +50,7 @@ import io.github.zoyluo.minecraftai.task.EatTask;
 import io.github.zoyluo.minecraftai.task.FishTask;
 import io.github.zoyluo.minecraftai.task.FarmTask;
 import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
+import io.github.zoyluo.minecraftai.task.GatherThenGiveTask;
 import io.github.zoyluo.minecraftai.task.FollowTask;
 import io.github.zoyluo.minecraftai.task.GiveItemTask;
 import io.github.zoyluo.minecraftai.task.GuardTask;
@@ -260,6 +262,25 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
+        register("gather_then_give", "Collect a NEW quota of one gatherable resource, then hand that exact count to a nearby player. Existing inventory never satisfies the collection phase. For generic tree logs, pass item=logs so the task uses a species it actually gathers; use an exact minecraft:<species>_log id only when that species was named. Use this for one-resource requests that explicitly combine gathering/collecting with giving/handing the result to a player; use give_item only for an existing-inventory handoff.", objectSchema()
+                .property("item", stringSchema("exact item id, or the literal logs for any tree-log species"))
+                .property("count", integerSchema("positive number of new items to collect before the handoff", 1, Integer.MAX_VALUE))
+                .property("player", stringSchema("optional recipient player name; defaults to owner"))
+                .required("item")
+                .required("count")
+                .build(), (bot, args) -> {
+            String requestedItem = requiredString(args, "item");
+            Task task = isGenericLogHandoff(requestedItem)
+                    ? GatherThenGiveTask.genericLogs(
+                            requiredPositiveInt(args, "count"), optionalString(args, "player", ""))
+                    : new GatherThenGiveTask(
+                            requiredItem(args, "item"),
+                            requiredPositiveInt(args, "count"),
+                            optionalString(args, "player", ""));
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
         register("clear_grass", "Break exactly the requested number of nearby grass plants. This counts short grass, tall grass, ferns, and large ferns that are actually broken; it does not count wheat seeds in inventory.", objectSchema()
                 .property("count", integerSchema("number of grass plants to break"))
                 .required("count")
@@ -304,12 +325,12 @@ public final class ToolRegistry {
 
     /** Goal-driven high-level actions: gather/break/fish/trade plus every deterministic-goal task. */
     private void registerGoalTools() {
-        register("fulfill_items", "Fulfill an arbitrary compound item request with deterministic dependency planning and exact player handoffs. Use when the player asks for multiple different final items, a kit, a bundle, or a split between players. Put every final allocation in items; recipient omitted means keep it on this bot, while a named recipient is handed that item after all production is complete. The model chooses the manifest from the player's request; this tool does not assume a fixed kit or recipe.", objectSchema()
+        register("fulfill_items", "Newly produce and fulfill an arbitrary compound item request with deterministic dependency planning and exact player handoffs. Use when the player asks for multiple different final items, a kit, a bundle, or a split between players. Every final allocation is additional to matching inventory held when this call starts; it cannot hand over a pre-existing matching stack. Put every final allocation in items; recipient omitted means keep it on this bot, while a named recipient is handed that newly produced item after all production is complete. The model chooses the manifest from the player's request; this tool does not assume a fixed kit or recipe.", objectSchema()
                 .property("items", allocationArraySchema("complete final item allocations for this request"))
                 .required("items")
                 .build(), (bot, args) -> {
             List<Goal.Allocation> allocations = requiredAllocations(args, "items");
-            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.Fulfill(allocations));
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, freshFulfillGoal(bot, allocations));
             return started ? ok("goal_assigned: fulfill_items allocations=" + allocations.size())
                     : fail("goal_plan_failed");
         });
@@ -1371,6 +1392,12 @@ public final class ToolRegistry {
         return args.get(name).getAsString();
     }
 
+    /** The only non-registry item spelling accepted by gather_then_give: generic tree logs. */
+    private static boolean isGenericLogHandoff(String item) {
+        return item != null && ("logs".equalsIgnoreCase(item.trim())
+                || "minecraft:logs".equalsIgnoreCase(item.trim()));
+    }
+
     private static int optionalInt(JsonObject args, String name, int defaultValue) {
         if (!args.has(name) || !args.get(name).isJsonPrimitive()) {
             return defaultValue;
@@ -1385,6 +1412,21 @@ public final class ToolRegistry {
     private static Goal.MineOre additionalOreGoal(AIPlayerEntity bot, Set<Block> ores, int requestedDrops) {
         int heldDrops = HarvestCore.countInventoryItems(bot, HarvestCore.expectedDropsFor(ores));
         return new Goal.MineOre(ores, requestedDrops, heldDrops);
+    }
+
+    /**
+     * Public fulfillment is an acquisition request, not permission to hand over an existing
+     * stack.  Capture one immutable, planner-compatible inventory baseline for every requested
+     * output so a goal/replan/restart has to produce the requested quantity above it.
+     */
+    private static Goal.Fulfill freshFulfillGoal(AIPlayerEntity bot, List<Goal.Allocation> allocations) {
+        Goal.Fulfill canonical = new Goal.Fulfill(allocations);
+        Map<Item, Integer> baselines = new LinkedHashMap<>();
+        for (Goal.Allocation allocation : canonical.allocations()) {
+            baselines.putIfAbsent(allocation.item(),
+                    GoalSnapshotCollector.inventoryCount(bot, allocation.item()));
+        }
+        return new Goal.Fulfill(canonical.allocations(), baselines);
     }
 
     /**

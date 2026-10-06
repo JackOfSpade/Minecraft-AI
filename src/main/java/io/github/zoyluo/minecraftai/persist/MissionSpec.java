@@ -89,12 +89,24 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
             }
             case Goal.Fulfill g -> {
                 type = "fulfill";
-                params.put("schema", "1");
-                List<String> encoded = new ArrayList<>(g.allocations().size() * 3);
-                for (Goal.Allocation allocation : g.allocations()) {
-                    encoded.add(allocation.itemId());
-                    encoded.add(String.valueOf(allocation.count()));
-                    encoded.add(allocation.recipient());
+                List<String> encoded = encodeFulfillAllocations(g.allocations());
+                if (g.isFreshInventoryRequest()) {
+                    // Schema 2 preserves the immutable request-time inventory baseline. Keep it
+                    // in the declarative MissionSpec so replans, death recovery, and queued
+                    // missions retain the same freshness boundary.
+                    params.put("schema", "2");
+                    params.put("allocation_count", String.valueOf(g.allocations().size()));
+                    g.initialItemCounts().entrySet().stream()
+                            .sorted(java.util.Comparator.comparing(entry ->
+                                    BuiltInRegistries.ITEM.getKey(entry.getKey()).toString()))
+                            .forEach(entry -> {
+                                encoded.add(BuiltInRegistries.ITEM.getKey(entry.getKey()).toString());
+                                encoded.add(String.valueOf(entry.getValue()));
+                            });
+                } else {
+                    // Preserve the strict legacy wire format for absolute fulfillment goals and
+                    // existing persisted missions.
+                    params.put("schema", "1");
                 }
                 values = List.copyOf(encoded);
             }
@@ -171,40 +183,124 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 : Goal.CollectionMode.fromPersistedValue(value);
     }
 
-    /** Strict triplet encoding keeps a persisted compound request declarative and replay-safe. */
+    /** Strict canonical encoding keeps persisted compound requests declarative and replay-safe. */
     private Goal.Fulfill fulfill() {
+        String schema = params.get("schema");
+        if ("1".equals(schema)) {
+            return legacyFulfill();
+        }
+        if ("2".equals(schema)) {
+            return freshFulfill();
+        }
+        throw new IllegalArgumentException("invalid_fulfill_mission_spec");
+    }
+
+    /** Schema 1 is frozen: canonical allocation triplets only, with legacy absolute semantics. */
+    private Goal.Fulfill legacyFulfill() {
         if (!params.keySet().equals(Set.of("schema"))
-                || !"1".equals(params.get("schema"))
                 || values.isEmpty() || values.size() % 3 != 0) {
             throw new IllegalArgumentException("invalid_fulfill_mission_spec");
         }
-        List<Goal.Allocation> allocations = new ArrayList<>(values.size() / 3);
-        for (int index = 0; index < values.size(); index += 3) {
+        return new Goal.Fulfill(decodeCanonicalFulfillAllocations(values));
+    }
+
+    /**
+     * Schema 2 stores allocation triplets followed by {@code item,count} baseline pairs. The
+     * explicit allocation count makes that boundary unambiguous when multiple recipients receive
+     * the same item.
+     */
+    private Goal.Fulfill freshFulfill() {
+        if (!params.keySet().equals(Set.of("schema", "allocation_count"))
+                || values.isEmpty()) {
+            throw new IllegalArgumentException("invalid_fresh_fulfill_mission_spec");
+        }
+        String countText = params.get("allocation_count");
+        int allocationCount = Integer.parseInt(countText);
+        if (allocationCount <= 0 || !countText.equals(String.valueOf(allocationCount))) {
+            throw new IllegalArgumentException("invalid_fresh_fulfill_allocation_count");
+        }
+        int allocationValues = Math.multiplyExact(allocationCount, 3);
+        if (values.size() <= allocationValues
+                || (values.size() - allocationValues) % 2 != 0) {
+            throw new IllegalArgumentException("invalid_fresh_fulfill_mission_spec");
+        }
+        List<Goal.Allocation> allocations = decodeCanonicalFulfillAllocations(
+                List.copyOf(values.subList(0, allocationValues)));
+        if (allocations.size() != allocationCount) {
+            // Duplicate allocations would shrink during Goal.Fulfill canonicalization and could
+            // otherwise move a fresh boundary to a different manifest at restore time.
+            throw new IllegalArgumentException("noncanonical_fresh_fulfill_mission_spec");
+        }
+
+        Map<net.minecraft.world.item.Item, Integer> initialItemCounts = new LinkedHashMap<>();
+        String previousItemId = "";
+        for (int index = allocationValues; index < values.size(); index += 2) {
             String itemId = values.get(index);
             Identifier identifier = Identifier.tryParse(itemId);
             net.minecraft.world.item.Item item = identifier == null
                     ? null : BuiltInRegistries.ITEM.getOptional(identifier).orElse(null);
-            String countText = values.get(index + 1);
+            String baselineText = values.get(index + 1);
+            int baseline = Integer.parseInt(baselineText);
+            if (item == null || !itemId.equals(BuiltInRegistries.ITEM.getKey(item).toString())
+                    || baseline < 0 || !baselineText.equals(String.valueOf(baseline))
+                    || (!previousItemId.isEmpty() && previousItemId.compareTo(itemId) >= 0)
+                    || initialItemCounts.put(item, baseline) != null) {
+                throw new IllegalArgumentException("invalid_fresh_fulfill_baseline");
+            }
+            previousItemId = itemId;
+        }
+        Goal.Fulfill decoded = new Goal.Fulfill(allocations, initialItemCounts);
+        if (!decoded.isFreshInventoryRequest()) {
+            throw new IllegalArgumentException("invalid_fresh_fulfill_baseline");
+        }
+        List<String> canonical = encodeFulfillAllocations(decoded.allocations());
+        decoded.initialItemCounts().entrySet().stream()
+                .sorted(java.util.Comparator.comparing(entry ->
+                        BuiltInRegistries.ITEM.getKey(entry.getKey()).toString()))
+                .forEach(entry -> {
+                    canonical.add(BuiltInRegistries.ITEM.getKey(entry.getKey()).toString());
+                    canonical.add(String.valueOf(entry.getValue()));
+                });
+        if (!canonical.equals(values)) {
+            throw new IllegalArgumentException("noncanonical_fulfill_mission_spec");
+        }
+        return decoded;
+    }
+
+    /** Decodes triplets and rejects alternate ordering or duplicate allocation encodings. */
+    private static List<Goal.Allocation> decodeCanonicalFulfillAllocations(List<String> encoded) {
+        if (encoded == null || encoded.isEmpty() || encoded.size() % 3 != 0) {
+            throw new IllegalArgumentException("invalid_fulfill_mission_spec");
+        }
+        List<Goal.Allocation> allocations = new ArrayList<>(encoded.size() / 3);
+        for (int index = 0; index < encoded.size(); index += 3) {
+            String itemId = encoded.get(index);
+            Identifier identifier = Identifier.tryParse(itemId);
+            net.minecraft.world.item.Item item = identifier == null
+                    ? null : BuiltInRegistries.ITEM.getOptional(identifier).orElse(null);
+            String countText = encoded.get(index + 1);
             int count = Integer.parseInt(countText);
             if (item == null || !itemId.equals(BuiltInRegistries.ITEM.getKey(item).toString())
                     || count <= 0 || !countText.equals(String.valueOf(count))) {
                 throw new IllegalArgumentException("invalid_fulfill_allocation");
             }
-            allocations.add(new Goal.Allocation(item, count, values.get(index + 2)));
+            allocations.add(new Goal.Allocation(item, count, encoded.get(index + 2)));
         }
         Goal.Fulfill decoded = new Goal.Fulfill(allocations);
-        // The stored representation must already be canonical.  Otherwise an altered or
-        // duplicate manifest could make a restart describe a different authorization scope.
-        List<String> canonical = new ArrayList<>(decoded.allocations().size() * 3);
-        for (Goal.Allocation allocation : decoded.allocations()) {
-            canonical.add(allocation.itemId());
-            canonical.add(String.valueOf(allocation.count()));
-            canonical.add(allocation.recipient());
-        }
-        if (!canonical.equals(values)) {
+        if (!encodeFulfillAllocations(decoded.allocations()).equals(encoded)) {
             throw new IllegalArgumentException("noncanonical_fulfill_mission_spec");
         }
-        return decoded;
+        return decoded.allocations();
+    }
+
+    private static List<String> encodeFulfillAllocations(List<Goal.Allocation> allocations) {
+        List<String> encoded = new ArrayList<>(allocations.size() * 3);
+        for (Goal.Allocation allocation : allocations) {
+            encoded.add(allocation.itemId());
+            encoded.add(String.valueOf(allocation.count()));
+            encoded.add(allocation.recipient());
+        }
+        return encoded;
     }
 
     private String required(String key) {

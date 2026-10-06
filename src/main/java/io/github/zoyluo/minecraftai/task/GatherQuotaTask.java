@@ -138,6 +138,10 @@ public final class GatherQuotaTask extends AbstractTask {
     // Fix C: when the target is logs, accept/gather **any** tree species (a biome may not have
     // oak). Progress is counted against the total across the whole log family.
     private final Set<Item> acceptItems;
+    /** A fresh handoff mode must retain its promised inventory rather than merely observe a pickup. */
+    private final boolean retainAcceptedItemsDuringDeposit;
+    /** Items this task (or its parent) must never stow while a bounded child is in progress. */
+    private final Set<Item> protectedItemsDuringDeposit;
     private final Set<Block> harvestBlocks;
     private final boolean probabilisticDrop; // The break drop is probabilistic/partial (grass → seeds, berry bush → berries): dropping 0 is normal, not a "failed pickup"
     private Phase phase = Phase.SURVEY;
@@ -302,6 +306,25 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     /**
+     * Collects a fresh quota of one exact item id. This is used before an exact player handoff:
+     * unlike ordinary log gathering, a later GiveItemTask cannot substitute another log family.
+     */
+    public static GatherQuotaTask collectAdditionalExact(Item targetItem, int targetCount) {
+        return new GatherQuotaTask(targetItem, targetCount, false, null, "", "", true,
+                0, 0, 0, Set.of(targetItem), true);
+    }
+
+    /**
+     * Collects a fresh generic-log quota for a later handoff.  Unlike an explicitly named wood
+     * species, the player word "logs" means any ordinary tree log is acceptable; preserve the
+     * entire family while the handoff wrapper selects one actually gathered species to deliver.
+     */
+    static GatherQuotaTask collectAdditionalLogsForHandoff(int targetCount) {
+        return new GatherQuotaTask(Items.OAK_LOG, targetCount, false, null, "", "", true,
+                0, 0, 0, Set.copyOf(RecipeRegistry.LOGS), true);
+    }
+
+    /**
      * Collects as much newly acquired material as possible for ten minutes.  Existing inventory
      * establishes only the counting baseline; it can never complete this task.
      */
@@ -336,6 +359,26 @@ public final class GatherQuotaTask extends AbstractTask {
                             Set<Block> exactBreakBlocks, String exactBreakTaskName,
                             String exactBreakTargetLabel, boolean countNewItems, int collectionDurationTicks,
                             int localSearchRadius, int localTimeoutTicks) {
+        this(targetItem, targetCount, countBrokenBlocks, exactBreakBlocks, exactBreakTaskName,
+                exactBreakTargetLabel, countNewItems, collectionDurationTicks, localSearchRadius,
+                localTimeoutTicks, null, false);
+    }
+
+    private GatherQuotaTask(Item targetItem, int targetCount, boolean countBrokenBlocks,
+                            Set<Block> exactBreakBlocks, String exactBreakTaskName,
+                            String exactBreakTargetLabel, boolean countNewItems, int collectionDurationTicks,
+                            int localSearchRadius, int localTimeoutTicks, Set<Item> acceptedItemsOverride,
+                            boolean retainAcceptedItemsDuringDeposit) {
+        this(targetItem, targetCount, countBrokenBlocks, exactBreakBlocks, exactBreakTaskName,
+                exactBreakTargetLabel, countNewItems, collectionDurationTicks, localSearchRadius,
+                localTimeoutTicks, acceptedItemsOverride, retainAcceptedItemsDuringDeposit, Set.of());
+    }
+
+    private GatherQuotaTask(Item targetItem, int targetCount, boolean countBrokenBlocks,
+                            Set<Block> exactBreakBlocks, String exactBreakTaskName,
+                            String exactBreakTargetLabel, boolean countNewItems, int collectionDurationTicks,
+                            int localSearchRadius, int localTimeoutTicks, Set<Item> acceptedItemsOverride,
+                            boolean retainAcceptedItemsDuringDeposit, Set<Item> inheritedProtectedItems) {
         this.targetItem = targetItem;
         this.targetCount = Math.max(1, targetCount);
         this.countBrokenBlocks = countBrokenBlocks;
@@ -345,7 +388,16 @@ public final class GatherQuotaTask extends AbstractTask {
         this.localTimeoutTicks = this.localSearchRadius == 0 ? 0 : Math.max(1, localTimeoutTicks);
         this.exactBreakTaskName = countBrokenBlocks ? exactBreakTaskName : "";
         this.exactBreakTargetLabel = countBrokenBlocks ? exactBreakTargetLabel : "";
-        this.acceptItems = acceptItemsFor(targetItem);
+        this.acceptItems = acceptedItemsOverride == null ? acceptItemsFor(targetItem) : Set.copyOf(acceptedItemsOverride);
+        this.retainAcceptedItemsDuringDeposit = !countBrokenBlocks && retainAcceptedItemsDuringDeposit;
+        LinkedHashSet<Item> protectedItems = new LinkedHashSet<>();
+        if (this.retainAcceptedItemsDuringDeposit) {
+            protectedItems.addAll(this.acceptItems);
+        }
+        if (inheritedProtectedItems != null) {
+            protectedItems.addAll(inheritedProtectedItems);
+        }
+        this.protectedItemsDuringDeposit = Set.copyOf(protectedItems);
         this.harvestBlocks = exactBreakBlocks == null ? harvestBlocksFor(this.acceptItems) : Set.copyOf(exactBreakBlocks);
         this.probabilisticDrop = !countBrokenBlocks && (harvestBlocks.contains(Blocks.SHORT_GRASS)
                 || harvestBlocks.contains(Blocks.SWEET_BERRY_BUSH));
@@ -356,8 +408,23 @@ public final class GatherQuotaTask extends AbstractTask {
      * high target. MineTask shares this exact safety boundary for non-ore block targets.
      */
     static GatherQuotaTask collectNearbyPillarSupport(Item item, int count) {
+        return collectNearbyPillarSupport(item, count, Set.of());
+    }
+
+    /**
+     * Local support collection inherits a parent's promised inventory and also reserves the
+     * support being accumulated, so a full-inventory detour cannot stow either mid-transaction.
+     */
+    static GatherQuotaTask collectNearbyPillarSupport(Item item, int count, Set<Item> inheritedProtectedItems) {
+        LinkedHashSet<Item> protectedItems = new LinkedHashSet<>();
+        if (inheritedProtectedItems != null) {
+            protectedItems.addAll(inheritedProtectedItems);
+        }
+        if (item != null) {
+            protectedItems.add(item);
+        }
         return new GatherQuotaTask(item, count, false, null, "", "", true,
-                0, SCAFFOLD_SUPPLY_RADIUS, SCAFFOLD_SUPPLY_TIMEOUT);
+                0, SCAFFOLD_SUPPLY_RADIUS, SCAFFOLD_SUPPLY_TIMEOUT, null, false, protectedItems);
     }
 
     /** Clears actual vegetation plants, independent of any random wheat-seed drops. */
@@ -554,9 +621,17 @@ public final class GatherQuotaTask extends AbstractTask {
         EpisodeMemory.INSTANCE.recordTrail(bot.getUUID(), countBrokenBlocks ? name() : "gather", bot.blockPosition());
         if (!countBrokenBlocks) {
             refreshCountSoFar(bot);
-            // Any gain not claimed by confirmPickup's own "pickup" detection (below, later this
-            // same tick or a previous one) is unattributed -- e.g. a player handed the bot an item.
-            logGatherUnitGains(bot, "unattributed", null);
+            // A new inventory count is visible before the PICKUP phase's ordinary dispatch.  Let
+            // confirmPickup consume it first: logging it generically here used to advance the
+            // audit baseline as "unattributed", so the subsequent confirmed physical pickup had
+            // no delta left to record (and a quota-closing pickup could skip pickup() entirely).
+            if (phase == Phase.PICKUP) {
+                confirmPickup(bot, pickedUpAccepted(bot));
+            } else {
+                // Any gain outside an active physical pickup is genuinely unattributed -- e.g.
+                // a player handed the bot an item mid-task.
+                logGatherUnitGains(bot, "unattributed", null);
+            }
         }
         // A block break or its local pickup was already physically committed before the window
         // closed. Let that bounded transaction settle before deciding that nothing was found;
@@ -808,7 +883,7 @@ public final class GatherQuotaTask extends AbstractTask {
         bot.getActionPack().stopAll();
         // Walking rejected → first escalate to dig-approach (tunnel to a tree below/against a
         // cliff); only blacklist and move to the next one if digging also fails.
-        var pathResult = bot.getActionPack().startPathTo(ground);
+        var pathResult = startGatherPathTo(bot, ground);
         if (pathResult.isFailed()) {
             if (tryDigApproach(bot, found, pathResult.reason())) {
                 return true;
@@ -836,7 +911,7 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupMisses = 0;
         selfStuckTick = elapsed;
         phase = Phase.GOTO;
-        bot.getActionPack().startPathTo(ground);
+        startGatherPathTo(bot, ground);
         BotLog.action(bot, "gather_prospected",
                 "found", found.getX() + "," + found.getY() + "," + found.getZ(),
                 "to", ground.getX() + "," + ground.getY() + "," + ground.getZ(),
@@ -1129,6 +1204,7 @@ public final class GatherQuotaTask extends AbstractTask {
             }
         }
         if (!countBrokenBlocks && HarvestCore.isInventoryFull(bot)
+                && (!retainAcceptedItemsDuringDeposit || !hasAcceptedStackRoom(bot))
                 && (isTimedCollection() || countSoFar < targetCount)) {
             phase = Phase.DEPOSIT;
             return;
@@ -1187,7 +1263,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // support-material child is excluded so it cannot recursively collect more filler
             // to pillar toward filler. Keeping this after the view sweep lets a plainly visible
             // tree/target win immediately instead of paying for an empty high-target scan.
-            if (!isLocalScaffoldSupply() && tryPillarApproach(bot, botId, now)) {
+            if (!isLocalScaffoldSupply() && mayUsePillarRecovery() && tryPillarApproach(bot, botId, now)) {
                 return;
             }
             if (countBrokenBlocks && hasPendingExactVisibleSearch()) {
@@ -1266,7 +1342,7 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         phase = Phase.GOTO;
-        bot.getActionPack().startPathTo(choice.stand());
+        startGatherPathTo(bot, choice.stand());
     }
 
     /**
@@ -1277,7 +1353,12 @@ public final class GatherQuotaTask extends AbstractTask {
      */
     private boolean seekVisibleTree(AIPlayerEntity bot) {
         if (treeSightingHint != null) {
-            if (isVerticalPillarHint(bot, treeSightingHint, true)) {
+            // A tree feature in the bot's own X/Z column has no direction for a landmark
+            // pursuit.  Keep the factual hint for the pillar scan below, but do not recreate
+            // the horizon scan while the bot remains in this cell: TreeHorizonScan deliberately
+            // samples straight up/down every step, so clearing the hint here would retry the
+            // same impossible directional route forever.
+            if (!hasHorizontalLandmarkHeading(bot.blockPosition(), treeSightingHint)) {
                 return false;
             }
             if (horizontalDistanceSquared(bot.blockPosition(), treeSightingHint) <= SEARCH_RADIUS * SEARCH_RADIUS) {
@@ -1331,7 +1412,7 @@ public final class GatherQuotaTask extends AbstractTask {
             startHarvest(bot);
             return true;
         }
-        ActionResult route = bot.getActionPack().startPathTo(choice.stand());
+        ActionResult route = startGatherPathTo(bot, choice.stand());
         if (route.isFailed()) {
             targetPos = null;
             BotLog.action(bot, "gather_tree_sighting_route_refused",
@@ -1365,9 +1446,13 @@ public final class GatherQuotaTask extends AbstractTask {
             treeSightingHint = null;
             return false;
         }
-        if (isVerticalPillarHint(bot, treeSightingHint, true)) {
-            // The dedicated pillar path owns a visible vertical tree feature; a directional
-            // landmark hop would have no heading and must not manufacture one.
+        if (!hasHorizontalLandmarkHeading(bot.blockPosition(), treeSightingHint)) {
+            // ActionPack rejects this same-column route too, but retain the hint rather than
+            // treating that refusal as a failed landmark.  survey() immediately gives the
+            // observed pillar recovery its chance; on later stationary survey ticks the guard
+            // in seekVisibleTree() prevents TreeHorizonScan's vertical ray from spinning here.
+            BotLog.action(bot, "gather_tree_sighting_vertical_handoff",
+                    "hint", treeSightingHint.toShortString());
             return false;
         }
         int requestedHop = treeSightingPursuitDistance(bot);
@@ -1388,6 +1473,14 @@ public final class GatherQuotaTask extends AbstractTask {
             }
         }
         if (route.isFailed()) {
+            if ("visible_landmark_no_horizontal_heading".equals(route.reason())) {
+                // Defensive handoff for a coordinate change between the local heading check
+                // and route admission.  Preserve the hint so the next survey does not replay
+                // the same first-hit vertical ray as a fresh failed pursuit.
+                BotLog.action(bot, "gather_tree_sighting_vertical_handoff",
+                        "hint", treeSightingHint.toShortString(), "source", "route_refusal");
+                return false;
+            }
             BotLog.action(bot, "gather_tree_sighting_pursuit_refused",
                     "hint", treeSightingHint.toShortString(), "reason", route.reason());
             treeSightingHint = null;
@@ -1525,7 +1618,7 @@ public final class GatherQuotaTask extends AbstractTask {
             startHarvest(bot);
             return true;
         }
-        ActionResult route = bot.getActionPack().startPathTo(choice.stand());
+        ActionResult route = startGatherPathTo(bot, choice.stand());
         if (route.isFailed()) {
             targetPos = null;
             BotLog.action(bot, "gather_target_sighting_route_refused",
@@ -1640,6 +1733,18 @@ public final class GatherQuotaTask extends AbstractTask {
 
     /** Attempts an explicit no-dig pillar for a visible, unreachable target block. */
     private boolean tryPillarApproach(AIPlayerEntity bot, java.util.UUID botId, int now) {
+        // A current same-column log sighting is much more valuable than a generic volume scan:
+        // it has already identified the exact block the bot needs.  Admit that target directly
+        // so a seven-block-high trunk does not wait for the 42k-cell cursor to happen to reach
+        // it.  If it needs throwaway supports, admitPillarApproach starts the bounded common-
+        // material child immediately; if its nearby column is not actually safe, the ordinary
+        // observed scan below remains available as a fallback.
+        HarvestCore.PillarApproach hintedApproach = pillarApproachForVerticalHint(bot);
+        if (hintedApproach != null) {
+            pillarApproachScan = null;
+            pillarApproachScanUp = 0;
+            return admitPillarApproach(bot, hintedApproach);
+        }
         // A tall tree or other high target can sit above the shallow ordinary survey.  This
         // remains a small, line-of-sight-filtered candidate volume, but it is deliberately
         // resumable: one empty survey must not cast tens of thousands of rays in a single tick
@@ -1662,6 +1767,23 @@ public final class GatherQuotaTask extends AbstractTask {
         if (approach == null) {
             return false;
         }
+        return admitPillarApproach(bot, approach);
+    }
+
+    /**
+     * A fresh exact handoff may not place its target as irreversible scaffold. Ordinary gather
+     * keeps the full recovery path; only a target that Baritone itself would select as a pillar
+     * support is withheld here.
+     */
+    private boolean mayUsePillarRecovery() {
+        return !retainAcceptedItemsDuringDeposit || !MaterialPalette.isPillarSupportItem(targetItem);
+    }
+
+    /** Admits a re-proved pillar target, obtaining only cheap nearby supports when necessary. */
+    private boolean admitPillarApproach(AIPlayerEntity bot, HarvestCore.PillarApproach approach) {
+        if (approach == null) {
+            return false;
+        }
         int required = approach.supports() + SCAFFOLD_SUPPORT_CUSHION;
         int available = MaterialPalette.countPillarSupportBlocks(bot);
         if (available < required) {
@@ -1679,6 +1801,25 @@ public final class GatherQuotaTask extends AbstractTask {
             return false;
         }
         return startPillarApproach(bot, approach, available);
+    }
+
+    /**
+     * Turns one currently visible overhead log hint into a pillar candidate without waiting for
+     * the broad nearest-target cursor. A leaf remains only a factual landmark: HarvestCore
+     * re-proves that this exact cell is a requested harvest block before it can be climbed to.
+     */
+    private HarvestCore.PillarApproach pillarApproachForVerticalHint(AIPlayerEntity bot) {
+        BlockPos hint = gathersTreeLogs() ? treeSightingHint : targetSightingHint;
+        if (!isVerticalPillarHint(bot, hint, gathersTreeLogs())) {
+            return null;
+        }
+        // Match the broad cursor's exclusion fence. A rejected pillar or exhausted support
+        // refill must not be re-admitted solely because its factual sighting is still visible.
+        if (EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), hint,
+                bot.level().getServer().getTickCount())) {
+            return null;
+        }
+        return HarvestCore.pillarApproachFor(bot, hint, harvestBlocks);
     }
 
     /** Re-validates the exact target and recomputes its clear pillar column after a refill walk. */
@@ -1831,7 +1972,7 @@ public final class GatherQuotaTask extends AbstractTask {
     /** A high same-column sighting has no directional-hop heading and belongs to pillar recovery. */
     private boolean isVerticalPillarHint(AIPlayerEntity bot, BlockPos hint, boolean treeLandmark) {
         if (bot == null || hint == null || !sameHorizontalColumn(bot.blockPosition(), hint)
-                || insideLocalHarvestSurvey(bot, hint) || hint.getY() <= bot.blockPosition().getY()) {
+                || hint.getY() <= bot.blockPosition().getY()) {
             return false;
         }
         return treeLandmark ? isCurrentVisibleTreeLandmark(bot, hint)
@@ -1861,7 +2002,7 @@ public final class GatherQuotaTask extends AbstractTask {
             return false;
         }
         scaffoldSupplyItem = candidates.get(scaffoldSupplyItemIndex++);
-        scaffoldSupplyTask = collectNearbyPillarSupport(scaffoldSupplyItem, missing);
+        scaffoldSupplyTask = collectNearbyPillarSupport(scaffoldSupplyItem, missing, protectedItemsDuringDeposit);
         scaffoldSupplyTask.start(bot);
         BotLog.action(bot, "gather_scaffold_resupply",
                 "target", pendingPillarApproach == null ? "none" : pendingPillarApproach.target().toShortString(),
@@ -1904,6 +2045,11 @@ public final class GatherQuotaTask extends AbstractTask {
     private static boolean sameHorizontalColumn(BlockPos first, BlockPos second) {
         return first != null && second != null
                 && first.getX() == second.getX() && first.getZ() == second.getZ();
+    }
+
+    /** True only when a visible landmark can supply a directional-pursuit heading. */
+    static boolean hasHorizontalLandmarkHeading(BlockPos feet, BlockPos landmark) {
+        return feet != null && landmark != null && !sameHorizontalColumn(feet, landmark);
     }
 
     /** The same small volume that the ordinary survey may turn into a normal harvest route. */
@@ -2169,7 +2315,7 @@ public final class GatherQuotaTask extends AbstractTask {
     // goToTarget from re-issuing it immediately. If digging also fails (rare: sealed off by
     // bedrock / out of bounds) → return false, and the caller blacklists it and switches trees.
     private boolean tryDigApproach(AIPlayerEntity bot, BlockPos tree, String why) {
-        if (countBrokenBlocks) {
+        if (countBrokenBlocks || !protectedItemsDuringDeposit.isEmpty()) {
             return false;
         }
         ActionResult dig = bot.getActionPack().startDigPathTo(tree);
@@ -2185,6 +2331,18 @@ public final class GatherQuotaTask extends AbstractTask {
         gotoFailStreak = 0;
         phase = Phase.GOTO;
         return true;
+    }
+
+    /**
+     * A fresh-handoff or support-resupply variant must not let an ordinary Baritone route spend
+     * protected inventory as disposable path material. Its explicit high-target route is still
+     * available above when the target is not a pillar support; normal gather behavior remains
+     * unchanged.
+     */
+    private ActionResult startGatherPathTo(AIPlayerEntity bot, BlockPos goal) {
+        return !protectedItemsDuringDeposit.isEmpty()
+                ? bot.getActionPack().startSurfacePathTo(goal)
+                : bot.getActionPack().startPathTo(goal);
     }
 
     private void goToTarget(AIPlayerEntity bot) {
@@ -2288,7 +2446,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // nothing to switch to when every tree is on a cliff). Each target is escalated only
             // once; only blacklisted (and revived after its TTL) if dig-approach also can't reach
             // it. This is the key to being able to gather wood on any terrain.
-            if (!pillarApproachActive && !treeDigTried) {
+            if (!pillarApproachActive && !treeDigTried && protectedItemsDuringDeposit.isEmpty()) {
                 treeDigTried = true;
                 ActionResult dig = bot.getActionPack().startDigPathTo(targetPos);
                 BotLog.action(bot, "gather_dig_approach",
@@ -2685,12 +2843,22 @@ public final class GatherQuotaTask extends AbstractTask {
     private void deposit(AIPlayerEntity bot) {
         if (stockpileTask == null) {
             bot.getActionPack().stopAll();
-            stockpileTask = new StockpileTask(true);
+            stockpileTask = !protectedItemsDuringDeposit.isEmpty()
+                    ? new StockpileTask(true, protectedItemsDuringDeposit)
+                    : new StockpileTask(true);
             stockpileTask.start(bot);
         }
         stockpileTask.tick(bot);
         if (stockpileTask.state() == TaskState.COMPLETED) {
             stockpileTask = null;
+            // The child intentionally leaves the promised fresh target in place. If only that
+            // protected target fills the inventory, looping SURVEY -> DEPOSIT can neither make
+            // space nor preserve a truthful later handoff; fail closed instead.
+            if (!protectedItemsDuringDeposit.isEmpty()
+                    && HarvestCore.isInventoryFull(bot) && !hasAcceptedStackRoom(bot)) {
+                fail("inventory_full_reserved_handoff");
+                return;
+            }
             phase = Phase.SURVEY;
             return;
         }
@@ -2813,7 +2981,28 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private int countAccepted(AIPlayerEntity bot) {
-        return acceptedInventoryCount(bot, targetItem);
+        // Keep this instance's acceptance set authoritative. Normal gather tasks initialize it
+        // to the target's family (for example, all logs), while collectAdditionalExact narrows it
+        // to a single id before a matching GiveItemTask is allowed to run.
+        return HarvestCore.countInventoryItems(bot, acceptItems);
+    }
+
+    /**
+     * A full inventory can bypass stockpiling only when one exact retained item has a mergeable
+     * stack. A retained family (generic logs) cannot assume a partial oak stack leaves room for
+     * a newly found birch log, so it must first make a real empty slot or fail closed.
+     */
+    private boolean hasAcceptedStackRoom(AIPlayerEntity bot) {
+        if (acceptItems.size() != 1) {
+            return false;
+        }
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (!stack.isEmpty() && acceptItems.contains(stack.getItem())
+                    && stack.getCount() < stack.getMaxStackSize()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -2824,6 +3013,14 @@ public final class GatherQuotaTask extends AbstractTask {
      */
     private void refreshCountSoFar(AIPlayerEntity bot) {
         int accepted = countAccepted(bot);
+        if (retainAcceptedItemsDuringDeposit) {
+            // A later exact handoff needs the new units still in inventory. Unlike ordinary
+            // gather, a pickup statistic alone is not enough: a stowed or spent item must reopen
+            // the quota so the task regathers it instead of allowing GiveItemTask to use an old
+            // stack of the same id.
+            countSoFar = Math.max(0, accepted - acceptedInventoryAtStart);
+            return;
+        }
         if (!countNewItems) {
             // While bootstrapping, the logs earmarked for the axe craft are not part of the quota.
             countSoFar = Math.max(0, accepted - (bootstrapActive ? bootstrapExcluded : 0));
@@ -2831,6 +3028,15 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         int observedNewItems = Math.max(0, rawNewItems(bot) - bootstrapExcluded);
         countSoFar = Math.max(countSoFar, observedNewItems);
+    }
+
+    /**
+     * Final defense for {@link GatherThenGiveTask}: the exact fresh quota must still be present
+     * beyond the immutable inventory baseline at the moment the physical handoff begins.
+     */
+    boolean hasRetainedFreshQuota(AIPlayerEntity bot) {
+        return retainAcceptedItemsDuringDeposit
+                && countAccepted(bot) >= acceptedInventoryAtStart + targetCount;
     }
 
     /** Accepted items this task has received so far (monotonic: max of inventory delta and picked-up stat delta). */

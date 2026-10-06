@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.goal;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -9,6 +10,7 @@ import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 
 public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.MineOre, Goal.HarvestCrop,
@@ -264,12 +266,92 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
     }
 
     /**
+     * The accepted material family for a physical gather stage that must complete before a
+     * compound fulfillment may begin its ordinary recipe work.
+     */
+    enum FreshGatherMode {
+        EXACT("exact"),
+        /** The player said the generic plural "logs", so any ordinary tree-log species counts. */
+        LOGS("logs");
+
+        private final String persistedValue;
+
+        FreshGatherMode(String persistedValue) {
+            this.persistedValue = persistedValue;
+        }
+
+        public String persistedValue() {
+            return persistedValue;
+        }
+
+        public static FreshGatherMode fromPersistedValue(String value) {
+            for (FreshGatherMode mode : values()) {
+                if (mode.persistedValue.equals(value)) {
+                    return mode;
+                }
+            }
+            throw new IllegalArgumentException("unknown_fresh_gather_mode:" + value);
+        }
+    }
+
+    /**
+     * A durable, physical collection requirement that precedes a compound output manifest.
+     * Unlike a final allocation, this is a historical receipt: after the bot has actually
+     * gathered it, those materials may be consumed by the later recipe chain.
+     */
+    record FreshGatherQuota(Item item, int count, FreshGatherMode mode) {
+        public FreshGatherQuota(Item item, int count) {
+            this(item, count, FreshGatherMode.EXACT);
+        }
+
+        /** Uses oak only as a canonical registry sentinel; the task accepts every log species. */
+        public static FreshGatherQuota logs(int count) {
+            return new FreshGatherQuota(Items.OAK_LOG, count, FreshGatherMode.LOGS);
+        }
+
+        public FreshGatherQuota {
+            Objects.requireNonNull(item, "fresh_gather_item");
+            if (count <= 0) {
+                throw new IllegalArgumentException("fresh_gather_count_must_be_positive");
+            }
+            mode = mode == null ? FreshGatherMode.EXACT : mode;
+            if (mode == FreshGatherMode.LOGS && item != Items.OAK_LOG) {
+                throw new IllegalArgumentException("generic_fresh_gather_requires_oak_log_sentinel");
+            }
+        }
+
+        public String itemId() {
+            return BuiltInRegistries.ITEM.getKey(item).toString();
+        }
+
+        public boolean genericLogs() {
+            return mode == FreshGatherMode.LOGS;
+        }
+    }
+
+    /**
      * A general compound fulfillment objective.  It is deliberately declarative: the language
      * model chooses any finite set of requested item allocations, while the regular recipe
      * planner derives their shared prerequisites.  Duplicate item/recipient allocations are
      * merged so repeated model entries cannot create competing handoff obligations.
      */
-    record Fulfill(List<Allocation> allocations) implements Goal {
+    record Fulfill(List<Allocation> allocations,
+                   Map<Item, Integer> initialItemCounts,
+                   List<FreshGatherQuota> freshGatherQuotas) implements Goal {
+        /**
+         * Legacy/internal fulfillment remains an absolute inventory goal.  Public acquisition
+         * requests use the two-argument form, whose non-empty baseline is an immutable proof
+         * boundary captured when the request was accepted.
+         */
+        public Fulfill(List<Allocation> allocations) {
+            this(allocations, Map.of(), List.of());
+        }
+
+        /** Fresh final-output boundary without any ordered raw-material collection stage. */
+        public Fulfill(List<Allocation> allocations, Map<Item, Integer> initialItemCounts) {
+            this(allocations, initialItemCounts, List.of());
+        }
+
         public Fulfill {
             if (allocations == null || allocations.isEmpty()) {
                 throw new IllegalArgumentException("fulfillment_requires_allocations");
@@ -293,6 +375,94 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
                     .forEach(entry -> canonical.add(new Allocation(
                             entry.getKey().item(), entry.getValue(), entry.getKey().recipient())));
             allocations = List.copyOf(canonical);
+
+            // An empty map deliberately preserves the pre-existing absolute-inventory semantics.
+            // A fresh public request, on the other hand, must snapshot every requested item --
+            // including items whose baseline is zero -- so it cannot become indistinguishable
+            // from a legacy request after serialization or a replan.
+            if (initialItemCounts == null || initialItemCounts.isEmpty()) {
+                initialItemCounts = Map.of();
+            } else {
+                Map<Item, Integer> suppliedBaselines = initialItemCounts;
+                if (!suppliedBaselines.keySet().equals(aggregateByItem.keySet())) {
+                    throw new IllegalArgumentException("fulfillment_baseline_items_must_match_allocations");
+                }
+                Map<Item, Integer> canonicalBaselines = new LinkedHashMap<>();
+                suppliedBaselines.entrySet().stream()
+                        .sorted(Comparator.comparing(entry ->
+                                BuiltInRegistries.ITEM.getKey(entry.getKey()).toString()))
+                        .forEach(entry -> {
+                            Item item = Objects.requireNonNull(entry.getKey(), "baseline_item");
+                            Integer count = Objects.requireNonNull(entry.getValue(), "baseline_count");
+                            if (count < 0) {
+                                throw new IllegalArgumentException("negative_fulfillment_baseline");
+                            }
+                            // Validate the largest possible pre-handoff requirement here rather
+                            // than overflowing only when a later replan reaches it.
+                            Math.addExact(count, aggregateByItem.get(item));
+                            canonicalBaselines.put(item, count);
+                        });
+                initialItemCounts = Collections.unmodifiableMap(canonicalBaselines);
+            }
+
+            if (freshGatherQuotas == null || freshGatherQuotas.isEmpty()) {
+                freshGatherQuotas = List.of();
+            } else {
+                if (initialItemCounts.isEmpty()) {
+                    // A staged public collection must retain the same fresh final-output
+                    // semantics as every other public Fulfill request; internal legacy callers
+                    // deliberately keep their old absolute-inventory behavior.
+                    throw new IllegalArgumentException("fresh_gather_requires_fresh_fulfillment");
+                }
+                Map<FreshGatherKey, Integer> mergedQuotas = new LinkedHashMap<>();
+                for (FreshGatherQuota quota : freshGatherQuotas) {
+                    FreshGatherQuota value = Objects.requireNonNull(quota, "fresh_gather_quota");
+                    mergedQuotas.merge(new FreshGatherKey(value.item(), value.mode()),
+                            value.count(), Math::addExact);
+                }
+                List<FreshGatherQuota> canonicalQuotas = new ArrayList<>(mergedQuotas.size());
+                mergedQuotas.entrySet().stream()
+                        .sorted(Comparator.comparing((Map.Entry<FreshGatherKey, Integer> entry) ->
+                                        BuiltInRegistries.ITEM.getKey(entry.getKey().item()).toString())
+                                .thenComparing(entry -> entry.getKey().mode().persistedValue()))
+                        .forEach(entry -> canonicalQuotas.add(new FreshGatherQuota(
+                                entry.getKey().item(), entry.getValue(), entry.getKey().mode())));
+                freshGatherQuotas = List.copyOf(canonicalQuotas);
+            }
+        }
+
+        /** True when this goal must prove that every requested allocation was newly produced. */
+        public boolean isFreshInventoryRequest() {
+            return !initialItemCounts.isEmpty();
+        }
+
+        /** True when this fulfillment owns one or more completed-before-crafting gather receipts. */
+        public boolean hasFreshGatherQuotas() {
+            return !freshGatherQuotas.isEmpty();
+        }
+
+        /** Count held at public-request submission time; zero for legacy absolute goals. */
+        public int initialItemCount(Item item) {
+            return initialItemCounts.getOrDefault(item, 0);
+        }
+
+        /** Total requested quantity of one item across retained and delivery allocations. */
+        public int requestedItemCount(Item item) {
+            int requested = 0;
+            for (Allocation allocation : allocations) {
+                if (allocation.item() == item) {
+                    requested = Math.addExact(requested, allocation.count());
+                }
+            }
+            return requested;
+        }
+
+        /** Fresh quantity currently evidenced above the immutable submission baseline. */
+        public int deliveredFromInitial(Item item, int currentItemCount) {
+            if (!isFreshInventoryRequest() || currentItemCount <= initialItemCount(item)) {
+                return 0;
+            }
+            return Math.min(requestedItemCount(item), currentItemCount - initialItemCount(item));
         }
 
         /** The allocations the bot itself must still carry after any handoffs. */
@@ -313,6 +483,12 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
         public Map<Item, Integer> inventoryRequired(Set<Allocation> completedDeliveries) {
             Set<Allocation> completed = completedDeliveries == null ? Set.of() : Set.copyOf(completedDeliveries);
             Map<Item, Integer> required = new LinkedHashMap<>();
+            if (isFreshInventoryRequest()) {
+                // Preserve the pre-request stack while satisfying every still-owned allocation.
+                // This makes a later GiveItemTask drop only newly produced quantity: after a
+                // completed delivery, the baseline remains required but that delivery does not.
+                initialItemCounts.forEach((item, count) -> required.put(item, count));
+            }
             for (Allocation allocation : allocations) {
                 if (!allocation.delivery() || !completed.contains(allocation)) {
                     required.merge(allocation.item(), allocation.count(), Math::addExact);
@@ -322,6 +498,9 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
         }
 
         private record AllocationKey(Item item, String recipient) {
+        }
+
+        private record FreshGatherKey(Item item, FreshGatherMode mode) {
         }
     }
 }

@@ -70,7 +70,8 @@ final class GatherTreeRecoverySourceContractTest {
         String pack = read("action/ActionPack.java");
         String palette = read("action/MaterialPalette.java");
         String resupply = methodBody(gather, "private boolean startNextScaffoldSupply(");
-        String localResupply = methodBody(gather, "static GatherQuotaTask collectNearbyPillarSupport(");
+        String localResupply = methodBody(gather,
+                "static GatherQuotaTask collectNearbyPillarSupport(Item item, int count, Set<Item> inheritedProtectedItems)");
         String pillarStart = methodBody(gather, "private boolean startPillarApproach(");
         String gotoTarget = methodBody(gather, "private void goToTarget(");
         String survey = methodBody(gather, "private void survey(");
@@ -92,12 +93,13 @@ final class GatherTreeRecoverySourceContractTest {
                 "high-target recovery must time-slice its visible candidate scan instead of stalling a server tick");
         int pillarAttempt = survey.indexOf("tryPillarApproach(bot, botId, now)");
         int exactBreakBoundary = survey.indexOf("if (countBrokenBlocks)");
-        assertTrue(Pattern.compile("if\\s*\\(\\s*!isLocalScaffoldSupply\\(\\)\\s*&&\\s*tryPillarApproach\\(bot, botId, now\\)\\s*\\)")
+        assertTrue(Pattern.compile("if\\s*\\(\\s*!isLocalScaffoldSupply\\(\\)\\s*&&\\s*mayUsePillarRecovery\\(\\)\\s*&&\\s*tryPillarApproach\\(bot, botId, now\\)\\s*\\)")
                         .matcher(survey).find()
                         && pillarAttempt >= 0
                         && exactBreakBoundary > pillarAttempt
+                        && gather.contains("private boolean mayUsePillarRecovery()")
                         && !survey.contains("gathersTreeLogs() && tryPillarApproach"),
-                "every outer GatherQuotaTask target, including exact-break targets, should try an observed pillar before giving up; the internal filler child must not recurse");
+                "every eligible outer GatherQuotaTask target, including exact-break targets, should try an observed pillar before giving up; a retained handoff target may not be spent as scaffold");
         assertTrue(palette.contains("nearbyPillarSupportGatherItems()"),
                 "the local scaffold child must draw from the dedicated naturally gatherable support palette");
         assertFalse(Pattern.compile("Items\\.[A-Z_]*(?:LOG|PLANK|WOOD|STEM|HYPHAE|ORE|RAW_[A-Z_]*)")

@@ -96,13 +96,19 @@ class MissionSpecTest {
     }
 
     @Test
-    void compoundFulfillmentPersistsCanonicalItemRecipientTriplets() throws IOException {
+    void compoundFulfillmentPersistsLegacyAndFreshCanonicalManifests() throws IOException {
         // The real registry-backed round trip runs in the Fabric GameTest. This source contract
         // keeps the ordinary JUnit suite bootstrap-free while guarding its wire format.
         String source = Files.readString(MISSION_SPEC);
 
         assertTrue(source.contains("case Goal.Fulfill g -> {"));
         assertTrue(source.contains("params.put(\"schema\", \"1\");"));
+        assertTrue(source.contains("params.put(\"schema\", \"2\");"));
+        assertTrue(source.contains("params.put(\"allocation_count\", String.valueOf(g.allocations().size()));"));
+        assertTrue(source.contains("g.initialItemCounts().entrySet().stream()"));
+        assertTrue(source.contains("private Goal.Fulfill freshFulfill()"));
+        assertTrue(source.contains("Set.of(\"schema\", \"allocation_count\")"));
+        assertTrue(source.contains("invalid_fresh_fulfill_baseline"));
         assertTrue(source.contains("encoded.add(allocation.itemId());"));
         assertTrue(source.contains("encoded.add(allocation.recipient());"));
         assertTrue(source.contains("case \"fulfill\" -> fulfill();"));

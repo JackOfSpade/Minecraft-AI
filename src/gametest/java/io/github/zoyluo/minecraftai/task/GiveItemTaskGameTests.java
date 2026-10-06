@@ -81,6 +81,26 @@ public final class GiveItemTaskGameTests {
         cleanup(context, fixture);
     }
 
+    @GameTest(maxTicks = 60)
+    public void freshDeliveryGuardFailsBeforeAnyCobblestoneDropOrRouteWork(GameTestHelper context) {
+        Fixture fixture = spawnGiverAndRecipient(context, new BlockPos(24, 4, 6), "FreshGuardGT");
+        AIPlayerEntity giver = fixture.giver();
+        InventoryAction.giveItem(giver, new ItemStack(Items.COBBLESTONE, 64));
+
+        GiveItemTask task = new GiveItemTask(Items.COBBLESTONE, 32, fixture.recipientName(),
+                () -> true, true, () -> false);
+        task.start(giver);
+        task.tick(giver);
+
+        require(context, task.state() == TaskState.FAILED,
+                "failed fresh conservation guard must stop the handoff before pathing/drop");
+        require(context, "give_item_fresh_quota_lost".equals(task.failureReason()),
+                "fresh guard failure reason was not typed: " + task.failureReason());
+        require(context, InventoryAction.countItem(giver, Items.COBBLESTONE) == 64,
+                "fresh guard failure must not debit protected cobblestone");
+        cleanup(context, fixture);
+    }
+
     private static List<ItemEntity> nearbyItemEntities(
             GameTestHelper context, AIPlayerEntity near, net.minecraft.world.item.Item item) {
         AABB search = near.getBoundingBox().inflate(2.0D);

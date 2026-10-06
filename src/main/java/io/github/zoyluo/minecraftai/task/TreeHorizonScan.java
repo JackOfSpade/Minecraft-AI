@@ -93,6 +93,12 @@ final class TreeHorizonScan {
         if (steps % SHARED_SIGHT_RECHECK_STEPS == 0) {
             Sighting remembered = sharedSight(bot);
             if (remembered != null) {
+                // A shared-sight lead is a useful shortcut, not a reason to pin this cursor at
+                // its initial cadence forever.  In particular, a same-column leaf has no
+                // directional heading; without advancing steps here, the next call re-checks
+                // the identical shared observation at step zero and GatherQuotaTask can never
+                // reach its bounded pillar/exploration fallback.
+                steps++;
                 return remembered;
             }
         }

@@ -210,6 +210,11 @@ public final class MaterialPalette {
         return OptionalInt.empty();
     }
 
+    /** True when an item can be irreversibly placed by the dedicated pillar route. */
+    public static boolean isPillarSupportItem(Item item) {
+        return item != null && PILLAR_SUPPORT_BLOCKS.contains(item);
+    }
+
     /** Counts the broader stable, non-wood, non-ore supports eligible for an ordinary path. */
     public static int countPathSupportBlocks(AIPlayerEntity bot) {
         int total = 0;

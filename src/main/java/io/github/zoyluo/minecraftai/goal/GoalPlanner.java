@@ -266,6 +266,18 @@ public final class GoalPlanner {
     }
 
     private static List<GoalStep> mergeGathers(List<GoalStep> steps) {
+        // A declared fresh raw quota is a historical stage receipt, not an interchangeable
+        // dependency gather.  Never move a normal gather across it: the player explicitly asked
+        // for this collection to happen before subsequent crafting/delivery work begins.
+        for (int index = 0; index < steps.size(); index++) {
+            if (steps.get(index).kind() == GoalStep.Kind.FRESH_GATHER_QUOTA) {
+                List<GoalStep> result = new ArrayList<>();
+                result.addAll(mergeGathers(steps.subList(0, index)));
+                result.add(steps.get(index));
+                result.addAll(mergeGathers(steps.subList(index + 1, steps.size())));
+                return result;
+            }
+        }
         int huntIndex = -1;
         for (int i = 0; i < steps.size(); i++) {
             if (steps.get(i).kind() == GoalStep.Kind.HUNT) {
@@ -500,6 +512,17 @@ public final class GoalPlanner {
                                       Set<String> visiting) {
             Set<Goal.Allocation> completedDeliveries = resumeContext == null
                     ? Set.of() : resumeContext.completedDeliveries();
+            Set<Goal.FreshGatherQuota> completedFreshGatherQuotas = resumeContext == null
+                    ? Set.of() : resumeContext.completedFreshGatherQuotas();
+            // A pending quota is deliberately added to the virtual ledger only for this first
+            // stage plan.  Once its physical receipt is durable, a later replan must use live
+            // inventory alone because those logs may already have become planks/sticks/tools.
+            for (Goal.FreshGatherQuota quota : fulfill.freshGatherQuotas()) {
+                if (!completedFreshGatherQuotas.contains(quota)) {
+                    addStep(GoalStep.freshGatherQuota(quota));
+                    counts.merge(quota.item(), quota.count(), Integer::sum);
+                }
+            }
             List<Map.Entry<Item, Integer>> required = new ArrayList<>(
                     fulfill.inventoryRequired(completedDeliveries).entrySet());
             required.sort(java.util.Comparator.comparing(entry ->

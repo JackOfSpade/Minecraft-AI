@@ -47,4 +47,14 @@ final class BrainCoordinatorSystemPromptTest {
         assertFalse(forJack.contains("speaking to you is Ember"));
         assertTrue(forOtherBot.contains("speaking to you is Ember"));
     }
+
+    @Test
+    void distinguishesNewResourceCollectionFromAnExistingInventoryHandoff() {
+        String prompt = BrainCoordinator.systemPrompt("Moss", "JackNotInTheBox");
+
+        assertTrue(prompt.contains("Direct give_item is only for an explicit handoff of existing inventory"));
+        assertTrue(prompt.contains("never substitute it for \"get\", \"gather\", \"collect\", \"chop\", \"mine\", \"harvest\""));
+        assertTrue(prompt.contains("use gather_then_give"));
+        assertTrue(prompt.contains("For an unspecified plural \"logs\", call gather_then_give with item=\"logs\""));
+    }
 }

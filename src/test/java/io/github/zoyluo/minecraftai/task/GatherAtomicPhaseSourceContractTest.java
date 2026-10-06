@@ -53,4 +53,21 @@ final class GatherAtomicPhaseSourceContractTest {
                     "the sweep must never dig or pillar (found " + forbidden + ")");
         }
     }
+
+    @Test
+    void confirmedPickupClaimsItsInventoryDeltaBeforeGenericAuditLogging() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
+        int tick = source.indexOf("protected void onTick(");
+        int deadline = source.indexOf("private void finishTimedCollection(", tick);
+        String onTick = source.substring(tick, deadline);
+        int pickupPhase = onTick.indexOf("if (phase == Phase.PICKUP)");
+        int confirmation = onTick.indexOf("confirmPickup(bot, pickedUpAccepted(bot))", pickupPhase);
+        int genericAudit = onTick.indexOf("logGatherUnitGains(bot, \"unattributed\", null)");
+
+        assertTrue(pickupPhase >= 0 && confirmation > pickupPhase && genericAudit > confirmation,
+                "a physical pickup must consume its audit delta before generic inventory logging labels it unattributed");
+        assertTrue(source.contains("logGatherUnitGains(bot, \"pickup\", pickupOrigin)"),
+                "the confirmed pickup path must remain the sole attributed gather-unit logger");
+    }
 }

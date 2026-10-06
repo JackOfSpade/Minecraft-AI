@@ -44,7 +44,9 @@ public final class GoalSnapshotCollector {
             int buildPlaced,
             int buildSkipped,
             /** Exact successful handoffs already committed by a compound fulfillment mission. */
-            Set<Goal.Allocation> completedDeliveries
+            Set<Goal.Allocation> completedDeliveries,
+            /** Fresh collection stages already physically completed before fulfillment crafting. */
+            Set<Goal.FreshGatherQuota> completedFreshGatherQuotas
     ) {
         /** Backward-compatible context shape for ordinary goals with no handoff receipts. */
         public Context(BlockPos origin,
@@ -53,7 +55,20 @@ public final class GoalSnapshotCollector {
                        BlockPos buildAnchor,
                        int buildPlaced,
                        int buildSkipped) {
-            this(origin, boundContainers, blueprint, buildAnchor, buildPlaced, buildSkipped, Set.of());
+            this(origin, boundContainers, blueprint, buildAnchor, buildPlaced, buildSkipped,
+                    Set.of(), Set.of());
+        }
+
+        /** Backward-compatible delivery-receipt context before staged fresh gathering existed. */
+        public Context(BlockPos origin,
+                       Set<BlockPos> boundContainers,
+                       BlueprintSchema blueprint,
+                       BlockPos buildAnchor,
+                       int buildPlaced,
+                       int buildSkipped,
+                       Set<Goal.Allocation> completedDeliveries) {
+            this(origin, boundContainers, blueprint, buildAnchor, buildPlaced, buildSkipped,
+                    completedDeliveries, Set.of());
         }
 
         public Context {
@@ -62,6 +77,8 @@ public final class GoalSnapshotCollector {
                     .map(BlockPos::immutable).collect(java.util.stream.Collectors.toUnmodifiableSet());
             buildAnchor = buildAnchor == null ? null : buildAnchor.immutable();
             completedDeliveries = completedDeliveries == null ? Set.of() : Set.copyOf(completedDeliveries);
+            completedFreshGatherQuotas = completedFreshGatherQuotas == null
+                    ? Set.of() : Set.copyOf(completedFreshGatherQuotas);
         }
 
         public static Context at(BlockPos origin) {
@@ -89,6 +106,20 @@ public final class GoalSnapshotCollector {
         }
         return new GoalSnapshot(inventory, ToolTier.bestPickaxeTier(bot), capabilities,
                 nearbyBlocks, containerItems, foodUnits, structure);
+    }
+
+    /**
+     * Uses the same usable-inventory domain as goal predicates and planning: normal inventory,
+     * offhand, and equipment, excluding one-use-left damaged stacks.  Fresh goal baselines must
+     * not mix this domain with a handoff-only counter or an equipped preexisting item could be
+     * mistaken for newly produced inventory.
+     */
+    public static int inventoryCount(AIPlayerEntity bot, Item item) {
+        if (bot == null || item == null) {
+            return 0;
+        }
+        String itemId = BuiltInRegistries.ITEM.getKey(item).toString();
+        return inventoryCounts(bot).getOrDefault(itemId, 0);
     }
 
     private static Map<String, Integer> inventoryCounts(AIPlayerEntity bot) {

@@ -226,9 +226,9 @@ public final class GoalExecutor {
             Optional<Goal> suspendedGoal = suspended.active() == null
                     || suspended.active().spec() == null
                     ? Optional.empty() : suspended.active().spec().toGoal();
-            if (suspendedGoal.filter(goal::equals).isPresent()
+            if (suspendedGoal.filter(candidate -> sameGoalIntent(candidate, goal)).isPresent()
                     || suspended.queue().stream().map(MissionSpec::toGoal)
-                    .flatMap(Optional::stream).anyMatch(goal::equals)) {
+                    .flatMap(Optional::stream).anyMatch(candidate -> sameGoalIntent(candidate, goal))) {
                 BotLog.task(bot, "goal_submit_ignored", "goal", goal,
                         "reason", "duplicate_suspended_runtime");
                 return Optional.of(true);
@@ -274,7 +274,7 @@ public final class GoalExecutor {
         // GOALFIX-GF3: idempotency -- when the same bot already has an active plan for the same goal, ignore the duplicate submit
         // (prevents the brain from repeatedly calling mine_ore/achieve_goal, overwriting the plan and interrupting a step in progress).
         ActivePlan existing = activePlans.get(bot.getUUID());
-        if (existing != null && existing.goal.equals(goal)) {
+        if (existing != null && sameGoalIntent(existing.goal, goal)) {
             BotLog.task(bot, "goal_submit_ignored", "goal", goal, "reason", "duplicate_active_plan");
             return true;
         }
@@ -289,7 +289,7 @@ public final class GoalExecutor {
                 report(bot, "This is a prerequisite for the current goal and will finish automatically.");
                 return false;
             }
-            if (queued.stream().map(QueuedGoal::goal).anyMatch(goal::equals)) {
+            if (queued.stream().map(QueuedGoal::goal).anyMatch(candidate -> sameGoalIntent(candidate, goal))) {
                 BotLog.task(bot, "goal_submit_ignored", "goal", goal, "reason", "duplicate_queued");
                 return true;
             }
@@ -1960,12 +1960,26 @@ public final class GoalExecutor {
     public boolean isActiveGoal(AIPlayerEntity bot, Goal goal) {
         ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan != null) {
-            return plan.goal.equals(goal);
+            return sameGoalIntent(plan.goal, goal);
         }
         MissionRuntimeRecord suspended = deathSuspended.get(bot.getUUID());
         return suspended != null && suspended.active() != null
                 && suspended.active().spec() != null
-                && suspended.active().spec().toGoal().filter(goal::equals).isPresent();
+                && suspended.active().spec().toGoal()
+                .filter(candidate -> sameGoalIntent(candidate, goal)).isPresent();
+    }
+
+    /**
+     * A repeated public fulfillment call snapshots a later inventory state, but it is still the
+     * same in-flight player intent.  Dedupe that retry by its canonical allocation manifest
+     * while never conflating a fresh transaction with an old absolute-inventory fulfillment.
+     */
+    private static boolean sameGoalIntent(Goal left, Goal right) {
+        if (left instanceof Goal.Fulfill leftFulfill && right instanceof Goal.Fulfill rightFulfill) {
+            return leftFulfill.isFreshInventoryRequest() == rightFulfill.isFreshInventoryRequest()
+                    && leftFulfill.allocations().equals(rightFulfill.allocations());
+        }
+        return java.util.Objects.equals(left, right);
     }
 
     public void clear(AIPlayerEntity bot) {
@@ -3304,9 +3318,14 @@ public final class GoalExecutor {
         if (goal instanceof Goal.Fulfill fulfill) {
             int total = 0;
             for (Item item : fulfill.inventoryRequired(Set.of()).keySet()) {
+                int held = fulfill.isFreshInventoryRequest()
+                        ? GoalSnapshotCollector.inventoryCount(bot, item)
+                        : io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
+                                bot, Set.of(item));
                 total = Math.addExact(total,
-                        io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
-                                bot, Set.of(item)));
+                        fulfill.isFreshInventoryRequest()
+                                ? fulfill.deliveredFromInitial(item, held)
+                                : held);
             }
             return total;
         }
@@ -4111,11 +4130,13 @@ public final class GoalExecutor {
     static Optional<Task> stepToTask(AIPlayerEntity bot, GoalStep step, ActivePlan plan) {
         return switch (step.kind()) {
             // Planner GATHER counts are incremental deliveries; GatherQuotaTask owns an absolute
-            // family quota (all log species, all forage foods, or the exact item). Convert at the
-            // execution boundary just like CRAFT, otherwise a replan that asks for +3 logs beside
-            // 29 existing logs is misread as an already-satisfied absolute target of 3.
-            case GATHER -> Optional.of(new GatherQuotaTask(step.item(), gatherTargetCount(
-                    GatherQuotaTask.acceptedInventoryCount(bot, step.item()), step.count())));
+            // family quota (all log species, all forage foods, or the exact item). A fresh
+            // Fulfill final allocation is different: its immutable baseline is exact-item based,
+            // so an oak-log delivery must not be satisfied by newly collecting birch logs.
+            case GATHER -> Optional.of(plan != null && isFreshFulfillOutputGather(plan.goal, step.item())
+                    ? GatherQuotaTask.collectAdditionalExact(step.item(), step.count())
+                    : new GatherQuotaTask(step.item(), gatherTargetCount(
+                            GatherQuotaTask.acceptedInventoryCount(bot, step.item()), step.count())));
             // Generic mining selects visible, reachable blocks and may widen the view through
             // bounded observation-fenced walk-only hops.  Its movement is Baritone-owned and it
             // never opens a shaft or paths toward unseen terrain to discover a target.
@@ -4196,9 +4217,13 @@ public final class GoalExecutor {
                 if (hasCommittedDelivery(plan, step)) {
                     yield Optional.empty();
                 }
+                boolean freshFulfillDelivery = isFreshFulfillDelivery(plan, step);
                 yield Optional.of(new GiveItemTask(
                         step.item(), step.count(), step.giveRecipient(),
-                        () -> commitDeliveryReceipt(bot, plan, step)));
+                        () -> commitDeliveryReceipt(bot, plan, step),
+                        freshFulfillDelivery,
+                        () -> !freshFulfillDelivery
+                                || hasFreshFulfillDeliveryQuota(bot, plan, step)));
             }
             // Kept only to fail safely when resuming a pre-migration mission checkpoint. New
             // plans no longer emit layer-seeking excavation steps.
@@ -4281,6 +4306,68 @@ public final class GoalExecutor {
 
     static int craftTargetCount(int existing, int increment) {
         return Math.max(0, existing) + Math.max(1, increment);
+    }
+
+    /**
+     * Only final fresh-Fulfill output gets exact gather semantics.  Ingredient gathers retain
+     * their normal family-aware behavior so a plan may still bootstrap from any local log type.
+     */
+    private static boolean isFreshFulfillOutputGather(Goal goal, Item item) {
+        return goal instanceof Goal.Fulfill fulfill
+                && fulfill.isFreshInventoryRequest()
+                && fulfill.initialItemCounts().containsKey(item);
+    }
+
+    /** Fresh final delivery owns a conservation boundary until its receipt is committed. */
+    private static boolean isFreshFulfillDelivery(ActivePlan plan, GoalStep step) {
+        return plan != null && step != null && step.kind() == GoalStep.Kind.GIVE_ITEM
+                && plan.goal instanceof Goal.Fulfill fulfill
+                && fulfill.isFreshInventoryRequest();
+    }
+
+    /**
+     * The exact item total must still cover the immutable baseline plus every retained and
+     * unreceipted allocation.  GiveItemTask separately proves its own droppable count; this
+     * total-domain check prevents an old stack from being handed over after fresh output was
+     * consumed by another task.
+     */
+    private static boolean hasFreshFulfillDeliveryQuota(AIPlayerEntity bot,
+                                                         ActivePlan plan,
+                                                         GoalStep step) {
+        if (!isFreshFulfillDelivery(plan, step)) {
+            return true;
+        }
+        if (plan.current != step || hasCommittedDelivery(plan, step)) {
+            return false;
+        }
+        Goal.Fulfill fulfill = (Goal.Fulfill) plan.goal;
+        try {
+            declaredDelivery(plan, step);
+        } catch (RuntimeException invalidDelivery) {
+            return false;
+        }
+        int required = fulfill.inventoryRequired(plan.completedDeliveries)
+                .getOrDefault(step.item(), 0);
+        return GoalSnapshotCollector.inventoryCount(bot, step.item()) >= required;
+    }
+
+    /**
+     * A fresh receipt is valid only if the post-drop inventory still preserves its immutable
+     * baseline plus every allocation that remains after this exact handoff.  The pre-drop guard
+     * should imply this, but this last check fails closed if inventory changes during the
+     * physical debit/callback boundary.
+     */
+    private static boolean hasFreshFulfillPostDeliveryQuota(AIPlayerEntity bot,
+                                                            ActivePlan plan,
+                                                            Goal.Allocation allocation) {
+        if (!(plan.goal instanceof Goal.Fulfill fulfill) || !fulfill.isFreshInventoryRequest()) {
+            return true;
+        }
+        Set<Goal.Allocation> completedAfterThisDelivery = new HashSet<>(plan.completedDeliveries);
+        completedAfterThisDelivery.add(allocation);
+        int required = fulfill.inventoryRequired(completedAfterThisDelivery)
+                .getOrDefault(allocation.item(), 0);
+        return GoalSnapshotCollector.inventoryCount(bot, allocation.item()) >= required;
     }
 
     static int gatherTargetCount(int existingFamilyCount, int increment) {
@@ -4633,6 +4720,9 @@ public final class GoalExecutor {
         }
         try {
             Goal.Allocation allocation = declaredDelivery(plan, step);
+            if (!hasFreshFulfillPostDeliveryQuota(bot, plan, allocation)) {
+                return false;
+            }
             if (!plan.completedDeliveries.add(allocation)) {
                 return false;
             }

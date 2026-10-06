@@ -30,6 +30,8 @@ public final class StockpileTask extends AbstractTask {
     }
 
     private final boolean allExceptTools;
+    /** Items a parent task must keep in inventory for its own terminal handoff. */
+    private final Set<Item> retainedItems;
     private Phase phase = Phase.FIND_BASE;
     private BlockPos basePos;
     private final List<BlockPos> containers = new ArrayList<>();
@@ -40,7 +42,17 @@ public final class StockpileTask extends AbstractTask {
     private String note = "";
 
     public StockpileTask(boolean allExceptTools) {
+        this(allExceptTools, Set.of());
+    }
+
+    /**
+     * Creates a stockpiling task that leaves the supplied items untouched. This is used by an
+     * in-progress fresh acquire-and-handoff transaction: depositing its exact target would let a
+     * later handoff consume an older carried stack instead.
+     */
+    StockpileTask(boolean allExceptTools, Set<Item> retainedItems) {
         this.allExceptTools = allExceptTools;
+        this.retainedItems = retainedItems == null ? Set.of() : Set.copyOf(retainedItems);
     }
 
     @Override
@@ -136,7 +148,11 @@ public final class StockpileTask extends AbstractTask {
             selectNextContainer(bot);
             return;
         }
-        ActionResult result = bot.getActionPack().startPathTo(stand);
+        // A parent may reserve a fresh handoff target. Reaching storage must not spend that
+        // target as disposable Baritone support before the deposit filter has a chance to keep it.
+        ActionResult result = retainedItems.isEmpty()
+                ? bot.getActionPack().startPathTo(stand)
+                : bot.getActionPack().startSurfacePathTo(stand);
         if (result.isFailed()) {
             note = result.reason();
             selectNextContainer(bot);
@@ -194,7 +210,8 @@ public final class StockpileTask extends AbstractTask {
     }
 
     private Predicate<ItemStack> depositFilter() {
-        return allExceptTools ? stack -> !ContainerAction.isReservedTool(stack) : stack -> true;
+        return stack -> !retainedItems.contains(stack.getItem())
+                && (!allExceptTools || !ContainerAction.isReservedTool(stack));
     }
 
     private Item nextDepositItem(AIPlayerEntity bot) {
