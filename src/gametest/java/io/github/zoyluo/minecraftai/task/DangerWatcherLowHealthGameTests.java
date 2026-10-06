@@ -1,10 +1,13 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.gametest.PerceptionFixtures;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
+import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
@@ -16,6 +19,7 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
 import net.minecraft.world.entity.EntityReference;
 import net.minecraft.world.entity.EntitySpawnReason;
@@ -2063,6 +2067,45 @@ public final class DangerWatcherLowHealthGameTests {
                         && work.state() == TaskState.RUNNING
                         && !TaskManager.INSTANCE.hasPaused(bot),
                 "failed evade left the original mission frame permanently paused");
+        despawnAndComplete(context, bot);
+    }
+
+    /**
+     * Opening the bot's inventory screen pauses its task, and the pause must hold until the screen closes: the generic safety resume
+     * used to pop the frame on the next scan (no threat, no running actions), so gather ran under the player's cursor.
+     */
+    @GameTest(maxTicks = 40)
+    public void openInventoryScreenKeepsTaskPausedAcrossSafetyScans(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "InventoryPauseGT", 2);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        HoldingTask work = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, work,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_inventory_screen_pause"));
+        ServerPlayer viewer = MockPlayers.mock(context);
+        viewer.teleportTo(context.getLevel(), bot.getX() + 1.5D, bot.getY(), bot.getZ(),
+                Set.of(), 0.0F, 0.0F, true);
+
+        viewer.openMenu(new BotInventoryScreenFactory(bot, viewer));
+        require(context, BotInventoryScreenHandler.isScreenOpen(bot),
+                "fixture did not open the bot's inventory screen");
+        require(context, work.state() == TaskState.PAUSED && TaskManager.INSTANCE.pausedDepth(bot) == 1
+                        && TaskManager.INSTANCE.getActive(bot).isEmpty(),
+                "opening the screen did not pause the task");
+
+        for (int scan = 0; scan < 5; scan++) {
+            DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
+        }
+        require(context, work.state() == TaskState.PAUSED && TaskManager.INSTANCE.getActive(bot).isEmpty()
+                        && TaskManager.INSTANCE.pausedDepth(bot) == 1,
+                "a safety scan resumed the task while the screen was still open: " + work.state());
+
+        viewer.closeContainer();
+        require(context, !BotInventoryScreenHandler.isScreenOpen(bot),
+                "closing the menu left the screen lease open");
+        require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == work
+                        && work.state() == TaskState.RUNNING && !TaskManager.INSTANCE.hasPaused(bot),
+                "closing the screen did not resume the paused task");
         despawnAndComplete(context, bot);
     }
 

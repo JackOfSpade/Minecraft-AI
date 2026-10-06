@@ -306,17 +306,7 @@ public final class SurvivalReflexGameTests {
     public void botInSealedDarkStonePocketIsDarkTrapped(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(20, 5, 190));
-        int wall = 3;
-        for (int dx = -wall; dx <= wall; dx++) {
-            for (int dz = -wall; dz <= wall; dz++) {
-                boolean onWall = Math.abs(dx) == wall || Math.abs(dz) == wall;
-                world.setBlock(feet.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                for (int dy = 0; dy <= 3; dy++) {
-                    world.setBlock(feet.offset(dx, dy, dz), onWall || dy == 3
-                            ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                }
-            }
-        }
+        sealedDarkPocket(world, feet);
         AIPlayerEntity bot = spawnAt(context, "DarkPocketGT", feet);
         int[] ticks = {0};
         TimeLockedRun.run(context, 1200, () -> {
@@ -328,6 +318,95 @@ public final class SurvivalReflexGameTests {
             require(context, ++ticks[0] < 500, "the bot in a sealed dark stone pocket was never judged trapped");
             return false;
         }, () -> cleanUp(bot));
+    }
+
+    /**
+     * Strict survival denies the emergency teleport, so a bot stuck in the dark answers with what it carries. With torches its
+     * stuck move is paused, torches are placed until the cell is no longer dark, and the move resumes.
+     */
+    @GameTest(maxTicks = 700)
+    public void darkTrapWithCarriedTorchesPausesTheStuckMoveLightsTheCellAndResumesIt(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(20, 5, 700));
+        sealedDarkPocket(world, feet);
+        world.setDayTime(NOON);
+        AIPlayerEntity bot = spawnAt(context, "DarkTorchGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 4));
+        StuckMoveTask stuck = new StuckMoveTask();
+        TaskManager.INSTANCE.assign(bot, stuck, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_stuck_move"));
+        boolean[] pausedForLight = {false};
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            if (active instanceof LightAreaTask && stuck.state() == TaskState.PAUSED) {
+                pausedForLight[0] = true;
+            }
+            require(context, insidePocket(bot, feet), "the bot left its pocket: " + bot.blockPosition());
+            if (pausedForLight[0] && active == stuck && stuck.state() == TaskState.RUNNING
+                    && world.getBrightness(LightLayer.BLOCK, feet) >= DangerWatcher.DARK_TRAP_LIGHT) {
+                require(context, InventoryAction.countItem(bot, Items.TORCH) < 4, "no torch was spent lighting the cell");
+                require(context, DangerWatcher.INSTANCE.darkTrapDetections(bot) == 1,
+                        "the bot was judged trapped again after the cell was lit: " + DangerWatcher.INSTANCE.darkTrapDetections(bot));
+                despawnAndComplete(context, bot);
+                return;
+            }
+            require(context, ++ticks[0] < 650, "the dark pocket was never lit with the carried torches, active="
+                    + (active == null ? "none" : active.name()) + " stuck=" + stuck.state() + " light="
+                    + world.getBrightness(LightLayer.BLOCK, feet));
+        });
+    }
+
+    /** No torch but coal and a stick: the bot crafts torches, then the idle lighting reflex places them. */
+    @GameTest(maxTicks = 900)
+    public void darkTrapWithCoalAndSticksCraftsTorchesAndLightsTheCell(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(20, 5, 740));
+        sealedDarkPocket(world, feet);
+        world.setDayTime(NOON);
+        AIPlayerEntity bot = spawnAt(context, "DarkCraftGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 1));
+        InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 2));
+        boolean[] crafted = {false};
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            if (InventoryAction.countItem(bot, Items.TORCH) > 0 || world.getBrightness(LightLayer.BLOCK, feet) > 0) {
+                crafted[0] = true;
+            }
+            require(context, insidePocket(bot, feet), "the bot left its pocket: " + bot.blockPosition());
+            if (crafted[0] && world.getBrightness(LightLayer.BLOCK, feet) >= DangerWatcher.DARK_TRAP_LIGHT) {
+                require(context, InventoryAction.countItem(bot, Items.COAL) == 0,
+                        "the coal was not used up making torches");
+                despawnAndComplete(context, bot);
+                return;
+            }
+            require(context, ++ticks[0] < 850, "the bot never crafted torches and lit its pocket, torches="
+                    + InventoryAction.countItem(bot, Items.TORCH) + " light=" + world.getBrightness(LightLayer.BLOCK, feet));
+        });
+    }
+
+    /**
+     * Nothing to light the cell with and nothing to make a torch from: it is reported once and left alone, instead of being judged
+     * trapped again every eight seconds (the repeating DANGER line the session log showed).
+     */
+    @GameTest(maxTicks = 700)
+    public void darkTrapWithNothingToLightItWithIsReportedOnceNotEveryEightSeconds(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(20, 5, 780));
+        sealedDarkPocket(world, feet);
+        world.setDayTime(NOON);
+        AIPlayerEntity bot = spawnAt(context, "DarkNothingGT", feet);
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            require(context, bot.blockPosition().equals(feet), "the bot left its pocket: " + bot.blockPosition());
+            require(context, TaskManager.INSTANCE.getActive(bot).isEmpty(),
+                    "the bot started work with nothing to work with: " + TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse(""));
+            // Three full dwell windows after the first detection: the old behaviour detected the same trap at each of them.
+            if (++ticks[0] >= 560) {
+                require(context, DangerWatcher.INSTANCE.darkTrapDetections(bot) == 1,
+                        "the same dark trap was detected " + DangerWatcher.INSTANCE.darkTrapDetections(bot) + " times");
+                despawnAndComplete(context, bot);
+            }
+        });
     }
 
     // ---- 3: a chat request does not cancel a running SAFETY task ----
@@ -678,6 +757,52 @@ public final class SurvivalReflexGameTests {
         @Override
         public double progress() {
             return 0.5D;
+        }
+
+        @Override
+        protected void onStart(AIPlayerEntity bot) {
+        }
+
+        @Override
+        protected void onTick(AIPlayerEntity bot) {
+        }
+    }
+
+    /** A sealed, roofed stone box (a 5x5 interior, three high) with no light in it; {@code feet} is the interior's centre. */
+    private static void sealedDarkPocket(ServerLevel world, BlockPos feet) {
+        int wall = 3;
+        for (int dx = -wall; dx <= wall; dx++) {
+            for (int dz = -wall; dz <= wall; dz++) {
+                boolean onWall = Math.abs(dx) == wall || Math.abs(dz) == wall;
+                world.setBlock(feet.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlock(feet.offset(dx, dy, dz), onWall || dy == 3
+                            ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+    }
+
+    private static boolean insidePocket(AIPlayerEntity bot, BlockPos feet) {
+        BlockPos at = bot.blockPosition();
+        return at.getY() == feet.getY() && Math.abs(at.getX() - feet.getX()) <= 2 && Math.abs(at.getZ() - feet.getZ()) <= 2;
+    }
+
+    /** Stands in for a mission move that has stopped making progress: it is named "move" and never reports itself as waiting. */
+    private static final class StuckMoveTask extends AbstractTask {
+        @Override
+        public String name() {
+            return "move";
+        }
+
+        @Override
+        public String describe() {
+            return "Stuck move";
+        }
+
+        @Override
+        public double progress() {
+            return 0.0D;
         }
 
         @Override

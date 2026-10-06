@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.baritone;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -55,7 +56,11 @@ class BaritoneSurvivalContractTest {
         String context = read("baritone/ServerPlayerContext.java");
         assertTrue(body(context, "public boolean allowScanningProcess(").contains("BaritoneBreakPlacePolicy.allowScanningProcess("));
         String policy = read("baritone/BaritoneBreakPlacePolicy.java");
-        assertTrue(policy.contains("PrivilegedCapability.HIDDEN_BLOCK_SCAN"), "the scanning processes still cross the retired capability boundary");
+        String gate = body(policy, "public static boolean allowScanningProcess(");
+        assertTrue(gate.contains("scan_process_refused") && gate.contains("return false;"),
+                "a scanning process stays refused: the retired capability can never allow it");
+        assertFalse(gate.contains("CapabilityRuntime.decide("),
+                "the retired capability is not asked for on every start: its answer is fixed and each ask logged a decision");
         String capabilityPolicy = read("mode/CapabilityPolicy.java");
         assertTrue(capabilityPolicy.contains("DENIED_RETIRED_CAPABILITY"),
                 "hidden-world scanning must be retired for every operating profile");

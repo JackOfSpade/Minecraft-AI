@@ -515,6 +515,30 @@ public final class BaritoneSurvivalGameTests {
         s.finish();
     }
 
+    /**
+     * A scanning process stays refused, but the refusal is final: the retired hidden-scan capability is not asked for on every
+     * start, and Baritone's own reset of the mine process on losing control (mine(0, null)) is no start and is not refused.
+     */
+    @GameTest(maxTicks = 200)
+    public void scanningProcessRefusalIsFinalAndAResetOfTheMineProcessIsNoStart(GameTestHelper context) {
+        Small s = Small.begin(context, "SurvScanResetGT", 4);
+        IBaritone baritone = s.baritone;
+        baritone.getMineProcess().mine(0, new BlockOptionalMetaLookup(Blocks.DIAMOND_ORE));
+        baritone.getGetToBlockProcess().getToBlock(new BlockOptionalMeta(Blocks.DIAMOND_ORE));
+        require(context, !baritone.getMineProcess().isActive() && !baritone.getGetToBlockProcess().isActive(),
+                "a scanning process started");
+        int starts = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.SCAN_PROCESS).size();
+        require(context, starts == 2, "expected one refusal per start, got " + BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.SCAN_PROCESS));
+
+        baritone.getPathingBehavior().cancelEverything();
+        baritone.getMineProcess().onLostControl();
+        List<BaritoneRefusals.Refusal> after = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.SCAN_PROCESS);
+        require(context, after.size() == starts, "a reset of the mine process was refused like a start: " + after);
+        s.requireLogged("baritone_refused", 2);
+        s.requireNotLogged("baritone_scan_process");
+        s.finish();
+    }
+
     @GameTest(maxTicks = 600)
     public void miningGoalOnAnUnobservedOreIsRefusedAndOnAVisibleOreIsCarriedOut(GameTestHelper context) {
         Small s = Small.begin(context, "SurvOreGT", 4);
@@ -715,6 +739,21 @@ public final class BaritoneSurvivalGameTests {
         /** The bot's log has at least {@code count} lines of the event (only where the log writer runs; asynchronous, so polled). */
         void requireLogged(String event, int count) {
             logLines(context, name, event, count);
+        }
+
+        /** No line of the bot's log contains {@code text}; read after a {@link #requireLogged} so the writer has caught up. */
+        void requireNotLogged(String text) {
+            if (!BotLogWriter.INSTANCE.isStarted() || BotLogWriter.INSTANCE.baseDir() == null) {
+                return;
+            }
+            Path file = BotLogWriter.INSTANCE.baseDir().resolve("by-bot").resolve(name + ".log");
+            try {
+                List<String> lines = Files.exists(file) ? Files.readAllLines(file) : List.of();
+                require(context, lines.stream().noneMatch(line -> line.contains(text)),
+                        "the bot log has a line with '" + text + "': " + lines.stream().filter(line -> line.contains(text)).findFirst().orElse(""));
+            } catch (IOException unreadable) {
+                System.out.println("BARITONE_LOG skipped: " + file + " is unreadable");
+            }
         }
     }
 

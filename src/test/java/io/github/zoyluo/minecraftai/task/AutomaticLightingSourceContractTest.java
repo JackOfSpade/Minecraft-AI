@@ -60,15 +60,18 @@ final class AutomaticLightingSourceContractTest {
     }
 
     @Test
-    void bothAutomaticReflexesSkipTheSurfaceAndOnlyLightUnderARoof() throws IOException {
+    void everyAutomaticReflexSkipsTheSurfaceAndOnlyLightsUnderARoof() throws IOException {
         String watcher = read(MAIN.resolve("task/DangerWatcher.java"));
         assertTrue(watcher.contains("skipAutoLightOnSurface(bot, now, \"night_task\")"));
         assertTrue(watcher.contains("skipAutoLightOnSurface(bot, now, \"dark_area_light\")"));
         assertTrue(watcher.contains("auto_light_skipped"));
         assertFalse(watcher.contains("new LightAreaTask("), "automatic lighting must use LightAreaTask.automatic");
-        assertEquals(2, count(watcher, "LightAreaTask.automatic(8, 8)"));
-        assertEquals(2, count(watcher, "night.autoLight()") + count(watcher, "night().autoLight()"),
-                "night.autoLight gates both automatic reflexes");
+        // The two idle reflexes above, and the dark-trap answer (a trap cell is under a roof by definition, see isDarkTrapCell).
+        assertEquals(3, count(watcher, "LightAreaTask.automatic(8, 8)"));
+        assertEquals(3, count(watcher, "night.autoLight()") + count(watcher, "night().autoLight()"),
+                "night.autoLight gates every automatic reflex");
+        assertTrue(watcher.contains("return !SurfaceCheck.isOnSurface(world, feet);"),
+                "a dark-trap cell is never on the surface");
 
         String lightArea = read(MAIN.resolve("task/LightAreaTask.java"));
         assertTrue(lightArea.contains("SurfaceCheck.isOnSurface(world, cell)"));

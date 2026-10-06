@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.action.PaceRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
@@ -51,6 +52,8 @@ public final class DangerWatcher {
     /** Counts how often a bot was judged trapped in the dark (before any surface escape is attempted); read by tests. */
     private final Map<UUID, Integer> darkTrapDetections = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextFollowKeepLogTick = new ConcurrentHashMap<>();
+    /** The answer a bot was last given for the dark trap cell it stands in, so an unchanged situation is not announced again. */
+    private final Map<UUID, DarkTrapAnswer> darkTrapAnswers = new ConcurrentHashMap<>();
 
     // Layer 1 trapped backoff: an evasion-class task (evade/shelter) repeatedly firing on the same
     // cell without the bot escaping counts as "trapped". Back off for a while and stop dispatching,
@@ -95,6 +98,7 @@ public final class DangerWatcher {
         nextHuntAttemptTick.remove(id);
         darkStuckRecords.remove(id);
         nextEscapeHelpTick.remove(id);
+        darkTrapAnswers.remove(id);
         nextShelterAttemptTick.remove(id);
         shelterEpisodes.remove(id);
         nextFollowKeepLogTick.remove(id);
@@ -115,6 +119,7 @@ public final class DangerWatcher {
         nextHuntAttemptTick.clear();
         darkStuckRecords.clear();
         nextEscapeHelpTick.clear();
+        darkTrapAnswers.clear();
         nextShelterAttemptTick.clear();
         shelterEpisodes.clear();
         nextFollowKeepLogTick.clear();
@@ -516,10 +521,14 @@ public final class DangerWatcher {
                 && BrainCoordinator.INSTANCE.maybeWakeForFailureOrGoal(bot)) {
             return true;
         }
+        // A player editing the bot's gear holds the task paused for the whole open screen; BotInventoryScreenHandler
+        // resumes it when the last viewer closes. Resuming here (this scan finds the task paused, no actions running and
+        // no threat) ran the task right under the player's cursor within a tick of the screen opening.
         if (active.isEmpty()
                 && !bot.getActionPack().hasActiveActions()
                 && TaskManager.INSTANCE.hasPaused(bot)
                 && !adaptiveStrategyCheckpoint
+                && !BotInventoryScreenHandler.isScreenOpen(bot)
                 && canResumePausedWork(bot, threat)) {
             TaskManager.INSTANCE.resumeFromPause(bot);
             return true;
@@ -1229,7 +1238,8 @@ public final class DangerWatcher {
     // watchdogs or are legitimately stationary, so let those fail on their own first. Once trapped is
     // detected, teleport back to the surface + clear the current goal + request help (throttled).
     // Sacrifice the current goal to save the bot's life; the brain can retry after returning to the
-    // surface (by then torches should be better stocked, making it safer).
+    // surface (by then torches should be better stocked, making it safer). Where the teleport is denied
+    // (strict survival) the bot lights the cell with its own torches instead, see answerDarkTrapWithoutTeleport.
     private boolean maybeEscapeDarkTrap(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
         // isWaiting = the task self-reports "standing still in place is a normal state": MoveTask can
         // stand still for several seconds while tunnel-digging straight through hard stone, and
@@ -1243,7 +1253,13 @@ public final class DangerWatcher {
         BlockPos feet = bot.blockPosition();
         if (!isDarkTrapCell(world, feet)) {
             darkStuckRecords.remove(bot.getUUID());
+            darkTrapAnswers.remove(bot.getUUID());
             return false;
+        }
+        DarkTrapAnswer prior = darkTrapAnswers.get(bot.getUUID());
+        if (prior != null && !prior.cell().equals(feet)) {
+            darkTrapAnswers.remove(bot.getUUID()); // the bot left the cell that was answered: a new trap is a new situation
+            prior = null;
         }
         int now = server.getTickCount();
         PosRecord rec = darkStuckRecords.get(bot.getUUID());
@@ -1255,12 +1271,17 @@ public final class DangerWatcher {
             return false; // Not stuck long enough yet
         }
         darkStuckRecords.remove(bot.getUUID());
+        DarkTrapResponse response = darkTrapResponse(bot);
+        if (prior != null && prior.repeatedBy(feet, response)) {
+            return false; // this cell was already answered with exactly this, and the bot's means have not changed since
+        }
         darkTrapDetections.merge(bot.getUUID(), 1, Integer::sum);
         BotLog.danger(bot, "dark_trap_detected", "at", feet.toShortString(),
                 "block_light", world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet),
                 "combined_light", world.getMaxLocalRawBrightness(feet, world.getSkyDarken()));
         if (!escapeToSurface(bot)) {
-            return false; // No open-sky standable spot above (rare); hand off to other logic
+            // Denied (strict survival) or no open-sky standable spot above: light the cell with what the bot carries instead.
+            return answerDarkTrapWithoutTeleport(server, bot, active, feet, response);
         }
         TaskManager.INSTANCE.abort(bot);
         // Issue 4: no longer clear the goal -- after retreating to the surface, keep the
@@ -1275,6 +1296,97 @@ public final class DangerWatcher {
                     bot.getGameProfile().name() + " was trapped in a dark cave too long and returned to the surface to avoid hostile spawns. The unfinished task will resume later.");
             nextEscapeHelpTick.put(bot.getUUID(), now + TRAP_HELP_INTERVAL);
         }
+        return true;
+    }
+
+    /** What a bot can do about a dark trap with its own hands when the surface teleport is not an option. */
+    enum DarkTrapResponse {
+        /** It carries a torch: place torches (automatic lighting, so never on the surface; a trap cell is under a roof by definition). */
+        LIGHT,
+        /** It carries the makings of torches (coal or charcoal, and sticks or planks): craft them first, in the inventory grid. */
+        CRAFT_TORCHES,
+        /** Nothing to light the cell with. */
+        NONE,
+        /** Automatic lighting is switched off ({@code night.autoLight}), like the other lighting reflexes: whatever the bot carries stays put. */
+        LIGHTING_OFF
+    }
+
+    /** One torch craft (a coal and a stick) yields four, which is plenty to light a pocket. */
+    private static final int DARK_TRAP_TORCHES = 4;
+
+    static DarkTrapResponse darkTrapResponse(boolean autoLight, int torchesCarried, boolean torchesCraftable) {
+        if (!autoLight) {
+            return DarkTrapResponse.LIGHTING_OFF;
+        }
+        if (torchesCarried > 0) {
+            return DarkTrapResponse.LIGHT;
+        }
+        return torchesCraftable ? DarkTrapResponse.CRAFT_TORCHES : DarkTrapResponse.NONE;
+    }
+
+    private static DarkTrapResponse darkTrapResponse(AIPlayerEntity bot) {
+        boolean autoLight = MinecraftAiConfig.get().night().autoLight();
+        int torches = autoLight ? InventoryAction.countItem(bot, net.minecraft.world.item.Items.TORCH) : 0;
+        boolean craftable = false;
+        if (autoLight && torches == 0) {
+            var plan = io.github.zoyluo.minecraftai.craft.CraftingHelper.plan(
+                    bot, net.minecraft.world.item.Items.TORCH, DARK_TRAP_TORCHES);
+            craftable = plan.success() && !plan.needsCraftingTable();
+        }
+        return darkTrapResponse(autoLight, torches, craftable);
+    }
+
+    /** What the bot tells its player when it can do nothing about being stuck in the dark; the reason is the one that is true. */
+    static String darkTrapReport(String botName, BlockPos feet, DarkTrapResponse response) {
+        String reason = response == DarkTrapResponse.LIGHTING_OFF
+                ? "automatic lighting is switched off (night.autoLight)."
+                : "has nothing to light it with.";
+        return botName + " is stuck in the dark at (" + feet.getX() + "," + feet.getY() + "," + feet.getZ() + ") and " + reason;
+    }
+
+    /**
+     * What a dark-trap cell was last answered with. The same answer is never given twice for one cell: a bot that lit it and is still
+     * in the dark, or had nothing to light it with and still has nothing, is not told the same thing every few seconds (the repeating
+     * DANGER line with nothing after it). Leaving the cell, or gaining or losing the means, makes it a new situation.
+     */
+    record DarkTrapAnswer(BlockPos cell, DarkTrapResponse response) {
+        boolean repeatedBy(BlockPos feet, DarkTrapResponse next) {
+            return cell.equals(feet) && response == next;
+        }
+    }
+
+    /**
+     * The surface teleport is denied (strict survival) or there is no open sky above, so the trapped bot answers the way a player in a
+     * dark pocket does: it places a torch if it has one, crafts torches from coal and sticks first if it can, and otherwise can only
+     * say so. Lighting stays underground-only: {@link LightAreaTask#automatic} skips the surface and a trap cell is never on it. Like
+     * the other lighting reflexes this is a background task, so the work it interrupts is resumed once it ends.
+     */
+    private boolean answerDarkTrapWithoutTeleport(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active,
+                                                  BlockPos feet, DarkTrapResponse response) {
+        if (TaskManager.INSTANCE.isUserPaused(bot)) {
+            return false; // a paused bot starts no work of its own; it is looked at again once resumed
+        }
+        darkTrapAnswers.put(bot.getUUID(), new DarkTrapAnswer(feet, response));
+        BotLog.danger(bot, "dark_trap_response", "response", response, "at", feet.toShortString());
+        Task task = switch (response) {
+            case LIGHT -> LightAreaTask.automatic(8, 8);
+            case CRAFT_TORCHES -> new CraftTask(net.minecraft.world.item.Items.TORCH, DARK_TRAP_TORCHES);
+            case NONE, LIGHTING_OFF -> null;
+        };
+        if (task == null) {
+            int now = server.getTickCount();
+            if (now >= nextEscapeHelpTick.getOrDefault(bot.getUUID(), 0)) {
+                BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
+                        darkTrapReport(bot.getGameProfile().name(), feet, response));
+                nextEscapeHelpTick.put(bot.getUUID(), now + TRAP_HELP_INTERVAL);
+            }
+            return false;
+        }
+        String reason = "dark_trap_" + response.name().toLowerCase(java.util.Locale.ROOT);
+        if (active.isPresent()) {
+            TaskManager.INSTANCE.pauseFor(bot, reason);
+        }
+        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, reason));
         return true;
     }
 

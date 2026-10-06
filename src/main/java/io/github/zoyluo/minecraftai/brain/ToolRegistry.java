@@ -538,7 +538,7 @@ public final class ToolRegistry {
                 .orElseGet(() -> fail("no_container")));
 
         register("find", "Start a persistent, bounded locate-only search for any registered non-air block (for example furnace, crafting_table, oak_sapling, water, or modid:block), or for sheep / a storage container. It surveys only targets the bot can actually see, then explores with short observed hops (never force-loading chunks, mining, harvesting, attacking, or opening storage). It reports either a real coordinate or that it could not find the target within the requested radius.", objectSchema()
-                .property("target", stringSchema("registered block name/id (e.g. furnace, oak_sapling, minecraft:chest, modid:block), or sheep/container/bonus_chest"))
+                .property("target", stringSchema("registered block name/id (e.g. furnace, oak_sapling, minecraft:chest, modid:block), or sheep/container (a chest or other storage container; bonus_chest is the same search, since no chest can be told apart as the bonus chest)"))
                 .property("radius", integerSchema("search radius in blocks (24..64)", 24, 64))
                 .required("target")
                 .build(), (bot, args) -> {
@@ -1274,14 +1274,10 @@ public final class ToolRegistry {
 
     /** Explicit verified coordinates work independently; omitting them makes “show me” use the latest real discovery. */
     private static Task showLocationTask(AIPlayerEntity bot, JsonObject args) {
-        BlockPos explicit = optionalBlockPos(args, "x", "y", "z");
-        String label = optionalString(args, "label", "");
-        if (explicit != null) {
-            return new ShowTargetTask(explicit, label);
-        }
-        DiscoveryTask.FoundTarget found = DiscoveryTask.latestFound(bot)
+        DiscoveryTask.FoundTarget shown = DiscoveryTask.FoundTarget.forShowing(DiscoveryTask.latestFound(bot),
+                        optionalBlockPos(args, "x", "y", "z"), optionalString(args, "label", ""))
                 .orElseThrow(() -> new IllegalArgumentException("no_recent_find_in_this_dimension"));
-        return new ShowTargetTask(found.pos(), label.isBlank() ? found.label() : label);
+        return new ShowTargetTask(shown.pos(), shown.label());
     }
 
     private void register(String name, String description, JsonObject schema, ToolDefinition.Handler handler) {

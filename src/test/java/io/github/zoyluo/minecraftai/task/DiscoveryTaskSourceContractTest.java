@@ -24,7 +24,8 @@ final class DiscoveryTaskSourceContractTest {
                         && task.contains("case \"wheat\", \"mature_wheat\"")
                         && task.contains("\"minecraft:wheat\"")
                         && task.contains("case \"plant\", \"plants\" -> PLANTS")
-                        && task.contains("case \"bonus_chest\", \"container\"")
+                        && task.contains("case \"bonus_chest\" -> BONUS_CHEST")
+                        && task.contains("case \"container\", \"storage\"")
                         && task.contains("case \"sheep\", \"sheeps\", \"minecraft:sheep\""),
                 "the established resource/entity/container vocabulary must remain available");
         assertTrue(task.contains("BuiltInRegistries.BLOCK.getOptional(id)")

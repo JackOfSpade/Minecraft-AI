@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.perception.PerceptionCollector;
 import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
@@ -12,17 +13,20 @@ import net.minecraft.server.MinecraftServer;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.SplittableRandom;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 /**
  * Occasional, unprompted bot-to-bot chat: at most once per {@code conversation.cooldownTicks},
- * 1+ currently-eligible companions have a short in-character exchange, each line its own
- * independent LLM call. Modeled on {@link ChatRecipientRouter}: its own client, its own thread
+ * 2+ currently-eligible companions, the first of whom has noticed another, have a short in-character
+ * exchange, each line its own independent LLM call. Modeled on {@link ChatRecipientRouter}: its own client, its own thread
  * pool and lifecycle, entirely outside {@link BrainCoordinator}'s per-bot planner/tool-loop, so it
  * never disrupts, consumes the call budget of, or is throttled by whatever a bot is actually doing.
  * <p>
@@ -101,11 +105,18 @@ public final class AmbientConversationCoordinator {
         }
 
         List<AIPlayerEntity> eligible = eligibleBots();
-        if (eligible.size() < cfg.minParticipants()) {
+        if (!hasEnoughParticipants(eligible.size(), cfg)) {
             return;
         }
-        int count = pickParticipantCount(eligible.size(), cfg.minParticipants(), cfg.maxParticipants(), random);
+        int count = pickParticipantCount(eligible.size(), requiredParticipants(cfg), cfg.maxParticipants(), random);
         List<AIPlayerEntity> chosen = shuffleAndTake(eligible, count, random);
+        // The opening line is said to somebody the speaker has noticed (its view cone and hearing, docs/PERCEPTION.md): companions
+        // who have not set eyes on each other start nothing, however many of them are online.
+        int opener = indexOfOpener(chosen, ObservableWorldQuery::canNoticeCreature);
+        if (opener < 0) {
+            return;
+        }
+        Collections.rotate(chosen, -opener);
 
         ActiveConversation conversation = new ActiveConversation(chosen.stream().map(AIPlayerEntity::getUUID).toList());
         active = conversation;
@@ -127,6 +138,10 @@ public final class AmbientConversationCoordinator {
         return eligible;
     }
 
+    private static boolean addresseePresent(ActiveConversation conversation, UUID speakerId) {
+        return hasAddressee(conversation.order, speakerId, id -> AIPlayerManager.INSTANCE.getByUuid(id).isPresent());
+    }
+
     private void driveActive(MinecraftServer server) {
         ActiveConversation conversation = active;
         if (conversation == null) {
@@ -143,6 +158,10 @@ public final class AmbientConversationCoordinator {
         AIPlayerEntity speaker = AIPlayerManager.INSTANCE.getByUuid(speakerId).orElse(null);
         if (speaker == null) {
             endConversation(server, "speaker_gone");
+            return;
+        }
+        if (!addresseePresent(conversation, speakerId)) {
+            endConversation(server, "no_addressee");
             return;
         }
         String line = conversation.pendingLine;
@@ -179,6 +198,11 @@ public final class AmbientConversationCoordinator {
             endConversation(server, "speaker_gone");
             return;
         }
+        // Every line, canned or model-written, is spoken to the other participants: with none of them left there is nobody to hear it.
+        if (!addresseePresent(conversation, speakerId)) {
+            endConversation(server, "no_addressee");
+            return;
+        }
         MinecraftAiConfig.Conversation cfg = MinecraftAiConfig.get().conversation();
         String previousLine = conversation.transcript.isEmpty()
                 ? null : conversation.transcript.get(conversation.transcript.size() - 1).text();
@@ -197,6 +221,13 @@ public final class AmbientConversationCoordinator {
         // failure.  This is deliberately based on evidence availability, not a list of words such
         // as "cliff" or "stone".
         if (!hasSceneObservation(snapshot.highlights())) {
+            // The canned line speaks of company ("keeping each other company"): unless the speaker has noticed a participant,
+            // nothing it observed says there is any.
+            if (!hasAddressee(conversation.order, speakerId, id -> AIPlayerManager.INSTANCE.getByUuid(id)
+                    .filter(other -> ObservableWorldQuery.canNoticeCreature(speaker, other)).isPresent())) {
+                endConversation(server, "no_addressee_in_view");
+                return;
+            }
             conversation.pendingLine = ambientSocialFallback(mustBeStatement);
             conversation.pendingReady = true;
             BotLog.comm(speaker, "ambient_social_fallback_no_scene_evidence",
@@ -436,6 +467,39 @@ public final class AmbientConversationCoordinator {
 
     static boolean isEligible(boolean inSafetyTask, boolean brainBusy) {
         return !inSafetyTask && !brainBusy;
+    }
+
+    /** A conversation is an exchange between companions: a lone bot has nobody to address, whatever the configured minimum. */
+    static final int MIN_CONVERSATION_PARTICIPANTS = 2;
+
+    static int requiredParticipants(MinecraftAiConfig.Conversation cfg) {
+        return Math.max(MIN_CONVERSATION_PARTICIPANTS, cfg.minParticipants());
+    }
+
+    static boolean hasEnoughParticipants(int eligibleCount, MinecraftAiConfig.Conversation cfg) {
+        return eligibleCount >= requiredParticipants(cfg);
+    }
+
+    /** Whether a participant other than the speaker is still around to hear the line. */
+    static boolean hasAddressee(List<UUID> order, UUID speakerId, Predicate<UUID> present) {
+        for (UUID id : order) {
+            if (!id.equals(speakerId) && present.test(id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Index of the first participant who has noticed another one (so can open the conversation to somebody it perceives), or -1. */
+    static <T> int indexOfOpener(List<T> participants, BiPredicate<T, T> hasNoticed) {
+        for (int i = 0; i < participants.size(); i++) {
+            for (int j = 0; j < participants.size(); j++) {
+                if (i != j && hasNoticed.test(participants.get(i), participants.get(j))) {
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     static int pickParticipantCount(int eligibleCount, int minParticipants, int maxParticipants, SplittableRandom random) {
