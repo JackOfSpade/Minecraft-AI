@@ -3,8 +3,10 @@ package io.github.zoyluo.minecraftai.brain;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.craft.SmeltChain;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -12,6 +14,7 @@ import java.util.regex.Pattern;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
@@ -29,10 +32,13 @@ final class ItemNouns {
             "wood", "tree", "flower", "meat", "food", "fish", "crop", "gem", "material", "resource");
     private static final Set<String> CRAFTED_GROUPS = Set.of(
             "armor", "armour", "tool", "gear", "weapon", "equipment", "kit", "set");
+    /** Words that name creatures in general rather than one entity type. */
+    private static final Set<String> CREATURE_GROUPS = Set.of(
+            "mob", "monster", "animal", "hostile", "creature", "enemy");
     /** Colloquial one-word names for an item whose registry id is a different word. */
     private static final Map<String, String> ALIASES = Map.of(
             "table", "crafting_table", "workbench", "crafting_table", "cobble", "cobblestone",
-            "lapis", "lapis_lazuli", "debris", "ancient_debris");
+            "lapis", "lapis_lazuli", "debris", "ancient_debris", "pork", "porkchop");
     /**
      * Items whose registry id says "processed form": every ingot/nugget/storage block/plank/slab and
      * so on is made from something else. Recipes alone do not say so for storage blocks: the runtime
@@ -43,31 +49,64 @@ final class ItemNouns {
                     + "pressure_plate|sign|hanging_sign|boat|chest_boat|raft|chest_raft|bed|bricks?)$");
     /**
      * What the world yields even though a recipe converts it: wood from logs, raw metal from its
-     * block. The conversion is storage, not the way the bot gets it.
+     * block, wool from sheep (every colour is also a dyeing recipe). The conversion is storage or
+     * colouring, not the way the bot gets it.
      */
-    private static final Pattern NATURAL_FORM = Pattern.compile("(?:_log|_wood|_stem|_hyphae|_ore)$|^raw_[^_]+$");
+    private static final Pattern NATURAL_FORM = Pattern.compile(
+            "(?:_log|_wood|_stem|_hyphae|_ore|_wool)$|^raw_[^_]+$");
     /**
-     * Blocks the world generates that a recipe also makes from their own pieces (sand to sandstone, clay balls
-     * to clay, andesite from diorite): that recipe is how vanilla compacts them, not how a player gets them.
-     * Listed by id because the recipe tables cannot say so, and because a running server's recipe index holds
-     * these recipes where the unit tests' does not, which would otherwise make them "crafted" only in the game.
+     * Things the world generates or a creature drops that a recipe also makes (sand to sandstone, clay balls
+     * to clay, rabbit hide to leather, a melon's slices back to the melon): that recipe is how vanilla
+     * compacts or converts them, not how a player gets them. Listed by id because the recipe tables cannot say
+     * so, and because a running server's recipe index holds these recipes where the unit tests' does not, which
+     * would otherwise make them "crafted" only in the game. Every recipe result of the game's data that is also a
+     * natural resource is here (ItemNounsTest checks the list against the real recipe data).
      */
     private static final Set<String> NATURAL_BLOCKS = Set.of(
             "grass_block", "moss_block", "pale_moss_block", "magma_block", "amethyst_block",
             "andesite", "diorite", "granite", "sandstone", "red_sandstone", "clay", "glowstone",
-            "snow_block", "packed_ice", "blue_ice", "dripstone_block", "bone_block", "nether_wart_block");
+            "snow", "snow_block", "packed_ice", "blue_ice", "dripstone_block", "bone_block", "nether_wart_block",
+            "warped_wart_block", "brown_mushroom_block", "red_mushroom_block", "coarse_dirt", "mossy_cobblestone",
+            "muddy_mangrove_roots", "moss_carpet", "pale_moss_carpet", "melon", "melon_seeds", "pumpkin_seeds",
+            "prismarine", "dark_prismarine", "sea_lantern", "leather", "magma_cream");
+    /** Item ids contain a few grammar words ("lily_of_the_valley", "flint_and_steel"): they name nothing alone. */
+    private static final Set<String> GRAMMAR_WORDS = Set.of("the", "of", "on", "a", "an", "and", "or", "in", "at", "to", "for");
+    /**
+     * Words that say how much or which kind, not what: "stack of", "iron ore", "stone blocks". "Raw" is one: raw
+     * iron is what mining iron ore yields, so a collection that names the ore is a collection of it; a vein is the
+     * ore it is made of.
+     */
+    private static final Set<String> GENERIC_NOUN_WORDS = Set.of(
+            "ore", "ores", "block", "blocks", "item", "items", "stack", "stacks", "piece", "pieces", "pile",
+            "piles", "dozen", "dozens", "of", "raw", "vein", "veins");
+    /** Several words for one thing: the spellings of "wood" and "trees" include the log items' own word. */
+    private static final Map<String, String> NOUN_SYNONYMS = Map.of(
+            "wood", "log", "woods", "log", "tree", "log", "trees", "log", "trunk", "log", "timber", "log",
+            "stone", "cobblestone", "cobble", "cobblestone", "pork", "porkchop");
     private static final int MAX_PHRASE_WORDS = 6;
 
     private static Map<String, List<Item>> byLastSegment;
     private static Set<String> segments;
+    private static Set<Item> handwrittenOutputs;
 
     private ItemNouns() {
     }
 
     /** The kind of the item a noun phrase names, trying ever shorter tails ("fresh iron pickaxe" -> "iron pickaxe"). */
     static Kind classify(List<String> words) {
+        return classify(words, true);
+    }
+
+    /**
+     * Same, for a verb that decides how recipes count. {@code recipesCount} is false for a collecting verb
+     * ("gather", "mine", "harvest"): a recipe that merely exists in the running game's recipe index (white wool
+     * from string, a sea lantern from crystals) does not make a world resource crafted there, so only what is
+     * crafted whatever the recipes say (gear, processed forms, the planner's own recipes and smelting chains)
+     * is. That also makes the answer the same in a running game and in a bare test JVM.
+     */
+    static Kind classify(List<String> words, boolean recipesCount) {
         for (int start = 0; start < words.size(); start++) {
-            Kind kind = resolve(words.subList(start, words.size()));
+            Kind kind = resolve(words.subList(start, words.size()), recipesCount);
             if (kind != null) {
                 return kind;
             }
@@ -80,6 +119,10 @@ final class ItemNouns {
      * carry durability; the recipe tables cover everything else the planner crafts or smelts.
      */
     static boolean isCraftedOutput(Item item) {
+        return isCraftedOutput(item, true);
+    }
+
+    static boolean isCraftedOutput(Item item, boolean recipesCount) {
         if (item == Items.STONE) {
             // Breaking stone drops cobblestone, so "get 64 stone" is a mining request even though
             // stone itself is smelted from cobblestone.
@@ -90,7 +133,8 @@ final class ItemNouns {
             return false;
         }
         if (item.components().has(DataComponents.MAX_DAMAGE)
-                || RecipeRegistry.find(item).isPresent() || SmeltChain.rawFor(item) != null) {
+                || handwrittenOutputs().contains(item) || SmeltChain.rawFor(item) != null
+                || recipesCount && RecipeRegistry.find(item).isPresent()) {
             return true;
         }
         return PROCESSED_FORM.matcher(path).find() || path.endsWith("_block");
@@ -104,6 +148,115 @@ final class ItemNouns {
     /** True when {@code path} (or a namespaced id) is a registered item. */
     static boolean isItemPath(String path) {
         return itemFor(path) != null;
+    }
+
+    /** True for a registered item that the world yields (not one the bot crafts); false for crafted or unknown ids. */
+    static boolean isRawItemId(String id) {
+        Item item = id == null ? null : itemFor(id.trim().toLowerCase(java.util.Locale.ROOT));
+        return item != null && !isCraftedOutput(item);
+    }
+
+    /** True when the word on its own names an item or a group of them: "logs", "coal", "cobble", "wood". */
+    static boolean isNounWord(String word) {
+        if (GRAMMAR_WORDS.contains(word)) {
+            return false;
+        }
+        for (String variant : singularVariants(word)) {
+            if (isItemSegment(variant) || ALIASES.containsKey(variant)
+                    || RAW_GROUPS.contains(variant) || CRAFTED_GROUPS.contains(variant)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when the noun phrase names a creature ("cows", "cave spider", "mobs"), the thing a hunter kills,
+     * rather than anything it drops.
+     */
+    static boolean isCreature(List<String> words) {
+        if (words.isEmpty()) {
+            return false;
+        }
+        String prefix = words.size() == 1 ? "" : String.join("_", words.subList(0, words.size() - 1)) + "_";
+        for (String variant : singularVariants(words.get(words.size() - 1))) {
+            if (CREATURE_GROUPS.contains(variant)) {
+                return true;
+            }
+            Identifier id = Identifier.tryParse("minecraft:" + prefix + variant);
+            if (id != null && BuiltInRegistries.ENTITY_TYPE.getOptional(id)
+                    .filter(type -> type != EntityType.PLAYER).isPresent()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * What a noun phrase names, as the words an item id has to contain to be it: one set per word of the
+     * phrase, holding the spellings that word can have ("oak logs" is {oak} and {log, logs}, "wood" is
+     * {wood, log}). An item is what the phrase names when each set has one of its spellings as a whole id
+     * segment, so "oak logs" is no birch log and "raw copper" is no raw iron. No sets at all (a phrase that
+     * says nothing an item id can be checked against, "stacks of") is any item.
+     */
+    record Words(List<Set<String>> groups) {
+        static final Words ANY = new Words(List.of());
+
+        /** Whether an item id ("minecraft:oak_log", "raw_iron", the literal "logs") has every word of the phrase. */
+        boolean matches(String itemId) {
+            return matchedWords(itemId) == groups.size();
+        }
+
+        /** How many of the phrase's words the item id has: all of them when it is what the phrase names. */
+        int matchedWords(String itemId) {
+            String path = itemId.substring(itemId.indexOf(':') + 1).toLowerCase(java.util.Locale.ROOT);
+            List<String> segments = List.of(path.split("_"));
+            int matched = 0;
+            for (Set<String> spellings : groups) {
+                if (segments.stream().anyMatch(spellings::contains)) {
+                    matched++;
+                }
+            }
+            return matched;
+        }
+
+        /**
+         * Whether two phrases name the same resource: each of the words of either has a spelling in common
+         * with a word of the other ("logs" and "wood" are both the log items; "oak logs" is not "birch logs").
+         */
+        boolean sameAs(Words other) {
+            return coveredBy(groups, other.groups) && coveredBy(other.groups, groups);
+        }
+
+        private static boolean coveredBy(List<Set<String>> words, List<Set<String>> by) {
+            return words.stream().allMatch(word -> by.stream().anyMatch(other -> !Collections.disjoint(word, other)));
+        }
+    }
+
+    /**
+     * The words of a noun phrase that an item id is held to ({@link Words}). Words that say how much or which
+     * kind ("stack of", "iron ore", "raw iron": the ore and the raw item are the same collection) and words no
+     * item can be recognised by ("fresh", "steaks", "the") are left out, so they cannot make a real item miss.
+     */
+    static Words matchWords(List<String> noun) {
+        List<Set<String>> groups = new ArrayList<>();
+        for (String word : noun) {
+            if (GENERIC_NOUN_WORDS.contains(word) || GRAMMAR_WORDS.contains(word)) {
+                continue;
+            }
+            Set<String> spellings = new LinkedHashSet<>();
+            for (String variant : singularVariants(word)) {
+                spellings.add(variant);
+                String synonym = NOUN_SYNONYMS.get(variant);
+                if (synonym != null) {
+                    spellings.add(synonym);
+                }
+            }
+            if (isNounWord(word) || spellings.stream().anyMatch(ItemNouns::isItemSegment)) {
+                groups.add(spellings);
+            }
+        }
+        return new Words(List.copyOf(groups));
     }
 
     /** The spellings a plural player word can have as a registry word ("torches" -> "torch"). */
@@ -126,7 +279,7 @@ final class ItemNouns {
         return variants;
     }
 
-    private static Kind resolve(List<String> phrase) {
+    private static Kind resolve(List<String> phrase, boolean recipesCount) {
         if (phrase.size() > MAX_PHRASE_WORDS) {
             return null;
         }
@@ -135,14 +288,14 @@ final class ItemNouns {
         for (String variant : singularVariants(last)) {
             Item exact = itemFor(prefix + variant);
             if (exact != null) {
-                return kindOf(exact);
+                return kindOf(exact, recipesCount);
             }
             if (phrase.size() > 1) {
                 continue;
             }
             Item alias = ALIASES.containsKey(variant) ? itemFor(ALIASES.get(variant)) : null;
             if (alias != null) {
-                return kindOf(alias);
+                return kindOf(alias, recipesCount);
             }
             if (RAW_GROUPS.contains(variant)) {
                 return Kind.RAW;
@@ -150,7 +303,7 @@ final class ItemNouns {
             if (CRAFTED_GROUPS.contains(variant)) {
                 return Kind.CRAFTED;
             }
-            Kind family = familyKind(variant);
+            Kind family = familyKind(variant, recipesCount);
             if (family != null) {
                 return family;
             }
@@ -159,14 +312,14 @@ final class ItemNouns {
     }
 
     /** "logs", "pickaxe", "ore": the kind shared by every item whose id ends in that word, or null if they disagree. */
-    private static Kind familyKind(String word) {
+    private static Kind familyKind(String word, boolean recipesCount) {
         List<Item> family = byLastSegment().get(word);
         if (family == null) {
             return null;
         }
         Kind shared = null;
         for (Item item : family) {
-            Kind kind = kindOf(item);
+            Kind kind = kindOf(item, recipesCount);
             if (shared != null && shared != kind) {
                 return null;
             }
@@ -175,8 +328,8 @@ final class ItemNouns {
         return shared;
     }
 
-    private static Kind kindOf(Item item) {
-        return isCraftedOutput(item) ? Kind.CRAFTED : Kind.RAW;
+    private static Kind kindOf(Item item, boolean recipesCount) {
+        return isCraftedOutput(item, recipesCount) ? Kind.CRAFTED : Kind.RAW;
     }
 
     private static Item itemFor(String path) {
@@ -185,6 +338,15 @@ final class ItemNouns {
             return null;
         }
         return BuiltInRegistries.ITEM.getOptional(id).filter(item -> item != Items.AIR).orElse(null);
+    }
+
+    private static synchronized Set<Item> handwrittenOutputs() {
+        if (handwrittenOutputs == null) {
+            Set<Item> outputs = new HashSet<>();
+            RecipeRegistry.all().forEach(recipe -> outputs.add(recipe.output()));
+            handwrittenOutputs = outputs;
+        }
+        return handwrittenOutputs;
     }
 
     private static synchronized Map<String, List<Item>> byLastSegment() {
@@ -209,6 +371,9 @@ final class ItemNouns {
                 continue;
             }
             String path = BuiltInRegistries.ITEM.getKey(item).getPath();
+            if (path.startsWith("music_disc_")) {
+                continue; // named after songs: "wait", "far", "mall" are ordinary words in chat, not resources
+            }
             String[] parts = path.split("_");
             all.addAll(List.of(parts));
             last.computeIfAbsent(parts[parts.length - 1], key -> new ArrayList<>()).add(item);

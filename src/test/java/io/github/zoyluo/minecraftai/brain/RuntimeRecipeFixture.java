@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.brain;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.craft.RuntimeRecipeIndex;
 import java.lang.reflect.Field;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.world.item.Item;
@@ -17,8 +18,17 @@ final class RuntimeRecipeFixture {
     }
 
     /** Makes each item look like the output of a crafting recipe in the runtime index. */
-    @SuppressWarnings("unchecked")
     static void install(Item... outputs) {
+        install(List.of(outputs));
+    }
+
+    /** The index of a running server: every vanilla crafting recipe's result (see {@link VanillaRecipeOutputs}). */
+    static void installVanilla() {
+        install(VanillaRecipeOutputs.indexed());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void install(Collection<Item> outputs) {
         try {
             Field index = RuntimeRecipeIndex.class.getDeclaredField("INDEX");
             index.setAccessible(true);

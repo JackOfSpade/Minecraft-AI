@@ -356,6 +356,16 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     /**
+     * Time-boxed collection whose yield is handed over afterwards ("gather some wood and give it to me"): like
+     * {@link #collectForDuration(Item, int)}, but the collected units are promised inventory that a deposit must
+     * not stow, as in the exact-quota forms. {@code accepted} is the exact item, or every log species for logs.
+     */
+    static GatherQuotaTask collectForDurationForHandoff(Item targetItem, Set<Item> accepted, int durationTicks) {
+        return new GatherQuotaTask(targetItem, 1, false, null, "", "", true,
+                Math.max(1, durationTicks), 0, 0, Set.copyOf(accepted), true);
+    }
+
+    /**
      * Collects as much newly acquired material as possible for ten minutes.  Existing inventory
      * establishes only the counting baseline; it can never complete this task.
      */
@@ -3314,15 +3324,6 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         int observedNewItems = Math.max(0, rawNewItems(bot) - bootstrapExcluded);
         countSoFar = Math.max(countSoFar, observedNewItems);
-    }
-
-    /**
-     * Final defense for {@link GatherThenGiveTask}: the exact fresh quota must still be present
-     * beyond the immutable inventory baseline at the moment the physical handoff begins.
-     */
-    boolean hasRetainedFreshQuota(AIPlayerEntity bot) {
-        return retainAcceptedItemsDuringDeposit
-                && countAccepted(bot) >= acceptedInventoryAtStart + targetCount;
     }
 
     /** Accepted items this task has received so far (monotonic: max of inventory delta and picked-up stat delta). */

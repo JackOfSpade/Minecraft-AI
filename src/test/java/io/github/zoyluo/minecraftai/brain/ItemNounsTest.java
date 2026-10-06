@@ -99,6 +99,148 @@ final class ItemNounsTest {
     }
 
     @Test
+    void whatTheWorldYieldsIsRawWithTheGamesWholeRecipeIndexInstalledToo() {
+        // The recipe index of a running server holds every vanilla crafting recipe. Each of these is a resource
+        // the world (or a creature) yields that a recipe also makes, and none may read as crafted there.
+        RuntimeRecipeFixture.installVanilla();
+        try {
+            for (String noun : List.of("white wool", "red wool", "wool", "melon", "melons", "melon seeds",
+                    "pumpkin seeds", "sea lantern", "sea lanterns", "prismarine", "dark prismarine", "coarse dirt",
+                    "leather", "magma cream", "snow", "snow blocks", "mossy cobblestone", "sandstone", "red sandstone",
+                    "clay", "glowstone", "andesite", "diorite", "granite", "packed ice", "blue ice", "bone block",
+                    "moss carpet", "muddy mangrove roots", "brown mushroom block", "red mushroom block",
+                    "amethyst block", "nether wart block", "warped wart block", "dripstone block", "magma block",
+                    "oak logs", "oak wood", "stripped oak log", "raw iron", "raw gold", "coal", "diamond", "emerald",
+                    "redstone", "lapis", "quartz", "copper ore", "iron ore", "cobblestone", "stone", "obsidian")) {
+                assertEquals(ItemNouns.Kind.RAW, kind(noun), noun + " reads as crafted in the running game");
+            }
+            // Whereas the made things stay made: the recipe index only adds to what the structure already says.
+            for (String noun : List.of("piston", "dispenser", "lantern", "anvil", "hopper", "furnace", "bookshelf",
+                    "white banner", "oak shelf", "shulker box", "iron bars", "bundle", "tnt", "rail", "paper", "book",
+                    "iron pickaxe", "stone bricks", "iron ingot", "iron block", "hay block", "slime block")) {
+                assertEquals(ItemNouns.Kind.CRAFTED, kind(noun), noun + " reads as raw in the running game");
+            }
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
+    }
+
+    @Test
+    void aCollectingVerbIgnoresRecipesThatOnlyTheRunningGameKnows() {
+        RuntimeRecipeFixture.install(Items.PISTON, Items.SEA_LANTERN);
+        try {
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("pistons"), true));
+            assertEquals(ItemNouns.Kind.RAW, ItemNouns.classify(List.of("pistons"), false),
+                    "gather/mine name what the world yields, whatever the recipe index says");
+            // What is crafted whatever the recipes say stays crafted for every verb.
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("iron", "pickaxe"), false));
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("iron", "ingots"), false));
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("torches"), false),
+                    "the planner's own recipes are structure, not index");
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
+    }
+
+    @Test
+    void anItemIdIsRawWhenTheWorldYieldsIt() {
+        assertTrue(ItemNouns.isRawItemId("minecraft:oak_log"));
+        assertTrue(ItemNouns.isRawItemId("COAL"));
+        assertTrue(ItemNouns.isRawItemId(" minecraft:raw_iron "));
+        assertFalse(ItemNouns.isRawItemId("minecraft:crafting_table"));
+        assertFalse(ItemNouns.isRawItemId("minecraft:iron_pickaxe"));
+        assertFalse(ItemNouns.isRawItemId("minecraft:not_an_item"));
+        assertFalse(ItemNouns.isRawItemId(null));
+    }
+
+    @Test
+    void creaturesAreToldApartFromTheirDrops() {
+        for (String noun : List.of("cow", "cows", "sheep", "zombie", "zombies", "skeletons", "spiders", "pigs",
+                "creeper", "mobs", "monsters", "animals", "enderman")) {
+            assertTrue(ItemNouns.isCreature(List.of(noun)), noun);
+        }
+        assertTrue(ItemNouns.isCreature(List.of("cave", "spiders")));
+        for (String noun : List.of("beef", "leather", "bones", "wool", "logs", "iron", "drops", "")) {
+            assertFalse(ItemNouns.isCreature(List.of(noun)), noun);
+        }
+        assertFalse(ItemNouns.isCreature(List.of()));
+    }
+
+    private static ItemNouns.Words words(String... noun) {
+        return ItemNouns.matchWords(List.of(noun));
+    }
+
+    @Test
+    void aNounPhraseKeepsTheWordsAnItemMustContainToBeIt() {
+        assertEquals(List.of(java.util.Set.of("oak"), java.util.Set.of("logs", "log")), words("oak", "logs").groups());
+        assertTrue(words("wood").groups().get(0).contains("log"), "wood is the log items' own word");
+        assertTrue(words("trees").groups().get(0).contains("log"));
+        assertTrue(words("stone").groups().get(0).contains("cobblestone"), "breaking stone drops cobblestone");
+        assertEquals(1, words("stack", "of", "logs").groups().size(), "stack and of say how much, not what");
+        assertEquals(ItemNouns.Words.ANY, words("stacks", "of"));
+        assertEquals(words("iron"), words("raw", "iron"), "raw iron is what mining iron ore yields");
+        assertEquals(words("logs"), words("fresh", "logs"), "no item is called fresh: the word cannot make a log miss");
+        assertEquals(ItemNouns.Words.ANY, words("steaks"), "no item id says steak: nothing to hold an item to");
+        assertEquals(words("iron"), words("iron", "vein"), "a vein is the ore it is made of");
+        assertEquals(ItemNouns.Words.ANY, words("vein"));
+
+        assertTrue(words("logs").matches("minecraft:oak_log"));
+        assertTrue(words("logs").matches("logs"), "the gather_then_give sentinel");
+        assertTrue(words("coal").matches("minecraft:coal_ore"));
+        assertTrue(words("coal").matches("minecraft:deepslate_coal_ore"));
+        assertTrue(words("iron").matches("minecraft:raw_iron"));
+        assertTrue(words("raw", "iron").matches("minecraft:iron_ore"), "the ore and its raw drop are one collection");
+        assertTrue(words("diamonds").matches("minecraft:diamond"));
+        assertTrue(words("berries").matches("minecraft:sweet_berries"));
+        assertTrue(words("pork").matches("minecraft:porkchop"));
+        assertFalse(words("logs").matches("minecraft:coal"));
+        assertFalse(words("coal").matches("minecraft:oak_log"));
+        assertTrue(ItemNouns.Words.ANY.matches("minecraft:anything"), "no words: any item");
+    }
+
+    @Test
+    void aSongsNameIsNoResourceTheChatNames() {
+        // music_disc_wait, _far, _mall, _blocks: the discs are named after songs, and "and wait" is no second resource
+        assertFalse(ItemNouns.isNounWord("wait"));
+        assertFalse(ItemNouns.isItemSegment("mall"));
+        assertEquals(ItemNouns.Kind.UNKNOWN, ItemNouns.classify(List.of("wait")));
+        assertTrue(ItemNouns.isNounWord("logs"), "the other words keep their meaning");
+    }
+
+    @Test
+    void anItemHasToHaveEveryWordOfThePhraseToBeIt() {
+        assertTrue(words("oak", "logs").matches("minecraft:oak_log"));
+        assertTrue(words("oak", "logs").matches("minecraft:stripped_oak_log"));
+        assertFalse(words("oak", "logs").matches("minecraft:birch_log"), "a species is part of what was asked for");
+        assertFalse(words("birch", "logs").matches("minecraft:oak_log"));
+        assertFalse(words("raw", "copper").matches("minecraft:raw_iron"));
+        assertFalse(words("raw", "iron").matches("minecraft:raw_copper"));
+        assertTrue(words("oak", "wood").matches("minecraft:oak_log"), "oak wood is the oak log items");
+        assertTrue(words("dark", "oak", "logs").matches("minecraft:dark_oak_log"));
+
+        assertEquals(1, words("lapis", "lazuli").matchedWords("minecraft:lapis_ore"));
+        assertEquals(2, words("lapis", "lazuli").matchedWords("minecraft:lapis_lazuli"));
+        assertFalse(words("lapis", "lazuli").matches("minecraft:lapis_ore"));
+        assertEquals(0, words("oak", "logs").matchedWords("minecraft:coal"));
+    }
+
+    @Test
+    void twoPhrasesNameTheSameResourceOnlyWhenTheirWordsPairUp() {
+        assertTrue(words("logs").sameAs(words("wood")), "two words for the log items");
+        assertTrue(words("logs").sameAs(words("log")));
+        assertTrue(words("oak", "logs").sameAs(words("oak", "wood")));
+        assertTrue(words("stone").sameAs(words("cobblestone")), "breaking stone drops cobblestone");
+        assertTrue(words("iron").sameAs(words("raw", "iron")));
+        assertTrue(ItemNouns.Words.ANY.sameAs(words("steaks")), "neither says anything an item can be held to");
+
+        assertFalse(words("oak", "logs").sameAs(words("birch", "logs")), "they share the word logs, not the resource");
+        assertFalse(words("raw", "iron").sameAs(words("raw", "copper")));
+        assertFalse(words("logs").sameAs(words("oak", "logs")), "any log is not the oak ones");
+        assertFalse(words("coal").sameAs(words("iron")));
+        assertFalse(ItemNouns.Words.ANY.sameAs(words("coal")));
+    }
+
+    @Test
     void gearIsCraftedBecauseItHasDurability() {
         assertTrue(ItemNouns.isCraftedOutput(Items.IRON_PICKAXE));
         assertTrue(ItemNouns.isCraftedOutput(Items.SHIELD));
