@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,8 @@ public final class ExplorationGameTests {
     private static final int HOPS = 4;
     /** A hop that has not arrived after this long is stuck; a real one takes about fifty ticks. */
     private static final int HOP_TIMEOUT_TICKS = 200;
+    /** Cells the survey of a place without trees may leave in the bot's sight memory (the old order left about a thousand; the new one about fifty). */
+    private static final int SURVEY_REMEMBERED_CELLS = 100;
 
     @GameTest(environment = "minecraftai-gametest:exploration_game_tests_search_walks_out_through_open_ground_instead_of_circling", maxTicks = 1000)
     public void searchWalksOutThroughOpenGroundInsteadOfCircling(GameTestHelper context) {
@@ -76,11 +79,14 @@ public final class ExplorationGameTests {
 
     /**
      * Looking around a place with no tree in it used to cost about a hundred milliseconds of server thread on every
-     * tick for some seventy ticks (a ray for each of about eleven thousand cells on every tick, then a 42,000-cell
-     * pillar volume the same way). The survey must be over, and the first hop begun, within a few dozen ticks.
+     * tick for some seventy ticks: the survey and then a 42,000-cell pillar volume cast the observation rays for every
+     * cell they visited, whatever block it held. Now only a cell that holds a log is ray-tested, so the survey is
+     * over in a few ticks. How many ticks that is depends on the machine, so this counts the work instead: a ray that
+     * finds a solid cell in view leaves it in the bot's sight memory, and the floor and walls of this place are all in
+     * view, so a survey that cast rays at them would leave them all there.
      */
-    @GameTest(environment = "minecraftai-gametest:exploration_game_tests_survey_of_a_treeless_place_hands_over_to_exploration_within_a_few_ticks", maxTicks = 200)
-    public void surveyOfATreelessPlaceHandsOverToExplorationWithinAFewTicks(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:exploration_game_tests_survey_of_a_treeless_place_rays_no_cell_that_cannot_be_a_log", maxTicks = 200)
+    public void surveyOfATreelessPlaceRaysNoCellThatCannotBeALog(GameTestHelper context) {
         FollowFieldFixture fixture = new FollowFieldFixture(context, 44, 8);
         AIPlayerEntity bot = fixture.bot("ExploreSurveyGT", -40, 0, true);
         fixture.give(bot, new ItemStack(Items.WOODEN_AXE));
@@ -88,14 +94,19 @@ public final class ExplorationGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_gather_survey_of_treeless_place"));
 
+        int[] remembered = {0};
+
         context.failIfEver(() -> {
-            if (task.describe().contains("phase=EXPLORE")) {
-                fixture.finish();
+            if (!task.describe().contains("phase=EXPLORE")) {
+                // Counted while the survey runs: the tick that hands over also admits the first hop, whose route
+                // fence rays a great many cells of its own.
+                remembered[0] = SharedWorldSight.knownBlocks(bot, state -> true, Integer.MAX_VALUE).size();
                 return;
             }
-            fixture.require(context.getTick() <= 45,
-                    "the bot was still looking around a place without trees after " + context.getTick()
-                            + " ticks: " + task.describe());
+            fixture.require(remembered[0] <= SURVEY_REMEMBERED_CELLS,
+                    "the survey of a place without trees ray-tested " + remembered[0] + " cells it could see (at most "
+                            + SURVEY_REMEMBERED_CELLS + " expected): " + task.describe());
+            fixture.finish();
         });
     }
 

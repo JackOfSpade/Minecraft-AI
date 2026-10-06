@@ -76,19 +76,24 @@ public final class EpisodeMemory {
     }
 
     public boolean isExcluded(UUID botId, BlockPos pos, int nowTick) {
+        return excludedUntil(botId, pos, nowTick) >= 0;
+    }
+
+    /** The last tick on which {@code pos} is still excluded (it revives on the next one), or -1 when it is not excluded. */
+    public int excludedUntil(UUID botId, BlockPos pos, int nowTick) {
         BotEpisode ep = episodes.get(botId);
         if (ep == null) {
-            return false;
+            return -1;
         }
         Integer until = ep.excludedUntil.get(pos);
         if (until == null) {
-            return false;
+            return -1;
         }
         if (until < nowTick) {
             ep.excludedUntil.remove(pos);
-            return false;
+            return -1;
         }
-        return true;
+        return until;
     }
 
     public int excludedCount(UUID botId) {

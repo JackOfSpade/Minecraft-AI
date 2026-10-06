@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
@@ -163,6 +164,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private long harvestMiningGeneration;
     /** Why the attempt's break was refused at admission, until {@link #harvest} reacts to it. */
     private String harvestStartRefusal;
+    /** The last break start waited on a guarded step's fence: not a refusal of the block, so the next tick starts it again. */
+    private boolean harvestStartFenced;
     private BlockPos pickupOrigin;
     private long pickupStatBeforeHarvest;
     private boolean pickupOriginApproachLogged;
@@ -567,6 +570,7 @@ public final class GatherQuotaTask extends AbstractTask {
         bootstrapOriginSweep = null;
         pickupOriginSweep = null;
         harvestStartRefusal = null;
+        harvestStartFenced = false;
         surveyOwedAfterExplore = false;
         exactPillarMemo.clear();
         broadPillarMemo.clear();
@@ -1794,8 +1798,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (pillarApproachScan == null
                 || bot.blockPosition().distSqr(pillarApproachScan.origin()) > SCAN_STALE_DISTANCE_SQ) {
             pillarApproachScan = HarvestCore.beginNearestPillarApproachScan(bot, harvestBlocks,
-                    SEARCH_RADIUS, SEARCH_DOWN, PILLAR_SEARCH_UP,
-                    pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, now));
+                    SEARCH_RADIUS, SEARCH_DOWN, PILLAR_SEARCH_UP, broadPillarMemo.scanFilter(botId, now));
         }
         if (!pillarApproachScan.step(SCAN_STEP_BUDGET_NANOS)) {
             return true;
@@ -1805,6 +1808,8 @@ public final class GatherQuotaTask extends AbstractTask {
         pillarApproachScan = null;
         if (approach == null) {
             broadPillarMemo.rememberEmpty(scanned, PILLAR_SEARCH_UP, worldVersion, now);
+            BotLog.action(bot, "gather_pillar_scan_empty", "search", "volume", "from", scanned.toShortString(),
+                    "up", PILLAR_SEARCH_UP);
             return false;
         }
         return admitPillarApproach(bot, approach);
@@ -1849,6 +1854,8 @@ public final class GatherQuotaTask extends AbstractTask {
         if (base == null) {
             exactPillarMemo.rememberEmpty(bot.blockPosition(), block.asLong(), worldVersion,
                     bot.level().getServer().getTickCount());
+            BotLog.action(bot, "gather_pillar_scan_empty", "search", "hint", "from", bot.blockPosition().toShortString(),
+                    "target", block.toShortString());
             return false;
         }
         ActionResult route = startGatherPathTo(bot, base);
@@ -2575,8 +2582,10 @@ public final class GatherQuotaTask extends AbstractTask {
             phase = Phase.PICKUP;
             return;
         }
-        String refusal = harvestStartRefusal != null ? harvestStartRefusal
-                : bot.getActionPack().consumeFailedMining(targetPos, harvestMiningGeneration);
+        String refusal = harvestStartRefusal;
+        if (refusal == null && !harvestStartFenced) { // a fenced start admitted no controller that could have failed
+            refusal = bot.getActionPack().consumeFailedMining(targetPos, harvestMiningGeneration);
+        }
         harvestStartRefusal = null;
         if (refusal != null) {
             // The break controller is gone: the block left the bot's sight (or was never admitted), so
@@ -2604,7 +2613,7 @@ public final class GatherQuotaTask extends AbstractTask {
             phase = Phase.SURVEY;
             return;
         }
-        if (bot.getActionPack().isMiningIdle() && elapsed % 200 == 0) {
+        if (bot.getActionPack().isMiningIdle() && (harvestStartFenced || elapsed % 200 == 0)) {
             // A controller retry is part of the same atomic attempt. Calling startHarvest() here
             // used to renew harvestStartedTick every 200 ticks, permanently outrunning the
             // 240-tick deadline whenever the target had become out of reach.
@@ -3049,7 +3058,10 @@ public final class GatherQuotaTask extends AbstractTask {
     private void startHarvestMining(AIPlayerEntity bot) {
         ActionResult started = HarvestCore.startMining(bot, targetPos);
         harvestMiningGeneration = bot.getActionPack().miningGeneration();
-        harvestStartRefusal = started.isFailed() ? started.reason() : null;
+        // The fence of a guarded step says nothing about this block (ActionPack calls it an unstarted
+        // retry, not a terrain refusal): keep the attempt and start again once that step is reconciled.
+        harvestStartFenced = started.isFailed() && ActionPack.GUARDED_STEP_FENCE.equals(started.reason());
+        harvestStartRefusal = started.isFailed() && !harvestStartFenced ? started.reason() : null;
     }
 
     /**
