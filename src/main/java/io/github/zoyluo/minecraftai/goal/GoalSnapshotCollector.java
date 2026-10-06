@@ -44,9 +44,7 @@ public final class GoalSnapshotCollector {
             int buildPlaced,
             int buildSkipped,
             /** Exact successful handoffs already committed by a compound fulfillment mission. */
-            Set<Goal.Allocation> completedDeliveries,
-            /** Fresh collection stages already physically completed before fulfillment crafting. */
-            Set<Goal.FreshGatherQuota> completedFreshGatherQuotas
+            Set<Goal.Allocation> completedDeliveries
     ) {
         /** Backward-compatible context shape for ordinary goals with no handoff receipts. */
         public Context(BlockPos origin,
@@ -55,20 +53,7 @@ public final class GoalSnapshotCollector {
                        BlockPos buildAnchor,
                        int buildPlaced,
                        int buildSkipped) {
-            this(origin, boundContainers, blueprint, buildAnchor, buildPlaced, buildSkipped,
-                    Set.of(), Set.of());
-        }
-
-        /** Backward-compatible delivery-receipt context before staged fresh gathering existed. */
-        public Context(BlockPos origin,
-                       Set<BlockPos> boundContainers,
-                       BlueprintSchema blueprint,
-                       BlockPos buildAnchor,
-                       int buildPlaced,
-                       int buildSkipped,
-                       Set<Goal.Allocation> completedDeliveries) {
-            this(origin, boundContainers, blueprint, buildAnchor, buildPlaced, buildSkipped,
-                    completedDeliveries, Set.of());
+            this(origin, boundContainers, blueprint, buildAnchor, buildPlaced, buildSkipped, Set.of());
         }
 
         public Context {
@@ -77,8 +62,6 @@ public final class GoalSnapshotCollector {
                     .map(BlockPos::immutable).collect(java.util.stream.Collectors.toUnmodifiableSet());
             buildAnchor = buildAnchor == null ? null : buildAnchor.immutable();
             completedDeliveries = completedDeliveries == null ? Set.of() : Set.copyOf(completedDeliveries);
-            completedFreshGatherQuotas = completedFreshGatherQuotas == null
-                    ? Set.of() : Set.copyOf(completedFreshGatherQuotas);
         }
 
         public static Context at(BlockPos origin) {

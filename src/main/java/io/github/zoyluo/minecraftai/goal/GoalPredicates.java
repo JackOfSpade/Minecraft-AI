@@ -36,7 +36,7 @@ public final class GoalPredicates {
                     BuiltInRegistries.ITEM.getKey(stockpile.item()).toString(), stockpile.count());
             case Goal.Food food -> new GoalPredicate.FoodUnits(food.cookedCount());
             case Goal.Build build -> new GoalPredicate.Structure(build.blueprint());
-            case Goal.Fulfill fulfill -> new GoalPredicate.Fulfillment(fulfill, Set.of(), Set.of());
+            case Goal.Fulfill fulfill -> new GoalPredicate.Fulfillment(fulfill, Set.of());
         };
     }
 
@@ -44,17 +44,8 @@ public final class GoalPredicates {
     public static GoalEvaluation evaluate(Goal goal,
                                           GoalSnapshot snapshot,
                                           Set<Goal.Allocation> completedDeliveries) {
-        return evaluate(goal, snapshot, completedDeliveries, Set.of());
-    }
-
-    /** Evaluates a goal with both durable handoff and fresh-collection receipts. */
-    public static GoalEvaluation evaluate(Goal goal,
-                                          GoalSnapshot snapshot,
-                                          Set<Goal.Allocation> completedDeliveries,
-                                          Set<Goal.FreshGatherQuota> completedFreshGatherQuotas) {
         if (goal instanceof Goal.Fulfill fulfill) {
-            return new GoalPredicate.Fulfillment(fulfill, completedDeliveries,
-                    completedFreshGatherQuotas).evaluate(snapshot);
+            return new GoalPredicate.Fulfillment(fulfill, completedDeliveries).evaluate(snapshot);
         }
         return forGoal(goal).evaluate(snapshot);
     }

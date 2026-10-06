@@ -165,31 +165,18 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
      */
     record Fulfillment(List<Goal.Allocation> allocations,
                        Set<Goal.Allocation> completedDeliveries,
-                       Map<Item, Integer> initialItemCounts,
-                       List<Goal.FreshGatherQuota> freshGatherQuotas,
-                       Set<Goal.FreshGatherQuota> completedFreshGatherQuotas) implements GoalPredicate {
+                       Map<Item, Integer> initialItemCounts) implements GoalPredicate {
         /** Legacy/internal fulfillment remains an absolute inventory predicate. */
         public Fulfillment(List<Goal.Allocation> allocations,
                            Set<Goal.Allocation> completedDeliveries) {
-            this(allocations, completedDeliveries, Map.of(), List.of(), Set.of());
+            this(allocations, completedDeliveries, Map.of());
         }
 
         /** Preserve the immutable fresh-request baseline carried by the declarative goal. */
         public Fulfillment(Goal.Fulfill fulfill,
                            Set<Goal.Allocation> completedDeliveries) {
             this(fulfill == null ? List.of() : fulfill.allocations(), completedDeliveries,
-                    fulfill == null ? Map.of() : fulfill.initialItemCounts(),
-                    fulfill == null ? List.of() : fulfill.freshGatherQuotas(), Set.of());
-        }
-
-        /** Preserve both fresh final-output and ordered raw-collection receipt boundaries. */
-        public Fulfillment(Goal.Fulfill fulfill,
-                           Set<Goal.Allocation> completedDeliveries,
-                           Set<Goal.FreshGatherQuota> completedFreshGatherQuotas) {
-            this(fulfill == null ? List.of() : fulfill.allocations(), completedDeliveries,
-                    fulfill == null ? Map.of() : fulfill.initialItemCounts(),
-                    fulfill == null ? List.of() : fulfill.freshGatherQuotas(),
-                    completedFreshGatherQuotas);
+                    fulfill == null ? Map.of() : fulfill.initialItemCounts());
         }
 
         public Fulfillment {
@@ -197,9 +184,6 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
             completedDeliveries = completedDeliveries == null
                     ? Set.of() : Set.copyOf(completedDeliveries);
             initialItemCounts = initialItemCounts == null ? Map.of() : Map.copyOf(initialItemCounts);
-            freshGatherQuotas = freshGatherQuotas == null ? List.of() : List.copyOf(freshGatherQuotas);
-            completedFreshGatherQuotas = completedFreshGatherQuotas == null
-                    ? Set.of() : Set.copyOf(completedFreshGatherQuotas);
         }
 
         @Override
@@ -208,18 +192,6 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
             int required = 0;
             List<String> unmet = new java.util.ArrayList<>();
             Map<String, String> evidence = new LinkedHashMap<>();
-            for (Goal.FreshGatherQuota quota : freshGatherQuotas) {
-                required = Math.addExact(required, quota.count());
-                String key = "fresh_gather." + quota.mode().persistedValue() + "." + quota.itemId();
-                boolean completed = completedFreshGatherQuotas.contains(quota);
-                evidence.put(key, completed ? String.valueOf(quota.count()) : "0");
-                if (completed) {
-                    matched = Math.addExact(matched, quota.count());
-                } else {
-                    unmet.add("fresh_gather_not_completed:" + quota.mode().persistedValue()
-                            + ":" + quota.itemId());
-                }
-            }
             for (Goal.Allocation allocation : allocations) {
                 int count = allocation.count();
                 required = Math.addExact(required, count);

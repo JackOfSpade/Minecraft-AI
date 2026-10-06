@@ -21,8 +21,6 @@ public record GoalStep(Kind kind,
                        boolean bestEffort) {
     public enum Kind {
         GATHER,
-        /** A declared fresh physical collection receipt that must settle before recipe work. */
-        FRESH_GATHER_QUOTA,
         MINE,
         MINE_ORE,
         /** Collect a resource until a fixed elapsed-time window closes, rather than to a quota. */
@@ -57,29 +55,10 @@ public record GoalStep(Kind kind,
                 && (item == null || tag == null || tag.isBlank() || !validRecipient(tag))) {
             throw new IllegalArgumentException("invalid_give_item_step");
         }
-        if (kind == Kind.FRESH_GATHER_QUOTA
-                && (item == null || tag == null || tag.isBlank())) {
-            throw new IllegalArgumentException("invalid_fresh_gather_quota_step");
-        }
     }
 
     public static GoalStep gather(Item item, int count) {
         return new GoalStep(Kind.GATHER, item, count, null, Set.of(), null, null, null, null, false);
-    }
-
-    /** A hard fulfillment-stage barrier, distinct from ordinary planner dependency gathering. */
-    public static GoalStep freshGatherQuota(Goal.FreshGatherQuota quota) {
-        Goal.FreshGatherQuota value = java.util.Objects.requireNonNull(quota, "fresh_gather_quota");
-        return new GoalStep(Kind.FRESH_GATHER_QUOTA, value.item(), value.count(), null, Set.of(),
-                null, null, null, value.mode().persistedValue(), false);
-    }
-
-    /** Reconstructs the declared quota carried by this stage's canonical item/count/mode fields. */
-    public Goal.FreshGatherQuota freshGatherQuota() {
-        if (kind != Kind.FRESH_GATHER_QUOTA) {
-            throw new IllegalStateException("not_a_fresh_gather_quota_step");
-        }
-        return new Goal.FreshGatherQuota(item, count, Goal.FreshGatherMode.fromPersistedValue(tag));
     }
 
     public static GoalStep mine(Block block, int count) {
@@ -384,9 +363,6 @@ public record GoalStep(Kind kind,
     public String describe() {
         return switch (kind) {
             case GATHER -> "Gather " + itemName(item) + " x" + count;
-            case FRESH_GATHER_QUOTA -> "Gather new "
-                    + (freshGatherQuota().genericLogs() ? "logs" : itemName(item))
-                    + " x" + count + " before crafting";
             case MINE -> "Mine " + blockName(block) + " x" + count;
             case MINE_ORE -> "Mine ore " + ores.stream()
                     .map(GoalStep::blockName)
