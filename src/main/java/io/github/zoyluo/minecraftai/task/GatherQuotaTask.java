@@ -276,6 +276,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos pillarBaseWalk;
     /** The pillar this task built last: the bot takes it down again before it does anything else (see descendTower). */
     private TowerDescent tower;
+    /** What the bot does on its tower about the item the log it has just felled gave (see TowerDropWatch). */
+    private TowerDropWatch dropWatch;
     /** How many of the tower's returned blocks the pickup baselines have already moved up for (see descendTower). */
     private int towerReturnsAccounted;
     /** Of those, how many have not yet arrived in the inventory: they are not gains of the quota (see logGatherUnitGains). */
@@ -562,6 +564,7 @@ public final class GatherQuotaTask extends AbstractTask {
         pillarRecoveryTried = null;
         pillarBaseWalk = null;
         tower = null;
+        dropWatch = null;
         nextExploreAdmissionTick = -1;
         miningExploration = null;
         miningExplorationAttempted = false;
@@ -876,6 +879,10 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         // Before the bot leaves the pillar, the leaf a canopy log's drop would rest on is broken.
         if (phase == Phase.PICKUP && tower.standsOnTower(bot) && releaseDropBelowBreak(bot)) {
+            return true;
+        }
+        // Then the item itself: waited for while it falls, and looked for from the level of the break when it is out of sight.
+        if (phase == Phase.PICKUP && dropWatch != null && tower.standsOnTower(bot) && dropWatch.hold(bot)) {
             return true;
         }
         TowerDescent.Status status = tower.tick(bot);
@@ -2724,6 +2731,8 @@ public final class GatherQuotaTask extends AbstractTask {
             invalidateConsumedResource(bot);
             bot.getActionPack().stopAll(); // Stop and stand still after felling it — don't let movement momentum carry the bot away from the drop (observed drifting away from the tree's position after chopping and then failing to pick up the drop)
             pickupTicks = probabilisticDrop ? 30 : 120; // Probabilistic-drop resources (seeds/berries) drop right at the bot's feet and are picked up quickly, so wait less
+            dropWatch = tower != null && pickupOrigin != null
+                    ? new TowerDropWatch(pickupOrigin, bot.level().getGameTime(), acceptItems, pickupTicks, "gather") : null;
             phase = Phase.PICKUP;
             return;
         }
@@ -3031,6 +3040,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void clearPickupLedger() {
+        dropWatch = null;
         pickupOrigin = null;
         pickupOriginApproachLogged = false;
         pickupOriginSweep = null;

@@ -88,6 +88,7 @@ final class VisibleTargetHorizonScanSourceContractTest {
                         && pursuit.contains("isCurrentVisibleTarget(bot, targetSightingHint)"),
                 "MineTask must pursue only a re-proved direct target through the observed landmark route");
         assertTrue(seek.contains("targetHorizonScan.decline(bot, sighting.pos())")
+                        && seek.contains("targetHorizonScan.decline(bot, retained)")
                         && act.contains("pillarToBlock(bot, seen, true)")
                         && !mine.contains("isVerticalPillarHint"),
                 "a sighting MineTask cannot use is declined (never retained as a hint that stops the sweep), and one an observed pillar reaches is climbed to");
@@ -95,6 +96,20 @@ final class VisibleTargetHorizonScanSourceContractTest {
                         && mine.contains("GatherQuotaTask.collectNearbyPillarSupport(")
                         && mine.contains("startPillarPathTo(approach.goal())"),
                 "generic MineTask targets must receive the same safe common-block pillar/resupply recovery as gathering");
+    }
+
+    @Test
+    void gatherTellsTheSweepWhatItCouldNotUseOrHadRefused() throws IOException {
+        String gather = read("task/GatherQuotaTask.java");
+        String trees = methodBody(gather, "private boolean seekVisibleTree(");
+        String targets = methodBody(gather, "private boolean seekVisibleTarget(");
+
+        assertTrue(trees.contains("treeHorizonScan.decline(bot, sighting.pos())")
+                        && trees.contains("treeHorizonScan.decline(bot, retained)"),
+                "a leaf or log the gatherer can do nothing with, and a landmark whose pursuit was refused, are not offered again from this stance");
+        assertTrue(targets.contains("targetHorizonScan.decline(bot, sighting.pos())")
+                        && targets.contains("targetHorizonScan.decline(bot, retained)"),
+                "the same for a block of any other kind");
     }
 
     @Test

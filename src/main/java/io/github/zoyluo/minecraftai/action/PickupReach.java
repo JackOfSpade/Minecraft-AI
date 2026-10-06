@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.action;
 
-import java.util.OptionalInt;
 import net.minecraft.world.phys.AABB;
 
 /**
- * Where a standing player collects a dropped item: vanilla's own pickup box ({@code Player#aiStep}), the body's
- * box grown by a block to each side and half a block up and down. An item that rests on a ledge beside a pillar
- * is picked up once the pillar is high enough for that box to meet it, with no step taken off the pillar; this
- * is the geometry that says how high.
+ * When and where a standing player collects a dropped item, as vanilla has it: the pickup box ({@code Player#aiStep}),
+ * the body's box grown by a block to each side and half a block up and down, and the time a dropped item takes to
+ * land and become collectable. A bot on a pillar waits for the item of the block it broke on this: an item that is
+ * neither in sight nor collected by then is not on its way down.
  */
 public final class PickupReach {
     /** The growth of the body's box on each horizontal axis in {@code Player#aiStep}. */
@@ -46,24 +45,5 @@ public final class PickupReach {
     /** The box an item must meet for a player whose body occupies {@code body} to collect it. */
     static AABB pickupBox(AABB body) {
         return body.inflate(SIDE, VERTICAL, SIDE);
-    }
-
-    /**
-     * The lowest level from {@code fromFeetY} to {@code toFeetY} (inclusive) at which a body standing upright
-     * in the cell column centred on {@code x}, {@code z} collects {@code item}, if any.
-     */
-    static OptionalInt lowestMeetingLevel(double x, double z, int fromFeetY, int toFeetY,
-                                          double width, double height, AABB item) {
-        double half = width / 2.0D;
-        for (int feetY = fromFeetY; feetY <= toFeetY; feetY++) {
-            AABB body = new AABB(x - half, feetY, z - half, x + half, feetY + height, z + half);
-            if (pickupBox(body).intersects(item)) {
-                return OptionalInt.of(feetY);
-            }
-            if (pickupBox(body).minY > item.maxY) {
-                break; // every higher level is farther above the item
-            }
-        }
-        return OptionalInt.empty();
     }
 }

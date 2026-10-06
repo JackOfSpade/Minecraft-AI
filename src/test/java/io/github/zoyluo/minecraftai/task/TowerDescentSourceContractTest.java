@@ -56,8 +56,9 @@ final class TowerDescentSourceContractTest {
                         && release.contains("pickupOrigin.below()") && release.contains("canObserveCell(bot, rest)"),
                 "only a leaf the bot can see and reach, in the column under the cell it just broke, is ever broken to release the drop");
         assertTrue(descend.indexOf("releaseDropBelowBreak(bot)") > 0
-                        && descend.indexOf("releaseDropBelowBreak(bot)") < descend.indexOf("tower.tick(bot)"),
-                "the drop is released while the bot is still up on its pillar");
+                        && descend.indexOf("releaseDropBelowBreak(bot)") < descend.indexOf("dropWatch.hold(bot)")
+                        && descend.indexOf("dropWatch.hold(bot)") < descend.indexOf("tower.tick(bot)"),
+                "the drop is released, and its item waited for or looked for, while the bot is still up on its pillar");
     }
 
     @Test
@@ -76,6 +77,37 @@ final class TowerDescentSourceContractTest {
                 "a pillar still being climbed or mined from is in use");
         assertTrue(!pickup.contains("complete();") && pickup.contains("Phase.FINISHING"),
                 "a met quota must not end the task on top of a tower");
+    }
+
+    @Test
+    void mineCountsTheItemOfItsBreakBeforeItsTowerComesBackAsItems() throws IOException {
+        String descend = methodBody(read("task/MineTask.java"), "private boolean descendTower(");
+
+        int counted = descend.indexOf("collectedDrops(bot) > 0");
+        int waits = descend.indexOf("dropWatch.hold(bot)");
+        int breaks = descend.indexOf("tower.tick(bot)");
+        assertTrue(counted > 0 && counted < waits && waits < breaks,
+                "the pickup is counted first, then the bot stays for its item, and only then does the tower start coming down");
+        assertTrue(descend.contains("inventoryCountBeforeMining += Math.min(tower.returnedOf(targetDrops)"),
+                "what the tower gives back is no progress of a request for the same kind of block");
+    }
+
+    @Test
+    void aTowerIsHeldByItsTaskAndTakenDownWithoutOneWhenTheTaskEndsFirst() throws IOException {
+        for (String task : List.of("task/GatherQuotaTask.java", "task/MineTask.java")) {
+            String source = read(task);
+            assertTrue(methodBody(source, "private boolean startPillarApproach(").contains("TowerCustody.INSTANCE.hold(bot, this, tower)"),
+                    task + " answers for the tower it builds until it has taken it down");
+            assertTrue(methodBody(source, "private boolean descendTower(").contains("TowerCustody.INSTANCE.release(bot, tower)"),
+                    task + " hands the tower back once it is down");
+        }
+        String tick = methodBody(read("task/TaskManager.java"), "public void tickAll(MinecraftServer server)");
+        assertTrue(tick.indexOf("TowerCustody.INSTANCE.tickOrphans()") > 0
+                        && tick.indexOf("TowerCustody.INSTANCE.tickOrphans()") < tick.indexOf("for (Map.Entry<UUID, Task> entry")
+                        && tick.contains("descending.contains(uuid)"),
+                "an orphaned tower comes down before the bot's active task is ticked");
+        assertTrue(read("task/StuckWatcher.java").contains("TowerCustody.INSTANCE.isDescending(bot)"),
+                "a task held back for a tower is not stuck");
     }
 
     @Test

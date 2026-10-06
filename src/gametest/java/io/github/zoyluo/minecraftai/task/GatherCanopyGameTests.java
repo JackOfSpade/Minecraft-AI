@@ -10,10 +10,14 @@ import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * What is left of gather's answer to a canopy it can see but not walk to, once a log straight overhead is
@@ -102,6 +106,21 @@ public final class GatherCanopyGameTests {
     }
 
     /**
+     * Where a felled block's drop comes to rest is a matter of its random pop: puts the first item of {@code kind} near
+     * {@code around} at rest on top of the block at {@code support}. True when there was one to put.
+     */
+    private static boolean restDropOn(Case c, BlockPos around, Item kind, BlockPos support) {
+        boolean moved = false;
+        for (ItemEntity drop : c.world().getEntitiesOfClass(ItemEntity.class, new AABB(around).inflate(4.0D),
+                item -> item.getItem().is(kind))) {
+            drop.setPos(support.getX() + 0.5D, support.getY() + 1.0D, support.getZ() + 0.5D);
+            drop.setDeltaMovement(Vec3.ZERO);
+            moved = true;
+        }
+        return moved;
+    }
+
+    /**
      * Two broad steps of stone toward the far wall, four blocks deep and one higher each (a gentle slope, so the
      * risers of both can be seen from the floor), {@code half} blocks to each side of the middle.
      */
@@ -122,8 +141,10 @@ public final class GatherCanopyGameTests {
         // A canopy log at the edge of a platform of leaves, three blocks wide, with the leaf under it (the platform is
         // what the log's drop could not slide off, and what keeps it out of the bot's sight once it lies there: above
         // the eye line, behind the leaf). The bot lets it fall by breaking that leaf from the pillar before it comes down.
+        // (The fixture puts the drop on that leaf: where a drop comes to rest is a matter of its random pop.)
         Case c = new Case(context, "GatherCanopyPlatformGT", 2, 9);
         BlockPos log = c.at(3, 8, 0);
+        BlockPos under = c.at(3, 7, 0);
         c.set(3, 8, 0, Blocks.OAK_LOG);
         for (int dx = 3; dx <= 5; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
@@ -134,7 +155,9 @@ public final class GatherCanopyGameTests {
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
         task.start(c.bot);
 
+        boolean[] placed = {false};
         c.run(task, () -> {
+            placed[0] |= !placed[0] && restDropOn(c, log, Items.OAK_LOG, under);
             if (task.state() != TaskState.COMPLETED) {
                 return false;
             }
@@ -145,6 +168,47 @@ public final class GatherCanopyGameTests {
                     "the leaf under the felled log was never broken: " + c.tail(lines));
             c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 1 && c.count(lines, "gather_pickup_miss") == 0,
                     "the felled log was left on the platform: " + c.tail(lines));
+            c.require(c.count(lines, "gather_tower_descended") >= 1 && c.bot.blockPosition().getY() == c.feet.getY(),
+                    "the bot did not come back down: " + c.tail(lines));
+            return true;
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_drop_on_a_leaf_beside_the_felled_log_is_looked_for_and_its_leaf_broken", maxTicks = 2400)
+    public void dropOnALeafBesideTheFelledLogIsLookedForAndItsLeafBroken(GameTestHelper context) {
+        // The platform case, with the felled log's drop on the leaf next to the one under the cell it was broken from
+        // (where a drop comes to rest is a matter of its random pop; the fixture puts it there). That leaf is not the
+        // one the bot breaks blind, and the item on it is out of sight from the pillar, under the platform's own
+        // edge. The bot builds up to the level of the log, sees the item, breaks the leaf it lies on, comes down and
+        // picks the log up from the floor.
+        Case c = new Case(context, "GatherCanopyBesideGT", 5, 9);
+        BlockPos log = c.at(3, 8, 0);
+        BlockPos beside = c.at(4, 7, 0);
+        c.set(3, 8, 0, Blocks.OAK_LOG);
+        for (int dx = 3; dx <= 5; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                c.leaf(dx, 7, dz);
+            }
+        }
+        c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 12));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
+        task.start(c.bot);
+
+        boolean[] placed = {false};
+        c.budget = 2200;
+        c.run(task, () -> {
+            placed[0] |= !placed[0] && restDropOn(c, log, Items.OAK_LOG, beside);
+            if (task.state() != TaskState.COMPLETED) {
+                return false;
+            }
+            List<String> lines = c.log();
+            c.require(placed[0], "the felled log's drop never appeared: " + c.tail(lines));
+            c.require(c.count(lines, "gather_drop_climb") == 1,
+                    "the bot never built up to look for the item: " + c.tail(lines));
+            c.require(c.count(lines, "gather_drop_released", "leaf='" + beside.toShortString() + "'") == 1,
+                    "the leaf the log lay on was not broken: " + c.tail(lines));
+            c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 1 && c.count(lines, "gather_pickup_miss") == 0,
+                    "the log was left on the platform: " + c.tail(lines));
             c.require(c.count(lines, "gather_tower_descended") >= 1 && c.bot.blockPosition().getY() == c.feet.getY(),
                     "the bot did not come back down: " + c.tail(lines));
             return true;

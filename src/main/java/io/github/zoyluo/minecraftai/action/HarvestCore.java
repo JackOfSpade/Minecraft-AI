@@ -319,23 +319,9 @@ public final class HarvestCore {
         return PickupReach.pickupBox(bot.getBoundingBox()).intersects(drop.getBoundingBox());
     }
 
-    /**
-     * The level of the bot's own column, above its feet, at which vanilla's pickup box meets {@code drop} so that the
-     * bot collects it without leaving the column: an item resting on a ledge beside a pillar is out of reach from
-     * the pillar's head but not from a few blocks higher. Null when no level within {@code maxLevels} blocks does (the
-     * item is below, or too far to the side for any level), or when the column up to there, and the headroom a
-     * pillar needs above it, is not seen to be air. The level is a pillar goal ({@link ActionPack#startPillarPathTo}).
-     */
-    public static BlockPos dropClimbGoal(AIPlayerEntity bot, ItemEntity drop, int maxLevels) {
-        BlockPos feet = bot.blockPosition();
-        var body = bot.getDimensions(Pose.STANDING);
-        var level = PickupReach.lowestMeetingLevel(feet.getX() + 0.5D, feet.getZ() + 0.5D, feet.getY() + 1,
-                feet.getY() + Math.max(0, maxLevels), body.width(), body.height(), drop.getBoundingBox());
-        if (level.isEmpty()) {
-            return null;
-        }
-        BlockPos goal = new BlockPos(feet.getX(), level.getAsInt(), feet.getZ());
-        return isObservedClearPillarColumn(bot, feet, goal.getY() + PILLAR_HEADROOM) ? goal : null;
+    /** The cell holding the block {@code drop} lies on: the one a hair under its box. */
+    public static BlockPos restingOn(ItemEntity drop) {
+        return BlockPos.containing(drop.getX(), drop.getBoundingBox().minY - 0.01D, drop.getZ());
     }
 
     /**

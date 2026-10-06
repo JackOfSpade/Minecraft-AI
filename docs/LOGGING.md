@@ -285,13 +285,15 @@ A felled canopy log comes to rest on the leaf under the cell it was broken from,
 from the ground: before the bot leaves its pillar, the leaf in the column under that cell that it can see and reach is
 broken so the drop falls on (`gather_drop_released`, `origin`, `leaf`; repeated while the canopy has layers); only a leaf is
 ever broken this way, never terrain.
-A generic mine request does the same for the item its break gave, from the same tower: it waits while the item falls or is
-within vanilla's pickup box (a block drop cannot be collected for ten ticks), and builds the pillar higher in its own column
-(`mine_drop_climb`, `why=reach|look`, `around`, `goal`, `levels`; `mine_drop_climb_refused`, plus `reason`) to an item it sees
-resting out of reach (`reach`), or, when nothing has come and nothing is in sight after the time an item takes to fall, up to
-the level of the block it broke to look for an item hidden from below by the ledge it rests on (`look`). Each kind of climb is
-tried once per broken block, and the whole tower is taken down afterwards. The tower's own blocks come back as items: when
-they are of the kind being mined or gathered they are not counted as progress.
+Both tasks then see to the item the break gave before they take the tower down (`TowerDropWatch`). The bot waits while the
+item falls or lies within vanilla's pickup box (a block drop cannot be collected for ten ticks). An item it does not see,
+nor has collected, after the time an item takes to fall lies out of sight, on the very ledge or leaf that hides it from
+below: the pillar is built up, in its own column, to the level of the block that was broken (`gather_drop_climb` /
+`mine_drop_climb`, `around`, `goal`, `levels`; `*_drop_climb_refused`, plus `reason`; it uses only the supports carried
+beyond the tower's own). An item it then sees on a leaf it can reach is let fall by breaking that leaf
+(`gather_drop_released` / `mine_drop_released`, `origin`, `leaf`); one on anything else is left for the floor. The whole
+tower is taken down afterwards. The tower's own blocks come back as items: when they are of the kind being mined or gathered
+they are not counted as progress.
 A tower whose task has ended (stopped, replaced, timed out, failed) before the bot was back down is taken down anyway
 (`TowerCustody`), before the bot's next task goes on; an active safety task keeps the bot's attention first. The lines are
 `tower_orphan_descended` (`owner`, `blocks`, `at`) and `tower_orphan_descent_failed` (`owner`, `reason`, `at`).

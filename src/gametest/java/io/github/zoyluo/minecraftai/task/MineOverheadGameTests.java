@@ -144,7 +144,7 @@ public final class MineOverheadGameTests {
             }
             List<String> lines = c.log();
             c.require(placed[0], "the block's drop never appeared: " + c.tail(lines, "mine_"));
-            c.require(c.count(lines, "mine_drop_climb", "why='look'") == 1 && c.count(lines, "mine_drop_climb_refused") == 0,
+            c.require(c.count(lines, "mine_drop_climb") == 1 && c.count(lines, "mine_drop_climb_refused") == 0,
                     "the bot never built up to look for the item: " + c.tail(lines, "mine_"));
             c.require(InventoryAction.countItem(c.bot, Items.COARSE_DIRT) == 1,
                     "the item on the shelf was not collected: " + c.tail(lines, "mine_"));
