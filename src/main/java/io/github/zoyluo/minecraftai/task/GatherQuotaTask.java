@@ -276,6 +276,10 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos pillarBaseWalk;
     /** The pillar this task built last: the bot takes it down again before it does anything else (see descendTower). */
     private TowerDescent tower;
+    /** How many of the tower's returned blocks the pickup baselines have already moved up for (see descendTower). */
+    private int towerReturnsAccounted;
+    /** Of those, how many have not yet arrived in the inventory: they are not gains of the quota (see logGatherUnitGains). */
+    private int towerReturnsUnlogged;
     private BlockPos gotoStuckPos; // R1: last coordinate recorded by GOTO (used to detect an airborne/deadlocked bot that hasn't moved in a long time)
     private int gotoStuckTick;
     // Visible-tree recovery: a budgeted 360-degree first-hit sweep nominates a trunk or leaf;
@@ -875,6 +879,18 @@ public final class GatherQuotaTask extends AbstractTask {
             return true;
         }
         TowerDescent.Status status = tower.tick(bot);
+        // The tower's blocks come back as items; when they are of a kind this quota accepts (a cobblestone quota built
+        // up with cobblestone) they are no progress, so the baselines they would pass move up with them. The item is
+        // picked up after its break, so the baseline is ahead of the count until it is, never behind it.
+        int returned = tower.returnedOf(acceptItems);
+        if (returned > towerReturnsAccounted) {
+            int fresh = returned - towerReturnsAccounted;
+            towerReturnsAccounted = returned;
+            pickedUpAtStart += fresh;
+            pickupStatBeforeHarvest += fresh;
+            countBeforeHarvest += fresh;
+            towerReturnsUnlogged += fresh;
+        }
         if (status == TowerDescent.Status.DESCENDING) {
             return true;
         }
@@ -886,6 +902,7 @@ public final class GatherQuotaTask extends AbstractTask {
                     "blocks", tower.broken(), "at", bot.blockPosition().toShortString());
             resetSurveyWatchdog(); // the descent was work too: the survey that follows must not read it as time spent stuck
         }
+        TowerCustody.INSTANCE.release(bot, tower);
         tower = null;
         return false;
     }
@@ -1479,15 +1496,19 @@ public final class GatherQuotaTask extends AbstractTask {
      * observed pursuit.
      */
     private boolean seekVisibleTree(AIPlayerEntity bot) {
+        if (treeHorizonScan == null) {
+            treeHorizonScan = new TreeHorizonScan(harvestBlocks);
+        }
         if (treeSightingHint != null) {
-            if (horizontalDistanceSquared(bot.blockPosition(), treeSightingHint) <= SEARCH_RADIUS * SEARCH_RADIUS) {
+            BlockPos retained = treeSightingHint;
+            if (horizontalDistanceSquared(bot.blockPosition(), retained) <= SEARCH_RADIUS * SEARCH_RADIUS) {
                 treeSightingHint = null;
             } else if (startTreeSightingPursuit(bot)) {
                 return true;
+            } else {
+                // Refused from here: the sweep must not hand the same landmark straight back and have it refused again.
+                treeHorizonScan.decline(bot, retained);
             }
-        }
-        if (treeHorizonScan == null) {
-            treeHorizonScan = new TreeHorizonScan(harvestBlocks);
         }
         TreeHorizonScan.Sighting sighting = treeHorizonScan.step(bot);
         if (sighting != null) {
@@ -1681,16 +1702,20 @@ public final class GatherQuotaTask extends AbstractTask {
      * block says nothing factual about where the requested block is.
      */
     private boolean seekVisibleTarget(AIPlayerEntity bot) {
+        if (targetHorizonScan == null) {
+            targetHorizonScan = new VisibleTargetHorizonScan(harvestBlocks);
+        }
         if (targetSightingHint != null) {
-            if (horizontalDistanceSquared(bot.blockPosition(), targetSightingHint)
+            BlockPos retained = targetSightingHint;
+            if (horizontalDistanceSquared(bot.blockPosition(), retained)
                     <= SEARCH_RADIUS * SEARCH_RADIUS) {
                 targetSightingHint = null;
             } else if (startTargetSightingPursuit(bot)) {
                 return true;
+            } else {
+                // Refused from here: the sweep must not hand the same block straight back and have it refused again.
+                targetHorizonScan.decline(bot, retained);
             }
-        }
-        if (targetHorizonScan == null) {
-            targetHorizonScan = new VisibleTargetHorizonScan(harvestBlocks);
         }
         VisibleTargetHorizonScan.Sighting sighting = targetHorizonScan.step(bot);
         if (sighting != null) {
@@ -2056,6 +2081,8 @@ public final class GatherQuotaTask extends AbstractTask {
         treeDigTried = false;
         pillarApproachActive = true;
         tower = TowerDescent.over(approach.goal(), approach.supports());
+        towerReturnsAccounted = 0;
+        TowerCustody.INSTANCE.hold(bot, this, tower);
         gotoStuckPos = null;
         searchRadius = SEARCH_RADIUS;
         pickupMisses = 0;
@@ -3427,6 +3454,13 @@ public final class GatherQuotaTask extends AbstractTask {
                 continue;
             }
             int delta = now - previous;
+            // A block of the bot's own tower coming back is no gain (see descendTower).
+            int fromTower = Math.min(delta, towerReturnsUnlogged);
+            towerReturnsUnlogged -= fromTower;
+            delta -= fromTower;
+            if (delta == 0) {
+                continue;
+            }
             gainedTotal += delta;
             if (pickup) {
                 BotLog.action(bot, "gather_unit",

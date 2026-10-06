@@ -181,6 +181,36 @@ public final class GatherCanopyGameTests {
         });
     }
 
+    @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_blocks_of_the_towers_own_kind_are_not_counted_as_gathered", maxTicks = 3000)
+    public void blocksOfTheTowersOwnKindAreNotCountedAsGathered(GameTestHelper context) {
+        // The tower is built of dirt and the quota is for dirt: its blocks come back as dirt when it is taken down,
+        // and each one is a pickup. Two blocks are asked for; the first must not close the quota with the tower's help.
+        Case c = new Case(context, "GatherCanopySameKindGT", 4, 9);
+        BlockPos first = c.at(0, 7, 0);
+        BlockPos second = c.at(6, 7, 0);
+        c.set(0, 7, 0, Blocks.DIRT);
+        c.set(6, 7, 0, Blocks.DIRT);
+        c.give(new ItemStack(Items.WOODEN_SHOVEL), new ItemStack(Items.DIRT, 8));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.DIRT, 2);
+        task.start(c.bot);
+
+        c.budget = 2800;
+        c.run(task, () -> {
+            if (task.state() != TaskState.COMPLETED) {
+                return false;
+            }
+            List<String> lines = c.log();
+            c.require(c.world().getBlockState(first).isAir() && c.world().getBlockState(second).isAir(),
+                    "the quota of two closed with a block still standing: " + c.tail(lines));
+            // One of the tower's blocks may have popped out of reach of the spot the bot finished on.
+            c.require(InventoryAction.countItem(c.bot, Items.DIRT) >= 9,
+                    "expected the supports back and the two blocks gathered: " + InventoryAction.countItem(c.bot, Items.DIRT));
+            c.require(c.count(lines, "gather_summary", "consistent='true'") == 1,
+                    "the tower's own blocks were counted as gathered: " + c.tail(lines));
+            return true;
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_pillar_plan_does_not_depend_on_the_bot_being_mid_fall", maxTicks = 100)
     public void pillarPlanDoesNotDependOnTheBotBeingMidFall(GameTestHelper context) {
         // The bot plans its next pillar the moment a descent drops it onto the floor, still a fraction of a block

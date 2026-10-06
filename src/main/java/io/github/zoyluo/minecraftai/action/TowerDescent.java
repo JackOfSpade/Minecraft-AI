@@ -3,7 +3,11 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
 
 /**
  * The way back down from a pillar the bot built itself. A person on top of a tall tower looks down,
@@ -34,6 +38,11 @@ public final class TowerDescent {
     private BlockPos gone;
     private long generation;
     private int broken;
+    /** What each block taken down gave back, in order: the throwaway blocks return as items the bot picks up again. */
+    private final List<Item> returned = new ArrayList<>();
+    private Item breakingItem;
+    /** The game time of the last break that went through; its item cannot be picked up for a moment (see {@link PickupReach}). */
+    private long lastBreakAt = Long.MIN_VALUE;
     private String failure = "";
 
     private TowerDescent(BlockPos base) {
@@ -58,6 +67,15 @@ public final class TowerDescent {
         return broken;
     }
 
+    /**
+     * How many of the blocks taken down so far came back as one of {@code items}. A task that counts what it
+     * gathered by what the inventory holds must not count its own tower's blocks among them (a stone quota built
+     * up with cobblestone).
+     */
+    public int returnedOf(Set<Item> items) {
+        return (int) returned.stream().filter(items::contains).count();
+    }
+
     /** True while the bot stands in the pillar's column above its floor level, so the tower is under it. */
     public boolean standsOnTower(AIPlayerEntity bot) {
         BlockPos feet = bot.blockPosition();
@@ -75,6 +93,8 @@ public final class TowerDescent {
             breaking = null;
             if (pack.consumeSuccessfulMining(settled, generation)) {
                 broken++;
+                returned.add(breakingItem);
+                lastBreakAt = bot.level().getGameTime();
                 gone = settled;
             } else {
                 String refusal = pack.consumeFailedMining(settled, generation);
@@ -93,7 +113,12 @@ public final class TowerDescent {
             gone = null;
         }
         if (!standsOnTower(bot)) {
-            return Status.DONE;
+            // The last block's item lies at the bot's feet; vanilla lets it be picked up only after its delay (and a
+            // tick to count it down and another to touch it), and the owner must not walk off, or count what it
+            // gathered, before it is.
+            boolean collecting = lastBreakAt != Long.MIN_VALUE
+                    && bot.level().getGameTime() - lastBreakAt < PickupReach.PICKUP_DELAY_TICKS + 2;
+            return collecting ? Status.DESCENDING : Status.DONE;
         }
         if (!bot.onGround()) {
             return Status.DESCENDING;
@@ -106,6 +131,8 @@ public final class TowerDescent {
                     ? Status.DESCENDING : fail(bot, started.reason());
         }
         breaking = support.immutable();
+        // The bot stands on this cell, so what it is made of is no hidden read.
+        breakingItem = bot.level().getBlockState(support).getBlock().asItem();
         generation = pack.miningGeneration();
         return Status.DESCENDING;
     }

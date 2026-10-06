@@ -358,6 +358,8 @@ public final class TaskManager {
     }
 
     public void tickAll(MinecraftServer server) {
+        // A tower whose task has ended comes down before the bot's next task goes on (see TowerCustody).
+        Set<UUID> descending = TowerCustody.INSTANCE.tickOrphans();
         for (Map.Entry<UUID, Task> entry : new ArrayList<>(active.entrySet())) {
             UUID uuid = entry.getKey();
             Task task = entry.getValue();
@@ -371,6 +373,9 @@ public final class TaskManager {
             }
             AIPlayerEntity player = bot.get();
             TaskOrigin origin = activeOrigins.get(uuid);
+            if (descending.contains(uuid)) {
+                continue;
+            }
             if ((origin == null || !origin.safety()) && !isCritical(task)
                     && !TpsGuard.INSTANCE.shouldTickNonCriticalTask(server, uuid)) {
                 BotProfiler.INSTANCE.record(player, "task_tick_skipped", 0L);
@@ -481,6 +486,7 @@ public final class TaskManager {
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
             cancelIntentTasks(bot, "server_unload");
         }
+        TowerCustody.INSTANCE.clearAll();
         active.clear();
         activeOrigins.clear();
         executionStacks.clear();
@@ -506,6 +512,7 @@ public final class TaskManager {
         executionStacks.remove(bot.getUUID());
         activeOrigins.remove(bot.getUUID());
         userPaused.remove(bot.getUUID());
+        TowerCustody.INSTANCE.forget(bot.getUUID());
         lastStatus.remove(bot.getUUID());
         lastFailure.remove(bot.getUUID());
         pendingFailure.remove(bot.getUUID());
@@ -514,6 +521,7 @@ public final class TaskManager {
 
     public void clearAllRuntime() {
         active.clear();
+        TowerCustody.INSTANCE.clearAll();
         activeOrigins.clear();
         executionStacks.clear();
         userPaused.clear();

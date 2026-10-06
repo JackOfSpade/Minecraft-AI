@@ -5,19 +5,23 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.PickupReach;
 import io.github.zoyluo.minecraftai.action.TowerDescent;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -47,6 +51,8 @@ public final class MineTask extends AbstractTask {
         MOVING,
         MINING,
         PICKING_UP,
+        /** Building the tower higher, in its own column, to an item that rests out of reach of its head. */
+        DROP_CLIMB,
         /** The quota is met; the task ends once the bot is back down from a pillar it built. */
         FINISHING
     }
@@ -61,6 +67,18 @@ public final class MineTask extends AbstractTask {
     private int inventoryCountBeforeMining;
     private int pickupTicks;
     private boolean pickupSweepAttempted;
+    /** The game time the block being picked up for was broken, which dates the item that came of it. */
+    private long brokeAt;
+    /** Why the tower is built higher for the item a break gave (see awaitDropOnTower). */
+    private enum DropClimb {
+        REACH,
+        LOOK
+    }
+
+    /** Each kind of climb is tried once per broken block: one that ended short is not asked for again. */
+    private final Set<DropClimb> climbsTried = EnumSet.noneOf(DropClimb.class);
+    /** The inventory count of the target's drops when the tower began coming down; -1 before that. */
+    private int descentCountAtStart = -1;
     private boolean directMiningTarget;
     /** Local cadence for the side-effect-free automatic-light scan at safe task boundaries. */
     private int lastTorchCheckElapsed = -10;
@@ -144,6 +162,7 @@ public final class MineTask extends AbstractTask {
         exactPillarMemo.clear();
         broadPillarMemo.clear();
         tower = null;
+        descentCountAtStart = -1;
     }
 
     @Override
@@ -186,6 +205,7 @@ public final class MineTask extends AbstractTask {
             case MOVING -> move(bot);
             case MINING -> mine(bot);
             case PICKING_UP -> pickup(bot);
+            case DROP_CLIMB -> dropClimb(bot);
             case FINISHING -> complete();
         }
     }
@@ -194,12 +214,25 @@ public final class MineTask extends AbstractTask {
      * Takes the pillar this task built down again before the bot does anything else: a route steps
      * down at most the safe fall and never breaks the bot's own footing, so a tall tower would strand
      * it. The bot breaks the block under its feet one at a time, as a player does (see
-     * {@link TowerDescent}). A pillar still being climbed or mined from is in use and left alone.
-     * True while it owns the tick.
+     * {@link TowerDescent}). A pillar still being climbed or mined from is in use and left alone, and
+     * the bot stays up on it while the item the break gave is still to be collected from there (see
+     * {@link #awaitDropOnTower}). True while it owns the tick.
      */
     private boolean descendTower(AIPlayerEntity bot) {
-        if (tower == null || phase == Phase.MOVING || phase == Phase.MINING) {
+        if (tower == null || phase == Phase.MOVING || phase == Phase.MINING || phase == Phase.DROP_CLIMB) {
             return false;
+        }
+        if (phase == Phase.PICKING_UP && descentCountAtStart < 0) {
+            // What the break gave is counted by pickup() before the tower's own blocks come back as items.
+            if (collectedDrops(bot) > 0) {
+                return false;
+            }
+            if (tower.standsOnTower(bot) && awaitDropOnTower(bot)) {
+                return true;
+            }
+        }
+        if (descentCountAtStart < 0) {
+            descentCountAtStart = HarvestCore.countInventoryItems(bot, targetDrops);
         }
         TowerDescent.Status status = tower.tick(bot);
         if (status == TowerDescent.Status.DESCENDING) {
@@ -212,8 +245,91 @@ public final class MineTask extends AbstractTask {
             BotLog.action(bot, "mine_tower_descended",
                     "blocks", tower.broken(), "at", bot.blockPosition().toShortString());
         }
+        // The blocks of the tower come back as items; when they are of the kind being mined they are no
+        // progress (a stone quota built up with cobblestone), so the count of what this break gave starts over.
+        int gained = HarvestCore.countInventoryItems(bot, targetDrops) - descentCountAtStart;
+        inventoryCountBeforeMining += Math.min(tower.returnedOf(targetDrops), Math.max(0, gained));
+        descentCountAtStart = -1;
+        TowerCustody.INSTANCE.release(bot, tower);
         tower = null;
         return false;
+    }
+
+    /** The items of the target's kind the inventory gained since the block now being picked up for began to break. */
+    private int collectedDrops(AIPlayerEntity bot) {
+        return HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
+    }
+
+    /**
+     * Keeps the bot on its tower for the item the break gave. While the item is in the air, or vanilla's pickup
+     * box already meets it (a freshly dropped item cannot be collected for ten ticks, and the next block of the
+     * descent would drop the bot out of range), it waits. An item it sees come to rest out of reach of the
+     * pillar's head (on a ledge beside the target) is climbed to by building the pillar higher, in its own
+     * column, until that box meets it. An item it does not see after the time it takes to fall and be collected
+     * lies out of sight, usually on the very ledge that hides it from below, so the pillar is built up to the
+     * level of the block that was broken and the bot looks from there; what it then sees is dealt with as above.
+     * No step is taken off the tower, and the descent takes the whole tower down afterwards. An item that fell
+     * below is picked up from the floor. The wait counts against the pickup window. True while the bot stays.
+     */
+    private boolean awaitDropOnTower(AIPlayerEntity bot) {
+        if (pickupTicks <= 0) {
+            return false;
+        }
+        long sinceBreak = bot.level().getGameTime() - brokeAt;
+        Optional<ItemEntity> seen = HarvestCore.nearestDropAnyOf(bot, targetDrops, 8.0D,
+                drop -> drop.getAge() <= sinceBreak + 3);
+        int supportsToSpare = MaterialPalette.countPillarSupportBlocks(bot) - PILLAR_SUPPORT_CUSHION;
+        pickupTicks--;
+        if (seen.isPresent()) {
+            ItemEntity drop = seen.get();
+            if (!HarvestCore.isDropPhysicallySupported(bot, drop) || HarvestCore.canCollectNow(bot, drop)) {
+                return true;
+            }
+            if (climbsTried.contains(DropClimb.REACH)) {
+                return false;
+            }
+            BlockPos goal = HarvestCore.dropClimbGoal(bot, drop, supportsToSpare);
+            return startDropClimb(bot, DropClimb.REACH, goal, drop.blockPosition());
+        }
+        // A block that is still standing (the break failed) gave nothing to look for.
+        if (climbsTried.contains(DropClimb.LOOK) || targetPos == null || isCurrentVisibleTarget(bot, targetPos)) {
+            return false;
+        }
+        double fall = Math.max(0, targetPos.getY() - bot.blockPosition().getY());
+        if (sinceBreak <= PickupReach.settledTicks(fall)) {
+            return true;
+        }
+        return startDropClimb(bot, DropClimb.LOOK, HarvestCore.lookClimbGoal(bot, targetPos, supportsToSpare), targetPos);
+    }
+
+    /** True while the climb is under way (or only waits for the pack to be free); false when there is nothing to climb. */
+    private boolean startDropClimb(AIPlayerEntity bot, DropClimb why, BlockPos goal, BlockPos around) {
+        if (goal == null) {
+            climbsTried.add(why);
+            return false;
+        }
+        bot.getActionPack().stopAll();
+        ActionResult route = bot.getActionPack().startPillarPathTo(goal);
+        if (ActionPack.GUARDED_STEP_FENCE.equals(route.reason()) && route.isFailed()) {
+            return true; // an unstarted retry, not a refusal of this climb
+        }
+        climbsTried.add(why);
+        if (route.isFailed()) {
+            BotLog.action(bot, "mine_drop_climb_refused", "why", why.name().toLowerCase(java.util.Locale.ROOT), "around", around.toShortString(),
+                    "goal", goal.toShortString(), "reason", route.reason());
+            return false;
+        }
+        phase = Phase.DROP_CLIMB;
+        BotLog.action(bot, "mine_drop_climb", "why", why.name().toLowerCase(java.util.Locale.ROOT), "around", around.toShortString(),
+                "goal", goal.toShortString(), "levels", goal.getY() - bot.blockPosition().getY());
+        return true;
+    }
+
+    /** The tower is being built higher; once the route is over the item is in reach, or in sight, or the climb ended short. */
+    private void dropClimb(AIPlayerEntity bot) {
+        if (bot.getActionPack().isPathExecutorIdle() && bot.onGround()) {
+            phase = Phase.PICKING_UP;
+        }
     }
 
     /**
@@ -347,15 +463,19 @@ public final class MineTask extends AbstractTask {
      * query; a target must be a first-hit eye ray or freshly re-proved shared visual evidence.
      */
     private boolean seekVisibleTarget(AIPlayerEntity bot) {
+        if (targetHorizonScan == null) {
+            targetHorizonScan = new VisibleTargetHorizonScan(Set.of(targetBlock));
+        }
         if (targetSightingHint != null) {
-            if (horizontalDistanceSquared(bot.blockPosition(), targetSightingHint) <= 64.0D) {
+            BlockPos retained = targetSightingHint;
+            if (horizontalDistanceSquared(bot.blockPosition(), retained) <= 64.0D) {
                 targetSightingHint = null;
             } else if (startTargetSightingPursuit(bot)) {
                 return true;
+            } else {
+                // Refused from here: the sweep must not hand the same block straight back and have it refused again.
+                targetHorizonScan.decline(bot, retained);
             }
-        }
-        if (targetHorizonScan == null) {
-            targetHorizonScan = new VisibleTargetHorizonScan(Set.of(targetBlock));
         }
         VisibleTargetHorizonScan.Sighting sighting = targetHorizonScan.step(bot);
         if (sighting != null) {
@@ -702,6 +822,7 @@ public final class MineTask extends AbstractTask {
         directMiningTarget = false;
         pillarApproachActive = true;
         tower = TowerDescent.over(approach.goal(), approach.supports());
+        TowerCustody.INSTANCE.hold(bot, this, tower);
         phase = Phase.MOVING;
         BotLog.action(bot, "mine_pillar_start",
                 "target", targetPos.toShortString(), "goal", approach.goal().toShortString(),
@@ -1070,20 +1191,25 @@ public final class MineTask extends AbstractTask {
         if (targetPos == null || !bot.level().getBlockState(targetPos).is(targetBlock)) {
             miner.cancel(bot);
             pillarApproachActive = false;
-            pickupTicks = 120;
-            phase = Phase.PICKING_UP;
+            startPickup(bot);
             return;
         }
         // P1-a: mining goes through BlockMiner (only starts when idle, never restarts and resets progress); block break/timeout moves to the pickup phase.
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.DONE || status == BlockMiner.Status.FAILED) {
-            pickupTicks = 120;
-            phase = Phase.PICKING_UP;
+            startPickup(bot);
         }
     }
 
+    private void startPickup(AIPlayerEntity bot) {
+        pickupTicks = 120;
+        brokeAt = bot.level().getGameTime();
+        climbsTried.clear();
+        phase = Phase.PICKING_UP;
+    }
+
     private void pickup(AIPlayerEntity bot) {
-        int collected = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
+        int collected = collectedDrops(bot);
         if (collected > 0) {
             // A prior tick's chaseDropAnyOf -> approachDropPhysically nudge can leave the action
             // pack mid pickup-nudge (sneaking held); nothing else clears it once this phase stops
@@ -1104,7 +1230,7 @@ public final class MineTask extends AbstractTask {
                 pickupTicks = 60;
                 return;
             }
-            int partial = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
+            int partial = collectedDrops(bot);
             bot.getActionPack().stopAll();
             if (partial > 0) {
                 BotLog.action(bot, "pickup_collected", "count", partial, "reason", "partial_pickup");

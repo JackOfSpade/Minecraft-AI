@@ -300,12 +300,58 @@ public final class HarvestCore {
     }
 
     public static Optional<ItemEntity> nearestDropAnyOf(AIPlayerEntity bot, Set<Item> items, double radius) {
+        return nearestDropAnyOf(bot, items, radius, entity -> true);
+    }
+
+    /** {@link #nearestDropAnyOf(AIPlayerEntity, Set, double)} limited to the drops {@code accept} approves (an item's age, say). */
+    public static Optional<ItemEntity> nearestDropAnyOf(AIPlayerEntity bot, Set<Item> items, double radius,
+                                                        Predicate<ItemEntity> accept) {
         return bot.level()
                 .getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(radius),
                         entity -> !entity.getItem().isEmpty() && matches(entity.getItem(), items)
-                                && ObservableWorldQuery.canObserveEntity(bot, entity))
+                                && ObservableWorldQuery.canObserveEntity(bot, entity) && accept.test(entity))
                 .stream()
                 .min(Comparator.comparingDouble(entity -> entity.distanceTo(bot)));
+    }
+
+    /** Whether vanilla's pickup box around the bot where it stands meets {@code drop} (see {@link PickupReach}). */
+    public static boolean canCollectNow(AIPlayerEntity bot, ItemEntity drop) {
+        return PickupReach.pickupBox(bot.getBoundingBox()).intersects(drop.getBoundingBox());
+    }
+
+    /**
+     * The level of the bot's own column, above its feet, at which vanilla's pickup box meets {@code drop} so that the
+     * bot collects it without leaving the column: an item resting on a ledge beside a pillar is out of reach from
+     * the pillar's head but not from a few blocks higher. Null when no level within {@code maxLevels} blocks does (the
+     * item is below, or too far to the side for any level), or when the column up to there, and the headroom a
+     * pillar needs above it, is not seen to be air. The level is a pillar goal ({@link ActionPack#startPillarPathTo}).
+     */
+    public static BlockPos dropClimbGoal(AIPlayerEntity bot, ItemEntity drop, int maxLevels) {
+        BlockPos feet = bot.blockPosition();
+        var body = bot.getDimensions(Pose.STANDING);
+        var level = PickupReach.lowestMeetingLevel(feet.getX() + 0.5D, feet.getZ() + 0.5D, feet.getY() + 1,
+                feet.getY() + Math.max(0, maxLevels), body.width(), body.height(), drop.getBoundingBox());
+        if (level.isEmpty()) {
+            return null;
+        }
+        BlockPos goal = new BlockPos(feet.getX(), level.getAsInt(), feet.getZ());
+        return isObservedClearPillarColumn(bot, feet, goal.getY() + PILLAR_HEADROOM) ? goal : null;
+    }
+
+    /**
+     * The level of the bot's own column from which the eye is level with the floor of the cell {@code broken}: the
+     * item that came of that break may rest on a ledge beside it, hidden from below by the ledge itself, and from
+     * here the top of the ledge is in sight. At most {@code maxLevels} above the bot's feet. Null when that is not
+     * above the feet, or the column up to there (and the headroom a pillar needs above it) is not seen to be air.
+     */
+    public static BlockPos lookClimbGoal(AIPlayerEntity bot, BlockPos broken, int maxLevels) {
+        BlockPos feet = bot.blockPosition();
+        int goalY = Math.min(broken.getY() - 1, feet.getY() + Math.max(0, maxLevels));
+        if (goalY <= feet.getY()) {
+            return null;
+        }
+        return isObservedClearPillarColumn(bot, feet, goalY + PILLAR_HEADROOM)
+                ? new BlockPos(feet.getX(), goalY, feet.getZ()) : null;
     }
 
     public static void chaseDrop(AIPlayerEntity bot, Item item, double radius) {

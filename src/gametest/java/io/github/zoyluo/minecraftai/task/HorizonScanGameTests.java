@@ -17,7 +17,10 @@ import net.minecraft.world.phys.Vec3;
  * The look-around scans answer with the first thing they see, so a sighting the caller cannot use would answer
  * every step again and the rest of the sweep would never run (the real session: 326 refusals of one leaf in 37 s).
  * These pin, with real rays in a real room, that a declined sighting is passed over and that a shared-sight lead
- * is revisited on its cadence rather than at every step.
+ * is revisited on its cadence rather than at every step. They drive the two scans directly: that a task declines what it
+ * cannot use is pinned where the task does it ({@link MineOverheadGameTests}: a block seen through a slit, an excluded
+ * block overhead; the gather and canopy tests for the gatherer), and for the ore dig by a source contract only, since a
+ * hop to another stance resets the raster before the pinned sweep of an unused sighting could be told apart in-world.
  */
 public final class HorizonScanGameTests {
     private static final int ROOM_HEIGHT = 12;
@@ -59,7 +62,7 @@ public final class HorizonScanGameTests {
 
     @GameTest(environment = "minecraftai-gametest:horizon_scan_game_tests_declined_overhead_block_does_not_stall_the_target_sweep", maxTicks = 200)
     public void declinedOverheadBlockDoesNotStallTheTargetSweep(GameTestHelper context) {
-        // The scan every ore, mine and gather request shares: OreDig and MineTask decline an excluded or refused ore.
+        // The scan every ore, mine and gather request shares.
         Fixture f = new Fixture(context, "HorizonTargetDeclineGT", 1);
         BlockPos overhead = f.room.at(0, 5, 0);
         BlockPos beside = f.room.at(4, 2, -4);
@@ -95,7 +98,8 @@ public final class HorizonScanGameTests {
         // A lead from shared sight is a shortcut to be re-proved, not a reason to pin the sweep: the step that
         // returns it must still advance, or a lead the caller cannot use would be handed back (without a single ray
         // cast) on every call and the sweep would never run. A shared lead costs no ray, so it reports no rays; the
-        // next step is a sweep step and has cast some.
+        // next step is a sweep step and has cast some. (The scans already advance on a lead: this pins that, and fails
+        // when the step that returns the lead stops counting.)
         Fixture f = new Fixture(context, "HorizonSharedCadenceGT", 2);
         BlockPos log = f.room.at(4, 1, 0);
         f.room.set(4, 1, 0, Blocks.OAK_LOG);

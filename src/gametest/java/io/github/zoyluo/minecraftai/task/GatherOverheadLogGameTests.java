@@ -521,6 +521,23 @@ public final class GatherOverheadLogGameTests {
             });
         }
 
+        /** Like {@link #run}, for work the server ticks itself (the TaskManager): only this case's clock and verdict live here. */
+        void watch(BooleanSupplier finished) {
+            context.failIfEver(() -> {
+                if (done) {
+                    return;
+                }
+                ticks++;
+                maxFeetY = Math.max(maxFeetY, bot.blockPosition().getY());
+                if (finished.getAsBoolean()) {
+                    finish();
+                } else if (ticks > budget) {
+                    fail("the case did not finish in " + budget + " ticks, bot at " + bot.blockPosition() + " "
+                            + tail(log(), ""));
+                }
+            });
+        }
+
         List<String> log() {
             List<String> lines = SensingArena.botLog(name);
             if (lines == null) {
