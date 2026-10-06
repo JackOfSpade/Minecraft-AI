@@ -3190,8 +3190,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return false;
         }
         BlockPos pos = place.orElseThrow();
-        boolean observable = ObservableWorldQuery.canObserveCell(bot, pos)
-                || ObservableWorldQuery.canObserveBlock(bot, pos);
+        boolean observable = ObservableWorldQuery.canObserveCellStrict(bot, pos)
+                || ObservableWorldQuery.canObserveBlockStrict(bot, pos);
         return observable && ContainerAction.resolve(bot, pos).isPresent();
     }
 
@@ -3880,9 +3880,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         return lastFailure;
     }
 
+    /** Reaching into the depot sends no click ray, so a hand's line to it must be clear: the strict proof. */
     private static boolean canInteractWithDepot(AIPlayerEntity bot, BlockPos pos) {
         return bot.getEyePosition().distanceToSqr(pos.getCenter()) <= REACH_SQUARED
-                && ObservableWorldQuery.canObserveCell(bot, pos);
+                && ObservableWorldQuery.canObserveCellStrict(bot, pos);
     }
 
     private static boolean atWorkFace(AIPlayerEntity bot, BlockPos pos) {

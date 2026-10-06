@@ -86,13 +86,17 @@ public final class MiningController {
      * target must never keep a break packet alive. A solid natural-terrain cell that currently
      * intersects the player's own body is also direct evidence: escaping it does not discover a
      * neighbouring cell, and is needed when the player's eye is inside the collision shape.
+     *
+     * <p>This is the reach gate, so it asks the strict (vanilla clip) predicates: START/STOP/ABORT carry no pick ray and the
+     * server checks only distance, so this is the one proof that stops a break through a leaf, a fence or a pane. The bot
+     * may <em>see</em> the log behind a leaf (the sight predicates), but it only mines what a hand can reach.</p>
      */
     static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos) {
         return player != null && pos != null && (ownBodyEmergencyBlock(player, pos)
-                || (ObservableWorldQuery.canObserveBlockCellFace(player, pos)
-                || ObservableWorldQuery.canObserveCell(player, pos))
-                && (ObservableWorldQuery.canObserveBlock(player, pos)
-                || ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos))
+                || (ObservableWorldQuery.canObserveBlockCellFaceStrict(player, pos)
+                || ObservableWorldQuery.canObserveCellStrict(player, pos))
+                && (ObservableWorldQuery.canObserveBlockStrict(player, pos)
+                || ObservableWorldQuery.canObserveBlockWithInsetFacesStrict(player, pos))
                 || currentObservedCropTarget(player, pos));
     }
 
@@ -102,7 +106,7 @@ public final class MiningController {
      * the state read; only an actual crop may use this narrow path.
      */
     private static boolean currentObservedCropTarget(AIPlayerEntity player, BlockPos pos) {
-        return ObservableWorldQuery.canObserveFarmCell(player, pos)
+        return ObservableWorldQuery.canObserveFarmCellStrict(player, pos)
                 && player.level().getBlockState(pos).getBlock() instanceof CropBlock;
     }
 

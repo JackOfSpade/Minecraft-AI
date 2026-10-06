@@ -20,11 +20,13 @@ final class VisibleTargetHorizonScanSourceContractTest {
     void genericScannerUsesOnlyDirectRenderSightAndHasNoTreeLeafShortcut() throws IOException {
         String scan = read("task/VisibleTargetHorizonScan.java");
 
-        assertTrue(scan.contains("ObservableWorldQuery.castViewRay(")
+        assertTrue(scan.contains("ObservableWorldQuery.castSightRay(")
                         && scan.contains("ObservableWorldQuery.visibleRangeBlocks(bot) - 1")
                         && scan.contains("ObservableWorldQuery.ViewShape.OUTLINE")
                         && scan.contains("SharedWorldSight.knownBlocks("),
-                "ordinary targets must be discovered through first-hit render rays or re-proved shared sight");
+                "ordinary targets must be discovered through render-distance sight rays or re-proved shared sight");
+        assertTrue(scan.contains("hit.crossed()"),
+                "a target that is itself see-through (a plant, a vine, a cobweb) is found among the cells a ray crossed");
         assertTrue(scan.contains("ObservableWorldQuery.canObserveBlock(bot, pos)")
                         && scan.contains("targetBlocks.contains(bot.level().getBlockState(pos).getBlock())"),
                 "a remembered generic target must be visible again before its live state is read");

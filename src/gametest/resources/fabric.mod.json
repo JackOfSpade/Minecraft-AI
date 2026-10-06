@@ -28,6 +28,8 @@
       "io.github.zoyluo.minecraftai.task.VanillaParityGameTests",
       "io.github.zoyluo.minecraftai.action.ObservationShapeGameTests",
       "io.github.zoyluo.minecraftai.mode.SightClipGameTests",
+      "io.github.zoyluo.minecraftai.action.ObservationSeeThroughGameTests",
+      "io.github.zoyluo.minecraftai.task.HorizonScanSeeThroughGameTests",
       "io.github.zoyluo.minecraftai.action.OffhandExecutionGameTests",
       "io.github.zoyluo.minecraftai.action.BlockMinerOwnershipGameTests",
       "io.github.zoyluo.minecraftai.action.GearWorstFirstGameTests",

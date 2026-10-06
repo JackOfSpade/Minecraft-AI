@@ -141,8 +141,8 @@ class PrivilegedBoundarySourceTest {
                 "the fluid-transparent collider helper must use a first-hit Fluid.NONE proof before any target-state shape read");
         assertTrue(observation.contains("public static boolean canObserveCellThroughFluids")
                         && observation.contains("\"observable_water_cell_query\")")
-                        && observation.contains("canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.NONE)"),
-                "only water navigation may use the fluid-transparent line-of-sight helpers");
+                        && observation.contains("canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.NONE, true)"),
+                "the named through-fluids helpers (the same sight proof as the ordinary ones) stay scoped to reviewed water navigation");
         String diagonalCorner = body(safety, "private static boolean hasVisibleSolidDiagonalWaterCorner",
                 "/** A full player-body side column");
         String solidColumn = body(safety, "private static boolean isVisibleSolidWaterColumn",
@@ -169,8 +169,8 @@ class PrivilegedBoundarySourceTest {
         assertTrue(observation.contains("public static boolean canObserveCollider(AIPlayerEntity bot, BlockPos pos)")
                         && observation.contains("\"observable_block_query\", ClipContext.Fluid.ANY")
                         && observation.contains("private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range)")
-                        && observation.contains("canObserveCellWithinAfterPolicy(bot, pos, range, ClipContext.Fluid.ANY)"),
-                "ordinary block, collider, and interaction observers must retain Fluid.ANY occlusion");
+                        && observation.contains("canObserveCellWithinAfterPolicy(bot, pos, range, ClipContext.Fluid.ANY, true)"),
+                "ordinary block, collider, and cell observers still ask for Fluid.ANY (lava stops their sight ray; the strict twins stop at water too)");
         assertEquals(Set.of("baritone/BaritoneWaterFall.java", "baritone/ObservedNavigationFence.java", "mode/ObservableWorldQuery.java", "task/BoatSupport.java",
                         "task/CreateObsidianTask.java", "task/NavSafetyNet.java", "task/ShowTargetTask.java", "task/SwimRoute.java"),
                 matchingSources(Pattern.compile("canObserve(?:Cell|Collider)ThroughFluids\\s*\\(")).keySet(),
@@ -556,7 +556,7 @@ class PrivilegedBoundarySourceTest {
         // Container code reaches the boundary through ContainerAction (whose canSee wraps ObservableWorldQuery),
         // so each of these files must name its specific gating call, not just any observation call.
         java.util.Map<String, String> containerGates = java.util.Map.of(
-                "action/ContainerAction.java", "ObservableWorldQuery.canObserveCell(bot, pos)",
+                "action/ContainerAction.java", "ObservableWorldQuery.canObserveCellStrict(bot, pos)",
                 "task/ContainerTask.java", "ContainerAction.canSee(bot, containerPos)",
                 "task/ResupplyTask.java", "ContainerAction.inReachAndSight(bot, containerPos)",
                 "task/StockpileTask.java", "ContainerAction.inReachAndSight(bot, containerPos)");
@@ -644,7 +644,8 @@ class PrivilegedBoundarySourceTest {
                 "contents are only learned by really opening the container");
         String containerAction = read("action/ContainerAction.java");
         assertTrue(containerAction.contains("distanceToSqr(pos.getCenter()) <= REACH_SQUARED"));
-        assertTrue(containerAction.contains("ObservableWorldQuery.canObserveCell(bot, pos)"));
+        assertTrue(containerAction.contains("ObservableWorldQuery.canObserveCellStrict(bot, pos)"),
+                "opening a container sends no click ray, so its sight proof is the strict one");
 
         assertTrue(matchingSources(Pattern.compile("setDayTime\\s*\\(")).isEmpty(),
                 "no bot task may rewrite the time of day: night skipping belongs to the vanilla sleep vote among human players");
@@ -683,7 +684,7 @@ class PrivilegedBoundarySourceTest {
         assertTrue(interactionGuard >= 0);
         String guard = service.substring(interactionGuard);
         assertTrue(guard.contains("distanceToSqr(pos.getCenter()) <= REACH_SQUARED"));
-        assertTrue(guard.contains("ObservableWorldQuery.canObserveCell(bot, pos)"));
+        assertTrue(guard.contains("ObservableWorldQuery.canObserveCellStrict(bot, pos)"));
     }
 
     @Test

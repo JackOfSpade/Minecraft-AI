@@ -23,10 +23,12 @@ final class GatherTreeRecoverySourceContractTest {
         String gather = read("task/GatherQuotaTask.java");
         String pack = read("action/ActionPack.java");
 
-        assertTrue(scan.contains("ObservableWorldQuery.castViewRay(")
+        assertTrue(scan.contains("ObservableWorldQuery.castSightRay(")
                         && scan.contains("ObservableWorldQuery.visibleRangeBlocks(bot) - 1")
                         && scan.contains("ObservableWorldQuery.ViewShape.OUTLINE"),
-                "tree discovery must sweep the actual tracked render range with first-hit outline rays");
+                "tree discovery must sweep the actual tracked render range with sight rays that see through the canopy to the first opaque block");
+        assertTrue(scan.contains("hit.crossed()") && scan.contains("Kind.LEAF"),
+                "a leaf a ray crossed is still a landmark when no trunk shows behind it");
         assertTrue(scan.contains("SharedWorldSight.knownBlocks(")
                         && scan.contains("state.is(BlockTags.LEAVES)"),
                 "a player-visible canopy must be a usable, re-proved tree landmark");

@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.SightClip;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -62,7 +63,9 @@ public final class SharedVision {
         if (length > 1.0E-6D && owner.getViewVector(1.0F).dot(toEntity.scale(1.0D / length)) < targeting.ownerViewConeDot()) {
             return false;
         }
-        return owner.hasLineOfSight(entity);
+        // The owner's eyes see through foliage, fences, glass and water like the bot's; it only nominates, a strike still
+        // needs StrikeLegality's own collider line.
+        return SightClip.hasLineOfSight(owner, entity);
     }
 
     /** The bot's owner if online (looked up once per bot per server tick), else null. */

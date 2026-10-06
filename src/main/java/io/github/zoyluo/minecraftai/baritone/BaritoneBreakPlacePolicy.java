@@ -149,10 +149,13 @@ public final class BaritoneBreakPlacePolicy {
         return Decision.ALLOWED;
     }
 
-    /** A current eye-ray proof is deliberately required in addition to the immutable route snapshot. */
+    /**
+     * A current eye-ray proof is deliberately required in addition to the immutable route snapshot. The fence may hold a log
+     * seen through a leaf; breaking it is a reach question, so the proof is the strict (vanilla clip) one that stops at the leaf.
+     */
     private static boolean currentObservedNavigationCell(AIPlayerEntity bot, BlockPos pos) {
         return BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, pos)
-                && ObservableWorldQuery.canObserveCell(bot, pos);
+                && ObservableWorldQuery.canObserveCellStrict(bot, pos);
     }
 
     // ---------------------------------------------------------------------------------------------------------------

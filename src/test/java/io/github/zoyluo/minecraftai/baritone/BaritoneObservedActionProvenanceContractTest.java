@@ -48,7 +48,7 @@ class BaritoneObservedActionProvenanceContractTest {
 
         String current = method(policy, "private static boolean currentObservedNavigationCell(");
         assertTrue(current.contains("BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, pos)")
-                        && current.contains("ObservableWorldQuery.canObserveCell(bot, pos)"),
+                        && current.contains("ObservableWorldQuery.canObserveCellStrict(bot, pos)"),
                 "the live break proof must use the context fence, not a dimensionless raw snapshot");
 
         String click = method(policy, "public static Decision checkClickBlock(");
@@ -66,9 +66,9 @@ class BaritoneObservedActionProvenanceContractTest {
 
         String goals = read("baritone/BaritoneGoals.java");
         String mine = method(goals, "public static Outcome mineAt(");
-        int cellProof = mine.indexOf("ObservableWorldQuery.canObserveBlockCellFace(bot, target)");
-        int cellRay = mine.indexOf("ObservableWorldQuery.canObserveCell(bot, target)");
-        int shapeProof = mine.indexOf("ObservableWorldQuery.canObserveBlock(bot, target)");
+        int cellProof = mine.indexOf("ObservableWorldQuery.canObserveBlockCellFaceStrict(bot, target)");
+        int cellRay = mine.indexOf("ObservableWorldQuery.canObserveCellStrict(bot, target)");
+        int shapeProof = mine.indexOf("ObservableWorldQuery.canObserveBlockStrict(bot, target)");
         int liveRead = mine.indexOf("bot.level().getBlockState(target)");
         assertTrue(cellProof >= 0 && cellRay > cellProof && shapeProof > cellRay && liveRead > shapeProof,
                 "the public direct-mine seam needs a state-free cell proof before shape or state reads");

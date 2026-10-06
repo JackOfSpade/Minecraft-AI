@@ -1,10 +1,12 @@
 package io.github.zoyluo.minecraftai.mode;
 
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -35,7 +37,7 @@ public final class SightClip {
 
     public static BlockHitResult clip(BlockGetter level, Vec3 from, Vec3 to, ClipContext.Block shape,
                                       ClipContext.Fluid fluid, Entity observer, BlockPos target) {
-        return clip(level, from, to, shape, fluid, CollisionContext.of(observer), target);
+        return level.clip(new SightClipContext(from, to, shape, fluid, observer, target, false));
     }
 
     /**
@@ -50,7 +52,22 @@ public final class SightClip {
 
     public static SightClipContext context(Vec3 from, Vec3 to, ClipContext.Block shape, ClipContext.Fluid fluid,
                                            Entity observer, BlockPos target, boolean recordCrossed) {
-        return context(from, to, shape, fluid, CollisionContext.of(observer), target, recordCrossed);
+        return new SightClipContext(from, to, shape, fluid, observer, target, recordCrossed);
+    }
+
+    /**
+     * What a ray that recorded its crossings ({@link SightClipContext#crossed()}) saw in the cell {@code packedPos}
+     * ({@link BlockPos#asLong()}): the real state of a leaf, a fence, glass or water it passed through, or {@code null} when
+     * it did not skip that cell. A recorder that walks a ray's cells stores this instead of air, so foliage and water are
+     * never remembered as free space.
+     */
+    public static BlockState crossedState(List<SightClipContext.Crossing> crossed, long packedPos) {
+        for (SightClipContext.Crossing crossing : crossed) {
+            if (crossing.pos().asLong() == packedPos) {
+                return crossing.state();
+            }
+        }
+        return null;
     }
 
     /** Whether nothing opaque lies between two points: a COLLIDER ray, blind to every fluid but lava, ends without a hit. */
@@ -60,7 +77,8 @@ public final class SightClip {
     }
 
     public static boolean clear(BlockGetter level, Entity observer, Vec3 from, Vec3 to) {
-        return clear(level, CollisionContext.of(observer), from, to);
+        return clip(level, from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, observer, null)
+                .getType() == HitResult.Type.MISS;
     }
 
     /**

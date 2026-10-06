@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.SightClip;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -300,10 +301,10 @@ public final class FireExtinguishTask extends AbstractTask {
             if (bot.getEyePosition().distanceToSqr(end) > radius * radius) {
                 continue;
             }
-            var hit = world.clip(new net.minecraft.world.level.ClipContext(
-                    bot.getEyePosition(), end,
+            // The pool cell is the ray's target, so it is never skipped; water, foliage or a fence in front of it are.
+            var hit = SightClip.clip(world, bot.getEyePosition(), end,
                     net.minecraft.world.level.ClipContext.Block.COLLIDER,
-                    net.minecraft.world.level.ClipContext.Fluid.ANY, bot));
+                    net.minecraft.world.level.ClipContext.Fluid.ANY, bot, cell);
             if (hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK && hit.getBlockPos().equals(cell)) {
                 return true;
             }

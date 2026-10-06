@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
 import io.github.zoyluo.minecraftai.task.SharedVision;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
@@ -16,7 +17,15 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** Strict-survival perception filter: exposed on the bot's or its linked owner's real line of sight. */
+/**
+ * Strict-survival perception filter: exposed on the bot's or its linked owner's real line of sight.
+ *
+ * <p><b>Sight is not reach.</b> The block predicates and view rays here are sight: the bot's eyes pass through foliage, fences,
+ * glass and water, but not lava ({@link SeeThrough}), so a log behind two leaves is observed. A hand does not pass through
+ * them, and a break, an open or a use packet carries no pick ray of its own, so every actuator that sends one re-proves its
+ * target with the {@code Strict} twin of the predicate: the plain vanilla clip, which stops at the first leaf. Seeing a block
+ * through a leaf therefore never lets the bot mine, open or use it through that leaf.</p>
+ */
 public final class ObservableWorldQuery {
     /** Shared inset (in blocks) used to sample points around a face center. Also used by BuildAction. */
     public static final double FACE_SAMPLE_INSET = 0.375D;
@@ -58,15 +67,34 @@ public final class ObservableWorldQuery {
     }
 
     /**
+     * One eye ray. A sight ray ({@code seeThrough}) passes through {@linkplain SeeThrough see-through blocks} and water and
+     * stops at lava and at anything opaque; {@code target}, the cell being observed, is never skipped, so a leaf, a fence or a
+     * water cell can itself be observed. A strict ray is the plain vanilla clip, the line a hand's pick ray follows, which the
+     * first leaf, fence, pane or water cell stops.
+     */
+    private static BlockHitResult eyeClip(Entity observer, Vec3 from, Vec3 to, ClipContext.Block shape,
+                                          ClipContext.Fluid fluid, BlockPos target, boolean seeThrough) {
+        return seeThrough
+                ? SightClip.clip(observer.level(), from, to, shape, fluid, observer, target)
+                : observer.level().clip(new ClipContext(from, to, shape, fluid, observer));
+    }
+
+    /**
      * Whether the bot's or its linked owner's eye can see a face of the block at {@code pos}: a block in plain view, as a player
-     * sees it. The ray aims at the block's own shape ({@link FaceAim}): its collision shape, or for a block that
-     * has none (torch, rail, cobweb, plant, crop, banner, snow layer) its selection outline with an OUTLINE ray. This
-     * is a <em>visibility</em> proof, not a solidity proof: a support or standability decision must use
+     * sees it, through foliage, fences, glass and water. The ray aims at the block's own shape ({@link FaceAim}): its collision
+     * shape, or for a block that has none (torch, rail, cobweb, plant, crop, banner, snow layer) its selection outline with an
+     * OUTLINE ray. This is a <em>visibility</em> proof, not a solidity proof: a support or standability decision must use
      * {@link #canObserveCollider}, or read the state and check the collision shape itself, so that
-     * "I can see a torch there" never turns into "I can stand on it".
+     * "I can see a torch there" never turns into "I can stand on it". It is not a reach proof either: whatever breaks, opens or
+     * uses the block needs {@link #canObserveBlockStrict}.
      */
     public static boolean canObserveBlock(AIPlayerEntity bot, BlockPos pos) {
         return canObserveBlockWithin(bot, pos, 0);
+    }
+
+    /** {@link #canObserveBlock} on the vanilla clip: the first leaf, fence, pane or water cell in the way hides the block. */
+    public static boolean canObserveBlockStrict(AIPlayerEntity bot, BlockPos pos) {
+        return observeShapeFaces(bot, pos, 0, true, "observable_block_query", ClipContext.Fluid.ANY, false);
     }
 
     /**
@@ -80,6 +108,15 @@ public final class ObservableWorldQuery {
      * that a player-facing ray reached this cell before any target-state read.</p>
      */
     public static boolean canObserveBlockCellFace(AIPlayerEntity bot, BlockPos pos) {
+        return observeBlockCellFace(bot, pos, true);
+    }
+
+    /** {@link #canObserveBlockCellFace} on the vanilla clip, for the actuators that must not reach through foliage. */
+    public static boolean canObserveBlockCellFaceStrict(AIPlayerEntity bot, BlockPos pos) {
+        return observeBlockCellFace(bot, pos, false);
+    }
+
+    private static boolean observeBlockCellFace(AIPlayerEntity bot, BlockPos pos, boolean seeThrough) {
         if (canBypassObservationWithRetiredHiddenScan("observable_block_cell_face_query")) {
             return true;
         }
@@ -88,7 +125,7 @@ public final class ObservableWorldQuery {
         Vec3 eye = bot.getEyePosition();
         AABB cell = new AABB(pos);
         if (!botTracks(bot, pos)) {
-            return rememberIfVisible(bot, pos, ownerCanObserveCellFace(bot, pos, cell));
+            return rememberIfVisible(bot, pos, ownerCanObserveCellFace(bot, pos, cell, seeThrough));
         }
         for (Direction face : Direction.values()) {
             for (double[] offset : FACE_SAMPLE_OFFSETS) {
@@ -96,8 +133,8 @@ public final class ObservableWorldQuery {
                 if (eye.distanceToSqr(endpoint) > radiusSquared) {
                     continue;
                 }
-                BlockHitResult hit = bot.level().clip(new ClipContext(
-                        eye, endpoint, ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
+                BlockHitResult hit = eyeClip(bot, eye, endpoint,
+                        ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, pos, seeThrough);
                 if (hit.getType() == HitResult.Type.BLOCK
                         && pos.equals(hit.getBlockPos())
                         && hit.getDirection() == face) {
@@ -105,7 +142,7 @@ public final class ObservableWorldQuery {
                 }
             }
         }
-        return rememberIfVisible(bot, pos, ownerCanObserveCellFace(bot, pos, cell));
+        return rememberIfVisible(bot, pos, ownerCanObserveCellFace(bot, pos, cell, seeThrough));
     }
 
     /**
@@ -116,7 +153,7 @@ public final class ObservableWorldQuery {
      * below the configured perception radius. Ordinary block scans keep the base radius.
      */
     public static boolean canObserveBlockWithin(AIPlayerEntity bot, BlockPos pos, int range) {
-        return observeShapeFaces(bot, pos, range, true, "observable_block_query", ClipContext.Fluid.ANY);
+        return observeShapeFaces(bot, pos, range, true, "observable_block_query", ClipContext.Fluid.ANY, true);
     }
 
     /**
@@ -130,14 +167,14 @@ public final class ObservableWorldQuery {
 
     /** {@link #canObserveCollider} at prey-grounding range ({@link #canObserveBlockWithin}). */
     public static boolean canObserveColliderWithin(AIPlayerEntity bot, BlockPos pos, int range) {
-        return observeShapeFaces(bot, pos, range, false, "observable_block_query", ClipContext.Fluid.ANY);
+        return observeShapeFaces(bot, pos, range, false, "observable_block_query", ClipContext.Fluid.ANY, true);
     }
 
     /**
      * A real collider visible on vanilla entity line of sight, which deliberately does not let
      * water (the medium an underwater player is looking through) block the ray. This is scoped to
-     * water navigation; placement and ordinary block-interaction proofs keep their fluid-aware
-     * observation policy above.
+     * water navigation. Water is see-through to every sight proof now, so it differs from
+     * {@link #canObserveCollider} only in the single centre ray it casts.
      */
     public static boolean canObserveColliderThroughFluids(AIPlayerEntity bot, BlockPos pos) {
         if (canBypassObservationWithRetiredHiddenScan("observable_water_collider_query")) {
@@ -153,14 +190,15 @@ public final class ObservableWorldQuery {
         // a real collider, without reading the target BlockState to derive a shape before it has
         // crossed the transparent-water observation boundary. A conservative center sample may
         // reject an unusually shaped exposed collider, but can never invent one behind terrain.
-        BlockHitResult hit = bot.level().clip(new ClipContext(
-                eye, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
+        BlockHitResult hit = SightClip.clip(bot.level(), eye, target,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot, pos);
         boolean visible = hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos);
         return rememberIfVisible(bot, pos, visible || ownerCanObserveColliderThroughFluids(bot, pos));
     }
 
     private static boolean observeShapeFaces(AIPlayerEntity bot, BlockPos pos, int range,
-                                             boolean outlineFallback, String reason, ClipContext.Fluid fluid) {
+                                             boolean outlineFallback, String reason, ClipContext.Fluid fluid,
+                                             boolean seeThrough) {
         if (canBypassObservationWithRetiredHiddenScan(reason)) {
             return true;
         }
@@ -173,11 +211,11 @@ public final class ObservableWorldQuery {
                 ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
         for (Direction direction : Direction.values()) {
             var face = FaceAim.facePoint(aim.box(), direction, FaceAim.OBSERVE_DEPTH, 0.0D, 0.0D);
-            if (canObserveFaceAfterPolicy(bot, pos, direction, face, range, aim.clipShape(), fluid)) {
+            if (canObserveFaceAfterPolicy(bot, pos, direction, face, range, aim.clipShape(), fluid, seeThrough)) {
                 return rememberIfVisible(bot, pos, true);
             }
         }
-        return rememberIfVisible(bot, pos, ownerCanObserveShape(bot, pos, outlineFallback, fluid));
+        return rememberIfVisible(bot, pos, ownerCanObserveShape(bot, pos, outlineFallback, fluid, seeThrough));
     }
 
     /**
@@ -188,12 +226,17 @@ public final class ObservableWorldQuery {
      * {@link #canObserveBlock}; {@link #canObserveColliderWithInsetFaces} is the collider-only form.
      */
     public static boolean canObserveBlockWithInsetFaces(AIPlayerEntity bot, BlockPos pos) {
-        return observeShapeInsetFaces(bot, pos, true);
+        return observeShapeInsetFaces(bot, pos, true, bot.blockInteractionRange(), true);
+    }
+
+    /** {@link #canObserveBlockWithInsetFaces} on the vanilla clip, for the actuators that must not reach through foliage. */
+    public static boolean canObserveBlockWithInsetFacesStrict(AIPlayerEntity bot, BlockPos pos) {
+        return observeShapeInsetFaces(bot, pos, true, bot.blockInteractionRange(), false);
     }
 
     /** {@link #canObserveBlockWithInsetFaces} for support and standability proofs: a collision shape is required. */
     public static boolean canObserveColliderWithInsetFaces(AIPlayerEntity bot, BlockPos pos) {
-        return observeShapeInsetFaces(bot, pos, false, bot.blockInteractionRange());
+        return observeShapeInsetFaces(bot, pos, false, bot.blockInteractionRange(), true);
     }
 
     /**
@@ -204,17 +247,14 @@ public final class ObservableWorldQuery {
     public static boolean canObserveColliderWithInsetFacesWithin(AIPlayerEntity bot,
                                                                   BlockPos pos,
                                                                   int range) {
-        return observeShapeInsetFaces(bot, pos, false, Math.max(1, range));
-    }
-
-    private static boolean observeShapeInsetFaces(AIPlayerEntity bot, BlockPos pos, boolean outlineFallback) {
-        return observeShapeInsetFaces(bot, pos, outlineFallback, bot.blockInteractionRange());
+        return observeShapeInsetFaces(bot, pos, false, Math.max(1, range), true);
     }
 
     private static boolean observeShapeInsetFaces(AIPlayerEntity bot,
                                                   BlockPos pos,
                                                   boolean outlineFallback,
-                                                  double rangeLimit) {
+                                                  double rangeLimit,
+                                                  boolean seeThrough) {
         if (canBypassObservationWithRetiredHiddenScan("observable_block_inset_face_query")) {
             return true;
         }
@@ -222,7 +262,7 @@ public final class ObservableWorldQuery {
         double observationRangeSquared = observationRange * observationRange;
         Vec3 eye = bot.getEyePosition();
         if (!botTracks(bot, pos)) {
-            return rememberIfVisible(bot, pos, ownerCanObserveInsetShape(bot, pos, outlineFallback));
+            return rememberIfVisible(bot, pos, ownerCanObserveInsetShape(bot, pos, outlineFallback, seeThrough));
         }
         FaceAim.Target aim = FaceAim.aim(bot.level(), pos, bot.level().getBlockState(pos),
                 ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
@@ -233,11 +273,11 @@ public final class ObservableWorldQuery {
                 if (eye.distanceToSqr(endpoint) > observationRangeSquared) {
                     continue;
                 }
-                BlockHitResult hit = bot.level().clip(new ClipContext(
-                        eye, endpoint,
+                BlockHitResult hit = eyeClip(bot, eye, endpoint,
                         aim.clipShape(),
                         ClipContext.Fluid.ANY,
-                        bot));
+                        pos,
+                        seeThrough);
                 if (hit.getType() == HitResult.Type.BLOCK
                         && hit.getBlockPos().equals(pos)
                         && hit.getDirection() == direction) {
@@ -245,7 +285,7 @@ public final class ObservableWorldQuery {
                 }
             }
         }
-        return rememberIfVisible(bot, pos, ownerCanObserveInsetShape(bot, pos, outlineFallback));
+        return rememberIfVisible(bot, pos, ownerCanObserveInsetShape(bot, pos, outlineFallback, seeThrough));
     }
 
     private static boolean canObserveFaceAfterPolicy(AIPlayerEntity bot,
@@ -254,22 +294,22 @@ public final class ObservableWorldQuery {
                                                       net.minecraft.world.phys.Vec3 endpoint,
                                                       int range,
                                                       ClipContext.Block clipShape,
-                                                      ClipContext.Fluid fluid) {
+                                                      ClipContext.Fluid fluid,
+                                                      boolean seeThrough) {
         int radius = botRenderDistanceBlocks(bot);
         if (!botTracks(bot, pos) || bot.getEyePosition().distanceToSqr(endpoint) > (double) radius * radius) {
             return false;
         }
-        BlockHitResult hit = bot.level().clip(new ClipContext(
-                bot.getEyePosition(), endpoint,
-                clipShape, fluid, bot));
+        BlockHitResult hit = eyeClip(bot, bot.getEyePosition(), endpoint,
+                clipShape, fluid, pos, seeThrough);
         return hit.getType() == HitResult.Type.BLOCK
                 && hit.getBlockPos().equals(pos)
                 && hit.getDirection() == face;
     }
 
     /**
-     * Returns whether the bot has an unobstructed view into a nearby world cell. Unlike
-     * {@link #canObserveBlock(AIPlayerEntity, BlockPos)}, an empty/non-colliding target is a valid
+     * Returns whether the bot has an unobstructed view into a nearby world cell, through foliage, fences, glass and water.
+     * Unlike {@link #canObserveBlock(AIPlayerEntity, BlockPos)}, an empty/non-colliding target is a valid
      * result, so callers can gate feet/head reads before asking whether a position is standable.
      */
     public static boolean canObserveCell(AIPlayerEntity bot, BlockPos pos) {
@@ -279,17 +319,27 @@ public final class ObservableWorldQuery {
         return canObserveCellWithinAfterPolicy(bot, pos, 0);
     }
 
+    /** {@link #canObserveCell} on the vanilla clip: the first leaf, fence, pane or water cell in the way hides the cell. */
+    public static boolean canObserveCellStrict(AIPlayerEntity bot, BlockPos pos) {
+        if (canBypassObservationWithRetiredHiddenScan("observable_cell_query")) {
+            return true;
+        }
+        return canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.ANY, false);
+    }
+
     /**
      * Cell observation for underwater movement. It uses the same eye/range/solid-terrain ray as
      * {@link net.minecraft.world.entity.Entity#hasLineOfSight(Entity)}, whose fluid mode is
      * {@link ClipContext.Fluid#NONE}: water does not make a nearby visible shore or water column
-     * into hidden-world knowledge. Callers remain responsible for rejecting hazardous fluids.
+     * into hidden-world knowledge. Callers remain responsible for rejecting hazardous fluids; lava, unlike
+     * for that vanilla ray, still hides what lies behind it. Ordinary sight sees through water as well, so the
+     * answer is the one {@link #canObserveCell} gives; the name marks the reviewed water-navigation callers.
      */
     public static boolean canObserveCellThroughFluids(AIPlayerEntity bot, BlockPos pos) {
         if (canBypassObservationWithRetiredHiddenScan("observable_water_cell_query")) {
             return true;
         }
-        return canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.NONE);
+        return canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.NONE, true);
     }
 
     /**
@@ -304,23 +354,22 @@ public final class ObservableWorldQuery {
     }
 
     private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range) {
-        return canObserveCellWithinAfterPolicy(bot, pos, range, ClipContext.Fluid.ANY);
+        return canObserveCellWithinAfterPolicy(bot, pos, range, ClipContext.Fluid.ANY, true);
     }
 
     private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range,
-                                                            ClipContext.Fluid fluid) {
+                                                            ClipContext.Fluid fluid, boolean seeThrough) {
         int radius = botRenderDistanceBlocks(bot);
         if (!botTracks(bot, pos) || bot.getEyePosition().distanceToSqr(pos.getCenter()) > (double) radius * radius) {
-            return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid));
+            return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid, seeThrough));
         }
-        BlockHitResult hit = bot.level().clip(new ClipContext(
-                bot.getEyePosition(), pos.getCenter(),
-                ClipContext.Block.COLLIDER, fluid, bot));
+        BlockHitResult hit = eyeClip(bot, bot.getEyePosition(), pos.getCenter(),
+                ClipContext.Block.COLLIDER, fluid, pos, seeThrough);
         if (hit.getType() == HitResult.Type.MISS
                 || hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)) {
             return rememberIfVisible(bot, pos, true);
         }
-        return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid));
+        return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid, seeThrough));
     }
 
     /**
@@ -382,7 +431,8 @@ public final class ObservableWorldQuery {
     }
 
     private static boolean ownerCanObserveShape(AIPlayerEntity bot, BlockPos pos,
-                                                boolean outlineFallback, ClipContext.Fluid fluid) {
+                                                boolean outlineFallback, ClipContext.Fluid fluid,
+                                                boolean seeThrough) {
         ServerPlayer owner = sharedOwner(bot);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
@@ -396,7 +446,7 @@ public final class ObservableWorldQuery {
             if (eye.distanceToSqr(endpoint) > (double) radius * radius) {
                 continue;
             }
-            BlockHitResult hit = owner.level().clip(new ClipContext(eye, endpoint, aim.clipShape(), fluid, owner));
+            BlockHitResult hit = eyeClip(owner, eye, endpoint, aim.clipShape(), fluid, pos, seeThrough);
             if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)
                     && hit.getDirection() == direction) {
                 return true;
@@ -406,7 +456,7 @@ public final class ObservableWorldQuery {
     }
 
     /** State-free unit-cell face proof for a target nominated from the linked owner's view. */
-    private static boolean ownerCanObserveCellFace(AIPlayerEntity bot, BlockPos pos, AABB cell) {
+    private static boolean ownerCanObserveCellFace(AIPlayerEntity bot, BlockPos pos, AABB cell, boolean seeThrough) {
         ServerPlayer owner = sharedOwner(bot);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
@@ -419,8 +469,8 @@ public final class ObservableWorldQuery {
                 if (eye.distanceToSqr(endpoint) > radiusSquared) {
                     continue;
                 }
-                BlockHitResult hit = owner.level().clip(new ClipContext(
-                        eye, endpoint, ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, owner));
+                BlockHitResult hit = eyeClip(owner, eye, endpoint,
+                        ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, pos, seeThrough);
                 if (hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos())
                         && hit.getDirection() == face) {
                     return true;
@@ -442,14 +492,14 @@ public final class ObservableWorldQuery {
         if (eye.distanceToSqr(target) > (double) radius * radius) {
             return false;
         }
-        BlockHitResult hit = owner.level().clip(new ClipContext(
-                eye, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner));
+        BlockHitResult hit = SightClip.clip(owner.level(), eye, target,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner, pos);
         return hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos());
     }
 
     /** Owner-side counterpart of the conservative inset-face proof used for narrow supports. */
     private static boolean ownerCanObserveInsetShape(AIPlayerEntity bot, BlockPos pos,
-                                                      boolean outlineFallback) {
+                                                      boolean outlineFallback, boolean seeThrough) {
         ServerPlayer owner = sharedOwner(bot);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
@@ -466,8 +516,8 @@ public final class ObservableWorldQuery {
                 if (eye.distanceToSqr(endpoint) > radiusSquared) {
                     continue;
                 }
-                BlockHitResult hit = owner.level().clip(new ClipContext(
-                        eye, endpoint, aim.clipShape(), ClipContext.Fluid.ANY, owner));
+                BlockHitResult hit = eyeClip(owner, eye, endpoint,
+                        aim.clipShape(), ClipContext.Fluid.ANY, pos, seeThrough);
                 if (hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos())
                         && hit.getDirection() == direction) {
                     return true;
@@ -477,7 +527,8 @@ public final class ObservableWorldQuery {
         return false;
     }
 
-    private static boolean ownerCanObserveCell(AIPlayerEntity bot, BlockPos pos, ClipContext.Fluid fluid) {
+    private static boolean ownerCanObserveCell(AIPlayerEntity bot, BlockPos pos, ClipContext.Fluid fluid,
+                                               boolean seeThrough) {
         ServerPlayer owner = sharedOwner(bot);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
@@ -488,8 +539,7 @@ public final class ObservableWorldQuery {
         if (eye.distanceToSqr(target) > (double) radius * radius) {
             return false;
         }
-        BlockHitResult hit = owner.level().clip(new ClipContext(
-                eye, target, ClipContext.Block.COLLIDER, fluid, owner));
+        BlockHitResult hit = eyeClip(owner, eye, target, ClipContext.Block.COLLIDER, fluid, pos, seeThrough);
         return hit.getType() == HitResult.Type.MISS
                 || hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos);
     }
@@ -503,11 +553,23 @@ public final class ObservableWorldQuery {
      * seed click lands, and does an empty cell count as seen (the {@link #canObserveCell} policy)? This
      * aims OUTLINE rays at points inside the state's real shape (its top centre and four inset top
      * points, so a crop packed between neighbours is still seen from above) and needs the exact ray to
-     * strike this cell, so a crop hidden behind a wall or a taller crop stays hidden. Same perception
+     * strike this cell, so a crop hidden behind a wall stays hidden. Same perception
      * radius and capability gate as the other observation predicates; it sees nothing a player standing
      * at the bot's eye could not see. It is the one farm-specific query: farm code needs nothing else.
+     *
+     * <p>Crops are see-through like every plant, so this sight form sees a crop behind a taller crop; the click that
+     * harvests one asks {@link #canObserveFarmCellStrict}, where the taller crop still hides it.</p>
      */
     public static boolean canObserveFarmCell(AIPlayerEntity bot, BlockPos pos) {
+        return observeFarmCell(bot, pos, true);
+    }
+
+    /** {@link #canObserveFarmCell} on the vanilla clip, for the crop break and harvest proofs. */
+    public static boolean canObserveFarmCellStrict(AIPlayerEntity bot, BlockPos pos) {
+        return observeFarmCell(bot, pos, false);
+    }
+
+    private static boolean observeFarmCell(AIPlayerEntity bot, BlockPos pos, boolean seeThrough) {
         if (canBypassObservationWithRetiredHiddenScan("observable_farm_cell_query")) {
             return true;
         }
@@ -515,28 +577,28 @@ public final class ObservableWorldQuery {
         double radiusSquared = (double) radius * radius;
         Vec3 eye = bot.getEyePosition();
         if (!botTracks(bot, pos) || eye.distanceToSqr(pos.getCenter()) > (radius + 1.0D) * (radius + 1.0D)) {
-            return rememberIfVisible(bot, pos, ownerCanObserveFarmCell(bot, pos));
+            return rememberIfVisible(bot, pos, ownerCanObserveFarmCell(bot, pos, seeThrough));
         }
         var world = bot.level();
         java.util.List<Vec3> samples = shapeTopSamples(world, pos);
         if (samples.isEmpty()) {
-            return canObserveCellWithinAfterPolicy(bot, pos, 0);
+            return canObserveCellWithinAfterPolicy(bot, pos, 0, ClipContext.Fluid.ANY, seeThrough);
         }
         for (Vec3 endpoint : samples) {
             if (eye.distanceToSqr(endpoint) > radiusSquared) {
                 continue;
             }
-            BlockHitResult hit = world.clip(new ClipContext(
-                    eye, endpoint, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, bot));
+            BlockHitResult hit = eyeClip(bot, eye, endpoint,
+                    ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, pos, seeThrough);
             if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)) {
                 return rememberIfVisible(bot, pos, true);
             }
         }
-        return rememberIfVisible(bot, pos, ownerCanObserveFarmCell(bot, pos));
+        return rememberIfVisible(bot, pos, ownerCanObserveFarmCell(bot, pos, seeThrough));
     }
 
     /** Owner-side counterpart of the crop/farmland top-outline probe. */
-    private static boolean ownerCanObserveFarmCell(AIPlayerEntity bot, BlockPos pos) {
+    private static boolean ownerCanObserveFarmCell(AIPlayerEntity bot, BlockPos pos, boolean seeThrough) {
         ServerPlayer owner = sharedOwner(bot);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
@@ -548,15 +610,15 @@ public final class ObservableWorldQuery {
         }
         java.util.List<Vec3> samples = shapeTopSamples(owner.level(), pos);
         if (samples.isEmpty()) {
-            return ownerCanObserveCell(bot, pos, ClipContext.Fluid.ANY);
+            return ownerCanObserveCell(bot, pos, ClipContext.Fluid.ANY, seeThrough);
         }
         double radiusSquared = (double) radius * radius;
         for (Vec3 endpoint : samples) {
             if (eye.distanceToSqr(endpoint) > radiusSquared) {
                 continue;
             }
-            BlockHitResult hit = owner.level().clip(new ClipContext(
-                    eye, endpoint, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, owner));
+            BlockHitResult hit = eyeClip(owner, eye, endpoint,
+                    ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, pos, seeThrough);
             if (hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos())) {
                 return true;
             }
@@ -662,18 +724,39 @@ public final class ObservableWorldQuery {
     }
 
     /**
-     * First-hit answer of {@link #castViewRay}. A miss has {@code hit == false} and
+     * First-hit answer of {@link #castViewRay} and {@link #castSightRay}. A miss has {@code hit == false} and
      * {@code distance ==} the clamped range; a hit carries the exact hit cell, the struck face and the
      * state of that one cell. A ray that was not cast at all (its end chunk is not loaded) is
      * {@link #unknown()}: it says nothing about the world and must not be recorded as free space.
+     *
+     * <p>{@code crossed} is what a sight ray passed through before it ended: the see-through cells (leaves, fences, glass,
+     * water ...) it skipped, nearest the eye first, each with the state it really holds. It is empty for a strict ray,
+     * which stops at the first of them, and for a sight ray that met none. A recorder stores these states instead of
+     * air, so foliage and water are never remembered as free space.</p>
      */
-    public record ViewHit(boolean hit, BlockPos pos, Direction side, double distance, BlockState state) {
+    public record ViewHit(boolean hit, BlockPos pos, Direction side, double distance, BlockState state,
+                          List<SightClipContext.Crossing> crossed) {
+        public ViewHit(boolean hit, BlockPos pos, Direction side, double distance, BlockState state) {
+            this(hit, pos, side, distance, state, List.of());
+        }
+
         public static ViewHit unknown() {
             return new ViewHit(false, null, null, -1.0D, null);
         }
 
         public boolean isUnknown() {
             return !hit && distance < 0.0D;
+        }
+
+        /**
+         * The state this ray saw in {@code cell}: the struck block, or the real state of a see-through cell it passed through.
+         * {@code null} when it saw only empty space there, which is what a recorder stores as air.
+         */
+        public BlockState seenState(BlockPos cell) {
+            if (hit && cell.equals(pos)) {
+                return state;
+            }
+            return SightClip.crossedState(crossed, cell.asLong());
         }
     }
 
@@ -688,25 +771,29 @@ public final class ObservableWorldQuery {
      * holding the ray's end point is not loaded the ray is skipped and reported {@link ViewHit#unknown()}.
      * This is a plain view query with no capability lookup: it sees nothing a player standing at the
      * bot's eye could not see.</p>
+     *
+     * <p>This is the strict form: the plain vanilla clip, which the first leaf, fence, pane or water surface
+     * stops. The mining assist's sweeper and the suffocation escape's dig choice use it; a caller that asks what the
+     * bot can <em>see</em> uses {@link #castSightRay}.</p>
      */
     public static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,
                                       double range, ViewShape shape) {
-        return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.ANY);
+        return castViewRay(bot, dx, dy, dz, range, shape, false, null);
     }
 
     /**
-     * As {@link #castViewRay(AIPlayerEntity, double, double, double, double, ViewShape)}, but
-     * treats water as transparent. This is only appropriate for a route whose policy explicitly
-     * permits swimming: a player underwater can see a nearby shore through water, while solid
-     * terrain, range and unloaded chunks remain exactly as restrictive as the ordinary view ray.
+     * {@link #castViewRay} with the bot's eyes: it passes through {@linkplain SeeThrough see-through blocks} and water,
+     * stops at lava and at anything opaque, and reports what it passed through ({@link ViewHit#crossed()}). The first hit is
+     * therefore the log behind two leaves, and a recorder keeps the leaves. {@code target}, a cell the caller is asking
+     * about, is never skipped, so the leaf, fence or water cell itself can be the first hit; {@code null} asks for none.
      */
-    public static ViewHit castViewRayThroughFluids(AIPlayerEntity bot, double dx, double dy, double dz,
-                                                   double range, ViewShape shape) {
-        return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.NONE);
+    public static ViewHit castSightRay(AIPlayerEntity bot, double dx, double dy, double dz,
+                                       double range, ViewShape shape, BlockPos target) {
+        return castViewRay(bot, dx, dy, dz, range, shape, true, target);
     }
 
     private static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,
-                                        double range, ViewShape shape, ClipContext.Fluid fluid) {
+                                        double range, ViewShape shape, boolean seeThrough, BlockPos target) {
         double limit = Math.min(range, botRenderDistanceBlocks(bot));
         double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (!(limit > 0.0D) || !(length > 1.0E-9D)) {
@@ -722,16 +809,17 @@ public final class ObservableWorldQuery {
                 || !world.getChunkSource().hasChunk(endChunkX, endChunkZ)) {
             return ViewHit.unknown();
         }
-        BlockHitResult hit = world.clip(new ClipContext(
-                eye, end,
-                shape == ViewShape.OUTLINE
-                        ? ClipContext.Block.OUTLINE : ClipContext.Block.COLLIDER,
-                fluid,
-                bot));
+        ClipContext.Block block = shape == ViewShape.OUTLINE
+                ? ClipContext.Block.OUTLINE : ClipContext.Block.COLLIDER;
+        SightClipContext sight = seeThrough
+                ? SightClip.context(eye, end, block, ClipContext.Fluid.ANY, bot, target, true) : null;
+        BlockHitResult hit = world.clip(seeThrough ? sight : new ClipContext(eye, end, block, ClipContext.Fluid.ANY, bot));
+        List<SightClipContext.Crossing> crossed = seeThrough ? sight.crossed() : List.of();
         if (hit.getType() != HitResult.Type.BLOCK) {
-            return new ViewHit(false, null, null, limit, null);
+            return new ViewHit(false, null, null, limit, null, crossed);
         }
         BlockPos pos = hit.getBlockPos();
-        return new ViewHit(true, pos, hit.getDirection(), eye.distanceTo(hit.getLocation()), world.getBlockState(pos));
+        return new ViewHit(true, pos, hit.getDirection(), eye.distanceTo(hit.getLocation()),
+                world.getBlockState(pos), crossed);
     }
 }

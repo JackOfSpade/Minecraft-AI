@@ -268,7 +268,7 @@ public final class SmeltTask extends AbstractTask {
             }
         }
         if (furnaceDistanceSquared <= REACH_SQUARED
-                && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, furnacePos)) {
+                && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlockStrict(bot, furnacePos)) {
             phase = Phase.LOADING;
             return;
         }
@@ -297,7 +297,7 @@ public final class SmeltTask extends AbstractTask {
             phase = Phase.FINDING_FURNACE;
             return;
         }
-        boolean observable = io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, furnacePos);
+        boolean observable = io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlockStrict(bot, furnacePos);
         if (observable && !WorkshopLocator.isCompatibleFurnace(bot, furnacePos, input, output)) {
             rejectCurrentFurnace(bot, "station_changed_or_occupied");
             phase = Phase.FINDING_FURNACE;
@@ -666,10 +666,11 @@ public final class SmeltTask extends AbstractTask {
         return moved;
     }
 
+    /** The furnace the bot loads and empties without a click ray, so it must be reachable by a hand: the strict proof. */
     private AbstractFurnaceBlockEntity furnace(AIPlayerEntity bot) {
         if (furnacePos == null
                 || bot.getEyePosition().distanceToSqr(furnacePos.getCenter()) > REACH_SQUARED
-                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, furnacePos)
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlockStrict(bot, furnacePos)
                 || !WorkshopLocator.isCompatibleFurnace(bot, furnacePos, input, output)) {
             return null;
         }

@@ -395,6 +395,8 @@ public final class ObservationShapeGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(context.getLevel(), pose.x, pose.y, pose.z, Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
+        // The chunk tracking view follows a teleport on the next tick, and every sight question below needs it at once.
+        context.getLevel().getChunkSource().move(bot);
         if (!bot.blockPosition().equals(feet)) {
             context.fail(Component.nullToEmpty("fixture spawned in the wrong feet cell: "
                     + bot.blockPosition().toShortString()));

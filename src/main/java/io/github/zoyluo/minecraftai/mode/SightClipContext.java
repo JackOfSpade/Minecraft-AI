@@ -25,8 +25,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *
  * <p><b>What is skipped.</b> A block {@link SeeThrough#cell(BlockState) the predicate} accepts, in the shape kind the ray was
  * built with, and water. Lava (and any other non-water fluid) is never skipped and keeps its real fluid shape even when the ray
- * asked for {@link ClipContext.Fluid#NONE}: eyes do not see through lava. A waterlogged slab keeps its slab shape, only its
- * water is skipped.</p>
+ * asked for {@link ClipContext.Fluid#NONE}: eyes do not see through lava. The one exception is the cell the observer stands in:
+ * its eye is above the surface of the lava it wades in, and that lava must not hide the ground around it from a bot that is
+ * trying to climb out (an eye inside the lava itself stays blind). A waterlogged slab keeps its slab shape, only its water is
+ * skipped.</p>
  *
  * <p><b>The target.</b> The cell being observed (a block, or a water cell for a water proof) is never skipped, so asking whether
  * a leaf, a fence or a water cell itself is visible still returns that cell (a water cell only when the ray's fluid kind picks
@@ -52,6 +54,8 @@ public final class SightClipContext extends ClipContext {
     private final CollisionContext collisionContext;
     private final boolean hasTarget;
     private final long target;
+    private final boolean hasStanding;
+    private final long standing;
     private final boolean recordCrossed;
     private List<Crossing> obstructions;
     private List<Crossing> crossed;
@@ -63,17 +67,28 @@ public final class SightClipContext extends ClipContext {
      */
     public SightClipContext(Vec3 from, Vec3 to, ClipContext.Block shape, ClipContext.Fluid fluid,
                             CollisionContext collisionContext, BlockPos target, boolean recordCrossed) {
+        this(from, to, shape, fluid, collisionContext, target, recordCrossed, null);
+    }
+
+    public SightClipContext(Vec3 from, Vec3 to, ClipContext.Block shape, ClipContext.Fluid fluid, Entity observer,
+                            BlockPos target, boolean recordCrossed) {
+        this(from, to, shape, fluid, CollisionContext.of(observer), target, recordCrossed, observer.blockPosition());
+    }
+
+    /**
+     * @param standing the cell the observer stands in, or {@code null}: the lava it wades in does not hide the ground around
+     *                 it (see the class comment), unless its eye is in that very cell
+     */
+    public SightClipContext(Vec3 from, Vec3 to, ClipContext.Block shape, ClipContext.Fluid fluid,
+                            CollisionContext collisionContext, BlockPos target, boolean recordCrossed, BlockPos standing) {
         super(from, to, shape, fluid, collisionContext);
         this.shapeKind = shape;
         this.collisionContext = collisionContext;
         this.hasTarget = target != null;
         this.target = target == null ? 0L : target.asLong();
+        this.hasStanding = standing != null && !BlockPos.containing(from).equals(standing);
+        this.standing = standing == null ? 0L : standing.asLong();
         this.recordCrossed = recordCrossed;
-    }
-
-    public SightClipContext(Vec3 from, Vec3 to, ClipContext.Block shape, ClipContext.Fluid fluid, Entity observer,
-                            BlockPos target, boolean recordCrossed) {
-        this(from, to, shape, fluid, CollisionContext.of(observer), target, recordCrossed);
     }
 
     @Override
@@ -103,7 +118,7 @@ public final class SightClipContext extends ClipContext {
             return Shapes.empty();
         }
         if (!fluid.is(FluidTags.WATER)) {
-            return fluid.getShape(level, pos);
+            return hasStanding && pos.asLong() == standing && !isTarget(pos) ? Shapes.empty() : fluid.getShape(level, pos);
         }
         if (isTarget(pos)) {
             return super.getFluidShape(fluid, level, pos);

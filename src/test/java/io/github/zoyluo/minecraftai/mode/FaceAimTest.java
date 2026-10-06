@@ -97,7 +97,7 @@ class FaceAimTest {
                 "src/main/java/io/github/zoyluo/minecraftai/mode/ObservableWorldQuery.java"));
         assertTrue(source.contains("observeShapeFaces(bot, pos, range, true, "), "canObserveBlockWithin: outline fallback on");
         assertTrue(source.contains("observeShapeFaces(bot, pos, range, false, "), "canObserveColliderWithin: outline fallback off");
-        assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, true);"));
+        assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, true, bot.blockInteractionRange(), true);"));
         assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, false"));
         assertTrue(source.contains("ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback)"));
     }

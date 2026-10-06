@@ -173,13 +173,16 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
 ## Shared block sight and navigation
 
 Terrain knowledge is shared between a Minecraft-AI bot and its linked owner. A block/cell becomes
-route knowledge only after a vanilla eye ray from either observer reaches it. The observer's
+route knowledge only after an eye ray from either observer reaches it (the eyes see through
+foliage, fences, glass and water, see below). The observer's
 effective block range is the lower of its requested client render distance and the server view
 distance, converted from chunks with `chunks × 16`; its endpoint chunk must also be both tracked
 for that observer and loaded by the server. This is deliberately not a loaded-chunk snapshot.
 
 `SharedWorldSight` retains the ray-proven cells (including outline-only blocks such as rails,
-vines, torches, and crops) for 6,000 ticks. A route request adds an exact ray to its requested
+vines, torches, and crops) for 6,000 ticks. A cell a ray passed through is stored as what it is:
+a leaf, a fence, glass or water keeps its state and is never remembered as free air, so Baritone
+cannot plan through foliage or water it merely looked through. A route request adds an exact ray to its requested
 target plus the ray-proven feet/headroom/floor lane needed by the navigator. Baritone receives
 only that bounded memory in `ObservedNavigationFence`, so it can path through terrain either
 observer actually saw without discovering hidden terrain. Mutable targets are re-checked before
@@ -204,7 +207,9 @@ see-through): a block a later Minecraft adds fails the test until somebody decid
 `mode/SightClip` is `level.clip` with those cells skipped. `SightClipContext` is a vanilla `ClipContext` whose two per-cell hooks
 answer an empty shape for what is skipped, so vanilla's own traversal and nearest-hit rule do the rest and a ray that crosses
 nothing see-through is exactly vanilla's. The cell being observed (the target) is never skipped, an eye inside a see-through cell
-sees out of it, and lava keeps its shape even for a ray that asked for `Fluid.NONE`.
+sees out of it, and lava keeps its shape even for a ray that asked for `Fluid.NONE`. The one lava that does not hide the ground is the
+lava the observer stands in (its eye is above the surface; a bot that fell into a pool still sees the bank it must climb to). An eye
+in the lava itself is blind.
 
 **Sight is not reach.** Seeing a block behind a leaf does not let a hand reach it: every actuator (break, place, open, interact,
 strike, bucket) keeps its own vanilla `ClipContext` and refuses what a real pick ray would not reach. The context therefore also
@@ -214,13 +219,35 @@ ray used: water is never an obstruction, a block with no collision but an outlin
 that slips past a lone fence post or a pane's post is not. `crossed()` lists every skipped cell with the state it really holds, so
 a recorder never stores a leaf, a fence or water as air.
 
+The two families live side by side in `ObservableWorldQuery`. The ordinary predicates (`canObserveBlock`,
+`canObserveBlockCellFace`, `canObserveBlockWithInsetFaces`, `canObserveCell`, `canObserveFarmCell`, the collider forms, the
+`*ThroughFluids` aliases and the linked owner's mirrors) are sight: they cast `SightClip` rays and pass the observed cell as the
+target. Each one an actuator needs has a `Strict` twin, the plain vanilla clip that the first leaf, fence, pane or water cell
+stops. A break, an open or a use sends no pick ray of its own, so each of those actuators re-proves with the strict twin itself:
+`MiningController.currentObservedTarget` (the sole break gate; `visiblyAir` only settles a finished break and may use sight),
+`ContainerAction.canSee`, `FarmAction.harvestProof`, `BaritoneGoals.mineAt`, the break proof of `BaritoneBreakPlacePolicy`, a
+furnace or depot the bot reaches into (`SmeltTask`, `StripMineTask`, `MiningServiceTask`, `WorkshopLocator`) and
+`InteractAction.useItemOnEntity` (the vanilla collider line of `StrikeLegality`). Placement, bucket and strike rays were always plain
+vanilla clips. `SightVersusReachSourceContractTest` pins both lists. A log seen through two leaves is therefore a target (navigation
+admits it and the shared memory knows the leaves and the log), but a break through the leaf is refused with `target_not_observed`
+until the leaf is gone.
+
+`castViewRay` stays the strict first-hit view ray: the mining assist's sweeper and the suffocation escape's dig choice use it,
+because an occupancy grid that writes air for every traversed cell and a hazard field that takes a water surface for a fluid hit
+cannot take a ray that passes through foliage or water. `castSightRay` is its see-through sibling for sight consumers (the tree and
+target look-arounds, the observed-navigation fence): its `ViewHit` lists the `crossed()` cells with their real states, so
+`TreeHorizonScan` keeps a leaf as a landmark when no trunk shows behind it, `VisibleTargetHorizonScan` finds a plant or a cobweb a
+ray crosses, and `ObservedNavigationFence.scanRay` stores what the ray passed through. Lava is never forgotten: it stays opaque, so
+a ray that crossed water and then met lava remembers both. The linked owner's eyes (`SharedVision.ownerSees`) see through the same
+things as the bot's.
+
 ## Scope
 
 * IN: every place a bot NOTICES a creature (threat detection, target acquisition, aggro, aggressor checks,
   perception summaries given to the LLM, projectile threat awareness).
 * OUT: object perception (items, containers, crops, blocks, boats), non-hostile task targets a bot deliberately
   searches for (hunt, breed, milk, trade, villagers), strike legality (a physical ray check), and the owner's own
-  camera cone (`SharedVision.ownerSees`, already realistic).
+  camera cone (`SharedVision.ownerSees`, which uses the same see-through eyes as the bot's).
 * Light level and darkness are not modelled (vanilla mobs ignore them too); a possible later option.
 
 ## Vectors

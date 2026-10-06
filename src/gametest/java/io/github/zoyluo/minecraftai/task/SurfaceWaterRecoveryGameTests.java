@@ -58,6 +58,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        bot.level().getChunkSource().move(bot);
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
 
         context.failIfEver(() -> {
@@ -108,6 +109,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, start.getX() + 0.5D, start.getY() + 0.125D,
                 start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
+        bot.level().getChunkSource().move(bot);
         bot.setAirSupply(300);
         TeleportAudit.reset(bot);
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
@@ -642,6 +644,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        bot.level().getChunkSource().move(bot);
         bot.setAirSupply(260);
         TeleportAudit.reset(bot);
         AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
@@ -924,6 +927,7 @@ public final class SurfaceWaterRecoveryGameTests {
         // GameTest spawn helper does.
         bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        bot.level().getChunkSource().move(bot);
         bot.setDeltaMovement(Vec3.ZERO);
         bot.fallDistance = 0.0F;
         MinecraftAiConfig original = MinecraftAiConfig.get();
@@ -1264,6 +1268,7 @@ public final class SurfaceWaterRecoveryGameTests {
         // Bias both target rays through the open east gap rather than along the shared corner.
         bot.teleportTo(bot.level(), start.getX() + 0.625D, start.getY() + 0.125D,
                 start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        bot.level().getChunkSource().move(bot);
         bot.setDeltaMovement(Vec3.ZERO);
         bot.setAirSupply(260);
         MinecraftAiConfig original = MinecraftAiConfig.get();
@@ -1340,6 +1345,7 @@ public final class SurfaceWaterRecoveryGameTests {
         // the later east wall genuinely intersects both current center-ray proofs.
         bot.teleportTo(bot.level(), start.getX() + 0.625D, start.getY() + 0.125D,
                 start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        bot.level().getChunkSource().move(bot);
         bot.setDeltaMovement(Vec3.ZERO);
         bot.setAirSupply(260);
         MinecraftAiConfig original = MinecraftAiConfig.get();
@@ -1435,6 +1441,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        bot.level().getChunkSource().move(bot);
         bot.setAirSupply(260);
         MinecraftAiConfig original = MinecraftAiConfig.get();
         try {
@@ -1521,6 +1528,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleportTo(world, lower.getX() + 0.5D, lower.getY() + 0.125D,
                 lower.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
+        bot.level().getChunkSource().move(bot);
         return new WaterShaftFixture(name, bot, lower.immutable());
     }
 
@@ -1535,6 +1543,7 @@ public final class SurfaceWaterRecoveryGameTests {
     private static void poseWaterObserver(AIPlayerEntity bot, BlockPos feet) {
         bot.teleportTo(bot.level(), feet.getX() + 0.5D, feet.getY() + 0.125D, feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
+        bot.level().getChunkSource().move(bot);
         bot.setDeltaMovement(Vec3.ZERO);
         bot.fallDistance = 0.0F;
     }

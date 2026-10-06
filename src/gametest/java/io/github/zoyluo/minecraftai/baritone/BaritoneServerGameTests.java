@@ -283,6 +283,7 @@ public final class BaritoneServerGameTests {
         bot.teleportTo(context.getLevel(), feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 java.util.Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
+        context.getLevel().getChunkSource().move(bot);
         return bot;
     }
 

@@ -56,8 +56,11 @@ class ObservableWorldQueryInsetFaceTest {
                 "ordinary block observation must retain its six-ray cost");
         assertFalse(ordinaryBody.contains("canObserveBlockWithInsetFaces"));
 
-        int cellFaceEnd = source.indexOf("\n    }", cellFace) + "\n    }".length();
-        String cellFaceBody = source.substring(cellFace, cellFaceEnd);
+        // The sight and the strict predicate share one implementation that differs only in the clip it casts.
+        int cellFaceImpl = source.indexOf("private static boolean observeBlockCellFace(");
+        assertTrue(cellFaceImpl > cellFace, "the cell-face predicates share one implementation");
+        int cellFaceEnd = source.indexOf("\n    }", cellFaceImpl) + "\n    }".length();
+        String cellFaceBody = source.substring(cellFaceImpl, cellFaceEnd);
         assertTrue(cellFaceBody.contains("FaceAim.facePoint(cell, face"));
         assertTrue(cellFaceBody.contains("ClipContext.Fluid.ANY"));
         assertTrue(cellFaceBody.contains("pos.equals(hit.getBlockPos())"));

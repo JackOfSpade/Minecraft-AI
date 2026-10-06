@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.mode.SightClip;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -1369,8 +1370,8 @@ public final class NavSafetyNet {
         if (bot.getEyePosition().distanceToSqr(sample) > radius * radius) {
             return false;
         }
-        BlockHitResult hit = bot.level().clip(new ClipContext(
-                bot.getEyePosition(), sample, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
+        BlockHitResult hit = SightClip.clip(bot.level(),
+                bot.getEyePosition(), sample, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot, side);
         return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(side);
     }
 
@@ -1393,8 +1394,8 @@ public final class NavSafetyNet {
         double sampleZ = candidate.getZ() + (dz > 0 ? WATER_RESCUE_ADJACENT_FACE_INSET
                 : dz < 0 ? 1.0D - WATER_RESCUE_ADJACENT_FACE_INSET : 0.5D);
         Vec3 sample = new Vec3(sampleX, candidate.getY() + WATER_RESCUE_ADJACENT_FACE_INSET, sampleZ);
-        BlockHitResult hit = bot.level().clip(new ClipContext(
-                bot.getEyePosition(), sample, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot));
+        BlockHitResult hit = SightClip.clip(bot.level(),
+                bot.getEyePosition(), sample, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, bot, candidate);
         return hit.getType() == HitResult.Type.MISS
                 || (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(candidate));
     }

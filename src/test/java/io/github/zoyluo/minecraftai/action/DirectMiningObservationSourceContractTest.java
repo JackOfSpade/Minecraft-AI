@@ -41,16 +41,19 @@ class DirectMiningObservationSourceContractTest {
         String observation = body(source, "static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos)");
         assertInOrder(observation,
                 "ownBodyEmergencyBlock(player, pos)",
-                "ObservableWorldQuery.canObserveBlockCellFace(player, pos)",
-                "ObservableWorldQuery.canObserveCell(player, pos)",
-                "ObservableWorldQuery.canObserveBlock(player, pos)",
-                "ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos)");
-        assertTrue(observation.contains("ObservableWorldQuery.canObserveBlockCellFace(player, pos)\n"
-                        + "                || ObservableWorldQuery.canObserveCell(player, pos)"),
+                "ObservableWorldQuery.canObserveBlockCellFaceStrict(player, pos)",
+                "ObservableWorldQuery.canObserveCellStrict(player, pos)",
+                "ObservableWorldQuery.canObserveBlockStrict(player, pos)",
+                "ObservableWorldQuery.canObserveBlockWithInsetFacesStrict(player, pos)");
+        assertTrue(observation.contains("ObservableWorldQuery.canObserveBlockCellFaceStrict(player, pos)\n"
+                        + "                || ObservableWorldQuery.canObserveCellStrict(player, pos)"),
                 "a partial but exposed block needs the ordinary state-free cell ray when it cannot reach a unit-cell face");
+        assertFalse(observation.matches("(?s).*canObserve(Block|BlockCellFace|Cell|BlockWithInsetFaces|FarmCell)\\(.*"),
+                "the break gate is the reach gate: it asks the strict (vanilla clip) predicates, never the see-through sight ones, "
+                        + "so a log seen behind a leaf is not mined through the leaf");
         String crop = body(source, "private static boolean currentObservedCropTarget(AIPlayerEntity player, BlockPos pos)");
         assertInOrder(crop,
-                "ObservableWorldQuery.canObserveFarmCell(player, pos)",
+                "ObservableWorldQuery.canObserveFarmCellStrict(player, pos)",
                 "player.level().getBlockState(pos)",
                 "instanceof CropBlock");
         String bodyEmergency = body(source, "private static boolean ownBodyEmergencyBlock(AIPlayerEntity player, BlockPos pos)");

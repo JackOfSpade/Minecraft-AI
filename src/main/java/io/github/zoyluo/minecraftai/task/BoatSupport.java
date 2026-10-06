@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.SightClip;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.Comparator;
 import java.util.List;
@@ -247,8 +248,9 @@ final class BoatSupport {
                 if (bot.getEyePosition().distanceToSqr(target) > reach * reach) {
                     continue;
                 }
-                BlockHitResult hit = world.clip(new ClipContext(bot.getEyePosition(), target,
-                        ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
+                // The lake cell is the ray's target, so it is never skipped; water, foliage or a fence in front of it are.
+                BlockHitResult hit = SightClip.clip(world, bot.getEyePosition(), target,
+                        ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot, water);
                 if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(water)) {
                     return true;
                 }
