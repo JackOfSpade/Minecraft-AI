@@ -78,6 +78,37 @@ public final class ExplorationGameTests {
     }
 
     /**
+     * A bot that has looked around counts as searched only what it saw. Ground behind a wall it could not see through
+     * is not searched, and it is not sought either: nothing says the way there is open. The old memory credited the
+     * whole disc of the perception radius, so every direction looked equally unsearched and the first one, east, was
+     * taken, straight at a wall six blocks away.
+     */
+    @GameTest(environment = "minecraftai-gametest:exploration_game_tests_search_does_not_head_for_ground_behind_a_wall", maxTicks = 400)
+    public void searchDoesNotHeadForGroundBehindAWall(GameTestHelper context) {
+        FollowFieldFixture fixture = new FollowFieldFixture(context, 44, 8);
+        AIPlayerEntity bot = fixture.bot("ExploreWallGT", 0, 0, true);
+        for (int dz = -8; dz <= 8; dz++) {
+            for (int height = 0; height < 3; height++) {
+                fixture.level.setBlock(fixture.cell(6, dz).above(height), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        ObservedSearchHops hops = new ObservedSearchHops(16);
+
+        context.failIfEver(() -> {
+            if (context.getTick() < 10 || !bot.onGround()) {
+                return; // a bot just placed in the arena has not settled on its floor yet
+            }
+            BlockPos start = bot.blockPosition().immutable();
+            ObservedSearchHops.Attempt attempt = hops.begin(bot, null);
+            fixture.require(attempt.started(), "the hop was not admitted: " + attempt.reason() + " at " + start);
+            fixture.require(attempt.heading().getX() < start.getX(),
+                    "the bot headed " + attempt.heading() + " from " + start + ", toward the wall six blocks east of it");
+            bot.getActionPack().stopAll();
+            fixture.finish();
+        });
+    }
+
+    /**
      * Looking around a place with no tree in it used to cost about a hundred milliseconds of server thread on every
      * tick for some seventy ticks: the survey and then a 42,000-cell pillar volume cast the observation rays for every
      * cell they visited, whatever block it held. Now only a cell that holds a log is ray-tested, so the survey is

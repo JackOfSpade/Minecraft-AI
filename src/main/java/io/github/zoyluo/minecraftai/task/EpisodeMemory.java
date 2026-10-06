@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -41,6 +42,8 @@ public final class EpisodeMemory {
     private static final int EXCLUDE_CAP = 128;    // Exclusion table cap (prevents unbounded growth; when full, clears the oldest half)
 
     private final Map<UUID, BotEpisode> episodes = new ConcurrentHashMap<>();
+    /** Moves whenever exclusions were dropped before their time ran out; see {@link #earlyRevivals()}. */
+    private final AtomicLong earlyRevivals = new AtomicLong();
 
     private EpisodeMemory() {
     }
@@ -57,10 +60,21 @@ public final class EpisodeMemory {
     /** New goal starts / external reset: this episode's working memory is invalidated (both exclusions and trails are only meaningful for "this particular task"). */
     public void reset(UUID botId) {
         episodes.remove(botId);
+        earlyRevivals.incrementAndGet();
     }
 
     public void clearAll() {
         episodes.clear();
+        earlyRevivals.incrementAndGet();
+    }
+
+    /**
+     * A counter that moves whenever exclusions disappeared before their recorded end: the table was full and shed
+     * its older half, or an episode was reset. A caller that derived "this target stays excluded until tick T" from
+     * {@link #excludedUntil} keeps that conclusion only while the counter has not moved since.
+     */
+    public long earlyRevivals() {
+        return earlyRevivals.get();
     }
 
     /** Excludes a target point (unreachable/dug out/tried with no result); it automatically revives after the TTL. */
@@ -71,6 +85,7 @@ public final class EpisodeMemory {
             int median = ep.excludedUntil.values().stream().sorted()
                     .skip(ep.excludedUntil.size() / 2).findFirst().orElse(nowTick);
             ep.excludedUntil.values().removeIf(until -> until <= median);
+            earlyRevivals.incrementAndGet();
         }
         ep.excludedUntil.put(pos.immutable(), nowTick + ttlTicks);
     }

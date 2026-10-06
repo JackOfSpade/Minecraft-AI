@@ -32,8 +32,15 @@ Google's `generativelanguage.googleapis.com` host. In `config/minecraftai.json`:
   long-term-goal wake-ups pause for another five minutes instead of starting a new retry cycle at once.
   A reply the provider sent back unusable (empty, garbled, a function call without a name) is not an
   outage: the bot asks again as an ordinary planner call, which does use the model-call budget. Any other
-  error (rejected key, bad request) fails at once; its reason is the `brain_hiccup` log line.
-  `llm.retryCount` / `retryBackoffMs` therefore only govern the helper calls (chat routing, ambient chat).
+  error (rejected key, bad request) fails at once; its reason is the `brain_hiccup` log line. A key Google
+  rejects (HTTP 400 "API key not valid") counts as a rejected key, not a bad request, and is also logged as
+  `llm_credentials_rejected`. A 429 that names its own wait in the error body (`RetryInfo.retryDelay`) is
+  waited out like `Retry-After`. If a stored Gemini interaction has expired (HTTP 400/404 on a continuation),
+  the conversation carries on in a fresh interaction rebuilt from the bot's own history. While a call keeps
+  failing, a player who waits on it hears once, after about ten seconds, that the bot is still trying.
+  The chat-recipient router uses the same retry (a line the player replaced meanwhile is dropped), and the
+  ambient chatter makes one attempt per line. Nothing in the game sleeps and retries inside the HTTP client any
+  more, so `llm.retryCount` / `retryBackoffMs` are accepted for old config files but no longer used.
 * `deploy_profile.sh`'s own `.env` parsing separately accepts the pre-rename interim names
   `AIBOT_LLM_API_KEY` / `AIBOT_LLM_BASE_URL` / `AIBOT_LLM_MODEL` as a per-variable fallback (in the
   file or the environment) when the current `MINECRAFTAI_LLM_*` name is absent; it prints a warning

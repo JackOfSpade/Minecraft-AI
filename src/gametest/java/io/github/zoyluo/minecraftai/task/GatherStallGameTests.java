@@ -243,6 +243,51 @@ public final class GatherStallGameTests {
         });
     }
 
+    /**
+     * The prospect picks a cell to stand in beside the log it found. It used to read the standability of every cell
+     * around the log, seen or not, and then the world's height map, so a log behind a wall got a goal in a place the
+     * bot had never seen; the navigation fence refused it and a route request was spent for nothing. Only a cell the
+     * bot has observed may be chosen.
+     */
+    @GameTest(environment = "minecraftai-gametest:gather_stall_game_tests_prospect_stand_is_only_ever_a_cell_the_bot_has_seen", maxTicks = 200)
+    public void prospectStandIsOnlyEverACellTheBotHasSeen(GameTestHelper context) {
+        Fixture fixture = fixture(context, "GatherStandSeenGT", 5);
+        AIPlayerEntity bot = fixture.bot();
+        BlockPos log = fixture.start().east(4);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        List<BlockPos> wall = new java.util.ArrayList<>();
+        for (int dz = -2; dz <= 2; dz++) {
+            for (int height = 0; height < 3; height++) {
+                wall.add(fixture.start().east(2).north(dz).above(height));
+            }
+        }
+        int[] phase = {0};
+
+        context.failIfEver(() -> {
+            // A fresh bot sees nothing until its chunk tracking view is set up on its first ticks.
+            if (!ObservableWorldQuery.canObserveCell(bot, fixture.start().east(1))) {
+                return;
+            }
+            if (phase[0] == 0) {
+                wall.forEach(cell -> bot.level().setBlock(cell, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL));
+                phase[0] = 1;
+                return;
+            }
+            if (phase[0] == 1) {
+                BlockPos stand = GatherQuotaTask.standNearTarget(bot, log);
+                require(context, stand == null,
+                        "the only cells beside the log are behind the wall, yet the bot chose " + stand);
+                wall.forEach(cell -> bot.level().setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL));
+                phase[0] = 2;
+                return;
+            }
+            BlockPos stand = GatherQuotaTask.standNearTarget(bot, log);
+            require(context, stand != null && Standability.isStandable(bot.level(), stand) && stand.distSqr(log) <= 2.0D,
+                    "with the wall gone the cell beside the log is in plain view and must be chosen, got " + stand);
+            finish(context, fixture);
+        });
+    }
+
     private static Fixture fixture(GameTestHelper context, String name, int east) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(2, 2, 2));

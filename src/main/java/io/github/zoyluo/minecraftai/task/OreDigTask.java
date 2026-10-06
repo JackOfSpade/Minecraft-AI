@@ -2390,7 +2390,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "ore", ore.toShortString(),
                 "attempt", attempt.number(),
                 "to", highTargetStairSearchTarget.toShortString(),
-                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+                "max_hop", ObservedSearchHops.hopDistance());
         noteProgress();
         return true;
     }
@@ -2477,7 +2477,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "attempt", attempt.number(),
                 "heading", attempt.heading().toShortString(),
                 "to", observedOreSearchTarget.toShortString(),
-                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+                "max_hop", ObservedSearchHops.hopDistance());
         noteProgress();
         return true;
     }
@@ -3882,7 +3882,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "attempt", attempt.number(),
                 "heading", attempt.heading().toShortString(),
                 "to", highTargetStairSearchTarget.toShortString(),
-                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+                "max_hop", ObservedSearchHops.hopDistance());
         noteProgress();
         return true;
     }
@@ -3981,7 +3981,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "hint", hint.toShortString(),
                 "attempt", attempt.number(),
                 "to", queuedVeinHintSearchTarget.toShortString(),
-                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+                "max_hop", ObservedSearchHops.hopDistance());
         noteProgress();
     }
 

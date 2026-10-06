@@ -15,7 +15,8 @@ import net.minecraft.core.BlockPos;
  * ends, so the finding ends then too. Like an exclusion, a finding is a "not reachable from here"
  * verdict, so it is kept for no longer than {@link EpisodeMemory#TTL_UNREACHABLE} ticks; that is
  * also how long a change the bot did not make (a leaf that decays, another player's edit) can go
- * unnoticed by it.</p>
+ * unnoticed by it. An exclusion that disappears before its end ends the finding too, which
+ * {@link EpisodeMemory#earlyRevivals()} reports.</p>
  */
 final class PillarSearchMemo {
     private BlockPos stance;
@@ -24,11 +25,18 @@ final class PillarSearchMemo {
     private int validUntilTick;
     /** The first tick after which an exclusion that held a candidate back from the scan in progress is gone. */
     private int earliestRevival = Integer.MAX_VALUE;
+    /**
+     * {@link EpisodeMemory#earlyRevivals()} when the scan in progress began (-1 outside a scan): the exclusions it
+     * relied on can vanish before their recorded end, for instance when a full table sheds its older half.
+     */
+    private long earlyRevivalsAtScan = -1L;
+    private long earlyRevivalsAtFinding;
 
     /** Whether a search for {@code subject} (a target, or the extent of a broad scan) already came back empty here. */
     boolean knownEmpty(BlockPos stance, long subject, long worldVersion, int nowTick) {
         return this.stance != null && this.stance.equals(stance) && this.subject == subject
-                && this.worldVersion == worldVersion && nowTick <= validUntilTick;
+                && this.worldVersion == worldVersion && nowTick <= validUntilTick
+                && earlyRevivalsAtFinding == EpisodeMemory.INSTANCE.earlyRevivals();
     }
 
     /**
@@ -37,6 +45,7 @@ final class PillarSearchMemo {
      */
     Predicate<BlockPos> scanFilter(UUID botId, int nowTick) {
         earliestRevival = Integer.MAX_VALUE;
+        earlyRevivalsAtScan = EpisodeMemory.INSTANCE.earlyRevivals();
         return pos -> {
             int excludedUntil = EpisodeMemory.INSTANCE.excludedUntil(botId, pos, nowTick);
             if (excludedUntil < 0) {
@@ -52,6 +61,9 @@ final class PillarSearchMemo {
         this.subject = subject;
         this.worldVersion = worldVersion;
         this.validUntilTick = Math.min(nowTick + EpisodeMemory.TTL_UNREACHABLE, earliestRevival);
+        // A search that never filtered by exclusions has none to lose, so only now is as far back as it can look.
+        this.earlyRevivalsAtFinding = earlyRevivalsAtScan >= 0 ? earlyRevivalsAtScan : EpisodeMemory.INSTANCE.earlyRevivals();
+        earlyRevivalsAtScan = -1L;
     }
 
     void clear() {

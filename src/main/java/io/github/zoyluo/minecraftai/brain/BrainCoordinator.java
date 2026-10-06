@@ -202,6 +202,8 @@ public final class BrainCoordinator {
         conversation.callBudget.beginPlayerInstruction(callsAlreadyUsed);
         conversation.continuationTaskPolls = 0;
         conversation.budgetExhaustionReported = false;
+        conversation.retryNoticeSent = false;
+        conversation.planDeclaresMoreSteps = false;
         conversation.lastToolRoundFailureCount = 0;
         conversation.requestStarted = false;
         conversation.failureReportCall = false;
@@ -298,6 +300,9 @@ public final class BrainCoordinator {
         // withholds say and requires the work-start tool.
         if (!failureReportCall && !conversation.initialPlanSpoken && containsValidPlan(response.toolCalls())) {
             conversation.initialPlanSpoken = true;
+        }
+        if (!failureReportCall && planDeclaresMoreSteps(response.toolCalls())) {
+            conversation.planDeclaresMoreSteps = true;
         }
         conversation.history.add(ChatMessage.assistant(response.content(), toolCalls));
         return initialActionGate;
@@ -787,6 +792,33 @@ public final class BrainCoordinator {
         return calls != null && calls.stream().anyMatch(call -> isValidSayWithPurpose(call, "plan"));
     }
 
+    /**
+     * Whether a valid say(purpose=plan) in this round declares {@code more_steps}: the model itself says its
+     * plan runs further tasks one after another. That is the only source of "the plan has remaining steps"
+     * the runtime has for sequential tasks, which are not queued goals (a queued goal already counts as work
+     * in progress).
+     */
+    static boolean planDeclaresMoreSteps(List<ChatToolCall> calls) {
+        if (calls == null) {
+            return false;
+        }
+        for (ChatToolCall call : calls) {
+            if (!isValidSayWithPurpose(call, "plan")) {
+                continue;
+            }
+            try {
+                var more = call.parsedArguments().get("more_steps");
+                if (more != null && more.isJsonPrimitive() && more.getAsJsonPrimitive().isBoolean()
+                        && more.getAsBoolean()) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+                // An unreadable flag is no declaration.
+            }
+        }
+        return false;
+    }
+
     static boolean isAnswerOnlyReply(List<ChatToolCall> calls) {
         if (calls == null || calls.isEmpty()) {
             return false;
@@ -878,9 +910,22 @@ public final class BrainCoordinator {
                 "message", conciseFailureMessage(failure.getMessage()),
                 "kind", failure.kind(),
                 "status", failure.httpStatus());
+        if (failure.kind() == LlmApiException.Kind.AUTH) {
+            // The player is told too, but the one who can fix it is the server owner, and the player's
+            // message does not say why.
+            BotLog.error(bot, "llm_credentials_rejected", null,
+                    "status", failure.httpStatus(),
+                    "action", "check llm.apiKey in config/minecraftai.json: the model service refuses it, so no bot can plan");
+        }
         if (ApiFailureReport.repairWithAnotherCall(failure.kind(), conversation.failureReportCall,
                 currentDecisionBudgetExhausted(conversation), lease.equals(conversation.repairLease))) {
             resubmitAfterUnusableReply(bot, conversation, failure);
+            return;
+        }
+        if (ApiFailureReport.interactionLost(failure,
+                executor.usesGeminiInteractions() && conversation.geminiInteractionId != null,
+                conversation.failureReportCall, currentDecisionBudgetExhausted(conversation))) {
+            resubmitInFreshInteraction(bot, conversation, failure);
             return;
         }
         // Nothing more will be asked of the service for this call: an autonomous goal wake must not
@@ -921,10 +966,81 @@ public final class BrainCoordinator {
         submit(bot, conversation, retryLease);
     }
 
+    /**
+     * The service no longer has the stored interaction the failed continuation named (it keeps them only
+     * for a limited time), so that request can never succeed. The conversation goes on in a fresh
+     * interaction: its prompt is rebuilt from the brain's own history, plus the results of the last tool
+     * calls, which only the dropped interaction knew about. A metered planner call like any other.
+     */
+    private void resubmitInFreshInteraction(AIPlayerEntity bot, BotConversation conversation, LlmApiException failure) {
+        StringBuilder note = new StringBuilder("The earlier part of this conversation is no longer available "
+                + "on the service, so this is a fresh start. Continue the same request from the current state; "
+                + "check what is already done before repeating anything.");
+        if (!conversation.pendingGeminiFunctionResults.isEmpty()) {
+            note.append(" Results of your last tool calls:");
+            for (GeminiInteractionsApiClient.FunctionResult result : conversation.pendingGeminiFunctionResults) {
+                note.append("\n- ").append(result.name()).append(": ").append(result.content());
+            }
+        }
+        conversation.history.add(ChatMessage.user(note.toString()));
+        trimHistory(conversation);
+        conversation.geminiInteractionId = null;
+        conversation.pendingGeminiFunctionResults = List.of();
+        BotLog.warn(LogCategory.COMM, bot, "gemini_interaction_dropped",
+                "status", failure.httpStatus(),
+                "reason", conciseFailureMessage(failure.getMessage()),
+                "model_call", callsUsedForCurrentDecision(conversation) + 1,
+                "model_calls_remaining_before_retry", callsRemainingForCurrentDecision(conversation));
+        submit(bot, conversation, conversation.decision.beginEpoch());
+    }
+
     /** Whether {@code lease} is still the request its conversation waits on: a backoff is dropped once it is not. */
     private boolean leaseInFlight(DecisionLease lease) {
         BotConversation conversation = conversations.get(lease.botId());
         return conversation != null && conversation.decision.isInFlight(lease);
+    }
+
+    /**
+     * A planning call has now gone unanswered long enough (see {@link LlmRetryPolicy#NOTICE_AFTER_MS})
+     * that the player who waits on it is told, once per instruction, that the bot is still trying.
+     */
+    private void onRetryWaiting(AIPlayerEntity bot, DecisionLease lease, LlmApiException failure) {
+        BotConversation conversation = conversations.get(lease.botId());
+        if (conversation == null || !conversation.decision.isInFlight(lease) || conversation.missionDecisionCall) {
+            return;
+        }
+        boolean workActive = workInProgress(bot);
+        if (!ApiFailureReport.tellPlayerStillTrying(conversation.retryNoticeSent, conversation.failureReportCall,
+                workActive, requestCompleted(bot, conversation, workActive))) {
+            return;
+        }
+        conversation.retryNoticeSent = true;
+        BotLog.warn(LogCategory.COMM, bot, "still_trying_notice",
+                "kind", failure.kind(),
+                "status", failure.httpStatus(),
+                "instruction", conversation.callBudget.instructionSequence());
+        sendBotReply(bot, ApiFailureReport.stillTryingMessage());
+    }
+
+    /** Whether the bot has anything running, paused or queued: then it visibly works, whatever its planner call does. */
+    private static boolean workInProgress(AIPlayerEntity bot) {
+        return hasRuntimeWork(
+                TaskManager.INSTANCE.getActive(bot).isPresent(),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
+                bot.getActionPack().hasActiveActions()) || TaskManager.INSTANCE.hasPaused(bot);
+    }
+
+    /** Whether the work this instruction started has demonstrably finished; see {@link ApiFailureReport#requestCompleted}. */
+    private static boolean requestCompleted(AIPlayerEntity bot, BotConversation conversation, boolean workActive) {
+        return ApiFailureReport.requestCompleted(
+                conversation.requestStarted,
+                workActive,
+                TaskManager.INSTANCE.peekFailure(bot).isPresent(),
+                BotMemoryStore.INSTANCE.of(bot.getUUID()).hasActiveGoal() || conversation.planDeclaresMoreSteps,
+                TaskManager.INSTANCE.status(bot).state(),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.lastResult(bot)
+                        .map(io.github.zoyluo.minecraftai.goal.GoalResult::status).orElse(null));
     }
 
     /**
@@ -933,19 +1049,8 @@ public final class BrainCoordinator {
      * successfully: then only the closing words were lost, and a failure text would be false.
      */
     private void reportApiFailure(AIPlayerEntity bot, BotConversation conversation, LlmApiException failure) {
-        boolean workActive = hasRuntimeWork(
-                TaskManager.INSTANCE.getActive(bot).isPresent(),
-                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
-                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
-                bot.getActionPack().hasActiveActions()) || TaskManager.INSTANCE.hasPaused(bot);
-        boolean requestCompleted = ApiFailureReport.requestCompleted(
-                conversation.requestStarted,
-                workActive,
-                TaskManager.INSTANCE.peekFailure(bot).isPresent(),
-                BotMemoryStore.INSTANCE.of(bot.getUUID()).hasActiveGoal(),
-                TaskManager.INSTANCE.status(bot).state(),
-                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.lastResult(bot)
-                        .map(io.github.zoyluo.minecraftai.goal.GoalResult::status).orElse(null));
+        boolean workActive = workInProgress(bot);
+        boolean requestCompleted = requestCompleted(bot, conversation, workActive);
         ApiFailureReport.Decision decision = ApiFailureReport.decide(
                 conversation.budgetExhaustionReported, requestCompleted);
         BotLog.warn(LogCategory.COMM, bot, "api_failure_final",
@@ -1065,6 +1170,19 @@ public final class BrainCoordinator {
         onError(bot, conversation.decision.beginEpoch(), failure);
     }
 
+    /**
+     * Test seam: the retry runner's notice that the bot's in-flight call has been waiting long enough, delivered on
+     * demand (and again, as a second failed attempt would). Real attempts are seconds apart, too slow for a GameTest.
+     * {@code requestStarted} stands for "a work-start tool of this instruction already succeeded".
+     */
+    void deliverRetryNoticeForTest(AIPlayerEntity bot, LlmApiException failure, boolean requestStarted) {
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUUID(), BotConversation::new);
+        conversation.requestStarted = requestStarted;
+        DecisionLease lease = conversation.decision.busy()
+                ? conversation.decision.currentLease() : conversation.decision.beginEpoch();
+        onRetryWaiting(bot, lease, failure);
+    }
+
     /** Test seam: how many model calls the bot's current player instruction has spent. */
     int modelCallsUsedForTest(AIPlayerEntity bot) {
         BotConversation conversation = conversations.get(bot.getUUID());
@@ -1150,6 +1268,8 @@ public final class BrainCoordinator {
             awaitingTask.remove(bot.getUUID());
             conversation.callBudget.beginPlayerInstruction(0);
             conversation.budgetExhaustionReported = false;
+            conversation.retryNoticeSent = false;
+            conversation.planDeclaresMoreSteps = false;
             conversation.lastToolRoundFailureCount = 0;
             conversation.requestStarted = false;
             conversation.failureReportCall = false;
@@ -1365,7 +1485,8 @@ public final class BrainCoordinator {
                     geminiRequest,
                     withholdSay || missionDecision,
                     (responseLease, response) -> onResponse(bot, responseLease, response),
-                    (errorLease, throwable) -> onError(bot, errorLease, throwable));
+                    (errorLease, throwable) -> onError(bot, errorLease, throwable),
+                    (waitingLease, failure) -> onRetryWaiting(bot, waitingLease, failure));
         } catch (RuntimeException exception) {
             if (missionDecisionReservation) {
                 conversation.missionDecisionBudget.releaseLastReservation();
@@ -2071,7 +2192,7 @@ public final class BrainCoordinator {
                    For gather, forage, mine_ore, and harvest_crop: if the player states a number, pass count and it is a NEW/additional-resource quota even if the bot already carries some. If the player does not state a number, OMIT count. The task then collects as much as it can for up to ten minutes, actively explores through repeated short safe observed hops, and rescans terrain revealed by those hops. Do not say none was found, stop after the first visible patch, or switch to blind digging/pathing toward hidden terrain before that collection window ends. A request to get, gather, collect, mine, chop, harvest or otherwise acquire raw resources is never met from what you carry: while that collection is unfinished give_item and achieve_goal are not offered (a carried stack could satisfy them), and they come back when every resource the player asked for ("get 32 logs and 10 coal" asks for two) has been collected. If the resource needs a tool you may lack (stone, ore) or a quantity has to be produced, fulfill_items also works: a raw allocation is newly collected above what you carry, and a named recipient is handed it afterwards. To collect one resource and hand it to a player, call gather_then_give with the number the player stated (item="logs" for an unspecified plural "logs"; an exact minecraft:<species>_log only when the player names that species); it owns both stages and cannot use an existing stack to skip collection. If the player gives no number, collect with gather, mine_ore or harvest_crop without count and, once it finishes, hand over what it collected with give_item (or call gather_then_give without count: it collects for up to ten minutes and hands over everything it collected). If the final result is a crafted item (gather 32 logs, craft a table, give it to me), call fulfill_items once: the raw resource as its own item without a recipient (a new quota above what you carry) and the crafted item with the player as recipient; gather_then_give would hand over the logs, not the table. Or collect first with gather and the count, then craft the item and hand it over after the collection finishes; a crafted item you keep for yourself is always made that way, because fulfill_items counts one you already carry as done, and so is a result made of the collected resource itself ("mine 5 iron, smelt it, give it to me"), because one manifest would collect that resource twice. The same goes for handing over only part of the collection (gather 32 logs, give 16): gather_then_give hands over everything it collects, so gather with the count first and give_item the part when it finishes. Direct give_item is only for handing over what you already carry ("give me 32 logs", "give me your logs", "bring me the logs you collected"): hand over a bundle with one give_item call per item. fulfill_items is for production, never for handing over carried stock.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
                 5. A new player message always supersedes prior work. The runtime cancels old tasks, goals, queued goals, and actions before this request is planned, so treat each new message as self-contained. For a compound request whose outcome is an inventory bundle or a division between players, make one fulfill_items call with every final item and recipient allocation; infer the manifest from the words and current game knowledge rather than reducing it to one representative item. Everything handed to a player and every raw resource you keep is newly produced or collected, additional to matching inventory held at submission, never a pre-existing handoff; a crafted item you keep (your own tool or armor) counts if you already carry it. A bundle of items you already carry is not production: hand it over with one give_item call per item. This is not a fixed kit vocabulary. For genuinely sequential objectives that are not one inventory bundle, goal tools (achieve_goal, mine_ore, harvest_crop, provision_food, set_goal) may be queued in that same response. High-level tasks run over multiple ticks; start only one non-goal task at a time and wait for its status before assigning another.
-                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). When you can emit multiple function calls, call the action or goal tool that starts the work in the SAME response. If the provider emits only one function call, call the plan once; the runtime immediately follows up with say unavailable, and you must then call the action or goal tool that starts the work. Never answer an action request with say alone. Do not make a plan-only loop. For "come here" / "come to me" call follow (it walks to the player); for "stay here" call hold; for "follow me" call follow; for "eat until full" call eat. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
+                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). If the plan runs further tasks one after another, set more_steps=true on that say. When you can emit multiple function calls, call the action or goal tool that starts the work in the SAME response. If the provider emits only one function call, call the plan once; the runtime immediately follows up with say unavailable, and you must then call the action or goal tool that starts the work. Never answer an action request with say alone. Do not make a plan-only loop. For "come here" / "come to me" call follow (it walks to the player); for "stay here" call hold; for "follow me" call follow; for "eat until full" call eat. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
                 7. For one item or tool the player wants obtained from whatever materials are available, use achieve_goal directly even when materials may be missing. For multiple different requested items or a player/bot split, use fulfill_items directly and list each output/allocation; it shares the same dependency planner and will gather, craft, mine, smelt, use an existing or newly made crafting table, and then perform each requested handoff. Everything it hands to a player and every raw resource it keeps is newly produced or collected, additional to matching inventory present at submission; a crafted item kept on you counts if you already carry it. A recipient omitted from a fulfill_items entry stays with you; a named recipient is handed that exact newly produced item after production. Use plan_craft only when the player explicitly asks for a feasibility or material breakdown; it is read-only. Use craft only when the player explicitly wants a one-step craft and the required materials are already carried. Do not decompose an item goal into assign_task, mine, smelt, planks, or sticks yourself.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
                 9. For "find/search iron ore", "find wheat", "find sheep", "find the bonus chest", or any named block, call find. find accepts every registered non-air block: use a bare vanilla name with spaces or underscores (for example furnace, crafting table, oak_sapling), or a full modded id such as modid:block. Its semantic targets are iron_ore (the iron-ore family), wheat (mature wheat), sheep, container/bonus_chest, and plant/flower/sapling categories. find is a persistent bounded locate-only task: it walks short observed hops, reports a real visible coordinate, and says it could not find the target when its search limit is spent; it does not mine, harvest, kill, or open anything. For "find and mine iron", first call find with target=iron_ore and wait for its result, then call mine_ore only after it reports visible ore. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore (when the player states a number and also wants that ore handed over, as in "mine 10 iron and give them to me", mine_ore is not offered: call fulfill_items with the player as recipient); its count mode owns the bounded observed search and automatically resumes mining when ore becomes visible, so do not pre-split that request into find/retry calls. For "mine the whole/entire vein", "this vein" or "until the vein is gone", call mine_ore with mode=vein (optionally x/y/z of an ore in that vein): it mines only that connected, observed vein, stops, and reports the count; never approximate a vein with a count or tunnel toward unseen ore. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. For a kit or multi-player allocation, call fulfill_items instead. A high-level goal call establishes an immutable root goal, then the deterministic executor performs one whole safe stage at a time. After each safe stage it automatically gives you a strategy checkpoint containing an exact mission_id, revision, current observed state, a server-rendered root manifest, and a server-generated proposed next stage. At that checkpoint, call continue_goal_step exactly once with that mission_id and revision if the stage still serves the root goal; if current observed facts make the stage unsuitable, call replan_goal_from_current_state with the same token so the server rebuilds the remaining safe plan; call stop_goal_mission with that same token only to end this exact root goal. Do not call inventory, assign_task, mine, raw movement, or another goal tool at a strategy checkpoint. The executor, not you, owns recipes, inventory arithmetic, exploration bounds, navigation, physical handoffs, and final verification. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For "break N leaves" / "clear the leaves", call break_blocks with block=leaves (any leaf type) and the exact count; drops are irrelevant and it uses shears or a hoe if carried, otherwise bare hands (never craft shears for it). Use gather only when the player wants leaf blocks in the inventory (that needs shears). For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
@@ -2095,6 +2216,11 @@ public final class BrainCoordinator {
         private final MissionDecisionCallBudget missionDecisionBudget = new MissionDecisionCallBudget();
         private int continuationTaskPolls;
         private boolean budgetExhaustionReported;
+        // The plan this instruction announced names further steps after its first task (say more_steps), so a
+        // task that has finished is not the end of the request. Reset for every new instruction.
+        private boolean planDeclaresMoreSteps;
+        // The player was already told, once for this instruction, that the service is slow to answer.
+        private boolean retryNoticeSent;
         private int lastToolRoundFailureCount;
         // This instruction's request has started: a work-start tool of THIS instruction succeeded.
         // Deliberately not "some runtime work is active" (unrelated autonomous work says nothing about

@@ -1384,7 +1384,7 @@ public final class HarvestCore {
      * cell is physically known; every other pose needs observed feet, head, and support cells
      * before {@link Standability} is allowed to inspect their collision states.
      */
-    static boolean canObserveStand(AIPlayerEntity bot, BlockPos stand) {
+    public static boolean canObserveStand(AIPlayerEntity bot, BlockPos stand) {
         if (stand.equals(bot.blockPosition())) {
             return true;
         }

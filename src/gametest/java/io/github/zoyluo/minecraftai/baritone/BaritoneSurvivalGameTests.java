@@ -534,8 +534,14 @@ public final class BaritoneSurvivalGameTests {
         baritone.getMineProcess().onLostControl();
         List<BaritoneRefusals.Refusal> after = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.SCAN_PROCESS);
         require(context, after.size() == starts, "a reset of the mine process was refused like a start: " + after);
+        // What every exploration hop does when it ends: the bot's own stop, not Baritone's. It must neither
+        // count as a start of the mine process nor ask the retired hidden-scan capability for a decision.
+        s.bot.getActionPack().stopAll();
+        List<BaritoneRefusals.Refusal> afterStopAll = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.SCAN_PROCESS);
+        require(context, afterStopAll.size() == starts, "a stopAll was refused like a start of a scanning process: " + afterStopAll);
         s.requireLogged("baritone_refused", 2);
         s.requireNotLogged("baritone_scan_process");
+        s.requireNotLogged("HIDDEN_BLOCK_SCAN");
         s.finish();
     }
 

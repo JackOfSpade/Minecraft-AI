@@ -160,6 +160,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private long pickedUpAtStart;
     private int countBeforeHarvest;
     private int pickupTicks;
+    /** The tick the block was broken: when its drop popped out, for {@link ItemDropSettle}. */
+    private int pickupStartedTick;
     private int harvestStartedTick;
     /** Mining generation of the current attempt, to learn why its break controller ended without breaking. */
     private long harvestMiningGeneration;
@@ -993,7 +995,6 @@ public final class GatherQuotaTask extends AbstractTask {
         prospectScan = null;
         prospectScansFinished++;
         lastProspectScanMaxStepNanos = scan.maxStepNanos();
-        var world = bot.level();
         BlockPos found = scan.result();
         if (found == null) {
             // Observability: silently returning false can't distinguish "genuinely no such
@@ -1012,7 +1013,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // landing point to a cliff top dozens of blocks above the target, unreachable even after
         // walking there (observed: found=y66 to=y86 infinite loop). Let A* work out the downhill
         // route itself.
-        BlockPos ground = standNearTarget(world, found);
+        BlockPos ground = standNearTarget(bot, found);
         if (ground == null) {
             // No standable point around a cliff-face/elevation-difference tree: plain walking has
             // no solution, but dig-approach can tunnel down/through (the real cause of 67% of
@@ -1079,11 +1080,13 @@ public final class GatherQuotaTask extends AbstractTask {
 
     // Find a landing point anchored to the target: prefer the target's own cell first
     // (non-colliding blocks like short grass/saplings can be stood on directly), then the four
-    // neighbors at ±1 level; if none are standable (the target is buried in a solid block or
-    // floating), fall back to that column's surface (for a trunk column: stand beside the tree's
-    // roots).
-    private BlockPos standNearTarget(net.minecraft.server.level.ServerLevel world, BlockPos found) {
-        if (Standability.isStandable(world, found)) {
+    // neighbors at ±1 level; null when none of them is a cell the bot has observed to be
+    // standable (the target is buried in a solid block, floating, or its surroundings are out of
+    // sight). A cell the bot has not seen is never read, and no column surface is guessed from the
+    // world's height map: a goal the bot has not seen is one the navigation fence refuses.
+    static BlockPos standNearTarget(AIPlayerEntity bot, BlockPos found) {
+        var world = bot.level();
+        if (HarvestCore.canObserveStand(bot, found) && Standability.isStandable(world, found)) {
             return found;
         }
         // R2: search the four neighbors vertically from ±1 up to ±3. Cliff-face/below-grade trees
@@ -1095,12 +1098,12 @@ public final class GatherQuotaTask extends AbstractTask {
             BlockPos side = found.relative(dir);
             for (int dy : new int[]{0, -1, 1, -2, 2, -3, 3}) {
                 BlockPos p = side.above(dy);
-                if (Standability.isStandable(world, p)) {
+                if (HarvestCore.canObserveStand(bot, p) && Standability.isStandable(world, p)) {
                     return p;
                 }
             }
         }
-        return findGroundAt(world, found.getX(), found.getZ());
+        return null;
     }
 
     // The only legal escape from an empty patch is an admitted directional hop.  Older code
@@ -1116,25 +1119,6 @@ public final class GatherQuotaTask extends AbstractTask {
     // remote terrain landing point.
     private boolean roamToNewArea(AIPlayerEntity bot) {
         return startExplore(bot);
-    }
-
-    // Search column (x,z) from high to low for the first standable point (surface/forest floor).
-    private BlockPos findGroundAt(net.minecraft.server.level.ServerLevel world, int x, int z) {
-        // Use the heightmap to get that column's surface, which works at any elevation (the old
-        // hard cap of y=110 made roaming/landing fail entirely when the bot stood on ground above
-        // y=110 — the same root-cause bug as in HuntTask). Canopy penetration (same fix as
-        // HuntTask.findGround): the old MOTION_BLOCKING top surface lands in the canopy in a
-        // forest (tall spruce 20+ blocks — a fixed downward-search offset can't reliably win that
-        // bet). The correct fix: MOTION_BLOCKING_NO_LEAVES natively skips leaves, so the top
-        // surface is terrain/trunk, and we then descend to the ground.
-        int surfaceY = world.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-        for (int y = surfaceY; y >= surfaceY - 24 && y > world.getMinY() + 1; y--) {
-            BlockPos p = new BlockPos(x, y, z);
-            if (Standability.isStandable(world, p)) {
-                return p;
-            }
-        }
-        return null;
     }
 
     // Legacy ROAM state retained for checkpoint/source compatibility.  New empty-patch recovery
@@ -1200,7 +1184,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 "heading", attempt.heading().toShortString(),
                 "to", exploreTarget.toShortString(),
                 "mode", attempt.guided() ? "known_heading" : "compass",
-                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+                "max_hop", ObservedSearchHops.hopDistance());
         return true;
     }
 
@@ -2743,6 +2727,7 @@ public final class GatherQuotaTask extends AbstractTask {
             pickupTicks = probabilisticDrop ? 30 : 120; // Probabilistic-drop resources (seeds/berries) drop right at the bot's feet and are picked up quickly, so wait less
             dropWatch = tower != null && pickupOrigin != null
                     ? new TowerDropWatch(pickupOrigin, bot.level().getGameTime(), acceptItems, pickupTicks, "gather") : null;
+            pickupStartedTick = elapsed;
             phase = Phase.PICKUP;
             return;
         }
@@ -2956,6 +2941,14 @@ public final class GatherQuotaTask extends AbstractTask {
                 BotLog.action(bot, "gather_pickup_origin_approach",
                         "origin", pickupOrigin.toShortString(),
                         "from", bot.blockPosition().toShortString());
+            }
+            // Nothing is left to try: no drop can be seen and every cell it could rest in has been visited.
+            // The one thing still worth waiting for is a drop that has not landed yet, and vanilla's physics
+            // says when it has (ItemDropSettle); the rest of the window would be the bot standing about.
+            if (swept == KnownCellPickupSweep.Step.EXHAUSTED && visibleDrop.isEmpty()
+                    && elapsed - pickupStartedTick >= ItemDropSettle.ticksToSettle(
+                            Math.max(0, pickupOrigin.getY() - bot.blockPosition().getY()) + 1)) {
+                pickupTicks = 0;
             }
             if (pickupOriginSweep.cellsVisited() > pickupOriginSweepLogged) {
                 pickupOriginSweepLogged = pickupOriginSweep.cellsVisited();
