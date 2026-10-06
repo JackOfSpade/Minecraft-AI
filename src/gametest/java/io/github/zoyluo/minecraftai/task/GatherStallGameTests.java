@@ -157,9 +157,10 @@ public final class GatherStallGameTests {
     @GameTest(environment = "minecraftai-gametest:gather_stall_game_tests_empty_pillar_searches_are_not_repeated_while_the_bot_stands_still", maxTicks = 300)
     public void emptyPillarSearchesAreNotRepeatedWhileTheBotStandsStill(GameTestHelper context) {
         FollowFieldFixture fixture = new FollowFieldFixture(context, 12, 12);
-        // The bot stands in a one-cell pit of a stone slab whose floor is out of a walker's slope (the columns around
-        // the log have no floor within reach), and a log floats ten blocks straight above it, in plain view but out
-        // of reach. Its own column is clear, but a tower of five is more than the bot could ever step down from.
+        // The bot stands in a one-cell pit of a stone slab whose rim it cannot see from the bottom (no column around
+        // the log has a floor it has seen), and a log floats ten blocks straight above it, in plain view but out of
+        // reach. Its own column would do for a tower, but an invisible light block in it is not air, so no pillar can
+        // be planned there either: nothing is climbable from anywhere, and that finding must be kept.
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 if (dx != 0 || dz != 0) {
@@ -168,6 +169,7 @@ public final class GatherStallGameTests {
             }
         }
         fixture.arena.set(0, 10, 0, Blocks.OAK_LOG);
+        fixture.arena.set(0, 6, 0, Blocks.LIGHT);
         String name = "PillarMemoGT";
         AIPlayerEntity bot = fixture.bot(name, 0, 0, false);
         fixture.give(bot, new ItemStack(Items.WOODEN_AXE));

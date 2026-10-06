@@ -271,3 +271,17 @@ harvest stays in HARVEST and starts again the next tick, so no `gather_harvest_r
 `gather_pillar_scan_empty` (`search=hint|volume`, `from`, plus `target` or `up`) is logged once per pillar search that found
 no approach. The search is then not repeated while the bot stays in the same cell (`PillarSearchMemo`): until a target the
 scan skipped as excluded is available again, until a bot changes terrain, or for `EpisodeMemory.TTL_UNREACHABLE` ticks at most.
+A pillar the bot built (`gather_pillar_start`, `mine_pillar_start`) is taken down again before the bot does anything else:
+it breaks the block under its feet one at a time, as a player does (`TowerDescent`; every drop is a single block, and the
+blocks come back as items), so a pillar of any height can be left. `gather_tower_descended` / `mine_tower_descended`
+(`blocks`, `at`) closes it; `gather_tower_descent_failed` / `mine_tower_descent_failed` (`reason`, `at`) and the
+`tower_descent_refused` line before it say why a break was refused. The task does not end (quota reached, `DONE`) until
+the descent is over. A pillar whose floor is not at the bot's level is walked to first (`gather_pillar_base_walk` /
+`mine_pillar_base_walk`, `target`, `base`; `*_pillar_base_refused` when the route to a floor is refused and the next is
+tried; `*_pillar_base_failed` when no column was left once the bot got there), whenever it needs fewer supports than a
+pillar from the bot's own level. `mine_route_refused` (`target`, `stand`, `reason`) is a generic mine request whose route
+to the chosen block was refused: the block is climbed to or set aside, not asked for again on the next tick.
+A felled canopy log comes to rest on the leaf under the cell it was broken from, above the bot's eye line and out of reach
+from the ground: before the bot leaves its pillar, the leaf in the column under that cell that it can see and reach is
+broken so the drop falls on (`gather_drop_released`, `origin`, `leaf`; repeated while the canopy has layers); only a leaf is
+ever broken this way, never terrain.

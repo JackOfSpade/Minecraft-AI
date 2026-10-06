@@ -77,7 +77,7 @@ class DirectMiningObservationSourceContractTest {
                 "return settleVisibleAir(player);",
                 "if (!currentObservedTarget(player, pos))",
                 "return visibilityRefused(player);",
-                "MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);",
+                "MiningSafety.SupportOccupancy support = footingOccupancy(player);",
                 "return supportRefused(player, support);",
                 "BlockState state = world.getBlockState(pos);");
         assertFalse(tick.contains("handleBlockBreakAction("),
@@ -91,8 +91,14 @@ class DirectMiningObservationSourceContractTest {
                 "action != ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK",
                 "visiblyAir(player, pos)",
                 "if (!currentObservedTarget(player, pos))",
-                "MiningSafety.supportOccupancy(player, pos)",
+                "footingOccupancy(player)",
                 "player.gameMode.handleBlockBreakAction(");
+        // Only the bot's own footing can ever be released, and only by the break TowerDescent starts.
+        String footing = body(source, "private MiningSafety.SupportOccupancy footingOccupancy(AIPlayerEntity player)");
+        assertTrue(footing.contains("MiningSafety.supportOccupancy(player, pos)")
+                        && footing.contains("releasesOwnFooting && support == MiningSafety.SupportOccupancy.SELF")
+                        && !footing.contains("SupportOccupancy.PLAYER"),
+                "another player's footing must stay protected whatever the controller is allowed to release");
         String abort = body(source, "public void abort(AIPlayerEntity player)");
         String reset = body(source, "private void resetProgress(AIPlayerEntity player)");
         assertTrue(abort.contains("sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK)")

@@ -21,7 +21,10 @@ final class MineMiningExplorationPrioritySourceContractTest {
         String source = Files.readString(SOURCE);
         String search = methodBody(source, "private void search(");
 
-        int visibleScan = search.indexOf("HarvestCore.nearestReachableBlock(");
+        assertTrue(methodBody(source, "private HarvestCore.TargetChoice nearestTarget(")
+                        .contains("HarvestCore.nearestReachableBlock("),
+                "the local scan stays the ordinary observed nearest-block search");
+        int visibleScan = search.indexOf("nearestTarget(bot)");
         int handoff = search.indexOf("if (startMiningExploration(bot))");
         int observedHop = search.indexOf("if (startObservedExploration(bot))");
         assertTrue(visibleScan >= 0 && handoff > visibleScan && observedHop > handoff,

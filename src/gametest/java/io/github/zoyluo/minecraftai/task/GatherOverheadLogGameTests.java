@@ -12,12 +12,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -50,7 +52,6 @@ public final class GatherOverheadLogGameTests {
             }
             c.require(c.world().getBlockState(log).isAir(), "the log is in the inventory but its block is still standing");
             c.require(c.maxFeetY >= c.feet.getY() + 2, "the bot never climbed: highest feet y " + c.maxFeetY);
-            c.require(InventoryAction.countItem(c.bot, Items.DIRT) < 8, "no dirt was spent, so nothing was built");
             List<String> lines = c.log();
             c.require(c.count(lines, "gather_pillar_start", "target='" + log.toShortString() + "'") == 1,
                     "expected exactly one pillar for the log: " + c.tail(lines));
@@ -257,7 +258,9 @@ public final class GatherOverheadLogGameTests {
     public void logOverALeafIsClimbedBesideTheLeaf(GameTestHelper context) {
         // A canopy log seen from a few blocks off, with a leaf directly under it. Its own column looks like the
         // cheapest pillar (the columns beside it need as many blocks, and it wins ties), but mining straight up
-        // that column crosses the leaf, which the break controller refuses once the pillar stands.
+        // that column crosses the leaf, which the break controller refuses once the pillar stands. The felled log
+        // lands on that leaf or slides off it, by chance: either way the bot has to end up with it (a drop that
+        // stays up there is let fall by breaking the leaf under it, from the pillar).
         Case c = new Case(context, "GatherOverheadUnderLeafGT", -1);
         BlockPos log = c.at(3, 8, 0);
         c.set(3, 8, 0, Blocks.OAK_LOG);
@@ -267,7 +270,7 @@ public final class GatherOverheadLogGameTests {
         task.start(c.bot);
 
         c.run(task, () -> {
-            if (InventoryAction.countItem(c.bot, Items.OAK_LOG) < 1) {
+            if (task.state() != TaskState.COMPLETED) {
                 return false;
             }
             List<String> lines = c.log();
@@ -278,6 +281,8 @@ public final class GatherOverheadLogGameTests {
                     "the pillar went up the log's own column, through the leaf: " + goal);
             c.require(c.count(lines, "gather_harvest_timeout") == 0 && c.count(lines, "gather_target_excluded") == 0,
                     "the climbed log was not mined: " + c.tail(lines));
+            c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 1,
+                    "the felled log was left where it came to rest: " + c.tail(lines));
             return true;
         });
     }
@@ -317,11 +322,11 @@ public final class GatherOverheadLogGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_pillar_of_three_is_left_by_stepping_off_and_the_next_log_is_climbed", maxTicks = 2400)
-    public void pillarOfThreeIsLeftBySteppingOffAndTheNextLogIsClimbed(GameTestHelper context) {
-        // Two logs eight up, six blocks apart: three supports each, the tallest tower a bot can step down from
-        // (the safe fall). The second log can only be climbed from the floor, so the bot has to get back down
-        // after the first one instead of sitting on its tower.
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_pillar_of_three_is_taken_down_and_the_next_log_is_climbed", maxTicks = 2400)
+    public void pillarOfThreeIsTakenDownAndTheNextLogIsClimbed(GameTestHelper context) {
+        // Two logs eight up, six blocks apart, three supports each. The second log can only be climbed from the
+        // floor, so the bot has to be back down after the first one instead of sitting on its tower, and the
+        // blocks of the first tower are what it builds the second one from.
         Case c = new Case(context, "GatherOverheadTowerGT", -3, 9);
         BlockPos first = c.at(0, 8, 0);
         BlockPos second = c.at(6, 8, 0);
@@ -350,26 +355,42 @@ public final class GatherOverheadLogGameTests {
             c.require(c.count(lines, "gather_pillar_start", "target='" + first.toShortString() + "'") >= 1
                             && c.count(lines, "gather_pillar_start", "target='" + second.toShortString() + "'") >= 1,
                     "each log needs its own pillar: " + c.tail(lines));
+            c.require(c.count(lines, "gather_tower_descended", "blocks='3'") >= 1 && c.count(lines, "gather_tower_descent_failed") == 0,
+                    "the first tower was not taken down block by block: " + c.tail(lines));
             return true;
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_log_needing_a_taller_pillar_than_a_safe_way_down_is_left_alone", maxTicks = 500)
-    public void logNeedingATallerPillarThanASafeWayDownIsLeftAlone(GameTestHelper context) {
-        // Twelve up needs a seven-block tower. The bot never breaks the block it stands on and a route steps down
-        // at most the safe fall, so it could never leave that tower: it must not build it.
+    @GameTest(environment = "minecraftai-gametest:gather_overhead_log_game_tests_tall_pillar_is_climbed_and_taken_down_again", maxTicks = 1500)
+    public void tallPillarIsClimbedAndTakenDownAgain(GameTestHelper context) {
+        // Twelve up needs a seven-block tower: more than a route steps down from (the safe fall), and a route never
+        // breaks the block under the bot's own feet. The bot takes the tower down the way a player does, one block
+        // under its feet at a time (every drop is a single block), and the task ends only once it stands on the floor.
         Case c = new Case(context, "GatherOverheadTooTallGT", -3, 9);
+        BlockPos log = c.at(0, 12, 0);
         c.set(0, 12, 0, Blocks.OAK_LOG);
         c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 8));
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
         task.start(c.bot);
 
         c.run(task, () -> {
-            if (c.ticks < 200) {
+            if (task.state() != TaskState.COMPLETED) {
                 return false;
             }
-            c.require(c.count(c.log(), "gather_pillar_start") == 0 && c.maxFeetY < c.feet.getY() + 2,
-                    "a bot that could not come down built a tower: " + c.tail(c.log()));
+            List<String> lines = c.log();
+            c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 1, "the quota closed without a log: " + c.tail(lines));
+            c.require(c.count(lines, "gather_pillar_start", "target='" + log.toShortString() + "'", "supports='7'") == 1,
+                    "expected one seven-block pillar: " + c.tail(lines));
+            c.require(c.maxFeetY >= c.feet.getY() + 7, "the bot never reached the top: highest feet y " + c.maxFeetY);
+            c.require(c.count(lines, "gather_tower_descended", "blocks='7'") == 1,
+                    "the tower was not taken down block by block: " + c.tail(lines));
+            c.require(c.bot.blockPosition().getY() == c.feet.getY(),
+                    "the task ended with the bot still " + (c.bot.blockPosition().getY() - c.feet.getY()) + " up: " + c.tail(lines));
+            for (int up = 0; up < 7; up++) {
+                c.require(c.world().getBlockState(c.at(0, up, 0)).isAir(), "a block of the tower is still standing at " + up);
+            }
+            c.require(InventoryAction.countItem(c.bot, Items.DIRT) >= 7,
+                    "the tower's blocks were not picked up again: " + InventoryAction.countItem(c.bot, Items.DIRT));
             return true;
         });
     }
@@ -402,7 +423,7 @@ public final class GatherOverheadLogGameTests {
     }
 
     /** One sealed room, one bot standing at its floor, and the log-reading helpers shared by every case. */
-    private static final class Case {
+    static final class Case {
         final GameTestHelper context;
         final Room room;
         final AIPlayerEntity bot;
@@ -477,7 +498,7 @@ public final class GatherOverheadLogGameTests {
         }
 
         /** Ticks the task each GameTest tick until {@code finished} says the case is over; a stuck case fails with its log. */
-        void run(GatherQuotaTask task, BooleanSupplier finished) {
+        void run(Task task, BooleanSupplier finished) {
             context.failIfEver(() -> {
                 if (done) {
                     return;
@@ -536,8 +557,13 @@ public final class GatherOverheadLogGameTests {
 
         /** The gather events of this bot, for a failure message. */
         String tail(List<String> lines) {
-            List<String> gather = lines.stream().filter(line -> line.contains("event=gather_")).toList();
-            return String.join(" | ", gather.subList(Math.max(0, gather.size() - 14), gather.size()).stream()
+            return tail(lines, "gather_");
+        }
+
+        /** The last events of this bot whose name starts with {@code prefix}, for a failure message. */
+        String tail(List<String> lines, String prefix) {
+            List<String> events = lines.stream().filter(line -> line.contains("event=" + prefix)).toList();
+            return String.join(" | ", events.subList(Math.max(0, events.size() - 14), events.size()).stream()
                     .map(line -> line.substring(Math.max(0, line.indexOf("event="))))
                     .toList());
         }
@@ -550,8 +576,16 @@ public final class GatherOverheadLogGameTests {
         }
 
         void fail(String message) {
+            String where = " | bot at " + bot.blockPosition().toShortString() + ", items " + drops();
             cleanup();
-            context.fail(Component.nullToEmpty(message));
+            context.fail(Component.nullToEmpty(message + where));
+        }
+
+        /** Where the item entities of this room lie, for a failure message. */
+        private String drops() {
+            return world().getEntitiesOfClass(ItemEntity.class, new AABB(at(-12, -3, -12).getX(), at(0, -3, 0).getY(),
+                            at(0, 0, -12).getZ(), at(12, 20, 12).getX(), at(0, 20, 0).getY(), at(0, 0, 12).getZ()))
+                    .stream().map(item -> item.getItem().getItem() + "@" + item.blockPosition().toShortString()).toList().toString();
         }
 
         void finish() {

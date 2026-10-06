@@ -1337,6 +1337,45 @@ public final class ActionPack {
     }
 
     /**
+     * Starts breaking the block the bot stands on, for the one case where that is the point: a bot on top of
+     * a pillar it placed itself takes it down block by block ({@link TowerDescent}). Every other break of the
+     * bot's own footing stays refused ({@link MiningSafety}). It is admitted only for the cell directly under
+     * a bot that stands on it and only when that cell holds one of the throwaway blocks a pillar is built from;
+     * what stands below it is the caller's business (the pillar it built), and another player's footing still
+     * blocks the break.
+     */
+    public ActionResult startOwnSupportMining(BlockPos pos) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
+        if (pos == null || !player.onGround() || !pos.equals(player.blockPosition().below())) {
+            return ActionResult.failed("not_own_support");
+        }
+        // Same order as startMining: the observation proof comes before any read of the cell.
+        if (!MiningController.currentObservedTarget(player, pos)) {
+            BotLog.action(player, "mine_refused", "reason", MiningController.TARGET_NOT_OBSERVED,
+                    "pos", LogFields.pos(pos));
+            return ActionResult.failed(MiningController.TARGET_NOT_OBSERVED);
+        }
+        if (MiningSafety.supportOccupancy(player, pos) == MiningSafety.SupportOccupancy.PLAYER) {
+            BotLog.action(player, "mine_refused", "reason", MiningSafety.PLAYER_SUPPORT, "pos", LogFields.pos(pos));
+            return ActionResult.failed(MiningSafety.PLAYER_SUPPORT);
+        }
+        if (!MaterialPalette.isPillarSupportItem(player.level().getBlockState(pos).getBlock().asItem())) {
+            return ActionResult.failed("not_pillar_support");
+        }
+        claim("mining");
+        completedMining = null;
+        failedMining = null;
+        miningGeneration++;
+        this.mining = MiningController.ownSupport(pos, Direction.UP);
+        clearRouteLease();
+        this.forward = 0.0F;
+        this.strafing = 0.0F;
+        return ActionResult.IN_PROGRESS;
+    }
+
+    /**
      * Consumes the exact completion receipt produced by this pack's current mining generation.
      * The receipt carries no world-state authority: it only settles the successful observed break
      * that {@link #tickMining()} has already committed, after an empty cell becomes occluded.
