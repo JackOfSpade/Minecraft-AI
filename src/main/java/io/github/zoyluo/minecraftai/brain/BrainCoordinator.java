@@ -113,7 +113,8 @@ public final class BrainCoordinator {
                 .isGoogleInteractionsEndpoint(config.llm())
                 ? new GeminiInteractionsApiClient(config.llm(), config.brain().maxToolCallsPerTurn())
                 : null;
-        executor = new AsyncDecisionExecutor(new OpenAiCompatibleApiClient(config.llm()), geminiInteractions);
+        executor = new AsyncDecisionExecutor(
+                OpenAiCompatibleApiClient.singleAttempt(config.llm()), geminiInteractions, this::leaseInFlight);
     }
 
     /** Preserves the speaker's real current view for ordinary/player-panel chat. */
@@ -855,30 +856,97 @@ public final class BrainCoordinator {
             logStaleDecision(lease, "error");
             return;
         }
-        String message = throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
-        BotLog.error(bot, "brain_hiccup", throwable, "message", message);
-        if (currentDecisionBudgetExhausted(conversation)) {
-            if (conversation.missionDecisionCall) {
-                finishMissionDecisionBudget(bot, conversation, "api_error");
-            } else {
-                finishCallBudget(bot, conversation, "api_error");
-            }
+        // The executor has already replayed every transient failure with backoff, outside this
+        // conversation's model-call budget (LlmRetryRunner), so an error that reaches here is final:
+        // the service stayed unavailable for the whole patience, or no retry could have helped. The
+        // bot's own task or goal was never touched and keeps running.
+        LlmApiException failure = LlmApiException.classify(throwable);
+        BotLog.error(bot, "brain_hiccup", throwable,
+                "message", conciseFailureMessage(failure.getMessage()),
+                "kind", failure.kind(),
+                "status", failure.httpStatus());
+        if (ApiFailureReport.repairWithAnotherCall(failure.kind(), conversation.failureReportCall,
+                currentDecisionBudgetExhausted(conversation), lease.equals(conversation.repairLease))) {
+            resubmitAfterUnusableReply(bot, conversation, failure);
             return;
         }
-        // A failed HTTP/model turn did not apply any game action. Keep the original instruction,
-        // native interaction id, and function-result batch intact, then spend one of the two
-        // permitted repair calls on a fresh attempt.
+        // Nothing more will be asked of the service for this call: an autonomous goal wake must not
+        // start another full retry cycle against it ten seconds from now.
+        nextGoalWakeTick.put(bot.getUUID(),
+                bot.level().getServer().getTickCount() + ApiFailureReport.GOAL_WAKE_COOLDOWN_TICKS);
+        if (conversation.failureReportCall) {
+            // The model was to report a failed task; the deterministic line still tells the player.
+            reportPendingFailureWithoutModel(bot, conversation);
+            return;
+        }
+        if (conversation.missionDecisionCall) {
+            finishMissionDecisionBudget(bot, conversation, "api_error");
+            return;
+        }
+        reportApiFailure(bot, conversation, failure);
+    }
+
+    /**
+     * The service answered but the reply was unusable. Unlike an outage this is a planner turn: it
+     * is metered by the call budget (submit reserves the call) and the model is told what was wrong.
+     * A failed HTTP/model turn did not apply any game action, so the original instruction, the native
+     * interaction id and the function-result batch stay intact for the fresh attempt.
+     */
+    private void resubmitAfterUnusableReply(AIPlayerEntity bot, BotConversation conversation, LlmApiException failure) {
+        String reason = conciseFailureMessage(failure.getMessage());
         conversation.history.add(ChatMessage.user(
-                "The previous AI request failed before it could finish. Retry the same player request now. "
-                        + "If a prior tool result is present, correct its error instead of repeating it unchanged. "
-                        + "Failure summary: " + conciseFailureMessage(message)));
+                "Your previous reply could not be used (" + reason + "). Answer the same request again now with a "
+                        + "complete, well-formed reply. If a prior tool result is present, correct its error "
+                        + "instead of repeating it unchanged."));
         trimHistory(conversation);
         DecisionLease retryLease = conversation.decision.beginEpoch();
+        conversation.repairLease = retryLease;
         BotLog.warn(LogCategory.COMM, bot, "model_call_retry_scheduled",
-                "model_call", conversation.callBudget.callsUsed() + 1,
-                "model_calls_remaining_before_retry", conversation.callBudget.callsRemaining(),
-                "reason", conciseFailureMessage(message));
+                "model_call", callsUsedForCurrentDecision(conversation) + 1,
+                "model_calls_remaining_before_retry", callsRemainingForCurrentDecision(conversation),
+                "reason", reason);
         submit(bot, conversation, retryLease);
+    }
+
+    /** Whether {@code lease} is still the request its conversation waits on: a backoff is dropped once it is not. */
+    private boolean leaseInFlight(DecisionLease lease) {
+        BotConversation conversation = conversations.get(lease.botId());
+        return conversation != null && conversation.decision.isInFlight(lease);
+    }
+
+    /**
+     * Tells the player why the model could not be reached, truthfully (the thinking service failed,
+     * not the request), once per instruction, and not at all when the request already finished
+     * successfully: then only the closing words were lost, and a failure text would be false.
+     */
+    private void reportApiFailure(AIPlayerEntity bot, BotConversation conversation, LlmApiException failure) {
+        boolean workActive = hasRuntimeWork(
+                TaskManager.INSTANCE.getActive(bot).isPresent(),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
+                bot.getActionPack().hasActiveActions()) || TaskManager.INSTANCE.hasPaused(bot);
+        boolean requestCompleted = ApiFailureReport.requestCompleted(
+                conversation.requestStarted,
+                workActive,
+                TaskManager.INSTANCE.peekFailure(bot).isPresent(),
+                BotMemoryStore.INSTANCE.of(bot.getUUID()).hasActiveGoal(),
+                TaskManager.INSTANCE.status(bot).state(),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.lastResult(bot)
+                        .map(io.github.zoyluo.minecraftai.goal.GoalResult::status).orElse(null));
+        ApiFailureReport.Decision decision = ApiFailureReport.decide(
+                conversation.budgetExhaustionReported, requestCompleted);
+        BotLog.warn(LogCategory.COMM, bot, "api_failure_final",
+                "kind", failure.kind(),
+                "status", failure.httpStatus(),
+                "decision", decision,
+                "request_started", conversation.requestStarted,
+                "work_active", workActive,
+                "instruction", conversation.callBudget.instructionSequence());
+        if (decision != ApiFailureReport.Decision.REPORT) {
+            return;
+        }
+        conversation.budgetExhaustionReported = true;
+        sendBotReply(bot, ApiFailureReport.playerMessage(failure));
     }
 
     public void reset(AIPlayerEntity bot) {
@@ -971,6 +1039,23 @@ public final class BrainCoordinator {
      * back without going through the heavier {@link #status}/conversation machinery. */
     public boolean isAwaitingTaskForTest(AIPlayerEntity bot) {
         return Boolean.TRUE.equals(awaitingTask.get(bot.getUUID()));
+    }
+
+    /**
+     * Test seam: fails the bot's in-flight model call the way the executor does once the retry patience
+     * is spent. A real outage takes five minutes to get there, too long for a GameTest.
+     * {@code requestStarted} stands for "a work-start tool of this instruction already succeeded".
+     */
+    void deliverFinalFailureForTest(AIPlayerEntity bot, LlmApiException failure, boolean requestStarted) {
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUUID(), BotConversation::new);
+        conversation.requestStarted = requestStarted;
+        onError(bot, conversation.decision.beginEpoch(), failure);
+    }
+
+    /** Test seam: how many model calls the bot's current player instruction has spent. */
+    int modelCallsUsedForTest(AIPlayerEntity bot) {
+        BotConversation conversation = conversations.get(bot.getUUID());
+        return conversation == null ? 0 : conversation.callBudget.callsUsed();
     }
 
     public void setManualMode(AIPlayerEntity bot, boolean enabled) {
@@ -2004,6 +2089,10 @@ public final class BrainCoordinator {
         private boolean requestStarted;
         // The call in flight is a failure report (set per call by submit, read by onResponse).
         private boolean failureReportCall;
+        // The request that is the one repair of an unusable reply: if it comes back unusable too, that is
+        // reported to the player instead of being asked for a third time. Leases are never reused, so a
+        // stale value can never match a later request.
+        private DecisionLease repairLease;
         // Distinct from requestStarted (which requires the paired action to have actually
         // succeeded/be active): a plan already spoken this turn should not be demanded again just
         // because the FOLLOWING action call failed on unrelated grounds (e.g. a bad tool argument).

@@ -17,6 +17,7 @@
       "io.github.zoyluo.minecraftai.goal.DeathRecoveryMissionGameTests",
       "io.github.zoyluo.minecraftai.goal.MiningCheckpointMissionGameTests",
       "io.github.zoyluo.minecraftai.brain.ToolRegistryMiningGameTests",
+      "io.github.zoyluo.minecraftai.brain.BrainApiFailureGameTests",
       "io.github.zoyluo.minecraftai.action.ActionPackPhysicalSnapGameTests",
       "io.github.zoyluo.minecraftai.action.ActionPackSuppressedSnapGameTests",
       "io.github.zoyluo.minecraftai.action.NaturalMovementGameTests",

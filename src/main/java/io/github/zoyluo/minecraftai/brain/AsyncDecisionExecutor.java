@@ -4,14 +4,26 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
+/**
+ * Runs model requests off the server thread. A request that fails only transiently (overload, rate
+ * limit, timeout, dropped connection) is replayed here, unchanged and outside the per-instruction
+ * model-call budget, until it answers, fails for good or its lease is no longer in flight; see
+ * {@link LlmRetryRunner}. The caller therefore sees exactly one callback per request.
+ */
 public final class AsyncDecisionExecutor {
     private final OpenAiCompatibleApiClient apiClient;
     private final GeminiInteractionsApiClient geminiInteractionsClient;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
+    private final Predicate<DecisionLease> leaseInFlight;
+    private final LlmRetryRunner retryRunner;
 
     public AsyncDecisionExecutor(OpenAiCompatibleApiClient apiClient) {
         this(apiClient, null);
@@ -19,8 +31,24 @@ public final class AsyncDecisionExecutor {
 
     public AsyncDecisionExecutor(OpenAiCompatibleApiClient apiClient,
                                  GeminiInteractionsApiClient geminiInteractionsClient) {
+        this(apiClient, geminiInteractionsClient, lease -> true);
+    }
+
+    /**
+     * @param leaseInFlight whether a lease is still the request its decision session waits on; a
+     *                      request waiting out a backoff is dropped once this turns false
+     */
+    public AsyncDecisionExecutor(OpenAiCompatibleApiClient apiClient,
+                                 GeminiInteractionsApiClient geminiInteractionsClient,
+                                 Predicate<DecisionLease> leaseInFlight) {
         this.apiClient = apiClient;
         this.geminiInteractionsClient = geminiInteractionsClient;
+        this.leaseInFlight = leaseInFlight;
+        this.retryRunner = new LlmRetryRunner(
+                executor,
+                (delayMillis, task) -> CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS).execute(task),
+                () -> System.nanoTime() / 1_000_000L,
+                new LlmRetryPolicy(() -> ThreadLocalRandom.current().nextDouble()));
     }
 
     public boolean usesGeminiInteractions() {
@@ -53,23 +81,27 @@ public final class AsyncDecisionExecutor {
         var server = bot.level().getServer();
         var botId = bot.getUUID();
         String botName = bot.getGameProfile().name();
-        executor.submit(() -> {
-            long started = System.nanoTime();
-            try {
-                ChatResponse response = geminiRequest == null
-                        ? (requireToolCall && tools != null && !tools.isEmpty()
-                                ? apiClient.chatRequiringToolCall(historySnapshot, tools)
-                                : apiClient.chat(historySnapshot, tools))
-                        : executeGeminiInteraction(geminiRequest, tools);
-                long elapsed = System.nanoTime() - started;
-                server.execute(() -> onResponse.accept(lease, response));
-                BotProfiler.INSTANCE.record(botId, botName, "brain_latency", elapsed);
-            } catch (Exception exception) {
-                long elapsed = System.nanoTime() - started;
-                BotProfiler.INSTANCE.record(botId, botName, "brain_latency_error", elapsed);
-                server.execute(() -> onError.accept(lease, exception));
-            }
-        });
+        retryRunner.run(
+                botName,
+                () -> {
+                    // Timed per attempt: the latency a retry spends waiting is not the service's.
+                    long started = System.nanoTime();
+                    try {
+                        ChatResponse response = geminiRequest == null
+                                ? (requireToolCall && tools != null && !tools.isEmpty()
+                                        ? apiClient.chatRequiringToolCall(historySnapshot, tools)
+                                        : apiClient.chat(historySnapshot, tools))
+                                : executeGeminiInteraction(geminiRequest, tools);
+                        BotProfiler.INSTANCE.record(botId, botName, "brain_latency", System.nanoTime() - started);
+                        return response;
+                    } catch (Exception exception) {
+                        BotProfiler.INSTANCE.record(botId, botName, "brain_latency_error", System.nanoTime() - started);
+                        throw exception;
+                    }
+                },
+                () -> leaseInFlight.test(lease),
+                response -> server.execute(() -> onResponse.accept(lease, response)),
+                failure -> server.execute(() -> onError.accept(lease, failure)));
     }
 
     private ChatResponse executeGeminiInteraction(GeminiInteractionRequest request,

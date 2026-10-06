@@ -32,6 +32,18 @@ public final class OpenAiCompatibleApiClient {
                 .build();
     }
 
+    /**
+     * A client that sends each request exactly once. The brain's own retry (LlmRetryRunner) waits
+     * without holding a thread and keeps retries out of the model-call budget; the sleep-and-retry
+     * loop this client otherwise runs on a worker thread would stack a second, invisible round of
+     * attempts under it.
+     */
+    public static OpenAiCompatibleApiClient singleAttempt(MinecraftAiConfig.Llm config) {
+        return new OpenAiCompatibleApiClient(new MinecraftAiConfig.Llm(
+                config.apiKey(), config.baseUrl(), config.model(), config.maxTokens(), config.temperature(),
+                config.timeoutSeconds(), 0, config.retryBackoffMs(), config.thinking(), config.reasoningEffort()));
+    }
+
     public ChatResponse chat(List<ChatMessage> history, List<ToolDefinition> tools) throws LlmApiException {
         return chat(history, tools, false);
     }
@@ -51,7 +63,7 @@ public final class OpenAiCompatibleApiClient {
                               List<ToolDefinition> tools,
                               boolean requireToolCall) throws LlmApiException {
         if (config.apiKey() == null || config.apiKey().isBlank()) {
-            throw new LlmApiException("llm_api_key_missing");
+            throw new LlmApiException("llm_api_key_missing", LlmApiException.Kind.AUTH, 0, null, null);
         }
 
         LlmApiException lastFailure = null;
@@ -62,13 +74,14 @@ public final class OpenAiCompatibleApiClient {
             HttpResponse<String> response = sendWithRetry(request);
             if (response.statusCode() == 200) {
                 if (response.body() == null || response.body().isBlank()) {
-                    throw new LlmApiException("empty_response");
+                    throw LlmApiException.unusableReply("empty_response", null);
                 }
                 return parseResponse(response.body());
             }
 
             String reason = classifyStatus(response.statusCode(), response.body());
-            lastFailure = new LlmApiException(reason);
+            lastFailure = new LlmApiException(reason, LlmHttpStatus.kind(response.statusCode()),
+                    response.statusCode(), LlmHttpStatus.retryAfter(response), null);
             if (!shouldTryNextModel(response.statusCode(), models, index)) {
                 throw lastFailure;
             }
@@ -150,7 +163,8 @@ public final class OpenAiCompatibleApiClient {
             } catch (HttpTimeoutException exception) {
                 if (attempt >= attempts) {
                     BotLog.error("api_timeout", exception, "attempt", attempt);
-                    throw new LlmApiException("api_timeout: " + exception.getMessage(), exception);
+                    throw new LlmApiException("api_timeout: " + exception.getMessage(),
+                            LlmApiException.Kind.TRANSIENT, 0, null, exception);
                 }
                 BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", "api_timeout", "backoff_ms", backoffMs);
                 sleep(backoffMs);
@@ -158,7 +172,8 @@ public final class OpenAiCompatibleApiClient {
             } catch (IOException exception) {
                 if (attempt >= attempts) {
                     BotLog.error("api_io_error", exception, "attempt", attempt);
-                    throw new LlmApiException("io_error: " + exception.getMessage(), exception);
+                    throw new LlmApiException("io_error: " + exception.getMessage(),
+                            LlmApiException.Kind.TRANSIENT, 0, null, exception);
                 }
                 BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", "io_error", "backoff_ms", backoffMs);
                 sleep(backoffMs);
@@ -300,7 +315,7 @@ public final class OpenAiCompatibleApiClient {
                     ? root.getAsJsonArray("choices")
                     : null;
             if (choices == null || choices.isEmpty()) {
-                throw new LlmApiException("empty_choices");
+                throw LlmApiException.unusableReply("empty_choices", null);
             }
             JsonObject choice = choices.get(0).getAsJsonObject();
             JsonObject message = choice.getAsJsonObject("message");
@@ -346,7 +361,7 @@ public final class OpenAiCompatibleApiClient {
             throw exception;
         } catch (RuntimeException exception) {
             BotLog.error("api_parse_error", exception, "body_excerpt", body.substring(0, Math.min(200, body.length())));
-            throw new LlmApiException("bad_response: " + exception.getMessage(), exception);
+            throw LlmApiException.unusableReply("bad_response: " + exception.getMessage(), exception);
         }
     }
 
