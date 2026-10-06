@@ -64,6 +64,56 @@ public final class OreDigPillarGameTests {
         pillarsUpAndMines(context, fixture, task);
     }
 
+    /**
+     * The tower of the first pillar must not cap the pillars of the rest of the task: a second coal in a cave whose floor is higher than the
+     * first tower can be (a hillside above it) is built up to from that floor, counted from that ground.
+     */
+    @GameTest(maxTicks = 7200)
+    public void aSecondCoalOnHigherGroundIsBuiltUpToFromThatGroundNotFromTheFirstTowersGround(GameTestHelper context) {
+        Fixture fixture = build(context, "PillarHigherGT", 4, RESERVE + 12);
+        AIPlayerEntity bot = fixture.bot();
+        ServerLevel world = bot.level();
+        BlockPos highOre = fixture.ore().offset(0, HIGHER_GROUND, HIGH_CAVE_OFFSET);
+        carveCave(world, highOre, 4);
+        BlockPos highStand = highOre.offset(OUT + 1, -4, 0);
+        int deaths = deathCount(bot);
+        OreDigTask task = new OreDigTask(OreScan.oreFamily(Blocks.COAL_ORE), 2);
+        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_pillar_higher_ground"));
+
+        boolean[] onHigherGround = {false};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                fail(context, "the task ended as " + task.state() + ":" + task.failureReason()
+                        + " at " + bot.blockPosition().toShortString());
+            }
+            if (!onHigherGround[0]) {
+                // The first coal is mined from the top of its tower; the bot then climbs the hillside to the second cave.
+                if (world.getBlockState(fixture.ore()).isAir() && InventoryAction.countItem(bot, Items.COAL) >= 1) {
+                    onHigherGround[0] = true;
+                    bot.teleportTo(world, highStand.getX() + 0.5D, highStand.getY(), highStand.getZ() + 0.5D,
+                            Set.of(), 90.0F, 0.0F, true);
+                }
+                return;
+            }
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            require(context, world.getBlockState(highOre).isAir(), "the second coal was not mined");
+            require(context, InventoryAction.countItem(bot, Items.COAL) >= 2,
+                    "the second coal drop was not collected: " + InventoryAction.countItem(bot, Items.COAL));
+            // Not by a stair dug into the wall, which the bot also falls back to after refusing the pillar for a while.
+            int tower = 0;
+            for (int dy = -4; dy <= 0; dy++) {
+                if (world.getBlockState(highOre.offset(1, dy, 0)).is(Blocks.COBBLESTONE)) {
+                    tower++;
+                }
+            }
+            require(context, tower >= 1, "the second coal was reached without a pillar of cobblestone beside it");
+            finish(context, fixture);
+        });
+    }
+
     @SuppressWarnings("unchecked")
     private static Deque<BlockPos> queuedVeinMembers(OreDigTask task) {
         try {
@@ -200,10 +250,12 @@ public final class OreDigPillarGameTests {
     private static final int MAX_Z = 8;
     private static final int TOP = 10;
 
-    /** The coal at the origin of a stone wall, a cave in front of it, and the bot on its floor {@code height} under the coal. */
-    private static Fixture build(GameTestHelper context, String name, int height, int cobblestone) {
-        ServerLevel world = context.getLevel();
-        BlockPos ore = context.absolutePos(new BlockPos(8, 20, 8));
+    /** Where the second cave of a test sits against the first: further along the wall, with a floor higher than any tower of the first pillar. */
+    private static final int HIGHER_GROUND = 6;
+    private static final int HIGH_CAVE_OFFSET = 24;
+
+    /** The coal at {@code ore} in a stone wall with a cave in front of it, its floor {@code height} under the coal. */
+    private static void carveCave(ServerLevel world, BlockPos ore, int height) {
         for (int dx = MIN_X; dx <= MAX_X; dx++) {
             for (int dy = -height - 6; dy <= TOP; dy++) {
                 for (int dz = MIN_Z; dz <= MAX_Z; dz++) {
@@ -214,6 +266,13 @@ public final class OreDigPillarGameTests {
             }
         }
         world.setBlock(ore, Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
+    }
+
+    /** The coal at the origin of a stone wall, a cave in front of it, and the bot on its floor {@code height} under the coal. */
+    private static Fixture build(GameTestHelper context, String name, int height, int cobblestone) {
+        ServerLevel world = context.getLevel();
+        BlockPos ore = context.absolutePos(new BlockPos(8, 20, 8));
+        carveCave(world, ore, height);
         BlockPos stand = ore.offset(OUT + 1, -height, 0).immutable();
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(stand), 90.0F, 0.0F, GameType.SURVIVAL)

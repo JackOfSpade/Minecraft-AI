@@ -296,7 +296,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /** The height the bot stood at when that pillar began: a pillar that ends short of its pose has to have risen to be planned again. */
     private int orePillarStartY;
     /** The natural ground under the tower the bot stands on, so a second pillar on top of the first cannot outgrow the safe fall. */
-    private Integer orePillarFloorY;
+    private final OrePillarTower orePillarTower = new OrePillarTower();
     /** One fresh depth handoff, plus bounded re-descent only after a real cave survey. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
@@ -4349,8 +4349,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * throwaway blocks, only in a column of cells it has seen are air, from a stack that holds the
      * pillar beyond the mission's protected stone, and the tower is never taller than the bot can
      * step down from again
-     * ({@link HarvestCore#maxPillarSupports()}, counted from the ground the first pillar of the
-     * ore began on, so a second pillar on top of the first cannot strand it). An ore that none of
+     * ({@link HarvestCore#maxPillarSupports()}, counted from the natural ground the tower rests on
+     * ({@link OrePillarTower}), so a second pillar on top of the first cannot strand it while a
+     * pillar begun from other ground, on a hillside, counts from that ground). An ore that none of
      * that reaches, or that the bot carries no blocks for, is left to the other ways.</p>
      *
      * @return true when a pillar route was started for {@code ore}
@@ -4365,10 +4366,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         BlockPos feet = bot.blockPosition();
-        if (orePillarFloorY == null || feet.getY() <= orePillarFloorY) {
-            orePillarFloorY = feet.getY();
-        }
-        int highestGoalY = orePillarFloorY + HarvestCore.maxPillarSupports();
+        int highestGoalY = orePillarTower.groundUnder(feet, HarvestCore.maxPillarSupports())
+                + HarvestCore.maxPillarSupports();
         HarvestCore.PillarApproach approach = HarvestCore.pillarApproachFor(bot, ore, targetOres,
                 goal -> goal.getY() <= highestGoalY
                         && isRecoverableBreakPose(goal, ore)
@@ -4403,6 +4402,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         highTargetClimbOwner = ore.immutable();
         orePillarGoal = goal;
+        orePillarTower.rises(goal);
         orePillarStartY = feet.getY();
         targetApproachTick = elapsed;
         noteProgress();
