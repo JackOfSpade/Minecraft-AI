@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
@@ -3014,13 +3015,18 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
             ActionResult result = bot.getActionPack().startPathTo(workFace);
-            if (result.isFailed()) {
+            if (result.isFailed() && !isThrottled(result)) {
                 result = bot.getActionPack().startDigPathTo(workFace);
             }
-            if (result.isFailed()) {
+            // A throttled request is a route asked for again too soon, not a failed return: it is asked again on a later tick.
+            if (result.isFailed() && !isThrottled(result)) {
                 fail("mining_service_return_failed:" + result.reason());
             }
         }
+    }
+
+    private static boolean isThrottled(ActionResult result) {
+        return ActionPack.PATHFINDING_THROTTLED.equals(result.reason());
     }
 
     @Override

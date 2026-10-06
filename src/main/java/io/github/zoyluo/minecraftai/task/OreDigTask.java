@@ -2402,6 +2402,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         "hop", observedOreSearchCompletedHops,
                         "at", bot.blockPosition().toShortString(),
                         "attempts", observedOreSearch.attempts());
+            } else {
+                // A heading the fence resolved to a stance the bot already stands near is not a completed hop, and it
+                // is not admitted again: the search remembers where it looked and would choose the same heading from
+                // here every time, so the episode would spend all its hops on that one stance.
+                observedOreSearch.retireObservedGoal(observedOreSearchTarget);
             }
             bot.getActionPack().stopAll();
             clearObservedOreSearchLeg();
@@ -2414,6 +2419,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             BotLog.action(bot, "ore_dig_explore_hop_ended",
                     "reason", legAge > OBSERVED_SEARCH_MOVE_LIMIT ? "timeout" : "route_ended",
                     "to", observedOreSearchTarget.toShortString());
+            // A leg that ended short of its stance would end short of it again.
+            observedOreSearch.retireObservedGoal(observedOreSearchTarget);
             bot.getActionPack().stopAll();
             clearObservedOreSearchLeg();
             lastScanTick = -SCAN_INTERVAL;
@@ -3996,6 +4003,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // active break into a target-drop debt. A remote checkpoint hint is allowed to widen
             // the view only through short observation-fenced, no-dig hops toward that known
             // coordinate; it is never permission to carve toward an UNKNOWN block.
+            if (isOverheadInOwnColumn(bot, v)
+                    && approachGoalFor(bot, world, v) == null
+                    && rememberedHighWorkPose(bot, world, v) == null) {
+                // Straight above the bot, what hides the member is the ore under it, and an overhead
+                // member is released as soon as it is seen (see approachTargetOre). Re-observing it
+                // would send the bot to a side stance where it is seen and approach walks the bot back
+                // under it, where it is hidden again: a hop and a return, for as long as the task runs.
+                abandonTargetApproach(bot, v, "overhead_drop_catch_unproven", v.below());
+                return true;
+            }
             if (miner.target() != null) {
                 // This is only a stale channel transaction from before this member became
                 // occluded.  Do not finish it (or begin a replacement) while the queued owner is
@@ -4157,6 +4174,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 || !bot.getActionPack().isWalkToIdle();
     }
 
+    /** Whether {@code ore} is straight above the bot and higher than any ordinary break pose reaches. */
+    private static boolean isOverheadInOwnColumn(AIPlayerEntity bot, BlockPos ore) {
+        BlockPos feet = bot.blockPosition();
+        return ore.getX() == feet.getX()
+                && ore.getZ() == feet.getZ()
+                && ore.getY() - feet.getY() > MAX_TARGET_BREAK_DY;
+    }
+
     /** A queued member is a finite same-vein owner, unlike an ordinary scan candidate. */
     private boolean isQueuedVeinMember(BlockPos ore) {
         BlockPos head = veinQueue.peekFirst();
@@ -4205,10 +4230,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 climbTowardHighTarget(bot, world, ore);
                 return;
             }
-            BlockPos feet = bot.blockPosition();
-            if (ore.getX() == feet.getX()
-                    && ore.getZ() == feet.getZ()
-                    && ore.getY() - feet.getY() > MAX_TARGET_BREAK_DY) {
+            if (isOverheadInOwnColumn(bot, ore)) {
                 // A vertical air column is not a sealed item funnel. Vanilla block drops start at
                 // a random X/Z offset and retain horizontal velocity, so a high drop can leave the
                 // shaft and settle on an unreachable ledge before entering player collision range.

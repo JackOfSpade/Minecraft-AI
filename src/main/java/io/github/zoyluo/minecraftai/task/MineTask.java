@@ -721,6 +721,8 @@ public final class MineTask extends AbstractTask {
             BotLog.action(bot, "mine_explore_hop_ended",
                     "reason", elapsed - exploreStartedTick > EXPLORE_MOVE_LIMIT ? "timeout" : "route_ended",
                     "to", exploreTarget.toShortString());
+            // A leg that ended short of its stance would end short of it again.
+            observedSearchHops.retireObservedGoal(exploreTarget);
             bot.getActionPack().stopAll();
             clearExploreLeg();
             phase = Phase.SEARCHING;
@@ -734,6 +736,10 @@ public final class MineTask extends AbstractTask {
                     "hop", completedExploreHops,
                     "at", bot.blockPosition().toShortString(),
                     "attempts", observedSearchHops.attempts());
+        } else {
+            // A heading the fence resolved to a stance the bot already stands near is not a completed hop, and it is not
+            // admitted again: the search remembers where it looked and would choose the same heading from here every time.
+            observedSearchHops.retireObservedGoal(exploreTarget);
         }
     }
 

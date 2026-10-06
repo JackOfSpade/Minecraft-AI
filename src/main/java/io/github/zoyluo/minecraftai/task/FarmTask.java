@@ -376,11 +376,8 @@ public final class FarmTask extends AbstractTask implements CheckpointableTask {
             waitingForMaturity = false;
             if (darkCells > 0 && needMore && completedActions == 0) {
                 // Crops need light >= 8 at the crop cell (vanilla rule); seeds cannot be planted here, and
-                // waiting would only burn the whole quota timeout.
-                if (!isResourceCollection()) {
-                    fail("farm_area_too_dark cells=" + darkCells);
-                    return;
-                }
+                // waiting would only burn the whole quota timeout. Only a produce request gets here (see
+                // isResourceCollection), and it widens its observed search for a lit field instead of failing.
                 note = "waiting_for_observed_lit_crop_area";
                 if (startResourceExploration(bot)) {
                     return;
