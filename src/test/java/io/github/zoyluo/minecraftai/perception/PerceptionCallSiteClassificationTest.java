@@ -59,6 +59,7 @@ class PerceptionCallSiteClassificationTest {
         m.put("task/FollowEscort.java", Counts.of(1, 0, 0));
         m.put("perception/PerceptionCollector.java", Counts.of(1, 1, 0));      // what the LLM is told it sees: creatures noticed; dropped items observed
         m.put("log/DiagnosticLogger.java", Counts.of(1, 0, 0));
+        m.put("brain/AmbientConversationCoordinator.java", Counts.of(1, 0, 0)); // ambient chat: a canned line needs an addressee the speaker has noticed
         m.put("baritone/ServerPlayerContext.java", Counts.of(1, 1, 0));        // mob avoidance: noticed mobs; dropped items observed
         // ---- objects and deliberate searches (unchanged on purpose)
         m.put("action/HarvestCore.java", Counts.of(0, 2, 0));                  // dropped items

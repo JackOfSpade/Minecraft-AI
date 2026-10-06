@@ -139,7 +139,8 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
 * **Call sites.** `PerceptionCallSiteClassificationTest` lists every caller of `canNoticeCreature`, `canObserveEntity` and
   `hasLineOfSight` with its class: creature noticing (DangerWatcher threat scans, AggroSense, CombatCore target acquisition,
   CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision, ShieldGuard,
-  HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance), objects and deliberate searches (kept
+  HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance, AmbientConversationCoordinator: a canned ambient line needs an addressee
+  the speaker has noticed), objects and deliberate searches (kept
   omnidirectional: drops, boats, prey, the discovery task's deliberate sheep survey, breeding, milking, trading, the landmark evidence of the mining assist) and physical strike legality (kept).
   The `attack_entity` command only considers creatures the bot has noticed (animals and villagers stay omnidirectional) and is refused with `busy` while another task runs (never replaces it, and a refused call does not turn the bot's head: a busy bot
   only strikes what is already under its crosshair).
