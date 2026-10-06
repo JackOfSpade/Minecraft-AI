@@ -142,9 +142,9 @@ public final class GeminiInteractionsApiClient {
                                         JsonObject body,
                                         int toolCount,
                                         int functionResultCount) throws GeminiInteractionsApiException {
-        // A planner turn is exactly one HTTP request. Transport retries or model fallbacks here
-        // would invisibly exceed the player-visible "initial + two repairs" allowance. Failures
-        // instead return to BrainCoordinator, which records and spends one explicit repair turn.
+        // A call is exactly one HTTP request. Retrying a transient failure is the caller's job
+        // (LlmRetryRunner replays this same request outside the per-instruction model-call budget);
+        // retrying or falling back to another model here would hide attempts from that accounting.
         String model = config.model();
         body.addProperty("model", model);
         BotLog.api(null, "gemini_interaction_request",
@@ -157,7 +157,9 @@ public final class GeminiInteractionsApiClient {
         if (response.statusCode() == 200) {
             return parseResponse(response.body(), maxFunctionCallsPerResponse);
         }
-        throw new GeminiInteractionsApiException(classifyStatus(response.statusCode(), response.body()));
+        int status = response.statusCode();
+        throw new GeminiInteractionsApiException(classifyStatus(status, response.body()),
+                LlmHttpStatus.kind(status), status, LlmHttpStatus.retryAfter(response), null);
     }
 
     private JsonObject baseBody() {
@@ -232,9 +234,12 @@ public final class GeminiInteractionsApiClient {
         try {
             return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (HttpTimeoutException exception) {
-            throw new GeminiInteractionsApiException("api_timeout: " + exception.getMessage(), exception);
+            throw new GeminiInteractionsApiException("api_timeout: " + exception.getMessage(),
+                    LlmApiException.Kind.TRANSIENT, 0, null, exception);
         } catch (IOException exception) {
-            throw new GeminiInteractionsApiException("io_error: " + exception.getMessage(), exception);
+            // A reset or dropped connection, an unreachable host: the next attempt may well get through.
+            throw new GeminiInteractionsApiException("io_error: " + exception.getMessage(),
+                    LlmApiException.Kind.TRANSIENT, 0, null, exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new GeminiInteractionsApiException("interrupted", exception);
@@ -502,13 +507,17 @@ public final class GeminiInteractionsApiClient {
         }
     }
 
-    public static final class GeminiInteractionsApiException extends Exception {
+    public static final class GeminiInteractionsApiException extends LlmApiException {
         public GeminiInteractionsApiException(String message) {
             super(message);
         }
 
         public GeminiInteractionsApiException(String message, Throwable cause) {
             super(message, cause);
+        }
+
+        GeminiInteractionsApiException(String message, Kind kind, int httpStatus, Duration retryAfter, Throwable cause) {
+            super(message, kind, httpStatus, retryAfter, cause);
         }
     }
 }

@@ -215,7 +215,8 @@ public final class BrainCoordinator {
                 .isGoogleInteractionsEndpoint(config.llm())
                 ? new GeminiInteractionsApiClient(config.llm(), config.brain().maxToolCallsPerTurn())
                 : null;
-        executor = new AsyncDecisionExecutor(new OpenAiCompatibleApiClient(config.llm()), geminiInteractions);
+        executor = new AsyncDecisionExecutor(
+                OpenAiCompatibleApiClient.singleAttempt(config.llm()), geminiInteractions, this::leaseInFlight);
     }
 
     /** Preserves the speaker's real current view for ordinary/player-panel chat. */
@@ -1055,30 +1056,66 @@ public final class BrainCoordinator {
             logStaleDecision(lease, "error");
             return;
         }
-        String message = throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
-        BotLog.error(bot, "brain_hiccup", throwable, "message", message);
-        if (currentDecisionBudgetExhausted(conversation)) {
-            if (conversation.missionDecisionCall) {
-                finishMissionDecisionBudget(bot, conversation, "api_error");
-            } else {
-                finishCallBudget(bot, conversation, "api_error");
-            }
+        // The executor has already replayed every transient failure with backoff, outside this
+        // conversation's model-call budget (LlmRetryRunner), so an error that reaches here is final:
+        // the service stayed unavailable for the whole patience, or no retry could have helped. It
+        // is not a planner turn, so it spends no call and adds nothing to the history; the bot's
+        // own task or goal was never touched and keeps running.
+        LlmApiException failure = LlmApiException.classify(throwable);
+        BotLog.error(bot, "brain_hiccup", throwable,
+                "message", conciseFailureMessage(failure.getMessage()),
+                "kind", failure.kind(),
+                "status", failure.httpStatus());
+        if (conversation.failureReportCall) {
+            // The model was to report a failed task; the deterministic line still tells the player.
+            reportPendingFailureWithoutModel(bot, conversation);
             return;
         }
-        // A failed HTTP/model turn did not apply any game action. Keep the original instruction,
-        // native interaction id, and function-result batch intact, then spend one of the two
-        // permitted repair calls on a fresh attempt.
-        conversation.history.add(ChatMessage.user(
-                "The previous AI request failed before it could finish. Retry the same player request now. "
-                        + "If a prior tool result is present, correct its error instead of repeating it unchanged. "
-                        + "Failure summary: " + conciseFailureMessage(message)));
-        trimHistory(conversation);
-        DecisionLease retryLease = conversation.decision.beginEpoch();
-        BotLog.warn(LogCategory.COMM, bot, "model_call_retry_scheduled",
-                "model_call", conversation.callBudget.callsUsed() + 1,
-                "model_calls_remaining_before_retry", conversation.callBudget.callsRemaining(),
-                "reason", conciseFailureMessage(message));
-        submit(bot, conversation, retryLease);
+        if (conversation.missionDecisionCall) {
+            finishMissionDecisionBudget(bot, conversation, "api_error");
+            return;
+        }
+        reportApiFailure(bot, conversation, failure);
+    }
+
+    /** Whether {@code lease} is still the request its conversation waits on: a backoff is dropped once it is not. */
+    private boolean leaseInFlight(DecisionLease lease) {
+        BotConversation conversation = conversations.get(lease.botId());
+        return conversation != null && conversation.decision.isInFlight(lease);
+    }
+
+    /**
+     * Tells the player why the model could not be reached, truthfully (the thinking service failed,
+     * not the request), once per instruction, and not at all when the request already finished
+     * successfully: then only the closing words were lost, and a failure text would be false.
+     */
+    private void reportApiFailure(AIPlayerEntity bot, BotConversation conversation, LlmApiException failure) {
+        boolean workActive = hasRuntimeWork(
+                TaskManager.INSTANCE.getActive(bot).isPresent(),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
+                bot.getActionPack().hasActiveActions()) || TaskManager.INSTANCE.hasPaused(bot);
+        boolean requestCompleted = ApiFailureReport.requestCompleted(
+                conversation.requestStarted,
+                workActive,
+                TaskManager.INSTANCE.peekFailure(bot).isPresent(),
+                TaskManager.INSTANCE.status(bot).state(),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.lastResult(bot)
+                        .map(io.github.zoyluo.minecraftai.goal.GoalResult::status).orElse(null));
+        ApiFailureReport.Decision decision = ApiFailureReport.decide(
+                conversation.budgetExhaustionReported, requestCompleted);
+        BotLog.warn(LogCategory.COMM, bot, "api_failure_final",
+                "kind", failure.kind(),
+                "status", failure.httpStatus(),
+                "decision", decision,
+                "request_started", conversation.requestStarted,
+                "work_active", workActive,
+                "instruction", conversation.callBudget.instructionSequence());
+        if (decision != ApiFailureReport.Decision.REPORT) {
+            return;
+        }
+        conversation.budgetExhaustionReported = true;
+        sendBotReply(bot, ApiFailureReport.playerMessage(failure));
     }
 
     public void reset(AIPlayerEntity bot) {

@@ -157,6 +157,42 @@ final class DecisionSessionTest {
     }
 
     @Test
+    void aRequestIsInFlightUntilSomethingReplacesOrEndsIt() {
+        DecisionSession session = new DecisionSession(BOT_ID, SESSION_ID);
+        DecisionLease lease = session.beginEpoch();
+
+        assertTrue(session.isInFlight(lease));
+        // Asking never claims the lease: a retry may check it as often as it likes.
+        assertTrue(session.isInFlight(lease));
+        assertTrue(session.tryAcceptError(lease));
+        assertFalse(session.isInFlight(lease));
+    }
+
+    @Test
+    void aNewerMessageOrAnIntentCancelEndsTheWaitingRequest() {
+        DecisionSession session = new DecisionSession(BOT_ID, SESSION_ID);
+        DecisionLease backingOff = session.beginEpoch();
+        assertTrue(session.isInFlight(backingOff));
+
+        DecisionLease newerMessage = session.beginEpoch();
+        assertFalse(session.isInFlight(backingOff));
+        assertTrue(session.isInFlight(newerMessage));
+
+        assertTrue(session.invalidateIfBusy()); // what an intent cancel does to a busy decision
+        assertFalse(session.isInFlight(newerMessage));
+    }
+
+    @Test
+    void aRequestStopsBeingInFlightOnceItsResponseIsClaimed() {
+        DecisionSession session = new DecisionSession(BOT_ID, SESSION_ID);
+        DecisionLease lease = session.beginEpoch();
+
+        assertTrue(session.tryAcceptResponse(lease));
+
+        assertFalse(session.isInFlight(lease));
+    }
+
+    @Test
     void failedSubmissionReturnsOnlyItsOwnInflightLeaseToIdle() {
         DecisionSession session = new DecisionSession(BOT_ID, SESSION_ID);
         DecisionLease stale = session.beginEpoch();

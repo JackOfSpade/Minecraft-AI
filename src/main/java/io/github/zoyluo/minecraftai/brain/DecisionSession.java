@@ -91,6 +91,15 @@ public final class DecisionSession {
         return true;
     }
 
+    /**
+     * Whether {@code lease} is still the request this session is waiting on. Unlike
+     * {@link #tryAcceptError} it claims nothing: the retry of a failed request asks it before each
+     * new attempt, so a request that was replaced or cancelled while it waited is not sent again.
+     */
+    public synchronized boolean isInFlight(DecisionLease lease) {
+        return phase == DecisionPhase.IN_FLIGHT && matches(lease);
+    }
+
     public synchronized boolean isWaiting(DecisionLease lease) {
         return phase == DecisionPhase.WAITING_CONTINUATION && matches(lease);
     }
