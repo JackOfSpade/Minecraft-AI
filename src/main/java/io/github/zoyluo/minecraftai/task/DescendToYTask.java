@@ -75,6 +75,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // open drop.  The bypass never guesses through terrain: these bounds cap only candidates
     // that are individually re-proven visible before Baritone is asked to walk to them.
     private static final int HAZARD_BYPASS_RADIUS = 8;
+    // A bridge across a floorless layer is built toward ground the bot has seen. This task looks for such a rim only within
+    // HAZARD_BYPASS_RADIUS, so a bridge that has run that far without the descent getting anywhere has no destination this task
+    // knows of: it stops placing supports (the rest of the lateral budget is for walking on what is already there). Counted
+    // per layer, like the lateral budget, and cleared by the same thing: landing below the lowest layer the detours touched.
+    static final int MAX_DETOUR_SUPPORTS_PER_LAYER = HAZARD_BYPASS_RADIUS;
     private static final int HAZARD_BYPASS_MAX_RISE = 2;
     private static final int HAZARD_BYPASS_PROBES_PER_TICK = 24;
     private static final int HAZARD_BYPASS_MAX_STARTED_LEGS = 48;
@@ -124,6 +129,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private int budgetLimit;
     private int lastProgressTick;
     private int lateralDetours; // number of lateral detours already taken around lava/obstructions at the current height level
+    private int detourSupportsPlaced; // supports placed to bridge a floorless cell at the current height level (not persisted: a restart gets a fresh allowance)
+    private boolean detourSupportBudgetReported;
     private int landingDriftRecoveries; // number of landing-drift recoveries already performed within this descent
     private int stairDirIndex;  // the stair's current diagonal-descent horizontal direction (index into HORIZONTAL)
     private int detourHeadingIndex = -1; // detours keep heading; an immediate reversal is tried last
@@ -1401,6 +1408,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 || feet.getY() < lowestTraversedDetourY();
         if (advancedBelowDetourFloor) {
             lateralDetours = 0;
+            detourSupportsPlaced = 0;
+            detourSupportBudgetReported = false;
             detourHeadingIndex = pendingLandingDirection;
             traversedDetourEdges.clear();
         } else {
@@ -2319,6 +2328,15 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 || containsOwnedWaterSeal(world, landing, landing.above(), support)) {
             return false;
         }
+        if (detourSupportsPlaced >= MAX_DETOUR_SUPPORTS_PER_LAYER) {
+            if (!detourSupportBudgetReported) {
+                detourSupportBudgetReported = true;
+                BotLog.action(bot, "descend_detour_support_budget_spent",
+                        "at", origin.toShortString(), "placed", detourSupportsPlaced,
+                        "budget", MAX_DETOUR_SUPPORTS_PER_LAYER);
+            }
+            return false;
+        }
 
         BlockState feetState = world.getBlockState(landing);
         BlockState headState = world.getBlockState(landing.above());
@@ -2545,6 +2563,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
         markStarted(bot, current.origin);
         lastProgressTick = totalBudget();
+        detourSupportsPlaced++;
         BotLog.action(bot, "descend_detour_support_placed",
                 "origin", current.origin.toShortString(),
                 "landing", current.landing.toShortString(),
