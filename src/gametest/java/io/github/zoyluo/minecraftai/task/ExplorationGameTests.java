@@ -75,6 +75,31 @@ public final class ExplorationGameTests {
     }
 
     /**
+     * Looking around a place with no tree in it used to cost about a hundred milliseconds of server thread on every
+     * tick for some seventy ticks (a ray for each of about eleven thousand cells on every tick, then a 42,000-cell
+     * pillar volume the same way). The survey must be over, and the first hop begun, within a few dozen ticks.
+     */
+    @GameTest(environment = "minecraftai-gametest:exploration_game_tests_survey_of_a_treeless_place_hands_over_to_exploration_within_a_few_ticks", maxTicks = 200)
+    public void surveyOfATreelessPlaceHandsOverToExplorationWithinAFewTicks(GameTestHelper context) {
+        FollowFieldFixture fixture = new FollowFieldFixture(context, 44, 8);
+        AIPlayerEntity bot = fixture.bot("ExploreSurveyGT", -40, 0, true);
+        fixture.give(bot, new ItemStack(Items.WOODEN_AXE));
+        GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_gather_survey_of_treeless_place"));
+
+        context.failIfEver(() -> {
+            if (task.describe().contains("phase=EXPLORE")) {
+                fixture.finish();
+                return;
+            }
+            fixture.require(context.getTick() <= 45,
+                    "the bot was still looking around a place without trees after " + context.getTick()
+                            + " ticks: " + task.describe());
+        });
+    }
+
+    /**
      * After a long fruitless search the gather's stuck watchdog is armed. It used to start the next hop the moment
      * a leg ended, before the bot had looked around the place it reached, so a log in plain view was passed again
      * and again until every hop of the episode was spent (a real session: sixteen hops in thirty seconds, with the

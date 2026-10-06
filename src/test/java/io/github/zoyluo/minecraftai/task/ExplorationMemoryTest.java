@@ -18,7 +18,6 @@ class ExplorationMemoryTest {
     private static final int HOP = 12;
     private static final int RADIUS = 16;
     private static final int EAST = 0;
-    private static final int SOUTH_EAST = 1;
     private static final int NORTH_EAST = 7;
 
     /** A bot walking its episode: it searches where it stands, picks a heading, and ends the leg HOP blocks along it. */

@@ -47,4 +47,21 @@ class ObservableScanOrderSourceTest {
         assertEquals(1, source.split("ObservableWorldQuery\\.canObserveBlock\\(", -1).length - 1,
                 "a single ray gate remains, after the state match");
     }
+
+    @Test
+    void harvestSurveyAndPillarScansPrefilterThenMatchThenRay() throws IOException {
+        String source = read("action/HarvestCore.java");
+        String survey = source.substring(source.indexOf("private void enumerate(long deadline)"),
+                source.indexOf("private void verify(long deadline)"));
+        String pillar = source.substring(source.indexOf("public static final class PillarApproachScan"),
+                source.indexOf("public static PillarApproach pillarApproachFor("));
+        for (String scan : new String[] {survey, pillar}) {
+            int section = scan.indexOf("candidateSection(");
+            int match = scan.indexOf("targetBlocks.contains(SectionPrefilter.stateIn(");
+            int ray = scan.indexOf("canObserveHarvestTarget(bot, cursor,");
+            assertTrue(section > 0 && section < match && match < ray,
+                    "prefilter -> state match -> ray: a survey of ground without a tree must not cast a ray per cell");
+            assertFalse(scan.contains("getBlockState("), "the state comes from the prefiltered section");
+        }
+    }
 }
