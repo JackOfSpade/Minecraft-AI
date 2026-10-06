@@ -163,4 +163,13 @@ class WalkedStepRulesTest {
                 WalkedStepRules.timeoutBudget(Kind.SWIM, 2.0D));
         assertTrue(WalkedStepRules.timeoutBudget(Kind.SWIM, 1.0D) >= 40.0D, "one block of swimming is about ten ticks: at least a few times that");
     }
+
+    @Test
+    void aSneakShiftIsAdmittedFromAnywhereARecentreEnds() {
+        // A recentre is done within POINT_TOLERANCE of the middle of the cell, on either side of it; the shift then walks
+        // EDGE_SHIFT past the middle. A cap below that sum refused the lean ("too_far") from the far side of the tolerance.
+        assertTrue(InCellWalk.EDGE_SHIFT + WalkedStepRules.POINT_TOLERANCE <= WalkedStepRules.IN_CELL_MAX_OFFSET);
+        // And a recentre from the corner of the cell, the longest walk back to a middle, stays admissible.
+        assertTrue(Math.hypot(0.5D, 0.5D) <= WalkedStepRules.IN_CELL_MAX_OFFSET);
+    }
 }

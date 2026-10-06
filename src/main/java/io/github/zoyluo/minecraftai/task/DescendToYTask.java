@@ -162,6 +162,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     /** The stages of the sneak-bridge that places one floor block: lean over the edge, place, walk back to the middle of the cell. */
     private enum EdgeStage {
+        /** The bot stands off the middle of its cell, too far behind the lean's start for the step to be admitted; walk to the middle first. */
+        CENTERING,
         SHIFTING,
         /** The floor interaction has completed; wait to admit the physical recenter step. */
         RETURN_PENDING,
@@ -223,6 +225,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private boolean awaitingMiningHandoff;
     // Steps that failed in this task instance: never retried (the flat landing, detour and relocation choosers skip them).
     private final Set<DetourEdge> failedStepEdges = new HashSet<>();
+    // The detour edge whose walk to the middle of its cell has failed once. A first failure can be a mob that stood there for a moment, so
+    // the edge is kept for another try; a second failure on the same edge retires it like any other failed step.
+    private DetourEdge centreFailedEdge;
     // Set when a step was abandoned or failed: the bot may be in the air between two cells, so nothing is decided from its pose
     // until it stands on something again.
     private boolean poseUnsettled;
@@ -2352,6 +2357,20 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             bot.setOnGround(true);
         }
         Direction direction = HORIZONTAL[directionIndex];
+        // The lean walks to a point over the edge of the support, and a step inside a cell is admitted only from within a short walk
+        // of its point (WalkedStepRules.IN_CELL_MAX_OFFSET). A flat step ends the moment the feet cross into its cell, so the bot
+        // arrives at the near edge, up to the whole cell away from where a lean the other way must start; leaning from there was
+        // refused as too far and poisoned the edge. A player lines up on the middle of the block first.
+        if (!isCentredInCell(bot, origin)) {
+            WalkedStep centring = InCellWalk.beginEdgeReturn(bot, origin, "descend_detour_support");
+            if (centring == null) {
+                // A guarded owner still holds the pack; this says nothing about the detour.
+                return bot.getActionPack().stepAdmissionBlocked();
+            }
+            edge = new EdgePlacement(origin, landing, support, direction, item, centring);
+            edge.stage = EdgeStage.CENTERING;
+            return true;
+        }
         // The lean is a walked step (sneak, forward toward a point over the edge of the support); the placement happens when it has
         // ended, and the walk back to the middle of the cell after it (tickEdgePlacement). The next task ticks are held until then.
         WalkedStep lean = InCellWalk.beginEdgeShift(bot, origin, direction, "descend_detour_support");
@@ -2371,10 +2390,16 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         return true;
     }
 
+    /** Whether the bot stands where a walk to the middle of {@code cell} ends: within the arrival tolerance of it. */
+    private static boolean isCentredInCell(AIPlayerEntity bot, BlockPos cell) {
+        return Math.hypot(cell.getX() + 0.5D - bot.getX(), cell.getZ() + 0.5D - bot.getZ())
+                <= WalkedStepRules.POINT_TOLERANCE;
+    }
+
     /**
-     * Carries the sneak-bridge on (always holds the tick): lean over the edge, place the floor block against the side face of the
-     * support, walk back to the middle of the cell, then check the world receipt. A pause or restart in between cancels the step and
-     * the pose is re-derived afterwards ({@link #holdForStep}).
+     * Carries the sneak-bridge on (always holds the tick): walk to the middle of the cell if the bot stands off it, lean over the
+     * edge, place the floor block against the side face of the support, walk back to the middle of the cell, then check the world
+     * receipt. A pause or restart in between cancels the step and the pose is re-derived afterwards ({@link #holdForStep}).
      */
     private void tickEdgePlacement(AIPlayerEntity bot, ServerLevel world) {
         EdgePlacement current = edge;
@@ -2395,6 +2420,45 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
         WalkedStep.Result result = current.step.outcome();
         DetourEdge detour = new DetourEdge(current.origin, current.landing);
+        if (current.stage == EdgeStage.CENTERING) {
+            if (result == null || !result.succeeded()) {
+                edge = null;
+                bot.getActionPack().stopMovement();
+                poseUnsettled = true;
+                unsettledTicks = 0;
+                if (result != null && !"not_supported".equals(result.reason())) {
+                    if (detour.equals(centreFailedEdge)) {
+                        failedStepEdges.add(detour);
+                        BotLog.action(bot, "descend_detour_support_failed",
+                                "origin", current.origin.toShortString(),
+                                "landing", current.landing.toShortString(),
+                                "support", current.support.toShortString(),
+                                "reason", "support_centre_unreachable");
+                    } else {
+                        centreFailedEdge = detour;
+                    }
+                }
+                return;
+            }
+            centreFailedEdge = null;
+            WalkedStep lean = InCellWalk.beginEdgeShift(
+                    bot, current.origin, current.direction, "descend_detour_support");
+            if (lean == null) {
+                if (!bot.getActionPack().stepAdmissionBlocked()) {
+                    edge = null;
+                    failedStepEdges.add(detour);
+                    BotLog.action(bot, "descend_detour_support_failed",
+                            "origin", current.origin.toShortString(),
+                            "landing", current.landing.toShortString(),
+                            "support", current.support.toShortString(),
+                            "reason", "support_edge_unreachable");
+                }
+                return;
+            }
+            current.step = lean;
+            current.stage = EdgeStage.SHIFTING;
+            return;
+        }
         if (current.stage == EdgeStage.SHIFTING) {
             if (result == null || !result.succeeded()) {
                 edge = null;

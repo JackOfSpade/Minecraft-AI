@@ -20,8 +20,12 @@ public final class WalkedStepRules {
     public static final double PUSH_OUT_SPEED = 0.1D;
     /** A push out never travels farther than one block: the neighbouring cell is the only place a free side is looked for. */
     public static final double PUSH_OUT_MAX_SHIFT = 1.0D;
-    /** The longest a step inside its own cell (recentre, sneak shift) may move the bot. */
-    public static final double IN_CELL_MAX_OFFSET = 0.75D;
+    /**
+     * The longest a step inside its own cell (recentre, sneak shift) may move the bot. A sneak shift goes {@link InCellWalk#EDGE_SHIFT}
+     * past the middle of the cell and has to be admitted from anywhere a recentre may have ended, which is {@link #POINT_TOLERANCE}
+     * short of that middle.
+     */
+    public static final double IN_CELL_MAX_OFFSET = InCellWalk.EDGE_SHIFT + WalkedStepRules.POINT_TOLERANCE;
     /** A point-step is done once the bot is this close to its point. */
     public static final double POINT_TOLERANCE = 0.2D;
     /** A sneak shift over an edge is done this close to its point: it has to be over the edge (the eye past the face of the support), not near it. */

@@ -88,7 +88,9 @@ import net.minecraft.world.phys.Vec3;
  * OREDIG mines only finite ore blocks the bot can actually observe. Baritone owns every approach;
  * direct {@link BlockMiner} work is limited to the currently visible target and newly exposed
  * visible vein members. It never strips, descends, prospects through loaded terrain, or opens a
- * tunnel toward an unseen resource.
+ * tunnel toward an unseen resource. An ore it saw that hangs out of reach is reached by a stair
+ * dug up to it ({@link #climbTowardHighTarget}); that stair may hide the ore from view, and the
+ * ore is mined only where it is seen again.
  *
  * Self-contained state machine (Iron Rule G1), no internal assign; runs entirely on the main thread (G2).
  */
@@ -277,6 +279,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private BlockPos highTargetStairSearchTarget;
     private BlockPos highTargetStairSearchStart;
     private int highTargetStairSearchStartedBudget;
+    /**
+     * The ore an upward stair is being dug to (see {@link #climbTowardHighTarget}). That ore was
+     * seen when the stair began, and the stair itself is what hides it afterwards; this is what
+     * lets the climb go on while the ore is out of sight. Runtime only: a restored task has seen
+     * nothing yet, so it waits to see its ore again like any other restored owner.
+     */
+    private BlockPos highTargetClimbOwner;
     /** One fresh depth handoff, plus bounded re-descent only after a real cave survey. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
@@ -1153,6 +1162,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         clearObservedOreSearchLeg();
         clearVisibleOreSighting();
         clearHighTargetStairSearch();
+        highTargetClimbOwner = null;
         markMineFace(bot);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
@@ -1574,6 +1584,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return;
             }
             OreScan.Observation targetState = OreScan.observeOre(bot, targetOre, targetOres);
+            if (targetState == OreScan.Observation.UNKNOWN && ownsHighTargetClimb(targetOre)) {
+                // The stair that is being dug to this ore is what hides it. It was seen when the
+                // stair began, and the stair opens only cells of its own: keep climbing toward the
+                // remembered coordinate, and let the ordinary gates take over where the ore comes
+                // back into view.
+                climbTowardHighTarget(bot, world, targetOre);
+                return;
+            }
             if (targetState == OreScan.Observation.UNKNOWN) {
                 // Do not convert an occluded target into a completed break or a pickup debt. The
                 // same exact owner is retried after ordinary movement exposes the cell again. An
@@ -1663,6 +1681,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         bot.getActionPack().stopAll();
                     }
                     clearHighTargetStairSearch(targetOre);
+                    clearHighTargetClimb(targetOre);
                     BotLog.action(bot, "ore_dig_relock_nearer",
                             "from", targetOre.toShortString(), "to", nearer.toShortString());
                     targetOre = nearer.immutable();
@@ -1817,6 +1836,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
 
         clearHighTargetStairSearch();
+        highTargetClimbOwner = null;
 
         if (veinMode) {
             tickVeinWithoutTarget(bot, world);
@@ -3720,6 +3740,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return owner != null && owner.equals(highTargetStairSearchOwner);
     }
 
+    private boolean ownsHighTargetClimb(BlockPos owner) {
+        return owner != null && owner.equals(highTargetClimbOwner);
+    }
+
+    /** Ends the climb's claim on {@code owner}, or on whichever ore holds it when {@code owner} is null. */
+    private void clearHighTargetClimb(BlockPos owner) {
+        if (owner == null || owner.equals(highTargetClimbOwner)) {
+            highTargetClimbOwner = null;
+        }
+    }
+
     /** Retires only the active local leg; the finite high-ore owner may start the next one. */
     private void clearHighTargetStairSearchLeg() {
         highTargetStairSearchTarget = null;
@@ -3768,13 +3799,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /**
      * Prefers an existing observed staircase/ledge for a visible high ore before a generic
      * horizontal tunnel produces an unsafe vertical drop shaft. After a finite set of walk-only
-     * hops, the existing abandonment path remains responsible for the normal exploration handoff.
+     * hops that found none, the bot digs its own stair up to the ore
+     * ({@link #climbTowardHighTarget}); false hands the tick to that approach.
      */
     private boolean startHighTargetStairSearch(AIPlayerEntity bot,
                                                ServerLevel world,
                                                BlockPos ore) {
         if (!needsHighTargetStairSearch(bot, world, ore)) {
             clearHighTargetStairSearch();
+            return false;
+        }
+        if (ownsHighTargetStairSearch(ore) && highTargetStairSearch.exhausted()) {
             return false;
         }
         if (!ownsHighTargetStairSearch(ore)) {
@@ -3802,10 +3837,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                             - highTargetStairSearch.attempts()));
             targetApproachTick = elapsed;
             if (highTargetStairSearch.exhausted()) {
-                abandonTargetApproach(bot, ore, "high_stair_route_unreachable", ore.below());
-            } else {
-                noteProgress();
+                BotLog.action(bot, "ore_dig_high_stair_search_exhausted",
+                        "ore", ore.toShortString(), "attempts", highTargetStairSearch.attempts());
+                return false;
             }
+            noteProgress();
             return true;
         }
         highTargetStairSearchTarget = attempt.observedGoal();
@@ -4165,6 +4201,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (tryRememberedHighWorkPoseRoute(bot, world, ore)) {
                 return;
             }
+            if (climbsTo(bot, ore)) {
+                climbTowardHighTarget(bot, world, ore);
+                return;
+            }
             BlockPos feet = bot.blockPosition();
             if (ore.getX() == feet.getX()
                     && ore.getZ() == feet.getZ()
@@ -4173,7 +4213,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // a random X/Z offset and retain horizontal velocity, so a high drop can leave the
                 // shaft and settle on an unreachable ledge before entering player collision range.
                 // Keep the ore intact unless this task previously observed and durably retained a
-                // standable high side pose before the lower shaft/pickup occluded it.
+                // standable high side pose before the lower shaft/pickup occluded it. (Only the
+                // primary target has a stair dug up to it; a queued vein member stays a finite
+                // owner released here.)
                 abandonTargetApproach(
                         bot, ore, "overhead_drop_catch_unproven", ore.below());
                 return;
@@ -4190,14 +4232,194 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // approach below, which hands the finite owner back to beginTargetMine before it breaks.
         ActionResult approach = bot.getActionPack().startSurfacePathTo(workPose);
         if (approach.isFailed()) {
-            if (!"pathfinding_throttled".equals(approach.reason())) {
+            boolean throttled = "pathfinding_throttled".equals(approach.reason());
+            if (!throttled) {
                 BotLog.action(bot, "ore_dig_approach_rejected", "why", approach.reason(),
                         "target", ore.toShortString());
+            }
+            if (climbsTo(bot, ore)) {
+                // A pose up there that no walk reaches is reached by the stair, but a planner that
+                // merely has to wait a tick is not a reason to start digging.
+                if (!throttled) {
+                    climbTowardHighTarget(bot, world, ore);
+                }
+                return;
             }
             // Deep solid terrain can exhaust the bounded A* search. Controlled one-cell tunnelling
             // also fills a harmless pathfinding-cooldown tick, keeping distance progress physical
             // without weakening the close-break invariant.
             digTowardStep(bot, world, ore, TunnelIntent.TARGET_APPROACH);
+        }
+    }
+
+    /**
+     * Whether {@code ore} is reached by digging a stair up to it: it is the primary target and
+     * either hangs out of reach or already has a stair under way, which is finished around the ore
+     * rather than by the level tunnel that serves an ore within reach.
+     */
+    private boolean climbsTo(AIPlayerEntity bot, BlockPos ore) {
+        return ore.equals(targetOre)
+                && (ore.getY() - bot.blockPosition().getY() > MAX_TARGET_BREAK_DY || ownsHighTargetClimb(ore));
+    }
+
+    /**
+     * Digs one more step of a stair up to an observed ore that no ordinary work pose reaches
+     * because it hangs more than {@link #MAX_TARGET_BREAK_DY} above the bot: what a player with
+     * a pickaxe does in solid rock. {@link OreClimb} lays the stair out (a level tunnel to the
+     * ore's column, then a climb around the cells beside it) and this opens it one cell at a time.
+     *
+     * <p>The pose it ends in is an ordinary one, the ore at head height beside the bot, and it
+     * answers the old objection to an overhead ore: that a drop from an open column can fly off
+     * and settle out of reach. The stair never enters the column below the ore, so the ore's own
+     * cell holds its drop right beside the bot. A floor under the ore that is observed to be open
+     * cannot, and such an ore is still refused.</p>
+     *
+     * <p>Nothing is opened before it has been seen. A cell and the one above it (which is what
+     * floods or falls into an opening) must be free of fluid and falling blocks, the cell must be
+     * natural terrain that no player stands on, and no fluid may be seen beside it. The ore is
+     * never one of the cells. What an opening itself reveals overhead is seen on the next tick and
+     * stops the stair before any further cell of the step is opened.</p>
+     *
+     * <p>The stair only ever digs, so it needs rock to dig through and to stand on: an ore on an
+     * open cliff face or high in a cave, where a tread has no floor, is still given up as
+     * {@code open_drop} or {@code overhead_drop_catch_unproven}. Reaching it would take building
+     * up with placed blocks, which is a different approach and not part of this one.</p>
+     */
+    private void climbTowardHighTarget(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
+        ActionPack pack = bot.getActionPack();
+        if (!pack.isPathExecutorIdle() || !pack.isWalkToIdle() || !pack.stepIdle()
+                || hasRecoverableTargetBreakPose(bot, ore)) {
+            return;
+        }
+        BlockPos feet = bot.blockPosition();
+        BlockPos support = ore.below();
+        if (canObserveWorldState(bot, support) && !hasReliableObservedDropCatch(bot, world, support)) {
+            abandonTargetApproach(bot, ore, "overhead_drop_catch_unproven", support);
+            return;
+        }
+        if (elapsed - targetApproachTick > APPROACH_LIMIT) {
+            // The ore can be out of sight, which the ordinary approach monitor does not see.
+            abandonTargetApproach(bot, ore, "climb_stalled", feet);
+            return;
+        }
+        String refusal = null;
+        for (OreClimb.Move move : OreClimb.moves(
+                feet.getX() - ore.getX(), feet.getZ() - ore.getZ(), ore.getY() - feet.getY())) {
+            refusal = climbRefusal(bot, world, feet, move);
+            if (refusal == null) {
+                if (!ownsHighTargetClimb(ore)) {
+                    highTargetClimbOwner = ore.immutable();
+                    BotLog.action(bot, "ore_dig_high_climb_started",
+                            "ore", ore.toShortString(), "from", feet.toShortString(),
+                            "height", ore.getY() - feet.getY());
+                }
+                openClimbStep(bot, world, ore, feet, move);
+                return;
+            }
+        }
+        abandonTargetApproach(bot, ore, refusal == null ? "no_climb_route" : refusal, feet);
+    }
+
+    /**
+     * The first reason, from what the bot can see, that {@code move} cannot be opened safely, or
+     * null when nothing seen forbids it. A cell that is not in view yet is judged once the cells
+     * opened before it have brought it into view.
+     */
+    private String climbRefusal(AIPlayerEntity bot, ServerLevel world, BlockPos feet, OreClimb.Move move) {
+        for (BlockPos cell : OreClimb.bodyCells(feet, move)) {
+            if (!canObserveWorldState(bot, cell)) {
+                continue;
+            }
+            var state = world.getBlockState(cell);
+            String refusal = climbHazard(state);
+            if (refusal != null) {
+                return refusal;
+            }
+            // The cell above floods or buries this one. Rock hides it, so it only comes into view once
+            // this cell is open: the check has to run for a cell that is already air as well, or what the
+            // opening revealed overhead would never be looked at.
+            if (canObserveWorldState(bot, cell.above())) {
+                refusal = climbHazard(world.getBlockState(cell.above()));
+                if (refusal != null) {
+                    return refusal;
+                }
+            }
+            if (state.isAir()) {
+                continue;
+            }
+            String denial = BreakRule.legacyDenialOf(state);
+            if (denial != null) {
+                return "break_refused:" + denial;
+            }
+            if (hasPlayerSupportedBodyBlock(bot, cell)) {
+                return MiningSafety.PLAYER_SUPPORT;
+            }
+            if (OreScan.adjacentHazard(bot, cell) == OreScan.Observation.OBSERVED_PRESENT) {
+                return "adjacent_fluid";
+            }
+        }
+        BlockPos floor = OreClimb.landing(feet, move).below();
+        if (canObserveWorldState(bot, floor)) {
+            var floorState = world.getBlockState(floor);
+            if (!floorState.getFluidState().isEmpty()) {
+                return observedFluidReason(floorState.getFluidState());
+            }
+            if (Standability.isDangerous(floorState)
+                    || floorState.getCollisionShape(world, floor).isEmpty()) {
+                // Nothing is placed under a tread: a floor that is not there ends the stair.
+                return "open_drop";
+            }
+        }
+        return null;
+    }
+
+    /** Fluid and falling blocks are what turn an opened cell into a flood or a burial. */
+    private static String climbHazard(BlockState state) {
+        if (!state.getFluidState().isEmpty()) {
+            return observedFluidReason(state.getFluidState());
+        }
+        return state.getBlock() instanceof FallingBlock ? "gravity" : null;
+    }
+
+    /** Mines the next closed cell of {@code move}, or walks onto its landing once every cell is open. */
+    private void openClimbStep(AIPlayerEntity bot,
+                               ServerLevel world,
+                               BlockPos ore,
+                               BlockPos feet,
+                               OreClimb.Move move) {
+        for (BlockPos cell : OreClimb.bodyCells(feet, move)) {
+            if (!canObserveWorldState(bot, cell)) {
+                return;
+            }
+            if (world.getBlockState(cell).isAir()) {
+                continue;
+            }
+            // Mining is the stair's progress; the approach monitor must not time the ore out
+            // while the bot is working its way up to it.
+            targetApproachTick = elapsed;
+            settleOwnedTunnelMine(bot, ore, TunnelIntent.TARGET_APPROACH, cell);
+            return;
+        }
+        BlockPos landing = OreClimb.landing(feet, move);
+        miner.cancel(bot);
+        Standability.clearCache();
+        if (!Standability.isStandable(world, landing)) {
+            abandonTargetApproach(bot, ore, "open_drop", landing);
+            return;
+        }
+        if (bot.getActionPack().stepAdmissionBlocked()) {
+            return;
+        }
+        targetApproachTick = elapsed;
+        boolean started = beginWalkedMove(bot, landing, "ore_dig_climb_step", () -> {
+            noteProgress();
+            targetApproachTick = elapsed;
+            BotLog.action(bot, "ore_dig_high_climb_step",
+                    "ore", ore.toShortString(), "to", landing.toShortString(),
+                    "height_left", ore.getY() - landing.getY());
+        });
+        if (!started) {
+            abandonTargetApproach(bot, ore, "climb_step_refused", landing);
         }
     }
 
@@ -5688,6 +5910,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                        String reason,
                                        BlockPos blocked) {
         clearHighTargetStairSearch(goal);
+        clearHighTargetClimb(goal);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
         clearActiveTargetBreak(goal);
