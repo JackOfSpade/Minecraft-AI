@@ -86,8 +86,18 @@ final class BrainCoordinatorSystemPromptTest {
 
         // No number stated: gather_then_give needs one, so the plain collection tools stay and the prompt says so.
         assertTrue(prompt.contains("If the player gives no number, collect with gather, mine_ore or harvest_crop without count"));
-        // A crafted result cannot go through gather_then_give (it would hand over the raw resource).
+        // A crafted result cannot go through gather_then_give (it would hand over the raw resource): one
+        // fulfill_items call carries the raw quota and the crafted item, and the routing leaves that tool offered.
         assertTrue(prompt.contains("gather_then_give would hand over the logs, not the table"));
+        assertTrue(prompt.contains("call fulfill_items once: the raw resource as its own item without a recipient"));
+        RegistryBootstrap.ensure();
+        ToolRouting compound = new ToolRouting();
+        compound.beginInstruction(RequestIntent.parse("gather 32 logs, craft a table and give it to me"));
+        assertFalse(compound.withheldTools().contains("fulfill_items"));
+        assertTrue(compound.withheldTools().contains("gather_then_give"));
+        // Without a number gather_then_give collects for the ten-minute window; several resources are each collected.
+        assertTrue(prompt.contains("call gather_then_give without count: it collects for up to ten minutes"));
+        assertTrue(prompt.contains("every resource the player asked for"));
         // The prompt must not call for tools exactly where the routing hides them.
         assertTrue(prompt.contains("For \"make an iron pickaxe\" or \"get iron ingots\", call achieve_goal"));
         RegistryBootstrap.ensure();

@@ -99,6 +99,97 @@ final class ItemNounsTest {
     }
 
     @Test
+    void whatTheWorldYieldsIsRawWithTheGamesWholeRecipeIndexInstalledToo() {
+        // The recipe index of a running server holds every vanilla crafting recipe. Each of these is a resource
+        // the world (or a creature) yields that a recipe also makes, and none may read as crafted there.
+        RuntimeRecipeFixture.installVanilla();
+        try {
+            for (String noun : List.of("white wool", "red wool", "wool", "melon", "melons", "melon seeds",
+                    "pumpkin seeds", "sea lantern", "sea lanterns", "prismarine", "dark prismarine", "coarse dirt",
+                    "leather", "magma cream", "snow", "snow blocks", "mossy cobblestone", "sandstone", "red sandstone",
+                    "clay", "glowstone", "andesite", "diorite", "granite", "packed ice", "blue ice", "bone block",
+                    "moss carpet", "muddy mangrove roots", "brown mushroom block", "red mushroom block",
+                    "amethyst block", "nether wart block", "warped wart block", "dripstone block", "magma block",
+                    "oak logs", "oak wood", "stripped oak log", "raw iron", "raw gold", "coal", "diamond", "emerald",
+                    "redstone", "lapis", "quartz", "copper ore", "iron ore", "cobblestone", "stone", "obsidian")) {
+                assertEquals(ItemNouns.Kind.RAW, kind(noun), noun + " reads as crafted in the running game");
+            }
+            // Whereas the made things stay made: the recipe index only adds to what the structure already says.
+            for (String noun : List.of("piston", "dispenser", "lantern", "anvil", "hopper", "furnace", "bookshelf",
+                    "white banner", "oak shelf", "shulker box", "iron bars", "bundle", "tnt", "rail", "paper", "book",
+                    "iron pickaxe", "stone bricks", "iron ingot", "iron block", "hay block", "slime block")) {
+                assertEquals(ItemNouns.Kind.CRAFTED, kind(noun), noun + " reads as raw in the running game");
+            }
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
+    }
+
+    @Test
+    void aCollectingVerbIgnoresRecipesThatOnlyTheRunningGameKnows() {
+        RuntimeRecipeFixture.install(Items.PISTON, Items.SEA_LANTERN);
+        try {
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("pistons"), true));
+            assertEquals(ItemNouns.Kind.RAW, ItemNouns.classify(List.of("pistons"), false),
+                    "gather/mine name what the world yields, whatever the recipe index says");
+            // What is crafted whatever the recipes say stays crafted for every verb.
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("iron", "pickaxe"), false));
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("iron", "ingots"), false));
+            assertEquals(ItemNouns.Kind.CRAFTED, ItemNouns.classify(List.of("torches"), false),
+                    "the planner's own recipes are structure, not index");
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
+    }
+
+    @Test
+    void anItemIdIsRawWhenTheWorldYieldsIt() {
+        assertTrue(ItemNouns.isRawItemId("minecraft:oak_log"));
+        assertTrue(ItemNouns.isRawItemId("COAL"));
+        assertTrue(ItemNouns.isRawItemId(" minecraft:raw_iron "));
+        assertFalse(ItemNouns.isRawItemId("minecraft:crafting_table"));
+        assertFalse(ItemNouns.isRawItemId("minecraft:iron_pickaxe"));
+        assertFalse(ItemNouns.isRawItemId("minecraft:not_an_item"));
+        assertFalse(ItemNouns.isRawItemId(null));
+    }
+
+    @Test
+    void creaturesAreToldApartFromTheirDrops() {
+        for (String noun : List.of("cow", "cows", "sheep", "zombie", "zombies", "skeletons", "spiders", "pigs",
+                "creeper", "mobs", "monsters", "animals", "enderman")) {
+            assertTrue(ItemNouns.isCreature(List.of(noun)), noun);
+        }
+        assertTrue(ItemNouns.isCreature(List.of("cave", "spiders")));
+        for (String noun : List.of("beef", "leather", "bones", "wool", "logs", "iron", "drops", "")) {
+            assertFalse(ItemNouns.isCreature(List.of(noun)), noun);
+        }
+        assertFalse(ItemNouns.isCreature(List.of()));
+    }
+
+    @Test
+    void aNounPhraseKeepsTheWordsAnItemMustContainToBeIt() {
+        assertEquals(java.util.Set.of("oak", "logs", "log"), ItemNouns.matchWords(List.of("oak", "logs")));
+        assertTrue(ItemNouns.matchWords(List.of("wood")).contains("log"), "wood is the log items' own word");
+        assertTrue(ItemNouns.matchWords(List.of("trees")).contains("log"));
+        assertTrue(ItemNouns.matchWords(List.of("stone")).contains("cobblestone"), "breaking stone drops cobblestone");
+        assertTrue(ItemNouns.matchWords(List.of("stack", "of", "logs")).contains("log"));
+        assertFalse(ItemNouns.matchWords(List.of("stack", "of", "logs")).contains("stack"));
+        assertEquals(java.util.Set.of(), ItemNouns.matchWords(List.of("stacks", "of")));
+
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("logs")), "minecraft:oak_log"));
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("logs")), "logs"), "the gather_then_give sentinel");
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("coal")), "minecraft:coal_ore"));
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("coal")), "minecraft:deepslate_coal_ore"));
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("iron")), "minecraft:raw_iron"));
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("diamonds")), "minecraft:diamond"));
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("berries")), "minecraft:sweet_berries"));
+        assertTrue(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("pork")), "minecraft:porkchop"));
+        assertFalse(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("logs")), "minecraft:coal"));
+        assertFalse(ItemNouns.matchesItem(ItemNouns.matchWords(List.of("coal")), "minecraft:oak_log"));
+        assertTrue(ItemNouns.matchesItem(java.util.Set.of(), "minecraft:anything"), "no words: any item");
+    }
+
+    @Test
     void gearIsCraftedBecauseItHasDurability() {
         assertTrue(ItemNouns.isCraftedOutput(Items.IRON_PICKAXE));
         assertTrue(ItemNouns.isCraftedOutput(Items.SHIELD));

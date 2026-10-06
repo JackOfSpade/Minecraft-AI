@@ -263,21 +263,23 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("gather_then_give", "Collect a NEW quota of one gatherable resource, then hand that exact count to a nearby player. Existing inventory never satisfies the collection phase. For generic tree logs, pass item=logs so the task uses a species it actually gathers (a mix of species is delivered one drop per species); use an exact minecraft:<species>_log id only when that species was named. Use this for one-resource requests that explicitly combine gathering/collecting with giving/handing the result to a player and state a number. It collects only what the bot can gather with the tools it carries: for ore or stone that needs a pickaxe use fulfill_items with the player as recipient. It hands over the raw resource itself, so for a crafted result (gather logs, craft a table, give it) gather first and craft/give afterwards. It also hands over everything it collects, so for only part of it (gather 32, give 16) gather first and give_item the part. Without a stated number, collect with gather/mine_ore without count and then give_item what it collected. Use give_item only for an existing-inventory handoff.", objectSchema()
+        register("gather_then_give", "Collect a NEW quota of one gatherable resource, then hand that exact count to a nearby player. Existing inventory never satisfies the collection phase. For generic tree logs, pass item=logs so the task uses a species it actually gathers (a mix of species is delivered one drop per species); use an exact minecraft:<species>_log id only when that species was named. Use this for one-resource requests that explicitly combine gathering/collecting with giving/handing the result to a player. It collects only what the bot can gather with the tools it carries: for ore or stone that needs a pickaxe use fulfill_items with the player as recipient. It hands over the raw resource itself, so for a crafted result (gather logs, craft a table, give it) call fulfill_items with the raw resource as its own allocation without a recipient next to the crafted item for the player, or gather first and craft/give afterwards. It also hands over everything it collects, so for only part of it (gather 32, give 16) gather first and give_item the part. When the player stated no number, omit count: it then collects for up to ten minutes and hands over everything it collected. Use give_item only for an existing-inventory handoff.", objectSchema()
                 .property("item", stringSchema("exact item id, or the literal logs for any tree-log species"))
-                .property("count", integerSchema("positive number of new items to collect before the handoff, exactly as the player stated it", 1, Integer.MAX_VALUE))
+                .property("count", integerSchema("positive number of new items to collect before the handoff, exactly as the player stated it; omit when the player stated none", 1, Integer.MAX_VALUE))
                 .property("player", stringSchema("optional recipient player name; defaults to owner"))
                 .required("item")
-                .required("count")
                 .build(), (bot, args) -> {
             String requestedItem = requiredString(args, "item");
-            Task task = isGenericLogHandoff(requestedItem)
-                    ? GatherThenGiveTask.genericLogs(
-                            requiredPositiveInt(args, "count"), optionalString(args, "player", ""))
-                    : new GatherThenGiveTask(
-                            requiredItem(args, "item"),
-                            requiredPositiveInt(args, "count"),
-                            optionalString(args, "player", ""));
+            String player = optionalString(args, "player", "");
+            boolean counted = args.has("count");
+            Task task;
+            if (isGenericLogHandoff(requestedItem)) {
+                task = counted ? GatherThenGiveTask.genericLogs(requiredPositiveInt(args, "count"), player)
+                        : GatherThenGiveTask.timedLogs(player);
+            } else {
+                task = counted ? new GatherThenGiveTask(requiredItem(args, "item"), requiredPositiveInt(args, "count"), player)
+                        : GatherThenGiveTask.timed(requiredItem(args, "item"), player);
+            }
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
         });
@@ -326,7 +328,7 @@ public final class ToolRegistry {
 
     /** Goal-driven high-level actions: gather/break/fish/trade plus every deterministic-goal task. */
     private void registerGoalTools() {
-        register("fulfill_items", "Newly produce and fulfill an arbitrary compound item request with deterministic dependency planning and exact player handoffs. Use when the player asks for multiple different final items, a kit, a bundle, a split between players, or a new quantity of a raw resource that needs a tool you may lack (stone, ore). Put every final allocation in items; recipient omitted means keep it on this bot, while a named recipient is handed that newly produced item after all production is complete. Everything handed to a player and every raw resource kept is additional to matching inventory held when this call starts; it cannot hand over a pre-existing matching stack. A crafted item kept on the bot (your own tool or armor) is satisfied by one already carried. It is for production only: to hand over what the bot already carries, call give_item once per item. The model chooses the manifest from the player's request; this tool does not assume a fixed kit or recipe.", objectSchema()
+        register("fulfill_items", "Newly produce and fulfill an arbitrary compound item request with deterministic dependency planning and exact player handoffs. Use when the player asks for multiple different final items, a kit, a bundle, a split between players, or a new quantity of a raw resource that needs a tool you may lack (stone, ore). Put every final allocation in items; recipient omitted means keep it on this bot, while a named recipient is handed that newly produced item after all production is complete. Everything handed to a player and every raw resource kept is additional to matching inventory held when this call starts; it cannot hand over a pre-existing matching stack. A crafted item kept on the bot (your own tool or armor) is satisfied by one already carried. When the request also collects NEW raw resources beside a crafted result (gather 32 logs, craft a table, give it to me), call this once: the raw resource is its own allocation without a recipient (it stays with you and is always collected above what you carry) and the crafted item is an allocation with the player as recipient; leaving the raw resource out lets carried stock stand in for it. It is for production only: to hand over what the bot already carries, call give_item once per item. The model chooses the manifest from the player's request; this tool does not assume a fixed kit or recipe.", objectSchema()
                 .property("items", allocationArraySchema("complete final item allocations for this request"))
                 .required("items")
                 .build(), (bot, args) -> {

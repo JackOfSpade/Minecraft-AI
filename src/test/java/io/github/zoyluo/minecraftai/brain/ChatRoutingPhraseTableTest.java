@@ -29,8 +29,15 @@ final class ChatRoutingPhraseTableTest {
         COLLECT_AND_GIVE(Set.of("give_item", "achieve_goal", "gather", "assign_task", "forage", "mine_ore",
                 "mine_valuables_in_radius", "harvest_crop", "mine_block")),
         /**
-         * New raw resources plus a crafted result, or a handoff of only part of them: gather_then_give would
-         * hand over everything it collected, so collect first and craft / hand over afterwards.
+         * New raw resources plus a crafted result: gather_then_give would hand over the raw resource, not the
+         * crafted item. fulfill_items stays (the raw quota as an allocation without a recipient), and so do the
+         * plain collectors for collecting first.
+         */
+        CRAFT_RESULT(Set.of("give_item", "achieve_goal", "gather_then_give")),
+        /**
+         * A handoff of only part of the collection, or a crafted result the bot keeps: gather_then_give would hand over
+         * everything it collected, and fulfill_items cannot keep the rest beside the part (nor does it make a second
+         * tool for the bot), so collect first and craft or hand the part over afterwards.
          */
         COLLECT_FIRST(Set.of("give_item", "achieve_goal", "gather_then_give", "fulfill_items"));
 
@@ -56,7 +63,15 @@ final class ChatRoutingPhraseTableTest {
         return new Phrase(text, Route.COLLECT_AND_GIVE);
     }
 
-    private static Phrase collectFirst(String text) {
+    private static Phrase craftResult(String text) {
+        return new Phrase(text, Route.CRAFT_RESULT);
+    }
+
+    private static Phrase partialHandoff(String text) {
+        return new Phrase(text, Route.COLLECT_FIRST);
+    }
+
+    private static Phrase keptResult(String text) {
         return new Phrase(text, Route.COLLECT_FIRST);
     }
 
@@ -217,7 +232,7 @@ final class ChatRoutingPhraseTableTest {
             collect("moss lets mine some coal"),
             collect("mine this iron ore"),
             collect("mine the entire iron ore vein"),
-            collectFirst("lets go mine some coal , need more torches"),
+            keptResult("lets go mine some coal , need more torches"),
             free("get us both a full set of stone tools"),
             free("moss, get full stone tool set for both u and me"),
             free("moss make full cobblestone tool set for both of us, one set for you that you keep and give one set for me"),
@@ -275,23 +290,23 @@ final class ChatRoutingPhraseTableTest {
             collect("gather 32 logs and give me your coal"),
             collect("gather 32 logs, then give me the logs you have"),
             // --- collect, then craft
-            collectFirst("gather 32 logs then craft a table and give it to me"),
-            collectFirst("gather 32 logs, craft an iron pickaxe, then give it to me"),
-            collectFirst("chop 32 logs, craft a table, and hand it to me"),
-            collectFirst("gather 32 logs and make me a chest"),
-            collectFirst("mine 10 coal and craft 4 torches"),
-            collectFirst("get 20 logs and make me a crafting table"),
-            collectFirst("make an iron pickaxe and mine 10 diamonds"),
-            collectFirst("gather 32 logs and give me a table"),
-            collectFirst("gather 32 logs, then collect an iron pickaxe"),
+            craftResult("gather 32 logs then craft a table and give it to me"),
+            craftResult("gather 32 logs, craft an iron pickaxe, then give it to me"),
+            craftResult("chop 32 logs, craft a table, and hand it to me"),
+            craftResult("gather 32 logs and make me a chest"),
+            keptResult("mine 10 coal and craft 4 torches"),
+            craftResult("get 20 logs and make me a crafting table"),
+            keptResult("make an iron pickaxe and mine 10 diamonds"),
+            craftResult("gather 32 logs and give me a table"),
+            keptResult("gather 32 logs, then collect an iron pickaxe"),
             // --- handing over only part of the collection: gather_then_give would hand over all of it
-            collectFirst("gather 32 logs and give 16 to me"),
-            collectFirst("gather 32 logs and give me half"),
-            collectFirst("gather 32 logs, then give half to me"),
-            collectFirst("mine 10 coal and give Steve half"),
-            collectFirst("chop 20 logs and hand me 5"),
-            collectFirst("gather a stack of logs and give me a dozen"),
-            collectFirst("gather 32 logs and give me some"),
+            partialHandoff("gather 32 logs and give 16 to me"),
+            partialHandoff("gather 32 logs and give me half"),
+            partialHandoff("gather 32 logs, then give half to me"),
+            partialHandoff("mine 10 coal and give Steve half"),
+            partialHandoff("chop 20 logs and hand me 5"),
+            partialHandoff("gather a stack of logs and give me a dozen"),
+            partialHandoff("gather 32 logs and give me some"),
             // --- suggestions and conditions in question shape still ask for work
             collect("how about gathering 32 logs"),
             collect("how about you gather 32 logs"),
@@ -340,7 +355,432 @@ final class ChatRoutingPhraseTableTest {
             free("get me 3 steaks"),
             free("get 5 steaks"),
             free("i need 20 xp"),
-            free("get 3 levels"));
+            free("get 3 levels"),
+            // === second round: lines that are only a quantity and a resource
+            collect("32 logs pls"),
+            collect("32 logs"),
+            collect("64 cobblestone please"),
+            collect("10 coal pls"),
+            collect("a stack of logs pls"),
+            collect("x32 logs"),
+            collect("logs x32"),
+            collect("some wood pls"),
+            collect("wood pls"),
+            collect("logs plz"),
+            collect("more logs"),
+            collect("32 iron"),
+            collect("10 diamonds"),
+            collect("64 dirt"),
+            collect("3 wheat"),
+            collect("32 logs, thanks"),
+            collect("moss 32 logs pls"),
+            collect("Moss, 32 logs please"),
+            collect("32 oak logs plz"),
+            collect("16 coal asap"),
+            collect("64 cobble pls"),
+            collect("32 logs and 10 coal pls"),
+            collect("hey moss 20 sand"),
+            collect("a few logs pls"),
+            collect("another stack of cobblestone"),
+            collect("a couple of diamonds pls"),
+            free("32 logs?"),
+            free("logs"),
+            free("wood"),
+            free("iron"),
+            free("thanks for the 32 logs"),
+            free("i have 32 logs"),
+            free("there are 32 logs here"),
+            free("32 logs is a lot"),
+            free("32"),
+            free("pls"),
+            free("64 iron pickaxes pls"),
+            free("3 blocks"),
+            free("5 min"),
+            free("2 hours"),
+            free("diamond"),
+            free("the logs pls"),
+            free("my 32 logs"),
+            free("32 logs would be nice"),
+            free("wow 64 diamonds"),
+            free("thx for the wood"),
+            // === a negation that governs several verbs ("or", "and", "nor")
+            free("dont gather or mine anything"),
+            free("stop mining and chopping trees"),
+            free("don't mine or chop trees"),
+            free("no mining or chopping"),
+            free("never gather or mine"),
+            free("stop mining and chopping"),
+            free("dont mine coal and iron"),
+            free("do not gather logs or mine coal"),
+            free("stop gathering and mining, give me the logs"),
+            free("stop mining and give me your coal"),
+            free("dont mine and dont chop"),
+            free("stop mining or chopping please"),
+            free("please dont gather or chop anything"),
+            free("dont collect or harvest any wheat"),
+            free("do not mine nor chop"),
+            free("no more gathering or mining"),
+            free("stop all mining and gathering"),
+            free("forget mining and chopping"),
+            free("dont get wood or stone"),
+            free("dont gather logs or coal"),
+            free("stop collecting logs and coal"),
+            free("i dont want you to gather or mine"),
+            free("stop hunting and mining"),
+            free("dont kill or mine anything"),
+            // ...but a contrast, a comma or a command in another form is a new request
+            collect("dont gather logs, mine coal"),
+            collect("don't gather logs but mine coal"),
+            collect("stop chopping, start mining coal"),
+            collect("stop mining coal and chop some trees"),
+            collect("stop gathering logs and mine some coal"),
+            collect("dont mine, gather 32 logs"),
+            collect("stop mining. get 32 logs"),
+            // === hunting and what creatures drop
+            free("hunt 5 cows"),
+            free("kill 10 zombies"),
+            free("kill the sheep"),
+            free("go hunting"),
+            free("start hunting"),
+            free("hunt"),
+            free("kill 5 cows and cook the beef"),
+            free("hunt 5 cows and cook them"),
+            free("bring me 8 gunpowder"),
+            free("give me the beef you have"),
+            free("give me your leather"),
+            free("kill the zombie that is chasing you"),
+            free("kill it"),
+            free("kill all the mobs"),
+            free("hunt down the creeper"),
+            free("how many cows did you kill"),
+            free("did you kill the zombie"),
+            free("stop killing the cows"),
+            free("dont hunt the pigs"),
+            collect("hunt for meat"),
+            collect("hunt for food"),
+            collect("kill skeletons for bones"),
+            collect("kill sheep for wool"),
+            collect("kill 4 spiders for string"),
+            collect("kill a cow and give me the beef"),
+            collect("hunt some pigs and give me the pork"),
+            collect("slaughter 3 pigs and bring me the meat"),
+            collect("butcher some cows and give me the leather"),
+            collect("kill 5 sheep and bring me the wool"),
+            collect("hunt cows for leather"),
+            collect("farm 20 rotten flesh"),
+            collect("farm bones"),
+            collect("farm drops"),
+            collect("get me 10 feathers"),
+            collect("get 5 beef"),
+            collect("kill a creeper and get me the gunpowder"),
+            // === several resources in one request
+            collect("get 32 logs and 10 coal"),
+            collect("gather logs and coal"),
+            collect("gather logs, coal and iron"),
+            collect("mine 10 iron and some coal"),
+            collect("get me logs, stone and dirt"),
+            collect("collect 64 cobblestone and 32 dirt"),
+            collect("chop 10 trees and mine 5 coal"),
+            collect("gather logs, then mine coal"),
+            collect("gather some logs and also some coal"),
+            collect("mine coal, iron and gold"),
+            collect("get 10 wheat and 10 carrots"),
+            collect("i need logs and coal"),
+            free("give me logs and coal"),
+            free("give me your logs and coal"),
+            // === collect, craft, hand over: the raw quota goes through fulfill_items
+            keptResult("get 32 logs and a pickaxe"),
+            keptResult("gather 32 logs and craft a table"),
+            craftResult("gather logs, craft a chest and give me it"),
+            keptResult("mine 10 iron and make an iron pickaxe"),
+            keptResult("gather 20 logs and craft sticks"),
+            keptResult("get 10 coal and 4 torches"),
+            keptResult("mine 5 iron and smelt it"),
+            keptResult("gather 20 logs and make a chest"),
+            keptResult("chop 10 logs and craft 40 planks"),
+            keptResult("farm 10 wheat and bake bread"),
+            craftResult("mine 5 iron, smelt it and give it to me"),
+            // === natural resources a recipe also makes: collected, like any other resource
+            collect("collect 10 white wool"),
+            collect("gather 20 white wool"),
+            collect("get 5 white wool"),
+            collect("mine 5 melons"),
+            collect("gather 4 melons"),
+            collect("harvest 5 melon"),
+            collect("get 5 melons"),
+            collect("collect 8 sea lanterns"),
+            collect("get 8 sea lanterns"),
+            collect("collect 16 prismarine"),
+            collect("get 16 prismarine"),
+            collect("gather 10 terracotta"),
+            collect("get 10 terracotta"),
+            collect("collect 5 coarse dirt"),
+            collect("get 10 leather"),
+            collect("farm leather"),
+            collect("get 5 magma cream"),
+            collect("collect 20 snow"),
+            collect("get 10 mossy cobblestone"),
+            collect("get 8 honeycomb"),
+            collect("gather 32 stone"),
+            collect("gather 64 stone"),
+            collect("get 20 red wool"),
+            // === ...and what is made from them is not
+            free("get 3 hay blocks"),
+            free("gather 3 hay blocks"),
+            free("get 10 slime blocks"),
+            free("gather 16 prismarine bricks"),
+            free("gather 20 stone bricks"),
+            free("get a bed"),
+            free("get 5 shears"),
+            free("get me a chest"),
+            free("get 3 buckets"),
+            free("gather a diamond sword"),
+            free("gather 10 planks"),
+            free("collect 64 sticks"),
+            free("collect 4 torches"),
+            free("gather 16 iron ingots"),
+            free("collect 9 iron nuggets"),
+            free("get a crafting table"),
+            free("gather 8 furnaces"),
+            free("collect 3 iron helmets"),
+            // === more wordings of a request to collect
+            collect("please start mining coal"),
+            collect("can you go chop some trees"),
+            collect("i'd like 32 logs"),
+            collect("we need 64 cobblestone"),
+            collect("moss go get me 10 coal"),
+            collect("go gather 32 logs"),
+            collect("gonna need 10 iron"),
+            collect("need 32 logs asap"),
+            collect("get to chopping trees"),
+            collect("time to mine some iron"),
+            collect("can you gather?"),
+            collect("harvest the wheat"),
+            collect("go mining"),
+            collect("keep chopping"),
+            collect("collect leaves"),
+            collect("get me some sand"),
+            collect("i want 5 emeralds"),
+            // an absolute target: what is already carried counts towards it
+            free("mine until you have 20 coal"),
+            // === more handoffs of carried stock
+            free("give Steve 32 logs"),
+            free("send me 10 coal"),
+            free("hand over the logs"),
+            free("drop the logs here"),
+            free("can you share your coal"),
+            free("donate your iron to Steve"),
+            free("toss me the pickaxe"),
+            free("pass me 5 logs"),
+            free("give me the 32 logs you gathered"),
+            free("hand me what you mined"),
+            free("give me all the coal"),
+            free("could you give me some sand"),
+            // === questions and talk about collecting
+            free("can you mine?"),
+            free("what can you mine?"),
+            free("do you have coal?"),
+            free("is this coal?"),
+            free("where is the nearest forest?"),
+            free("are you mining?"),
+            free("what are you collecting?"),
+            free("how long to gather 32 logs?"),
+            free("i will mine some coal myself"),
+            free("ill gather the logs myself"),
+            free("im going to chop some trees"),
+            free("i can mine that"),
+            free("thanks"),
+            free("good job"),
+            free("nice"),
+            free("lol"),
+            free("wait"),
+            free("come back"),
+            free("whats the plan"),
+            // === collect and hand over, number or not
+            collectAndGive("mine 10 coal and hand it to me"),
+            collectAndGive("collect 20 sand and give it to me"),
+            collectAndGive("fetch 16 logs and bring them here"),
+            collectAndGive("chop 8 logs, then give them to me"),
+            collectAndGive("gather 5 logs and drop them here"),
+            collectAndGive("dig 10 dirt and give it to me"),
+            collect("mine some coal and give it to me"),
+            collect("gather some logs and hand them to me"),
+            collect("chop logs and bring them to me"),
+            // === handing over part of the collection
+            partialHandoff("collect 20 sand and give me 5"),
+            partialHandoff("mine 10 coal and give me 4"),
+            partialHandoff("gather 64 logs and give me a stack"),
+            partialHandoff("chop 20 logs and give me half"),
+            // === the remaining wordings of the routing audit (chat routing review)
+            collect("gather 32 logs and bring them to base"),
+            collectAndGive("gather 32 logs and drop them here"),
+            collectAndGive("gather 32 logs and give me 32 of them"),
+            collectAndGive("chop 32 logs and give me 'em"),
+            collectAndGive("gather 32 logs and give me those"),
+            collectAndGive("get 64 cobblestone and give it to me"),
+            collect("chop some wood and give it to me"),
+            collect("get 32 logs, then give me your 10 coal"),
+            partialHandoff("gather 32 logs, give 16 to me"),
+            free("get 3 iron ingots"),
+            free("get me some sticks"),
+            free("get me the logs you collected"),
+            free("give 16 to Steve and 16 to me"),
+            // === everyday wordings, slang, thanks and talk around collecting
+            free("gimme 32 logs"),
+            free("gib me wood"),
+            collect("get me wood pls"),
+            collect("chop wood"),
+            collect("chop trees"),
+            collect("mine stone"),
+            collect("mine some stone"),
+            free("break some stone"),
+            free("break 10 blocks of stone"),
+            collect("wood please"),
+            free("can i have 32 logs"),
+            collect("can i get 32 logs"),
+            collect("i need wood"),
+            collect("need wood"),
+            collect("we need wood"),
+            free("wood needed"),
+            collect("collect all the wood"),
+            collect("gather all wood"),
+            collect("chop down that tree"),
+            free("mine that"),
+            free("mine this"),
+            collect("mine that iron"),
+            collect("mine the coal over there"),
+            free("dig down"),
+            free("dig a hole"),
+            collect("dig for diamonds"),
+            free("build a farm"),
+            free("start a farm"),
+            collect("farm wheat"),
+            collect("harvest crops"),
+            collect("collect the eggs"),
+            free("milk the cow"),
+            free("shear the sheep"),
+            collect("shear sheep for wool"),
+            collect("shear 3 sheep and give me the wool"),
+            free("lets go"),
+            free("stay"),
+            free("come"),
+            free("what do you need"),
+            free("do you need wood"),
+            free("you need to eat"),
+            free("you have 32 logs"),
+            free("you have logs"),
+            free("you got any logs"),
+            free("got any wood"),
+            free("got logs?"),
+            free("do u have wood"),
+            collect("mine 3 gold"),
+            collect("mine 3 gold please"),
+            collect("please get me 3 gold"),
+            free("please give me 3 gold"),
+            collect("plz gather 20 sand"),
+            collect("gather 20 sand plz"),
+            free("thanks for gathering the logs"),
+            free("thank you for mining"),
+            free("good job mining"),
+            free("nice mining"),
+            free("you are mining too slow"),
+            free("why are you not mining"),
+            free("why arent you chopping trees"),
+            free("you gathered enough"),
+            free("enough logs"),
+            free("enough wood"),
+            free("that is enough"),
+            free("stop"),
+            free("stop it"),
+            free("hold on"),
+            collect("harvest all the wheat you can find"),
+            collect("collect as much wood as you can"),
+            collect("gather as many logs as possible"),
+            collect("chop every tree here"),
+            collect("mine all the coal"),
+            collect("mine everything"),
+            free("mine nothing"),
+            free("dont mine"),
+            free("dont chop"),
+            free("dont gather anything"),
+            free("do not collect anything"),
+            collect("collect everything you can find"),
+            collect("gather some stuff"),
+            free("give me some stuff"),
+            free("get me some stuff"),
+            free("get me your stuff"),
+            free("show me your inventory"),
+            free("what do you have"),
+            free("what do you have in your inventory"),
+            collect("go get wood"),
+            collect("go get me wood"),
+            collect("go chop some wood"),
+            collect("go mine some iron"),
+            collect("go and mine iron"),
+            collect("go gather some sand and come back"),
+            collectAndGive("go gather 10 sand and bring it to me"),
+            collectAndGive("go chop 10 logs and come give them to me"),
+            collect("hey moss could you please gather 32 logs for me"),
+            collect("moss i would like 32 logs"),
+            collect("moss i want 32 oak logs"),
+            collect("moss pls collect 20 coal"),
+            free("moss pls give me 20 coal"),
+            free("moss pls give me the coal you have"),
+            free("moss pls hand over the coal"),
+            free("moss get ready to mine"),
+            free("moss get ready"),
+            free("moss get over here"),
+            collect("moss come get the logs"),
+            free("moss come here and give me the logs"),
+            collect("get 32 logs then come here"),
+            collect("get 32 logs and then come here"),
+            free("get here"),
+            free("get back here"),
+            free("get inside"),
+            free("get out of the way"),
+            free("get lost"),
+            free("get in"),
+            collect("get to work chopping trees"),
+            collect("get to mining"),
+            collect("start mining"),
+            collect("start chopping"),
+            collect("keep gathering"),
+            collect("continue mining"),
+            collect("continue gathering logs"),
+            collect("resume mining"),
+            free("resume"),
+            free("pause mining"),
+            free("pause gathering"),
+            free("stop mining please"),
+            free("stop gathering and follow me"),
+            free("stop chopping, follow me"),
+            free("stop and give me the logs"),
+            free("hey stop gathering and hand me the logs"),
+            collect("stop following and mine coal"),
+            collect("stop following me and gather 32 logs"),
+            free("follow me and dont mine"),
+            free("follow me then"),
+            collect("follow me and gather logs"),
+            collect("follow me and mine coal on the way"),
+            free("eat then follow me"),
+            collect("eat and then gather 32 logs"),
+            free("craft a table"),
+            free("craft planks"),
+            free("make a pickaxe"),
+            free("make me a sword"),
+            free("make 4 chests"),
+            free("smelt the iron"),
+            free("cook the porkchop"),
+            free("cook 5 beef"),
+            craftResult("gather 20 logs and make me a chest"),
+            collect("shear 5 sheep for wool"),
+            free("shear the sheep"),
+            free("thank you for gathering"),
+            free("pause the mining"),
+            collect("harvest the wheat you can find"),
+            free("give me the wheat you harvested"),
+            free("give me the wheat you have"),
+            collect("get me the wheat you can find"));
 
     @BeforeAll
     static void bootstrap() {
@@ -353,8 +793,7 @@ final class ChatRoutingPhraseTableTest {
         return routing.withheldTools();
     }
 
-    @Test
-    void everyPhrasingWithholdsExactlyTheToolsACarriedStackCouldSatisfy() {
+    private static List<String> mismatches() {
         List<String> mismatches = new ArrayList<>();
         for (Phrase phrase : PHRASES) {
             Set<String> actual = withheldFor(phrase.text());
@@ -363,13 +802,33 @@ final class ChatRoutingPhraseTableTest {
                         + new LinkedHashSet<>(phrase.route().withheld) + " but withheld " + actual);
             }
         }
+        return mismatches;
+    }
+
+    @Test
+    void everyPhrasingWithholdsExactlyTheToolsACarriedStackCouldSatisfy() {
+        List<String> mismatches = mismatches();
         assertTrue(mismatches.isEmpty(), mismatches.size() + " of " + PHRASES.size() + " phrasings:\n"
                 + String.join("\n", mismatches));
     }
 
     @Test
+    void everyPhrasingReadsTheSameWithTheGamesWholeRecipeIndexInstalled() {
+        // A running server's recipe index holds every vanilla crafting recipe; a bare test JVM's holds none, so a
+        // noun could read as raw here and as crafted in play. Run the table against the real recipe data too.
+        RuntimeRecipeFixture.installVanilla();
+        try {
+            List<String> mismatches = mismatches();
+            assertTrue(mismatches.isEmpty(), mismatches.size() + " of " + PHRASES.size()
+                    + " phrasings differ in the running game:\n" + String.join("\n", mismatches));
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
+    }
+
+    @Test
     void theTableIsLargeEnoughToCoverEachCategory() {
-        assertTrue(PHRASES.size() >= 80, "phrase table size " + PHRASES.size());
+        assertTrue(PHRASES.size() >= 400, "phrase table size " + PHRASES.size());
         for (Route route : Route.values()) {
             assertTrue(PHRASES.stream().filter(phrase -> phrase.route() == route).count() >= 8, route.name());
         }
@@ -411,7 +870,42 @@ final class ChatRoutingPhraseTableTest {
         assertTrue(withheldFor("mine some coal").contains("give_item"));
         assertTrue(!withheldFor("gather 32 logs then craft a table and give it to me").contains("gather"),
                 "the raw collection of a compound request is started with gather");
+        assertTrue(!withheldFor("gather 32 logs then craft a table and give it to me").contains("fulfill_items"),
+                "or in one call with the raw quota as an allocation without a recipient");
         assertEquals(Set.of(), withheldFor("give me 32 logs"));
+    }
+
+    @Test
+    void severalResourcesAreEachAskedFor() {
+        assertEquals(2, RequestIntent.parse("get 32 logs and 10 coal").resources().size());
+        assertEquals(3, RequestIntent.parse("gather logs, coal and iron").resources().size());
+        assertEquals(1, RequestIntent.parse("gather logs and wood").resources().size(),
+                "two words for the same thing are one resource");
+        assertEquals(List.of(Set.of()), RequestIntent.parse("start gathering").resources(),
+                "a request that names nothing is answered by any collection");
+        assertEquals(List.of(), RequestIntent.parse("give me 32 logs").resources());
+        assertTrue(RequestIntent.parse("get 32 logs and 10 coal").quantityStated());
+    }
+
+    @Test
+    void aLineThatIsOnlyAQuantityAndAResourceNeedsANumberOrAnImperative() {
+        assertTrue(RequestIntent.parse("32 logs").acquiresRaw());
+        assertTrue(RequestIntent.parse("wood pls").acquiresRaw());
+        assertFalse(RequestIntent.parse("wood").acquiresRaw());
+        assertFalse(RequestIntent.parse("32 logs?").acquiresRaw());
+        assertFalse(RequestIntent.parse("i have 32 logs").acquiresRaw());
+        assertTrue(RequestIntent.parse("32 logs pls").quantityStated());
+        assertFalse(RequestIntent.parse("wood pls").quantityStated());
+    }
+
+    @Test
+    void whatACreatureDropsIsOnlyAskedForWhenTheRequestSaysSo() {
+        assertFalse(RequestIntent.parse("kill 5 cows").acquiresRaw());
+        assertTrue(RequestIntent.parse("kill 5 cows and give me the beef").acquiresRaw());
+        assertTrue(RequestIntent.parse("kill 5 cows and give me the beef").handsOverAcquired());
+        assertFalse(RequestIntent.parse("kill 5 cows and give me the beef").quantityStated(),
+                "a hunt is no gather: the number is not a quota for gather_then_give");
+        assertTrue(RequestIntent.parse("kill skeletons for bones").acquiresRaw());
     }
 
     @Test
@@ -445,17 +939,31 @@ final class ChatRoutingPhraseTableTest {
                 Items.SEA_LANTERN, Items.PISTON, Items.IRON_PICKAXE);
         try {
             for (String text : List.of("mine 64 andesite", "dig 20 clay", "mine some glowstone",
-                    "gather 20 sandstone", "get 10 sandstone")) {
+                    "gather 20 sandstone", "get 10 sandstone", "get 10 sea lanterns", "mine 10 sea lanterns")) {
                 assertEquals(Route.COLLECT.withheld, withheldFor(text), text);
             }
-            // Not a listed natural block: "mine" cannot mean crafting, so the verb alone keeps it physical.
-            assertEquals(Route.COLLECT.withheld, withheldFor("mine 10 sea lanterns"));
             // Crafted stays crafted for the verbs that can mean either, so achieve_goal remains usable.
-            assertEquals(Set.of(), withheldFor("get 10 sea lanterns"));
             assertEquals(Set.of(), withheldFor("get 4 pistons"));
             assertEquals(Set.of(), withheldFor("collect an iron pickaxe"));
         } finally {
             RuntimeRecipeFixture.clear();
         }
+    }
+
+    @Test
+    void aCollectingVerbDoesNotLetARecipeOfTheRunningGameMakeAResourceCrafted() {
+        // "gather"/"mine" name what the world yields: an item whose only recipe is in the game's index (a piston)
+        // counts as a resource for them in the running game exactly as in a bare test JVM, while "get" reads it
+        // as the crafted item it is there.
+        RuntimeRecipeFixture.install(Items.PISTON, Items.DISPENSER);
+        try {
+            assertEquals(Route.COLLECT.withheld, withheldFor("gather 4 pistons"));
+            assertEquals(Route.COLLECT.withheld, withheldFor("collect 4 dispensers"));
+            assertEquals(Set.of(), withheldFor("get 4 pistons"));
+        } finally {
+            RuntimeRecipeFixture.clear();
+        }
+        assertEquals(Route.COLLECT.withheld, withheldFor("gather 4 pistons"));
+        assertEquals(Route.COLLECT.withheld, withheldFor("get 4 pistons"), "no recipe index: nothing says crafted");
     }
 }

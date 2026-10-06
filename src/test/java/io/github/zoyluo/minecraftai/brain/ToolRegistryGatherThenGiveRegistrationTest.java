@@ -32,16 +32,18 @@ final class ToolRegistryGatherThenGiveRegistrationTest {
     }
 
     @Test
-    void gatherThenGiveIsOfferedWithItsItemAndCountRequiredAndThePlayerOptional() {
+    void gatherThenGiveIsOfferedWithOnlyItsItemRequired() {
         ToolDefinition tool = registry.tools(null, false, false, false).stream()
                 .filter(candidate -> candidate.name().equals("gather_then_give")).findFirst().orElseThrow();
 
         JsonObject properties = tool.parametersSchema().getAsJsonObject("properties");
         assertEquals(List.of("item", "count", "player"), List.copyOf(properties.keySet()));
-        assertEquals(List.of("item", "count"), requiredArguments("gather_then_give"),
-                "the player may omit nothing the handoff cannot do without: the item and how many");
+        assertEquals(List.of("item"), requiredArguments("gather_then_give"),
+                "a number the player never stated must not have to be invented: without count it collects for the "
+                        + "ten-minute window");
         assertEquals(1, properties.getAsJsonObject("count").get("minimum").getAsInt(),
                 "a quota of zero or less is not a quota");
+        assertTrue(tool.description().contains("omit count"), "the description says when the count is left out");
     }
 
     @Test
