@@ -1,10 +1,12 @@
 package io.github.zoyluo.minecraftai.mode;
 
 import static io.github.zoyluo.minecraftai.testsupport.HitAssert.assertHitsBlock;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.zoyluo.minecraftai.testsupport.FakeLevel;
 import io.github.zoyluo.minecraftai.testsupport.VanillaRegistries;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
@@ -43,6 +45,20 @@ class SightClipStandingTest {
         // The line to the floor beside the pool dips below the lava surface inside the bot's own cell.
         assertHitsBlock(ray(level, EYE, INTO_FLOOR, null, null), STANDING, "to anyone else the lava is in the way");
         assertHitsBlock(ray(level, EYE, INTO_FLOOR, STANDING, null), new BlockPos(1, -1, 0), "the bot sees the floor it can climb to");
+    }
+
+    @Test
+    void theLavaABotWadesInIsSkippedButStillRecordedAsLavaSoNoRecorderStoresAirUnderItsFeet() {
+        FakeLevel level = new FakeLevel().set(0, 0, 0, LAVA).set(1, -1, 0, STONE);
+        SightClipContext context = new SightClipContext(EYE, INTO_FLOOR, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE,
+                CollisionContext.empty(), null, true, STANDING);
+        assertHitsBlock(level.clip(context), new BlockPos(1, -1, 0), "the floor is seen past the lava the bot stands in");
+        assertEquals(List.of(new SightClipContext.Crossing(STANDING, LAVA)), context.crossed(),
+                "the cell the ray skipped is the hazard it is, never free air");
+        SightClipContext quiet = new SightClipContext(EYE, INTO_FLOOR, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE,
+                CollisionContext.empty(), null, false, STANDING);
+        level.clip(quiet);
+        assertTrue(quiet.crossed().isEmpty(), "nothing is recorded unless asked for");
     }
 
     @Test

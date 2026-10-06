@@ -133,6 +133,51 @@ class SightRecordingTest {
     }
 
     @Test
+    void aRayThatWalksThroughFireACobwebAndABerryBushUnaidedStillStoresThemAsThemselves() {
+        // None of these has a collision shape: a COLLIDER ray (the Baritone fence's and the sweeper's) meets nothing in them, so
+        // vanilla's traversal never asks it to skip them, yet the cell holds them and air there would be walked through.
+        BlockState fire = Blocks.FIRE.defaultBlockState();
+        BlockState cobweb = Blocks.COBWEB.defaultBlockState();
+        BlockState berries = Blocks.SWEET_BERRY_BUSH.defaultBlockState();
+        for (BlockState state : new BlockState[] {fire, cobweb, berries}) {
+            assertTrue(SeeThrough.cell(state), state + " is see-through");
+            assertTrue(state.getCollisionShape(new FakeLevel(), at(1), CollisionContext.empty()).isEmpty(), state + " has no collision");
+        }
+        FakeLevel level = new FakeLevel().set(1, 1, 0, fire).set(2, 1, 0, cobweb).set(3, 1, 0, berries).set(4, 1, 0, LEAF)
+                .set(6, 1, 0, STONE);
+        Vec3 to = new Vec3(9.5D, 1.5D, 0.5D);
+        for (ClipContext.Block shape : new ClipContext.Block[] {ClipContext.Block.COLLIDER, ClipContext.Block.OUTLINE}) {
+            Map<BlockPos, BlockState> stored = record(castSight(level, EYE, to, shape), EYE, to);
+            assertEquals(fire, stored.get(at(1)), "fire, " + shape);
+            assertEquals(cobweb, stored.get(at(2)), "a cobweb, " + shape);
+            assertEquals(berries, stored.get(at(3)), "a berry bush, " + shape);
+            assertEquals(LEAF, stored.get(at(4)), "a leaf, " + shape);
+            assertEquals(AIR, stored.get(at(5)), "the open cell, " + shape);
+            assertEquals(STONE, stored.get(at(6)), shape.toString());
+        }
+    }
+
+    @Test
+    void aLongUnderwaterRayStoresEveryCellAsWaterAndAnswersEachLookupFromItsIndex() {
+        FakeLevel level = new FakeLevel().set(60, 1, 0, STONE);
+        for (int x = 1; x < 60; x++) {
+            level.set(x, 1, 0, x % 7 == 0 ? FENCE : WATER);
+        }
+        Vec3 to = new Vec3(70.5D, 1.5D, 0.5D);
+        ObservableWorldQuery.ViewHit view = castSight(level, EYE, to, ClipContext.Block.COLLIDER);
+        assertEquals(59, view.crossed().size(), "one crossing per skipped cell");
+        for (int x = 1; x < 60; x++) {
+            assertEquals(x % 7 == 0 ? FENCE : WATER, view.seenState(at(x)), "cell " + x);
+        }
+        assertNull(view.seenState(at(0)), "the eye's own empty cell");
+        assertNull(view.seenState(at(61)), "nothing behind the first opaque block");
+        Map<BlockPos, BlockState> stored = record(view, EYE, to);
+        assertEquals(WATER, stored.get(at(3)));
+        assertEquals(FENCE, stored.get(at(14)));
+        assertEquals(STONE, stored.get(at(60)));
+    }
+
+    @Test
     void aSeeThroughTargetIsTheHitAndIsStoredAsWhatItIs() {
         // The sweeper of a tree asks about the leaf itself: with the leaf as the target the ray ends in it.
         FakeLevel level = new FakeLevel().set(2, 1, 0, LEAF).set(5, 1, 0, LOG);
@@ -170,7 +215,8 @@ class SightRecordingTest {
      */
     @Test
     void everySeeThroughCellAnyRayCrossesIsStoredAsItselfOverRandomWorlds() {
-        BlockState[] palette = {AIR, AIR, AIR, LEAF, LEAF, FENCE, GLASS, WATER, STONE};
+        BlockState[] palette = {AIR, AIR, AIR, LEAF, LEAF, FENCE, GLASS, WATER, STONE, Blocks.TORCH.defaultBlockState(),
+                Blocks.SHORT_GRASS.defaultBlockState(), Blocks.COBWEB.defaultBlockState(), Blocks.FIRE.defaultBlockState()};
         Random random = new Random(0x5EE7_1356L);
         int checked = 0;
         for (int world = 0; world < 60; world++) {
@@ -198,10 +244,7 @@ class SightRecordingTest {
                         BlockPos pos = entry.getKey();
                         BlockState real = level.getBlockState(pos);
                         boolean isHit = view.hit() && pos.equals(view.pos());
-                        boolean solidToTheRay = shape == ClipContext.Block.COLLIDER
-                                ? !real.getCollisionShape(level, pos, CollisionContext.empty()).isEmpty()
-                                : !real.getShape(level, pos, CollisionContext.empty()).isEmpty();
-                        if (!isHit && SeeThrough.cell(real) && !real.isAir() && (solidToTheRay || !real.getFluidState().isEmpty())) {
+                        if (!isHit && SeeThrough.cell(real) && !real.isAir()) {
                             assertEquals(real, entry.getValue(), "ray " + from + " -> " + to + " (" + shape + ") stored the "
                                     + real + " at " + pos.toShortString() + " as " + entry.getValue());
                             checked++;

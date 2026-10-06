@@ -202,6 +202,11 @@ public final class TradeTask extends AbstractTask {
         complete();
     }
 
+    /**
+     * The nearest villager the bot sees AND could trade with from where it stands: the eyes pass through glass and fences, but a
+     * trade needs the plain vanilla line ({@link #inTradeReach}), so a villager behind a pane that is nearer than one in the open
+     * would be walked to forever while the reachable one is never chosen.
+     */
     private Optional<Villager> nearestVillager(AIPlayerEntity bot) {
         double range = Math.min(maxDistance, SEARCH_RANGE);
         AABB box = bot.getBoundingBox().inflate(range);
@@ -209,7 +214,8 @@ public final class TradeTask extends AbstractTask {
                 .getEntitiesOfClass(Villager.class, box,
                         entity -> entity.isAlive() && !entity.isBaby() && !entity.isSleeping() && !entity.isTrading())
                 .stream()
-                .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
+                .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity)
+                        && StrikeLegality.hasStrikeLineOfSight(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 

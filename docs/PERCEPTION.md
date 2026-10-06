@@ -224,18 +224,23 @@ lava the observer stands in (its eye is above the surface; a bot that fell into 
 in the lava itself is blind.
 
 **Sight is not reach.** Seeing a block behind a leaf does not let a hand reach it: every actuator (break, place, open, interact,
-strike, bucket) keeps its own vanilla `ClipContext` and refuses what a real pick ray would not reach. The context therefore also
-reports `obstructions()`: the see-through blocks a vanilla pick ray along the same segment would hit, nearest the eye first. A pick
-ray is an `OUTLINE` ray with `Fluid.NONE` (`Entity.pick`), so that is the shape the list is modelled with whatever shape the sight
-ray used: water is never an obstruction, a block with no collision but an outline (grass, a torch, an open gate) is, and a ray
-that slips past a lone fence post or a pane's post is not. `crossed()` lists every skipped cell with the state it really holds, so
-a recorder never stores a leaf, a fence or water as air.
+strike, bucket) refuses what a real pick ray would not reach. A context built with `trackObstructions()` therefore also reports
+`obstructions()`: the see-through blocks a vanilla pick ray along the same segment would hit, nearest the eye first (tracking costs
+a shape lookup and a clip per skipped block, so only the reach proofs ask for it: `SightClip.pick`). A pick ray is an `OUTLINE` ray
+with `Fluid.NONE` (`Entity.pick`), so that is the shape the list is modelled with whatever shape the sight ray used: water is never
+an obstruction, a block with no collision but an outline (grass, a cobweb, a torch, an open gate) is, and a ray that slips past a
+lone fence post or a pane's post is not. `crossed()` lists every skipped cell with the state it really holds, so a recorder never
+stores a leaf, a fence, a plant that no collision shape ever stopped (fire, a cobweb, a berry bush) or water as air, nor the lava a
+bot wades in; it answers a recorder's per-cell question from an index, so a long underwater ray costs one lookup per cell.
 
 The two families live side by side in `ObservableWorldQuery`. The ordinary predicates (`canObserveBlock`,
 `canObserveBlockCellFace`, `canObserveBlockWithInsetFaces`, `canObserveCell`, `canObserveFarmCell`, the collider forms, the
 `*ThroughFluids` aliases and the linked owner's mirrors) are sight: they cast `SightClip` rays and pass the observed cell as the
-target. Each one an actuator needs has a `Strict` twin, the plain vanilla clip that the first leaf, fence, pane or water cell
-stops. A break, an open or a use sends no pick ray of its own, so each of those actuators re-proves with the strict twin itself:
+target. Each one an actuator needs has a `Strict` twin, the line a hand needs: the vanilla pick ray (outline shapes, fluids ignored)
+along the very segment, which the first leaf, plant, cobweb, torch, open gate, fence post or pane its outline crosses stops, which
+water does not (a player mines the log across a pond) and lava still does. The strict twins aim at the outline of the target, and
+only the bot's own hand counts: a linked owner's clear line proves sight, never reach. A break, an open or a use sends no pick ray
+of its own, so each of those actuators re-proves with the strict twin itself:
 `MiningController.currentObservedTarget` (the sole break gate; `visiblyAir` only settles a finished break and may use sight),
 `ContainerAction.canSee`, `FarmAction.harvestProof`, `BaritoneGoals.mineAt` (through the miner's admission, below), the break proof of `BaritoneBreakPlacePolicy`, a
 furnace or depot the bot reaches into (`SmeltTask`, `StripMineTask`, `MiningServiceTask`, `WorkshopLocator`) and
@@ -247,20 +252,23 @@ admits it and the shared memory knows the leaves and the log), but a break throu
 
 ### Mining what is seen through something
 
-The bot first tries the target itself: the strict gate above, six face centres and the 3x3 inset grid on each face with the plain
-vanilla clip, is the "natural" line, and a log behind a fence line's gap, or in the open, is mined exactly as before. Only when no
-line passes the strict gate but the eyes do see the block (the sight proofs, state-free first) does `MiningController` clear the way,
-and it does so inside the one operation every caller already uses (`ActionPack.startMining`, `BlockMiner`, `HarvestCore`,
-`BaritoneGoals.mineAt`, the legacy path executor's dig steps), so Gather, OreDig, farming and the rest need no change and see one
-coherent break: it starts as in progress, keeps the generation, the break delay and the cancel semantics (a cancel aborts the step
-that is running), and succeeds when the target is gone.
+The bot first tries the target itself: the strict gate above, six face centres and the 3x3 inset grid on each face with the vanilla
+pick ray, is the "natural" line, so a log in the open, behind the gap of a fence line (between the rails) or across a pond is mined
+without breaking anything. Only when no line passes the strict gate but the eyes do see the block (the sight proofs, state-free
+first) does `MiningController` clear the way, and it does so inside the one operation every caller already uses
+(`ActionPack.startMining`, `BlockMiner`, `HarvestCore`, `BaritoneGoals.mineAt`, the legacy path executor's dig steps), so Gather,
+OreDig, farming and the rest need no change and see one coherent break: it starts as in progress, keeps the generation, the break
+delay and the cancel semantics (a cancel aborts the step that is running), and succeeds when the target is gone. Gather does read
+the miner's refusal at every place it starts a break: a log its eyes nominated but its hand may not reach (`target_obstructed`,
+`target_not_observed`) is given up at once (`gather_harvest_refused`, excluded like a timed-out target) instead of standing in HARVEST
+until the deadline.
 
 `mode/ReachObstructions` lists, for each of the strict gate's own aim lines, the see-through blocks that gate would meet first: it
-traces the same plain vanilla ray (every fluid hit stops it) and, each time that ray hits a see-through block, records it and goes on
-as if it were broken. What is left on a line is exactly what must disappear for the strict gate to pass along it. (That is not
-`SightClipContext.obstructions()`, which models the crosshair's `OUTLINE` ray: it lists a flower that the strict ray walks through and
-misses a fence whose collision arms stop the strict ray above the rails.) `MiningObstruction` then picks the line with the fewest
-blocks, then the nearest first block, and breaks that block like any other: through a normal `MiningController` with its own tool
+casts the very ray the strict twins do (`SightClip.pick`, tracked) and reads `obstructions()`, the see-through blocks whose outline the
+segment crosses, nearest first. What is on a line is exactly what must disappear for the strict gate to pass along it, and a line with
+nothing on it is one a hand already reaches (a click through the gap of a fence line, past a lone post, across water).
+`MiningObstruction` then picks the line with the fewest blocks, then the nearest first block, and breaks that block like any other:
+through a normal `MiningController` with its own tool
 (`ToolSelector`), break delay, safety, drops and audit (`mine_complete` with `obstruction_of`, the edits ledger). It re-plans after
 each break, so each step removes one real block and the target is started only once the strict gate passes, never while an intact
 see-through block is what a hand would hit. A break the server did not carry out ends the operation (`obstruction_persisted`) instead
@@ -269,9 +277,10 @@ of looping; no count or timer was invented for it.
 What may be broken is the mod-wide `BreakRule`: natural terrain, which for something in the way means leaves and the small plants
 that grow in the way. A fence, a gate, glass, a pane, bars, a ladder, a chain or ice was put there by somebody (or releases water),
 so a line that crosses one is skipped altogether, even with a leaf in front of it. A block the bot or another player stands on and a
-leaf beside lava the bot can see are kept too. When no line is left the operation fails with the typed `target_obstructed` (the
-callers' "not mineable from this stand": a task tries another stand), and `mining_obstruction_refused` says which block and why;
-`target_not_observed` stays for a target the eyes do not see (an opaque block, water, lava, out of reach). A Baritone driver's
+leaf beside lava the bot can see, or beside water that would flow into its cell, are kept too (`exposes_lava`, `exposes_water`).
+When no line is left the operation fails with the typed `target_obstructed` (the callers' "not mineable from this stand": a task
+tries another stand), and `mining_obstruction_refused` says which block and why;
+`target_not_observed` stays for a target the eyes do not see (an opaque block, lava, out of reach). A Baritone driver's
 controller does not clear anything on top of that: Baritone clicks what its own pick ray meets, which is the leaf.
 
 `castViewRay` stays the strict first-hit view ray: the mining assist's sweeper and the suffocation escape's dig choice use it,
@@ -298,6 +307,7 @@ creature changes: a blow, an arrow or a blast cannot cross what the eyes pass, s
 | Can it be struck or shot? Does it press on the bot? Is it a threat to fight or flee, a target to acquire, a creeper to run from? Is a fight still worth keeping? | physical (the vanilla collider ray) | `CombatCore.hasLineOfSight`, `StrikeLegality`, `DangerWatcher.canReachThreat`, the pressure sets, `nearestTarget`, `nearestHostileAround`, `CreeperDefenseTask`, `EvadeTask`, the lost-line timers of `CombatTask` and `GuardTask`, `SharedVision.ownerSeesStrict` |
 | Where did a projectile that hit the bot come from? | physical | `CreatureSenses.traceBack` |
 | May a hand milk, feed, board or trade? | physical, proved before the click | `InteractAction.useItemOnEntity`, `TradeTask` |
+| Which animal, villager or prey does a deliberate search set out for, and from which stand? | sight to nominate, then the physical line of what the click or blow will need | `CombatCore.nearestTarget` (a cow too), `TradeTask.nearestVillager`, `MilkCowAction.nearestCow`, `BreedTask.findPair`, `HuntTask.canStrikeFrom` (per attack pose), the last stand (`DangerWatcher.lastStandTarget`) |
 
 The split exists because a creature noticed through a leaf used to imply a physical line (sight and the line were the same ray),
 and a lot of code leans on that. A bot that fought what it merely sees would walk up to a pane, find no line and give up, then
@@ -311,7 +321,13 @@ sets (`DangerWatcher.observableActiveHostilePressure`, `CombatTask.observableAct
 (`EvadeTask`), and the two lost-line timers (`CombatTask`, `GuardTask`): they end a fight the bot can never strike in, which is
 about what a blow can cross, so they stay physical and a target seen but never reachable is dropped (and the guard leaves it alone
 for a while) exactly as one seen across a gap always was. The owner's nomination in that bookkeeping is the owner's collider line
-too. What the shelter's exit and the shield guard ask of a noticed creature stay sight: they plan for what is out there, and the
+too. What a deliberate search sets out for is chosen the same way: the nearest cow, villager or pair that is seen would otherwise be
+a pen behind glass that the bot walks to and cannot touch, while the one in the open is never chosen (a fight reported complete with
+nothing killed, a trade or a feeding that never starts, a hunt standing at the pane until its no-progress deadline). A fight, a
+trade, a milking and a breeding therefore nominate an animal that is seen AND on the plain vanilla line from where the bot stands; a
+hunt keeps the see-through nomination (prey is spotted across a hedge and walked to) and asks for the line from each attack pose
+(`HuntTask.canStrikeFrom`), so prey with no pose it can be struck from is rejected like any other that cannot be reached; and the
+last stand fights the nearest hostile it can hit, not the first one it merely sees. What the shelter's exit and the shield guard ask of a noticed creature stay sight: they plan for what is out there, and the
 mob's own vanilla AI (opaque) gates what it can do to the bot.
 
 The PvP BOT wrapper is not changed: its inhabitants keep vanilla's opaque ray (`AggroDriver`, `AggroWorld`), as they do for any
@@ -325,7 +341,8 @@ through a clear line.
 * IN: every place a bot NOTICES a creature (threat detection, target acquisition, aggro, aggressor checks,
   perception summaries given to the LLM, projectile threat awareness), through the see-through eyes of the bot.
 * OUT: object perception (items, containers, crops, blocks, boats), non-hostile task targets a bot deliberately
-  searches for (hunt, breed, milk, trade, villagers), strike legality and every other physical ray check (they keep the
+  searches for (hunt, breed, milk, trade, villagers: omnidirectional, with the physical line of the click or blow they need
+  on top, see above), strike legality and every other physical ray check (they keep the
   vanilla collider line), and the owner's own camera cone (`SharedVision.ownerSees`, which uses the same see-through eyes as
   the bot's).
 * Light level and darkness are not modelled (vanilla mobs ignore them too); a possible later option.

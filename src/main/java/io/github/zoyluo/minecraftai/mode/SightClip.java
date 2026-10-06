@@ -42,8 +42,8 @@ public final class SightClip {
 
     /**
      * A fresh context for a ray whose caller also wants what it crossed: pass it to {@code level.clip(...)} and then read
-     * {@link SightClipContext#reachObstructed()}, {@link SightClipContext#obstructions()} and, with {@code recordCrossed},
-     * {@link SightClipContext#crossed()}.
+     * {@link SightClipContext#crossed()} (with {@code recordCrossed}) or, after {@link SightClipContext#trackObstructions()},
+     * {@link SightClipContext#reachObstructed()} and {@link SightClipContext#obstructions()}.
      */
     public static SightClipContext context(Vec3 from, Vec3 to, ClipContext.Block shape, ClipContext.Fluid fluid,
                                            CollisionContext collisionContext, BlockPos target, boolean recordCrossed) {
@@ -56,12 +56,30 @@ public final class SightClip {
     }
 
     /**
+     * The line a hand follows to a point, as a context: a vanilla pick ray ({@code Entity.pick}, which every click goes by) is an
+     * OUTLINE ray that ignores fluids, so water is passed and a see-through block whose outline the segment crosses is what the
+     * click lands on, however a sight ray would treat it. After {@code level.clip(...)} the ray is clear exactly when it ended at
+     * {@code target} and {@link SightClipContext#reachObstructed()} is false; otherwise
+     * {@link SightClipContext#obstructions()} lists what must go first. Lava still stops it, as it stops the eyes: a hand does not
+     * reach what the bot cannot see. {@code standing} is the cell the observer stands in, as for
+     * {@link SightClipContext#SightClipContext(Vec3, Vec3, ClipContext.Block, ClipContext.Fluid, CollisionContext, BlockPos, boolean, BlockPos)}.
+     */
+    public static SightClipContext pick(Vec3 from, Vec3 to, CollisionContext collisionContext, BlockPos standing, BlockPos target) {
+        return new SightClipContext(from, to, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, collisionContext, target, false,
+                standing).trackObstructions();
+    }
+
+    /**
      * What a ray that recorded its crossings ({@link SightClipContext#crossed()}) saw in the cell {@code packedPos}
      * ({@link BlockPos#asLong()}): the real state of a leaf, a fence, glass or water it passed through, or {@code null} when
      * it did not skip that cell. A recorder that walks a ray's cells stores this instead of air, so foliage and water are
-     * never remembered as free space.
+     * never remembered as free space. A list that came from a ray ({@link SightClipContext#crossed()}) answers from its index, so
+     * a recorder that asks for every cell of a long underwater ray does not scan the whole list each time.
      */
     public static BlockState crossedState(List<SightClipContext.Crossing> crossed, long packedPos) {
+        if (crossed instanceof SightClipContext.Crossings indexed) {
+            return indexed.stateAt(packedPos);
+        }
         for (SightClipContext.Crossing crossing : crossed) {
             if (crossing.pos().asLong() == packedPos) {
                 return crossing.state();

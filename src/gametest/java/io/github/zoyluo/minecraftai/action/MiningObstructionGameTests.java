@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
@@ -18,13 +19,17 @@ import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -526,6 +531,165 @@ public final class MiningObstructionGameTests {
             arena.require(InventoryAction.countItem(bot, Items.OAK_LOG) >= 1, "gather completed without the log in the inventory");
             arena.require(arena.world().getBlockState(log).isAir(), "the log is still standing");
             arena.require(!arena.events("mining_obstruction_cleared").isEmpty(), "the log was mined without clearing the leaves in front of it");
+            arena.finish();
+        });
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Reach is a vanilla pick ray: outline shapes, fluids ignored
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @GameTest(environment = "minecraftai-gametest:mining_obstruction_game_tests_a_log_behind_cobweb_is_not_mined_through_it_and_a_chest_behind_it_is_not_opened", maxTicks = 100)
+    public void aLogBehindCobwebIsNotMinedThroughItAndAChestBehindItIsNotOpened(GameTestHelper context) {
+        // A cobweb collides with nothing, so a ray of collision shapes walks through it, but a click along the line lands on it:
+        // the log is not the block a hand reaches, however plainly the bot sees it.
+        Arena arena = Arena.begin(context, "ObstructWeb");
+        AIPlayerEntity bot = arena.bot();
+        BlockPos log = arena.log();
+        BlockPos chest = arena.at(4, 0, 0);
+        arena.set(log, LOG);
+        arena.set(chest, Blocks.CHEST.defaultBlockState());
+        List<BlockPos> webs = arena.wall(2, 2, Blocks.COBWEB.defaultBlockState());
+        arena.require(arena.sees(log), "the log behind the cobweb is not seen");
+        arena.require(!arena.reaches(log), "the mining gate admits the log through the cobweb: a click lands on the web");
+        arena.require(!ContainerAction.canSee(bot, chest) && ContainerAction.open(bot, chest, false).isEmpty(),
+                "the chest behind the cobweb was opened");
+
+        ActionResult refused = bot.getActionPack().startMining(log, Direction.WEST);
+        arena.require(refused.isFailed() && MiningController.TARGET_OBSTRUCTED.equals(refused.reason()),
+                "a log behind a cobweb was not refused as obstructed: " + refused);
+        arena.require(bot.getActionPack().isMiningIdle() && arena.world().getBlockState(log).is(Blocks.OAK_LOG),
+                "a break was started through the cobweb");
+        for (BlockPos web : webs) {
+            arena.require(arena.world().getBlockState(web).is(Blocks.COBWEB), "a cobweb was broken at " + web);
+        }
+
+        for (BlockPos web : webs) {
+            arena.set(web, AIR);
+        }
+        arena.require(arena.reaches(log) && ContainerAction.canSee(bot, chest),
+                "control: the log and the chest are not reachable once the cobweb is gone");
+        arena.finish();
+    }
+
+    @GameTest(environment = "minecraftai-gametest:mining_obstruction_game_tests_a_log_and_a_chest_behind_water_are_reached_as_a_player_reaches_them", maxTicks = 700)
+    public void aLogAndAChestBehindWaterAreReachedAsAPlayerReachesThem(GameTestHelper context) {
+        // A pick ray ignores fluids: a player mines the log across two blocks of water and opens the chest under them, and the
+        // bot that sees them through the water does the same, with nothing to break first (water is no block).
+        Arena arena = Arena.begin(context, "ObstructWater");
+        AIPlayerEntity bot = arena.bot();
+        arena.giveAxe();
+        BlockPos log = arena.log();
+        BlockPos chest = arena.at(4, 0, 0);
+        arena.set(log, LOG);
+        arena.set(chest, Blocks.CHEST.defaultBlockState());
+        arena.wall(2, 2, Blocks.WATER.defaultBlockState());
+        arena.wall(3, 2, Blocks.WATER.defaultBlockState());
+        arena.require(arena.sees(log), "the log behind the water is not seen");
+        arena.require(arena.reaches(log), "a hand does not reach the log across the water, as a player's does");
+        arena.require(ContainerAction.canSee(bot, chest), "a hand does not reach the chest across the water, as a player's does");
+
+        ActionResult started = bot.getActionPack().startMining(log, Direction.WEST);
+        arena.require(started.isInProgress(), "mining the log behind the water was not admitted: " + started);
+        context.failIfEver(() -> {
+            if (!arena.world().getBlockState(log).isAir()) {
+                return;
+            }
+            arena.require(arena.events("mining_obstruction_detected").isEmpty() && arena.events("mining_obstruction_refused").isEmpty(),
+                    "the water was treated as something to clear");
+            arena.finish();
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:mining_obstruction_game_tests_a_leaf_next_to_visible_water_is_not_broken_for_the_log_behind_it", maxTicks = 100)
+    public void aLeafNextToVisibleWaterIsNotBrokenForTheLogBehindIt(GameTestHelper context) {
+        // Breaking the leaf would let the water flow into its cell: a block for a log, and a stream left behind.
+        Arena arena = Arena.begin(context, "ObstructFlood");
+        AIPlayerEntity bot = arena.bot();
+        BlockPos log = arena.log();
+        arena.set(log, LOG);
+        List<BlockPos> leaves = arena.wall(2, 2, LEAF);
+        // A pocket of water inside the wall, sealed by stone behind, above, below and aside and by glass on the bot's side, so it
+        // is seen through the glass and cannot flow anywhere. Its neighbour in the wall is the leaf a line to the log crosses.
+        BlockPos water = arena.at(2, 1, 1);
+        arena.set(water, Blocks.WATER.defaultBlockState());
+        arena.set(arena.at(3, 1, 1), Blocks.STONE.defaultBlockState());
+        arena.set(arena.at(2, 2, 1), Blocks.STONE.defaultBlockState());
+        arena.set(arena.at(2, 0, 1), Blocks.STONE.defaultBlockState());
+        arena.set(arena.at(2, 1, 2), Blocks.STONE.defaultBlockState());
+        arena.set(arena.at(1, 1, 1), Blocks.GLASS.defaultBlockState());
+        arena.require(arena.sees(log), "the log behind the leaves is not seen");
+        arena.require(ObservableWorldQuery.canObserveCell(bot, water), "the water behind the glass is not seen");
+
+        ActionResult refused = bot.getActionPack().startMining(log, Direction.WEST);
+        arena.require(refused.isFailed() && MiningController.TARGET_OBSTRUCTED.equals(refused.reason()),
+                "a log behind a leaf that borders visible water was not refused as obstructed: " + refused);
+        for (BlockPos leaf : leaves) {
+            if (!leaf.equals(water) && !leaf.equals(arena.at(2, 1, 2)) && !leaf.equals(arena.at(2, 2, 1)) && !leaf.equals(arena.at(2, 0, 1))) {
+                arena.require(arena.world().getBlockState(leaf).is(Blocks.OAK_LEAVES), "the leaf at " + leaf + " was broken beside water");
+            }
+        }
+        List<String> refusals = arena.events("mining_obstruction_refused");
+        arena.require(refusals.size() == 1 && refusals.get(0).contains("reason='exposes_water'"),
+                "the refusal does not say the leaf borders water: " + refusals);
+        arena.finish();
+    }
+
+    @GameTest(environment = "minecraftai-gametest:mining_obstruction_game_tests_an_owners_clear_line_does_not_let_the_bot_mine_through_a_leaf", maxTicks = 100)
+    public void anOwnersClearLineDoesNotLetTheBotMineThroughALeaf(GameTestHelper context) {
+        // The linked owner is a second pair of EYES, never a second hand: what the owner sees cleanly is no line for the bot's own
+        // break, which a leaf in front of the bot still stops.
+        Arena arena = Arena.begin(context, "ObstructOwner");
+        AIPlayerEntity bot = arena.bot();
+        ServerPlayer owner = MockPlayers.ownerFor(context, bot);
+        BlockPos log = arena.log();
+        arena.set(log, LOG);
+        arena.wall(2, 1, LEAF);
+        BlockPos ownerFeet = arena.at(4, 0, 3);
+        owner.teleportTo(arena.world(), ownerFeet.getX() + 0.5D, ownerFeet.getY(), ownerFeet.getZ() + 0.5D, Set.of(), 180.0F, 0.0F, true);
+        arena.world().getChunkSource().move(owner);
+        Vec3 southFace = new Vec3(log.getX() + 0.5D, log.getY() + 0.5D, log.getZ() + 0.999D);
+        BlockHitResult ownerLine = arena.world().clip(new ClipContext(owner.getEyePosition(), southFace,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner));
+        arena.require(ownerLine.getType() == HitResult.Type.BLOCK && ownerLine.getBlockPos().equals(log),
+                "fixture: the owner has no clear line to the log");
+        arena.require(arena.sees(log), "the log behind the leaf is not seen");
+        arena.require(!ObservableWorldQuery.canObserveBlockStrict(bot, log) && !arena.reaches(log),
+                "the owner's clear line let the bot's own gate through the leaf");
+        ActionResult started = bot.getActionPack().startMining(log, Direction.WEST);
+        arena.require(started.isInProgress(), "the log behind a leaf is cleared, not refused: " + started);
+        bot.getActionPack().stopMining();
+        arena.require(arena.world().getBlockState(log).is(Blocks.OAK_LOG), "the log was broken through the leaf");
+        arena.finish();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Gather does not wait out its deadline for a target the miner has refused
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @GameTest(environment = "minecraftai-gametest:mining_obstruction_game_tests_gather_gives_up_a_log_behind_a_pane_at_once_and_does_not_wait_out_the_harvest_deadline", maxTicks = 220)
+    public void gatherGivesUpALogBehindAPaneAtOnceAndDoesNotWaitOutTheHarvestDeadline(GameTestHelper context) {
+        Arena arena = Arena.begin(context, "ObstructGatherPane");
+        AIPlayerEntity bot = arena.bot();
+        arena.giveAxe();
+        arena.wall(2, 2, Blocks.GLASS_PANE.defaultBlockState());
+        BlockPos log = arena.log();
+        arena.set(log, LOG);
+        arena.require(arena.sees(log) && !arena.reaches(log), "fixture: the log must be seen but not reachable");
+        GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
+        task.start(bot);
+        context.failIfEver(() -> {
+            if (task.state() == TaskState.RUNNING) {
+                task.tick(bot);
+            }
+            arena.require(arena.events("gather_harvest_timeout").isEmpty(), "gather waited out the harvest deadline for a log it may not mine");
+            if (arena.events("gather_harvest_refused").isEmpty()) {
+                return;
+            }
+            List<String> refused = arena.events("gather_harvest_refused");
+            arena.require(refused.get(0).contains("reason='target_obstructed'") && refused.get(0).contains("pos='" + log.toShortString() + "'"),
+                    "the refusal is not logged with the target and why: " + refused);
+            arena.require(arena.world().getBlockState(log).is(Blocks.OAK_LOG), "the log was broken through the panes");
             arena.finish();
         });
     }

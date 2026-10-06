@@ -139,10 +139,10 @@ class MiningObstructionSourceContractTest {
                             || source.contains("setBlock"),
                     file + " only decides what to break; the controller is the sole break actuator");
         }
-        assertFalse(read("mode/ReachObstructions.java").contains("SightClip"), // not even by name: it casts no see-through ray
-                "the lines are the strict gate's own plain vanilla rays, with the blocks found so far taken away");
-        assertTrue(read("mode/ReachObstructions.java").contains("ClipContext.Fluid.ANY"),
-                "the strict gate stops at every fluid, so a line through water is not a line to clear");
+        assertTrue(read("mode/ReachObstructions.java").contains("SightClip.pick("),
+                "the lines are traced with the click's own ray");
+        assertTrue(body(read("mode/ObservableWorldQuery.java"), "private static BlockHitResult handClip(").contains("SightClip.pick("),
+                "and it is the very ray the strict proofs cast, so a line is clear exactly when the gate passes along it");
     }
 
     @Test
@@ -150,12 +150,18 @@ class MiningObstructionSourceContractTest {
         String policy = body(read("action/MiningObstruction.java"),
                 "private static String refusalOf(AIPlayerEntity player, Obstruction obstruction, Collection<BlockPos> cleared)");
         assertInOrder(policy, "cleared.contains(obstruction.pos())", "BreakRule.denialOf(obstruction.state())",
-                "MiningSafety.supportOccupancy(player, obstruction.pos())", "exposesLava(player, obstruction.pos())");
+                "MiningSafety.supportOccupancy(player, obstruction.pos())", "exposesLava(player, obstruction.pos())",
+                "exposesWater(player, obstruction.pos())");
         String reach = body(read("action/MiningObstruction.java"), "private static boolean breakableFromHere(");
         assertTrue(reach.contains("MiningController.currentObservedTarget(player, obstruction.pos())"),
                 "a step that the controller would refuse is never planned");
-        String lava = body(read("action/MiningObstruction.java"), "private static boolean exposesLava(");
-        assertInOrder(lava, "ObservableWorldQuery.canObserveCell(player, neighbour)", "getFluidState(neighbour)");
+        String neighbours = body(read("action/MiningObstruction.java"), "private static boolean visibleNeighbourHolds(");
+        assertInOrder(neighbours, "ObservableWorldQuery.canObserveCell(player, neighbour)", "getFluidState(neighbour)");
+        assertTrue(body(read("action/MiningObstruction.java"), "private static boolean exposesLava(").contains("FluidTags.LAVA"));
+        assertTrue(body(read("action/MiningObstruction.java"), "private static boolean exposesWater(").contains("FluidTags.WATER, WATER_FEEDS"));
+        String source = read("action/MiningObstruction.java");
+        String feeds = source.substring(source.indexOf("WATER_FEEDS = {"), source.indexOf("};", source.indexOf("WATER_FEEDS = {")));
+        assertFalse(feeds.contains("DOWN"), "water never climbs: the cell below a broken block does not feed it");
     }
 
     @Test

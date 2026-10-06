@@ -148,11 +148,21 @@ class SightVersusReachSourceContractTest {
     }
 
     @Test
-    void theQueriesCastAVanillaClipForTheStrictFormAndTheSightClipForTheSightForm() throws IOException {
+    void theQueriesCastThePickRayForTheStrictFormAndTheSightClipForTheSightForm() throws IOException {
         String query = read("mode/ObservableWorldQuery.java");
         String eye = body(query, "private static BlockHitResult eyeClip(");
-        assertTrue(eye.contains("SightClip.clip(") && eye.contains("new ClipContext("),
-                "one switch: the see-through clip, or the plain vanilla one");
+        assertTrue(eye.contains("SightClip.clip(") && eye.contains("handClip("),
+                "one switch: the see-through clip, or the line a hand needs");
+        String hand = body(query, "private static BlockHitResult handClip(");
+        assertTrue(hand.contains("SightClip.pick(") && hand.contains("ray.reachObstructed()") && !hand.contains("new ClipContext("),
+                "a hand's line is the vanilla pick ray (outline shapes, fluids ignored), not a collider ray: a leaf, a plant or an open gate on it is hit");
+        assertTrue(body(query, "private static ServerPlayer sightOwner(").contains("seeThrough ? sharedOwner(bot) : null"),
+                "an owner's clear line proves sight, never a hand's reach");
+        for (String ownerProof : new String[] {"private static boolean ownerCanObserveShape(",
+                "private static boolean ownerCanObserveCellFace(", "private static boolean ownerCanObserveInsetShape(",
+                "private static boolean ownerCanObserveCell(", "private static boolean ownerCanObserveFarmCell("}) {
+            assertTrue(body(query, ownerProof).contains("sightOwner(bot, seeThrough)"), ownerProof + " is a sight proof only");
+        }
         String core = body(query, "private static ViewHit castViewRay(");
         assertTrue(core.contains("SightClip.context(") && core.contains("new ClipContext("));
         assertFalse(query.contains("castViewRayThroughFluids"),
@@ -194,7 +204,7 @@ class SightVersusReachSourceContractTest {
                 }
             }
         }
-        assertEquals(Set.of("mode/ObservableWorldQuery.java", "perception/CreatureSenses.java",
+        assertEquals(Set.of("mode/ObservableWorldQuery.java", "mode/ReachObstructions.java", "perception/CreatureSenses.java",
                         "perception/SharedWorldSight.java", "task/BoatSupport.java", "task/FireExtinguishTask.java",
                         "task/NavSafetyNet.java", "task/SharedVision.java", "task/TreeHorizonScan.java",
                         "task/VisibleTargetHorizonScan.java"),
@@ -223,10 +233,14 @@ class SightVersusReachSourceContractTest {
 
         String core = read("task/CombatCore.java");
         assertFalse(core.contains("SightClip"), "CombatCore asks the physical line: it decides what can be hit, shot at or blown up");
-        assertTrue(body(core, "public static boolean hasLineOfSight(").contains("ClipContext.Block.COLLIDER"));
-        assertTrue(body(core, "public static Optional<LivingEntity> nearestTarget(")
-                        .contains("canNoticeCreature(bot, entity) && hasLineOfSight(bot, entity)"),
+        assertTrue(body(core, "public static boolean hasLineOfSight(").contains("hasLineOfSightFrom(bot, bot.getEyePosition(), mob)")
+                        && body(core, "public static boolean hasLineOfSightFrom(").contains("ClipContext.Block.COLLIDER"),
+                "the physical line is one collider ray, from the eyes or from the eye a stand would have");
+        String nearest = body(core, "public static Optional<LivingEntity> nearestTarget(");
+        assertTrue(nearest.contains("canNoticeCreature(bot, entity) && hasLineOfSight(bot, entity)"),
                 "a hostile is a target when it is noticed AND on a physical line");
+        assertTrue(nearest.contains("canObserveEntity(bot, entity) && hasLineOfSight(bot, entity)"),
+                "a cow the bot was asked to kill too: one behind glass that is nearer than an open one ends the fight with nothing killed");
         String acquire = body(core, "java.util.function.Predicate<LivingEntity> allowed)");
         assertTrue(acquire.indexOf("seenByBotOrOwner(bot, entity)") > 0
                         && acquire.indexOf("hasLineOfSightOrOwnerSees(bot, entity)") > acquire.indexOf("seenByBotOrOwner(bot, entity)"),
@@ -264,7 +278,7 @@ class SightVersusReachSourceContractTest {
     }
 
     @Test
-    void aVillagerSeenThroughAPaneIsWalkedToAndNotTradedWith() throws IOException {
+    void aVillagerSeenThroughAPaneIsNeitherChosenNorTradedWith() throws IOException {
         String trade = read("task/TradeTask.java");
         assertTrue(body(trade, "private boolean inTradeReach(").contains("StrikeLegality.hasStrikeLineOfSight(bot, villager)"));
         assertEquals(3, count(trade, "inTradeReach(bot)"), "the two arrival checks and the trade itself");
@@ -272,6 +286,36 @@ class SightVersusReachSourceContractTest {
         assertTrue(tradeBody.indexOf("inTradeReach(bot)") >= 0
                         && tradeBody.indexOf("inTradeReach(bot)") < tradeBody.indexOf("setTradingPlayer(bot)"),
                 "opening a trade has no pick ray: the plain vanilla line is proved first");
+    }
+
+    /**
+     * What the bot sets out for, to hit, feed, milk or trade with, must be something it can touch from where it ends up: the nearest
+     * one seen through glass would otherwise shadow the one in the open. The behaviour is in CreatureSeeThroughGameTests.
+     */
+    @Test
+    void whatTheBotChoosesToApproachAndTouchIsChosenOnTheLineItWillNeed() throws IOException {
+        assertTrue(body(read("task/TradeTask.java"), "private Optional<Villager> nearestVillager(")
+                        .contains("canObserveEntity(bot, entity)\n                        && StrikeLegality.hasStrikeLineOfSight(bot, entity)"),
+                "a villager is chosen on the line the trade will need");
+        assertTrue(body(read("action/MilkCowAction.java"), "public static Cow nearestCow(")
+                        .contains("canObserveEntity(bot, cow)\n                        && StrikeLegality.hasStrikeLineOfSight(bot, cow)"),
+                "a cow is chosen on the line the click will need");
+        assertTrue(body(read("task/BreedTask.java"), "private void findPair(")
+                        .contains("canObserveEntity(bot, animal)\n                        && StrikeLegality.hasStrikeLineOfSight(bot, animal)"),
+                "a pair is chosen on the line the feeding will need");
+
+        String hunt = read("task/HuntTask.java");
+        assertTrue(body(hunt, "private AttackPoseSelection selectSafeAttackPose(").contains("!canStrikeFrom(bot, candidate, prey)"),
+                "a pose the prey cannot be struck from is never walked to");
+        assertTrue(body(hunt, "private static boolean canStrikeFrom(").contains("CombatCore.hasLineOfSightFrom(bot, eye, prey)"),
+                "the strike line of a pose is the physical line from the eye it would have there");
+
+        String watcher = read("task/DangerWatcher.java");
+        assertTrue(body(watcher, "private boolean trappedBackoff(").contains("lastStandTarget(bot)"));
+        String last = body(watcher, "static LivingEntity lastStandTarget(");
+        assertTrue(last.contains(".filter(e -> CombatCore.hasLineOfSight(bot, e))")
+                        && last.contains(".min(Comparator.comparingDouble(bot::distanceTo))"),
+                "the last stand fights the nearest hostile it can actually hit, not the first one it merely sees");
     }
 
     private static int count(String source, String needle) {

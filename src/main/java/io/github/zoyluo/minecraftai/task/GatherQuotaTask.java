@@ -591,7 +591,11 @@ public final class GatherQuotaTask extends AbstractTask {
         // preemption must not renew one stale target forever. The physical pickup ledger and the
         // task-wide collection budget remains monotonic for the same reason.
         if (HarvestCore.canReach(bot, targetPos)) {
-            HarvestCore.startMining(bot, targetPos);
+            ActionResult resumed = HarvestCore.startMining(bot, targetPos);
+            if (HarvestCore.refusedAsUnmineable(resumed)) {
+                abandonHarvestTarget(bot, "gather_harvest_refused", resumed.reason());
+                return;
+            }
             BotLog.action(bot, "gather_harvest_resumed", "pos", targetPos.toShortString());
             return;
         }
@@ -2482,22 +2486,40 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         if (elapsed - harvestStartedTick > HARVEST_LIMIT) {
-            bot.getActionPack().stopAll();
-            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
-                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
-            BotLog.action(bot, "gather_harvest_timeout", "pos", targetPos.toShortString());
-            targetPos = null;
-            clearPickupLedger();
-            resetSurveyWatchdog();
-            phase = Phase.SURVEY;
+            abandonHarvestTarget(bot, "gather_harvest_timeout", null);
             return;
         }
         if (bot.getActionPack().isMiningIdle() && elapsed % 200 == 0) {
             // A controller retry is part of the same atomic attempt. Calling startHarvest() here
             // used to renew harvestStartedTick every 200 ticks, permanently outrunning the
             // 240-tick deadline whenever the target had become out of reach.
-            HarvestCore.startMining(bot, targetPos);
+            ActionResult retried = HarvestCore.startMining(bot, targetPos);
+            if (HarvestCore.refusedAsUnmineable(retried)) {
+                abandonHarvestTarget(bot, "gather_harvest_refused", retried.reason());
+            }
         }
+    }
+
+    /**
+     * Gives up the harvest target for the unreachable TTL and surveys again, as the harvest deadline does. The bot also stops
+     * waiting out that deadline for a target the miner has already refused: what it sees (a log behind a pane, a fence or
+     * leaves it may not break) is not what its hand reaches, and standing still changes neither.
+     *
+     * @param reason the miner's typed refusal, or {@code null} for the deadline
+     */
+    private void abandonHarvestTarget(AIPlayerEntity bot, String event, String reason) {
+        bot.getActionPack().stopAll();
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+        if (reason == null) {
+            BotLog.action(bot, event, "pos", targetPos.toShortString());
+        } else {
+            BotLog.action(bot, event, "pos", targetPos.toShortString(), "reason", reason);
+        }
+        targetPos = null;
+        clearPickupLedger();
+        resetSurveyWatchdog();
+        phase = Phase.SURVEY;
     }
 
     private void recordBrokenBlock(AIPlayerEntity bot) {
@@ -2929,7 +2951,11 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
         pickupOriginSweep = null;
-        HarvestCore.startMining(bot, targetPos);
+        ActionResult started = HarvestCore.startMining(bot, targetPos);
+        if (HarvestCore.refusedAsUnmineable(started)) {
+            abandonHarvestTarget(bot, "gather_harvest_refused", started.reason());
+            return;
+        }
         phase = Phase.HARVEST;
     }
 

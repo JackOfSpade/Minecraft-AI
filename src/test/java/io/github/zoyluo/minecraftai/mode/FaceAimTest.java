@@ -99,7 +99,9 @@ class FaceAimTest {
         assertTrue(source.contains("observeShapeFaces(bot, pos, range, false, "), "canObserveColliderWithin: outline fallback off");
         assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, true, bot.blockInteractionRange(), true);"));
         assertTrue(source.contains("return observeShapeInsetFaces(bot, pos, false"));
-        assertTrue(source.contains("ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback)"));
+        assertTrue(source.contains("aimShape(seeThrough), CollisionContext.of(bot), outlineFallback)"),
+                "a sight proof aims at the collision shape (outline for a block with none), a hand's at the outline a click lands on");
+        assertTrue(source.contains("return seeThrough ? ClipContext.Block.COLLIDER : ClipContext.Block.OUTLINE;"));
     }
 
     @Test

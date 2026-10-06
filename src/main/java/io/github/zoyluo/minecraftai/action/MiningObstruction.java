@@ -19,17 +19,20 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
 /**
  * A block the bot has seen through leaves, a fence or a pane can only be broken once those are out of the way, and this decides
- * what to do about it. A hand needs a clear line, so when the strict proof (the plain vanilla clip: {@link
+ * what to do about it. A hand needs a clear line, so when the strict proof (the vanilla pick ray: {@link
  * MiningController#currentObservedTarget}) finds none but the bot's eyes do see the block, the plan names the see-through block to
  * break first: the one nearest the eye on the best line, that being the line with the fewest see-through blocks on it, then the one
- * whose first block is nearest ({@link ReachObstructions} lists them per line, exactly as the strict gate would meet them). It is
+ * whose first block is nearest ({@link ReachObstructions} lists them per line, exactly as the strict gate would meet them). A block
+ * seen through water needs nothing cleared: a hand passes water, so the target is mined as a player mines it from the shore. It is
  * re-planned after every break, so each step removes one real block and the target itself is only started once the strict proof
  * passes, never while an intact see-through block is what a hand would hit.
  *
@@ -37,7 +40,7 @@ import net.minecraft.world.phys.shapes.CollisionContext;
  * small plants that grow in the way. A fence, a gate, glass, a pane, bars, a ladder or a chain was put there by somebody, so a
  * line that crosses one is never cleared: the line is skipped, even if a leaf stands in front of it, and when no line is left the
  * target is refused with the typed {@link MiningController#TARGET_OBSTRUCTED}. The same goes for a block the bot or another player
- * stands on, a block next to lava the bot can see (breaking it would let the lava out), and one this very operation already broke
+ * stands on, a block next to lava the bot can see (breaking it would let the lava out) or water that would flow into its cell, and one this very operation already broke
  * and that is still there (a break the server did not carry out must not loop). Whatever it breaks, the bot must also be able to
  * reach it with the strict proof and within arm's length, so the step that follows cannot be refused.</p>
  */
@@ -49,7 +52,7 @@ final class MiningObstruction {
         CLEAR,
         /** The eyes see the target but every line is crossed by a block that may not be broken. */
         PROTECTED,
-        /** No line to the target that only see-through blocks hide: not seen, or hidden by something opaque or by water. */
+        /** No line to the target that only see-through blocks hide: not seen, or hidden by something opaque or by lava. */
         NOT_SEEN
     }
 
@@ -78,6 +81,10 @@ final class MiningObstruction {
         }
     }
 
+    /** The neighbours water can flow into a cleared cell from. */
+    private static final Direction[] WATER_FEEDS = {
+            Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
+
     private MiningObstruction() {
     }
 
@@ -99,7 +106,7 @@ final class MiningObstruction {
         if (state.isAir()) {
             return Plan.NOT_SEEN;
         }
-        List<Line> lines = ReachObstructions.lines(player.level(), CollisionContext.of(player), eye, target);
+        List<Line> lines = ReachObstructions.lines(player.level(), CollisionContext.of(player), player.blockPosition(), eye, target);
         return choose(lines, eye, obstruction -> refusalOf(player, obstruction, cleared),
                 obstruction -> breakableFromHere(player, obstruction, reach), blockId(state));
     }
@@ -169,15 +176,32 @@ final class MiningObstruction {
         if (support != MiningSafety.SupportOccupancy.NONE) {
             return MiningSafety.refusalReason(support);
         }
-        return exposesLava(player, obstruction.pos()) ? "exposes_lava" : null;
+        if (exposesLava(player, obstruction.pos())) {
+            return "exposes_lava";
+        }
+        // A waterlogged leaf leaves its own water in the cell whatever its neighbours hold: nothing new flows in.
+        boolean wet = obstruction.state().getFluidState().is(FluidTags.WATER);
+        return !wet && exposesWater(player, obstruction.pos()) ? "exposes_water" : null;
     }
 
     /** Whether a neighbour of {@code pos} that the bot can see holds lava: breaking {@code pos} would let it out. */
     private static boolean exposesLava(AIPlayerEntity player, BlockPos pos) {
-        for (Direction direction : Direction.values()) {
+        return visibleNeighbourHolds(player, pos, FluidTags.LAVA, Direction.values());
+    }
+
+    /**
+     * Whether a neighbour of {@code pos} that the bot can see holds water that would flow into it once it is broken. Water runs
+     * down and sideways, never up, so only the cell above and the four beside it count. A flood would not stop the break (a hand
+     * passes water) but it destroys a block for a log and leaves a stream behind, so the bot looks for a line that does not.
+     */
+    private static boolean exposesWater(AIPlayerEntity player, BlockPos pos) {
+        return visibleNeighbourHolds(player, pos, FluidTags.WATER, WATER_FEEDS);
+    }
+
+    private static boolean visibleNeighbourHolds(AIPlayerEntity player, BlockPos pos, TagKey<Fluid> fluid, Direction[] directions) {
+        for (Direction direction : directions) {
             BlockPos neighbour = pos.relative(direction);
-            if (ObservableWorldQuery.canObserveCell(player, neighbour)
-                    && player.level().getFluidState(neighbour).is(FluidTags.LAVA)) {
+            if (ObservableWorldQuery.canObserveCell(player, neighbour) && player.level().getFluidState(neighbour).is(fluid)) {
                 return true;
             }
         }

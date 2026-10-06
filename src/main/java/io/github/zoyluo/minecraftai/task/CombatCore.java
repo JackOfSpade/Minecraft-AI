@@ -326,7 +326,8 @@ public final class CombatCore {
      * seen for the reaction time, heard and in view, or struck by it) and be on a physical line ({@link #hasLineOfSight}): the
      * bot's eyes see through a leaf or a pane, but a fight against what stands behind it would be swung at the leaf. A non-hostile
      * one (a cow the bot was asked to kill) is a deliberate search, so the bot glances around for it: omnidirectional observation,
-     * as for every hunt.
+     * as for every hunt. It must be on a physical line as well: a cow behind glass that is nearer than one in the open would be
+     * walked to, lost for want of a line and the fight reported complete with nothing killed.
      */
     public static Optional<LivingEntity> nearestTarget(AIPlayerEntity bot, EntityType<?> targetType, double range) {
         return bot.level()
@@ -336,7 +337,7 @@ public final class CombatCore {
                 .stream()
                 .filter(entity -> hostileTo(bot, entity)
                         ? ObservableWorldQuery.canNoticeCreature(bot, entity) && hasLineOfSight(bot, entity)
-                        : ObservableWorldQuery.canObserveEntity(bot, entity))
+                        : ObservableWorldQuery.canObserveEntity(bot, entity) && hasLineOfSight(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
@@ -378,8 +379,16 @@ public final class CombatCore {
     // through leaves, fences, glass and water (ObservableWorldQuery.canNoticeCreature), but a blow, an
     // arrow or a blast cannot cross them, so every fight, pressure and shot decision asks this one.
     public static boolean hasLineOfSight(AIPlayerEntity bot, LivingEntity mob) {
+        return hasLineOfSightFrom(bot, bot.getEyePosition(), mob);
+    }
+
+    /**
+     * {@link #hasLineOfSight} for a bot whose eyes are at {@code eye}, say at a stand it has not reached yet: a hunt only commits
+     * to a pose from which the prey can be struck.
+     */
+    public static boolean hasLineOfSightFrom(AIPlayerEntity bot, Vec3 eye, LivingEntity mob) {
         HitResult hit = bot.level().clip(new ClipContext(
-                bot.getEyePosition(), mob.getEyePosition(),
+                eye, mob.getEyePosition(),
                 ClipContext.Block.COLLIDER,
                 ClipContext.Fluid.NONE,
                 bot));

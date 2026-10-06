@@ -1080,14 +1080,7 @@ public final class DangerWatcher {
         // there's no calculating -- fight even bare-handed, trading damage for a window to survive.
         if (repeat >= 2 && bot.hurtTime > 0) {
             trapRecords.remove(bot.getUUID());
-            var hostile = bot.level().getEntitiesOfClass(
-                    LivingEntity.class,
-                    bot.getBoundingBox().inflate(4.0D), e -> e.isAlive())
-                    .stream()
-                    .filter(e -> isActiveHostileThreat(bot, e))
-                    .filter(e -> !CombatCore.isMeleeForbiddenThreat(e))
-                    .filter(e -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canNoticeCreature(bot, e))
-                    .findFirst().orElse(null);
+            var hostile = lastStandTarget(bot);
             if (hostile != null) {
                 BotLog.danger(bot, "trapped_fight_back", "target", hostile.getType().toString());
                 if (TaskManager.INSTANCE.getActive(bot).isPresent()
@@ -1114,6 +1107,23 @@ public final class DangerWatcher {
             trapRecords.put(bot.getUUID(), new TrapRecord(here, repeat, rec.lastHelpTick()));
         }
         return true;
+    }
+
+    /**
+     * The hostile a last stand fights: the nearest within melee reach that is noticed AND on a physical line. Noticed is not
+     * hittable: a hostile seen through a pane or a hedge would be picked over the one actually landing the blows, and the fight
+     * (which only acquires on a physical line) would end at once with the last stand spent.
+     */
+    static LivingEntity lastStandTarget(AIPlayerEntity bot) {
+        return bot.level().getEntitiesOfClass(
+                        LivingEntity.class,
+                        bot.getBoundingBox().inflate(4.0D), e -> e.isAlive())
+                .stream()
+                .filter(e -> isActiveHostileThreat(bot, e))
+                .filter(e -> !CombatCore.isMeleeForbiddenThreat(e))
+                .filter(e -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canNoticeCreature(bot, e))
+                .filter(e -> CombatCore.hasLineOfSight(bot, e))
+                .min(Comparator.comparingDouble(bot::distanceTo)).orElse(null);
     }
 
     private boolean maybeStartNightTask(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {

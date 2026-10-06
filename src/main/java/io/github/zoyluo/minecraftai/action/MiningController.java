@@ -104,9 +104,10 @@ public final class MiningController {
      * intersects the player's own body is also direct evidence: escaping it does not discover a
      * neighbouring cell, and is needed when the player's eye is inside the collision shape.
      *
-     * <p>This is the reach gate, so it asks the strict (vanilla clip) predicates: START/STOP/ABORT carry no pick ray and the
-     * server checks only distance, so this is the one proof that stops a break through a leaf, a fence or a pane. The bot
-     * may <em>see</em> the log behind a leaf (the sight predicates), but it only mines what a hand can reach.</p>
+     * <p>This is the reach gate, so it asks the strict predicates, the line a vanilla pick ray follows (outline shapes, fluids
+     * ignored): START/STOP/ABORT carry no pick ray and the server checks only distance, so this is the one proof that stops a
+     * break through a leaf, a plant, a fence post or a pane, however little of it collides. The bot may <em>see</em> the log
+     * behind a leaf (the sight predicates), but it only mines what a hand can reach, and a hand passes water.</p>
      */
     static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos) {
         return player != null && pos != null && (ownBodyEmergencyBlock(player, pos)

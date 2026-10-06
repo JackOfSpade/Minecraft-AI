@@ -53,10 +53,10 @@ class PerceptionCallSiteClassificationTest {
         m.put("mode/SightClip.java", Counts.of(0, 0, 1));                      // definition: LivingEntity.hasLineOfSight with eyes that see through foliage and water (a sight ray, not a strike)
         m.put("perception/CreatureSenses.java", Counts.of(0, 1, 2));           // perception off (and a passive animal, a failed scan): the plain line-of-sight test with see-through eyes (SightClip); the projectile with perception off is exactly canObserveEntity
         // ---- creature noticing (converted)
-        m.put("task/DangerWatcher.java", Counts.of(4, 0, 3));                  // death-site hostiles, fight-before-rescue, trapped fight back, last-resort shelter; physical: canReachThreat (owner-aware ray), the pressure set, last-resort shelter
+        m.put("task/DangerWatcher.java", Counts.of(4, 0, 4));                  // death-site hostiles, fight-before-rescue, trapped fight back (noticed AND on a physical line), last-resort shelter; physical: canReachThreat (owner-aware ray), the pressure set, the last stand, last-resort shelter
         m.put("task/AggroSense.java", Counts.of(1, 1, 0));                     // mob aggressors noticed; object: the OWNER (a friend) being hurt, plain sight
         m.put("task/SharedVision.java", Counts.of(1, 0, 2));                   // seenByBotOrOwner: the bot part is noticing; ownerSees is the owner's see-through ray, ownerSeesStrict its plain collider ray
-        m.put("task/CombatCore.java", Counts.of(2, 1, 7));                     // ranged threats, target acquisition (hostile: notice AND the physical line; non-hostile deliberate search: object); physical: strike/reach rays
+        m.put("task/CombatCore.java", Counts.of(2, 1, 8));                     // ranged threats, target acquisition (hostile: notice AND the physical line; non-hostile deliberate search: object AND the physical line); physical: strike/reach rays
         m.put("task/CombatTask.java", Counts.of(2, 0, 5));                     // pressure, shoot-from-here; physical: strike legality and lost-sight timer (the physical line: a target seen through a pane must still end the fight)
         m.put("task/ShieldGuard.java", Counts.of(5, 1, 0));                    // reactive shield: noticed melee/creeper/guardian/drawing/tracked shooter; visible primed TNT is an observed object
         m.put("task/CreeperDefenseTask.java", Counts.of(1, 0, 1));             // a creeper is a risk when noticed AND on a physical line (a blast's exposure rays are collider rays)

@@ -1,5 +1,8 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MilkCowAction;
 import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
@@ -22,6 +25,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.zombie.Husk;
 import net.minecraft.world.entity.npc.villager.Villager;
@@ -270,7 +274,10 @@ public final class CreatureSeeThroughGameTests {
         context.succeed();
     }
 
-    /** Opening a trade sends no pick ray, so a villager seen through a pane is walked to and not traded with. */
+    /**
+     * Opening a trade sends no pick ray, so a villager seen through a pane is not traded with, and with nobody else about it is not
+     * even set out for: the trader ends with {@code no_villager_nearby} instead of walking at the glass.
+     */
     @GameTest(environment = ENV + "a_villager_behind_glass_is_not_traded_with", maxTicks = 40)
     public void aVillagerBehindGlassIsNotTradedWith(GameTestHelper context) {
         Arena arena = new Arena(context);
@@ -284,21 +291,150 @@ public final class CreatureSeeThroughGameTests {
         villager.getOffers().add(offer);
         require(context, ObservableWorldQuery.canObserveEntity(bot, villager), "the premise is the bot sees the villager through glass");
 
+        TradeTask behindGlass = new TradeTask(Items.ARROW, 16);
+        behindGlass.start(bot);
+        for (int i = 0; i < 40 && behindGlass.state() == TaskState.RUNNING; i++) {
+            behindGlass.tick(bot);
+        }
+        require(context, behindGlass.state() == TaskState.FAILED && "no_villager_nearby".equals(behindGlass.failureReason())
+                        && offer.getUses() == 0 && bot.getInventory().getItem(0).getCount() == 3,
+                "a villager behind glass was traded with or walked to: " + behindGlass.state() + " " + behindGlass.failureReason()
+                        + " uses " + offer.getUses());
+        arena.clearWall(1, 1);
+        TradeTask inTheOpen = new TradeTask(Items.ARROW, 16);
+        inTheOpen.start(bot);
+        for (int i = 0; i < 8 && inTheOpen.state() == TaskState.RUNNING; i++) {
+            inTheOpen.tick(bot);
+        }
+        require(context, inTheOpen.state() == TaskState.COMPLETED && offer.getUses() == 1,
+                "control: the trade did not complete once the glass was gone: " + inTheOpen.state() + " " + inTheOpen.failureReason());
+        context.succeed();
+    }
+
+    // ------------------------------------------------------------------ what the bot sets out for is what it can touch
+
+    /**
+     * The eyes see the nearer villager behind the pane, and a trade needs the plain vanilla line: the villager in the open is the
+     * one to trade with, not one to walk to for ever while the other is never chosen.
+     */
+    @GameTest(environment = ENV + "a_villager_behind_glass_does_not_hide_the_one_in_the_open_from_the_trader", maxTicks = 40)
+    public void aVillagerBehindGlassDoesNotHideTheOneInTheOpenFromTheTrader(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("SeeTradeOpenGT");
+        bot.getInventory().setItem(0, new ItemStack(Items.EMERALD, 3));
+        arena.wall(1, 1, Blocks.GLASS.defaultBlockState());
+        MerchantOffer pennedOffer = new MerchantOffer(new ItemCost(Items.EMERALD, 1), new ItemStack(Items.ARROW, 16), 12, 7, 0.05F);
+        MerchantOffer openOffer = new MerchantOffer(new ItemCost(Items.EMERALD, 1), new ItemStack(Items.ARROW, 16), 12, 7, 0.05F);
+        Villager penned = arena.villager(2, 0, pennedOffer);
+        Villager open = arena.villager(0, 3, openOffer);
+        require(context, ObservableWorldQuery.canObserveEntity(bot, penned) && ObservableWorldQuery.canObserveEntity(bot, open),
+                "the premise is the bot sees both villagers");
+        require(context, bot.distanceTo(penned) < bot.distanceTo(open), "fixture: the penned villager must be the nearer");
+
         TradeTask task = new TradeTask(Items.ARROW, 16);
         task.start(bot);
-        for (int i = 0; i < 40 && task.state() == TaskState.RUNNING; i++) {
+        for (int i = 0; i < 12 && task.state() == TaskState.RUNNING; i++) {
             task.tick(bot);
         }
-        require(context, task.state() == TaskState.RUNNING && offer.getUses() == 0
-                        && bot.getInventory().getItem(0).getCount() == 3,
-                "a villager behind glass was traded with: " + task.state() + " " + task.failureReason() + " uses " + offer.getUses());
-        arena.clearWall(1, 1);
-        for (int i = 0; i < 8 && task.state() == TaskState.RUNNING; i++) {
-            task.tick(bot);
-        }
-        require(context, task.state() == TaskState.COMPLETED && offer.getUses() == 1,
-                "control: the trade did not complete once the glass was gone: " + task.state() + " " + task.failureReason());
+        require(context, task.state() == TaskState.COMPLETED && openOffer.getUses() == 1 && pennedOffer.getUses() == 0,
+                "the trader did not trade with the villager in the open: " + task.state() + " " + task.failureReason()
+                        + " open uses " + openOffer.getUses() + " penned uses " + pennedOffer.getUses());
         context.succeed();
+    }
+
+    /** A cow the bot was asked to kill is chosen on a physical line too: the one behind glass must not end the fight with nothing killed. */
+    @GameTest(environment = ENV + "a_cow_behind_glass_does_not_shadow_the_cow_in_the_open_for_a_fight", maxTicks = 300)
+    public void aCowBehindGlassDoesNotShadowTheCowInTheOpenForAFight(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("SeeCowFightGT");
+        bot.getInventory().setItem(0, new ItemStack(Items.STONE_SWORD));
+        arena.wall(1, 1, Blocks.GLASS.defaultBlockState());
+        Cow penned = arena.cow(2, 0);
+        Cow open = arena.cow(0, 3);
+        require(context, ObservableWorldQuery.canObserveEntity(bot, penned), "the premise is the bot sees the cow through the glass");
+        require(context, bot.distanceTo(penned) < bot.distanceTo(open), "fixture: the penned cow must be the nearer");
+        require(context, CombatCore.nearestTarget(bot, EntityType.COW, 16).orElse(null) == open,
+                "the fight target is not the cow in the open: " + CombatCore.nearestTarget(bot, EntityType.COW, 16));
+
+        CombatTask task = new CombatTask(EntityType.COW, 1, 0.0F);
+        task.start(bot);
+        context.onEachTick(() -> {
+            if (task.state() == TaskState.RUNNING) {
+                task.tick(bot);
+            }
+            require(context, task.state() != TaskState.FAILED, "the fight failed: " + task.failureReason());
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            require(context, !open.isAlive(), "the fight reported itself complete with the cow in the open alive");
+            require(context, penned.isAlive() && penned.getHealth() >= penned.getMaxHealth(), "the cow behind the glass was struck");
+            context.succeed();
+        });
+    }
+
+    @GameTest(environment = ENV + "a_cow_behind_glass_does_not_shadow_the_cow_in_the_open_for_milking", maxTicks = 40)
+    public void aCowBehindGlassDoesNotShadowTheCowInTheOpenForMilking(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("SeeMilkOpenGT");
+        bot.getInventory().setItem(0, new ItemStack(Items.BUCKET));
+        arena.wall(1, 1, Blocks.GLASS.defaultBlockState());
+        Cow penned = arena.cow(2, 0);
+        Cow open = arena.cow(0, 3);
+        require(context, ObservableWorldQuery.canObserveEntity(bot, penned), "the premise is the bot sees the cow through the glass");
+        require(context, bot.distanceTo(penned) < bot.distanceTo(open), "fixture: the penned cow must be the nearer");
+        require(context, MilkCowAction.nearestCow(bot, MilkCowAction.REACH) == open, "the cow to milk is not the one in the open");
+        ActionResult milked = MilkCowAction.milk(bot);
+        require(context, milked.isSuccess() && InventoryAction.countItem(bot, Items.MILK_BUCKET) == 1,
+                "the cow in the open was not milked: " + milked);
+        context.succeed();
+    }
+
+    @GameTest(environment = ENV + "a_cow_behind_glass_does_not_shadow_the_pair_in_the_open_for_breeding", maxTicks = 60)
+    public void aCowBehindGlassDoesNotShadowThePairInTheOpenForBreeding(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("SeeBreedOpenGT");
+        bot.getInventory().setItem(0, new ItemStack(Items.WHEAT, 4));
+        arena.wall(1, 1, Blocks.GLASS.defaultBlockState());
+        Cow penned = arena.cow(2, 0);
+        Cow openOne = arena.cow(0, 3);
+        Cow openTwo = arena.cow(0, -3);
+        require(context, bot.distanceTo(penned) < bot.distanceTo(openOne), "fixture: the penned cow must be the nearest");
+
+        BreedTask task = new BreedTask(EntityType.COW, 1);
+        task.start(bot);
+        for (int i = 0; i < 30 && task.state() == TaskState.RUNNING; i++) {
+            task.tick(bot);
+        }
+        require(context, task.state() == TaskState.COMPLETED && !penned.isInLove(),
+                "the pair in the open was not bred: " + task.state() + " " + task.failureReason() + " " + task.describe());
+        require(context, InventoryAction.countItem(bot, Items.WHEAT) == 2, "two wheat were not spent on the pair in the open");
+        context.succeed();
+    }
+
+    /** A last stand fights the nearest hostile it can hit, not the first one it merely sees through the pane. */
+    @GameTest(environment = ENV + "the_last_stand_fights_the_hostile_it_can_hit_not_the_one_it_only_sees", maxTicks = 90 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void theLastStandFightsTheHostileItCanHitNotTheOneItOnlySees(GameTestHelper context) {
+        Arena arena = new Arena(context);
+        AIPlayerEntity bot = arena.bot("SeeLastStandGT");
+        arena.wall(1, 1, Blocks.GLASS.defaultBlockState());
+        // The one behind the pane is spawned first, so it is the first of the area scan; the one in the open is the attacker.
+        Husk penned = arena.husk(2, false);
+        Husk open = EntityType.HUSK.create(context.getLevel(), EntitySpawnReason.COMMAND);
+        open.setPersistenceRequired();
+        open.setNoAi(true);
+        arena.placeAt(open, 0, 3);
+        // Both are within the view, 45 degrees either side of where the bot looks.
+        PerceptionFixtures.facePoint(bot, new Vec3(arena.feet.getX() + 3.5D, arena.feet.getY() + 1.62D, arena.feet.getZ() + 3.5D));
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(penned, open), since -> {
+            require(context, ObservableWorldQuery.canNoticeCreature(bot, penned) && ObservableWorldQuery.canNoticeCreature(bot, open),
+                    "the premise is the bot notices both husks");
+            require(context, !CombatCore.hasLineOfSight(bot, penned) && CombatCore.hasLineOfSight(bot, open),
+                    "fixture: only the husk in the open is on a physical line");
+            require(context, bot.distanceTo(penned) < bot.distanceTo(open), "fixture: the husk behind the pane must be the nearer");
+            require(context, DangerWatcher.lastStandTarget(bot) == open,
+                    "the last stand picked " + DangerWatcher.lastStandTarget(bot) + ", not the husk it can hit");
+            context.succeed();
+        });
     }
 
     /** A shot in flight is SEEN through leaves and glass like any creature; stone still hides it. */
@@ -381,10 +517,29 @@ public final class CreatureSeeThroughGameTests {
         }
 
         <T extends Entity> T place(T entity, int dx) {
-            entity.snapTo(feet.getX() + 0.5D + dx, feet.getY(), feet.getZ() + 0.5D, 90.0F, 0.0F);
+            return placeAt(entity, dx, 0);
+        }
+
+        /** {@code dx} blocks east and {@code dz} blocks south of the bot. */
+        <T extends Entity> T placeAt(T entity, int dx, int dz) {
+            entity.snapTo(feet.getX() + 0.5D + dx, feet.getY(), feet.getZ() + 0.5D + dz, 90.0F, 0.0F);
             level.addFreshEntity(entity);
             entities.add(entity);
             return entity;
+        }
+
+        Cow cow(int dx, int dz) {
+            Cow cow = EntityType.COW.create(level, EntitySpawnReason.COMMAND);
+            cow.setPersistenceRequired();
+            cow.setNoAi(true);
+            return placeAt(cow, dx, dz);
+        }
+
+        Villager villager(int dx, int dz, MerchantOffer offer) {
+            Villager villager = EntityType.VILLAGER.create(level, EntitySpawnReason.COMMAND);
+            villager.setNoAi(true);
+            villager.getOffers().add(offer);
+            return placeAt(villager, dx, dz);
         }
 
         void put(ServerPlayer player, int dx) {

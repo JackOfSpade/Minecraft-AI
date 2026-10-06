@@ -130,7 +130,11 @@ public final class ObservationSeeThroughGameTests {
         }
     }
 
-    private record Wall(String name, BlockState state, int thickness) {
+    /** {@code handPasses}: a vanilla pick ray goes through it (water), so the block behind is reachable as well as seen. */
+    private record Wall(String name, BlockState state, int thickness, boolean handPasses) {
+        Wall(String name, BlockState state, int thickness) {
+            this(name, state, thickness, false);
+        }
     }
 
     private static final BlockState LOG = Blocks.OAK_LOG.defaultBlockState();
@@ -143,7 +147,7 @@ public final class ObservationSeeThroughGameTests {
             new Wall("glass", Blocks.GLASS.defaultBlockState(), 1),
             new Wall("glass panes", Blocks.GLASS_PANE.defaultBlockState(), 1),
             new Wall("iron bars", Blocks.IRON_BARS.defaultBlockState(), 1),
-            new Wall("two blocks of water", Blocks.WATER.defaultBlockState(), 2),
+            new Wall("two blocks of water", Blocks.WATER.defaultBlockState(), 2, true),
     };
 
     @GameTest(environment = "minecraftai-gametest:observation_see_through_game_tests_a_block_behind_see_through_blocks_is_observed_but_not_reachable", maxTicks = 100)
@@ -164,7 +168,11 @@ public final class ObservationSeeThroughGameTests {
                         + " cell face " + ObservableWorldQuery.canObserveBlockCellFace(bot, target)
                         + " cell " + ObservableWorldQuery.canObserveCell(bot, target));
             }
-            if (reachable(bot, target)) {
+            if (wall.handPasses() && !MiningController.currentObservedTarget(bot, target)) {
+                failures.add("the log behind " + wall.name() + " is not reachable, though a pick ray passes it: mining "
+                        + MiningController.currentObservedTarget(bot, target));
+            }
+            if (!wall.handPasses() && reachable(bot, target)) {
                 failures.add("the log behind " + wall.name() + " passes a strict (reach) gate: block "
                         + ObservableWorldQuery.canObserveBlockStrict(bot, target)
                         + " cell face " + ObservableWorldQuery.canObserveBlockCellFaceStrict(bot, target)

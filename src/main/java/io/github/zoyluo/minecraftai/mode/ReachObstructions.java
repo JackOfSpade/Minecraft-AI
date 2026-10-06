@@ -1,9 +1,7 @@
 package io.github.zoyluo.minecraftai.mode;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
@@ -13,25 +11,22 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
- * What stands between a hand and a block the eyes can see: the {@linkplain SeeThrough see-through} blocks that the strict (plain
- * vanilla) proof of a break meets first. A bot that sees a log through two leaves cannot break it until they are gone, and this
- * says which ones, per line of aim.
+ * What stands between a hand and a block the eyes can see: the {@linkplain SeeThrough see-through} blocks that a vanilla pick ray
+ * meets first. A bot that sees a log through two leaves cannot break it until they are gone, and this says which ones, per line of
+ * aim.
  *
- * <p>The lines are the ones the strict proofs aim ({@link ObservableWorldQuery#canObserveBlockStrict} and its inset form): nine
- * points on each of the six faces of the target's own shape, {@link FaceAim} style, each tested with the shape kind that proof
- * tests it with. A line is traced with the same plain vanilla ray as the strict gate: wherever the gate would stop at a leaf, a
- * fence or a pane, the stopping block is recorded and the trace goes on as if it were broken, so that what is left on a line is
- * exactly what must disappear for the strict gate to pass along it. That is why this is not the obstruction list of the sight
- * context, which models the player's crosshair ray (an {@code OUTLINE} ray) and so lists a flower the strict gate walks through
- * and misses a fence whose collision arms stop the strict ray above and between the rails.</p>
+ * <p>The lines are the ones the {@code Strict} proofs aim ({@link ObservableWorldQuery#canObserveBlockStrict} and its inset form):
+ * nine points on each of the six faces of the target's own outline, {@link FaceAim} style. A line is traced with the very ray
+ * those proofs cast ({@link SightClip#pick}): a click's own, an OUTLINE ray that ignores fluids. So a see-through block is an
+ * obstruction exactly when the click would land on it: a leaf, a plant, a torch, an open gate or a pane's post on the line, but not
+ * a fence's gap (the outline rails leave one even where its collision arms do not), and never water, which a hand passes. What is
+ * left on a line is therefore exactly what must disappear for the strict proofs to pass along it, and a line without any
+ * obstruction is one a hand already reaches.</p>
  *
- * <p>A line is dead, and not returned, when anything else stops its ray: an opaque block, lava, any fluid (breaking a block never
- * removes water, and a waterlogged block leaves its water behind), or the target itself on a face other than the one aimed at.
- * Each recorded block is a distinct cell, so a trace always ends.</p>
+ * <p>A line is dead, and not returned, when anything else stops its ray: an opaque block, lava, or the target itself on a face
+ * other than the one aimed at. Each obstruction is a distinct cell, so the list is as long as the blocks the line crosses.</p>
  */
 public final class ReachObstructions {
     private ReachObstructions() {
@@ -44,7 +39,7 @@ public final class ReachObstructions {
     /**
      * One aim point on a face of the target.
      *
-     * @param obstructions the see-through blocks a strict ray to {@code aim} meets before the target, nearest the eye first; empty
+     * @param obstructions the see-through blocks a pick ray to {@code aim} meets before the target, nearest the eye first; empty
      *                     when the line is already clear
      */
     public record Line(Direction face, Vec3 aim, List<Obstruction> obstructions) {
@@ -52,16 +47,19 @@ public final class ReachObstructions {
 
     /**
      * Every line from {@code eye} to a face of the block at {@code target} that only see-through blocks hide, in the fixed order of
-     * the strict proofs (faces, then the 3x3 grid). Lines whose ray ends at an opaque block or a fluid are left out.
+     * the strict proofs (faces, then the 3x3 grid). Lines whose ray ends at an opaque block or lava are left out.
+     *
+     * @param standing the cell the observer stands in, or {@code null}: the lava it wades in does not hide the lines (see
+     *                 {@link SightClipContext})
      */
-    public static List<Line> lines(BlockGetter level, CollisionContext context, Vec3 eye, BlockPos target) {
+    public static List<Line> lines(BlockGetter level, CollisionContext context, BlockPos standing, Vec3 eye, BlockPos target) {
         BlockState state = level.getBlockState(target);
-        FaceAim.Target aim = FaceAim.aim(level, target, state, ClipContext.Block.COLLIDER, context, true);
+        FaceAim.Target aim = FaceAim.aim(level, target, state, ClipContext.Block.OUTLINE, context, true);
         List<Line> lines = new ArrayList<>();
         for (Direction face : Direction.values()) {
             for (double[] offset : ObservableWorldQuery.FACE_SAMPLE_OFFSETS) {
                 Vec3 point = FaceAim.facePoint(aim.box(), face, FaceAim.OBSERVE_DEPTH, offset[0], offset[1]);
-                Line line = trace(level, context, eye, point, aim.clipShape(), target, face);
+                Line line = trace(level, context, standing, eye, point, target, face);
                 if (line != null) {
                     lines.add(line);
                 }
@@ -70,39 +68,17 @@ public final class ReachObstructions {
         return lines;
     }
 
-    private static Line trace(BlockGetter level, CollisionContext context, Vec3 eye, Vec3 point, ClipContext.Block shape,
+    private static Line trace(BlockGetter level, CollisionContext context, BlockPos standing, Vec3 eye, Vec3 point,
                               BlockPos target, Direction face) {
-        Set<Long> skipped = new HashSet<>();
-        List<Obstruction> found = new ArrayList<>(2);
-        while (true) {
-            BlockHitResult hit = level.clip(new SkippingClipContext(eye, point, shape, context, skipped));
-            if (hit.getType() != HitResult.Type.BLOCK) {
-                return null;
-            }
-            BlockPos pos = hit.getBlockPos();
-            if (pos.equals(target)) {
-                return hit.getDirection() == face ? new Line(face, point, found) : null;
-            }
-            BlockState state = level.getBlockState(pos);
-            if (!SeeThrough.cell(state) || !state.getFluidState().isEmpty() || !skipped.add(pos.asLong())) {
-                return null;
-            }
-            found.add(new Obstruction(pos.immutable(), state));
+        SightClipContext ray = SightClip.pick(eye, point, context, standing, target);
+        BlockHitResult hit = level.clip(ray);
+        if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(target) || hit.getDirection() != face) {
+            return null;
         }
-    }
-
-    /** The strict gate's own ray (plain vanilla, every fluid hit) that treats the blocks found so far as already broken. */
-    private static final class SkippingClipContext extends ClipContext {
-        private final Set<Long> skipped;
-
-        SkippingClipContext(Vec3 from, Vec3 to, ClipContext.Block shape, CollisionContext context, Set<Long> skipped) {
-            super(from, to, shape, ClipContext.Fluid.ANY, context);
-            this.skipped = skipped;
+        List<Obstruction> found = new ArrayList<>(ray.obstructions().size());
+        for (SightClipContext.Crossing crossing : ray.obstructions()) {
+            found.add(new Obstruction(crossing.pos(), crossing.state()));
         }
-
-        @Override
-        public VoxelShape getBlockShape(BlockState state, BlockGetter level, BlockPos pos) {
-            return skipped.contains(pos.asLong()) ? Shapes.empty() : super.getBlockShape(state, level, pos);
-        }
+        return new Line(face, point, found);
     }
 }

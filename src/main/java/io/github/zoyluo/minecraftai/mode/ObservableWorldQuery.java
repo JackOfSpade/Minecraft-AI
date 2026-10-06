@@ -23,8 +23,10 @@ import net.minecraft.world.phys.shapes.CollisionContext;
  * <p><b>Sight is not reach.</b> The block predicates and view rays here are sight: the bot's eyes pass through foliage, fences,
  * glass and water, but not lava ({@link SeeThrough}), so a log behind two leaves is observed. A hand does not pass through
  * them, and a break, an open or a use packet carries no pick ray of its own, so every actuator that sends one re-proves its
- * target with the {@code Strict} twin of the predicate: the plain vanilla clip, which stops at the first leaf. Seeing a block
- * through a leaf therefore never lets the bot mine, open or use it through that leaf.</p>
+ * target with the {@code Strict} twin of the predicate: the line a hand needs ({@link #handClip}), the vanilla pick ray (outline shapes,
+ * fluids ignored), which the first leaf, plant, fence post or pane on it stops while water does not. Seeing a block through a
+ * leaf therefore never lets the bot mine, open or use it through that leaf, and only the bot's own hand counts: a linked owner's
+ * clear line proves sight, never reach.</p>
  */
 public final class ObservableWorldQuery {
     /** Shared inset (in blocks) used to sample points around a face center. Also used by BuildAction. */
@@ -70,14 +72,36 @@ public final class ObservableWorldQuery {
     /**
      * One eye ray. A sight ray ({@code seeThrough}) passes through {@linkplain SeeThrough see-through blocks} and water and
      * stops at lava and at anything opaque; {@code target}, the cell being observed, is never skipped, so a leaf, a fence or a
-     * water cell can itself be observed. A strict ray is the plain vanilla clip, the line a hand's pick ray follows, which the
-     * first leaf, fence, pane or water cell stops.
+     * water cell can itself be observed. A strict ray is the line a hand needs ({@link #handClip}), whatever shape and fluid kind
+     * the call site names: those only matter to what the eyes see.
      */
     private static BlockHitResult eyeClip(Entity observer, Vec3 from, Vec3 to, ClipContext.Block shape,
                                           ClipContext.Fluid fluid, BlockPos target, boolean seeThrough) {
         return seeThrough
                 ? SightClip.clip(observer.level(), from, to, shape, fluid, observer, target)
-                : observer.level().clip(new ClipContext(from, to, shape, fluid, observer));
+                : handClip(observer, from, to, target);
+    }
+
+    /** The shape a block's aim box is taken from: the collision a sight proof tests, or the outline a click lands on. */
+    private static ClipContext.Block aimShape(boolean seeThrough) {
+        return seeThrough ? ClipContext.Block.COLLIDER : ClipContext.Block.OUTLINE;
+    }
+
+    /**
+     * What a click along this segment lands on. A hand reaches what a vanilla pick ray does ({@code Entity.pick}: OUTLINE shapes,
+     * fluids ignored), so the first leaf, plant, torch, open gate, fence post or pane the segment's outline crosses is the hit,
+     * however little it collides, while water is passed (a player mines a block under a lake) and lava still stops it. Planning
+     * what to break to get past such a block is {@link ReachObstructions}, over the same ray.
+     */
+    private static BlockHitResult handClip(Entity observer, Vec3 from, Vec3 to, BlockPos target) {
+        SightClipContext ray = SightClip.pick(from, to, CollisionContext.of(observer), observer.blockPosition(), target);
+        BlockHitResult hit = observer.level().clip(ray);
+        if (!ray.reachObstructed()) {
+            return hit;
+        }
+        BlockPos first = ray.obstructions().get(0).pos();
+        Vec3 center = first.getCenter();
+        return new BlockHitResult(center, Direction.getApproximateNearest(from.subtract(center)), first, false);
     }
 
     /**
@@ -93,7 +117,7 @@ public final class ObservableWorldQuery {
         return canObserveBlockWithin(bot, pos, 0);
     }
 
-    /** {@link #canObserveBlock} on the vanilla clip: the first leaf, fence, pane or water cell in the way hides the block. */
+    /** {@link #canObserveBlock} for a hand: the first leaf, plant, fence post or pane the pick ray meets hides the block. */
     public static boolean canObserveBlockStrict(AIPlayerEntity bot, BlockPos pos) {
         return observeShapeFaces(bot, pos, 0, true, "observable_block_query", ClipContext.Fluid.ANY, false);
     }
@@ -112,7 +136,7 @@ public final class ObservableWorldQuery {
         return observeBlockCellFace(bot, pos, true);
     }
 
-    /** {@link #canObserveBlockCellFace} on the vanilla clip, for the actuators that must not reach through foliage. */
+    /** {@link #canObserveBlockCellFace} for a hand, for the actuators that must not reach through foliage. */
     public static boolean canObserveBlockCellFaceStrict(AIPlayerEntity bot, BlockPos pos) {
         return observeBlockCellFace(bot, pos, false);
     }
@@ -209,7 +233,7 @@ public final class ObservableWorldQuery {
         // cell face at all (see FaceAim). Keep the endpoint just inside the shape: stopping just
         // outside lets the ray end before entering it and produces MISS for an otherwise visible block.
         FaceAim.Target aim = FaceAim.aim(bot.level(), pos, bot.level().getBlockState(pos),
-                ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
+                aimShape(seeThrough), CollisionContext.of(bot), outlineFallback);
         for (Direction direction : Direction.values()) {
             var face = FaceAim.facePoint(aim.box(), direction, FaceAim.OBSERVE_DEPTH, 0.0D, 0.0D);
             if (canObserveFaceAfterPolicy(bot, pos, direction, face, range, aim.clipShape(), fluid, seeThrough)) {
@@ -230,7 +254,7 @@ public final class ObservableWorldQuery {
         return observeShapeInsetFaces(bot, pos, true, bot.blockInteractionRange(), true);
     }
 
-    /** {@link #canObserveBlockWithInsetFaces} on the vanilla clip, for the actuators that must not reach through foliage. */
+    /** {@link #canObserveBlockWithInsetFaces} for a hand, for the actuators that must not reach through foliage. */
     public static boolean canObserveBlockWithInsetFacesStrict(AIPlayerEntity bot, BlockPos pos) {
         return observeShapeInsetFaces(bot, pos, true, bot.blockInteractionRange(), false);
     }
@@ -266,7 +290,7 @@ public final class ObservableWorldQuery {
             return rememberIfVisible(bot, pos, ownerCanObserveInsetShape(bot, pos, outlineFallback, seeThrough));
         }
         FaceAim.Target aim = FaceAim.aim(bot.level(), pos, bot.level().getBlockState(pos),
-                ClipContext.Block.COLLIDER, CollisionContext.of(bot), outlineFallback);
+                aimShape(seeThrough), CollisionContext.of(bot), outlineFallback);
         for (Direction direction : Direction.values()) {
             for (double[] offset : FACE_SAMPLE_OFFSETS) {
                 Vec3 endpoint = FaceAim.facePoint(
@@ -320,7 +344,7 @@ public final class ObservableWorldQuery {
         return canObserveCellWithinAfterPolicy(bot, pos, 0);
     }
 
-    /** {@link #canObserveCell} on the vanilla clip: the first leaf, fence, pane or water cell in the way hides the cell. */
+    /** {@link #canObserveCell} for a hand: the first leaf, plant, fence post or pane the pick ray meets hides the cell. */
     public static boolean canObserveCellStrict(AIPlayerEntity bot, BlockPos pos) {
         if (canBypassObservationWithRetiredHiddenScan("observable_cell_query")) {
             return true;
@@ -388,6 +412,14 @@ public final class ObservableWorldQuery {
     }
 
     /**
+     * The linked owner as a second pair of eyes for a sight proof, {@code null} for a strict (reach) one: a hand is the bot's own,
+     * and an owner's clear line to a block says nothing about what stands between the bot and it.
+     */
+    private static ServerPlayer sightOwner(AIPlayerEntity bot, boolean seeThrough) {
+        return seeThrough ? sharedOwner(bot) : null;
+    }
+
+    /**
      * A fake player receives the same server-managed chunk tracking view as a human player.
      * Use that actual view radius for block sight rather than an unrelated action/perception
      * tuning radius: render distance is supplied in chunks, so its block-space radius is ×16.
@@ -434,7 +466,7 @@ public final class ObservableWorldQuery {
     private static boolean ownerCanObserveShape(AIPlayerEntity bot, BlockPos pos,
                                                 boolean outlineFallback, ClipContext.Fluid fluid,
                                                 boolean seeThrough) {
-        ServerPlayer owner = sharedOwner(bot);
+        ServerPlayer owner = sightOwner(bot, seeThrough);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
         }
@@ -458,7 +490,7 @@ public final class ObservableWorldQuery {
 
     /** State-free unit-cell face proof for a target nominated from the linked owner's view. */
     private static boolean ownerCanObserveCellFace(AIPlayerEntity bot, BlockPos pos, AABB cell, boolean seeThrough) {
-        ServerPlayer owner = sharedOwner(bot);
+        ServerPlayer owner = sightOwner(bot, seeThrough);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
         }
@@ -501,7 +533,7 @@ public final class ObservableWorldQuery {
     /** Owner-side counterpart of the conservative inset-face proof used for narrow supports. */
     private static boolean ownerCanObserveInsetShape(AIPlayerEntity bot, BlockPos pos,
                                                       boolean outlineFallback, boolean seeThrough) {
-        ServerPlayer owner = sharedOwner(bot);
+        ServerPlayer owner = sightOwner(bot, seeThrough);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
         }
@@ -530,7 +562,7 @@ public final class ObservableWorldQuery {
 
     private static boolean ownerCanObserveCell(AIPlayerEntity bot, BlockPos pos, ClipContext.Fluid fluid,
                                                boolean seeThrough) {
-        ServerPlayer owner = sharedOwner(bot);
+        ServerPlayer owner = sightOwner(bot, seeThrough);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
         }
@@ -565,7 +597,7 @@ public final class ObservableWorldQuery {
         return observeFarmCell(bot, pos, true);
     }
 
-    /** {@link #canObserveFarmCell} on the vanilla clip, for the crop break and harvest proofs. */
+    /** {@link #canObserveFarmCell} for a hand, for the crop break and harvest proofs. */
     public static boolean canObserveFarmCellStrict(AIPlayerEntity bot, BlockPos pos) {
         return observeFarmCell(bot, pos, false);
     }
@@ -600,7 +632,7 @@ public final class ObservableWorldQuery {
 
     /** Owner-side counterpart of the crop/farmland top-outline probe. */
     private static boolean ownerCanObserveFarmCell(AIPlayerEntity bot, BlockPos pos, boolean seeThrough) {
-        ServerPlayer owner = sharedOwner(bot);
+        ServerPlayer owner = sightOwner(bot, seeThrough);
         if (owner == null || !ownerTracks(owner, pos)) {
             return false;
         }

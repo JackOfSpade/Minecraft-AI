@@ -188,7 +188,8 @@ public final class SightClipGameTests {
         List<String> failures = new ArrayList<>();
         Vec3 eye = new Vec3(feet.getX() + 0.5D, feet.getY() + 1.5D, feet.getZ() + 0.5D);
         Vec3 into = new Vec3(log.getX() + 0.001D, eye.y, eye.z);
-        SightClipContext sight = SightClip.context(eye, into, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, bot, log, true);
+        SightClipContext sight = SightClip.context(eye, into, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, bot, log, true)
+                .trackObstructions();
         BlockHitResult hit = bot.level().clip(sight);
         if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(log) || hit.getDirection() != Direction.WEST) {
             failures.add("the log behind the leaf was not seen: " + hit.getType() + " " + hit.getBlockPos().toShortString());

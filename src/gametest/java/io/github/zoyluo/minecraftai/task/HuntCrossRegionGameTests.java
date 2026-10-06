@@ -1782,6 +1782,60 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_prey_penned_behind_glass_does_not_shadow_the_open_prey", maxTicks = 1500)
+    public void preyPennedBehindGlassDoesNotShadowTheOpenPrey(GameTestHelper context) {
+        // The eyes see the nearer cow through a glass wall, but no blow crosses glass and the sealed ground behind it cannot be
+        // walked to: the hunt must find no pose the cow can be struck from, reject it, and go for the cow in the open. Without that
+        // it stood at the pose nearest the glass until the no-progress deadline, and the cow in the open was never touched.
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 5, -560));
+        for (int x = -14; x <= 14; x++) {
+            for (int z = -3; z <= 3; z++) {
+                BlockPos feet = start.offset(x, 0, z);
+                boolean frame = Math.abs(z) == 3 || Math.abs(x) == 14;
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 5; dy++) {
+                    // Bedrock all round, so the sealed ground cannot be dug into; a glass wall across the corridor at x = 3.
+                    world.setBlock(feet.above(dy), frame ? Blocks.BEDROCK.defaultBlockState()
+                            : x == 3 ? Blocks.GLASS.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        var penned = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
+        var open = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
+        require(context, penned != null && open != null, "failed to create the cows");
+        penned.setNoAi(true);
+        open.setNoAi(true);
+        penned.snapTo(start.getX() + 4.5D, start.getY(), start.getZ() + 0.5D, 90.0F, 0.0F);
+        open.snapTo(start.getX() - 8.5D, start.getY(), start.getZ() + 0.5D, 270.0F, 0.0F);
+        require(context, world.addFreshEntity(penned) && world.addFreshEntity(open), "failed to spawn the cows");
+
+        String name = "HuntPennedPreyGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
+        world.getChunkSource().move(bot);
+        HuntTask task = anchoredHunt(bot, 1);
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunt_penned_prey"));
+        context.failIfEver(() -> {
+            require(context, penned.isAlive() && penned.getHealth() >= penned.getMaxHealth(),
+                    "the cow behind the glass was struck: the hunt reached through the wall");
+            if (open.getHealth() < open.getMaxHealth() || !open.isAlive()) {
+                AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                context.succeed();
+                return;
+            }
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                context.fail(Component.nullToEmpty("the hunt ended as " + task.state() + ":" + task.failureReason()
+                        + " before the cow in the open was touched: " + task.describe()));
+            }
+        });
+    }
+
     /**
      * Re-queries the pickup-proof marker beef instead of trusting a captured reference: the
      * offset arena's chunks can transiently unload, and a reloaded {@link ItemEntity} is a new

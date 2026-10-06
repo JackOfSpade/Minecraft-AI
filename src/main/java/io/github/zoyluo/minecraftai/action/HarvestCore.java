@@ -291,6 +291,18 @@ public final class HarvestCore {
                 Direction.getApproximateNearest(bot.getEyePosition().subtract(targetPos.getCenter())));
     }
 
+    /**
+     * Whether a refused {@link #startMining} says the target cannot be mined from where the bot stands, however long it waits
+     * there: the eyes that nominated it see further than the hand that must break it, so a log behind a pane, a fence or leaves
+     * the bot may not break (or one it does not see at all) is refused at once, with a typed reason, and stays refused. Any other
+     * refusal (a busy pack, a bot standing on the block) can pass, so it is not this.
+     */
+    public static boolean refusedAsUnmineable(ActionResult started) {
+        return started.isFailed()
+                && (MiningController.TARGET_NOT_OBSERVED.equals(started.reason())
+                || MiningController.TARGET_OBSTRUCTED.equals(started.reason()));
+    }
+
     public static Optional<ItemEntity> nearestDrop(AIPlayerEntity bot, Item item, double radius) {
         return nearestDropAnyOf(bot, item == null ? null : Set.of(item), radius);
     }

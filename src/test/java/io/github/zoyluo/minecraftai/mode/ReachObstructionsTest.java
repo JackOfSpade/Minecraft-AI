@@ -14,6 +14,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
@@ -25,7 +26,8 @@ import org.junit.jupiter.api.Test;
  * What a hand would have to clear to reach a block the eyes see, line by line, over a fake level. The bot stands in cell (0,1,0)
  * with its eye at the height of a standing player, the log it wants is in cell (4,1,0), and a wall of whatever the case calls for
  * stands in x = 2 (and x = 3), three cells wide and tall enough to cover every line to the log's near face. The lines are the
- * strict gate's own, so the ones left are exactly what must disappear for that gate to pass.
+ * strict gate's own, a vanilla pick ray (outline shapes, fluids ignored), so the ones left are exactly what must disappear for
+ * that gate to pass.
  */
 class ReachObstructionsTest {
     static {
@@ -66,11 +68,15 @@ class ReachObstructionsTest {
     }
 
     private static List<Line> lines(FakeLevel level) {
-        return ReachObstructions.lines(level, CollisionContext.empty(), EYE, LOG_POS);
+        return ReachObstructions.lines(level, CollisionContext.empty(), null, EYE, LOG_POS);
     }
 
     private static List<BlockPos> blocks(Line line) {
         return line.obstructions().stream().map(ReachObstructions.Obstruction::pos).toList();
+    }
+
+    private static List<Line> obstructed(List<Line> lines) {
+        return lines.stream().filter(line -> !line.obstructions().isEmpty()).toList();
     }
 
     @Test
@@ -135,12 +141,30 @@ class ReachObstructionsTest {
     }
 
     @Test
-    void waterAndLavaKillALineBecauseBreakingABlockNeverRemovesThem() {
-        assertTrue(lines(row(level(), 2, Blocks.WATER.defaultBlockState())).isEmpty(), "water is no obstruction to break");
+    void lavaKillsEveryLineBecauseTheEyesStopAtIt() {
         assertTrue(lines(row(level(), 2, Blocks.LAVA.defaultBlockState())).isEmpty(), "lava is opaque");
+        assertTrue(lines(row(wall(level(), 2, LEAF), 3, Blocks.LAVA.defaultBlockState())).isEmpty(),
+                "a leaf in front of lava changes nothing");
+    }
+
+    @Test
+    void aHandPassesWaterSoALogUnderItIsReachedAsAPlayerMinesItFromTheShore() {
+        List<Line> lines = lines(row(row(level(), 2, Blocks.WATER.defaultBlockState()), 3, Blocks.WATER.defaultBlockState()));
+        assertFalse(lines.isEmpty(), "water hides nothing from the eyes");
+        for (Line line : lines) {
+            assertTrue(line.obstructions().isEmpty(), "a pick ray ignores fluids: water is nothing to break, " + line);
+        }
+    }
+
+    @Test
+    void aWaterloggedLeafIsAnObstructionAndItsWaterIsNot() {
         BlockState wet = LEAF.setValue(BlockStateProperties.WATERLOGGED, true);
-        assertTrue(lines(row(level(), 2, wet)).isEmpty(),
-                "a waterlogged leaf leaves its water behind: clearing it would not open the line");
+        List<Line> lines = lines(row(level(), 2, wet));
+        assertFalse(lines.isEmpty());
+        for (Line line : lines) {
+            assertEquals(List.of(wet), line.obstructions().stream().map(ReachObstructions.Obstruction::state).toList(),
+                    "the leaf must go; the water it leaves behind is passed like any other water: " + line);
+        }
     }
 
     @Test
@@ -161,11 +185,28 @@ class ReachObstructionsTest {
     }
 
     @Test
-    void aFenceInTheWayStopsTheStrictRayAtItsCollisionShapeAndIsListed() {
+    void aLoneFencePostStopsOnlyTheLinesThroughItsMiddleAndTheOthersSlipPast() {
+        // The post is 6/16 to 10/16 of the cell wide: the three lines aimed at the middle of the log's face cross it, the six
+        // aimed 0.375 to either side pass beside it, as a player's crosshair does.
+        List<Line> lines = lines(level().set(2, 1, 0, FENCE));
+        assertEquals(9, lines.size());
+        List<Line> stopped = obstructed(lines);
+        assertEquals(3, stopped.size(), lines.toString());
+        for (Line line : stopped) {
+            assertEquals(List.of(new BlockPos(2, 1, 0)), blocks(line));
+            assertTrue(line.obstructions().get(0).state().is(Blocks.OAK_FENCE));
+            assertEquals(0.5D, line.aim().z, 1.0E-9D, "the lines through the middle");
+        }
+    }
+
+    @Test
+    void aFencesRailsStopTheLinesThatCrossThemAtTheirHeight() {
         BlockState connected = FENCE.setValue(FenceBlock.NORTH, true).setValue(FenceBlock.SOUTH, true);
         List<Line> lines = lines(wall(level(), 2, connected));
         assertFalse(lines.isEmpty());
-        for (Line line : lines) {
+        List<Line> stopped = obstructed(lines);
+        assertFalse(stopped.isEmpty(), "the outline rails of a fence line are in the way of the lines that cross them");
+        for (Line line : stopped) {
             assertEquals(1, line.obstructions().size(), line.toString());
             assertTrue(line.obstructions().get(0).state().is(Blocks.OAK_FENCE));
         }
@@ -179,23 +220,67 @@ class ReachObstructionsTest {
             level.set(2, 0, z, FENCE.setValue(FenceBlock.NORTH, true).setValue(FenceBlock.SOUTH, true));
         }
         for (Line line : lines(level)) {
-            assertTrue(line.obstructions().isEmpty(), "the strict ray passes over a fence of one block: " + line);
+            assertTrue(line.obstructions().isEmpty(), "the pick ray passes over a fence of one block: " + line);
         }
     }
 
     @Test
-    void aPlantAColliderRayWalksThroughIsNotAnObstructionOfALog() {
+    void aWallOfCobwebIsOnEveryLineThoughNothingCollidesWithIt() {
+        BlockState web = Blocks.COBWEB.defaultBlockState();
+        assertTrue(web.getCollisionShape(new FakeLevel(), new BlockPos(2, 1, 0), CollisionContext.empty()).isEmpty());
+        List<Line> lines = lines(wall(level(), 2, web));
+        assertEquals(9, lines.size());
+        for (Line line : lines) {
+            assertEquals(List.of(web), line.obstructions().stream().map(ReachObstructions.Obstruction::state).toList(),
+                    "a click lands on the web, a collider ray would walk through it: " + line);
+        }
+    }
+
+    @Test
+    void anOpenGateIsOnEveryLineBecauseItsPanelStillTakesTheClick() {
+        BlockState open = Blocks.OAK_FENCE_GATE.defaultBlockState()
+                .setValue(FenceGateBlock.FACING, Direction.EAST).setValue(FenceGateBlock.OPEN, true);
+        assertTrue(open.getCollisionShape(new FakeLevel(), new BlockPos(2, 1, 0), CollisionContext.empty()).isEmpty());
+        List<Line> lines = lines(wall(level(), 2, open));
+        assertEquals(9, lines.size());
+        for (Line line : lines) {
+            assertEquals(List.of(open), line.obstructions().stream().map(ReachObstructions.Obstruction::state).toList(), line.toString());
+        }
+    }
+
+    @Test
+    void aPlantInTheWayIsAnObstructionOfALogThoughAColliderRayWalksThroughIt() {
         FakeLevel level = level();
-        for (int y = 0; y <= 3; y++) {
-            level.set(2, y, 0, Blocks.SHORT_GRASS.defaultBlockState());
+        BlockState grass = Blocks.SHORT_GRASS.defaultBlockState();
+        for (int z = -1; z <= 1; z++) {
+            for (int y = 0; y <= 3; y++) {
+                level.set(2, y, z, grass);
+            }
         }
-        for (Line line : lines(level)) {
-            assertTrue(line.obstructions().isEmpty(), "the strict gate's collider ray never meets grass: " + line);
+        List<Line> lines = lines(level);
+        assertEquals(9, lines.size(), "grass hides nothing from the eyes");
+        List<Line> stopped = obstructed(lines);
+        assertFalse(stopped.isEmpty(), "a click along the line meets the grass before the log");
+        for (Line line : stopped) {
+            assertEquals(1, line.obstructions().size(), line.toString());
+            assertTrue(line.obstructions().get(0).state().is(Blocks.SHORT_GRASS));
         }
     }
 
     @Test
-    void aPlantInFrontOfATorchIsAnObstructionBecauseItsOwnProofUsesTheOutline() {
+    void aTorchAsideTheLineIsNoObstructionAndOneOnItIs() {
+        List<Line> lines = lines(level().set(2, 1, 0, Blocks.TORCH.defaultBlockState()));
+        assertEquals(9, lines.size());
+        List<Line> stopped = obstructed(lines);
+        assertFalse(stopped.isEmpty(), "the lines through the middle of the cell meet the torch");
+        assertTrue(stopped.size() < lines.size(), "the lines beside it do not: a hand aims past a torch");
+        for (Line line : stopped) {
+            assertTrue(line.obstructions().get(0).state().is(Blocks.TORCH));
+        }
+    }
+
+    @Test
+    void aPlantInFrontOfATorchIsAnObstructionOfItToo() {
         BlockPos torch = new BlockPos(4, 1, 0);
         FakeLevel level = new FakeLevel().set(4, 1, 0, Blocks.TORCH.defaultBlockState());
         for (int y = 0; y <= 3; y++) {
@@ -203,11 +288,22 @@ class ReachObstructionsTest {
                 level.set(2, y, z, Blocks.SHORT_GRASS.defaultBlockState());
             }
         }
-        List<Line> lines = ReachObstructions.lines(level, CollisionContext.empty(), EYE, torch);
+        List<Line> lines = ReachObstructions.lines(level, CollisionContext.empty(), null, EYE, torch);
         assertFalse(lines.isEmpty(), "the torch is seen through the grass");
         assertTrue(lines.stream().anyMatch(line -> !line.obstructions().isEmpty()
                         && line.obstructions().get(0).state().is(Blocks.SHORT_GRASS)),
-                "a block without a collision shape is aimed at with an OUTLINE ray, which grass stops");
+                "a block without a collision shape is aimed at on its outline, which the grass on the line stops");
+    }
+
+    @Test
+    void aPaneInTheWayIsListedForTheLinesThroughItsPlane() {
+        BlockState plane = PANE.setValue(BlockStateProperties.NORTH, true).setValue(BlockStateProperties.SOUTH, true);
+        List<Line> lines = lines(wall(level(), 2, plane));
+        assertFalse(lines.isEmpty());
+        for (Line line : lines) {
+            assertEquals(1, line.obstructions().size(), line.toString());
+            assertTrue(line.obstructions().get(0).state().is(Blocks.GLASS_PANE));
+        }
     }
 
     @Test
@@ -231,6 +327,20 @@ class ReachObstructionsTest {
     }
 
     @Test
+    void theLavaABotWadesInDoesNotKillTheLinesFromItsEyes() {
+        BlockPos feet = new BlockPos(0, 0, 0);
+        FakeLevel level = level().set(0, 0, 0, Blocks.LAVA.defaultBlockState());
+        // Lines to a log below the pool's rim dip through the cell the bot stands in: they are the bot's own, whatever it wades in.
+        BlockPos low = new BlockPos(1, -1, 0);
+        level.set(1, -1, 0, LOG);
+        List<Line> others = ReachObstructions.lines(level, CollisionContext.empty(), null, EYE, low);
+        List<Line> wading = ReachObstructions.lines(level, CollisionContext.empty(), feet, EYE, low);
+        assertTrue(others.size() < wading.size(), "to anyone else the lava is in the way of the lines that dip through it: " + others.size() + " vs " + wading.size());
+        assertTrue(wading.stream().allMatch(line -> line.obstructions().isEmpty()),
+                "the bot sees, and can reach, what lies beyond the lava it stands in");
+    }
+
+    @Test
     void aLineEndsAtThePointItAimsAtTheFaceItNames() {
         for (Line line : lines(level())) {
             assertEquals(LOG_POS.getX() + 0.001D, line.aim().x, 1.0E-9D, "0.001 inside the near face, as the strict proofs aim");
@@ -238,13 +348,25 @@ class ReachObstructionsTest {
     }
 
     @Test
-    void theLinesAreTheOnesTheStrictClipAcceptsWhenNothingIsInTheWay() {
+    void theLinesAreTheOnesAClickReachesWhenNothingIsInTheWay() {
         FakeLevel level = level();
         for (Line line : lines(level)) {
-            var hit = level.clip(new ClipContext(EYE, line.aim(), ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY,
+            var hit = level.clip(new ClipContext(EYE, line.aim(), ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE,
                     CollisionContext.empty()));
             assertEquals(LOG_POS, hit.getBlockPos());
             assertEquals(line.face(), hit.getDirection());
+        }
+    }
+
+    @Test
+    void anObstructedLineIsOneAClickDoesNotReachAndAClearOneIs() {
+        FakeLevel level = wall(level(), 2, Blocks.COBWEB.defaultBlockState());
+        level.set(2, 1, 0, Blocks.AIR.defaultBlockState());
+        for (Line line : lines(level)) {
+            var click = level.clip(new ClipContext(EYE, line.aim(), ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE,
+                    CollisionContext.empty()));
+            assertEquals(line.obstructions().isEmpty(), click.getBlockPos().equals(LOG_POS),
+                    "the vanilla pick ray lands on the log exactly when the line lists nothing: " + line);
         }
     }
 }

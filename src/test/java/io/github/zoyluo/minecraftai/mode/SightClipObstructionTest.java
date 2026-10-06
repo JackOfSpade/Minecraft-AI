@@ -63,7 +63,8 @@ class SightClipObstructionTest {
 
     private static Trace trace(FakeLevel level, Vec3 from, Vec3 to, ClipContext.Block shape, ClipContext.Fluid fluid,
                                BlockPos target, boolean recordCrossed) {
-        SightClipContext context = SightClip.context(from, to, shape, fluid, CollisionContext.empty(), target, recordCrossed);
+        SightClipContext context = SightClip.context(from, to, shape, fluid, CollisionContext.empty(), target, recordCrossed)
+                .trackObstructions();
         return new Trace(level.clip(context), context);
     }
 
@@ -133,7 +134,7 @@ class SightClipObstructionTest {
         Trace collider = trace(level, ClipContext.Block.COLLIDER);
         assertHitsBlock(collider.hit(), LOG_POS, "nothing collides with an open gate");
         assertEquals(List.of(new Crossing(pos, open)), collider.obstructions());
-        assertTrue(collider.crossed().isEmpty(), "the collider ray never needed to skip it");
+        assertEquals(List.of(new Crossing(pos, open)), collider.crossed(), "the collider ray never needed to skip it, but the cell is a gate");
 
         Trace outline = trace(level, ClipContext.Block.OUTLINE);
         assertHitsBlock(outline.hit(), LOG_POS, "the outline ray skips the gate");
@@ -206,7 +207,8 @@ class SightClipObstructionTest {
         Trace collider = trace(level, low, lowEnd, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, null, true);
         assertHitsBlock(collider.hit(), LOG_POS, "the log behind the torch is seen");
         assertEquals(List.of(new Crossing(at(2), torch)), collider.obstructions());
-        assertTrue(collider.crossed().isEmpty(), "nothing was skipped: the ray never met it");
+        assertEquals(List.of(new Crossing(at(2), torch)), collider.crossed(),
+                "the collider ray walks through it unaided, yet the cell holds a torch and a recorder must never store air there");
         Trace outline = trace(level, low, lowEnd, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, null, true);
         assertHitsBlock(outline.hit(), LOG_POS, "the log behind the torch is seen");
         assertEquals(List.of(new Crossing(at(2), torch)), outline.obstructions());
@@ -243,9 +245,54 @@ class SightClipObstructionTest {
         FakeLevel level = new FakeLevel().set(2, 1, 0, LEAF).set(5, 1, 0, LOG);
         Trace quiet = trace(level, EYE, INTO_LOG, ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, null, false);
         assertTrue(quiet.crossed().isEmpty());
-        assertTrue(quiet.reachObstructed(), "the obstruction is always tracked");
+        assertTrue(quiet.reachObstructed(), "the obstruction was asked for");
         assertThrows(UnsupportedOperationException.class, () -> quiet.obstructions().clear());
         Trace recording = trace(level, ClipContext.Block.COLLIDER);
         assertThrows(UnsupportedOperationException.class, () -> recording.crossed().clear());
+        assertThrows(UnsupportedOperationException.class, () -> recording.crossed().add(new Crossing(at(9), LEAF)));
+    }
+
+    @Test
+    void theObstructionsOfThePickRayAreTrackedOnlyWhenAskedFor() {
+        // A leaf, a torch the outline ray meets and a fence arm: all three are on the pick line, none is reported untracked.
+        BlockState arms = FENCE.setValue(FenceBlock.NORTH, true).setValue(FenceBlock.SOUTH, true);
+        FakeLevel level = new FakeLevel().set(1, 1, 0, LEAF).set(3, 1, 0, Blocks.TORCH.defaultBlockState()).set(4, 1, 0, arms)
+                .set(5, 1, 0, LOG);
+        Vec3 from = new Vec3(0.5D, 1.3D, 0.5D);
+        Vec3 to = new Vec3(5.001D, 1.3D, 0.5D);
+        SightClipContext untracked = SightClip.context(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE,
+                CollisionContext.empty(), null, true);
+        assertHitsBlock(level.clip(untracked), LOG_POS, "sight is the same either way");
+        assertFalse(untracked.reachObstructed());
+        assertTrue(untracked.obstructions().isEmpty());
+        assertEquals(List.of(at(1), at(3), at(4)), positions(untracked.crossed()), "the crossings are recorded independently");
+
+        Trace tracked = trace(level, from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, null, true);
+        assertHitsBlock(tracked.hit(), LOG_POS, "sight");
+        assertEquals(List.of(at(1), at(3), at(4)), positions(tracked.obstructions()));
+        assertEquals(positions(untracked.crossed()), positions(tracked.crossed()), "tracking never changes what is recorded");
+    }
+
+    @Test
+    void thePickFactoryIsTheLineAClickFollowsWaterPassedLavaStoppingAndEveryOutlineInTheWay() {
+        FakeLevel level = new FakeLevel().set(1, 1, 0, WATER).set(2, 1, 0, LEAF).set(5, 1, 0, LOG);
+        SightClipContext click = SightClip.pick(EYE, INTO_LOG, CollisionContext.empty(), null, null);
+        assertHitsBlock(level.clip(click), LOG_POS, "the log is the end of the line");
+        assertEquals(List.of(new Crossing(at(2), LEAF)), click.obstructions(), "the leaf is what the click lands on, the water is not");
+        assertTrue(click.crossed().isEmpty(), "a click line records nothing but what it would hit");
+
+        FakeLevel lava = new FakeLevel().set(1, 1, 0, WATER).set(3, 1, 0, Blocks.LAVA.defaultBlockState()).set(5, 1, 0, LOG);
+        assertHitsBlock(lava.clip(SightClip.pick(EYE, INTO_LOG, CollisionContext.empty(), null, null)), at(3),
+                "a hand does not reach what the eyes cannot see through");
+
+        // The same shapes the vanilla pick ray uses, so the click and the factory never disagree on a gap.
+        FakeLevel gap = new FakeLevel().set(2, 1, 0, FENCE).set(5, 1, 0, LOG);
+        SightClipContext beside = SightClip.pick(new Vec3(0.5D, 1.5D, 0.2D), new Vec3(5.001D, 1.5D, 0.2D),
+                CollisionContext.empty(), null, null);
+        assertHitsBlock(gap.clip(beside), LOG_POS, "past the post");
+        assertFalse(beside.reachObstructed(), "a click through the gap of a fence line lands on the log");
+        BlockHitResult vanilla = gap.clip(new ClipContext(new Vec3(0.5D, 1.5D, 0.2D), new Vec3(5.001D, 1.5D, 0.2D),
+                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, CollisionContext.empty()));
+        assertHitsBlock(vanilla, LOG_POS, "vanilla's own pick ray agrees");
     }
 }
