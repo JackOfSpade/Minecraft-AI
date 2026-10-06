@@ -79,6 +79,7 @@
       "io.github.zoyluo.minecraftai.task.GiveItemTaskGameTests",
       "io.github.zoyluo.minecraftai.goal.GoalFreshFulfillmentGameTests",
       "io.github.zoyluo.minecraftai.persist.MissionSpecFreshFulfillmentGameTests",
+      "io.github.zoyluo.minecraftai.task.GatherThenGiveGameTests",
       "io.github.zoyluo.minecraftai.task.HungerEatToFullGameTests",
       "io.github.zoyluo.minecraftai.task.SurvivalReflexGameTests",
       "io.github.zoyluo.minecraftai.task.SelfPreservationGameTests",

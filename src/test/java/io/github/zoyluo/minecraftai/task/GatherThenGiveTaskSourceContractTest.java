@@ -7,32 +7,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
-/** Regression contract for a fresh acquisition followed by an exact vanilla handoff. */
+/**
+ * What the gather child of a fresh handoff must provide. The wrapper's own delivery logic is
+ * covered behaviourally in {@link GatherThenGiveTaskDeliveryPlanTest}.
+ */
 final class GatherThenGiveTaskSourceContractTest {
     @Test
-    void handoffCannotBeginUntilAnExactFreshGatherQuotaCompletes() throws IOException {
-        String task = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/minecraftai/task/GatherThenGiveTask.java"));
+    void exactHandoffGatherKeepsItsReserveThroughCapacityRecovery() throws IOException {
         String gather = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
         String stockpile = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/task/StockpileTask.java"));
 
-        int freshGather = task.indexOf("GatherQuotaTask.collectAdditionalExact(item, count)");
-        int give = task.indexOf("beginGive(bot, item)");
-        int gatherComplete = task.indexOf("gatherTask.state() == TaskState.COMPLETED");
-        assertTrue(freshGather >= 0 && gatherComplete > freshGather && give > gatherComplete,
-                "the exact give task must be created only after the fresh gather child completes");
-        assertTrue(task.contains("new GiveItemTask(delivery, count, playerName, true)"),
-                "the final give must receive the species whose retained fresh quota was proved");
-        assertTrue(task.contains("gatherTask.hasRetainedFreshQuota(bot)")
-                        && task.contains("fresh_gather_failed:") && task.contains("fresh_handoff_failed:")
-                        && task.contains("fresh_handoff_retained_quota_lost"),
-                "the wrapper must require retained fresh inventory and fail closed rather than fall through to delivery");
-        assertTrue(task.contains("child.pause(bot)") && task.contains("child.resume(bot)")
-                        && task.contains("child.abort(bot)") && task.contains("super.onAbort(bot)")
-                        && task.contains("failClosed(bot,") && task.contains("bot.getActionPack().stopAll()"),
-                "parent lifecycle transitions must be propagated to its private child task");
         assertTrue(gather.contains("collectAdditionalExact(Item targetItem, int targetCount)")
                         && gather.contains("Set.of(targetItem)")
                         && gather.contains("return HarvestCore.countInventoryItems(bot, acceptItems);")
@@ -48,20 +34,10 @@ final class GatherThenGiveTaskSourceContractTest {
     }
 
     @Test
-    void genericLogsLockAnActuallyFreshSpeciesBeforeTheExactHandoff() throws IOException {
-        String task = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/minecraftai/task/GatherThenGiveTask.java"));
+    void genericLogHandoffGatherRetainsTheWholeLogFamily() throws IOException {
         String gather = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
 
-        assertTrue(task.contains("GatherQuotaTask.collectAdditionalLogsForHandoff(count)")
-                        && task.contains("logInventoryBaseline.put(log, InventoryAction.countItem(bot, log))")
-                        && task.contains("freshLogCount(bot, deliveryItem)")
-                        && task.contains("hasGenericRetainedDeliveryQuota(bot)"),
-                "generic logs must use immutable per-species baselines, not the total family stack");
-        assertTrue(task.contains("GatherQuotaTask.collectAdditionalExact(deliveryItem, count - fresh)")
-                        && task.contains("phase = Phase.REFINE"),
-                "a mixed first-stage log collection must lock one new species and refine only its shortfall");
         assertTrue(gather.contains("collectAdditionalLogsForHandoff(int targetCount)")
                         && gather.contains("0, 0, 0, Set.copyOf(RecipeRegistry.LOGS), true);"),
                 "the first generic-log stage must retain the whole accepted log family through capacity recovery");

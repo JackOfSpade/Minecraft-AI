@@ -1,25 +1,82 @@
 package io.github.zoyluo.minecraftai.brain;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import java.util.ArrayList;
+import java.util.List;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** Pins the generic-log sentinel so an unspecified "logs" request never defaults to oak. */
+/**
+ * gather_then_give as the model sees it. The registry is built against the real item registry, so
+ * these run the actual registration instead of reading the source.
+ */
 final class ToolRegistryGatherThenGiveRegistrationTest {
-    @Test
-    void genericLogsSentinelUsesTheFamilySafeHandoffTask() throws IOException {
-        String registry = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/minecraftai/brain/ToolRegistry.java"));
+    private static ToolRegistry registry;
 
-        assertTrue(registry.contains("literal logs for any tree-log species")
-                        && registry.contains("isGenericLogHandoff(requestedItem)")
-                        && registry.contains("GatherThenGiveTask.genericLogs("),
-                "gather_then_give must accept the logs sentinel before exact registry-item parsing");
-        assertTrue(registry.contains("\"logs\".equalsIgnoreCase(item.trim())")
-                        && registry.contains("\"minecraft:logs\".equalsIgnoreCase(item.trim())"),
-                "only the intentional generic-log spellings may bypass exact item-id parsing");
+    @BeforeAll
+    static void registry() {
+        RegistryBootstrap.ensure();
+        registry = new ToolRegistry();
+    }
+
+    private static List<String> requiredArguments(String tool) {
+        JsonArray required = registry.get(tool).orElseThrow().parametersSchema().getAsJsonArray("required");
+        List<String> names = new ArrayList<>();
+        required.forEach(element -> names.add(element.getAsString()));
+        return names;
+    }
+
+    @Test
+    void gatherThenGiveIsOfferedWithItsItemAndCountRequiredAndThePlayerOptional() {
+        ToolDefinition tool = registry.tools(null, false, false, false).stream()
+                .filter(candidate -> candidate.name().equals("gather_then_give")).findFirst().orElseThrow();
+
+        JsonObject properties = tool.parametersSchema().getAsJsonObject("properties");
+        assertEquals(List.of("item", "count", "player"), List.copyOf(properties.keySet()));
+        assertEquals(List.of("item", "count"), requiredArguments("gather_then_give"),
+                "the player may omit nothing the handoff cannot do without: the item and how many");
+        assertEquals(1, properties.getAsJsonObject("count").get("minimum").getAsInt(),
+                "a quota of zero or less is not a quota");
+    }
+
+    @Test
+    void theLogsSentinelIsTheOnlyNonRegistrySpelling() {
+        assertTrue(ToolRegistry.isGenericLogHandoff("logs"));
+        assertTrue(ToolRegistry.isGenericLogHandoff(" Logs "));
+        assertTrue(ToolRegistry.isGenericLogHandoff("minecraft:logs"));
+        assertFalse(ToolRegistry.isGenericLogHandoff("log"));
+        assertFalse(ToolRegistry.isGenericLogHandoff("minecraft:oak_log"));
+        assertFalse(ToolRegistry.isGenericLogHandoff("oak_logs"));
+        assertFalse(ToolRegistry.isGenericLogHandoff(null));
+    }
+
+    @Test
+    void theToolsTheRoutingNamesAreRegisteredCoreTools() {
+        for (String name : List.of(ToolRouting.GIVE_ITEM, ToolRouting.ACHIEVE_GOAL,
+                ToolRouting.GATHER_THEN_GIVE, ToolRouting.FULFILL_ITEMS)) {
+            ToolDefinition tool = registry.get(name).orElseThrow(() -> new AssertionError(name + " is not registered"));
+            assertEquals(ToolDefinition.Group.CORE, tool.group(), name);
+        }
+    }
+
+    @Test
+    void giveItemAndTheCollectionToolsPointAtEachOther() {
+        String give = registry.get("give_item").orElseThrow().description();
+        String gatherThenGive = registry.get("gather_then_give").orElseThrow().description();
+        String fulfill = registry.get("fulfill_items").orElseThrow().description();
+
+        assertTrue(give.contains("already carries") && give.contains("gather_then_give") && give.contains("fulfill_items"),
+                "give_item must say it never collects and where collection lives");
+        assertTrue(gatherThenGive.contains("fulfill_items") && gatherThenGive.contains("give_item"),
+                "gather_then_give must name the routes for ore, crafted results and a missing number");
+        assertTrue(gatherThenGive.contains("give_item the part"),
+                "gather_then_give hands over everything it collects; a partial handoff goes through give_item");
+        assertTrue(fulfill.contains("give_item") && fulfill.contains("once per item"),
+                "fulfill_items is production; a carried bundle is handed over item by item");
     }
 }
