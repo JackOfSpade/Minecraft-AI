@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.SectionPrefilter;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
@@ -20,6 +21,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -52,19 +54,9 @@ public final class HarvestCore {
     }
 
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Block targetBlock, int horizontalRadius, int down, int up) {
-        TargetChoice remembered = knownVisibleTarget(bot, Set.of(targetBlock), null, false);
-        if (remembered != null) {
-            return remembered;
-        }
-        BlockPos origin = bot.blockPosition();
-        return firstWalkReachable(bot, origin,
-                BlockPos.betweenClosedStream(origin.offset(-horizontalRadius, -down, -horizontalRadius), origin.offset(horizontalRadius, up, horizontalRadius))
-                        .filter(pos -> withinObservationReach(bot, pos))
-                        .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                        .filter(pos -> bot.level().getBlockState(pos).is(targetBlock))
-                        .map(BlockPos::immutable)
-                        .map(pos -> targetChoice(bot, pos))
-                        .filter(choice -> choice != null));
+        // The same search as the set form (remembered sight first, then the nearest eight observed
+        // candidates), which tests the cheap block state before it casts any observation ray.
+        return nearestReachableBlock(bot, Set.of(targetBlock), horizontalRadius, down, up);
     }
 
     // MINE-DIG/Fix C: finds the nearest reachable block within a set of candidate blocks (e.g. "any log"),
@@ -240,8 +232,13 @@ public final class HarvestCore {
         }
 
         private void enumerate(long deadline) {
-            var world = bot.level();
             BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+            // The cheap conjuncts first and the rays last, as in OreProspector (see SectionPrefilter): a cell
+            // is a candidate when its state is a target block AND it is in view, so the answer is the same,
+            // but only a cell holding a target block pays the observation rays. This survey runs on every
+            // tick the bot looks around, and in a place with no tree it used to cast them for each of about
+            // 11,000 cells (roughly 100 ms of server thread per tick).
+            SectionPrefilter sections = new SectionPrefilter(bot.level(), state -> targetBlocks.contains(state.getBlock()));
             int visited = 0;
             while (index < total) {
                 long i = index++;
@@ -250,11 +247,15 @@ public final class HarvestCore {
                 int y = (int) (rest % sizeY);
                 int z = (int) (rest / sizeY);
                 cursor.set(minX + x, minY + y, minZ + z);
-                if ((hiddenScanAllowed || withinObservationReach(bot, cursor))
-                        && canObserveHarvestTarget(bot, cursor, allowObservableCellFallback)
-                        && targetBlocks.contains(world.getBlockState(cursor).getBlock())
-                        && (posFilter == null || posFilter.test(cursor))) {
-                    candidates.add(cursor.immutable());
+                if (hiddenScanAllowed || withinObservationReach(bot, cursor)) {
+                    LevelChunkSection section = sections.candidateSection(cursor.getX(), cursor.getY(), cursor.getZ());
+                    if (section != null
+                            && targetBlocks.contains(SectionPrefilter.stateIn(
+                                    section, cursor.getX(), cursor.getY(), cursor.getZ()).getBlock())
+                            && canObserveHarvestTarget(bot, cursor, allowObservableCellFallback)
+                            && (posFilter == null || posFilter.test(cursor))) {
+                        candidates.add(cursor.immutable());
+                    }
                 }
                 if ((++visited & CLOCK_CHECK_MASK) == 0 && System.nanoTime() >= deadline) {
                     return;
@@ -934,18 +935,6 @@ public final class HarvestCore {
         return allowObservableCellFallback && ObservableWorldQuery.canObserveCell(bot, pos);
     }
 
-    // Candidates are ordered near-to-far, but only individually observed target/stance cells may
-    // influence the choice.  Baritone's route admission supplies the actual all-observed corridor
-    // check immediately before movement, so this helper never becomes a hidden-map path oracle.
-    private static TargetChoice firstWalkReachable(AIPlayerEntity bot, BlockPos origin, java.util.stream.Stream<TargetChoice> candidates) {
-        return candidates
-                .sorted(Comparator.comparingDouble(choice -> choice.pos().distSqr(origin)))
-                .limit(REACH_VERIFY_LIMIT)
-                .filter(choice -> isWalkReachable(bot, choice))
-                .findFirst()
-                .orElse(null);
-    }
-
     public static boolean isWalkReachable(AIPlayerEntity bot, TargetChoice choice) {
         BlockPos stand = choice.stand();
         if (stand == null || bot.blockPosition().equals(stand)) {
@@ -1046,8 +1035,11 @@ public final class HarvestCore {
         }
 
         /**
-         * Advances the fixed candidate cursor for at most {@code budgetNanos}. A candidate's
-         * block state is still read only after a live render-distance line-of-sight proof.
+         * Advances the fixed candidate cursor for at most {@code budgetNanos}. A cell is a candidate
+         * only when its state is a requested block and a live render-distance line-of-sight proof
+         * reaches it; the cheap state test runs first (see {@link SectionPrefilter}), so only a cell
+         * holding a requested block pays the rays and the 42,000-cell volume of a treeless place is
+         * over in a tick or two instead of tens of them.
          */
         public boolean step(long budgetNanos) {
             if (done) {
@@ -1056,6 +1048,7 @@ public final class HarvestCore {
             long start = System.nanoTime();
             long deadline = budgetNanos >= Long.MAX_VALUE - start ? Long.MAX_VALUE : start + budgetNanos;
             BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+            SectionPrefilter sections = new SectionPrefilter(bot.level(), state -> targetBlocks.contains(state.getBlock()));
             int visited = 0;
             while (index < total) {
                 long current = index++;
@@ -1064,10 +1057,12 @@ public final class HarvestCore {
                 int y = (int) (rest % sizeY);
                 int z = (int) (rest / sizeY);
                 cursor.set(minX + x, minY + y, minZ + z);
-                if (withinRenderObservationReach(bot, cursor)
+                LevelChunkSection section = withinRenderObservationReach(bot, cursor)
+                        ? sections.candidateSection(cursor.getX(), cursor.getY(), cursor.getZ()) : null;
+                if (section != null
+                        && targetBlocks.contains(SectionPrefilter.stateIn(
+                                section, cursor.getX(), cursor.getY(), cursor.getZ()).getBlock())
                         && canObserveHarvestTarget(bot, cursor, false)
-                        // Observation deliberately precedes this only live state read.
-                        && targetBlocks.contains(bot.level().getBlockState(cursor).getBlock())
                         && (posFilter == null || posFilter.test(cursor))) {
                     PillarApproach candidate = pillarApproach(bot, cursor.immutable());
                     if (candidate != null && (result == null
@@ -1250,7 +1245,7 @@ public final class HarvestCore {
      * cell is physically known; every other pose needs observed feet, head, and support cells
      * before {@link Standability} is allowed to inspect their collision states.
      */
-    private static boolean canObserveStand(AIPlayerEntity bot, BlockPos stand) {
+    static boolean canObserveStand(AIPlayerEntity bot, BlockPos stand) {
         if (stand.equals(bot.blockPosition())) {
             return true;
         }

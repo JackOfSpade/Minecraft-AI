@@ -244,7 +244,10 @@ nothing branches on a match that is not observable), but the order of the conjun
 sections whose palette cannot hold a match are skipped whole (`mining/SectionPrefilter`, `LevelChunkSection.maybeHas`),
 then the cell state is tested, and only a matching cell pays the observation rays. Before, every cell of the search
 cube paid its rays before its state was read (thousands of ray casts for nothing); the returned set is identical.
-`task/WorkshopLocator` (`nearestBlock`, `nearestCompatibleFurnace`) follows the same order.
+`task/WorkshopLocator` (`nearestBlock`, `nearestCompatibleFurnace`) follows the same order. So do gather's
+local survey and its high-target pillar volume (`HarvestCore.NearestScan`, `HarvestCore.PillarApproachScan`): in a
+place with no tree they used to cast rays for every cell on every survey tick (about 100 ms of server thread per tick,
+seen as a run of `profile_slow_section section=task_tick` between two exploration hops); now they cost a palette check.
 
 Gather's wide survey (search radius 32/48, `HarvestCore.NearestScan`) and the en-route explore scan are
 resumable in the same way (2 ms per tick; at most one walk-reachability A*, itself capped at 30 ms, per
@@ -255,3 +258,11 @@ searches (node and millisecond caps) and cannot be suspended half-way without a 
 which is out of scope here; the scan work itself is no longer part of that tick. Every scan is dropped
 when the task leaves the phase that owns it (`exploreScan` on every exit from EXPLORE, `surveyScan` on
 leaving SURVEY) or when the bot has moved more than 8 blocks (20 for explore) since it began.
+
+Every Baritone route admission builds an `ObservedNavigationFence` snapshot (`nav_observation_fence_updated`, field
+`cells`) of at most 8192 cells. The snapshot sheds its oldest cells once per freeze (`ObservedCellRetention`); evicting
+inside every insertion scanned the whole map per new cell and made one exploration hop (`gather_explore_hop`) cost
+300-900 ms. `fresh_cells` now counts every cell the admission added, also when the snapshot was already full.
+New gather events: `gather_harvest_refused` (`pos`, `reason`: the break controller ended without breaking the block,
+e.g. `target_not_observed`; the target is excluded for `EpisodeMemory.TTL_SHORT` and the survey re-plans at once,
+instead of `gather_harvest_timeout` 240 ticks later).

@@ -208,8 +208,8 @@ public final class ObservedNavigationFence {
         String dimension = BotEdits.dimensionKey(bot.level());
         // A visible-landmark route is a short live-sight leg, not a map-memory route. Starting
         // it from fresh local evidence bounds the snapshot even when an unrelated previous
-        // route happened to fill its retained cache, and avoids repeated MAX_CELLS eviction
-        // scans while retaining only terrain that the bot can currently re-prove.
+        // route happened to fill its retained cache, and avoids copying and re-trimming that cache
+        // while retaining only terrain that the bot can currently re-prove.
         Map<Long, Cell> observed = isVisibleLandmarkPursuit(route)
                 ? new HashMap<>() : retained(previous, dimension, tick);
         int before = observed.size();
@@ -1315,33 +1315,21 @@ public final class ObservedNavigationFence {
         }
     }
 
+    /**
+     * The map may overshoot {@link #MAX_CELLS} while an admission is built; {@link #freeze} sheds
+     * the oldest memory once. Evicting inside every put scanned the whole 8192-entry map for each
+     * new cell, and with the snapshot saturated from the first admission on that cost a single
+     * directional hop 300-900 ms of server thread.
+     */
     private static void put(Map<Long, Cell> observed, long pos, BlockState state, int tick) {
-        Cell prior = observed.get(pos);
-        if (prior != null || observed.size() < MAX_CELLS) {
-            observed.put(pos, new Cell(state, tick));
-            return;
-        }
-        // Deterministic, bounded eviction: only replace the least-recent observation if the new
-        // one is fresher. This makes memory a local walking aid, never an expanding world cache.
-        long eldestKey = 0L;
-        Cell eldest = null;
-        for (Map.Entry<Long, Cell> entry : observed.entrySet()) {
-            Cell candidate = entry.getValue();
-            if (eldest == null || candidate.seenTick() < eldest.seenTick()
-                    || (candidate.seenTick() == eldest.seenTick() && Long.compare(entry.getKey(), eldestKey) < 0)) {
-                eldestKey = entry.getKey();
-                eldest = candidate;
-            }
-        }
-        if (eldest != null && tick >= eldest.seenTick()) {
-            observed.remove(eldestKey);
-            observed.put(pos, new Cell(state, tick));
-        }
+        observed.put(pos, new Cell(state, tick));
     }
 
     private static ObservedNavigationFence freeze(String dimension, int minimumY, long generation, int tick,
                                                   Map<Long, Cell> observed) {
-        List<Map.Entry<Long, Cell>> entries = new ArrayList<>(observed.entrySet());
+        // Bounded memory: a local walking aid, never an expanding world cache.
+        List<Map.Entry<Long, Cell>> entries = ObservedCellRetention.freshest(
+                new ArrayList<>(observed.entrySet()), Cell::seenTick, MAX_CELLS);
         entries.sort(Comparator.comparingLong(Map.Entry::getKey));
         long[] cells = new long[entries.size()];
         BlockState[] states = new BlockState[entries.size()];

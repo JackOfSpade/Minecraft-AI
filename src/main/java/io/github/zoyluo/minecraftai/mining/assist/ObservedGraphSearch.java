@@ -103,7 +103,9 @@ public final class ObservedGraphSearch {
             for (int[] horizontal : HORIZONTAL) {
                 for (int[] vertical : VERTICAL_MOVES) {
                     BlockPos next = new BlockPos(cx + horizontal[0], cy + vertical[0], cz + horizontal[1]);
-                    if (env.isForbidden(next) || !env.isStandable(next)) {
+                    // The cheap check first: most neighbours are not standable, and the forbidden
+                    // check scans a whole lava-clearance cube around the cell.
+                    if (!env.isStandable(next) || env.isForbidden(next)) {
                         continue;
                     }
                     double moveCost = BASE_MOVE_COST + FALL_COST_PER_BLOCK * vertical[1];
@@ -173,7 +175,7 @@ public final class ObservedGraphSearch {
             for (int[] horizontal : HORIZONTAL) {
                 for (int[] vertical : VERTICAL_MOVES) {
                     BlockPos next = new BlockPos(cx + horizontal[0], cy + vertical[0], cz + horizontal[1]);
-                    if (env.isForbidden(next) || !env.isStandable(next)) {
+                    if (!env.isStandable(next) || env.isForbidden(next)) {
                         continue;
                     }
                     double moveCost = BASE_MOVE_COST + FALL_COST_PER_BLOCK * vertical[1];

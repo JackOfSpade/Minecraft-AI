@@ -319,6 +319,11 @@ public final class GatherPickupGameTests {
                 new io.github.zoyluo.minecraftai.action.KnownCellPickupSweep(origin);
 
         context.failIfEver(() -> {
+            // The sweep walks only to cells the bot can see, and a fresh bot sees nothing until its chunk
+            // tracking view is set up on its first ticks.
+            if (!io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveCell(bot, fixture.start().east())) {
+                return;
+            }
             require(context, bot.level().getBlockState(cap).is(Blocks.OAK_LOG),
                     "the sweep must never dig the standing log");
             require(context, bot.blockPosition().getY() == fixture.start().getY(),

@@ -15,6 +15,7 @@ import io.github.zoyluo.minecraftai.log.GatherConsistency;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import org.slf4j.event.Level;
 
@@ -158,6 +159,10 @@ public final class GatherQuotaTask extends AbstractTask {
     private int countBeforeHarvest;
     private int pickupTicks;
     private int harvestStartedTick;
+    /** Mining generation of the current attempt, to learn why its break controller ended without breaking. */
+    private long harvestMiningGeneration;
+    /** Why the attempt's break was refused at admission, until {@link #harvest} reacts to it. */
+    private String harvestStartRefusal;
     private BlockPos pickupOrigin;
     private long pickupStatBeforeHarvest;
     private boolean pickupOriginApproachLogged;
@@ -220,6 +225,9 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos roamTarget;  // Landing point for the roam-to-new-patch move (walked to, never teleported)
     private int selfStuckTick;     // A: tick of the last time new material was actually gathered
     private int selfStuckCount;    // A: last recorded gathered count
+    // True from an exploration leg until the survey of where it ended reaches a verdict: the stuck
+    // watchdog must not start the next hop before the bot has looked around the new place.
+    private boolean surveyOwedAfterExplore;
     // EXPLORE state: an admitted directional-hop budget plus the count of legs physically reached.
     // A refusal to admit a visible local hop consumes only the search budget; it is never described
     // as travel.  The current target is always the observation-fence's resolved local goal, never
@@ -283,6 +291,9 @@ public final class GatherQuotaTask extends AbstractTask {
     private HarvestCore.PillarApproach pendingPillarApproach;
     /** Resumable high-target scan; never repeat a full LOS volume in one survey tick. */
     private HarvestCore.PillarApproachScan pillarApproachScan;
+    /** Searches that came back empty from the stance the bot still holds (see PillarSearchMemo). */
+    private final PillarSearchMemo exactPillarMemo = new PillarSearchMemo();
+    private final PillarSearchMemo broadPillarMemo = new PillarSearchMemo();
     private GatherQuotaTask scaffoldSupplyTask;
     private int scaffoldSupportRequirement;
     private int scaffoldSupplyItemIndex;
@@ -555,6 +566,10 @@ public final class GatherQuotaTask extends AbstractTask {
         bootstrapOriginApproachLogged = false;
         bootstrapOriginSweep = null;
         pickupOriginSweep = null;
+        harvestStartRefusal = null;
+        surveyOwedAfterExplore = false;
+        exactPillarMemo.clear();
+        broadPillarMemo.clear();
         breaksCount = 0;
         pickupsCount = 0;
         pickupMissesTotal = 0;
@@ -602,7 +617,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // preemption must not renew one stale target forever. The physical pickup ledger and the
         // task-wide collection budget remains monotonic for the same reason.
         if (HarvestCore.canReach(bot, targetPos)) {
-            HarvestCore.startMining(bot, targetPos);
+            startHarvestMining(bot);
             BotLog.action(bot, "gather_harvest_resumed", "pos", targetPos.toShortString());
             return;
         }
@@ -713,7 +728,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 explorationProgress.reset();
                 exploreHops = 0;          // Gathering something new means this patch produces — reset the explore hop budget
                 exploredSinceFind = true; // The next "found after exploring" is worth recording into memory again
-            } else if (elapsed - selfStuckTick > SELF_STUCK_LIMIT) {
+            } else if (elapsed - selfStuckTick > SELF_STUCK_LIMIT && !surveyOwedAfterExplore) {
                 if (countBrokenBlocks) {
                     // An exact break remains visual-only, but its line-of-sight raster is a
                     // real bounded search rather than idle circling. Let it finish its current
@@ -741,7 +756,12 @@ public final class GatherQuotaTask extends AbstractTask {
             surveyScan = null;
         }
         switch (phase) {
-            case SURVEY -> survey(bot);
+            case SURVEY -> {
+                survey(bot);
+                if (phase != Phase.SURVEY) {
+                    surveyOwedAfterExplore = false; // the survey decided what to do (harvest, hop, deposit, ...)
+                }
+            }
             case GOTO -> goToTarget(bot);
             case ENSURE_TOOL -> ensureTool(bot);
             case HARVEST -> harvest(bot);
@@ -1066,6 +1086,8 @@ public final class GatherQuotaTask extends AbstractTask {
     // chain to trigger the next startExplore hop if not). A single exit point keeps the state
     // machine from diverging.
     private void exploreMove(AIPlayerEntity bot) {
+        // Every exit below lands in SURVEY, which owes the place the leg ended at a look around.
+        surveyOwedAfterExplore = true;
         // (1) This hop has taken too long without arriving (the waypoint is genuinely hard to
         // reach / the route is a long detour) → abandon the hop and return to SURVEY to rescan
         // (reset scan radius/throttle).
@@ -1089,7 +1111,12 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         if (exploreScan == null && now - lastExploreScanTick >= EXPLORE_SCAN_INTERVAL) {
             lastExploreScanTick = now;
-            exploreScan = OreProspector.beginObservable(bot, 16, state -> harvestBlocks.contains(state.getBlock()), null);
+            // A target already found unreachable must not call the hop back to SURVEY again: the
+            // survey would only exclude it once more, and a real session lost every hop that way.
+            java.util.UUID botId = bot.getUUID();
+            var scanServer = bot.level().getServer();
+            exploreScan = OreProspector.beginObservable(bot, 16, state -> harvestBlocks.contains(state.getBlock()),
+                    pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, scanServer.getTickCount()));
         }
         if (exploreScan != null && exploreScan.step(SCAN_STEP_BUDGET_NANOS)) {
             BlockPos seen = exploreScan.result();
@@ -1759,6 +1786,11 @@ public final class GatherQuotaTask extends AbstractTask {
         // remains a small, line-of-sight-filtered candidate volume, but it is deliberately
         // resumable: one empty survey must not cast tens of thousands of rays in a single tick
         // (or repeat those rays while a separate horizon sweep is still progressing).
+        long worldVersion = AStarPathfinder.cacheVersion();
+        if (pillarApproachScan == null
+                && broadPillarMemo.knownEmpty(bot.blockPosition(), PILLAR_SEARCH_UP, worldVersion, now)) {
+            return false; // this very volume was just scanned from here and held no approach
+        }
         if (pillarApproachScan == null
                 || bot.blockPosition().distSqr(pillarApproachScan.origin()) > SCAN_STALE_DISTANCE_SQ) {
             pillarApproachScan = HarvestCore.beginNearestPillarApproachScan(bot, harvestBlocks,
@@ -1769,8 +1801,10 @@ public final class GatherQuotaTask extends AbstractTask {
             return true;
         }
         HarvestCore.PillarApproach approach = pillarApproachScan.result();
+        BlockPos scanned = pillarApproachScan.origin();
         pillarApproachScan = null;
         if (approach == null) {
+            broadPillarMemo.rememberEmpty(scanned, PILLAR_SEARCH_UP, worldVersion, now);
             return false;
         }
         return admitPillarApproach(bot, approach);
@@ -1787,9 +1821,16 @@ public final class GatherQuotaTask extends AbstractTask {
         if (isLocalScaffoldSupply() || !mayUsePillarRecovery()) {
             return false;
         }
+        // The ring search casts rays for up to 28 columns (and the floor search for six more levels of
+        // them); a sweep that restarts from the stance where this block already had none must not repeat it.
+        long worldVersion = AStarPathfinder.cacheVersion();
+        if (exactPillarMemo.knownEmpty(bot.blockPosition(), block.asLong(), worldVersion,
+                bot.level().getServer().getTickCount())) {
+            return false;
+        }
         HarvestCore.PillarApproach approach = HarvestCore.pillarApproachFor(bot, block, harvestBlocks);
         if (approach == null) {
-            return mayStepOntoFloor && stepOntoPillarBase(bot, block);
+            return mayStepOntoFloor && stepOntoPillarBase(bot, block, worldVersion);
         }
         if (!admitPillarApproach(bot, approach)) {
             return false;
@@ -1803,9 +1844,11 @@ public final class GatherQuotaTask extends AbstractTask {
      * rooted on a slope: the column's own floor is terrain, or open air over a drop). The bot walks onto
      * that floor by an ordinary observed route, and {@link #goToTarget} plans the pillar from there.
      */
-    private boolean stepOntoPillarBase(AIPlayerEntity bot, BlockPos block) {
+    private boolean stepOntoPillarBase(AIPlayerEntity bot, BlockPos block, long worldVersion) {
         BlockPos base = HarvestCore.pillarBaseFor(bot, block, harvestBlocks);
         if (base == null) {
+            exactPillarMemo.rememberEmpty(bot.blockPosition(), block.asLong(), worldVersion,
+                    bot.level().getServer().getTickCount());
             return false;
         }
         ActionResult route = startGatherPathTo(bot, base);
@@ -2532,6 +2575,24 @@ public final class GatherQuotaTask extends AbstractTask {
             phase = Phase.PICKUP;
             return;
         }
+        String refusal = harvestStartRefusal != null ? harvestStartRefusal
+                : bot.getActionPack().consumeFailedMining(targetPos, harvestMiningGeneration);
+        harvestStartRefusal = null;
+        if (refusal != null) {
+            // The break controller is gone: the block left the bot's sight (or was never admitted), so
+            // nothing in this phase can progress. Plan another target at once rather than idling out
+            // the harvest deadline (18 s on one log in a real session). The exclusion is short: a
+            // different stance may show the block again.
+            bot.getActionPack().stopAll();
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_SHORT);
+            BotLog.action(bot, "gather_harvest_refused", "pos", targetPos.toShortString(), "reason", refusal);
+            targetPos = null;
+            clearPickupLedger();
+            resetSurveyWatchdog();
+            phase = Phase.SURVEY;
+            return;
+        }
         if (elapsed - harvestStartedTick > HARVEST_LIMIT) {
             bot.getActionPack().stopAll();
             EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
@@ -2547,7 +2608,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // A controller retry is part of the same atomic attempt. Calling startHarvest() here
             // used to renew harvestStartedTick every 200 ticks, permanently outrunning the
             // 240-tick deadline whenever the target had become out of reach.
-            HarvestCore.startMining(bot, targetPos);
+            startHarvestMining(bot);
         }
     }
 
@@ -2980,8 +3041,15 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
         pickupOriginSweep = null;
-        HarvestCore.startMining(bot, targetPos);
+        startHarvestMining(bot);
         phase = Phase.HARVEST;
+    }
+
+    /** Starts the break controller and remembers how to learn that it ended without breaking. */
+    private void startHarvestMining(AIPlayerEntity bot) {
+        ActionResult started = HarvestCore.startMining(bot, targetPos);
+        harvestMiningGeneration = bot.getActionPack().miningGeneration();
+        harvestStartRefusal = started.isFailed() ? started.reason() : null;
     }
 
     /**
