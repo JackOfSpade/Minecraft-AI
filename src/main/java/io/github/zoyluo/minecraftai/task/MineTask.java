@@ -1,13 +1,16 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.TowerDescent;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -43,7 +46,9 @@ public final class MineTask extends AbstractTask {
         SCAFFOLD_SUPPLY,
         MOVING,
         MINING,
-        PICKING_UP
+        PICKING_UP,
+        /** The quota is met; the task ends once the bot is back down from a pillar it built. */
+        FINISHING
     }
 
     private final Block targetBlock;
@@ -56,6 +61,10 @@ public final class MineTask extends AbstractTask {
     private int inventoryCountBeforeMining;
     private int pickupTicks;
     private boolean pickupSweepAttempted;
+    /** What the bot does on its tower about the item the block it has just broken gave (null without a tower). */
+    private TowerDropWatch dropWatch;
+    /** The inventory count of the target's drops when the tower began coming down; -1 before that. */
+    private int descentCountAtStart = -1;
     private boolean directMiningTarget;
     /** Local cadence for the side-effect-free automatic-light scan at safe task boundaries. */
     private int lastTorchCheckElapsed = -10;
@@ -86,8 +95,13 @@ public final class MineTask extends AbstractTask {
     // The generic /mine path gets the same exact vertical recovery as gather. A support child is
     // deliberately local and non-recursive, so it can only acquire cheap natural filler.
     private HarvestCore.PillarApproachScan pillarApproachScan;
-    /** Vertical extent used for the active cursor; a high live sighting can widen it safely. */
-    private int pillarApproachScanUp;
+    /** Searches that came back empty from the stance the bot still holds (see PillarSearchMemo). */
+    private final PillarSearchMemo exactPillarMemo = new PillarSearchMemo();
+    private final PillarSearchMemo broadPillarMemo = new PillarSearchMemo();
+    /** The target a walk onto its pillar column's floor is under way for (see stepOntoPillarBase). */
+    private BlockPos pillarBaseWalk;
+    /** The pillar this task built last: the bot takes it down again before it does anything else (see descendTower). */
+    private TowerDescent tower;
     private HarvestCore.PillarApproach pendingPillarApproach;
     private GatherQuotaTask scaffoldSupplyTask;
     private int scaffoldSupportRequirement;
@@ -131,6 +145,11 @@ public final class MineTask extends AbstractTask {
         miningExplorationTimeoutCredit = 0;
         clearTargetSighting();
         clearPillarRecovery();
+        exactPillarMemo.clear();
+        broadPillarMemo.clear();
+        tower = null;
+        dropWatch = null;
+        descentCountAtStart = -1;
     }
 
     @Override
@@ -144,6 +163,9 @@ public final class MineTask extends AbstractTask {
         // lighting or ordinary mine planning contend for the same hand/path on this tick.
         if (scaffoldSupplyTask != null || phase == Phase.SCAFFOLD_SUPPLY) {
             scaffoldSupply(bot);
+            return;
+        }
+        if (descendTower(bot)) {
             return;
         }
         // Eligible mining requests may spend their first window revealing terrain through
@@ -170,7 +192,58 @@ public final class MineTask extends AbstractTask {
             case MOVING -> move(bot);
             case MINING -> mine(bot);
             case PICKING_UP -> pickup(bot);
+            case FINISHING -> complete();
         }
+    }
+
+    /**
+     * Takes the pillar this task built down again before the bot does anything else: a route steps
+     * down at most the safe fall and never breaks the bot's own footing, so a tall tower would strand
+     * it. The bot breaks the block under its feet one at a time, as a player does (see
+     * {@link TowerDescent}). A pillar still being climbed or mined from is in use and left alone, and
+     * the bot stays up on it while the item the break gave is still to be collected or looked for from
+     * there (see {@link TowerDropWatch}). True while it owns the tick.
+     */
+    private boolean descendTower(AIPlayerEntity bot) {
+        if (tower == null || phase == Phase.MOVING || phase == Phase.MINING) {
+            return false;
+        }
+        if (phase == Phase.PICKING_UP && descentCountAtStart < 0) {
+            // What the break gave is counted by pickup() before the tower's own blocks come back as items.
+            if (collectedDrops(bot) > 0) {
+                return false;
+            }
+            if (dropWatch != null && tower.standsOnTower(bot) && dropWatch.hold(bot)) {
+                return true;
+            }
+        }
+        if (descentCountAtStart < 0) {
+            descentCountAtStart = HarvestCore.countInventoryItems(bot, targetDrops);
+        }
+        TowerDescent.Status status = tower.tick(bot);
+        if (status == TowerDescent.Status.DESCENDING) {
+            return true;
+        }
+        if (status == TowerDescent.Status.FAILED) {
+            BotLog.action(bot, "mine_tower_descent_failed",
+                    "reason", tower.failureReason(), "at", bot.blockPosition().toShortString());
+        } else if (tower.broken() > 0) {
+            BotLog.action(bot, "mine_tower_descended",
+                    "blocks", tower.broken(), "at", bot.blockPosition().toShortString());
+        }
+        // The blocks of the tower come back as items; when they are of the kind being mined they are no
+        // progress (a stone quota built up with cobblestone), so the count of what this break gave starts over.
+        int gained = HarvestCore.countInventoryItems(bot, targetDrops) - descentCountAtStart;
+        inventoryCountBeforeMining += Math.min(tower.returnedOf(targetDrops), Math.max(0, gained));
+        descentCountAtStart = -1;
+        TowerCustody.INSTANCE.release(bot, tower);
+        tower = null;
+        return false;
+    }
+
+    /** The items of the target's kind the inventory gained since the block now being picked up for began to break. */
+    private int collectedDrops(AIPlayerEntity bot) {
+        return HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
     }
 
     /**
@@ -216,8 +289,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void search(AIPlayerEntity bot) {
-        HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, targetBlock,
-                LOCAL_SEARCH_RADIUS, LOCAL_SEARCH_DOWN, LOCAL_SEARCH_UP);
+        HarvestCore.TargetChoice choice = nearestTarget(bot);
         if (choice == null) {
             // Ore requests take the dedicated OreDig path in normal dispatch. Keep this generic
             // surface look-around for non-ore MineTask targets so it cannot change ore-vein
@@ -267,8 +339,36 @@ public final class MineTask extends AbstractTask {
             startMiningTarget(bot);
             return;
         }
+        ActionResult route = bot.getActionPack().startPathTo(choice.stand());
+        if (route.isFailed()) {
+            routeRefused(bot, choice, route);
+            return;
+        }
         phase = Phase.MOVING;
-        bot.getActionPack().startPathTo(choice.stand());
+    }
+
+    /** The nearest requested block with a stance, leaving out one the bot has already given up on. */
+    private HarvestCore.TargetChoice nearestTarget(AIPlayerEntity bot) {
+        return HarvestCore.nearestReachableBlock(bot, Set.of(targetBlock),
+                LOCAL_SEARCH_RADIUS, LOCAL_SEARCH_DOWN, LOCAL_SEARCH_UP, pos -> !isExcluded(bot, pos));
+    }
+
+    /**
+     * Nothing walks to the stance of the chosen block. An observed pillar may still reach it; otherwise
+     * it is set aside, or the next search would choose it again and ask for the same refused route on
+     * every tick.
+     */
+    private void routeRefused(AIPlayerEntity bot, HarvestCore.TargetChoice choice, ActionResult route) {
+        if (ActionPack.GUARDED_STEP_FENCE.equals(route.reason())) {
+            return; // an unstarted retry, not a refusal of this block
+        }
+        BotLog.action(bot, "mine_route_refused",
+                "target", choice.pos().toShortString(), "stand", choice.stand().toShortString(),
+                "reason", route.reason());
+        if (!pillarToBlock(bot, choice.pos(), true)) {
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), choice.pos(),
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+        }
     }
 
     /**
@@ -277,39 +377,64 @@ public final class MineTask extends AbstractTask {
      * query; a target must be a first-hit eye ray or freshly re-proved shared visual evidence.
      */
     private boolean seekVisibleTarget(AIPlayerEntity bot) {
-        if (targetSightingHint != null) {
-            if (isVerticalPillarHint(bot, targetSightingHint)) {
-                return false;
-            }
-            if (horizontalDistanceSquared(bot.blockPosition(), targetSightingHint) <= 64.0D) {
-                targetSightingHint = null;
-            } else if (startTargetSightingPursuit(bot)) {
-                return true;
-            }
-        }
         if (targetHorizonScan == null) {
             targetHorizonScan = new VisibleTargetHorizonScan(Set.of(targetBlock));
         }
-        VisibleTargetHorizonScan.Sighting sighting = targetHorizonScan.step(bot);
-        if (sighting == null) {
-            if (!targetHorizonScan.complete()) {
-                // Do not park for an entire fine visual raster. A small initial look-around is
-                // enough to preempt obvious targets; subsequent search/exploration remains
-                // safe while this persistent scanner resumes at later search boundaries.
-                return targetHorizonScan.shouldHoldFallback();
+        if (targetSightingHint != null) {
+            BlockPos retained = targetSightingHint;
+            if (horizontalDistanceSquared(bot.blockPosition(), retained) <= 64.0D) {
+                targetSightingHint = null;
+            } else if (startTargetSightingPursuit(bot)) {
+                return true;
+            } else {
+                // Refused from here: the sweep must not hand the same block straight back and have it refused again.
+                targetHorizonScan.decline(bot, retained);
             }
-            targetHorizonScan = null;
-            return false;
         }
-        BotLog.action(bot, "mine_target_sighted",
-                "target", BuiltInRegistries.BLOCK.getKey(targetBlock),
-                "pos", sighting.pos().toShortString(),
-                "rays", sighting.raysCast());
-        if (approachVisibleTarget(bot, sighting.pos())) {
+        VisibleTargetHorizonScan.Sighting sighting = targetHorizonScan.step(bot);
+        if (sighting != null) {
+            BotLog.action(bot, "mine_target_sighted",
+                    "target", BuiltInRegistries.BLOCK.getKey(targetBlock),
+                    "pos", sighting.pos().toShortString(),
+                    "rays", sighting.raysCast());
+            if (actOnTargetSighting(bot, sighting.pos())) {
+                return true;
+            }
+            // Nothing came of it. Tell the raster, or its very next ray would answer with the same
+            // block again (an overhead one answers the vertical ray of every step) and the rest of
+            // the look-around would never run.
+            targetHorizonScan.decline(bot, sighting.pos());
+        }
+        if (!targetHorizonScan.complete()) {
+            // Do not park for an entire fine visual raster. A small initial look-around is
+            // enough to preempt obvious targets; subsequent search/exploration remains
+            // safe while this persistent scanner resumes at later search boundaries.
+            return targetHorizonScan.shouldHoldFallback();
+        }
+        targetHorizonScan = null;
+        return false;
+    }
+
+    /** True when a sighted target started an approach, pillar or landmark leg. */
+    private boolean actOnTargetSighting(AIPlayerEntity bot, BlockPos seen) {
+        if (isExcluded(bot, seen)) {
+            return false; // already failed or unreachable: not worth another try from here
+        }
+        if (approachVisibleTarget(bot, seen)) {
             return true;
         }
-        targetSightingHint = sighting.pos().immutable();
+        if (horizontalDistanceSquared(bot.blockPosition(), seen) <= 64.0D) {
+            // Inside the local survey envelope there is no direction left to pursue. A target an
+            // observed pillar reaches (above the bot, in its own column or beside it) is climbed to
+            // now; one that is out of reach below simply has no use for this look-around.
+            return pillarToBlock(bot, seen, true);
+        }
+        targetSightingHint = seen.immutable();
         return startTargetSightingPursuit(bot);
+    }
+
+    private static boolean isExcluded(AIPlayerEntity bot, BlockPos pos) {
+        return EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), pos, bot.level().getServer().getTickCount());
     }
 
     /** Uses the normal direct-mining path if the currently visible target already has a stance. */
@@ -359,9 +484,6 @@ public final class MineTask extends AbstractTask {
         if (!isCurrentVisibleTarget(bot, targetSightingHint)) {
             BotLog.action(bot, "mine_target_sighting_lost", "hint", targetSightingHint.toShortString());
             targetSightingHint = null;
-            return false;
-        }
-        if (isVerticalPillarHint(bot, targetSightingHint)) {
             return false;
         }
         int requestedHop = targetSightingPursuitDistance(bot);
@@ -447,6 +569,13 @@ public final class MineTask extends AbstractTask {
                 && bot.level().getBlockState(target).is(targetBlock);
     }
 
+    /** The block is gone: a cell the bot can see now holds nothing (its own break, or someone else's). */
+    private static boolean isVisiblyAir(AIPlayerEntity bot, BlockPos pos) {
+        return pos != null
+                && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveCell(bot, pos)
+                && bot.level().getBlockState(pos).isAir();
+    }
+
     private int targetSightingPursuitDistance(AIPlayerEntity bot) {
         if (targetSightingHint == null) {
             return TARGET_SIGHTING_HOP_DISTANCE;
@@ -472,24 +601,98 @@ public final class MineTask extends AbstractTask {
      */
     private boolean tryPillarApproach(AIPlayerEntity bot) {
         int now = bot.level().getServer().getTickCount();
-        int scanUp = pillarSearchUp(bot);
+        long worldVersion = AStarPathfinder.cacheVersion();
         if (pillarApproachScan == null
-                || pillarApproachScanUp != scanUp
+                && broadPillarMemo.knownEmpty(bot.blockPosition(), PILLAR_SEARCH_UP, worldVersion, now)) {
+            return false; // this very volume was just scanned from here and held no approach
+        }
+        if (pillarApproachScan == null
                 || bot.blockPosition().distSqr(pillarApproachScan.origin()) > 64.0D) {
             pillarApproachScan = HarvestCore.beginNearestPillarApproachScan(bot, Set.of(targetBlock),
-                    LOCAL_SEARCH_RADIUS, LOCAL_SEARCH_DOWN, scanUp,
-                    pos -> !EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), pos, now));
-            pillarApproachScanUp = scanUp;
+                    LOCAL_SEARCH_RADIUS, LOCAL_SEARCH_DOWN, PILLAR_SEARCH_UP,
+                    broadPillarMemo.scanFilter(bot.getUUID(), now));
         }
         if (!pillarApproachScan.step(PILLAR_SCAN_STEP_BUDGET_NANOS)) {
             return true;
         }
         HarvestCore.PillarApproach approach = pillarApproachScan.result();
+        BlockPos slope = pillarApproachScan.baseWalkTarget();
+        BlockPos scanned = pillarApproachScan.origin();
         pillarApproachScan = null;
-        pillarApproachScanUp = 0;
-        if (approach == null) {
+        if (approach != null) {
+            // The scan found a column at the bot's own level; ground above or below may need fewer supports.
+            return pillarToBlock(bot, approach.target(), true);
+        }
+        // Nothing is climbable from the bot's own level; a target rooted on a slope may be from the floor a step away.
+        if (slope != null && pillarToBlock(bot, slope, true)) {
+            return true;
+        }
+        broadPillarMemo.rememberEmpty(scanned, PILLAR_SEARCH_UP, worldVersion, now);
+        return false;
+    }
+
+    /**
+     * Admits an observed pillar to one block the bot has just seen but no route reaches (a block it
+     * sighted overhead, or one the route planner refused). The exact block is re-proved here, so it
+     * does not wait for the broad candidate scan to reach it. False when it is not worth a pillar.
+     */
+    private boolean pillarToBlock(AIPlayerEntity bot, BlockPos block, boolean mayStepOntoFloor) {
+        long worldVersion = AStarPathfinder.cacheVersion();
+        int now = bot.level().getServer().getTickCount();
+        if (exactPillarMemo.knownEmpty(bot.blockPosition(), block.asLong(), worldVersion, now)) {
             return false;
         }
+        HarvestCore.PillarApproach flat = HarvestCore.pillarApproachFor(bot, block, Set.of(targetBlock));
+        // A tower is long to build and to take down again, and a target rooted on a slope may have no column at
+        // the bot's own level at all: ground a walk away may need fewer supports (or any).
+        List<HarvestCore.PillarApproach> elsewhere = mayStepOntoFloor
+                ? HarvestCore.pillarApproachesOnOtherFloors(bot, block, Set.of(targetBlock)) : List.of();
+        if (HarvestCore.otherFloorIsCheaper(flat, elsewhere)
+                && stepOntoPillarBase(bot, block, elsewhere)) {
+            return true;
+        }
+        if (flat == null) {
+            exactPillarMemo.rememberEmpty(bot.blockPosition(), block.asLong(), worldVersion, now);
+            return false;
+        }
+        if (!admitPillarApproach(bot, flat)) {
+            return false;
+        }
+        pillarApproachScan = null;
+        return true;
+    }
+
+    /**
+     * Walks onto the floor of one of the pillars {@code elsewhere}, cheapest first, by an ordinary observed
+     * route; {@link #move} plans the pillar from there. The best floor may be one that no observed route
+     * reaches (ground behind a ridge the bot has not seen over), so the next best is asked for when the
+     * route to it is refused.
+     */
+    private boolean stepOntoPillarBase(AIPlayerEntity bot, BlockPos block, List<HarvestCore.PillarApproach> elsewhere) {
+        for (HarvestCore.PillarApproach approach : elsewhere) {
+            BlockPos base = HarvestCore.pillarFloor(approach);
+            ActionResult route = bot.getActionPack().startPathTo(base);
+            if (route.isFailed()) {
+                BotLog.action(bot, "mine_pillar_base_refused",
+                        "target", block.toShortString(), "base", base.toShortString(), "reason", route.reason());
+                continue;
+            }
+            clearTargetSighting();
+            pillarApproachScan = null;
+            targetPos = block.immutable();
+            directMiningTarget = false;
+            pillarApproachActive = false;
+            pillarBaseWalk = targetPos;
+            phase = Phase.MOVING;
+            BotLog.action(bot, "mine_pillar_base_walk",
+                    "target", targetPos.toShortString(), "base", base.toShortString());
+            return true;
+        }
+        return false;
+    }
+
+    /** Obtains cheap nearby supports when the bot is short of them, then starts the pillar. */
+    private boolean admitPillarApproach(AIPlayerEntity bot, HarvestCore.PillarApproach approach) {
         int required = approach.supports() + PILLAR_SUPPORT_CUSHION;
         int available = MaterialPalette.countPillarSupportBlocks(bot);
         if (available >= required) {
@@ -503,7 +706,8 @@ public final class MineTask extends AbstractTask {
         if (startNextScaffoldSupply(bot)) {
             return true;
         }
-        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), approach.target(), now, EpisodeMemory.TTL_UNREACHABLE);
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), approach.target(),
+                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         BotLog.action(bot, "mine_pillar_support_unavailable",
                 "target", approach.target().toShortString(), "needed", required, "available", available);
         clearPillarRecovery();
@@ -524,7 +728,6 @@ public final class MineTask extends AbstractTask {
         }
         clearTargetSighting();
         pillarApproachScan = null;
-        pillarApproachScanUp = 0;
         pendingPillarApproach = null;
         scaffoldSupportRequirement = 0;
         scaffoldSupplyItemIndex = 0;
@@ -532,6 +735,8 @@ public final class MineTask extends AbstractTask {
         targetPos = approach.target().immutable();
         directMiningTarget = false;
         pillarApproachActive = true;
+        tower = TowerDescent.over(approach.goal(), approach.supports());
+        TowerCustody.INSTANCE.hold(bot, this, tower);
         phase = Phase.MOVING;
         BotLog.action(bot, "mine_pillar_start",
                 "target", targetPos.toShortString(), "goal", approach.goal().toShortString(),
@@ -625,7 +830,7 @@ public final class MineTask extends AbstractTask {
 
     private void clearPillarRecovery() {
         pillarApproachScan = null;
-        pillarApproachScanUp = 0;
+        pillarBaseWalk = null;
         pendingPillarApproach = null;
         scaffoldSupportRequirement = 0;
         scaffoldSupplyItemIndex = 0;
@@ -647,26 +852,6 @@ public final class MineTask extends AbstractTask {
         return horizontalDistanceSquared(feet, target) <= LOCAL_SEARCH_RADIUS * LOCAL_SEARCH_RADIUS
                 && target.getY() >= feet.getY() - LOCAL_SEARCH_DOWN
                 && target.getY() <= feet.getY() + LOCAL_SEARCH_UP;
-    }
-
-    /** A high same-column target cannot supply a direction-only walk leg; pillar recovery owns it. */
-    private boolean isVerticalPillarHint(AIPlayerEntity bot, BlockPos hint) {
-        return bot != null && hint != null
-                && bot.blockPosition().getX() == hint.getX()
-                && bot.blockPosition().getZ() == hint.getZ()
-                && hint.getY() > bot.blockPosition().getY()
-                && !insideLocalTargetSurvey(bot, hint)
-                && isCurrentVisibleTarget(bot, hint);
-    }
-
-    /** Extends the visible high-target cursor only while the exact vertical target remains live. */
-    private int pillarSearchUp(AIPlayerEntity bot) {
-        if (isVerticalPillarHint(bot, targetSightingHint)) {
-            int visibleHeight = targetSightingHint.getY() - bot.blockPosition().getY();
-            return Math.max(PILLAR_SEARCH_UP,
-                    Math.min(visibleHeight, io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.visibleRangeBlocks(bot)));
-        }
-        return PILLAR_SEARCH_UP;
     }
 
     /**
@@ -702,7 +887,7 @@ public final class MineTask extends AbstractTask {
         // Finding a visible target while walking is enough to hand control back to normal mining.
         // The next SEARCHING tick selects a verified local stance and never assumes the remote
         // compass heading contains a block.
-        if (HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6) != null) {
+        if (nearestTarget(bot) != null) {
             bot.getActionPack().stopAll();
             clearExploreLeg();
             phase = Phase.SEARCHING;
@@ -862,7 +1047,11 @@ public final class MineTask extends AbstractTask {
             phase = Phase.SEARCHING;
             return;
         }
-        if (HarvestCore.canReach(bot, targetPos)) {
+        // A pillar climbs by jumping: at the top of a jump the eye is briefly in reach of a block that the bot,
+        // standing on what it has built so far, cannot yet mine. A climbing bot is judged where it lands, also
+        // when its route ends mid-jump.
+        boolean midJump = pillarApproachActive && !bot.onGround();
+        if (HarvestCore.canReach(bot, targetPos) && !midJump) {
             // stopAll cancels a normal food/bow use (it preserves only a reactive shield), so the
             // pre-break ownership guard must run before it tears down the just-arrived route.
             // Keep the target and MOVING phase intact until the held vanilla use settles.
@@ -880,6 +1069,23 @@ public final class MineTask extends AbstractTask {
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
+            if (midJump) {
+                return;
+            }
+            if (targetPos.equals(pillarBaseWalk)) {
+                // The walk onto the column's floor is over: plan the pillar from the new level. A column
+                // that still yields none is not chased on to a third floor (the bot would shuttle between
+                // two), so the target is written off like any other failed pillar.
+                pillarBaseWalk = null;
+                if (pillarToBlock(bot, targetPos, false)) {
+                    return;
+                }
+                EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                        bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+                BotLog.action(bot, "mine_pillar_base_failed",
+                        "target", targetPos.toShortString(), "at", bot.blockPosition().toShortString());
+                targetPos = null;
+            }
             phase = Phase.SEARCHING;
         }
     }
@@ -893,7 +1099,8 @@ public final class MineTask extends AbstractTask {
     }
 
     private void mine(AIPlayerEntity bot) {
-        if (pillarApproachActive && !isCurrentVisibleTarget(bot, targetPos)) {
+        // A block this task has just broken is gone, not out of sight: it goes on to the pickup like any other.
+        if (pillarApproachActive && !isCurrentVisibleTarget(bot, targetPos) && !isVisiblyAir(bot, targetPos)) {
             miner.cancel(bot);
             bot.getActionPack().stopAll();
             clearPillarRecovery();
@@ -904,20 +1111,26 @@ public final class MineTask extends AbstractTask {
         if (targetPos == null || !bot.level().getBlockState(targetPos).is(targetBlock)) {
             miner.cancel(bot);
             pillarApproachActive = false;
-            pickupTicks = 120;
-            phase = Phase.PICKING_UP;
+            startPickup(bot);
             return;
         }
         // P1-a: mining goes through BlockMiner (only starts when idle, never restarts and resets progress); block break/timeout moves to the pickup phase.
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.DONE || status == BlockMiner.Status.FAILED) {
-            pickupTicks = 120;
-            phase = Phase.PICKING_UP;
+            startPickup(bot);
         }
     }
 
+    private void startPickup(AIPlayerEntity bot) {
+        pickupTicks = 120;
+        // A failed break left the block standing and gave nothing to wait for or look for.
+        dropWatch = tower != null && targetPos != null && isVisiblyAir(bot, targetPos)
+                ? new TowerDropWatch(targetPos, bot.level().getGameTime(), targetDrops, pickupTicks, "mine") : null;
+        phase = Phase.PICKING_UP;
+    }
+
     private void pickup(AIPlayerEntity bot) {
-        int collected = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
+        int collected = collectedDrops(bot);
         if (collected > 0) {
             // A prior tick's chaseDropAnyOf -> approachDropPhysically nudge can leave the action
             // pack mid pickup-nudge (sneaking held); nothing else clears it once this phase stops
@@ -926,11 +1139,7 @@ public final class MineTask extends AbstractTask {
             bot.getActionPack().stopAll();
             BotLog.action(bot, "pickup_collected", "count", collected);
             countSoFar += collected;
-            if (countSoFar >= countNeeded) {
-                complete();
-            } else {
-                phase = Phase.SEARCHING;
-            }
+            phase = countSoFar >= countNeeded ? Phase.FINISHING : Phase.SEARCHING;
             return;
         }
         pickupTicks--;
@@ -942,12 +1151,12 @@ public final class MineTask extends AbstractTask {
                 pickupTicks = 60;
                 return;
             }
-            int partial = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
+            int partial = collectedDrops(bot);
             bot.getActionPack().stopAll();
             if (partial > 0) {
                 BotLog.action(bot, "pickup_collected", "count", partial, "reason", "partial_pickup");
                 countSoFar += partial;
-                complete();
+                phase = Phase.FINISHING;
                 return;
             }
             fail("pickup_timeout");

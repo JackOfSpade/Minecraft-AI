@@ -18,6 +18,16 @@ final class ObservedSearchHopsSourceContractTest {
     private static final Path TASKS = Path.of("src/main/java/io/github/zoyluo/minecraftai/task");
 
     @Test
+    void aRefusedHeadingTowardARememberedResourceIsNotRequestedAgainFromTheSameStance() throws IOException {
+        String begin = methodBody(Files.readString(TASKS.resolve("ObservedSearchHops.java")), "Attempt begin(");
+
+        assertTrue(begin.contains("!memory.isGuidedRefused(feet.getX(), feet.getZ(), rememberedHint.getX(), rememberedHint.getZ())"),
+                "a guided hop that the fence turned down must fall back to the compass instead of asking for it every tick");
+        assertTrue(begin.contains("refuse(feet, direction, guided ? rememberedHint : null)"),
+                "every way a guided hop can be refused is remembered, not only a failed route request");
+    }
+
+    @Test
     void helperTurnsOnlyHeadingsIntoShortObservedNavigationLegs() throws IOException {
         String source = Files.readString(TASKS.resolve("ObservedSearchHops.java"));
 

@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.KnownCellPickupSweep;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.TowerDescent;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -273,6 +274,14 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos pillarRecoveryTried;
     /** The target a walk onto its pillar column's floor is under way for (see stepOntoPillarBase). */
     private BlockPos pillarBaseWalk;
+    /** The pillar this task built last: the bot takes it down again before it does anything else (see descendTower). */
+    private TowerDescent tower;
+    /** What the bot does on its tower about the item the log it has just felled gave (see TowerDropWatch). */
+    private TowerDropWatch dropWatch;
+    /** How many of the tower's returned blocks the pickup baselines have already moved up for (see descendTower). */
+    private int towerReturnsAccounted;
+    /** Of those, how many have not yet arrived in the inventory: they are not gains of the quota (see logGatherUnitGains). */
+    private int towerReturnsUnlogged;
     private BlockPos gotoStuckPos; // R1: last coordinate recorded by GOTO (used to detect an airborne/deadlocked bot that hasn't moved in a long time)
     private int gotoStuckTick;
     // Visible-tree recovery: a budgeted 360-degree first-hit sweep nominates a trunk or leaf;
@@ -554,6 +563,8 @@ public final class GatherQuotaTask extends AbstractTask {
         pillarApproachActive = false;
         pillarRecoveryTried = null;
         pillarBaseWalk = null;
+        tower = null;
+        dropWatch = null;
         nextExploreAdmissionTick = -1;
         miningExploration = null;
         miningExplorationAttempted = false;
@@ -670,7 +681,9 @@ public final class GatherQuotaTask extends AbstractTask {
             finishTimedCollection(bot);
             return;
         }
-        if (quotaReached()) {
+        // Only on the tick the quota closes: a bot on a tall pillar takes it down in DONE, and a stopAll() on
+        // every one of those ticks would cancel each break it starts.
+        if (quotaReached() && phase != Phase.DONE) {
             if (scaffoldSupplyTask != null) {
                 scaffoldSupplyTask.abort(bot);
                 scaffoldSupplyTask = null;
@@ -699,6 +712,9 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         if (tickMiningExploration(bot)) {
+            return;
+        }
+        if (descendTower(bot)) {
             return;
         }
         // The current session showed an empty prospect followed by one refused eastward hop,
@@ -732,7 +748,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 explorationProgress.reset();
                 exploreHops = 0;          // Gathering something new means this patch produces — reset the explore hop budget
                 exploredSinceFind = true; // The next "found after exploring" is worth recording into memory again
-            } else if (elapsed - selfStuckTick > SELF_STUCK_LIMIT && !surveyOwedAfterExplore) {
+            } else if (elapsed - selfStuckTick > SELF_STUCK_LIMIT && !surveyOwedAfterExplore && !pillarApproachActive) {
                 if (countBrokenBlocks) {
                     // An exact break remains visual-only, but its line-of-sight raster is a
                     // real bounded search rather than idle circling. Let it finish its current
@@ -807,9 +823,95 @@ public final class GatherQuotaTask extends AbstractTask {
         }
     }
 
-    /** Physical break/pickup work started before a deadline must settle before the final receipt. */
+    /** Physical break/pickup work started before a deadline must settle before the final receipt; so must a pillar the bot is on. */
     private boolean settlingCollection() {
-        return phase == Phase.HARVEST || phase == Phase.PICKUP || phase == Phase.BOOTSTRAP_PICKUP;
+        return phase == Phase.HARVEST || phase == Phase.PICKUP || phase == Phase.BOOTSTRAP_PICKUP || tower != null;
+    }
+
+    /**
+     * The drop of a log broken high in a canopy comes to rest on the leaf beneath the cell it was broken from:
+     * above the bot's eye line, out of its sight and out of anyone's reach from the ground. A player on the
+     * pillar next to it breaks that leaf, and the drop falls on to where it can be picked up (through the next
+     * leaf too, when the canopy has layers). Only a leaf is ever broken this way (never terrain), only one in
+     * the column under the break that the bot can see and reach. True while a break is under way.
+     */
+    private boolean releaseDropBelowBreak(AIPlayerEntity bot) {
+        if (!bot.getActionPack().isMiningIdle()) {
+            return true;
+        }
+        if (pickupOrigin == null) {
+            return false;
+        }
+        // Down the column under the break to the first thing a drop could rest on; the cells in between are
+        // open air the bot has seen.
+        BlockPos rest = pickupOrigin.below();
+        while (io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveCell(bot, rest)
+                && bot.level().getBlockState(rest).isAir()) {
+            rest = rest.below();
+        }
+        if (!io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveCell(bot, rest)
+                || !bot.level().getBlockState(rest).is(BlockTags.LEAVES)
+                || !HarvestCore.canReach(bot, rest)) {
+            return false;
+        }
+        ActionResult started = HarvestCore.startMining(bot, rest);
+        if (started.isFailed()) {
+            return false;
+        }
+        BotLog.action(bot, "gather_drop_released", "origin", pickupOrigin.toShortString(), "leaf", rest.toShortString());
+        return true;
+    }
+
+    /**
+     * Takes the pillar this task built down again before the bot does anything else: a route steps
+     * down at most the safe fall and never breaks the bot's own footing, so a tall tower would strand
+     * it. The bot breaks the block under its feet one at a time, as a player does (see
+     * {@link TowerDescent}). It runs wherever the bot leaves the tower from (the survey after a
+     * harvest, the pickup of the log, the end of the quota); a pillar still being climbed or mined
+     * from is in use and left alone. True while it owns the tick.
+     */
+    private boolean descendTower(AIPlayerEntity bot) {
+        if (tower == null) {
+            return false;
+        }
+        if (phase != Phase.SURVEY && phase != Phase.PICKUP && phase != Phase.BOOTSTRAP_PICKUP && phase != Phase.DONE) {
+            return false;
+        }
+        // Before the bot leaves the pillar, the leaf a canopy log's drop would rest on is broken.
+        if (phase == Phase.PICKUP && tower.standsOnTower(bot) && releaseDropBelowBreak(bot)) {
+            return true;
+        }
+        // Then the item itself: waited for while it falls, and looked for from the level of the break when it is out of sight.
+        if (phase == Phase.PICKUP && dropWatch != null && tower.standsOnTower(bot) && dropWatch.hold(bot)) {
+            return true;
+        }
+        TowerDescent.Status status = tower.tick(bot);
+        // The tower's blocks come back as items; when they are of a kind this quota accepts (a cobblestone quota built
+        // up with cobblestone) they are no progress, so the baselines they would pass move up with them. The item is
+        // picked up after its break, so the baseline is ahead of the count until it is, never behind it.
+        int returned = tower.returnedOf(acceptItems);
+        if (returned > towerReturnsAccounted) {
+            int fresh = returned - towerReturnsAccounted;
+            towerReturnsAccounted = returned;
+            pickedUpAtStart += fresh;
+            pickupStatBeforeHarvest += fresh;
+            countBeforeHarvest += fresh;
+            towerReturnsUnlogged += fresh;
+        }
+        if (status == TowerDescent.Status.DESCENDING) {
+            return true;
+        }
+        if (status == TowerDescent.Status.FAILED) {
+            BotLog.action(bot, "gather_tower_descent_failed",
+                    "reason", tower.failureReason(), "at", bot.blockPosition().toShortString());
+        } else if (tower.broken() > 0) {
+            BotLog.action(bot, "gather_tower_descended",
+                    "blocks", tower.broken(), "at", bot.blockPosition().toShortString());
+            resetSurveyWatchdog(); // the descent was work too: the survey that follows must not read it as time spent stuck
+        }
+        TowerCustody.INSTANCE.release(bot, tower);
+        tower = null;
+        return false;
     }
 
     // B: when the bot is underground (no sky overhead) and no reachable resource can be found
@@ -910,6 +1012,11 @@ public final class GatherQuotaTask extends AbstractTask {
             if (tryDigApproach(bot, found, "no_stand")) {
                 return true;
             }
+            // A visible block that nothing walks to (a canopy log, a ledge) can still be within reach of
+            // an observed pillar: climb before writing it off.
+            if (pillarToBlock(bot, found, true)) {
+                return true;
+            }
             BotLog.action(bot, "gather_prospect_unreachable",
                     "found", found.toShortString(), "why", "no_stand");
             EpisodeMemory.INSTANCE.exclude(botId, found, now, EpisodeMemory.TTL_UNREACHABLE);
@@ -921,6 +1028,9 @@ public final class GatherQuotaTask extends AbstractTask {
         var pathResult = startGatherPathTo(bot, ground);
         if (pathResult.isFailed()) {
             if (tryDigApproach(bot, found, pathResult.reason())) {
+                return true;
+            }
+            if (pillarToBlock(bot, found, true)) {
                 return true;
             }
             BotLog.action(bot, "gather_prospect_unreachable",
@@ -1393,15 +1503,19 @@ public final class GatherQuotaTask extends AbstractTask {
      * observed pursuit.
      */
     private boolean seekVisibleTree(AIPlayerEntity bot) {
+        if (treeHorizonScan == null) {
+            treeHorizonScan = new TreeHorizonScan(harvestBlocks);
+        }
         if (treeSightingHint != null) {
-            if (horizontalDistanceSquared(bot.blockPosition(), treeSightingHint) <= SEARCH_RADIUS * SEARCH_RADIUS) {
+            BlockPos retained = treeSightingHint;
+            if (horizontalDistanceSquared(bot.blockPosition(), retained) <= SEARCH_RADIUS * SEARCH_RADIUS) {
                 treeSightingHint = null;
             } else if (startTreeSightingPursuit(bot)) {
                 return true;
+            } else {
+                // Refused from here: the sweep must not hand the same landmark straight back and have it refused again.
+                treeHorizonScan.decline(bot, retained);
             }
-        }
-        if (treeHorizonScan == null) {
-            treeHorizonScan = new TreeHorizonScan(harvestBlocks);
         }
         TreeHorizonScan.Sighting sighting = treeHorizonScan.step(bot);
         if (sighting != null) {
@@ -1595,16 +1709,20 @@ public final class GatherQuotaTask extends AbstractTask {
      * block says nothing factual about where the requested block is.
      */
     private boolean seekVisibleTarget(AIPlayerEntity bot) {
+        if (targetHorizonScan == null) {
+            targetHorizonScan = new VisibleTargetHorizonScan(harvestBlocks);
+        }
         if (targetSightingHint != null) {
-            if (horizontalDistanceSquared(bot.blockPosition(), targetSightingHint)
+            BlockPos retained = targetSightingHint;
+            if (horizontalDistanceSquared(bot.blockPosition(), retained)
                     <= SEARCH_RADIUS * SEARCH_RADIUS) {
                 targetSightingHint = null;
             } else if (startTargetSightingPursuit(bot)) {
                 return true;
+            } else {
+                // Refused from here: the sweep must not hand the same block straight back and have it refused again.
+                targetHorizonScan.decline(bot, retained);
             }
-        }
-        if (targetHorizonScan == null) {
-            targetHorizonScan = new VisibleTargetHorizonScan(harvestBlocks);
         }
         VisibleTargetHorizonScan.Sighting sighting = targetHorizonScan.step(bot);
         if (sighting != null) {
@@ -1804,15 +1922,21 @@ public final class GatherQuotaTask extends AbstractTask {
             return true;
         }
         HarvestCore.PillarApproach approach = pillarApproachScan.result();
+        BlockPos slope = pillarApproachScan.baseWalkTarget();
         BlockPos scanned = pillarApproachScan.origin();
         pillarApproachScan = null;
-        if (approach == null) {
-            broadPillarMemo.rememberEmpty(scanned, PILLAR_SEARCH_UP, worldVersion, now);
-            BotLog.action(bot, "gather_pillar_scan_empty", "search", "volume", "from", scanned.toShortString(),
-                    "up", PILLAR_SEARCH_UP);
-            return false;
+        if (approach != null) {
+            // The scan found a column at the bot's own level; ground above or below may need fewer supports.
+            return pillarToBlock(bot, approach.target(), true);
         }
-        return admitPillarApproach(bot, approach);
+        // Nothing is climbable from the bot's own level; a trunk rooted on a slope may be from the floor a step away.
+        if (slope != null && pillarToBlock(bot, slope, true)) {
+            return true;
+        }
+        broadPillarMemo.rememberEmpty(scanned, PILLAR_SEARCH_UP, worldVersion, now);
+        BotLog.action(bot, "gather_pillar_scan_empty", "search", "volume", "from", scanned.toShortString(),
+                "up", PILLAR_SEARCH_UP);
+        return false;
     }
 
     /**
@@ -1826,18 +1950,31 @@ public final class GatherQuotaTask extends AbstractTask {
         if (isLocalScaffoldSupply() || !mayUsePillarRecovery()) {
             return false;
         }
-        // The ring search casts rays for up to 28 columns (and the floor search for six more levels of
-        // them); a sweep that restarts from the stance where this block already had none must not repeat it.
+        // The ring search casts rays for up to 28 columns (and the floor search for every level a walk could
+        // climb in them); a sweep that restarts from the stance where this block already had none must not repeat it.
         long worldVersion = AStarPathfinder.cacheVersion();
-        if (exactPillarMemo.knownEmpty(bot.blockPosition(), block.asLong(), worldVersion,
-                bot.level().getServer().getTickCount())) {
+        int now = bot.level().getServer().getTickCount();
+        if (exactPillarMemo.knownEmpty(bot.blockPosition(), block.asLong(), worldVersion, now)) {
             return false;
         }
-        HarvestCore.PillarApproach approach = HarvestCore.pillarApproachFor(bot, block, harvestBlocks);
-        if (approach == null) {
-            return mayStepOntoFloor && stepOntoPillarBase(bot, block, worldVersion);
+        HarvestCore.PillarApproach flat = HarvestCore.pillarApproachFor(bot, block, harvestBlocks);
+        // A tower is long to build and to take down again, and a trunk rooted on a slope may have no column at
+        // the bot's own level at all: ground a walk away may need fewer supports (or any).
+        List<HarvestCore.PillarApproach> elsewhere = mayStepOntoFloor
+                ? HarvestCore.pillarApproachesOnOtherFloors(bot, block, harvestBlocks) : List.of();
+        if (HarvestCore.otherFloorIsCheaper(flat, elsewhere)
+                && stepOntoPillarBase(bot, block, elsewhere)) {
+            return true;
         }
-        if (!admitPillarApproach(bot, approach)) {
+        if (flat == null) {
+            exactPillarMemo.rememberEmpty(bot.blockPosition(), block.asLong(), worldVersion, now);
+            if (elsewhere.isEmpty()) {
+                BotLog.action(bot, "gather_pillar_scan_empty", "search", "hint", "from",
+                        bot.blockPosition().toShortString(), "target", block.toShortString());
+            }
+            return false;
+        }
+        if (!admitPillarApproach(bot, flat)) {
             return false;
         }
         pillarApproachScan = null;
@@ -1845,41 +1982,38 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     /**
-     * A block that no pillar column at the bot's level reaches may have one a step up or down (a trunk
-     * rooted on a slope: the column's own floor is terrain, or open air over a drop). The bot walks onto
-     * that floor by an ordinary observed route, and {@link #goToTarget} plans the pillar from there.
+     * Walks onto the floor of one of the pillars {@code elsewhere}, cheapest first, by an ordinary observed
+     * route; {@link #goToTarget} plans the pillar from there. The best floor may be one that no observed
+     * route reaches (ground behind a ridge the bot has not seen over), so the next best is asked for when the
+     * route to it is refused.
      */
-    private boolean stepOntoPillarBase(AIPlayerEntity bot, BlockPos block, long worldVersion) {
-        BlockPos base = HarvestCore.pillarBaseFor(bot, block, harvestBlocks);
-        if (base == null) {
-            exactPillarMemo.rememberEmpty(bot.blockPosition(), block.asLong(), worldVersion,
-                    bot.level().getServer().getTickCount());
-            BotLog.action(bot, "gather_pillar_scan_empty", "search", "hint", "from", bot.blockPosition().toShortString(),
-                    "target", block.toShortString());
-            return false;
+    private boolean stepOntoPillarBase(AIPlayerEntity bot, BlockPos block, List<HarvestCore.PillarApproach> elsewhere) {
+        for (HarvestCore.PillarApproach approach : elsewhere) {
+            BlockPos base = HarvestCore.pillarFloor(approach);
+            ActionResult route = startGatherPathTo(bot, base);
+            if (route.isFailed()) {
+                BotLog.action(bot, "gather_pillar_base_refused",
+                        "target", block.toShortString(), "base", base.toShortString(), "reason", route.reason());
+                continue;
+            }
+            clearTreeSighting();
+            clearTargetSighting();
+            pillarApproachScan = null;
+            targetPos = block.immutable();
+            pillarBaseWalk = targetPos;
+            lastGotoTarget = targetPos;
+            gotoFailStreak = 0;
+            treeDigTried = false;
+            pillarApproachActive = false;
+            gotoStuckPos = null;
+            searchRadius = SEARCH_RADIUS;
+            selfStuckTick = elapsed;
+            phase = Phase.GOTO;
+            BotLog.action(bot, "gather_pillar_base_walk",
+                    "target", targetPos.toShortString(), "base", base.toShortString());
+            return true;
         }
-        ActionResult route = startGatherPathTo(bot, base);
-        if (route.isFailed()) {
-            BotLog.action(bot, "gather_pillar_base_refused",
-                    "target", block.toShortString(), "base", base.toShortString(), "reason", route.reason());
-            return false;
-        }
-        clearTreeSighting();
-        clearTargetSighting();
-        pillarApproachScan = null;
-        targetPos = block.immutable();
-        pillarBaseWalk = targetPos;
-        lastGotoTarget = targetPos;
-        gotoFailStreak = 0;
-        treeDigTried = false;
-        pillarApproachActive = false;
-        gotoStuckPos = null;
-        searchRadius = SEARCH_RADIUS;
-        selfStuckTick = elapsed;
-        phase = Phase.GOTO;
-        BotLog.action(bot, "gather_pillar_base_walk",
-                "target", targetPos.toShortString(), "base", base.toShortString());
-        return true;
+        return false;
     }
 
     private static boolean isExcluded(AIPlayerEntity bot, BlockPos pos) {
@@ -1953,6 +2087,9 @@ public final class GatherQuotaTask extends AbstractTask {
         gotoFailStreak = 0;
         treeDigTried = false;
         pillarApproachActive = true;
+        tower = TowerDescent.over(approach.goal(), approach.supports());
+        towerReturnsAccounted = 0;
+        TowerCustody.INSTANCE.hold(bot, this, tower);
         gotoStuckPos = null;
         searchRadius = SEARCH_RADIUS;
         pickupMisses = 0;
@@ -2513,8 +2650,12 @@ public final class GatherQuotaTask extends AbstractTask {
             }
             if (countBrokenBlocks) {
                 // The survey chooser has already proved an ordinary walking path. If it turns
-                // out to be stale, reject this block and try another nearby one; never tunnel
-                // toward an exact-break target.
+                // out to be stale, an observed pillar may still reach the block (the survey lets every
+                // exact break try one, and a canopy block must not be written off unclimbed); otherwise
+                // reject this block and try another nearby one. Never tunnel toward an exact-break target.
+                if (pillarRecoveryForUnreachableTarget(bot)) {
+                    return;
+                }
                 bot.getActionPack().stopAll();
                 EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
                         bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
@@ -2550,12 +2691,8 @@ public final class GatherQuotaTask extends AbstractTask {
             // trunk left hanging after its lower logs were felled) is still within reach of an
             // observed pillar. Once excluded it would be hidden from the pillar recovery, which only
             // runs when the survey finds nothing, so every such log used to be written off unclimbed.
-            // A target is tried once; a failed pillar excludes it on its own.
-            if (!targetPos.equals(pillarRecoveryTried)) {
-                pillarRecoveryTried = targetPos.immutable();
-                if (pillarToBlock(bot, targetPos, true)) {
-                    return;
-                }
+            if (pillarRecoveryForUnreachableTarget(bot)) {
+                return;
             }
             // Neither walking nor dig-approach nor a pillar can reach it → blacklist and switch trees
             // (survey's posFilter won't relock onto it; fixes the ping-pong infinite loop).
@@ -2569,6 +2706,21 @@ public final class GatherQuotaTask extends AbstractTask {
         }
     }
 
+    /**
+     * A target above the bot that neither walking nor tunnelling reaches (a canopy log, or a trunk
+     * left hanging after its lower logs were felled) is still within reach of an observed pillar. Once
+     * excluded it would be hidden from the pillar recovery, which only runs when the survey finds
+     * nothing, so every such log used to be written off unclimbed. A target is tried once; a failed
+     * pillar excludes it on its own. True when a pillar (or the walk onto its floor) was started.
+     */
+    private boolean pillarRecoveryForUnreachableTarget(AIPlayerEntity bot) {
+        if (targetPos.equals(pillarRecoveryTried)) {
+            return false;
+        }
+        pillarRecoveryTried = targetPos.immutable();
+        return pillarToBlock(bot, targetPos, true);
+    }
+
     private void harvest(AIPlayerEntity bot) {
         if (targetPos == null || !isHarvestBlock(bot, targetPos)) {
             if (countBrokenBlocks && targetPos != null) {
@@ -2579,6 +2731,8 @@ public final class GatherQuotaTask extends AbstractTask {
             invalidateConsumedResource(bot);
             bot.getActionPack().stopAll(); // Stop and stand still after felling it — don't let movement momentum carry the bot away from the drop (observed drifting away from the tree's position after chopping and then failing to pick up the drop)
             pickupTicks = probabilisticDrop ? 30 : 120; // Probabilistic-drop resources (seeds/berries) drop right at the bot's feet and are picked up quickly, so wait less
+            dropWatch = tower != null && pickupOrigin != null
+                    ? new TowerDropWatch(pickupOrigin, bot.level().getGameTime(), acceptItems, pickupTicks, "gather") : null;
             phase = Phase.PICKUP;
             return;
         }
@@ -2886,6 +3040,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void clearPickupLedger() {
+        dropWatch = null;
         pickupOrigin = null;
         pickupOriginApproachLogged = false;
         pickupOriginSweep = null;
@@ -3309,6 +3464,13 @@ public final class GatherQuotaTask extends AbstractTask {
                 continue;
             }
             int delta = now - previous;
+            // A block of the bot's own tower coming back is no gain (see descendTower).
+            int fromTower = Math.min(delta, towerReturnsUnlogged);
+            towerReturnsUnlogged -= fromTower;
+            delta -= fromTower;
+            if (delta == 0) {
+                continue;
+            }
             gainedTotal += delta;
             if (pickup) {
                 BotLog.action(bot, "gather_unit",

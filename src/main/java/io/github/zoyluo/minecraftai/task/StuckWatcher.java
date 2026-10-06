@@ -32,7 +32,9 @@ public final class StuckWatcher {
         int now = server.getTickCount();
         int window = MinecraftAiConfig.get().watchdog().stuckWindowTicks();
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
-        if (active.isEmpty() || active.get().state() != TaskState.RUNNING || active.get().isWaiting()) {
+        // A task held back while the bot takes an old tower down is not standing still for no reason (see TowerCustody).
+        if (active.isEmpty() || active.get().state() != TaskState.RUNNING || active.get().isWaiting()
+                || TowerCustody.INSTANCE.isDescending(bot)) {
             samples.remove(bot.getUUID());
             return;
         }

@@ -26,19 +26,38 @@ public final class MiningController {
     private final Direction face;
     /** The caller aims and picks the tool itself (see {@link #driven}); this controller only runs the break. */
     private final boolean driven;
+    /** See {@link #ownSupport}: the one break that may take away the footing of the bot itself. */
+    private final boolean releasesOwnFooting;
     private boolean started;
     private BlockState targetState;
     private float progress;
     private int elapsed;
 
     public MiningController(BlockPos pos, Direction face) {
-        this(pos, face, false);
+        this(pos, face, false, false);
     }
 
-    private MiningController(BlockPos pos, Direction face, boolean driven) {
+    private MiningController(BlockPos pos, Direction face, boolean driven, boolean releasesOwnFooting) {
         this.pos = pos;
         this.face = face;
         this.driven = driven;
+        this.releasesOwnFooting = releasesOwnFooting;
+    }
+
+    /**
+     * A break of the block the bot itself stands on, which every other controller refuses ({@link MiningSafety}).
+     * {@link TowerDescent} runs it on its own placed pillar, one block at a time. Another player's footing is
+     * still never broken: only the bot's own occupancy is released.
+     */
+    static MiningController ownSupport(BlockPos pos, Direction face) {
+        return new MiningController(pos, face, false, true);
+    }
+
+    /** Who stands on the target, with the bot's own footing set aside when this break is allowed to take it. */
+    private MiningSafety.SupportOccupancy footingOccupancy(AIPlayerEntity player) {
+        MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);
+        return releasesOwnFooting && support == MiningSafety.SupportOccupancy.SELF
+                ? MiningSafety.SupportOccupancy.NONE : support;
     }
 
     /**
@@ -49,7 +68,7 @@ public final class MiningController {
      * vanilla START/STOP/ABORT handshake, progress, reach, timeout, cache invalidation, the assist hook) is identical.
      */
     public static MiningController driven(BlockPos pos, Direction face) {
-        return new MiningController(pos, face, true);
+        return new MiningController(pos, face, true, false);
     }
 
     /** The cell this controller is (or was) mining. Lets a caller react once it finishes. */
@@ -135,7 +154,7 @@ public final class MiningController {
         // onto it, or a bot lands on its own bridge). Stop the live break before another progress
         // tick can destroy that footing. The current target has already been ray-proven above,
         // so this live footing check cannot become a hidden-terrain probe.
-        MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);
+        MiningSafety.SupportOccupancy support = footingOccupancy(player);
         if (support != MiningSafety.SupportOccupancy.NONE) {
             return supportRefused(player, support);
         }
@@ -159,7 +178,7 @@ public final class MiningController {
         if (!started) {
             if (driven) {
                 if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK)) {
-                    MiningSafety.SupportOccupancy liveSupport = MiningSafety.supportOccupancy(player, pos);
+                    MiningSafety.SupportOccupancy liveSupport = footingOccupancy(player);
                     if (liveSupport != MiningSafety.SupportOccupancy.NONE) {
                         return supportRefused(player, liveSupport);
                     }
@@ -169,7 +188,7 @@ public final class MiningController {
             } else {
                 ToolSelector.equipBestTool(player, state);
                 if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK)) {
-                    MiningSafety.SupportOccupancy liveSupport = MiningSafety.supportOccupancy(player, pos);
+                    MiningSafety.SupportOccupancy liveSupport = footingOccupancy(player);
                     if (liveSupport != MiningSafety.SupportOccupancy.NONE) {
                         return supportRefused(player, liveSupport);
                     }
@@ -189,7 +208,7 @@ public final class MiningController {
 
         if (progress >= 1.0F) {
             if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK)) {
-                MiningSafety.SupportOccupancy liveSupport = MiningSafety.supportOccupancy(player, pos);
+                MiningSafety.SupportOccupancy liveSupport = footingOccupancy(player);
                 if (liveSupport != MiningSafety.SupportOccupancy.NONE) {
                     return supportRefused(player, liveSupport);
                 }
@@ -257,7 +276,7 @@ public final class MiningController {
             return false;
         }
         if (action != ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK
-                && MiningSafety.supportOccupancy(player, pos) != MiningSafety.SupportOccupancy.NONE) {
+                && footingOccupancy(player) != MiningSafety.SupportOccupancy.NONE) {
             return false;
         }
         player.gameMode.handleBlockBreakAction(

@@ -73,6 +73,7 @@ final class VisibleTargetHorizonScanSourceContractTest {
         String search = methodBody(mine, "private void search(");
         String seek = methodBody(mine, "private boolean seekVisibleTarget(");
         String pursuit = methodBody(mine, "private boolean startTargetSightingPursuit(");
+        String act = methodBody(mine, "private boolean actOnTargetSighting(");
 
         int visible = search.indexOf("seekVisibleTarget(bot)");
         int descent = search.indexOf("startMiningExploration(bot)");
@@ -81,14 +82,34 @@ final class VisibleTargetHorizonScanSourceContractTest {
                         && search.contains("seekVisibleTarget(bot) || tryPillarApproach(bot)"),
                 "ordinary MineTask targets should check render-distance sight before beginning a descent, without changing ore dispatch");
         assertTrue(seek.contains("new VisibleTargetHorizonScan(Set.of(targetBlock))")
-                        && seek.contains("approachVisibleTarget(bot, sighting.pos())")
+                        && seek.contains("actOnTargetSighting(bot, sighting.pos())")
+                        && act.contains("approachVisibleTarget(bot, seen)")
                         && pursuit.contains("startVisibleLandmarkPursuitTo(")
                         && pursuit.contains("isCurrentVisibleTarget(bot, targetSightingHint)"),
                 "MineTask must pursue only a re-proved direct target through the observed landmark route");
+        assertTrue(seek.contains("targetHorizonScan.decline(bot, sighting.pos())")
+                        && seek.contains("targetHorizonScan.decline(bot, retained)")
+                        && act.contains("pillarToBlock(bot, seen, true)")
+                        && !mine.contains("isVerticalPillarHint"),
+                "a sighting MineTask cannot use is declined (never retained as a hint that stops the sweep), and one an observed pillar reaches is climbed to");
         assertTrue(mine.contains("HarvestCore.beginNearestPillarApproachScan(")
                         && mine.contains("GatherQuotaTask.collectNearbyPillarSupport(")
                         && mine.contains("startPillarPathTo(approach.goal())"),
                 "generic MineTask targets must receive the same safe common-block pillar/resupply recovery as gathering");
+    }
+
+    @Test
+    void gatherTellsTheSweepWhatItCouldNotUseOrHadRefused() throws IOException {
+        String gather = read("task/GatherQuotaTask.java");
+        String trees = methodBody(gather, "private boolean seekVisibleTree(");
+        String targets = methodBody(gather, "private boolean seekVisibleTarget(");
+
+        assertTrue(trees.contains("treeHorizonScan.decline(bot, sighting.pos())")
+                        && trees.contains("treeHorizonScan.decline(bot, retained)"),
+                "a leaf or log the gatherer can do nothing with, and a landmark whose pursuit was refused, are not offered again from this stance");
+        assertTrue(targets.contains("targetHorizonScan.decline(bot, sighting.pos())")
+                        && targets.contains("targetHorizonScan.decline(bot, retained)"),
+                "the same for a block of any other kind");
     }
 
     @Test
@@ -119,6 +140,11 @@ final class VisibleTargetHorizonScanSourceContractTest {
                 "replacing an observed hop must release its owner before starting the new landmark route");
         assertFalse(seek.contains("return visibleOreHorizonScan != null;"),
                 "an incomplete remote scan must not stall OreDig's established local scan or safe-hop fallback");
+        String decline = methodBody(oreDig, "private void declineVisibleOre(");
+        assertTrue(decline.contains("visibleOreHorizonScan.decline(bot, sighting)")
+                        && seek.contains("declineVisibleOre(bot, sighting.pos())")
+                        && interrupt.contains("declineVisibleOre(bot, sighting.pos())"),
+                "an excluded or refused ore must be declined, or its vertical ray answers every step again and the raster never advances");
         assertFalse(oreDig.contains("targetOre = visibleOreSightingHint")
                         || oreDig.contains("targetOre=visibleOreSightingHint"),
                 "a remote sighting must never bypass local ore evidence by becoming a digging target directly");

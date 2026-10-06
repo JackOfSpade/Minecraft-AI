@@ -26,6 +26,8 @@ final class ExplorationMemory {
     private int refusedX;
     private int refusedZ;
     private int refusedMask;
+    /** The stance and remembered resource of the last guided hop that was refused, or null. */
+    private int[] guidedRefused;
 
     /** Records that the surroundings of a stance were searched without finding the resource. */
     void markSearched(int x, int z) {
@@ -107,6 +109,21 @@ final class ExplorationMemory {
             refusedMask = 0;
         }
         refusedMask |= 1 << direction;
+    }
+
+    /**
+     * The navigation fence turned down the heading toward a remembered resource at (x, z); it is not asked
+     * for again from there. A compass heading that was refused is passed over the same way (see
+     * {@link #noteRefused}), but a guided hop has no compass direction to mark, so without this the same
+     * refused hop would be requested on every tick until the whole search budget was gone.
+     */
+    void noteGuidedRefused(int x, int z, int hintX, int hintZ) {
+        guidedRefused = new int[] {x, z, hintX, hintZ};
+    }
+
+    boolean isGuidedRefused(int x, int z, int hintX, int hintZ) {
+        return guidedRefused != null && guidedRefused[0] == x && guidedRefused[1] == z
+                && guidedRefused[2] == hintX && guidedRefused[3] == hintZ;
     }
 
     private int refusedMask(int x, int z) {

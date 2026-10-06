@@ -271,3 +271,29 @@ harvest stays in HARVEST and starts again the next tick, so no `gather_harvest_r
 `gather_pillar_scan_empty` (`search=hint|volume`, `from`, plus `target` or `up`) is logged once per pillar search that found
 no approach. The search is then not repeated while the bot stays in the same cell (`PillarSearchMemo`): until a target the
 scan skipped as excluded is available again, until a bot changes terrain, or for `EpisodeMemory.TTL_UNREACHABLE` ticks at most.
+A pillar the bot built (`gather_pillar_start`, `mine_pillar_start`) is taken down again before the bot does anything else:
+it breaks the block under its feet one at a time, as a player does (`TowerDescent`; every drop is a single block, and the
+blocks come back as items), so a pillar of any height can be left. `gather_tower_descended` / `mine_tower_descended`
+(`blocks`, `at`) closes it; `gather_tower_descent_failed` / `mine_tower_descent_failed` (`reason`, `at`) and the
+`tower_descent_refused` line before it say why a break was refused. The task does not end (quota reached, `DONE`) until
+the descent is over. A pillar whose floor is not at the bot's level is walked to first (`gather_pillar_base_walk` /
+`mine_pillar_base_walk`, `target`, `base`; `*_pillar_base_refused` when the route to a floor is refused and the next is
+tried; `*_pillar_base_failed` when no column was left once the bot got there), whenever it needs fewer supports than a
+pillar from the bot's own level. `mine_route_refused` (`target`, `stand`, `reason`) is a generic mine request whose route
+to the chosen block was refused: the block is climbed to or set aside, not asked for again on the next tick.
+A felled canopy log comes to rest on the leaf under the cell it was broken from, above the bot's eye line and out of reach
+from the ground: before the bot leaves its pillar, the leaf in the column under that cell that it can see and reach is
+broken so the drop falls on (`gather_drop_released`, `origin`, `leaf`; repeated while the canopy has layers); only a leaf is
+ever broken this way, never terrain.
+Both tasks then see to the item the break gave before they take the tower down (`TowerDropWatch`). The bot waits while the
+item falls or lies within vanilla's pickup box (a block drop cannot be collected for ten ticks). An item it does not see,
+nor has collected, after the time an item takes to fall lies out of sight, on the very ledge or leaf that hides it from
+below: the pillar is built up, in its own column, to the level of the block that was broken (`gather_drop_climb` /
+`mine_drop_climb`, `around`, `goal`, `levels`; `*_drop_climb_refused`, plus `reason`; it uses only the supports carried
+beyond the tower's own). An item it then sees on a leaf it can reach is let fall by breaking that leaf
+(`gather_drop_released` / `mine_drop_released`, `origin`, `leaf`); one on anything else is left for the floor. The whole
+tower is taken down afterwards. The tower's own blocks come back as items: when they are of the kind being mined or gathered
+they are not counted as progress.
+A tower whose task has ended (stopped, replaced, timed out, failed) before the bot was back down is taken down anyway
+(`TowerCustody`), before the bot's next task goes on; an active safety task keeps the bot's attention first. The lines are
+`tower_orphan_descended` (`owner`, `blocks`, `at`) and `tower_orphan_descent_failed` (`owner`, `reason`, `at`).

@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.mining.SectionPrefilter;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -14,7 +15,9 @@ import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -44,11 +47,6 @@ public final class HarvestCore {
      * planner a real air column instead of asking it to tunnel through an obstruction.
      */
     private static final int PILLAR_MAX_HORIZONTAL_OFFSET = 3;
-    /**
-     * A walker climbs terrain by single steps, so a column that many blocks off its target can have its
-     * floor at most that many blocks above or below the bot's: the steepest ground a plain walk crosses.
-     */
-    private static final int PILLAR_MAX_BASE_SLOPE = PILLAR_MAX_HORIZONTAL_OFFSET;
 
     private HarvestCore() {
     }
@@ -302,12 +300,44 @@ public final class HarvestCore {
     }
 
     public static Optional<ItemEntity> nearestDropAnyOf(AIPlayerEntity bot, Set<Item> items, double radius) {
+        return nearestDropAnyOf(bot, items, radius, entity -> true);
+    }
+
+    /** {@link #nearestDropAnyOf(AIPlayerEntity, Set, double)} limited to the drops {@code accept} approves (an item's age, say). */
+    public static Optional<ItemEntity> nearestDropAnyOf(AIPlayerEntity bot, Set<Item> items, double radius,
+                                                        Predicate<ItemEntity> accept) {
         return bot.level()
                 .getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(radius),
                         entity -> !entity.getItem().isEmpty() && matches(entity.getItem(), items)
-                                && ObservableWorldQuery.canObserveEntity(bot, entity))
+                                && ObservableWorldQuery.canObserveEntity(bot, entity) && accept.test(entity))
                 .stream()
                 .min(Comparator.comparingDouble(entity -> entity.distanceTo(bot)));
+    }
+
+    /** Whether vanilla's pickup box around the bot where it stands meets {@code drop} (see {@link PickupReach}). */
+    public static boolean canCollectNow(AIPlayerEntity bot, ItemEntity drop) {
+        return PickupReach.pickupBox(bot.getBoundingBox()).intersects(drop.getBoundingBox());
+    }
+
+    /** The cell holding the block {@code drop} lies on: the one a hair under its box. */
+    public static BlockPos restingOn(ItemEntity drop) {
+        return BlockPos.containing(drop.getX(), drop.getBoundingBox().minY - 0.01D, drop.getZ());
+    }
+
+    /**
+     * The level of the bot's own column from which the eye is level with the floor of the cell {@code broken}: the
+     * item that came of that break may rest on a ledge beside it, hidden from below by the ledge itself, and from
+     * here the top of the ledge is in sight. At most {@code maxLevels} above the bot's feet. Null when that is not
+     * above the feet, or the column up to there (and the headroom a pillar needs above it) is not seen to be air.
+     */
+    public static BlockPos lookClimbGoal(AIPlayerEntity bot, BlockPos broken, int maxLevels) {
+        BlockPos feet = bot.blockPosition();
+        int goalY = Math.min(broken.getY() - 1, feet.getY() + Math.max(0, maxLevels));
+        if (goalY <= feet.getY()) {
+            return null;
+        }
+        return isObservedClearPillarColumn(bot, feet, goalY + PILLAR_HEADROOM)
+                ? new BlockPos(feet.getX(), goalY, feet.getZ()) : null;
     }
 
     public static void chaseDrop(AIPlayerEntity bot, Item item, double radius) {
@@ -999,6 +1029,10 @@ public final class HarvestCore {
         private final long total;
         private long index;
         private PillarApproach result;
+        /** Visible targets the bot cannot reach and has no pillar column for at its own level; see the second pass in {@link #step}. */
+        private final List<BlockPos> beyondLevel = new ArrayList<>();
+        private int nextBeyond;
+        private BlockPos baseWalkTarget;
         private boolean done;
 
         private PillarApproachScan(AIPlayerEntity bot, Set<Block> targetBlocks,
@@ -1035,11 +1069,24 @@ public final class HarvestCore {
         }
 
         /**
+         * Only when {@link #result()} is null: the nearest visible target that has a pillar column at another
+         * level than the bot's (a trunk rooted on a slope); {@link #pillarApproachesOnOtherFloors} gives the floor
+         * to walk onto first. Meaningful only after {@link #isDone()}.
+         */
+        public BlockPos baseWalkTarget() {
+            return baseWalkTarget;
+        }
+
+        /**
          * Advances the fixed candidate cursor for at most {@code budgetNanos}. A cell is a candidate
          * only when its state is a requested block and a live render-distance line-of-sight proof
          * reaches it; the cheap state test runs first (see {@link SectionPrefilter}), so only a cell
          * holding a requested block pays the rays and the 42,000-cell volume of a treeless place is
          * over in a tick or two instead of tens of them.
+         *
+         * <p>Only when no candidate has a column at the bot's own level does a second pass look at the
+         * floors a slope step up or down, nearest candidate first: it costs several times as many rays
+         * per candidate, and a bot on level ground never needs it.</p>
          */
         public boolean step(long budgetNanos) {
             if (done) {
@@ -1063,15 +1110,31 @@ public final class HarvestCore {
                         && targetBlocks.contains(SectionPrefilter.stateIn(
                                 section, cursor.getX(), cursor.getY(), cursor.getZ()).getBlock())
                         && canObserveHarvestTarget(bot, cursor, false)
-                        && (posFilter == null || posFilter.test(cursor))) {
-                    PillarApproach candidate = pillarApproach(bot, cursor.immutable());
-                    if (candidate != null && (result == null
-                            || candidate.target().distSqr(origin) < result.target().distSqr(origin))) {
+                        && (posFilter == null || posFilter.test(cursor))
+                        && !canDirectMine(bot, cursor)) {
+                    BlockPos found = cursor.immutable();
+                    PillarApproach candidate = pillarApproachFromFloor(bot, found, bot.blockPosition().getY());
+                    if (candidate == null) {
+                        beyondLevel.add(found);
+                    } else if (isBetterPillar(candidate, result, origin)) {
                         result = candidate;
                     }
                 }
                 if ((++visited & CLOCK_CHECK_MASK) == 0 && System.nanoTime() >= deadline) {
                     return false;
+                }
+            }
+            if (result == null) {
+                if (nextBeyond == 0) {
+                    beyondLevel.sort(Comparator.comparingDouble(pos -> pos.distSqr(origin)));
+                }
+                while (baseWalkTarget == null && nextBeyond < beyondLevel.size()) {
+                    BlockPos target = beyondLevel.get(nextBeyond++);
+                    if (!pillarApproachesOnOtherFloors(bot, target, targetBlocks).isEmpty()) {
+                        baseWalkTarget = target;
+                    } else if (System.nanoTime() >= deadline) {
+                        return false;
+                    }
                 }
             }
             done = true;
@@ -1094,30 +1157,79 @@ public final class HarvestCore {
     }
 
     /**
-     * The floor of the best pillar column that stands at another height than the bot, for a target
-     * {@link #pillarApproachFor} finds no column for. A trunk rooted on a slope has no clear column at
-     * the bot's own level (that cell is terrain, or open air over a drop), but a step up or down it
-     * has: the caller walks onto this cell by an ordinary observed route and plans the pillar from
-     * there. Null when no column anywhere in reach of the target has an observed floor.
+     * The pillars, cheapest first, that start from a floor at another height than the bot's: a trunk
+     * rooted on a slope has no clear column at the bot's own level (that cell is terrain, or open air over
+     * a drop), but the ground under it has, and fewer supports are needed from higher ground than from the
+     * low ground a tall tower would start on. The caller walks onto the floor under a pillar's goal (see
+     * {@link #pillarFloor}) by an ordinary observed route and plans the pillar from there. Each column of the
+     * ring starts from the highest floor the bot has seen in it (a lower one is under that floor's solid
+     * blocks, so its column is shut), at most as many levels above or below the bot as the bot is blocks
+     * away from the column: a plain walk gains at most one block of height per block it moves. Empty when no
+     * column anywhere in reach of the target has such a floor.
      */
-    public static BlockPos pillarBaseFor(AIPlayerEntity bot, BlockPos target, Set<Block> targetBlocks) {
+    public static List<PillarApproach> pillarApproachesOnOtherFloors(AIPlayerEntity bot, BlockPos target,
+                                                                      Set<Block> targetBlocks) {
         if (!isObservedHarvestTarget(bot, target, targetBlocks) || canDirectMine(bot, target)) {
-            return null;
+            return List.of();
         }
-        int feetY = bot.blockPosition().getY();
-        PillarApproach best = null;
-        int bestBaseY = 0;
-        // Nearest floor level first, so a tie on supports goes to the shorter walk.
-        for (int offset = 1; offset <= PILLAR_MAX_BASE_SLOPE; offset++) {
-            for (int baseY : new int[] {feetY + offset, feetY - offset}) {
-                PillarApproach candidate = pillarApproachFromFloor(bot, target.immutable(), baseY);
-                if (candidate != null && (best == null || candidate.supports() < best.supports())) {
-                    best = candidate;
-                    bestBaseY = baseY;
-                }
+        BlockPos feet = bot.blockPosition();
+        return columnApproaches(bot, target.immutable(), (x, z) -> {
+            int walk = Math.max(Math.abs(x - feet.getX()), Math.abs(z - feet.getZ()));
+            BlockPos base = highestObservedStand(bot, x, z,
+                    Math.min(target.getY() - 1, feet.getY() + walk + 1), feet.getY() - walk - 1);
+            // A floor at the bot's own level is pillarApproachFor's, and needs no walk.
+            return base == null || base.getY() == feet.getY() ? null : base;
+        });
+    }
+
+    /** The floor a pillar starts from: the standing cell under which its supports are placed. */
+    public static BlockPos pillarFloor(PillarApproach approach) {
+        return approach.goal().below(approach.supports());
+    }
+
+    /**
+     * Whether to walk onto ground above or below the bot and pillar from there: when the best pillar from
+     * another floor needs fewer supports than the best at the bot's own level, or there is none at its level.
+     * A tower is long to build and to take down again; ties stay put, which needs no walk.
+     */
+    public static boolean otherFloorIsCheaper(PillarApproach flat, List<PillarApproach> elsewhere) {
+        return !elsewhere.isEmpty() && (flat == null || elsewhere.get(0).supports() < flat.supports());
+    }
+
+    /**
+     * Whether {@code candidate} is the better pillar of two visible targets: the one that needs fewer supports
+     * (a tower is long to build and to take down again, however near its log), the nearer target on equal supports.
+     */
+    static boolean isBetterPillar(PillarApproach candidate, PillarApproach best, BlockPos origin) {
+        return best == null
+                || candidate.supports() < best.supports()
+                || candidate.supports() == best.supports()
+                && candidate.target().distSqr(origin) < best.target().distSqr(origin);
+    }
+
+    /**
+     * The highest cell from {@code topY} down to {@code bottomY} in column x,z that the bot has seen to be a stand.
+     * A canopy is not ground: nobody walks onto leaves to start a climb, and a column resting on them would not
+     * outlast the leaves, so a floor of leaves is passed over.
+     */
+    private static BlockPos highestObservedStand(AIPlayerEntity bot, int x, int z, int topY, int bottomY) {
+        for (int y = topY; y >= bottomY; y--) {
+            BlockPos base = new BlockPos(x, y, z);
+            // Cells of an open column fail on the first tests: the one cheap ray each, and only a seen
+            // solid floor under a seen cell earns the full stand proof.
+            if (ObservableWorldQuery.canObserveCell(bot, base) && ObservableWorldQuery.canObserveCell(bot, base.below())
+                    && !isCanopyOrOpen(bot, base.below())
+                    && canObserveStand(bot, base) && Standability.isStandable(bot.level(), base)) {
+                return base;
             }
         }
-        return best == null ? null : new BlockPos(best.goal().getX(), bestBaseY, best.goal().getZ());
+        return null;
+    }
+
+    /** True for a cell the bot has seen to hold no ground to stand on: nothing solid, or leaves. */
+    private static boolean isCanopyOrOpen(AIPlayerEntity bot, BlockPos floor) {
+        var state = bot.level().getBlockState(floor);
+        return state.getCollisionShape(bot.level(), floor).isEmpty() || state.is(BlockTags.LEAVES);
     }
 
     private static boolean isObservedHarvestTarget(AIPlayerEntity bot, BlockPos target, Set<Block> targetBlocks) {
@@ -1138,77 +1250,104 @@ public final class HarvestCore {
      * floor at height {@code baseY}.
      */
     private static PillarApproach pillarApproachFromFloor(AIPlayerEntity bot, BlockPos target, int baseY) {
+        List<PillarApproach> approaches = columnApproaches(bot, target, (x, z) -> {
+            BlockPos base = new BlockPos(x, baseY, z);
+            return canObserveStand(bot, base) && Standability.isStandable(bot.level(), base) ? base : null;
+        });
+        return approaches.isEmpty() ? null : approaches.get(0);
+    }
+
+    /** The floor a pillar in column x,z starts from, or null when the bot has seen none there. */
+    private interface ColumnFloor {
+        BlockPos of(int x, int z);
+    }
+
+    /**
+     * Every column of the target's own column and the observed one-to-three-block ring around it that has
+     * a floor and a clear air column to the pillar head, cheapest first: the cells directly next to an
+     * upper target are often obstructed, so a column starts at the lowest clear altitude that is still
+     * within ordinary 4.5-block mining reach from the eventual pillar eye position. On equal supports the
+     * target's own column wins: it needs no sideways walk, and the felled log then drops onto the bot
+     * instead of onto the ground beside the pillar, out of its pickup reach. It is also the plain answer
+     * for a log left hanging above a felled trunk. A goal whose headroom would run into the target fails
+     * the air check, so the target itself can never end up inside the chosen column.
+     */
+    private static List<PillarApproach> columnApproaches(AIPlayerEntity bot, BlockPos target, ColumnFloor floors) {
         BlockPos feet = bot.blockPosition();
-        PillarApproach best = null;
-        boolean bestOwnColumn = false;
-        // The cells directly next to an upper target are often obstructed. Search the target's own
-        // column and the observed one-to-three-block ring around it, then choose the lowest clear
-        // altitude that is still within ordinary 4.5-block mining reach from the eventual pillar eye
-        // position. The own column is the plain answer for a log left hanging above a felled trunk:
-        // it needs the fewest supports and no sideways walk. A goal whose headroom would run into the
-        // target fails the air check, so the target itself can never end up inside the chosen column.
+        record Column(PillarApproach approach, boolean own) {
+        }
+        List<Column> columns = new ArrayList<>();
         for (int dx = -PILLAR_MAX_HORIZONTAL_OFFSET; dx <= PILLAR_MAX_HORIZONTAL_OFFSET; dx++) {
             for (int dz = -PILLAR_MAX_HORIZONTAL_OFFSET; dz <= PILLAR_MAX_HORIZONTAL_OFFSET; dz++) {
                 int horizontalSquared = dx * dx + dz * dz;
                 if (horizontalSquared > PILLAR_MAX_HORIZONTAL_OFFSET * PILLAR_MAX_HORIZONTAL_OFFSET) {
                     continue;
                 }
-                BlockPos base = new BlockPos(target.getX() + dx, baseY, target.getZ() + dz);
-                if (!canObserveStand(bot, base) || !Standability.isStandable(bot.level(), base)) {
+                BlockPos base = floors.of(target.getX() + dx, target.getZ() + dz);
+                if (base == null) {
                     continue;
                 }
-                boolean ownColumn = horizontalSquared == 0;
-                for (int goalY = baseY + 1; goalY <= target.getY(); goalY++) {
-                    BlockPos goal = base.above(goalY - baseY);
-                    if (!canReachFromPillarGoal(bot, target, goal)) {
-                        continue;
-                    }
-                    // This is the lowest level in reach, so it is the only one worth proving: a higher
-                    // one spends more of the user's throwaway material and has to prove every cell this
-                    // one does, so a column that fails here fails there too.
-                    if (goalY - baseY > maxPillarSupports()) {
-                        break;
-                    }
-                    // Mining straight up the target's own column crosses every cell between the pillar
-                    // head and the target, which the body's headroom stops short of; a leaf or log in
-                    // there would make the break controller refuse the mine after the pillar is built.
-                    int top = ownColumn ? Math.max(goalY + PILLAR_HEADROOM, target.getY() - 1)
-                            : goalY + PILLAR_HEADROOM;
-                    if (isObservedClearPillarColumn(bot, base, top)) {
-                        PillarApproach candidate = new PillarApproach(target, goal, goalY - baseY);
-                        // On equal supports the target's own column wins: the felled log then drops onto
-                        // the bot instead of onto the ground beside the pillar, out of its pickup reach.
-                        if (best == null
-                                || candidate.supports() < best.supports()
-                                || candidate.supports() == best.supports()
-                                && (ownColumn != bestOwnColumn
-                                        ? ownColumn
-                                        : candidate.goal().distSqr(feet) < best.goal().distSqr(feet))) {
-                            best = candidate;
-                            bestOwnColumn = ownColumn;
-                        }
-                    }
-                    break;
+                boolean own = horizontalSquared == 0;
+                PillarApproach approach = columnApproach(bot, target, base, own);
+                if (approach != null) {
+                    columns.add(new Column(approach, own));
                 }
             }
         }
-        return best;
+        columns.sort(Comparator.<Column>comparingInt(column -> column.approach().supports())
+                .thenComparing(column -> !column.own())
+                .thenComparingDouble(column -> column.approach().goal().distSqr(feet)));
+        return columns.stream().map(Column::approach).toList();
+    }
+
+    /** The lowest level of the column over {@code base} that the bot can mine {@code target} from, or null. */
+    private static PillarApproach columnApproach(AIPlayerEntity bot, BlockPos target, BlockPos base, boolean ownColumn) {
+        int baseY = base.getY();
+        for (int goalY = baseY + 1; goalY <= target.getY(); goalY++) {
+            BlockPos goal = base.above(goalY - baseY);
+            if (!canReachFromPillarGoal(bot, target, goal)) {
+                continue;
+            }
+            // Mining straight up the target's own column crosses every cell between the pillar
+            // head and the target, which the body's headroom stops short of; a leaf or log in
+            // there would make the break controller refuse the mine after the pillar is built.
+            int top = ownColumn ? Math.max(goalY + PILLAR_HEADROOM, target.getY() - 1)
+                    : goalY + PILLAR_HEADROOM;
+            if (!isObservedClearPillarColumn(bot, base, top)) {
+                return null; // a higher level has to prove every cell this one does, and more
+            }
+            // Beside the target the same refusal comes from a cell between the pillar head and the
+            // target. This is the lowest level in reach, so the cheapest: a higher one spends more of
+            // the user's throwaway material, and is proved only when every line from this head to the
+            // target is seen to be shut (a head one block higher looks along other lines).
+            if (!ownColumn && isSightlineBlocked(bot, goal, target)) {
+                continue;
+            }
+            return new PillarApproach(target, goal, goalY - baseY);
+        }
+        return null;
     }
 
     /**
-     * The tallest pillar the bot can leave again. A bot never breaks the block it stands on
-     * ({@link MiningSafety}) and a route steps down at most the safe fall, so a taller tower would
-     * strand it on top for good (a probe with a six-block tower: Baritone bridged sideways and stayed).
+     * The eye position the bot will have standing at {@code goal}, after it arrives on a pillar. It stands
+     * upright there whatever pose it is in, or how far into a fall, while it plans.
      */
-    private static int maxPillarSupports() {
-        return Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
+    private static Vec3 pillarEye(AIPlayerEntity bot, BlockPos goal) {
+        return new Vec3(goal.getX() + 0.5D, goal.getY() + bot.getEyeHeight(Pose.STANDING), goal.getZ() + 0.5D);
     }
 
     /** Tests mining reach from the eye position the bot will have after it arrives on a pillar. */
     private static boolean canReachFromPillarGoal(AIPlayerEntity bot, BlockPos target, BlockPos goal) {
-        double eyeHeight = bot.getEyePosition().y - bot.blockPosition().getY();
-        Vec3 pillarEye = new Vec3(goal.getX() + 0.5D, goal.getY() + eyeHeight, goal.getZ() + 0.5D);
-        return pillarEye.distanceTo(target.getCenter()) <= 4.5D;
+        return pillarEye(bot, goal).distanceTo(target.getCenter()) <= 4.5D;
+    }
+
+    /**
+     * True when the bot has already seen every line from the eye it will have on a pillar at {@code goal}
+     * to the target shut (see {@link PillarSightline}): the break controller would refuse the mine from there.
+     */
+    private static boolean isSightlineBlocked(AIPlayerEntity bot, BlockPos goal, BlockPos target) {
+        return PillarSightline.isBlocked(pillarEye(bot, goal), target, goal,
+                cell -> ObservableWorldQuery.canObserveCell(bot, cell) && !bot.level().getBlockState(cell).isAir());
     }
 
     /**

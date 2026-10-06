@@ -95,7 +95,8 @@ final class ObservedSearchHops {
         // Callers ask for a hop only after they searched what they can perceive from here.
         memory.markSearched(feet.getX(), feet.getZ());
         int number = attempts + 1;
-        boolean guided = rememberedHint != null && horizontalDistanceSquared(feet, rememberedHint) > 4.0D;
+        boolean guided = rememberedHint != null && horizontalDistanceSquared(feet, rememberedHint) > 4.0D
+                && !memory.isGuidedRefused(feet.getX(), feet.getZ(), rememberedHint.getX(), rememberedHint.getZ());
         int direction = -1;
         BlockPos heading;
         if (guided) {
@@ -108,7 +109,7 @@ final class ObservedSearchHops {
         attempts++;
         ActionResult route = bot.getActionPack().startDirectionalPursuitTo(heading, HOP_DISTANCE, false, false);
         if (route.isFailed()) {
-            refuse(feet, direction);
+            refuse(feet, direction, guided ? rememberedHint : null);
             return new Attempt(Status.REFUSED, number, heading, null, guided, route.reason());
         }
         BlockPos observedGoal = bot.getActionPack().activePathGoal();
@@ -116,7 +117,7 @@ final class ObservedSearchHops {
             // A directional route must expose an admitted local goal.  Do not leave a route whose
             // only target is the remote heading if that invariant is ever broken.
             bot.getActionPack().stopAll();
-            refuse(feet, direction);
+            refuse(feet, direction, guided ? rememberedHint : null);
             return new Attempt(Status.REFUSED, number, heading, null, guided,
                     "directional_hop_missing_observed_goal");
         }
@@ -125,7 +126,7 @@ final class ObservedSearchHops {
             // visible corridor. Once that exact corridor has already stalled, do not let it turn
             // another heading into a duplicate route/replan loop.
             bot.getActionPack().stopAll();
-            refuse(feet, direction);
+            refuse(feet, direction, guided ? rememberedHint : null);
             return new Attempt(Status.REFUSED, number, heading, null, guided,
                     "directional_hop_retired_observed_goal");
         }
@@ -135,10 +136,13 @@ final class ObservedSearchHops {
         return new Attempt(Status.STARTED, number, heading, observedGoal.immutable(), guided, "");
     }
 
-    /** A refused compass heading is not offered again from the same stance. */
-    private void refuse(BlockPos feet, int direction) {
+    /** A refused compass heading, or a refused heading toward a remembered resource, is not offered again from the same stance. */
+    private void refuse(BlockPos feet, int direction, BlockPos guidedHint) {
         if (direction >= 0) {
             memory.noteRefused(feet.getX(), feet.getZ(), direction);
+        }
+        if (guidedHint != null) {
+            memory.noteGuidedRefused(feet.getX(), feet.getZ(), guidedHint.getX(), guidedHint.getZ());
         }
     }
 
