@@ -2493,7 +2493,10 @@ public final class GoalExecutor {
         for (MissionSpec spec : runtime.queue()) {
             Optional<Goal> queued = spec.toGoal();
             if (queued.isPresent()) {
-                submit(bot, queued.get(), null, spec.executionMode());
+                // With no mission restored ahead of it, this entry becomes the active mission now
+                // (a promotion); otherwise it stays queued and is promoted by advanceQueue later.
+                Goal goal = hasActivePlan(bot) ? queued.get() : startingGoal(bot, queued.get());
+                submit(bot, goal, null, spec.executionMode());
             } else {
                 BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                         "mission_queue_restore_isolated", "type", spec.type(), "reason", "invalid_spec");
@@ -3092,7 +3095,7 @@ public final class GoalExecutor {
         QueuedGoal next;
         while ((next = queued.pollFirst()) != null) {
             report(bot, "Next, I will: " + goalLabel(next.goal));
-            if (submit(bot, next.goal, null, next.executionMode)) {
+            if (submit(bot, startingGoal(bot, next.goal), null, next.executionMode)) {
                 if (hasActivePlan(bot)) {
                     return true;
                 }
@@ -3102,6 +3105,17 @@ public final class GoalExecutor {
         }
         goalQueue.remove(bot.getUUID(), queued);
         return false;
+    }
+
+    /**
+     * The goal a queued request becomes when it is promoted to the active mission.  A fresh
+     * Fulfill is measured from the inventory held at that moment, not from the one it was
+     * accepted with while another mission was still running (see {@link Goal.Fulfill#rebaselined}).
+     */
+    private static Goal startingGoal(AIPlayerEntity bot, Goal queued) {
+        return queued instanceof Goal.Fulfill fulfill
+                ? fulfill.rebaselined(item -> GoalSnapshotCollector.inventoryCount(bot, item))
+                : queued;
     }
 
     /**
@@ -3814,6 +3828,12 @@ public final class GoalExecutor {
                     false, true, GoalResult.Status.FAILED);
             return;
         }
+        // Nothing was debited here, but a replan would only plan the identical Give again.
+        if (isLockedWornPieceFailure(failedStep, reason)) {
+            finishActive(bot, plan, evaluate(bot, plan), reason,
+                    false, true, GoalResult.Status.FAILED);
+            return;
+        }
         if (isUnsettledHuntPhysicalDebt(
                 failedStep == null ? null : failedStep.kind(), reason)) {
             // Meat in inventory cannot erase a return-to-surface debt. In particular, Goal.Food
@@ -4221,6 +4241,8 @@ public final class GoalExecutor {
                 yield Optional.of(new GiveItemTask(
                         step.item(), step.count(), step.giveRecipient(),
                         () -> commitDeliveryReceipt(bot, plan, step),
+                        freshFulfillDelivery && keepsDeliveryOffRoute(
+                                (Goal.Fulfill) plan.goal, plan.completedDeliveries),
                         freshFulfillDelivery,
                         () -> !freshFulfillDelivery
                                 || hasFreshFulfillDeliveryQuota(bot, plan, step)));
@@ -4323,6 +4345,20 @@ public final class GoalExecutor {
         return plan != null && step != null && step.kind() == GoalStep.Kind.GIVE_ITEM
                 && plan.goal instanceof Goal.Fulfill fulfill
                 && fulfill.isFreshInventoryRequest();
+    }
+
+    /**
+     * A fresh handoff must not spend reserved output as route scaffold, so it takes the
+     * no-dig/no-pillar approach.  Baritone only ever places dirt, cobblestone, netherrack and
+     * stone, so that restriction is needed only while the request still owes one of those (to a
+     * player or to the bot itself).  Otherwise the handoff keeps the ordinary dig and pillar
+     * approach, and a player on a ledge or in a pit stays reachable.
+     */
+    static boolean keepsDeliveryOffRoute(Goal.Fulfill fulfill, Set<Goal.Allocation> completedDeliveries) {
+        return fulfill.isFreshInventoryRequest() && fulfill.allocations().stream()
+                .filter(allocation -> !allocation.delivery() || !completedDeliveries.contains(allocation))
+                .anyMatch(allocation -> io.github.zoyluo.minecraftai.action.MaterialPalette
+                        .isPillarSupportItem(allocation.item()));
     }
 
     /**
@@ -5140,6 +5176,16 @@ public final class GoalExecutor {
         return step != null && step.kind() == GoalStep.Kind.GIVE_ITEM
                 && ("give_item_count_mismatch".equals(reason)
                 || "give_item_receipt_commit_failed".equals(reason));
+    }
+
+    /**
+     * The planner counts the piece the bot wears, but vanilla never lets a survival player take
+     * off Curse of Binding armor.  A replan would plan the identical Give and fail identically,
+     * so the mission ends with the typed reason instead of spending its replan budget on it.
+     */
+    static boolean isLockedWornPieceFailure(GoalStep step, String reason) {
+        return step != null && step.kind() == GoalStep.Kind.GIVE_ITEM
+                && GiveItemTask.WORN_PIECE_LOCKED.equals(reason);
     }
 
     // Package-private (not public): MissionRecoveryScheduler needs the type to accept a plan

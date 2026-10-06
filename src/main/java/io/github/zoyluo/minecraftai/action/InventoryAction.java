@@ -2,7 +2,11 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.util.ItemStackUtil;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import net.minecraft.core.NonNullList;
@@ -80,6 +84,49 @@ public final class InventoryAction {
         ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
         if (offHandStack.is(item)) {
             count += offHandStack.getCount();
+        }
+        return count;
+    }
+
+    /** The armor slots a player can strip by hand. */
+    private static final EquipmentSlot[] WORN_ARMOR = {
+            EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
+
+    /** A stack a hand-over may take from; {@code wornSlot} is null for the main inventory and offhand. */
+    private record Giveable(ItemStack stack, EquipmentSlot wornSlot) {
+    }
+
+    /** See {@link #dropItems(AIPlayerEntity, Item, int, boolean)}: fewest component changes from a new stack first. */
+    private static final Comparator<Giveable> NEWEST_FIRST = Comparator
+            .comparingInt((Giveable source) -> ItemStackUtil.isNearlyBroken(source.stack()) ? 1 : 0)
+            .thenComparingInt(source -> source.stack().getComponentsPatch().size())
+            .thenComparingInt(source -> source.stack().getDamageValue());
+
+    /**
+     * What a hand-over can draw on: {@link #countItem} plus the armor worn right now, which a
+     * player takes off and drops the same way (the planner and the goal predicates count a worn
+     * piece too, and the tick coordinator wears a freshly crafted one at once).  A Curse of
+     * Binding piece is excluded: vanilla never lets a survival player take it off.
+     */
+    public static int countGiveable(AIPlayerEntity player, Item item) {
+        int count = countItem(player, item);
+        for (EquipmentSlot slot : WORN_ARMOR) {
+            ItemStack worn = player.getItemBySlot(slot);
+            if (worn.is(item) && !GearValue.hasBindingCurse(worn)) {
+                count += worn.getCount();
+            }
+        }
+        return count;
+    }
+
+    /** Worn pieces of {@code item} that {@link #countGiveable} leaves out because they cannot be taken off. */
+    public static int countWornLocked(AIPlayerEntity player, Item item) {
+        int count = 0;
+        for (EquipmentSlot slot : WORN_ARMOR) {
+            ItemStack worn = player.getItemBySlot(slot);
+            if (worn.is(item) && GearValue.hasBindingCurse(worn)) {
+                count += worn.getCount();
+            }
         }
         return count;
     }
@@ -322,38 +369,75 @@ public final class InventoryAction {
     /**
      * Drops an exact total {@code count} of {@code item} through the ordinary vanilla player-drop
      * path ({@link AIPlayerEntity#drop}, the same thing a human player does with Q) -- main
-     * inventory first, then offhand, mirroring {@link #removeItems}'s counting/consumption order,
-     * but spawning real world {@link ItemEntity} drops instead of deleting the stacks. Used by
+     * inventory first, then offhand, mirroring {@link #removeItems}'s counting/consumption order
+     * (worn armor only after both, see {@link #countGiveable}), but spawning real world
+     * {@link ItemEntity} drops instead of deleting the stacks. Used by
      * give_item/{@code GiveItemTask} to hand items to a player without any forced-pickup or
      * teleport shortcut. Fails (and restocks anything already split off) if the full count is not
      * actually present, so a caller can trust a {@code true} result means exactly {@code count}
      * left the bot's inventory as real, pickup-able drops.
      */
     public static boolean dropItems(AIPlayerEntity player, Item item, int count) {
+        return dropItems(player, item, count, false);
+    }
+
+    /**
+     * {@link #dropItems(AIPlayerEntity, Item, int)} with a choice of stacks.  A hand-over of
+     * freshly produced output passes {@code newestFirst} to choose them deliberately instead of
+     * by slot order: a stack that is not on its last use first, then the one that differs least
+     * from a factory-new stack (damage, enchantments, a custom name), then the least damaged,
+     * wherever it sits.  The copy the bot already carried before the request is worn, enchanted
+     * or renamed, so it stays and the new one goes.  Stacks of a raw material are all alike, so
+     * for them the slot order still decides.
+     */
+    public static boolean dropItems(AIPlayerEntity player, Item item, int count, boolean newestFirst) {
         if (count <= 0) {
             return true;
         }
-        if (countItem(player, item) < count) {
+        if (countGiveable(player, item) < count) {
             return false;
         }
         Inventory inventory = player.getInventory();
-        java.util.List<ItemStack> chunks = new java.util.ArrayList<>();
-        int remaining = count;
-        for (int slot = 0; slot < inventory.getNonEquipmentItems().size() && remaining > 0; slot++) {
-            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (!stack.is(item)) {
-                continue;
+        List<Giveable> sources = new ArrayList<>();
+        for (ItemStack stack : inventory.getNonEquipmentItems()) {
+            if (stack.is(item)) {
+                sources.add(new Giveable(stack, null));
             }
-            int take = Math.min(remaining, stack.getCount());
-            chunks.add(stack.split(take));
-            remaining -= take;
         }
-        if (remaining > 0) {
-            ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
-            if (offHandStack.is(item)) {
-                int take = Math.min(remaining, offHandStack.getCount());
-                chunks.add(offHandStack.split(take));
+        ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
+        if (offHandStack.is(item)) {
+            sources.add(new Giveable(offHandStack, null));
+        }
+        for (EquipmentSlot slot : WORN_ARMOR) {
+            ItemStack worn = player.getItemBySlot(slot);
+            if (worn.is(item) && !GearValue.hasBindingCurse(worn)) {
+                sources.add(new Giveable(worn, slot));
+            }
+        }
+        if (newestFirst) {
+            sources.sort(NEWEST_FIRST); // stable: slot order breaks ties
+        }
+        List<ItemStack> chunks = new ArrayList<>();
+        int remaining = count;
+        for (Giveable source : sources) {
+            if (remaining <= 0) {
+                break;
+            }
+            ItemStack stack = source.stack();
+            if (source.wornSlot() == null) {
+                int take = Math.min(remaining, stack.getCount());
+                chunks.add(stack.split(take));
                 remaining -= take;
+            } else {
+                // Armor is never stacked, so a worn piece always leaves whole, through the slot
+                // setter the equip code uses (not a mutation of the live stack). It is unequipped
+                // and dropped within this one call, so BotTickCoordinator's armor auto-equip, which
+                // runs after the task tick, never sees a piece on its way out that it could put
+                // back on; no reservation is needed.
+                chunks.add(stack.copy());
+                remaining -= stack.getCount();
+                player.setItemSlot(source.wornSlot(), ItemStack.EMPTY);
+                BotLog.action(player, "give_unequip", "slot", source.wornSlot().getSerializedName(), "item", item);
             }
         }
         inventory.setChanged();
