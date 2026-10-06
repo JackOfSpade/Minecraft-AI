@@ -30,6 +30,9 @@ public final class GiveItemTask extends AbstractTask {
         GIVE
     }
 
+    /** Typed failure: the only copy the bot has is Curse of Binding armor it wears, which vanilla never lets a player take off. */
+    public static final String WORN_PIECE_LOCKED = "give_item_worn_piece_locked";
+
     private static final double GIVE_RANGE = 2.5D; // "within ~2 blocks"
     private static final int MOVE_TIMEOUT_TICKS = 600;  // 30s bound on reaching the player
     private static final int OVERALL_TIMEOUT_TICKS = 1200;
@@ -42,6 +45,12 @@ public final class GiveItemTask extends AbstractTask {
     private final BooleanSupplier receiptCommitter;
     /** A fresh-handoff parent must never spend its reserved output as disposable route support. */
     private final boolean surfaceOnlyApproach;
+    /**
+     * The handed-over item is newly produced output: the stack to drop is chosen deliberately
+     * (see {@link InventoryAction#dropItems(AIPlayerEntity, Item, int, boolean)}) so the copy the
+     * bot already carried is not the one that leaves.
+     */
+    private final boolean freshDelivery;
     /**
      * Optional parent-owned conservation check.  It runs before pathing and before the physical
      * drop so a fresh delivery can replan if another action consumed its reserved output.
@@ -83,11 +92,23 @@ public final class GiveItemTask extends AbstractTask {
                         BooleanSupplier receiptCommitter,
                         boolean surfaceOnlyApproach,
                         BooleanSupplier deliveryGuard) {
+        this(item, count, playerName, receiptCommitter, surfaceOnlyApproach, false, deliveryGuard);
+    }
+
+    /** As above, for a handoff of newly produced output ({@code freshDelivery}). */
+    public GiveItemTask(Item item,
+                        int count,
+                        String playerName,
+                        BooleanSupplier receiptCommitter,
+                        boolean surfaceOnlyApproach,
+                        boolean freshDelivery,
+                        BooleanSupplier deliveryGuard) {
         this.item = item;
         this.count = Math.max(1, count);
         this.requestedPlayerName = FollowTargetResolver.normalize(playerName);
         this.receiptCommitter = Objects.requireNonNull(receiptCommitter, "receiptCommitter");
         this.surfaceOnlyApproach = surfaceOnlyApproach;
+        this.freshDelivery = freshDelivery;
         this.deliveryGuard = Objects.requireNonNull(deliveryGuard, "deliveryGuard");
     }
 
@@ -138,8 +159,7 @@ public final class GiveItemTask extends AbstractTask {
         if (!guardSatisfied()) {
             return;
         }
-        if (InventoryAction.countItem(bot, item) < count) {
-            fail("need: " + BuiltInRegistries.ITEM.getKey(item) + " x" + count);
+        if (!hasEnoughToGive(bot)) {
             return;
         }
         target = FollowTargetResolver.resolve(bot, requestedPlayerName).orElse(null);
@@ -202,22 +222,21 @@ public final class GiveItemTask extends AbstractTask {
             transition(Phase.MOVE_TO_PLAYER);
             return;
         }
-        if (InventoryAction.countItem(bot, item) < count) {
-            fail("need: " + BuiltInRegistries.ITEM.getKey(item) + " x" + count);
+        if (!hasEnoughToGive(bot)) {
             return;
         }
         LookAction.lookAt(bot, target.position().add(0.0D, target.getEyeHeight(), 0.0D));
-        int before = InventoryAction.countItem(bot, item);
+        int before = InventoryAction.countGiveable(bot, item);
         // Recheck immediately before the irreversible vanilla debit. A move/look tick cannot
         // normally consume inventory, but the parent guard is intentionally authoritative.
         if (!guardSatisfied()) {
             return;
         }
-        if (!InventoryAction.dropItems(bot, item, count)) {
+        if (!InventoryAction.dropItems(bot, item, count, freshDelivery)) {
             fail("give_item_drop_failed");
             return;
         }
-        int after = InventoryAction.countItem(bot, item);
+        int after = InventoryAction.countGiveable(bot, item);
         if (before - after != count) {
             // Never claim success on anything other than the exact requested count actually
             // leaving the bot's inventory.
@@ -231,6 +250,18 @@ public final class GiveItemTask extends AbstractTask {
             return;
         }
         complete();
+    }
+
+    /** True when the full count can be handed over, otherwise fails with the reason it cannot. */
+    private boolean hasEnoughToGive(AIPlayerEntity bot) {
+        int giveable = InventoryAction.countGiveable(bot, item);
+        if (giveable >= count) {
+            return true;
+        }
+        fail(giveable + InventoryAction.countWornLocked(bot, item) >= count
+                ? WORN_PIECE_LOCKED
+                : "need: " + BuiltInRegistries.ITEM.getKey(item) + " x" + count);
+        return false;
     }
 
     private boolean guardSatisfied() {

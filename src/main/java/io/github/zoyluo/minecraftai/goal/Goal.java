@@ -340,6 +340,30 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
             return !initialItemCounts.isEmpty();
         }
 
+        /**
+         * The same manifest with its freshness boundary moved to what the bot holds right now.  A
+         * fresh request that waited behind another mission was snapshotted when it was accepted,
+         * but it must be measured from the inventory it STARTS with: whatever the mission ahead of
+         * it produced is not "new" for this request, and whatever that mission consumed is not
+         * owed back.  A persisted ACTIVE mission is never re-baselined, only a promoted one.
+         */
+        public Fulfill rebaselined(java.util.function.ToIntFunction<Item> heldCount) {
+            if (!isFreshInventoryRequest()) {
+                return this;
+            }
+            Map<Item, Integer> held = new LinkedHashMap<>();
+            for (Item item : initialItemCounts.keySet()) {
+                int count = Math.max(0, heldCount.applyAsInt(item));
+                if (count > Integer.MAX_VALUE - requestedItemCount(item)) {
+                    // The planner's int counts cannot hold baseline + request: keep the boundary
+                    // the request was accepted with rather than throw on the tick that promotes it.
+                    return this;
+                }
+                held.put(item, count);
+            }
+            return new Fulfill(allocations, held);
+        }
+
         /** Count held at public-request submission time; zero for legacy absolute goals. */
         public int initialItemCount(Item item) {
             return initialItemCounts.getOrDefault(item, 0);
@@ -378,6 +402,13 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
          * The physical inventory required before the remaining handoffs can begin.  Receipted
          * handoffs are intentionally excluded, so a later replan never crafts and drops them
          * again.
+         *
+         * <p>The baseline is deliberately never lowered while a mission runs (no "lowest count
+         * seen" ratchet), because a lost stack can come back: the corpse run returns what a death
+         * dropped and a chest withdrawal returns what a deposit stored, and a ratchet would then
+         * count those old units as fresh and hand them over, which is the bug the baseline exists
+         * to prevent.  The price is over-production when baseline units are gone for good (a death
+         * whose corpse is never recovered, torches placed or food eaten from the baseline stack).</p>
          */
         public Map<Item, Integer> inventoryRequired(Set<Allocation> completedDeliveries) {
             Set<Allocation> completed = completedDeliveries == null ? Set.of() : Set.copyOf(completedDeliveries);
