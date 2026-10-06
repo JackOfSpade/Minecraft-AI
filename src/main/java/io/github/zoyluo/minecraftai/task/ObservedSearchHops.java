@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import java.util.HashSet;
@@ -14,6 +15,10 @@ import net.minecraft.core.BlockPos;
  * boolean)} resolves it to a short, actually observed local stance before Baritone receives a
  * route.  This class never reads terrain, chooses a height-map landing point, or grants break
  * permission while looking for a resource.</p>
+ *
+ * <p>Which compass heading to try is decided by what the bot remembers of its own search
+ * ({@link ExplorationMemory}): it keeps walking its way into ground it has not searched and does not
+ * circle back over what it has.</p>
  */
 final class ObservedSearchHops {
     /** One physical leg stays inside the currently observed navigation fence. */
@@ -40,7 +45,8 @@ final class ObservedSearchHops {
 
     private final int maxAttempts;
     private int attempts;
-    private BlockPos anchor;
+    /** Survives {@link #reset}: a fresh episode must not search again where the last one already looked. */
+    private final ExplorationMemory memory = new ExplorationMemory();
     /** Local stances whose admitted routes made no physical progress in this search episode. */
     private final Set<BlockPos> retiredObservedGoals = new HashSet<>();
 
@@ -50,7 +56,6 @@ final class ObservedSearchHops {
 
     void reset() {
         attempts = 0;
-        anchor = null;
         retiredObservedGoals.clear();
     }
 
@@ -86,15 +91,24 @@ final class ObservedSearchHops {
         if (exhausted()) {
             return new Attempt(Status.EXHAUSTED, attempts, null, null, false, "search_budget_exhausted");
         }
-        if (anchor == null) {
-            anchor = bot.blockPosition().immutable();
-        }
+        BlockPos feet = bot.blockPosition();
+        // Callers ask for a hop only after they searched what they can perceive from here.
+        memory.markSearched(feet.getX(), feet.getZ());
         int number = attempts + 1;
-        boolean guided = rememberedHint != null && horizontalDistanceSquared(bot.blockPosition(), rememberedHint) > 4.0D;
-        BlockPos heading = guided ? rememberedHint.immutable() : compassHeading(attempts);
+        boolean guided = rememberedHint != null && horizontalDistanceSquared(feet, rememberedHint) > 4.0D;
+        int direction = -1;
+        BlockPos heading;
+        if (guided) {
+            heading = rememberedHint.immutable();
+        } else {
+            int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+            direction = memory.chooseDirection(COMPASS, feet.getX(), feet.getZ(), HOP_DISTANCE, radius);
+            heading = compassHeading(feet, COMPASS[direction]);
+        }
         attempts++;
         ActionResult route = bot.getActionPack().startDirectionalPursuitTo(heading, HOP_DISTANCE, false, false);
         if (route.isFailed()) {
+            refuse(feet, direction);
             return new Attempt(Status.REFUSED, number, heading, null, guided, route.reason());
         }
         BlockPos observedGoal = bot.getActionPack().activePathGoal();
@@ -102,6 +116,7 @@ final class ObservedSearchHops {
             // A directional route must expose an admitted local goal.  Do not leave a route whose
             // only target is the remote heading if that invariant is ever broken.
             bot.getActionPack().stopAll();
+            refuse(feet, direction);
             return new Attempt(Status.REFUSED, number, heading, null, guided,
                     "directional_hop_missing_observed_goal");
         }
@@ -110,20 +125,27 @@ final class ObservedSearchHops {
             // visible corridor. Once that exact corridor has already stalled, do not let it turn
             // another heading into a duplicate route/replan loop.
             bot.getActionPack().stopAll();
+            refuse(feet, direction);
             return new Attempt(Status.REFUSED, number, heading, null, guided,
                     "directional_hop_retired_observed_goal");
+        }
+        if (direction >= 0) {
+            memory.noteHeading(direction);
         }
         return new Attempt(Status.STARTED, number, heading, observedGoal.immutable(), guided, "");
     }
 
-    private BlockPos compassHeading(int attempt) {
-        int directionIndex = Math.floorMod(attempt, COMPASS.length);
-        int ring = attempt / COMPASS.length;
-        int distance = HEADING_DISTANCE * (ring + 1);
-        int[] direction = COMPASS[directionIndex];
+    /** A refused compass heading is not offered again from the same stance. */
+    private void refuse(BlockPos feet, int direction) {
+        if (direction >= 0) {
+            memory.noteRefused(feet.getX(), feet.getZ(), direction);
+        }
+    }
+
+    private static BlockPos compassHeading(BlockPos feet, int[] direction) {
         double length = Math.hypot(direction[0], direction[1]);
-        int component = (int) Math.floor(distance / length);
-        return anchor.offset(direction[0] * component, 0, direction[1] * component);
+        int component = (int) Math.floor(HEADING_DISTANCE / length);
+        return feet.offset(direction[0] * component, 0, direction[1] * component);
     }
 
     private static double horizontalDistanceSquared(BlockPos first, BlockPos second) {
