@@ -67,6 +67,7 @@
       "io.github.zoyluo.minecraftai.task.OreDigPoiGameTests",
       "io.github.zoyluo.minecraftai.task.OreDigVeinGameTests",
       "io.github.zoyluo.minecraftai.task.OreDigStructureBreakGameTests",
+      "io.github.zoyluo.minecraftai.task.OreDigHighTargetGameTests",
       "io.github.zoyluo.minecraftai.task.BaritoneEngineToolGameTests",
       "io.github.zoyluo.minecraftai.task.OreDigFrontierGameTests",
       "io.github.zoyluo.minecraftai.task.LightAreaGameTests",

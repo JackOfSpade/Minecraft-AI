@@ -39,8 +39,16 @@ final class OreDigHighTargetStairRouteSourceContractTest {
                 "the route must use the same finite observed-hop budget as other exploration");
         assertTrue(start.contains("highTargetStairSearch.begin(\n                bot, highTargetStairSearchHeading)")
                         && start.contains("highTargetStairSearch.exhausted()")
-                        && start.contains("\"high_stair_route_unreachable\""),
-                "the high route must be bounded and release its finite ore owner through the ordinary abandonment path");
+                        && start.contains("ore_dig_high_stair_search_exhausted")
+                        && !start.contains("abandonTargetApproach("),
+                "the hop search must stay bounded, and its exhaustion must hand the tick to the stair dug up to the ore"
+                        + " rather than give the ore up");
+        String approach = methodBody(source, "private void approachTargetOre(");
+        String reached = methodBody(source, "private boolean climbsTo(");
+        assertTrue(approach.contains("climbsTo(bot, ore)")
+                        && approach.contains("climbTowardHighTarget(bot, world, ore)")
+                        && reached.contains("ore.equals(targetOre)"),
+                "the primary overhead target must get its stair from the generic approach once the hops found no ledge");
         assertTrue(start.contains("highTargetStairSearchHeading = highTargetStairHeading(bot.blockPosition(), ore);")
                         && start.contains("else if (highTargetStairSearchHeading != null)"),
                 "guided hops must refresh their compass point from the new local stance rather than stop advancing after one projection");
