@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
@@ -27,6 +28,8 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -111,6 +114,79 @@ public final class BrainRoutingGameTests {
         });
     }
 
+    // The wait for the gather's follow-up call is wall-clock time too.
+    @GameTest(maxTicks = 20000)
+    public void theCarriedCoalStaysBlockedAfterTheLogsOfALogsAndCoalRequestAreCollected(GameTestHelper context) {
+        Harness harness = collectOneLog(context, "RouteTwoGT", "get 1 log and 1 coal");
+
+        context.onEachTick(() -> {
+            if (harness.service.requests() >= 2) {
+                Set<String> first = harness.toolsOfRequest(0);
+                require(context, !first.contains("give_item") && !first.contains("achieve_goal"),
+                        "setup: the request collects new resources: " + first);
+                require(context, harness.bodyOfRequest(1).contains("The previous task ended")
+                                || harness.bodyOfRequest(1).contains("Updated state after tool calls"),
+                        "setup: the second call follows the finished gather");
+                Set<String> after = harness.toolsOfRequest(1);
+                require(context, !after.contains("give_item") && !after.contains("achieve_goal"),
+                        "the logs are collected but the coal is not: carried coal must not stand in for it: " + after);
+                context.succeed();
+            }
+        });
+    }
+
+    @GameTest(maxTicks = 20000)
+    public void theCarriedStockOpensOnceTheOnlyRequestedResourceIsCollected(GameTestHelper context) {
+        Harness harness = collectOneLog(context, "RouteOneGT", "get 1 log");
+
+        context.onEachTick(() -> {
+            if (harness.service.requests() >= 2) {
+                Set<String> after = harness.toolsOfRequest(1);
+                require(context, after.contains("give_item") && after.contains("achieve_goal"),
+                        "the one requested resource is collected, so a handoff of the log may follow: " + after);
+                context.succeed();
+            }
+        });
+    }
+
+    /** A bot beside an oak log whose first reply plans and starts gathering exactly that log. */
+    private static Harness collectOneLog(GameTestHelper context, String botName, String request) {
+        Harness harness = Harness.start(context, botName,
+                Reply.calls(say("plan", "I will chop the log."),
+                        tool("gather", "{\"item\":\"minecraft:oak_log\",\"count\":1}")),
+                Reply.answer("Got it."));
+        BlockPos feet = harness.bot.blockPosition();
+        harness.bot.level().setBlock(feet.east(2), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        harness.bot.level().setBlock(feet.east(2).above(), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        InventoryAction.giveItem(harness.bot, new ItemStack(Items.WOODEN_AXE));
+        harness.ask(request);
+        return harness;
+    }
+
+    private static JsonObject say(String purpose, String message) {
+        JsonObject arguments = new JsonObject();
+        arguments.addProperty("message", message);
+        arguments.addProperty("purpose", purpose);
+        return call("say", arguments.toString());
+    }
+
+    private static JsonObject tool(String name, String arguments) {
+        return call(name, arguments);
+    }
+
+    private static int callCounter;
+
+    private static JsonObject call(String name, String arguments) {
+        JsonObject function = new JsonObject();
+        function.addProperty("name", name);
+        function.addProperty("arguments", arguments);
+        JsonObject call = new JsonObject();
+        call.addProperty("id", "call_" + (++callCounter));
+        call.addProperty("type", "function");
+        call.add("function", function);
+        return call;
+    }
+
     private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
             context.fail(Component.nullToEmpty(message));
@@ -191,30 +267,23 @@ public final class BrainRoutingGameTests {
     private record Reply(int status, String body) {
         /** A well-formed completion in which the model answers with the say tool. */
         static Reply answer(String text) {
-            JsonObject arguments = new JsonObject();
-            arguments.addProperty("message", text);
-            arguments.addProperty("purpose", "answer");
-            return call("say", arguments);
+            return calls(say("answer", text));
         }
 
         /** A completion that calls one tool without arguments. */
         static Reply toolCall(String name) {
-            return call(name, new JsonObject());
+            return calls(call(name, "{}"));
         }
 
-        private static Reply call(String name, JsonObject arguments) {
-            JsonObject function = new JsonObject();
-            function.addProperty("name", name);
-            function.addProperty("arguments", arguments.toString());
-            JsonObject call = new JsonObject();
-            call.addProperty("id", "call_1");
-            call.addProperty("type", "function");
-            call.add("function", function);
-            JsonArray calls = new JsonArray();
-            calls.add(call);
+        /** A completion that makes these tool calls in one response. */
+        static Reply calls(JsonObject... calls) {
+            JsonArray array = new JsonArray();
+            for (JsonObject call : calls) {
+                array.add(call);
+            }
             JsonObject message = new JsonObject();
             message.addProperty("role", "assistant");
-            message.add("tool_calls", calls);
+            message.add("tool_calls", array);
             JsonObject choice = new JsonObject();
             choice.add("message", message);
             choice.addProperty("finish_reason", "tool_calls");
