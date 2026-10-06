@@ -266,3 +266,8 @@ inside every insertion scanned the whole map per new cell and made one explorati
 New gather events: `gather_harvest_refused` (`pos`, `reason`: the break controller ended without breaking the block,
 e.g. `target_not_observed`; the target is excluded for `EpisodeMemory.TTL_SHORT` and the survey re-plans at once,
 instead of `gather_harvest_timeout` 240 ticks later).
+A break start that a guarded step's fence holds back (`ActionPack.GUARDED_STEP_FENCE`) is not a refusal of the block: the
+harvest stays in HARVEST and starts again the next tick, so no `gather_harvest_refused` follows.
+`gather_pillar_scan_empty` (`search=hint|volume`, `from`, plus `target` or `up`) is logged once per pillar search that found
+no approach. The search is then not repeated while the bot stays in the same cell (`PillarSearchMemo`): until a target the
+scan skipped as excluded is available again, until a bot changes terrain, or for `EpisodeMemory.TTL_UNREACHABLE` ticks at most.

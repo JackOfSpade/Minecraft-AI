@@ -1,11 +1,14 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.KnownCellPickupSweep;
+import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -74,6 +77,122 @@ public final class GatherStallGameTests {
                             && line.contains("target_not_observed")),
                     "the refusal reason was not logged");
             finish(context, fixture);
+        });
+    }
+
+    /**
+     * A guarded step (a swim, a rescue) keeps a fence in front of every other controller until its owner has reconciled it,
+     * so a break started meanwhile is not refused but merely not begun. The gather took that for a refusal of the block:
+     * it dropped a good log for thirty seconds and went looking for another. It must wait, and chop once the fence lifts.
+     */
+    @GameTest(environment = "minecraftai-gametest:gather_stall_game_tests_log_waits_for_a_guarded_step_to_release_its_fence", maxTicks = 400)
+    public void logWaitsForAGuardedStepToReleaseItsFence(GameTestHelper context) {
+        Fixture fixture = fixture(context, "GatherFenceGT", 5);
+        AIPlayerEntity bot = fixture.bot();
+        ActionPack pack = bot.getActionPack();
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
+        BlockPos log = fixture.start().east(2);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        // A guarded step that has run to its end but whose owner has not released it yet: the pack stays fenced.
+        ActionPack.StepLease lease = pack.runStep(
+                WalkedStep.begin(bot, fixture.start().west(), WalkedStep.Kind.FLAT, "gametest_fence"),
+                (stepBot, step) -> true);
+        require(context, lease != null, "fixture: the guarded step was not admitted");
+        GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
+        AtomicBoolean started = new AtomicBoolean();
+        AtomicBoolean released = new AtomicBoolean();
+        AtomicInteger ticksToReachBreak = new AtomicInteger();
+        AtomicInteger fencedTicks = new AtomicInteger();
+        AtomicInteger ticksSinceRelease = new AtomicInteger();
+
+        context.failIfEver(() -> {
+            if (!started.get()) {
+                if (!pack.stepIdle()) {
+                    return; // the guarded step is still walking
+                }
+                require(context, pack.baritoneControlBlocked(),
+                        "fixture: the finished guarded step must keep its fence until its owner releases it");
+                task.start(bot);
+                started.set(true);
+                return;
+            }
+            if (task.state() == TaskState.RUNNING) {
+                task.tick(bot);
+            }
+            boolean harvesting = task.describe().contains("phase=HARVEST");
+            if (!released.get()) {
+                if (fencedTicks.get() == 0 && !harvesting) {
+                    require(context, ticksToReachBreak.incrementAndGet() <= 10,
+                            "the gather never reached the break: " + task.describe());
+                    return;
+                }
+                require(context, harvesting, "the gather gave up the log it was waiting to break after "
+                        + fencedTicks.get() + " fenced ticks: " + task.describe());
+                require(context, bot.level().getBlockState(log).is(Blocks.OAK_LOG),
+                        "the log was broken although the guarded step still held the fence");
+                if (fencedTicks.incrementAndGet() >= 20) {
+                    require(context, pack.releaseStepLease(lease), "fixture: the owner could not release its lease");
+                    released.set(true);
+                }
+                return;
+            }
+            if (bot.level().getBlockState(log).isAir()) {
+                List<String> lines = SensingArena.botLog(fixture.name());
+                require(context, lines != null && lines.stream().noneMatch(line -> line.contains("event=gather_harvest_refused")),
+                        "the held-back break was logged as a refusal of the block");
+                finish(context, fixture);
+                return;
+            }
+            require(context, ticksSinceRelease.incrementAndGet() <= 100,
+                    "the log still stood " + ticksSinceRelease.get() + " ticks after the fence was lifted: " + task.describe());
+        });
+    }
+
+    /**
+     * Gather with a log in view that no pillar can reach: the pillar searches (for the sighted log, and over the whole
+     * volume around the bot) come back empty, and the survey asks again on every tick while its look-around is pending.
+     * Each search casts rays for dozens of columns or tens of thousands of cells, so a bot that has not moved must not
+     * repeat either of them.
+     */
+    @GameTest(environment = "minecraftai-gametest:gather_stall_game_tests_empty_pillar_searches_are_not_repeated_while_the_bot_stands_still", maxTicks = 300)
+    public void emptyPillarSearchesAreNotRepeatedWhileTheBotStandsStill(GameTestHelper context) {
+        FollowFieldFixture fixture = new FollowFieldFixture(context, 12, 12);
+        // The bot stands in a one-cell pit of a stone slab: no column of its own within pillar reach is clear, and a log
+        // floats seven blocks straight above it, in plain view but out of reach.
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                if (dx != 0 || dz != 0) {
+                    fixture.arena.fill(dx, dz, Blocks.STONE, 0, 1);
+                }
+            }
+        }
+        fixture.arena.set(0, 7, 0, Blocks.OAK_LOG);
+        String name = "PillarMemoGT";
+        AIPlayerEntity bot = fixture.bot(name, 0, 0, false);
+        fixture.give(bot, new ItemStack(Items.WOODEN_AXE));
+        // An exact break keeps the survey in place while its look-around is pending (about a thousand ticks).
+        GatherQuotaTask task = GatherQuotaTask.breakBlocks(Blocks.OAK_LOG, 1);
+        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_gather_pillar_memo"));
+        BlockPos stance = bot.blockPosition().immutable();
+
+        context.failIfEver(() -> {
+            fixture.require(bot.blockPosition().equals(stance), "the bot left its pit: " + bot.blockPosition());
+            fixture.require(task.state() != TaskState.FAILED && task.state() != TaskState.CANCELLED,
+                    "the gather ended as " + task.state() + ":" + task.failureReason());
+            if (context.getTick() < 100) {
+                return;
+            }
+            fixture.require(task.describe().contains("phase=SURVEY"),
+                    "fixture: the survey must still be asking for pillars every tick: " + task.describe());
+            List<String> lines = SensingArena.botLog(name);
+            fixture.require(lines != null, "the per-bot log is unavailable, so the searches cannot be counted");
+            long hint = lines.stream().filter(line -> line.contains("event=gather_pillar_scan_empty")
+                    && line.contains("search='hint'")).count();
+            long volume = lines.stream().filter(line -> line.contains("event=gather_pillar_scan_empty")
+                    && line.contains("search='volume'")).count();
+            fixture.require(hint == 1, "the search for the sighted log ran " + hint + " times in 100 ticks at one stance");
+            fixture.require(volume == 1, "the search of the whole volume ran " + volume + " times in 100 ticks at one stance");
+            fixture.finish();
         });
     }
 
