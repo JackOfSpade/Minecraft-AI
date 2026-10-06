@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.manager;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.gametest.MockPlayers;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.task.SharedVision;
 import java.util.ArrayList;
 import java.util.List;
@@ -101,6 +102,32 @@ public final class AIPlayerManagerGameTests {
         SharedVision.forget(bot.getUUID());
         require(context, SharedVision.ownerOnline(bot) == null,
                 "forget did not evict the populated same-tick owner lookup");
+        context.succeed();
+    }
+
+    /**
+     * A bot is placed at the world spawn and then teleported to where it is wanted, and it has no client whose movement packets would
+     * re-centre its chunk tracking: until its own first tick, a bot spawned into a loaded chunk used to see nothing in it, so anything
+     * started in the spawn tick (a restored mission) refused its first route as unobserved.
+     */
+    @GameTest(environment = ENV + "spawned_bot_observes_its_chunk_in_the_tick_it_spawns", maxTicks = 20)
+    public void spawnedBotObservesItsChunkInTheTickItSpawns(GameTestHelper context) {
+        var world = context.getLevel();
+        var server = world.getServer();
+        BlockPos start = context.absolutePos(new BlockPos(3, 2, 3));
+        prepareLanding(context, start);
+        BlockPos log = start.east(3);
+        world.setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        String name = "TrackSpawnGT";
+        GameTestCleanup.whenFinished(context, () -> AIPlayerManager.INSTANCE.despawn(server, name));
+
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        server, name, world, Vec3.atBottomCenterOf(start), 0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        require(context, bot.getChunkTrackingView().contains(log.getX() >> 4, log.getZ() >> 4),
+                "the bot does not track the chunk it was spawned into");
+        require(context, ObservableWorldQuery.canObserveBlock(bot, log),
+                "the bot cannot see a log in plain view in the tick it was spawned");
         context.succeed();
     }
 

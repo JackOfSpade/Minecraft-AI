@@ -177,7 +177,10 @@ Terrain knowledge is shared between a Minecraft-AI bot and its linked owner. A b
 route knowledge only after a vanilla eye ray from either observer reaches it. The observer's
 effective block range is the lower of its requested client render distance and the server view
 distance, converted from chunks with `chunks × 16`; its endpoint chunk must also be both tracked
-for that observer and loaded by the server. This is deliberately not a loaded-chunk snapshot.
+for that observer and loaded by the server. This is deliberately not a loaded-chunk snapshot. A bot has no client whose
+movement packets re-centre its tracking, so `AIPlayerEntity` does it itself: at the start of every tick and straight after
+every teleport (including the one that places a new bot), which is what lets a bot see the chunk it was just put in during
+the tick it was put there.
 
 `SharedWorldSight` retains the ray-proven cells (including outline-only blocks such as rails,
 vines, torches, and crops) for 6,000 ticks. A route request adds an exact ray to its requested
