@@ -39,8 +39,8 @@ public final class ShowTargetTask extends AbstractTask {
     static final int MAX_TARGET_LEGS = 24;
     /** Bound the whole demonstration so a bad route cannot become a permanent task. */
     static final int MAX_SHOW_TICKS = 3_600;
-    /** Exactly three distinct visual gestures, never an attack/mining input. */
-    static final int SWING_COUNT = 3;
+    /** Exactly five distinct visual gestures, never an attack/mining input. */
+    static final int SWING_COUNT = 5;
     /** Four game ticks makes each swing a discrete tap instead of holding an input. */
     static final int SWING_INTERVAL_TICKS = 4;
     private static final int RETRY_DELAY_TICKS = 5;
@@ -295,7 +295,7 @@ public final class ShowTargetTask extends AbstractTask {
         return pursuit;
     }
 
-    /** Stop moving, face the actual visible location, then make exactly three harmless animation-only taps. */
+    /** Stop moving, face the actual visible location, then make exactly five harmless animation-only taps. */
     private void pointAtTarget(AIPlayerEntity bot, int now) {
         if (surfacePresentation != null && bot.blockPosition().getY() < surfacePresentation.getY()) {
             releaseSurfaceHold(bot);

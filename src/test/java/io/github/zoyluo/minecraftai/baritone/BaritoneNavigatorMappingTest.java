@@ -35,6 +35,20 @@ final class BaritoneNavigatorMappingTest {
     }
 
     @Test
+    void explicitPillarColumnPermitsOnlyTheInitiallyProvenVerticalRange() {
+        NavRoute.PillarPlacementColumn column = new NavRoute.PillarPlacementColumn(
+                new net.minecraft.core.BlockPos(4, 64, -2), 67);
+        assertTrue(column.allows(new net.minecraft.core.BlockPos(4, 64, -2)));
+        assertTrue(column.allows(new net.minecraft.core.BlockPos(4, 67, -2)));
+        assertFalse(column.allows(new net.minecraft.core.BlockPos(4, 63, -2)),
+                "a support below the original proven base is never available to the pillar");
+        assertFalse(column.allows(new net.minecraft.core.BlockPos(4, 68, -2)),
+                "the feet goal and its headroom remain empty");
+        assertFalse(column.allows(new net.minecraft.core.BlockPos(5, 65, -2)),
+                "a pillar route cannot turn into a side bridge");
+    }
+
+    @Test
     void ordinarySwimRoutesKeepDryGoalResolutionAndExactWaterRemainsExplicit() throws IOException {
         String actionPack = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/action/ActionPack.java"));
         String swim = method(actionPack, "public ActionResult startSwimRouteTo(BlockPos goal) {");
@@ -393,6 +407,19 @@ final class BaritoneNavigatorMappingTest {
         String goalOf = method(navigator, "static Goal goalOf(AIPlayerEntity bot, NavRoute route) {");
         assertTrue(goalOf.contains("route.observedPillarGoal()"),
                 "only an admitted visible column may map an unsupported BLOCK target to a pillar goal");
+        String start = method(navigator, "public static Admission start(AIPlayerEntity bot, NavRoute route, boolean admit) {");
+        assertTrue(start.contains("route.setPillarPlacementColumn(observed.pillarBase())"),
+                "the placement gate must receive the exact base that admission proved, not a later bot position");
+        String route = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/navigation/NavRoute.java"));
+        String placementColumn = method(route, "public record PillarPlacementColumn(");
+        assertTrue(placementColumn.contains("destination.getY() >= base.getY()")
+                        && placementColumn.contains("destination.getY() <= lastPlacementY"),
+                "an explicit pillar may fill only from its proven base through the cell below its goal");
+        String policy = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/BaritoneBreakPlacePolicy.java"));
+        String click = method(policy, "public static Decision checkClickBlock(");
+        assertTrue(click.contains("allowsPillarPlacementDestination(bot, destination)")
+                        && click.contains("pillar_destination_outside_column"),
+                "the placement interceptor must reject bridge/side placements outside an explicit pillar column");
         String safety = method(navigator, "static String observedPathSafetyFailure(");
         assertTrue(safety.contains("movement.getSrc().getY() - movement.getDest().getY() > safeFall")
                         && safety.contains("navigation_observed_corridor_unavailable"),

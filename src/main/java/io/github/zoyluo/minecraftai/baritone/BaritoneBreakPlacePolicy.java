@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.baritone;
 
 import baritone.api.BaritoneAPI;
 import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.MiningSafety;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mining.BreakRule;
 import io.github.zoyluo.minecraftai.mining.BreakVerdictCache;
@@ -9,6 +10,7 @@ import io.github.zoyluo.minecraftai.mixin.TrapDoorBlockTypeInvokerMixin;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.List;
@@ -128,6 +130,10 @@ public final class BaritoneBreakPlacePolicy {
         if (!currentObservedNavigationCell(bot, pos)) {
             return refuse(bot, BaritoneRefusals.Op.BREAK, pos, "not_observable", "-");
         }
+        MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(bot, pos);
+        if (support != MiningSafety.SupportOccupancy.NONE) {
+            return refuse(bot, BaritoneRefusals.Op.BREAK, pos, MiningSafety.refusalReason(support), "-");
+        }
         BlockState state = bot.level().getBlockState(pos);
         if (state.isAir()) {
             return Decision.ALLOWED;
@@ -193,11 +199,28 @@ public final class BaritoneBreakPlacePolicy {
         if (!BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, destination)) {
             return refuse(bot, BaritoneRefusals.Op.PLACE, destination, "destination_not_observed", detail);
         }
+        if (!allowsPillarPlacementDestination(bot, destination)) {
+            return refuse(bot, BaritoneRefusals.Op.PLACE, destination, "pillar_destination_outside_column", detail);
+        }
         BlockState destinationState = fence.stateAt(destination);
         if (destinationState == null || !destinationState.isAir()) {
             return refuse(bot, BaritoneRefusals.Op.PLACE, destination, "destination_not_observed", detail);
         }
         return Decision.placement(blockItem.getBlock().defaultBlockState());
+    }
+
+    /**
+     * The explicit no-dig tree-pillar route may fill only the air cells admission proved from
+     * its original collision-bearing base through the cell below its feet goal. Every other
+     * placement-capable route intentionally keeps the established general placement behaviour.
+     */
+    private static boolean allowsPillarPlacementDestination(AIPlayerEntity bot, BlockPos destination) {
+        NavRoute route = BaritoneRegistry.INSTANCE.observedRoute(bot);
+        if (route == null || !route.requiresPillarPlacementColumn()) {
+            return true;
+        }
+        NavRoute.PillarPlacementColumn column = route.pillarPlacementColumn();
+        return column != null && column.allows(destination);
     }
 
     /**

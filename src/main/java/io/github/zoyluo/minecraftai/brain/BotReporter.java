@@ -86,6 +86,11 @@ public final class BotReporter {
         return taskReportSequences.getOrDefault(bot.getUUID(), 0L);
     }
 
+    /** Whether ordinary task lifecycle messages are currently visible for this bot. */
+    public boolean taskReportsEnabled(AIPlayerEntity bot) {
+        return enabled(bot);
+    }
+
     public void onGoalMessage(AIPlayerEntity bot, String text) {
         if (!enabled(bot)) {
             return;

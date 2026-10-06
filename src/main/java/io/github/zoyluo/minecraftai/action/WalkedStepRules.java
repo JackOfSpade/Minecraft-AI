@@ -12,6 +12,8 @@ public final class WalkedStepRules {
     public static final int TIMEOUT_TICKS_PER_BLOCK = 8;
     /** A drop presses no key once the bot is this close to the middle of its hole (a body 0.6 wide falls into a one-block hole from within 0.2). */
     public static final double DROP_CENTRED = 0.1D;
+    /** Vanilla fall damage begins after three blocks; ordinary dry walked drops never exceed this. */
+    public static final int MAX_ZERO_DAMAGE_FALL_BLOCKS = 3;
     /** Ground friction leaves a released walker sliding about 1.3 ticks of its speed: the keys are let go that far before the point. */
     public static final double BRAKE_FACTOR = 1.3D;
     /** Largest horizontal speed of the vanilla-client style push out of a block (LocalPlayer.moveTowardsClosestSpace uses 0.1). */
@@ -62,8 +64,8 @@ public final class WalkedStepRules {
         return switch (kind) {
             case FLAT -> dy == 0 && horizontal == 1;
             case STEP_UP -> dy == 1 && horizontal == 1;
-            case STEP_DOWN -> dy >= -3 && dy <= -1 && horizontal == 1;
-            case DROP -> dy >= -3 && dy <= -1 && dx == 0 && dz == 0;
+            case STEP_DOWN -> isZeroDamageFall(-dy) && horizontal == 1;
+            case DROP -> isZeroDamageFall(-dy) && dx == 0 && dz == 0;
             case SWIM -> Math.abs(dy) <= 1 && horizontal <= 1 && (horizontal + Math.abs(dy)) > 0;
             case SNEAK_SHIFT, RECENTER, PUSH_OUT -> dx == 0 && dy == 0 && dz == 0;
         };
@@ -86,7 +88,17 @@ public final class WalkedStepRules {
         if (dy == 1) {
             return WalkedStep.Kind.STEP_UP;
         }
-        return dy >= -3 && dy < 0 ? WalkedStep.Kind.STEP_DOWN : null;
+        return isZeroDamageFall(-dy) ? WalkedStep.Kind.STEP_DOWN : null;
+    }
+
+    /** Whether a dry fall of {@code fallBlocks} has vanilla fall damage zero. */
+    public static boolean isZeroDamageFall(int fallBlocks) {
+        return fallBlocks >= 1 && fallBlocks <= MAX_ZERO_DAMAGE_FALL_BLOCKS;
+    }
+
+    /** A navigation policy may narrow the dry-drop cap, but can never widen it past zero-damage physics. */
+    public static int zeroDamageDropLimit(int configuredLimit) {
+        return Math.min(Math.max(0, configuredLimit), MAX_ZERO_DAMAGE_FALL_BLOCKS);
     }
 
     /** True for the kinds that end in a cell (the bot's block position must equal it) rather than at a point. */

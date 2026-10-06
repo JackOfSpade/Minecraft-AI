@@ -112,9 +112,10 @@ public final class BaritoneNavigator {
                     "rays", observed.rays(), "fresh_cells", observed.freshCells());
             return Admission.refused(observed.failure());
         }
-        registry.setObservationFence(bot, observed.fence(), route);
         route.setRevalidateRememberedTarget(observed.provenance() == ObservedNavigationFence.TargetProvenance.REMEMBERED);
         route.setObservedPillarGoal(observed.pillarGoal());
+        route.setPillarPlacementColumn(observed.pillarBase());
+        registry.setObservationFence(bot, observed.fence(), route);
         BotLog.path(bot, "nav_observation_fence_updated", "goal", route.target(), "generation",
                 observed.fence().generation(), "cells", observed.fence().cellCount(), "rays", observed.rays(),
                 "fresh_cells", observed.freshCells(), "provenance", observed.provenance());

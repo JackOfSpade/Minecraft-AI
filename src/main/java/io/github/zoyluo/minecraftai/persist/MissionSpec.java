@@ -57,6 +57,10 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
             case Goal.MineOre g -> {
                 type = "mine_ore";
                 params.put("count", String.valueOf(g.count()));
+                // Preserve the captured inventory baseline: without it, a restarted public
+                // "mine one more" request could regress into an already-satisfied absolute goal.
+                params.put("initial_drop_count", String.valueOf(g.initialDropCount()));
+                putTimedCollectionMode(params, g.collectionMode());
                 values = g.ores().stream().map(block -> BuiltInRegistries.BLOCK.getKey(block).toString()).sorted().toList();
             }
             case Goal.HarvestCrop g -> {
@@ -65,6 +69,8 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 params.put("seed", BuiltInRegistries.ITEM.getKey(g.seed()).toString());
                 params.put("produce", BuiltInRegistries.ITEM.getKey(g.produce()).toString());
                 params.put("count", String.valueOf(g.count()));
+                params.put("initial_produce_count", String.valueOf(g.initialProduceCount()));
+                putTimedCollectionMode(params, g.collectionMode());
             }
             case Goal.Armor ignored -> type = "armor";
             case Goal.Workstation ignored -> type = "workstation";
@@ -104,9 +110,11 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 case "mine_ore" -> new Goal.MineOre(values.stream()
                         .map(Identifier::parse)
                         .map(id -> BuiltInRegistries.BLOCK.getOptional(id).orElseThrow())
-                        .collect(java.util.stream.Collectors.toSet()), integer("count"));
+                        .collect(java.util.stream.Collectors.toSet()), integer("count"),
+                        nonNegativeIntegerOrDefault("initial_drop_count", 0), collectionModeOrDefault());
                 case "harvest_crop" -> new Goal.HarvestCrop(
-                        block("crop"), item("seed"), item("produce"), integer("count"));
+                        block("crop"), item("seed"), item("produce"), integer("count"),
+                        nonNegativeIntegerOrDefault("initial_produce_count", 0), collectionModeOrDefault());
                 case "armor" -> new Goal.Armor();
                 case "workstation" -> new Goal.Workstation();
                 case "stockpile" -> new Goal.Stockpile(item("item"), integer("count"));
@@ -130,6 +138,37 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
 
     private int integer(String key) {
         return Integer.parseInt(required(key));
+    }
+
+    /** Legacy mission records predate incremental mine/crop baselines and therefore mean zero. */
+    private int nonNegativeIntegerOrDefault(String key, int defaultValue) {
+        String value = params.get(key);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        int parsed = Integer.parseInt(value);
+        if (parsed < 0) {
+            throw new IllegalArgumentException("negative_mission_param:" + key);
+        }
+        return parsed;
+    }
+
+    /**
+     * Older mission records have no collection mode and remain fixed-quota goals.  Persist the
+     * non-default timed value only, keeping fixed-count mission records wire-compatible with the
+     * pre-timebox schema.
+     */
+    private static void putTimedCollectionMode(Map<String, String> params, Goal.CollectionMode mode) {
+        if (mode != null && mode.isTimedCollection()) {
+            params.put("collection_mode", mode.persistedValue());
+        }
+    }
+
+    private Goal.CollectionMode collectionModeOrDefault() {
+        String value = params.get("collection_mode");
+        return value == null || value.isBlank()
+                ? Goal.CollectionMode.FIXED_QUOTA
+                : Goal.CollectionMode.fromPersistedValue(value);
     }
 
     /** Strict triplet encoding keeps a persisted compound request declarative and replay-safe. */

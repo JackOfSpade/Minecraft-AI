@@ -69,4 +69,35 @@ class MinecraftAiServerNetworkingSourceContractTest {
         String source = source();
         assertTrue(source.contains("private static final int MAX_TASK_COUNT = 2304;"));
     }
+
+    @Test
+    void panelMineDistinguishesAnOmittedCountFromAnExplicitQuota() throws IOException {
+        String source = source();
+
+        assertTrue(source.contains("boolean countSpecified = hasCount(payload);"),
+                "mine dispatch must preserve whether the panel actually supplied a count");
+        assertTrue(source.contains("OreDigTask.collectForDuration(OreScan.oreFamily(block))"),
+                "a no-count ore request must use the ten-minute collection mode");
+        assertTrue(source.contains("timedResourceMineTask(block)"),
+                "a no-count non-ore request must collect its real drops, rather than mine one block");
+        assertTrue(source.contains("return payload.count() != 0;"),
+                "zero is the backwards-compatible wire sentinel for a count omitted by the panel");
+        assertTrue(source.contains("GatherQuotaTask.collectForDuration(drop)"),
+                "the timed non-ore path must track the block's actual drop item");
+    }
+
+    @Test
+    void panelAndCommandFallbackCanSendAnOmittedMiningCount() throws IOException {
+        String bridge = Files.readString(Path.of(
+                "src/client/java/io/github/zoyluo/minecraftai/client/BotCommandBridge.java"));
+        String quickActions = Files.readString(Path.of(
+                "src/client/java/io/github/zoyluo/minecraftai/client/screen/ui/cards/QuickActionCard.java"));
+
+        assertTrue(quickActions.contains("countField.setValue(\"\");"),
+                "the quick-action count field must start empty instead of silently requesting one item");
+        assertTrue(quickActions.contains("if (value.isEmpty()) {\n            return 0;"),
+                "an intentionally blank count must reach the command bridge as the omitted-count sentinel");
+        assertTrue(bridge.contains("(count == 0 ? \"\" : \" \" + Math.max(1, count))"),
+                "the no-network fallback must omit the Mine count argument too");
+    }
 }

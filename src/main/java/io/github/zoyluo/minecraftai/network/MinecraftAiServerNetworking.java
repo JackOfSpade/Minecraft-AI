@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.network;
 
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.brain.BotRuntimeOptions;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -23,6 +24,7 @@ import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.CraftTask;
 import io.github.zoyluo.minecraftai.task.EatTask;
+import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
@@ -313,10 +315,12 @@ public final class MinecraftAiServerNetworking {
             case "move" -> assign(bot, new MoveTask(bot, parseBlockPos(payload.arg1())));
             case "mine" -> {
                 Block block = requiredBlock(payload.arg1());
+                boolean countSpecified = hasCount(payload);
                 int requested = count(payload);
                 assign(bot, OreScan.isOreBlock(block)
-                        ? new OreDigTask(OreScan.oreFamily(block), requested)
-                        : new MineTask(block, requested));
+                        ? (countSpecified ? new OreDigTask(OreScan.oreFamily(block), requested)
+                        : OreDigTask.collectForDuration(OreScan.oreFamily(block)))
+                        : (countSpecified ? new MineTask(block, requested) : timedResourceMineTask(block)));
             }
             case "craft" -> assign(bot, new CraftTask(requiredItem(payload.arg1()), count(payload)));
             case "smelt" -> assign(bot, new SmeltTask(requiredItem(payload.arg1()), requiredItem(payload.arg2()), count(payload)));
@@ -446,6 +450,21 @@ public final class MinecraftAiServerNetworking {
 
     private static int count(BotCommandC2S payload) {
         return Math.max(1, Math.min(MAX_TASK_COUNT, payload.count()));
+    }
+
+    /**
+     * The panel's packet predates an explicit optional-count flag.  Reserve zero as its
+     * backwards-compatible "count omitted" value: ordinary clients have always sent a positive
+     * count, while negative/fuzzed values retain the old clamped-to-one behavior.
+     */
+    private static boolean hasCount(BotCommandC2S payload) {
+        return payload.count() != 0;
+    }
+
+    /** Match a no-count block-mining request to the actual item it yields, not Block#asItem(). */
+    private static Task timedResourceMineTask(Block block) {
+        Item drop = HarvestCore.expectedDropsFor(block).stream().findFirst().orElse(null);
+        return drop == null ? new MineTask(block, 1) : GatherQuotaTask.collectForDuration(drop);
     }
 
     private static BlockPos parseBlockPos(String value) {

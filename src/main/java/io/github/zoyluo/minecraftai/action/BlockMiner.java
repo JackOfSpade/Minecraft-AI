@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.BreakRule;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -47,6 +48,10 @@ public final class BlockMiner {
     private boolean started;
     /** Exact ActionPack controller generation that this miner started, or -1 before admission. */
     private long miningGeneration = -1L;
+    /** A short physical sidestep that releases this bot's own support before retrying the same target. */
+    private ActionPack.StepLease selfSupportMoveLease;
+    private BlockPos selfSupportMoveOrigin;
+    private BlockPos selfSupportMoveTarget;
     private boolean miningChannelToolPolicy;
     /** Refuse (fail with {@code break_refused:<reason>}) a target the shared {@link BreakRule} denies for the legacy diggers ({@link BreakRule#legacyDenialOf}). */
     private boolean naturalTerrainOnly;
@@ -59,10 +64,14 @@ public final class BlockMiner {
 
     /** OreDig may opt into lowest-sufficient pickaxe selection; the default remains unchanged. */
     public void begin(AIPlayerEntity bot, BlockPos pos, boolean miningChannelToolPolicy) {
-        if (pos != null && pos.equals(target) && started) {
-            return; // Same block, keep mining — never reset (this was the exact root cause of the #9 hang)
+        if (pos != null && pos.equals(target) && (started || selfSupportMoveLease != null)) {
+            // Same block, keep its physical work in flight.  In particular OreDig renews the
+            // finite target each tick; resetting here would cancel the very sidestep that is
+            // getting us off that target's support before the next tick can settle it.
+            return;
         }
         // Switching targets: stop the old mining first, then lock in the new target.
+        cancelSelfSupportMove(bot);
         bot.getActionPack().stopMining();
         this.target = pos == null ? null : pos.immutable();
         this.sinceTick = 0;
@@ -100,11 +109,22 @@ public final class BlockMiner {
         if (target == null) {
             return Status.IDLE;
         }
+        if (selfSupportMoveLease != null) {
+            return settleSelfSupportMove(bot);
+        }
         // Do not let a controller that was cancelled or replaced claim an empty target as its
         // own completion. The check must precede visiblyAir(), whose state read is otherwise a
         // valid terminal result only for the controller that still owns this generation.
         if (started && miningGeneration != bot.getActionPack().miningGeneration()) {
             return miningPreempted(bot);
+        }
+        // Footing is live physical evidence, not remembered terrain: test it before the ordinary
+        // visibility gate so a bot standing on its own target can step aside rather than merely
+        // reporting that the block under its feet is out of sight. A different player on that
+        // footing is skipped without a target-state read or a break attempt.
+        MiningSafety.SupportOccupancy initialSupport = MiningSafety.supportOccupancy(bot, target);
+        if (initialSupport != MiningSafety.SupportOccupancy.NONE) {
+            return handleSupportOccupancy(bot, initialSupport);
         }
         ServerLevel world = bot.level();
         // The target may have been broken by this miner on the preceding scheduler tick. A
@@ -186,6 +206,10 @@ public final class BlockMiner {
             // The earlier state may have changed while this task tick selected a tool. Re-prove
             // before the second state read and the tool choice, then let ActionPack repeat the
             // same admission immediately before it creates the controller.
+            MiningSafety.SupportOccupancy admissionSupport = MiningSafety.supportOccupancy(bot, target);
+            if (admissionSupport != MiningSafety.SupportOccupancy.NONE) {
+                return handleSupportOccupancy(bot, admissionSupport);
+            }
             if (!MiningController.currentObservedTarget(bot, target)) {
                 return targetNotObserved(bot);
             }
@@ -223,6 +247,7 @@ public final class BlockMiner {
 
     /** Abandon the current mining operation (called when a task is paused/aborted); does not change the external intent of "which block to mine". */
     public void cancel(AIPlayerEntity bot) {
+        cancelSelfSupportMove(bot);
         stopOwnedMining(bot);
         target = null;
         started = false;
@@ -238,6 +263,101 @@ public final class BlockMiner {
                 pos.getX() + 0.5 - bot.getEyePosition().x,
                 pos.getY() + 0.5 - bot.getEyePosition().y,
                 pos.getZ() + 0.5 - bot.getEyePosition().z);
+    }
+
+    /**
+     * Leaves this bot's own footing before retrying the unchanged target. Another player on the
+     * block is a hard no-op: a bot must never attempt to dislodge someone else, so the owning task
+     * receives a typed refusal and can select another target or route around it.
+     */
+    private Status handleSupportOccupancy(AIPlayerEntity bot, MiningSafety.SupportOccupancy support) {
+        if (support == MiningSafety.SupportOccupancy.PLAYER) {
+            return supportUnavailable(bot, MiningSafety.PLAYER_SUPPORT);
+        }
+        stopOwnedMining(bot);
+        started = false;
+        miningGeneration = -1L;
+        BlockPos origin = bot.blockPosition().immutable();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos side = origin.relative(direction);
+            if (!canObserveSidestepEnvelope(bot, side)
+                    || WalkedStep.refusal(bot, side, WalkedStep.Kind.FLAT) != null) {
+                continue;
+            }
+            ActionPack.StepLease lease = bot.getActionPack().runStep(
+                    WalkedStep.begin(bot, side, WalkedStep.Kind.FLAT, "miner_self_support_step_aside"));
+            if (lease == null) {
+                if (bot.getActionPack().stepAdmissionBlocked()) {
+                    return Status.MINING;
+                }
+                continue;
+            }
+            selfSupportMoveLease = lease;
+            selfSupportMoveOrigin = origin;
+            selfSupportMoveTarget = side.immutable();
+            BotLog.action(bot, "miner_self_support_step_aside",
+                    "target", target.toShortString(),
+                    "from", origin.toShortString(), "to", side.toShortString());
+            return Status.MINING;
+        }
+        return supportUnavailable(bot, MiningSafety.SELF_SUPPORT);
+    }
+
+    /** Reconciles the exact physical sidestep before the miner tries the still-retained target again. */
+    private Status settleSelfSupportMove(AIPlayerEntity bot) {
+        ActionPack pack = bot.getActionPack();
+        ActionPack.StepLease lease = selfSupportMoveLease;
+        if (pack.stepInFlightFor(lease)) {
+            return Status.MINING;
+        }
+        BlockPos origin = selfSupportMoveOrigin;
+        BlockPos movedTo = selfSupportMoveTarget;
+        if (!pack.stepIdle()) {
+            clearSelfSupportMove();
+            return supportUnavailable(bot, MiningSafety.SELF_SUPPORT);
+        }
+        WalkedStep.Result result = pack.stepResultFor(lease);
+        clearSelfSupportMove();
+        if (result != null && result.succeeded() && movedTo != null && bot.blockPosition().equals(movedTo)) {
+            BotLog.action(bot, "miner_self_support_moved_aside",
+                    "target", target.toShortString(),
+                    "from", origin == null ? "unknown" : origin.toShortString(),
+                    "to", movedTo.toShortString());
+            return Status.MINING;
+        }
+        return supportUnavailable(bot, MiningSafety.SELF_SUPPORT);
+    }
+
+    /** Only a fully observed, adjacent dry stance is eligible to release an occupied support. */
+    private static boolean canObserveSidestepEnvelope(AIPlayerEntity bot, BlockPos side) {
+        return ObservableWorldQuery.canObserveCell(bot, side)
+                && ObservableWorldQuery.canObserveCell(bot, side.above())
+                && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, side.below());
+    }
+
+    private Status supportUnavailable(AIPlayerEntity bot, String reason) {
+        BlockPos refused = target;
+        stopOwnedMining(bot);
+        failureReason = reason;
+        target = null;
+        started = false;
+        miningGeneration = -1L;
+        BotLog.action(bot, "miner_support_unavailable", "target",
+                refused == null ? "unknown" : refused.toShortString(), "reason", reason);
+        return Status.FAILED;
+    }
+
+    private void cancelSelfSupportMove(AIPlayerEntity bot) {
+        if (selfSupportMoveLease != null && bot.getActionPack().stepInFlightFor(selfSupportMoveLease)) {
+            bot.getActionPack().cancelStep();
+        }
+        clearSelfSupportMove();
+    }
+
+    private void clearSelfSupportMove() {
+        selfSupportMoveLease = null;
+        selfSupportMoveOrigin = null;
+        selfSupportMoveTarget = null;
     }
 
     /** Refusal is terminal for this retained coordinate; callers may only nominate a new visible target. */

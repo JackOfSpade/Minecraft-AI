@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ClipContext;
@@ -155,8 +156,19 @@ public final class SharedWorldSight {
      * from a prior bot/owner eye ray, not permission to treat a stale state as current.
      */
     public static List<Observation> knownBlocks(AIPlayerEntity bot, Set<Block> targetBlocks, int limit) {
-        if (bot == null || targetBlocks == null || targetBlocks.isEmpty() || limit <= 0
-                || bot.level().getServer() == null) {
+        if (targetBlocks == null || targetBlocks.isEmpty()) {
+            return List.of();
+        }
+        return knownBlocks(bot, state -> targetBlocks.contains(state.getBlock()), limit);
+    }
+
+    /**
+     * Returns remembered cells selected by their already-recorded state, without inspecting new
+     * terrain. This is useful for landmarks such as leaves: callers still re-prove a selected
+     * cell before acting on it.
+     */
+    public static List<Observation> knownBlocks(AIPlayerEntity bot, Predicate<BlockState> stateFilter, int limit) {
+        if (bot == null || stateFilter == null || limit <= 0 || bot.level().getServer() == null) {
             return List.of();
         }
         int tick = bot.level().getServer().getTickCount();
@@ -164,7 +176,7 @@ public final class SharedWorldSight {
         prune(memory, tick);
         List<Observation> matches = new ArrayList<>();
         for (Observation observation : memory.cells.values()) {
-            if (targetBlocks.contains(observation.state().getBlock())) {
+            if (stateFilter.test(observation.state())) {
                 matches.add(observation);
             }
         }

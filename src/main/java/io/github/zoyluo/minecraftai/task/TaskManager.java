@@ -1,7 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.brain.BotReporter;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
@@ -419,6 +421,7 @@ public final class TaskManager {
                 recordFailure(player, task.name(), task.failureReason(), server.getTickCount());
                 BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.TASK, player, "task_failed",
                         "name", task.name(), "reason", task.failureReason(), "elapsed_ticks", task.elapsedTicks());
+                reportDirectTimedCollectionMiss(player, origin, task);
             } else if (task.state() == TaskState.CANCELLED) {
                 active.remove(uuid);
                 activeOrigins.remove(uuid);
@@ -435,6 +438,24 @@ public final class TaskManager {
             case PLAYER_COMMAND, PLAYER_PANEL, LLM_TOOL, MISSION, JOB -> true;
             case SAFETY, SYSTEM_BACKGROUND, VERIFY -> false;
         };
+    }
+
+    /**
+     * Goal missions publish their own exact terminal result. A direct tool/command task has no
+     * goal executor to do that, so make the promised "none found after ten minutes" reply
+     * unconditional even when optional verbose task reporting is disabled.
+     */
+    private static void reportDirectTimedCollectionMiss(AIPlayerEntity bot,
+                                                         TaskOrigin origin,
+                                                         Task task) {
+        if (task == null || !userRequested(origin)
+                || GoalExecutor.INSTANCE.hasActivePlan(bot)
+                || BotReporter.INSTANCE.taskReportsEnabled(bot)
+                || !GatherQuotaTask.NO_RESOURCE_FOUND_BY_DEADLINE.equals(task.failureReason())) {
+            return;
+        }
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "I explored for ten minutes but found none of the requested resource.");
     }
 
     public void recordFailure(AIPlayerEntity bot, String name, String reason, int tick) {

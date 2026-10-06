@@ -101,6 +101,17 @@ public final class NavRoute {
      * Baritone pillar plan to create that footing from cells the bot has actually seen.
      */
     private boolean observedPillarGoal;
+    /**
+     * True only for the explicit, no-dig pillar entry point.  Ordinary placement-capable routes
+     * deliberately leave this false: they retain their existing bridge/terrain behaviour.
+     */
+    private boolean pillarPlacementColumnRequired;
+    /**
+     * The exact range a no-dig pillar route may fill. It stays null until admission has proved
+     * the column from a real base through the requested goal; null is therefore fail-closed for
+     * an explicit pillar request.
+     */
+    private PillarPlacementColumn pillarPlacementColumn;
     private int deadlineTick;
     private BlockPos resolvedGoal;
     private Object goalHandle;
@@ -195,6 +206,53 @@ public final class NavRoute {
 
     public void setObservedPillarGoal(boolean observedPillarGoal) {
         this.observedPillarGoal = observedPillarGoal;
+    }
+
+    /** Marks this route as the one explicit construction form that may use only its proven pillar column. */
+    public void requirePillarPlacementColumn() {
+        pillarPlacementColumnRequired = true;
+    }
+
+    /** Whether execution must reject any placement outside the admitted vertical pillar column. */
+    public boolean requiresPillarPlacementColumn() {
+        return pillarPlacementColumnRequired;
+    }
+
+    /** The admitted column, or null when a no-dig pillar route has no current column proof. */
+    public PillarPlacementColumn pillarPlacementColumn() {
+        return pillarPlacementColumn;
+    }
+
+    /**
+     * Publishes the bottom of the exact column admission proved. The only legal destinations
+     * are the initially empty cells from that base through the cell immediately below this
+     * route's requested feet goal; the goal itself and its headroom stay clear for the body.
+     */
+    public void setPillarPlacementColumn(BlockPos base) {
+        if (!pillarPlacementColumnRequired || base == null || target.getY() <= base.getY()) {
+            pillarPlacementColumn = null;
+            return;
+        }
+        pillarPlacementColumn = new PillarPlacementColumn(base, target.getY() - 1);
+    }
+
+    /** Immutable, exact X/Z and Y-range permit for one visibly proven pillar. */
+    public record PillarPlacementColumn(BlockPos base, int lastPlacementY) {
+        public PillarPlacementColumn {
+            base = java.util.Objects.requireNonNull(base, "base").immutable();
+            if (lastPlacementY < base.getY()) {
+                throw new IllegalArgumentException("pillar placement range is empty");
+            }
+        }
+
+        /** Whether this exact placement destination belongs to the vertical column that was proved on admission. */
+        public boolean allows(BlockPos destination) {
+            return destination != null
+                    && destination.getX() == base.getX()
+                    && destination.getZ() == base.getZ()
+                    && destination.getY() >= base.getY()
+                    && destination.getY() <= lastPlacementY;
+        }
     }
 
     /** The tick after which a route that is still running is abandoned with {@code path_timeout}. */

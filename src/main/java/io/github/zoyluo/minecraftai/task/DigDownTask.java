@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.MiningSafety;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
@@ -727,7 +728,10 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return;
         }
 
-        // Advance the current dig.
+        // Advance the current dig. Keep the nominated coordinate long enough to distinguish a
+        // player-supported stair body from an ordinary mining failure: BlockMiner clears its
+        // target when it returns FAILED.
+        BlockPos minedTarget = miner.target();
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.MINING) {
             return; // still mining, wait for it to break/time out
@@ -738,6 +742,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // DONE / FAILED / IDLE -> decide the next cell (the column underfoot).
 
         BlockPos feet = bot.blockPosition();
+        if (!horizontalMode
+                && status == BlockMiner.Status.FAILED
+                && MiningSafety.PLAYER_SUPPORT.equals(miner.failureReason())
+                && routeAroundPlayerSupportedStairBody(bot, world, feet, minedTarget)) {
+            return;
+        }
         if (horizontalMode || feet.below().getY() <= MIN_Y) {
             // horizontalMode: permanently switches to horizontal digging once the MAX_DESCENT cap is
             // reached (see the one-time flag set above). Or, just above bedrock with no more room
@@ -823,6 +833,41 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         if (!rotateStair(bot, world, feet)) {
             digHorizontal(bot, world, feet);
         }
+    }
+
+    /**
+     * A player may step onto an already selected stair body between this task's local proof and
+     * BlockMiner's final break admission. That typed refusal is not a transient mining failure:
+     * preserve the player footing, mark this diagonal unavailable at this stance, and immediately
+     * choose another stair (or the ordinary horizontal fallback) instead of nominating the same
+     * body block again on the next tick.
+     */
+    private boolean routeAroundPlayerSupportedStairBody(AIPlayerEntity bot,
+                                                          ServerLevel world,
+                                                          BlockPos feet,
+                                                          BlockPos failedTarget) {
+        if (!isSelectedStairBody(feet, stairDirIndex, failedTarget)) {
+            return false;
+        }
+        Direction blocked = HDIRS[stairDirIndex];
+        rejectLandingDirection(feet, stairDirIndex);
+        BotLog.action(bot, "dig_down_player_support_bypass",
+                "target", failedTarget.toShortString(),
+                "from", feet.toShortString(),
+                "direction", blocked.getSerializedName());
+        if (!rotateStair(bot, world, feet)) {
+            digHorizontal(bot, world, feet);
+        }
+        return true;
+    }
+
+    /** The three cells cleared to make the currently selected diagonal stair passable. */
+    static boolean isSelectedStairBody(BlockPos feet, int directionIndex, BlockPos target) {
+        if (feet == null || target == null || directionIndex < 0 || directionIndex >= HDIRS.length) {
+            return false;
+        }
+        BlockPos ahead = feet.relative(HDIRS[directionIndex]);
+        return target.equals(ahead) || target.equals(ahead.above()) || target.equals(ahead.below());
     }
 
     private void beginReturn(AIPlayerEntity bot) {

@@ -126,16 +126,22 @@ public final class MiningController {
         // A visibly empty cell is the narrowly safe completion case (for example the controller
         // finished on the preceding scheduler tick); it cannot start a new break.
         if (visiblyAir(player, pos)) {
-            resetProgress(player);
-            return ActionResult.SUCCESS;
+            return settleVisibleAir(player);
         }
         if (!currentObservedTarget(player, pos)) {
             return visibilityRefused(player);
         }
+        // A target can become a support after the controller was admitted (another player walks
+        // onto it, or a bot lands on its own bridge). Stop the live break before another progress
+        // tick can destroy that footing. The current target has already been ray-proven above,
+        // so this live footing check cannot become a hidden-terrain probe.
+        MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);
+        if (support != MiningSafety.SupportOccupancy.NONE) {
+            return supportRefused(player, support);
+        }
         BlockState state = world.getBlockState(pos);
         if (state.isAir()) {
-            resetProgress(player);
-            return ActionResult.SUCCESS;
+            return settleVisibleAir(player);
         }
         if (targetState != null && !state.equals(targetState)) {
             resetProgress(player);
@@ -153,12 +159,20 @@ public final class MiningController {
         if (!started) {
             if (driven) {
                 if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK)) {
+                    MiningSafety.SupportOccupancy liveSupport = MiningSafety.supportOccupancy(player, pos);
+                    if (liveSupport != MiningSafety.SupportOccupancy.NONE) {
+                        return supportRefused(player, liveSupport);
+                    }
                     return visibilityRefused(player);
                 }
                 BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face, "driver", "baritone");
             } else {
                 ToolSelector.equipBestTool(player, state);
                 if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK)) {
+                    MiningSafety.SupportOccupancy liveSupport = MiningSafety.supportOccupancy(player, pos);
+                    if (liveSupport != MiningSafety.SupportOccupancy.NONE) {
+                        return supportRefused(player, liveSupport);
+                    }
                     return visibilityRefused(player);
                 }
                 BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face);
@@ -175,12 +189,13 @@ public final class MiningController {
 
         if (progress >= 1.0F) {
             if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK)) {
+                MiningSafety.SupportOccupancy liveSupport = MiningSafety.supportOccupancy(player, pos);
+                if (liveSupport != MiningSafety.SupportOccupancy.NONE) {
+                    return supportRefused(player, liveSupport);
+                }
                 return visibilityRefused(player);
             }
-            world.destroyBlockProgress(player.getId(), pos, -1);
-            AStarPathfinder.invalidateCache("block_break");
-            MiningAssistHooks.onBotBreak(player, pos);
-            return ActionResult.SUCCESS;
+            return completeBreak(player);
         }
 
         elapsed++;
@@ -230,7 +245,19 @@ public final class MiningController {
     /** Re-proves the live cell immediately before each vanilla break packet. */
     private boolean sendBreakActionIfObserved(AIPlayerEntity player,
                                               ServerboundPlayerActionPacket.Action action) {
+        // Some instant-break blocks (for example a torch) turn into observed air during the
+        // START/attack phase. STOP and ABORT have no packet left to send in that case, but the
+        // completed controller still owns a valid observed break transaction. Treat it as a
+        // successful settlement rather than misreporting a visibility refusal.
+        if (action != ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK
+                && visiblyAir(player, pos)) {
+            return true;
+        }
         if (!currentObservedTarget(player, pos)) {
+            return false;
+        }
+        if (action != ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK
+                && MiningSafety.supportOccupancy(player, pos) != MiningSafety.SupportOccupancy.NONE) {
             return false;
         }
         player.gameMode.handleBlockBreakAction(
@@ -240,6 +267,37 @@ public final class MiningController {
                 Level.MAX_ENTITY_SPAWN_Y,
                 -1);
         return true;
+    }
+
+    /** Clears an active local break without classifying a support-safety refusal as lost sight. */
+    private ActionResult supportRefused(AIPlayerEntity player, MiningSafety.SupportOccupancy support) {
+        abort(player);
+        String reason = MiningSafety.refusalReason(support);
+        BotLog.action(player, "mine_support_refused", "pos", LogFields.pos(pos),
+                "reason", reason);
+        return ActionResult.failed(reason);
+    }
+
+    /**
+     * Settles the one controller that actually started an observed break when its target is now
+     * visibly air. Instant blocks such as torches can disappear inside {@code state.attack}; do
+     * not erase the captured pre-break state or turn that successful transaction into an
+     * "unknown" completion. An unstarted race still clears its local indicator as before.
+     */
+    private ActionResult settleVisibleAir(AIPlayerEntity player) {
+        if (started && targetState != null) {
+            return completeBreak(player);
+        }
+        clearProgress(player);
+        return ActionResult.SUCCESS;
+    }
+
+    /** Runs the common post-break receipt work without erasing the captured pre-break state. */
+    private ActionResult completeBreak(AIPlayerEntity player) {
+        player.level().destroyBlockProgress(player.getId(), pos, -1);
+        AStarPathfinder.invalidateCache("block_break");
+        MiningAssistHooks.onBotBreak(player, pos);
+        return ActionResult.SUCCESS;
     }
 
     private ActionResult visibilityRefused(AIPlayerEntity player) {

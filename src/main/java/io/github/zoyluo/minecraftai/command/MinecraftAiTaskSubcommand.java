@@ -15,6 +15,7 @@ import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.task.BlueprintLoader;
 import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.task.BreedTask;
 import io.github.zoyluo.minecraftai.task.BuildTask;
 import io.github.zoyluo.minecraftai.task.CombatTask;
@@ -59,9 +60,9 @@ public final class MinecraftAiTaskSubcommand {
                                 .then(literal("move")
                                         .then(blockPosArgs(MinecraftAiTaskSubcommand::assignMove)))
                                 .then(literal("forage")
-                                        .executes(context -> assignForage(context, 4))
+                                        .executes(context -> assignForage(context, false, 0))
                                         .then(argument("count", IntegerArgumentType.integer(1))
-                                                .executes(context -> assignForage(context, IntegerArgumentType.getInteger(context, "count")))))
+                                                .executes(context -> assignForage(context, true, IntegerArgumentType.getInteger(context, "count")))))
                                 .then(literal("attack")
                                         .then(argument("entity_type", IdentifierArgument.id())
                                                 .executes(context -> assignAttack(context, 1))
@@ -69,14 +70,14 @@ public final class MinecraftAiTaskSubcommand {
                                                         .executes(context -> assignAttack(context, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("mine")
                                         .then(argument("block", IdentifierArgument.id())
-                                                .executes(context -> assignMine(context, 1))
+                                                .executes(context -> assignMine(context, false, 0))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
-                                                        .executes(context -> assignMine(context, IntegerArgumentType.getInteger(context, "count"))))))
+                                                        .executes(context -> assignMine(context, true, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("gather")
                                         .then(argument("item", IdentifierArgument.id())
-                                                .executes(context -> assignGather(context, 1))
+                                                .executes(context -> assignGather(context, false, 0))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
-                                                        .executes(context -> assignGather(context, IntegerArgumentType.getInteger(context, "count"))))))
+                                                        .executes(context -> assignGather(context, true, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("craft")
                                         .then(argument("item", IdentifierArgument.id())
                                                 .executes(context -> assignCraft(context, 1))
@@ -198,8 +199,12 @@ public final class MinecraftAiTaskSubcommand {
         return assign(context, bot -> new MoveTask(bot, getBlockPos(context)));
     }
 
-    private static int assignForage(CommandContext<CommandSourceStack> context, int count) {
-        return assign(context, bot -> GatherQuotaTask.collectAdditional(Items.SWEET_BERRIES, count));
+    private static int assignForage(CommandContext<CommandSourceStack> context,
+                                    boolean countSpecified,
+                                    int count) {
+        return assign(context, bot -> countSpecified
+                ? GatherQuotaTask.collectAdditional(Items.SWEET_BERRIES, count)
+                : GatherQuotaTask.collectForDuration(Items.SWEET_BERRIES));
     }
 
     private static int assignAttack(CommandContext<CommandSourceStack> context, int count) {
@@ -213,17 +218,33 @@ public final class MinecraftAiTaskSubcommand {
         });
     }
 
-    private static int assignMine(CommandContext<CommandSourceStack> context, int count) {
+    private static int assignMine(CommandContext<CommandSourceStack> context,
+                                  boolean countSpecified,
+                                  int count) {
         return assign(context, bot -> {
             Block block = BuiltInRegistries.BLOCK.getValue(IdentifierArgument.getId(context, "block"));
-            return OreScan.isOreBlock(block) ? new OreDigTask(OreScan.oreFamily(block), count) : new MineTask(block, count);
+            if (OreScan.isOreBlock(block)) {
+                return countSpecified ? new OreDigTask(OreScan.oreFamily(block), count)
+                        : OreDigTask.collectForDuration(OreScan.oreFamily(block));
+            }
+            return countSpecified ? new MineTask(block, count) : timedResourceMineTask(block);
         });
     }
 
-    private static int assignGather(CommandContext<CommandSourceStack> context, int count) {
-        return assign(context, bot -> GatherQuotaTask.collectAdditional(
-                BuiltInRegistries.ITEM.getValue(IdentifierArgument.getId(context, "item")),
-                count));
+    /** Match resource mining to the item that the block actually yields (for example stone -> cobblestone). */
+    private static Task timedResourceMineTask(Block block) {
+        Item drop = HarvestCore.expectedDropsFor(block).stream().findFirst().orElse(null);
+        return drop == null ? new MineTask(block, 1) : GatherQuotaTask.collectForDuration(drop);
+    }
+
+    private static int assignGather(CommandContext<CommandSourceStack> context,
+                                    boolean countSpecified,
+                                    int count) {
+        return assign(context, bot -> {
+            Item item = BuiltInRegistries.ITEM.getValue(IdentifierArgument.getId(context, "item"));
+            return countSpecified ? GatherQuotaTask.collectAdditional(item, count)
+                    : GatherQuotaTask.collectForDuration(item);
+        });
     }
 
     private static int assignCraft(CommandContext<CommandSourceStack> context, int count) {

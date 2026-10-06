@@ -7,6 +7,9 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.brain.ToolDefinition;
 import io.github.zoyluo.minecraftai.brain.ToolRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.goal.GoalResult;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
@@ -124,6 +127,70 @@ public final class OreDigVeinGameTests {
                             + ", expected all " + near.size() + " connected drops");
             requireOnlyChanged(context, world, before, near,
                     "count mode disturbed terrain outside the opened vein");
+            finish(context, fixture);
+        });
+    }
+
+    /**
+     * The public count tool promises new drops, rather than an absolute inventory total.  In
+     * particular, the coal it already holds must not make {@code mine_ore count=1} report
+     * {@code already_satisfied} while a visible coal ore remains unmined.
+     */
+    @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_public_count_with_held_coal_mines_seen_ore", maxTicks = 1500)
+    public void publicCountWithHeldCoalMinesSeenOre(GameTestHelper context) {
+        Fixture fixture = spawn(context, "PublicCoalCountGT", true, true, 20);
+        AIPlayerEntity bot = fixture.bot();
+        var world = bot.level();
+        BlockPos start = fixture.start();
+        BlockPos ore = start.offset(0, 0, -3).immutable();
+        world.setBlock(ore, Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        Map<BlockPos, BlockState> before = snapshot(world, start);
+        int deaths = deathCount(bot);
+        require(context, MinecraftAiConfig.get().goal().autoToolFillEnabled(),
+                "public mine_ore count must exercise its adaptive goal boundary");
+        InventoryAction.giveItem(bot, new ItemStack(Items.COAL));
+        int heldCoal = InventoryAction.countItem(bot, Items.COAL);
+        require(context, heldCoal == 1, "fixture did not start with exactly one held coal");
+        int requestedDrops = 1;
+        Goal.MineOre expectedGoal = new Goal.MineOre(
+                OreScan.oreFamily(Blocks.COAL_ORE), requestedDrops, heldCoal);
+        require(context, expectedGoal.count() == requestedDrops
+                        && expectedGoal.initialDropCount() == heldCoal
+                        && expectedGoal.targetDropCount() == heldCoal + requestedDrops,
+                "public count goal did not preserve its quota, baseline, and target semantics");
+        long resultBaseline = GoalExecutor.INSTANCE.lastResult(bot).map(GoalResult::sequence).orElse(0L);
+
+        ToolDefinition definition = new ToolRegistry().get("mine_ore").orElse(null);
+        require(context, definition != null, "mine_ore was not registered");
+        JsonObject args = JsonParser.parseString(
+                "{\"ore\":\"minecraft:coal_ore\",\"count\":1}").getAsJsonObject();
+        ToolDefinition.ToolResult result = definition.handler().invoke(bot, args);
+        require(context, result != null && result.ok(),
+                "public mine_ore count request was rejected: " + (result == null ? "null" : result.message()));
+        require(context, GoalExecutor.INSTANCE.isActiveGoal(bot, expectedGoal),
+                "public mine_ore did not retain its one-drop quota and held-coal baseline");
+        require(context, GoalExecutor.INSTANCE.resultAfter(bot, resultBaseline).isEmpty(),
+                "public mine_ore completed before mining the visible coal");
+
+        context.failIfEver(() -> {
+            require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
+            GoalResult completed = GoalExecutor.INSTANCE.resultAfter(bot, resultBaseline).orElse(null);
+            if (completed == null) {
+                if (context.getTick() > 1400) {
+                    fail(context, "public mine_ore did not complete after mining the visible coal");
+                }
+                return;
+            }
+            require(context, completed.goal().equals(expectedGoal)
+                            && completed.status() == GoalResult.Status.COMPLETED,
+                    "public mine_ore ended as " + completed.status() + ":" + completed.reason());
+            require(context, world.getBlockState(ore).isAir(),
+                    "public mine_ore reported completion without mining the visible coal");
+            require(context, InventoryAction.countItem(bot, Items.COAL) >= heldCoal + 1,
+                    "public mine_ore did not collect a new coal: "
+                            + InventoryAction.countItem(bot, Items.COAL));
+            requireOnlyChanged(context, world, before, Set.of(ore),
+                    "public mine_ore disturbed terrain outside the visible coal");
             finish(context, fixture);
         });
     }

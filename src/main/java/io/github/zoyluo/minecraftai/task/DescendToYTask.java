@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
@@ -69,6 +70,21 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // Keep the graph walk bounded, but leave enough factual movement budget to reach a nearby
     // supported rim after exploring a short dead branch (seed-3000 needs 21 unique edges).
     private static final int MAX_LATERAL = 32;
+    // A local stair/detour can prove that every immediately adjacent descent is unsafe while a
+    // dry rim is still plainly visible a few cells farther around an aquifer, lava shelf, or
+    // open drop.  The bypass never guesses through terrain: these bounds cap only candidates
+    // that are individually re-proven visible before Baritone is asked to walk to them.
+    private static final int HAZARD_BYPASS_RADIUS = 8;
+    private static final int HAZARD_BYPASS_MAX_RISE = 2;
+    private static final int HAZARD_BYPASS_PROBES_PER_TICK = 24;
+    private static final int HAZARD_BYPASS_MAX_STARTED_LEGS = 48;
+    // Refused Baritone goals must not make the first handful of visible cells terminal, but a
+    // repeatedly unavailable navigator still needs a hard per-obstacle ceiling independent of
+    // the larger task-wide descent budget.
+    private static final int HAZARD_BYPASS_MAX_ROUTE_PROBES = 96;
+    private static final int HAZARD_BYPASS_ROUTE_LIMIT = 160;
+    private static final int HAZARD_BYPASS_CANDIDATE_COUNT =
+            (HAZARD_BYPASS_MAX_RISE + 1) * 4 * HAZARD_BYPASS_RADIUS * (HAZARD_BYPASS_RADIUS + 1);
     // Landing drift (knockback/pushing knocks the bot to a third cell outside origin/target) is a
     // common external-force event, not a safety-invariant violation: simply replan the stair from
     // the bot's actual current stance as the new origin. Only when drift repeats beyond this cap
@@ -111,6 +127,19 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private int landingDriftRecoveries; // number of landing-drift recoveries already performed within this descent
     private int stairDirIndex;  // the stair's current diagonal-descent horizontal direction (index into HORIZONTAL)
     private int detourHeadingIndex = -1; // detours keep heading; an immediate reversal is tried last
+    // A Baritone-owned, no-dig/no-pillar reroute around an observed hazard.  This is intentionally
+    // transient: MiningExploration owns fresh non-durable descents, and pause/abort already stop
+    // every ActionPack route before the stair is re-derived from the factual current pose.
+    private BlockPos hazardBypassAnchor;
+    private BlockPos hazardBypassGoal;
+    private int hazardBypassStartedBudget = -1;
+    private BlockPos hazardBypassProbeOrigin;
+    private int hazardBypassProbeCursor;
+    private int hazardBypassRouteProbes;
+    /** Counts every successfully admitted bypass leg, including ones that later time out. */
+    private int hazardBypassStartedLegs;
+    private final Set<BlockPos> hazardBypassRejectedGoals = new LinkedHashSet<>();
+    private final Set<BlockPos> hazardBypassVisitedGoals = new LinkedHashSet<>();
     // SafetyNet runs after task ticks.  Remember the most recent physical landing so that, when
     // water/unsupported-footing recovery returns the bot to its origin, the next task tick rotates
     // away instead of issuing the identical rejected edge forever.
@@ -136,7 +165,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         SHIFTING,
         /** The floor interaction has completed; wait to admit the physical recenter step. */
         RETURN_PENDING,
-        RETURNING
+        RETURNING,
+        /** The new floor receipt is valid; wait until the same-level crossing can own ActionPack. */
+        CROSS_PENDING
     }
 
     private static final class EdgePlacement {
@@ -359,7 +390,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     && ((pendingOrigin == null && pendingDirection == -1)
                     || (pendingOrigin != null
                     && pendingDirection >= 0 && pendingDirection < HORIZONTAL.length
-                    && pendingTarget.equals(pendingOrigin.relative(HORIZONTAL[pendingDirection]).below())));
+                    && pendingTarget.getX() == pendingOrigin.relative(HORIZONTAL[pendingDirection]).getX()
+                    && pendingTarget.getZ() == pendingOrigin.relative(HORIZONTAL[pendingDirection]).getZ()
+                    && WalkedStepRules.isZeroDamageFall(pendingOrigin.getY() - pendingTarget.getY())));
             boolean rejectedShape = rejectedDirections >= 0
                     && rejectedDirections < (1 << HORIZONTAL.length)
                     && (rejectedDirections == 0 || rejectedOrigin != null);
@@ -475,6 +508,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     protected void onStart(AIPlayerEntity bot) {
         completedAtObservedOpenCavity = false;
         completedOpenCavity = null;
+        resetHazardBypassEpisode();
         if (!miningExplorationChild && RetiredNavigationTask.legacyExcavationDisabled()) {
             RetiredNavigationTask.refuse(bot, "descend_to_y");
             fail(RetiredNavigationTask.OBSERVED_TARGET_REQUIRED);
@@ -555,6 +589,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         miner.cancel(bot);
         blockedBodyRecoveryTarget = null;
         awaitingMiningHandoff = false;
+        clearHazardBypassRoute();
         bot.getActionPack().stopAll();
         abandonStep(bot);
     }
@@ -576,6 +611,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         miner.cancel(bot);
         blockedBodyRecoveryTarget = null;
         awaitingMiningHandoff = false;
+        clearHazardBypassRoute();
         bot.getActionPack().stopAll();
     }
 
@@ -647,6 +683,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (handleRejectedLanding(bot, world, feet)) {
             return;
         }
+        // A wider, but still completely observed, dry-rim route owns the controller until it
+        // reaches (and re-proves) its exact goal.  Do this before any fresh stair mutation.
+        if (tickHazardBypass(bot, world, feet)) {
+            return;
+        }
         // A water expedition can hand Descend a dry shoreline stance whose four cardinal lower
         // landings are all water or unsupported even though an immediately adjacent diagonal
         // stance has a normal safe stair. Before the first mutation only, inspect that bounded
@@ -705,6 +746,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 lastProgressTick = totalBudget();
                 return;
             }
+            if (tryHazardBypass(bot, world, feet)) {
+                return;
+            }
             miner.cancel(bot);
             fail("descend_no_progress at_y=" + feet.getY());
             return;
@@ -761,12 +805,23 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 lastProgressTick = totalBudget();
                 return;
             }
+            if (tryHazardBypass(bot, world, feet)) {
+                return;
+            }
             fail("descend_no_safe_landing at_y=" + (feet.getY() - 1));
             return;
         }
         Direction dir = HORIZONTAL[stairDirIndex];
         BlockPos ahead = feet.relative(dir);   // next step's head cell (x+d, y)
         BlockPos next = ahead.below();         // next step's standing cell (x+d, y-1)
+        // An exposed cave lip can have a real, dry floor two or three blocks below the next
+        // tread. It is a normal damage-free player step, not an unknown cavity to seal or hand
+        // to the mining-exploration survey. Prove its complete fall column before any raw
+        // WalkedStep validation reads it; a hidden cell remains outside this fast path and flows
+        // through the existing conservative viability/sealing logic below.
+        if (tryObservedSafeLateralDrop(bot, world, feet, ahead)) {
+            return;
+        }
         if (containsOwnedWaterSeal(world, ahead, ahead.above(), next)
                 || !isViableDescentDirection(bot, world, feet, stairDirIndex)) {
             // Mining next's tread can reveal that its own support is an already-mined cavity or a
@@ -790,6 +845,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // All four diagonal-descent directions are blocked by water/lava -> fall back to a lateral detour (stuck-condition backstop).
             if (lateralDetours < MAX_LATERAL && tryLateralDetour(bot, world, feet)) {
                 lastProgressTick = totalBudget();
+                return;
+            }
+            if (tryHazardBypass(bot, world, feet)) {
                 return;
             }
             miner.cancel(bot);
@@ -926,6 +984,60 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // The bot walks off the edge of its tread and gravity lands it on the next one. The landing joins the pending-landing
         // record only when the step has verified it (settleStep), never in the tick that starts the step.
         launchStep(bot, descent, StepPurpose.STAIR, origin, next, stairDirIndex, "descend_stair");
+    }
+
+    /**
+     * Starts the first fully observed, dry adjacent drop below the ordinary one-block stair. The
+     * existing stair settlement owns its factual landing history, so this has no separate cursor
+     * or checkpoint state.
+     */
+    private boolean tryObservedSafeLateralDrop(AIPlayerEntity bot,
+                                                ServerLevel world,
+                                                BlockPos origin,
+                                                BlockPos ahead) {
+        int maxDrop = Math.min(
+                WalkedStepRules.zeroDamageDropLimit(MinecraftAiConfig.get().nav().maxSafeFall()),
+                origin.getY() - targetY);
+        for (int depth = 2; depth <= maxDrop; depth++) {
+            BlockPos landing = ahead.below(depth);
+            // The destination proves its dry feet/head/support triple. The refusal envelope then
+            // proves every intermediate fall-column cell before WalkedStep is allowed to read it.
+            if (!isObservedDryStandable(bot, world, landing)
+                    || !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, landing, WalkedStep.Kind.STEP_DOWN)
+                    || !hasSafeObservedDropColumn(world, origin, landing)
+                    || WalkedStep.refusal(bot, landing, WalkedStep.Kind.STEP_DOWN) != null) {
+                continue;
+            }
+            WalkedStep descent = bot.getActionPack().beginDescend(landing, "descend_observed_safe_drop");
+            if (descent == null) {
+                // A retained guarded step is an ownership wait, not a terrain refusal; do not let
+                // the cavity fallback mutate the observed opening while that owner finishes.
+                return bot.getActionPack().stepAdmissionBlocked();
+            }
+            miner.cancel(bot);
+            launchStep(bot, descent, StepPurpose.STAIR, origin, landing, stairDirIndex,
+                    "descend_observed_safe_drop");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Reads the fall cells only after {@link SwimRoute#canObserveWalkedStepRefusalEnvelope} has
+     * proved them. The generic step validator rejects collision but deliberately has no opinion
+     * about a non-colliding fire, lava, or powder-snow cell crossed while falling.
+     */
+    private static boolean hasSafeObservedDropColumn(ServerLevel world, BlockPos origin, BlockPos landing) {
+        for (int y = landing.getY() + 1; y <= origin.getY() + 1; y++) {
+            BlockPos cell = new BlockPos(landing.getX(), y, landing.getZ());
+            BlockState state = world.getBlockState(cell);
+            if (!state.getFluidState().isEmpty()
+                    || !state.getCollisionShape(world, cell).isEmpty()
+                    || Standability.isDangerous(state)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1210,7 +1322,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             if (!rotated) {
                 boolean detouring = lateralDetours < MAX_LATERAL
                         && tryLateralDetour(bot, world, feet);
-                if (!detouring) {
+                if (!detouring && !tryHazardBypass(bot, world, feet)) {
                     fail("descend_no_safe_landing at_y=" + rejected.getY());
                 }
             }
@@ -1262,6 +1374,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
         ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
+        boolean advancedLower = pendingLandingOrigin != null
+                && feet.getY() < pendingLandingOrigin.getY();
         Standability.clearCache();
         boolean wet = bot.isUnderWater()
                 || bot.isInWater()
@@ -1295,6 +1409,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         pendingLandingTarget = null;
         pendingLandingDirection = -1;
         clearRejectedLandingDirections();
+        if (advancedLower) {
+            // A confirmed lower landing proves the current hazard rim is behind us.  Only this
+            // factual vertical progress releases its rejected/visited candidate memory.
+            resetHazardBypassEpisode();
+        }
         rememberSafeLanding(world, feet);
         lastProgressTick = totalBudget();
         return true;
@@ -1771,6 +1890,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (lateralDetours < MAX_LATERAL && tryLateralDetour(bot, world, feet)) {
             return;
         }
+        if (tryHazardBypass(bot, world, feet)) {
+            return;
+        }
         fail("descend_mine_failed at_y=" + feet.getY() + " reason=" + reason);
     }
 
@@ -1839,8 +1961,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 if (containsOwnedWaterSeal(world, side, side.above())) {
                     continue;
                 }
-                if (isLava(world, side) || isLava(world, side.above()) || isLava(world, support)) {
-                    continue; // don't move laterally toward lava
+                if (isObservedHazardFluid(bot, side)
+                        || isObservedHazardFluid(bot, side.above())
+                        || isObservedHazardFluid(bot, support)) {
+                    // `side`/head/support were all just independently observed above.  Water is
+                    // as unsafe as lava here: if a seal could not be placed, never promote the
+                    // wet cell into a WalkedStep merely because it has a solid floor.
+                    continue;
                 }
                 // Verify the factual landing before clearing its body column. A solid side block
                 // can hide an unsupported floor below it; mining that block first both discovers
@@ -1920,6 +2047,254 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
         }
         return false;
+    }
+
+    /**
+     * Holds normal stair planning while a previously admitted dry-rim Baritone leg is running.
+     * The route is deliberately short-lived: completion re-proves the exact pose before it can
+     * become a new descent origin, while refusal, an idle shortfall, or a timeout returns to the
+     * bounded observed candidate probe from the bot's actual new viewpoint.
+     */
+    private boolean tickHazardBypass(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        if (hazardBypassGoal == null) {
+            return false;
+        }
+        BlockPos goal = hazardBypassGoal;
+        BlockPos anchor = hazardBypassAnchor;
+        if (feet.equals(goal)) {
+            // The exact route is task-owned.  Stop its now-complete controller before mining or
+            // another walked step can acquire ActionPack on this same pose.
+            bot.getActionPack().stopAll();
+            clearHazardBypassRoute();
+            if (!isObservedDryRimCandidate(bot, world, feet)) {
+                hazardBypassRejectedGoals.add(goal);
+                BotLog.action(bot, "descend_hazard_bypass_arrival_rejected",
+                        "at", feet.toShortString());
+                if (bot.isInWater() || bot.isUnderWater() || bot.isInLava()) {
+                    NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+                }
+                return true;
+            }
+            hazardBypassVisitedGoals.add(goal);
+            lastProgressTick = totalBudget();
+            BotLog.action(bot, "descend_hazard_bypass_arrived",
+                    "from", anchor == null ? "unknown" : anchor.toShortString(),
+                    "at", feet.toShortString(),
+                    "visited", hazardBypassVisitedGoals.size(),
+                    "rejected", hazardBypassRejectedGoals.size());
+            // Let the ordinary stair loop re-observe and select its next descent on this exact,
+            // newly proven dry stance.  It must not trust the old viewpoint's hazard geometry.
+            return false;
+        }
+
+        boolean routeIdle = bot.getActionPack().isPathExecutorIdle()
+                && bot.getActionPack().isWalkToIdle();
+        boolean timedOut = hazardBypassStartedBudget >= 0
+                && totalBudget() - hazardBypassStartedBudget > HAZARD_BYPASS_ROUTE_LIMIT;
+        if (!routeIdle && !timedOut) {
+            lastProgressTick = totalBudget();
+            return true;
+        }
+
+        // A no-dig route may end early after the observation fence changes.  It is not evidence
+        // that the remaining terrain is safe: blacklist only this requested goal and re-probe
+        // from the factual current pose on a later/next bounded candidate leg.
+        bot.getActionPack().stopAll();
+        clearHazardBypassRoute();
+        hazardBypassRejectedGoals.add(goal);
+        BotLog.action(bot, "descend_hazard_bypass_route_rejected",
+                "from", anchor == null ? "unknown" : anchor.toShortString(),
+                "goal", goal.toShortString(),
+                "at", feet.toShortString(),
+                "reason", timedOut ? "timeout" : "route_ended");
+        return tryHazardBypass(bot, world, feet);
+    }
+
+    /**
+     * Starts at most one Baritone leg toward a fully observed dry rim.  This is a navigation
+     * fallback only after the established seal/rotate/local-detour flow failed; it neither mines
+     * a new tunnel nor spends support blocks to make a bridge.
+     */
+    private boolean tryHazardBypass(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        if (hazardBypassGoal != null || bot.isInWater() || bot.isUnderWater() || bot.isInLava()
+                || !isObservedDryStandable(bot, world, feet)) {
+            return false;
+        }
+        prepareHazardBypassProbe(feet);
+        if (hazardBypassStartedLegs >= HAZARD_BYPASS_MAX_STARTED_LEGS
+                || hazardBypassRouteProbes >= HAZARD_BYPASS_MAX_ROUTE_PROBES) {
+            BotLog.action(bot, "descend_hazard_bypass_exhausted",
+                    "at", feet.toShortString(),
+                    "reason", hazardBypassStartedLegs >= HAZARD_BYPASS_MAX_STARTED_LEGS
+                            ? "started_leg_budget" : "route_probe_budget",
+                    "started", hazardBypassStartedLegs,
+                    "visited", hazardBypassVisitedGoals.size(),
+                    "rejected", hazardBypassRejectedGoals.size(),
+                    "route_probes", hazardBypassRouteProbes);
+            return false;
+        }
+
+        int probeLimit = Math.min(HAZARD_BYPASS_CANDIDATE_COUNT,
+                hazardBypassProbeCursor + HAZARD_BYPASS_PROBES_PER_TICK);
+        while (hazardBypassProbeCursor < probeLimit) {
+            BlockPos candidate = hazardBypassCandidateAt(feet, hazardBypassProbeCursor++);
+            if (candidate.getY() < feet.getY()
+                    || hazardBypassRejectedGoals.contains(candidate)
+                    || hazardBypassVisitedGoals.contains(candidate)
+                    || !isObservedDryRimCandidate(bot, world, candidate)) {
+                continue;
+            }
+
+            // This three-argument overload is the critical contract: Baritone gets a walk-only,
+            // no-pillar/no-dig route, cannot go below this safe stance, and must prove it can walk
+            // back to the exact anchor without discovering terrain by moving into it.
+            BlockPos anchor = feet.immutable();
+            ActionResult route = bot.getActionPack().startSurfacePathTo(
+                    candidate, anchor.getY(), anchor);
+            if (route.isFailed()) {
+                if ("pathfinding_throttled".equals(route.reason())) {
+                    // No search ran, so leave the candidate eligible and let ActionPack's own
+                    // throttle clear rather than poisoning a factual dry rim.
+                    hazardBypassProbeCursor--;
+                    lastProgressTick = totalBudget();
+                    return true;
+                }
+                hazardBypassRouteProbes++;
+                hazardBypassRejectedGoals.add(candidate);
+                BotLog.action(bot, "descend_hazard_bypass_route_refused",
+                        "candidate", candidate.toShortString(), "reason", route.reason());
+                // Baritone admission itself is bounded but comparatively expensive.  Probe at
+                // most one route per task tick; the next tick continues with the next factual
+                // candidate rather than multiplying a single failed search into a tick spike.
+                lastProgressTick = totalBudget();
+                return true;
+            }
+            hazardBypassRouteProbes++;
+            BlockPos resolved = bot.getActionPack().activePathGoal();
+            if (!candidate.equals(resolved)) {
+                bot.getActionPack().stopAll();
+                hazardBypassRejectedGoals.add(candidate);
+                BotLog.action(bot, "descend_hazard_bypass_goal_mismatch",
+                        "candidate", candidate.toShortString(),
+                        "resolved", resolved == null ? "none" : resolved.toShortString());
+                lastProgressTick = totalBudget();
+                return true;
+            }
+            hazardBypassAnchor = anchor;
+            hazardBypassGoal = candidate.immutable();
+            hazardBypassStartedBudget = totalBudget();
+            // This is the admission boundary for the leg budget. A route that later idles early
+            // or times out still consumed real pathfinding/movement time and must not bypass the
+            // advertised started-leg ceiling merely because it never reached the dry rim.
+            hazardBypassStartedLegs++;
+            lastProgressTick = totalBudget();
+            BotLog.action(bot, "descend_hazard_bypass_started",
+                    "from", anchor.toShortString(), "to", candidate.toShortString(),
+                    "minimum_y", anchor.getY(),
+                    "started", hazardBypassStartedLegs,
+                    "visited", hazardBypassVisitedGoals.size(),
+                    "rejected", hazardBypassRejectedGoals.size());
+            return true;
+        }
+
+        if (hazardBypassProbeCursor < HAZARD_BYPASS_CANDIDATE_COUNT) {
+            // The next tick continues the same fixed-view, bounded cursor; this avoids a large
+            // synchronous radial LOS scan while still eventually checking every local rim cell.
+            lastProgressTick = totalBudget();
+            return true;
+        }
+        BotLog.action(bot, "descend_hazard_bypass_exhausted",
+                "at", feet.toShortString(), "reason", "no_observed_dry_rim",
+                "visited", hazardBypassVisitedGoals.size(),
+                "rejected", hazardBypassRejectedGoals.size());
+        return false;
+    }
+
+    /** Starts a fresh bounded observation cursor only after a real viewpoint change. */
+    private void prepareHazardBypassProbe(BlockPos feet) {
+        if (hazardBypassProbeOrigin == null || !hazardBypassProbeOrigin.equals(feet)) {
+            hazardBypassProbeOrigin = feet.immutable();
+            hazardBypassProbeCursor = 0;
+        }
+    }
+
+    /** Clears only the active route; rejected/visited goals remain for this obstacle episode. */
+    private void clearHazardBypassRoute() {
+        hazardBypassAnchor = null;
+        hazardBypassGoal = null;
+        hazardBypassStartedBudget = -1;
+    }
+
+    /** A committed lower landing is the only event that starts a new hazard episode. */
+    private void resetHazardBypassEpisode() {
+        clearHazardBypassRoute();
+        hazardBypassProbeOrigin = null;
+        hazardBypassProbeCursor = 0;
+        hazardBypassRouteProbes = 0;
+        hazardBypassStartedLegs = 0;
+        hazardBypassRejectedGoals.clear();
+        hazardBypassVisitedGoals.clear();
+    }
+
+    /**
+     * Maps a compact cursor to concentric, nearest-first horizontal rings at the current Y and
+     * two observable levels above it.  It constructs coordinates only; every world decision is
+     * made later by {@link #isObservedDryRimCandidate}.
+     */
+    private static BlockPos hazardBypassCandidateAt(BlockPos origin, int cursor) {
+        int remaining = cursor;
+        for (int rise = 0; rise <= HAZARD_BYPASS_MAX_RISE; rise++) {
+            for (int radius = 1; radius <= HAZARD_BYPASS_RADIUS; radius++) {
+                int ringCount = 8 * radius;
+                if (remaining >= ringCount) {
+                    remaining -= ringCount;
+                    continue;
+                }
+                int topCount = 2 * radius + 1;
+                int dx;
+                int dz;
+                if (remaining < topCount) {
+                    dx = -radius + remaining;
+                    dz = -radius;
+                } else {
+                    remaining -= topCount;
+                    int rightCount = 2 * radius;
+                    if (remaining < rightCount) {
+                        dx = radius;
+                        dz = -radius + 1 + remaining;
+                    } else {
+                        remaining -= rightCount;
+                        int bottomCount = 2 * radius;
+                        if (remaining < bottomCount) {
+                            dx = radius - 1 - remaining;
+                            dz = radius;
+                        } else {
+                            remaining -= bottomCount;
+                            dx = -radius;
+                            dz = radius - 1 - remaining;
+                        }
+                    }
+                }
+                return origin.offset(dx, rise, dz).immutable();
+            }
+        }
+        throw new IllegalArgumentException("hazard bypass candidate outside bounded cursor");
+    }
+
+    /** A candidate must be dry, fully observed, supported, and not visibly touching a fluid. */
+    private static boolean isObservedDryRimCandidate(AIPlayerEntity bot,
+                                                       ServerLevel world,
+                                                       BlockPos feet) {
+        if (!isObservedDryStandable(bot, world, feet)) {
+            return false;
+        }
+        for (Direction direction : Direction.values()) {
+            if (isObservedHazardFluid(bot, feet.relative(direction))
+                    || isObservedHazardFluid(bot, feet.above().relative(direction))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -2014,6 +2389,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             edge = null;
             return;
         }
+        if (current.stage == EdgeStage.CROSS_PENDING) {
+            startEdgeSupportCrossing(bot, current);
+            return;
+        }
         WalkedStep.Result result = current.step.outcome();
         DetourEdge detour = new DetourEdge(current.origin, current.landing);
         if (current.stage == EdgeStage.SHIFTING) {
@@ -2055,15 +2434,16 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             current.stage = EdgeStage.RETURNING;
             return;
         }
-        edge = null;
         bot.getActionPack().stopMovement();
         if (result == null) {
             // Cancelled (a pause, a restart, another controller took the pack): the lean is walked back by holdForStep.
+            edge = null;
             poseUnsettled = true;
             unsettledTicks = 0;
             return;
         }
         if (!result.succeeded()) {
+            edge = null;
             fail("descend_detour_support_return_failed origin=" + current.origin.toShortString());
             BotLog.action(bot, "descend_detour_support_failed",
                     "origin", current.origin.toShortString(),
@@ -2073,6 +2453,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return;
         }
         if (current.placeFailure != null) {
+            edge = null;
             failedStepEdges.add(detour);
             BotLog.action(bot, "descend_detour_support_failed",
                     "origin", current.origin.toShortString(),
@@ -2087,6 +2468,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (!receipt.getFluidState().isEmpty()
                 || receipt.getCollisionShape(world, current.support).isEmpty()
                 || Standability.isDangerous(receipt)) {
+            edge = null;
             fail("descend_no_safe_landing support_receipt_invalid="
                     + current.support.toShortString());
             BotLog.action(bot, "descend_detour_support_failed",
@@ -2105,6 +2487,46 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 "support", current.support.toShortString(),
                 "item", current.item,
                 "stone_like_reserve", MiningBudget.EMERGENCY_STONE_LIKE);
+        // This support is now the intended next landing, not the next stair obstruction. Hand the
+        // physical flat crossing to ActionPack before returning to ordinary stair selection; that
+        // prevents a cave-ceiling bridge floor from being immediately reclassified and mined.
+        current.stage = EdgeStage.CROSS_PENDING;
+        startEdgeSupportCrossing(bot, current);
+    }
+
+    /**
+     * Crosses a confirmed bridge floor as a normal lateral step. A temporarily guarded pack keeps
+     * the receipt alive and retries on the next tick instead of exposing the new floor to the
+     * primary stair's mine-first classifier.
+     */
+    private void startEdgeSupportCrossing(AIPlayerEntity bot, EdgePlacement current) {
+        DetourEdge detour = new DetourEdge(current.origin, current.landing);
+        int directionIndex = directionIndex(detour);
+        String refusal = WalkedStep.refusal(bot, current.landing, WalkedStep.Kind.FLAT);
+        if (refusal != null) {
+            // The receipt was real but its landing has since become unsafe or occupied. Do not
+            // classify the support itself as a mine target; retire this exact detour edge.
+            edge = null;
+            failedStepEdges.add(detour);
+            rejectLandingDirection(current.origin, directionIndex);
+            BotLog.action(bot, "descend_detour_support_failed",
+                    "origin", current.origin.toShortString(),
+                    "landing", current.landing.toShortString(),
+                    "support", current.support.toShortString(),
+                    "reason", "support_crossing_" + refusal);
+            return;
+        }
+        WalkedStep crossing = WalkedStep.begin(bot, current.landing, WalkedStep.Kind.FLAT,
+                "descend_detour_support_crossing");
+        if (!launchStep(bot, crossing, StepPurpose.LATERAL,
+                current.origin, current.landing, directionIndex, "descend_detour_support_crossing")) {
+            return;
+        }
+        edge = null;
+        BotLog.action(bot, "descend_detour_support_crossing",
+                "origin", current.origin.toShortString(),
+                "landing", current.landing.toShortString(),
+                "support", current.support.toShortString());
     }
 
     /** Reads only visible neighbours; hidden cells never become implicit lava-scan authority. */
@@ -2311,6 +2733,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
         if (lateralDetours < MAX_LATERAL && tryLateralDetour(bot, world, feet)) {
             lastProgressTick = totalBudget();
+            return true;
+        }
+        if (tryHazardBypass(bot, world, feet)) {
             return true;
         }
         fail("descend_no_safe_landing at_y=" + next.getY());

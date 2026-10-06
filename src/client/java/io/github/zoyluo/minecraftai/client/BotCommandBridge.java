@@ -42,15 +42,16 @@ public final class BotCommandBridge {
             ClientPlayNetworking.send(new BotCommandC2S(clean(botName), action, clean(arg1), clean(arg2), count));
             return;
         }
-        sendCommand(fallbackCommand(clean(botName), action, clean(arg1), clean(arg2), Math.max(1, count)));
+        sendCommand(fallbackCommand(clean(botName), action, clean(arg1), clean(arg2), count));
     }
 
     private static String fallbackCommand(String botName, String action, String arg1, String arg2, int count) {
         return switch (action) {
             case "move" -> "minecraftai task assign " + botName + " move " + arg1;
-            case "mine" -> "minecraftai task assign " + botName + " mine " + arg1 + " " + count;
-            case "craft" -> "minecraftai task assign " + botName + " craft " + arg1 + " " + count;
-            case "smelt" -> "minecraftai task assign " + botName + " smelt " + arg1 + " " + arg2 + " " + count;
+            case "mine" -> "minecraftai task assign " + botName + " mine " + arg1
+                    + (count == 0 ? "" : " " + Math.max(1, count));
+            case "craft" -> "minecraftai task assign " + botName + " craft " + arg1 + " " + Math.max(1, count);
+            case "smelt" -> "minecraftai task assign " + botName + " smelt " + arg1 + " " + arg2 + " " + Math.max(1, count);
             case "eat" -> "minecraftai task assign " + botName + " eat";
             case "abort" -> "minecraftai task abort " + botName;
             case "pause" -> "minecraftai task pause " + botName;

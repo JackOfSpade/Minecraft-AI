@@ -26,6 +26,9 @@ class DirectMiningObservationSourceContractTest {
                 "if (pos == null || face == null)",
                 "if (!MiningController.currentObservedTarget(player, pos))",
                 "BotLog.action(player, \"mine_refused\"",
+                "MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);",
+                "if (support != MiningSafety.SupportOccupancy.NONE)",
+                "MiningSafety.refusalReason(support)",
                 "claim(\"mining\")",
                 "this.mining = new MiningController(pos, face);");
         assertFalse(start.contains("getBlockState("),
@@ -71,9 +74,11 @@ class DirectMiningObservationSourceContractTest {
         String tick = body(source, "public ActionResult tick(ActionPack pack)");
         assertInOrder(tick,
                 "if (visiblyAir(player, pos))",
-                "return ActionResult.SUCCESS;",
+                "return settleVisibleAir(player);",
                 "if (!currentObservedTarget(player, pos))",
                 "return visibilityRefused(player);",
+                "MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);",
+                "return supportRefused(player, support);",
                 "BlockState state = world.getBlockState(pos);");
         assertFalse(tick.contains("handleBlockBreakAction("),
                 "tick must route every START/STOP packet through the live observation gate");
@@ -83,7 +88,10 @@ class DirectMiningObservationSourceContractTest {
 
         String packet = body(source, "private boolean sendBreakActionIfObserved(AIPlayerEntity player,");
         assertInOrder(packet,
+                "action != ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK",
+                "visiblyAir(player, pos)",
                 "if (!currentObservedTarget(player, pos))",
+                "MiningSafety.supportOccupancy(player, pos)",
                 "player.gameMode.handleBlockBreakAction(");
         String abort = body(source, "public void abort(AIPlayerEntity player)");
         String reset = body(source, "private void resetProgress(AIPlayerEntity player)");
@@ -92,6 +100,19 @@ class DirectMiningObservationSourceContractTest {
                 "cancellation must not send an unproved ABORT packet");
         assertTrue(source.contains("\"mine_visibility_refused\"") && source.contains("TARGET_NOT_OBSERVED"),
                 "a live visibility loss needs an auditable typed refusal");
+        assertTrue(source.contains("\"mine_support_refused\"")
+                        && source.contains("MiningSafety.refusalReason(support)"),
+                "a live support transition must end the controller with a typed refusal");
+
+        String safety = read("MiningSafety.java");
+        assertTrue(safety.contains("actor.level().players()")
+                        && safety.contains("BlockCollisions<Boolean>")
+                        && safety.contains("target.equals(position)")
+                        && safety.contains("while (supports.hasNext())")
+                        && safety.contains("SupportOccupancy.PLAYER")
+                        && safety.contains("SELF_SUPPORT")
+                        && safety.contains("PLAYER_SUPPORT"),
+                "support protection must scan every live collision shape under a body, including slabs and straddled floors");
     }
 
     @Test
@@ -99,16 +120,19 @@ class DirectMiningObservationSourceContractTest {
         String source = read("BlockMiner.java");
         String tick = body(source, "public Status tick(AIPlayerEntity bot)");
         assertInOrder(tick,
+                "MiningSafety.SupportOccupancy initialSupport = MiningSafety.supportOccupancy(bot, target);",
+                "return handleSupportOccupancy(bot, initialSupport);",
                 "if (MiningController.visiblyAir(bot, target))",
                 "return Status.DONE;",
                 "if (!MiningController.currentObservedTarget(bot, target))",
                 "return targetNotObserved(bot);",
                 "BlockState targetState = world.getBlockState(target);");
         int idle = tick.indexOf("if (bot.getActionPack().isMiningIdle())");
-        int reproved = tick.indexOf("if (!MiningController.currentObservedTarget(bot, target))", idle);
-        int toolState = tick.indexOf("BlockState equipTarget = world.getBlockState(target);", reproved);
-        assertTrue(idle >= 0 && reproved > idle && toolState > reproved,
-                "a target retained through the task tick must be re-proven before tool selection");
+        int support = tick.indexOf("MiningSafety.SupportOccupancy admissionSupport = MiningSafety.supportOccupancy(bot, target);", idle);
+        int reproved = tick.indexOf("if (!MiningController.currentObservedTarget(bot, target))", support);
+        int toolState = tick.indexOf("BlockState equipTarget = world.getBlockState(target);", support);
+        assertTrue(idle >= 0 && support > idle && reproved > support && toolState > reproved,
+                "a target retained through the task tick must be checked for new live footing and re-proven before tool selection");
         assertFalse(tick.contains("world.getBlockState(target).getBlock()"),
                 "the diagnostic must use an already guarded state rather than make a hidden extra read");
         assertInOrder(tick,
@@ -118,6 +142,21 @@ class DirectMiningObservationSourceContractTest {
                 "return Status.FAILED;");
         assertTrue(source.contains("\"miner_target_unobserved\""),
                 "checkpoint-backed miner refusals need an action log entry");
+        String sidestep = body(source, "private Status handleSupportOccupancy(AIPlayerEntity bot,");
+        assertInOrder(sidestep,
+                "support == MiningSafety.SupportOccupancy.PLAYER",
+                "MiningSafety.PLAYER_SUPPORT",
+                "Direction.Plane.HORIZONTAL",
+                "canObserveSidestepEnvelope(bot, side)",
+                "WalkedStep.Kind.FLAT",
+                "runStep(",
+                "\"miner_self_support_step_aside\"");
+        assertTrue(source.contains("\"miner_self_support_moved_aside\"")
+                        && source.contains("MiningSafety.SELF_SUPPORT"),
+                "the miner must release its own footing before retrying, while a player-held support remains unavailable");
+        String begin = body(source, "public void begin(AIPlayerEntity bot, BlockPos pos, boolean miningChannelToolPolicy)");
+        assertTrue(begin.contains("started || selfSupportMoveLease != null"),
+                "repeated finite-target submissions must preserve an admitted self-support sidestep until it settles");
     }
 
     private static String read(String name) throws IOException {

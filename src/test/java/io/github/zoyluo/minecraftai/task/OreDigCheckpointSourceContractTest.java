@@ -28,10 +28,11 @@ class OreDigCheckpointSourceContractTest {
     void checkpointMatchesOreFamilyAndReturnsToSavedFaceBeforeMining() throws IOException {
         String source = Files.readString(SOURCE);
         String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
-        int constructor = source.indexOf("this.restoredCheckpoint = OreDigCheckpoint.decode(");
+        int constructor = source.indexOf("OreDigCheckpoint.decode(");
         int missionIdentity = source.indexOf(
                 "values, this.targetOres, expectedRareMissionTarget", constructor);
         int invalidGuard = source.indexOf("this.invalidCheckpoint = !values.isEmpty()", constructor);
+        int timedDecoder = source.indexOf("TimedCollectionCheckpoint.decode(values)");
         int decoder = checkpointSource.indexOf("static Optional<OreDigCheckpoint> decode(");
         int fingerprintGuard = checkpointSource.indexOf(
                 "!OreDigTask.oreFingerprint(ores).equals(fingerprint)");
@@ -39,9 +40,10 @@ class OreDigCheckpointSourceContractTest {
                 "Set<BlockPos> queuedVeinHints = taskSchema == CHECKPOINT_SCHEMA", decoder);
         int queuedHintShape = checkpointSource.indexOf("boolean queuedVeinHintShape =", queuedHintDecode);
         assertTrue(constructor >= 0 && missionIdentity > constructor && invalidGuard > missionIdentity
+                        && timedDecoder >= 0 && timedDecoder < constructor
                         && decoder >= 0 && fingerprintGuard > decoder
                         && queuedHintDecode > decoder && queuedHintShape > queuedHintDecode,
-                "OreDig restore must validate its ore family and decode queued seam hints separately");
+                "OreDig restore must validate its ore family, keep timed-session accounting separate, and decode queued seam hints separately");
 
         int restoreFlag = source.indexOf(
                 "restoringFace = !bot.blockPosition().equals(cursor.face())", constructor);

@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavigationControllerOwner;
@@ -616,6 +617,27 @@ public final class ActionPack {
     }
 
     /**
+     * Starts a deliberately vertical construction route using a Baritone-approved common
+     * support (never logs, planks, ores, or falling blocks). This route may place only in its
+     * admitted pillar column and may not dig a shortcut through the surrounding tree or terrain.
+     */
+    public ActionResult startPillarPathTo(BlockPos goal) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
+        var support = MaterialPalette.pickPillarSupportBlockSlot(player);
+        if (support.isEmpty()) {
+            return ActionResult.failed("missing_path_support");
+        }
+        if (InventoryAction.equipFromSlot(player, support.getAsInt()) < 0) {
+            return ActionResult.failed("path_support_equip_failed");
+        }
+        ActionResult routed = routeOnBaritone("pillar_path_to", goal, true, false, 0,
+                RouteConstraints.unrestricted(), true);
+        return routed == null ? ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE) : routed;
+    }
+
+    /**
      * Starts a surface-exploration path without digging or disposable pillar shortcuts.
      * Hunt/Gather roaming must be able to keep moving after it reaches a waypoint; a path that
      * spends the last few dirt blocks pillaring out of a depression is not a reusable surface route.
@@ -705,6 +727,14 @@ public final class ActionPack {
      */
     private ActionResult routeOnBaritone(String kind, BlockPos goal, boolean canPillar, boolean allowDigFallback,
                                          int protectedStoneLikeReserve, RouteConstraints routeConstraints) {
+        return routeOnBaritone(kind, goal, canPillar, allowDigFallback, protectedStoneLikeReserve,
+                routeConstraints, false);
+    }
+
+    /** The explicit tree-pillar entry point alone requests a fail-closed exact placement column. */
+    private ActionResult routeOnBaritone(String kind, BlockPos goal, boolean canPillar, boolean allowDigFallback,
+                                         int protectedStoneLikeReserve, RouteConstraints routeConstraints,
+                                         boolean pillarPlacementColumnOnly) {
         if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
             logEngine(kind, goal, NavEngine.BARITONE, "baritone_unavailable");
             return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
@@ -714,7 +744,11 @@ public final class ActionPack {
         NavRoute.Options options = NavRouteRules.optionsFor(allowDigFallback, canPillar, reserve, player.isInWater());
         NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0, options, kind, serverTick(),
                 routeConstraints.minimumY(), routeConstraints.returnAnchor());
-        PathRequestIdentity identity = new PathRequestIdentity(goal, canPillar, allowDigFallback, reserve, routeConstraints);
+        if (pillarPlacementColumnOnly) {
+            request.requirePillarPlacementColumn();
+        }
+        PathRequestIdentity identity = new PathRequestIdentity(goal, canPillar, allowDigFallback, reserve,
+                routeConstraints, pillarPlacementColumnOnly);
         return NavEngineSelector.attempt(player.getUUID(), kind, () -> startBaritoneRoute(request, identity, true),
                 () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
@@ -789,6 +823,38 @@ public final class ActionPack {
         boolean admit = !(refresh && route != null);
         return NavEngineSelector.attempt(player.getUUID(), "directional_pursuit",
                 () -> startBaritoneRoute(request, null, admit),
+                () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
+    }
+
+    /**
+     * Starts a longer observed-only hop toward a currently visible terrain landmark. Unlike
+     * generic following, its evidence budget may use the bot's actual tracked render distance;
+     * the remote landmark still supplies direction only and the fence still chooses the local
+     * standable goal Baritone receives.
+     */
+    public ActionResult startVisibleLandmarkPursuitTo(BlockPos landmark, int maxHop) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
+        if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
+            return ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE);
+        }
+        // This privileged label is the only directional pursuit allowed to use the tracked
+        // render distance.  Do not let an arbitrary remembered coordinate acquire that
+        // authority: the exact landmark must still pass a current first-person LOS proof at
+        // route admission.  A vertically aligned landmark has no heading for a directional
+        // leg; local harvest/pillar recovery owns that case instead.
+        if (landmark == null || !ObservableWorldQuery.canObserveBlock(player, landmark)) {
+            return ActionResult.failed("visible_landmark_unobserved");
+        }
+        BlockPos feet = player.blockPosition();
+        if (landmark.getX() == feet.getX() && landmark.getZ() == feet.getZ()) {
+            return ActionResult.failed("visible_landmark_no_horizontal_heading");
+        }
+        NavRoute request = new NavRoute(NavRoute.Shape.DIRECTIONAL_PURSUIT, landmark,
+                Math.max(1, maxHop), NavRoute.Options.WALK_ONLY, "visible_landmark_pursuit", serverTick());
+        return NavEngineSelector.attempt(player.getUUID(), "visible_landmark_pursuit",
+                () -> startBaritoneRoute(request, null, true),
                 () -> ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE));
     }
 
@@ -1239,6 +1305,17 @@ public final class ActionPack {
             BotLog.action(player, "mine_refused", "reason", MiningController.TARGET_NOT_OBSERVED,
                     "pos", LogFields.pos(pos));
             return ActionResult.failed(MiningController.TARGET_NOT_OBSERVED);
+        }
+        // Never claim or preempt a mining controller for the block holding up this bot or a
+        // nearby player. The observation proof above deliberately comes first; MiningSafety may
+        // inspect only the live, physical footing around an already-admitted target.
+        // MiningController repeats the live check while a break is in progress.
+        MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);
+        if (support != MiningSafety.SupportOccupancy.NONE) {
+            String reason = MiningSafety.refusalReason(support);
+            BotLog.action(player, "mine_refused", "reason", reason,
+                    "pos", LogFields.pos(pos));
+            return ActionResult.failed(reason);
         }
         claim("mining");
         completedMining = null;
@@ -1739,7 +1816,8 @@ public final class ActionPack {
             boolean canPillar,
             boolean allowDig,
             int protectedStoneLikeReserve,
-            RouteConstraints routeConstraints) {
+            RouteConstraints routeConstraints,
+            boolean pillarPlacementColumnOnly) {
         private PathRequestIdentity {
             goal = goal.immutable();
             protectedStoneLikeReserve = Math.max(0, protectedStoneLikeReserve);

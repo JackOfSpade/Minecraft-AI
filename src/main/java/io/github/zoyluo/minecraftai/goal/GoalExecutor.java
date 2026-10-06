@@ -1691,6 +1691,18 @@ public final class GoalExecutor {
                 settleRestoredHuntPickup(bot, plan);
                 return true;
             }
+            if (isTimedCollectionStep(plan.current)) {
+                GoalEvaluation measuredOutcome = evaluate(bot, plan);
+                GoalResult.Status outcome = measuredOutcome.matched() > 0
+                        ? GoalResult.Status.COMPLETED : GoalResult.Status.FAILED;
+                GoalEvaluation timedOutcome = outcome == GoalResult.Status.COMPLETED
+                        ? completedTimedCollectionEvaluation(measuredOutcome) : measuredOutcome;
+                finishActive(bot, plan, timedOutcome,
+                        outcome == GoalResult.Status.COMPLETED
+                                ? "collection_window_elapsed" : GatherQuotaTask.NO_RESOURCE_FOUND_BY_DEADLINE,
+                        false, true, outcome);
+                return true;
+            }
             if (plan.current.kind() == GoalStep.Kind.GIVE_ITEM
                     && !hasCommittedDelivery(plan, plan.current)) {
                 finishActive(bot, plan, evaluate(bot, plan),
@@ -2354,7 +2366,7 @@ public final class GoalExecutor {
     }
 
     public String resultSummary(GoalResult result) {
-        return resultMessage(result.status(), result.evaluation(), result.reason());
+        return resultMessage(result);
     }
 
     public MissionRuntimeRecord captureRuntime(AIPlayerEntity bot) {
@@ -2989,8 +3001,11 @@ public final class GoalExecutor {
     private static String goalLabel(Goal goal) {
         return switch (goal) {
             case Goal.HaveItem g -> "Get " + itemLabel(g.item()) + " x" + g.count();
-            case Goal.MineOre g -> "Mine ore x" + g.count();
-            case Goal.HarvestCrop g -> "Farm " + itemLabel(g.produce()) + " x" + g.count();
+            case Goal.MineOre g -> g.isTimedCollection()
+                    ? "Collect ore for ten minutes" : "Mine ore x" + g.count();
+            case Goal.HarvestCrop g -> g.isTimedCollection()
+                    ? "Farm " + itemLabel(g.produce()) + " for ten minutes"
+                    : "Farm " + itemLabel(g.produce()) + " x" + g.count();
             case Goal.Food g -> "Prepare cooked food x" + g.cookedCount();
             case Goal.Armor g -> "Equip a full armor set and sword";
             case Goal.Workstation g -> "Set up a workstation";
@@ -3264,7 +3279,10 @@ public final class GoalExecutor {
                 || !java.util.Objects.equals(candidateFingerprint, lastFingerprint);
     }
 
-    // Phase A progress signal: the current inventory count of the goal's target product (HaveItem/Stockpile use its item; MineOre uses ore drops).
+    // Phase A progress signal: current target-product inventory for absolute goals. Incremental
+    // MineOre and HarvestCrop goals instead report mission-owned delivery above their immutable
+    // submission baseline, so a preexisting stack cannot advance a replan watermark (or a rare
+    // ore service boundary).
     // Package-private: also called by MissionRecoveryScheduler's rare-resource scheduling helpers.
     static int goalTargetCount(AIPlayerEntity bot, Goal goal) {
         if (goal instanceof Goal.HaveItem hi) {
@@ -3274,8 +3292,14 @@ public final class GoalExecutor {
             return io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot, java.util.Set.of(sp.item()));
         }
         if (goal instanceof Goal.MineOre mo) {
-            return io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot,
+            int heldDrops = io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot,
                     io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(mo.ores()));
+            return mo.deliveredFromInitial(heldDrops);
+        }
+        if (goal instanceof Goal.HarvestCrop crop) {
+            int heldProduce = io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
+                    bot, Set.of(crop.produce()));
+            return crop.deliveredFromInitial(heldProduce);
         }
         if (goal instanceof Goal.Fulfill fulfill) {
             int total = 0;
@@ -3386,6 +3410,8 @@ public final class GoalExecutor {
     }
 
     // Package-private: also called by MissionRecoveryScheduler's rare-resource scheduling helpers.
+    // MineOre.count is its immutable mission quota; MineOre.targetDropCount is only the physical
+    // postcondition threshold after the public boundary captured preexisting drops.
     static int originalLongRareOreTargetCount(Goal goal) {
         int target = 0;
         if (goal instanceof Goal.MineOre mineOre && isRareOre(mineOre.ores())) {
@@ -3635,6 +3661,15 @@ public final class GoalExecutor {
 
     private void handleStepFailure(MinecraftServer server, AIPlayerEntity bot, ActivePlan plan, String reason) {
         captureTaskEvidence(bot, plan);
+        // A timed collector only emits this reason after its entire search window elapsed with no
+        // mission-owned gain. Replanning would start another full window and turn the promised
+        // ten-minute result into an unbounded loop, so publish the factual terminal outcome.
+        if (isTimedCollectionStep(plan.current)
+                && GatherQuotaTask.NO_RESOURCE_FOUND_BY_DEADLINE.equals(reason)) {
+            finishActive(bot, plan, evaluate(bot, plan), reason,
+                    false, true, GoalResult.Status.FAILED);
+            return;
+        }
         Optional<SettledServiceTombstone> replayGuard =
                 MissionRecoveryScheduler.matchingSettledServiceGuard(bot, plan, reason);
         if (replayGuard.isPresent()) {
@@ -4105,6 +4140,11 @@ public final class GoalExecutor {
                                         ? oreCheckpoint : plan.miningCheckpoint),
                         oreCheckpoint));
             }
+            // A duration-bearing ore step restores only its small clock/baseline receipt.  It
+            // deliberately never consumes a fixed-quota OreDig cursor.
+            case MINE_ORE_FOR_DURATION -> Optional.of(OreDigTask.collectForDuration(
+                    step.ores(), step.count(),
+                    plan.takeTaskCheckpoint(GoalStep.Kind.MINE_ORE_FOR_DURATION)));
             case MINING_SERVICE -> {
                 MiningServiceInvocation invocation =
                         miningServiceInvocation(step, plan);
@@ -4135,6 +4175,9 @@ public final class GoalExecutor {
             // P3: the FARM step -> a count-limited FarmTask (till/plant/wait for growth/harvest in place; completes once count units of produce are collected).
             case FARM -> Optional.of(new FarmTask(bot.blockPosition(), 4, step.input(), step.block(),
                     true, false, step.item(), step.count()));
+            case FARM_FOR_DURATION -> Optional.of(FarmTask.collectForDuration(
+                    bot.blockPosition(), 4, step.input(), step.block(), step.item(), step.count(),
+                    plan.takeTaskCheckpoint(GoalStep.Kind.FARM_FOR_DURATION)));
             // Layer 4: the HUNT step -> HuntTask kills animals for raw meat (to stock food).
             case HUNT -> Optional.of(new HuntTask(
                     step.count(), !step.bestEffort(), plan.huntSearchCursor,
@@ -4913,7 +4956,7 @@ public final class GoalExecutor {
             io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
                     io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.GOAL_FAILED, bot.blockPosition(), goalLabel(result.goal()));
         }
-        String message = resultMessage(result.status(), result.evaluation(), result.reason());
+        String message = resultMessage(result);
         reportTerminal(bot, message, result.status());
         markDirty(bot);
     }
@@ -4923,14 +4966,42 @@ public final class GoalExecutor {
         io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.level().getServer());
     }
 
-    private static String resultMessage(GoalResult.Status status, GoalEvaluation evaluation, String reason) {
-        return switch (status) {
+    private static String resultMessage(GoalResult result) {
+        if (result.goal() instanceof Goal.MineOre mine && mine.isTimedCollection()
+                || result.goal() instanceof Goal.HarvestCrop crop && crop.isTimedCollection()) {
+            String resource = timedCollectionResourceLabel(result.goal());
+            if (result.status() == GoalResult.Status.COMPLETED) {
+                return "I collected " + result.evaluation().matched() + " new " + resource
+                        + " during the ten-minute collection window.";
+            }
+            if (GatherQuotaTask.NO_RESOURCE_FOUND_BY_DEADLINE.equals(result.reason())) {
+                return "I explored for ten minutes but found no " + resource + ".";
+            }
+        }
+        return switch (result.status()) {
             case COMPLETED -> "Goal completed.";
-            case PARTIAL -> "Goal partially completed (" + evaluation.matched() + "/" + evaluation.required() + "): "
-                    + String.join(",", evaluation.unmet());
-            case FAILED -> "Goal failed final verification: " + (evaluation.unmet().isEmpty() ? reason : String.join(",", evaluation.unmet()));
+            case PARTIAL -> "Goal partially completed (" + result.evaluation().matched() + "/"
+                    + result.evaluation().required() + "): "
+                    + String.join(",", result.evaluation().unmet());
+            case FAILED -> "Goal failed final verification: "
+                    + (result.evaluation().unmet().isEmpty()
+                    ? result.reason() : String.join(",", result.evaluation().unmet()));
             case CANCELLED -> "Goal cancelled.";
         };
+    }
+
+    private static String timedCollectionResourceLabel(Goal goal) {
+        if (goal instanceof Goal.HarvestCrop crop) {
+            return itemLabel(crop.produce());
+        }
+        if (goal instanceof Goal.MineOre mine) {
+            return io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(mine.ores()).stream()
+                    .map(GoalExecutor::itemLabel)
+                    .sorted()
+                    .findFirst()
+                    .orElse("requested ore");
+        }
+        return "requested resource";
     }
 
     private static void reportTerminal(AIPlayerEntity bot, String text, GoalResult.Status status) {
@@ -4953,9 +5024,21 @@ public final class GoalExecutor {
                 || reason.contains("dig_down_blocked")
                 || reason.contains("stuck:")
                 || reason.contains("timeout")
+                || GatherQuotaTask.NO_RESOURCE_FOUND_BY_DEADLINE.equals(reason)
                 || reason.contains("no_reachable")
                 || reason.startsWith("no_observed_resource_in_local_view")
                 || reason.startsWith("no_observed_ore_in_local_view");
+    }
+
+    private static boolean isTimedCollectionStep(GoalStep step) {
+        return step != null && (step.kind() == GoalStep.Kind.MINE_ORE_FOR_DURATION
+                || step.kind() == GoalStep.Kind.FARM_FOR_DURATION);
+    }
+
+    /** The timed predicate stays open during execution; crossing its real deadline settles it. */
+    private static GoalEvaluation completedTimedCollectionEvaluation(GoalEvaluation measured) {
+        return new GoalEvaluation(GoalEvaluation.State.SATISFIED,
+                measured.matched(), measured.required(), measured.evidence(), List.of());
     }
 
     /**

@@ -473,8 +473,14 @@ public final class GoalPlanner {
             return switch (goal) {
                 case Goal.HaveItem haveItem -> ensureItem(haveItem.item(), haveItem.count(), depth, visiting);
                 case Goal.HavePickaxeTier havePickaxeTier -> ensurePickaxeTier(havePickaxeTier.tier(), depth, visiting);
-                case Goal.MineOre mineOre -> ensureMineOre(mineOre.ores(), mineOre.count(), depth, visiting);
-                case Goal.HarvestCrop harvestCrop -> ensureHarvestCrop(harvestCrop, depth, visiting);
+                case Goal.MineOre mineOre -> mineOre.isTimedCollection()
+                        ? ensureTimedMineOre(mineOre, depth, visiting)
+                        : ensureMineOre(
+                                mineOre.ores(), mineOre.targetDropCount(), mineOre.count(),
+                                mineOre.initialDropCount(), depth, visiting);
+                case Goal.HarvestCrop harvestCrop -> harvestCrop.isTimedCollection()
+                        ? ensureTimedHarvestCrop(harvestCrop, depth, visiting)
+                        : ensureHarvestCrop(harvestCrop, depth, visiting);
                 case Goal.Armor ignored -> ensureArmor(true, depth, visiting);
                 case Goal.Workstation ignored -> ensureWorkstation(depth, visiting);
                 case Goal.Stockpile stockpile -> ensureStockpile(stockpile, depth, visiting);
@@ -513,11 +519,65 @@ public final class GoalPlanner {
             return true;
         }
 
-        // P3: harvest a crop -- no-op if already holding enough produce; otherwise back-derive a
-        // hoe (any tier works, here we use wooden_hoe) + seeds, then emit the FARM step.
+        /**
+         * Timed harvesting still obtains the small, real prerequisite chain (a hoe and seed) but
+         * replaces its final one-unit quota with a duration-bearing step.  The inventory baseline
+         * is deliberately ignored as a completion gate: someone who already carries wheat still
+         * asked us to farm for the whole collection window.
+         */
+        private boolean ensureTimedHarvestCrop(Goal.HarvestCrop g,
+                                               int depth,
+                                               Set<String> visiting) {
+            int firstStep = steps.size();
+            int owned = counts.getOrDefault(g.produce(), 0);
+            Goal.HarvestCrop preparation = new Goal.HarvestCrop(
+                    g.crop(), g.seed(), g.produce(), 1, owned);
+            if (!ensureHarvestCrop(preparation, depth, visiting)) {
+                return false;
+            }
+            return replaceFinalCollectionStep(firstStep, GoalStep.Kind.FARM,
+                    GoalStep.farmForDuration(g.crop(), g.seed(), g.produce(), g.timeLimitTicks()));
+        }
+
+        /**
+         * Timed mining uses one bounded target unit only to derive the correct legal tool chain.
+         * Its final ore step is then swapped for a real duration task; we never fake a massive
+         * quota or let the preexisting inventory satisfy the request.
+         */
+        private boolean ensureTimedMineOre(Goal.MineOre g,
+                                           int depth,
+                                           Set<String> visiting) {
+            Set<Block> expanded = g.ores() == null || g.ores().isEmpty()
+                    ? OreScan.COMMON_ORES : OreScan.expandOreFamilies(g.ores());
+            int owned = countAny(io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(expanded));
+            int firstStep = steps.size();
+            if (!ensureMineOre(expanded, saturatedAdd(owned, 1), 1, owned, depth, visiting)) {
+                return false;
+            }
+            return replaceFinalCollectionStep(firstStep, GoalStep.Kind.MINE_ORE,
+                    GoalStep.mineOreForDuration(expanded, g.timeLimitTicks()));
+        }
+
+        /** Replace only the task produced by the current timed-goal prerequisite derivation. */
+        private boolean replaceFinalCollectionStep(int firstStep,
+                                                   GoalStep.Kind expectedKind,
+                                                   GoalStep replacement) {
+            for (int index = steps.size() - 1; index >= firstStep; index--) {
+                if (steps.get(index).kind() == expectedKind) {
+                    steps.set(index, replacement);
+                    return true;
+                }
+            }
+            unresolved.add("timed_collection_step_missing:" + expectedKind);
+            return false;
+        }
+
+        // P3: harvest a crop -- no-op only after the physical baseline-plus-quota target is met;
+        // otherwise back-derive a hoe (any tier works, here we use wooden_hoe) + seeds, then
+        // emit the FARM step.
         private boolean ensureHarvestCrop(Goal.HarvestCrop g, int depth, Set<String> visiting) {
             int owned = counts.getOrDefault(g.produce(), 0);
-            int remaining = Math.max(0, g.count() - owned);
+            int remaining = Math.max(0, g.targetProduceCount() - owned);
             if (remaining <= 0) {
                 return true;
             }
@@ -576,14 +636,40 @@ public final class GoalPlanner {
             return ensureItem(pickaxe, 1, depth + 1, visiting);
         }
 
-        private boolean ensureMineOre(Set<Block> ores, int count, int depth, Set<String> visiting) {
+        /**
+         * Legacy/planner-internal ore dependency: {@code targetDropCount} is an absolute
+         * inventory target and therefore has a zero incremental baseline.
+         */
+        private boolean ensureMineOre(Set<Block> ores,
+                                      int targetDropCount,
+                                      int depth,
+                                      Set<String> visiting) {
+            return ensureMineOre(ores, targetDropCount, targetDropCount, 0, depth, visiting);
+        }
+
+        /**
+         * Plans a mine goal with two deliberately separate quantities: the physical inventory
+         * target and the mission-owned quota.  A public request for one more diamond while 63 are
+         * already held must need a sixty-fourth physical diamond, but it is still a one-drop
+         * mission rather than a new 64-drop expedition.
+         */
+        private boolean ensureMineOre(Set<Block> ores,
+                                      int targetDropCount,
+                                      int missionQuota,
+                                      int initialDropCount,
+                                      int depth,
+                                      Set<String> visiting) {
             Set<Block> expanded = ores == null || ores.isEmpty() ? OreScan.COMMON_ORES : OreScan.expandOreFamilies(ores);
             Set<Item> drops = io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(expanded);
             int owned = countAny(drops);
-            int remaining = Math.max(0, count - owned);
+            int remaining = Math.max(0, targetDropCount - owned);
             if (remaining <= 0) {
                 return true;
             }
+            // Only growth above the captured baseline belongs to this mission.  The physical
+            // total above still determines what must be replenished after a loss.
+            int missionDelivered = Math.min(missionQuota,
+                    Math.max(0, owned - initialDropCount));
             int tier = ToolTier.requiredPickaxeTier(expanded);
             boolean rareOre = expanded.contains(Blocks.DIAMOND_ORE)
                     || expanded.contains(Blocks.DEEPSLATE_DIAMOND_ORE)
@@ -592,11 +678,11 @@ public final class GoalPlanner {
             boolean coalOre = expanded.contains(Blocks.COAL_ORE)
                     || expanded.contains(Blocks.DEEPSLATE_COAL_ORE);
             MiningBudget budget = MiningBudget.forQuota(remaining, rareOre, tier);
-            // Mission identity is the requested total, not the current deficit. A 64-diamond
-            // expedition with 63 already collected must retain its service/tool contract instead
-            // of silently degrading into a one-off local mine after resume.
-            MiningBudget missionBudget = MiningBudget.forQuota(count, rareOre, tier);
-            boolean expedition = count >= MiningBudget.EXPEDITION_THRESHOLD;
+            // Mission identity is the immutable requested quota, not a mutable inventory total
+            // or current deficit.  This preserves a resumed 64-diamond expedition's service
+            // contract while keeping a new +1 request beside 63 held diamonds lightweight.
+            MiningBudget missionBudget = MiningBudget.forQuota(missionQuota, rareOre, tier);
+            boolean expedition = missionQuota >= MiningBudget.EXPEDITION_THRESHOLD;
             boolean longRareExpedition = expedition && rareOre;
             int mineY = bestMiningY(expanded);
             // A long rare-ore expedition owns a stable optimal layer. One exposed ore must not keep
@@ -619,7 +705,7 @@ public final class GoalPlanner {
                 // Surface readiness is a hard gate before descent. Once the sealed descent kit
                 // hands off to the mine, its protected stone ledger supersedes this phase-scoped
                 // wood reserve; an underground resume must never emit a wood top-up.
-                boolean reserveSurfaceShelter = count >= 64 && surfaceAcquisitionAllowed;
+                boolean reserveSurfaceShelter = missionQuota >= 64 && surfaceAcquisitionAllowed;
                 if (reserveSurfaceShelter) {
                     beginSurfaceEmergencyShelterWoodReserve();
                 }
@@ -750,15 +836,16 @@ public final class GoalPlanner {
             // but the next mining task can proceed only when it has a freshly observed/revalidated
             // target and a safe Baritone route; it never adds a shaft-digging step to discover one.
             int rareBatchOffset = longRareExpedition
-                    ? Math.floorMod(owned, budget.batchSize()) : 0;
+                    ? Math.floorMod(missionDelivered, budget.batchSize()) : 0;
             if (longRareExpedition && rareBatchOffset == 0) {
                 // The first rare batch always owns a boundary service after the final descent.
                 // From-zero missions use boundary 0 and a synthetic cursor supplied by Executor;
                 // completed-batch resumes use their exact eight-item boundary. A partial open
                 // batch must resume its existing cursor/resource ledgers before the next boundary;
-                // servicing at owned=4 would silently split one logical batch into two.
+                // servicing at a partial delivered count would silently split one logical batch
+                // into two.
                 steps.add(GoalStep.rareOreService(
-                        expanded, owned, count));
+                        expanded, missionDelivered, missionQuota));
             }
             if (longRareExpedition) {
                 int cumulative = 0;
@@ -774,7 +861,7 @@ public final class GoalPlanner {
                     cumulative += batchTarget;
                     if (cumulative < remaining) {
                         steps.add(GoalStep.rareOreService(
-                                expanded, owned + cumulative, count));
+                                expanded, missionDelivered + cumulative, missionQuota));
                     }
                 }
             } else if (remaining >= MiningBudget.EXPEDITION_THRESHOLD) {
@@ -815,7 +902,7 @@ public final class GoalPlanner {
                 // mission's exact debit; preserving it keeps the downstream obsidian/rare plan
                 // truthful while surplus mining spoil remains disposable.
                 steps.add(GoalStep.miningHandoffService(
-                        expanded, owned + remaining, plannedStoneLikeCount()));
+                        expanded, targetDropCount, plannedStoneLikeCount()));
             }
             return true;
         }

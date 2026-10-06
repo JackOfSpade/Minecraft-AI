@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.MiningSafety;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
@@ -92,6 +93,11 @@ import net.minecraft.world.phys.Vec3;
  * Self-contained state machine (Iron Rule G1), no internal assign; runs entirely on the main thread (G2).
  */
 public final class OreDigTask extends AbstractTask implements CheckpointableTask {
+    /** Ten real-time minutes at Minecraft's normal twenty ticks per second. */
+    public static final int DEFAULT_COLLECTION_DURATION_TICKS = 20 * 60 * 10;
+    /** A time-boxed collection ended without obtaining a new matching ore drop. */
+    public static final String NO_RESOURCE_FOUND_BY_DEADLINE = "no_resource_found_by_deadline";
+
     private enum PickupEgressResult {
         CLEAR,
         WORKING,
@@ -139,6 +145,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /** Short, walk-only observation-fenced legs used when no target ore is in the current view. */
     private static final int OBSERVED_SEARCH_MAX_HOPS = 16;
     private static final int OBSERVED_SEARCH_MOVE_LIMIT = 240;
+    /** Render-distance sight uses a long proven leg, with this short observed fallback. */
+    private static final int VISIBLE_ORE_SIGHTING_HOP_DISTANCE = 48;
+    private static final int VISIBLE_ORE_SIGHTING_MOVE_LIMIT = 300;
+    /** Far enough to remain a compass heading after one short observed Baritone leg. */
+    private static final int HIGH_TARGET_STAIR_HEADING_DISTANCE = 48;
     /** A cave must be searched from its visible rim before at most two further safe stair episodes. */
     private static final int MAX_CAVE_REDESCENTS = 2;
     private static final int PROSPECT_RANGE = 64;       // prospecting (wide-range locate of the nearest ore) radius -- kicks in when nothing is found nearby
@@ -181,6 +192,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private final Set<Block> targetOres;
     private final Set<Item> targetDrops;
     private final int targetCount;
+    /** Positive only for an open-ended, time-boxed collection rather than a fixed drop quota. */
+    private final int collectionDurationTicks;
     private final BlockMiner miner = new BlockMiner();
     // Exclusions are folded into EpisodeMemory (working memory, goal-scoped lifecycle + TTL
     // revival): the old instance Set was lost after a replan and needed a one-time "amnesty" fix;
@@ -231,6 +244,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int observedOreSearchCompletedHops;
     private int observedOreSearchLastScanTick = -SCAN_INTERVAL;
     /**
+     * A remote ore seen through current line of sight is a walking landmark only. It is never
+     * assigned to {@link #targetOre}: normal local ore observation and approach logic must own
+     * it after the bot reaches the ordinary scan envelope.
+     */
+    private VisibleTargetHorizonScan visibleOreHorizonScan;
+    private BlockPos visibleOreSightingHint;
+    private BlockPos visibleOreSightingStart;
+    private int visibleOreSightingStartedBudget;
+    /** The visible landmark entered the ordinary local scan envelope this tick. */
+    private boolean visibleOreSightingNeedsLocalScan;
+    /**
      * A restored queued vein member may be farther than the current view. Its persisted coordinate
      * is a heading only: each hop resolves to an actually observed walk-only stance, never a dig
      * route or a claim that the stale ore is still present.
@@ -241,6 +265,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private BlockPos queuedVeinHintSearchTarget;
     private BlockPos queuedVeinHintSearchStart;
     private int queuedVeinHintSearchStartedBudget;
+    /**
+     * A visible high ore with no current safe work pose gets one bounded, walk-only attempt to
+     * re-observe an existing stair or ledge before normal depth exploration is allowed to give up
+     * on it. The ore coordinate remains a heading only, never a route endpoint or dig target.
+     */
+    private final ObservedSearchHops highTargetStairSearch = new ObservedSearchHops(
+            OBSERVED_SEARCH_MAX_HOPS);
+    private BlockPos highTargetStairSearchOwner;
+    private BlockPos highTargetStairSearchHeading;
+    private BlockPos highTargetStairSearchTarget;
+    private BlockPos highTargetStairSearchStart;
+    private int highTargetStairSearchStartedBudget;
     /** One fresh depth handoff, plus bounded re-descent only after a real cave survey. */
     private MiningExplorationTask miningExploration;
     private boolean miningExplorationAttempted;
@@ -281,6 +317,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int lastReLockTick = -100;  // Rate limit for re-scanning mid-approach to switch to a closer ore
     private final MiningCursor restoredCursor;
     private final OreDigCheckpoint restoredCheckpoint;
+    /** Durable session accounting for a timed collection; never a fixed-quota mining cursor. */
+    private final TimedCollectionCheckpoint restoredTimedCollection;
     private final boolean invalidCheckpoint;
     private final int budgetTargetCount;
     private final int deliveredAtStart;
@@ -388,6 +426,29 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /**
+     * Collects every newly obtained target-ore drop possible for ten minutes. Existing inventory
+     * is a baseline only: it never completes this task before an observed ore is actually mined.
+     */
+    public static OreDigTask collectForDuration(Set<Block> targetOres) {
+        return collectForDuration(targetOres, DEFAULT_COLLECTION_DURATION_TICKS);
+    }
+
+    /**
+     * Time-boxed variant for focused tests and callers that supply their own bounded session.
+     * The task still follows only observed targets and observed walk-only exploration legs.
+     */
+    public static OreDigTask collectForDuration(Set<Block> targetOres, int durationTicks) {
+        return collectForDuration(targetOres, durationTicks, Map.of());
+    }
+
+    /** Restores only a prior collection-window accounting checkpoint, never a mining cursor. */
+    public static OreDigTask collectForDuration(Set<Block> targetOres, int durationTicks,
+                                                Map<String, String> checkpoint) {
+        return new OreDigTask(targetOres, 1, 0,
+                MiningBudget.EMERGENCY_STONE_LIKE, checkpoint, Math.max(1, durationTicks));
+    }
+
+    /**
      * Vein mode: mine the connected vein of the nearest observable target ore (or of the observable
      * ore nearest {@code seedHint} when given) and stop when no further observable connected member
      * remains. No open-ended strip/branch mining, prospecting or descent; other veins and passing
@@ -402,6 +463,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     public boolean isVeinMode() {
         return veinMode;
+    }
+
+    /** Whether this task collects newly mined drops for a fixed session rather than a quota. */
+    public boolean isTimedCollection() {
+        return collectionDurationTicks > 0;
     }
 
     /** Number of ore blocks this vein-mode task has broken so far. */
@@ -427,11 +493,22 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                       int expectedRareMissionTarget,
                       int expectedFluidSealStoneLikeReserve,
                       Map<String, String> checkpoint) {
+        this(targetOres, targetCount, expectedRareMissionTarget,
+                expectedFluidSealStoneLikeReserve, checkpoint, 0);
+    }
+
+    private OreDigTask(Set<Block> targetOres,
+                       int targetCount,
+                       int expectedRareMissionTarget,
+                       int expectedFluidSealStoneLikeReserve,
+                       Map<String, String> checkpoint,
+                       int collectionDurationTicks) {
         this.targetOres = targetOres == null || targetOres.isEmpty()
                 ? OreScan.COMMON_ORES
                 : OreScan.expandOreFamilies(targetOres);
         this.legChooserAdapter = new OreDigLegChooserAdapter(this.targetOres, this.stripCoverage);
         this.targetDrops = HarvestCore.expectedDropsFor(this.targetOres);
+        this.collectionDurationTicks = Math.max(0, collectionDurationTicks);
         this.oreFingerprint = oreFingerprint(this.targetOres);
         if (expectedRareMissionTarget != 0
                 && expectedRareMissionTarget < MiningBudget.EXPEDITION_THRESHOLD) {
@@ -443,15 +520,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     + expectedFluidSealStoneLikeReserve);
         }
         Map<String, String> values = checkpoint == null ? Map.of() : checkpoint;
-        this.restoredCheckpoint = OreDigCheckpoint.decode(
+        this.restoredTimedCollection = isTimedCollection()
+                ? TimedCollectionCheckpoint.decode(values).orElse(null) : null;
+        this.restoredCheckpoint = isTimedCollection() ? null : OreDigCheckpoint.decode(
                 values, this.targetOres, expectedRareMissionTarget).orElse(null);
         boolean incompatibleOpenStep = restoredCheckpoint != null
                 && restoredCheckpoint.batchOpen()
                 && targetCount != restoredCheckpoint.targetCount()
                 && targetCount != (restoredCheckpoint.targetCount()
                         - restoredCheckpoint.delivered());
-        this.invalidCheckpoint = !values.isEmpty()
-                && (restoredCheckpoint == null || incompatibleOpenStep);
+        this.invalidCheckpoint = !values.isEmpty() && (isTimedCollection()
+                ? restoredTimedCollection == null
+                        || restoredTimedCollection.durationTicks() != this.collectionDurationTicks
+                : restoredCheckpoint == null || incompatibleOpenStep);
         this.restoredCursor = restoredCheckpoint == null ? null : restoredCheckpoint.cursor();
         this.restoredPendingPickupPos = restoredCheckpoint == null
                 ? null : restoredCheckpoint.pendingPickupPos();
@@ -488,8 +569,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 expectedFluidSealStoneLikeReserve, rareExpeditionBatch, resourceEpoch);
         this.inventoryServiceUsed = restoredCheckpoint != null
                 && restoredCheckpoint.inventoryServiceUsed();
-        this.maxElapsed = maxElapsedForTarget(
-                this.targetOres, this.budgetTargetCount,
+        this.maxElapsed = isTimedCollection()
+                ? this.collectionDurationTicks
+                : maxElapsedForTarget(this.targetOres, this.budgetTargetCount,
                 this.rareMissionTarget, this.resourceEpoch);
     }
 
@@ -513,6 +595,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return "OreDig vein " + veinBroken.size() + " mined, " + veinQueue.size() + " queued"
                     + (targetOre == null ? "" : " ->" + targetOre.getX() + "," + targetOre.getY() + "," + targetOre.getZ());
         }
+        if (isTimedCollection()) {
+            return "OreDig collecting " + collected + " new drops in "
+                    + Math.min(totalBudget(), collectionDurationTicks) + "/"
+                    + collectionDurationTicks + " ticks"
+                    + (targetOre == null ? " (scanning)" : " ->" + targetOre.getX() + ","
+                    + targetOre.getY() + "," + targetOre.getZ());
+        }
         return "OreDig " + collected + "/" + targetCount
                 + (restoringFace ? " (returning to saved face)" : "")
                 + " branch=" + stripLegIndex + ":" + stripStepsLeft
@@ -526,6 +615,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         if (veinMode) {
             return Math.min(0.95D, (double) veinBroken.size() / (veinBroken.size() + veinQueue.size() + 1));
+        }
+        if (isTimedCollection()) {
+            return Math.min(0.95D, (double) totalBudget() / collectionDurationTicks);
         }
         if (targetCount == 0) {
             return 0.95D;
@@ -869,11 +961,20 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             fail("ore_dig_invalid_checkpoint");
             return;
         }
-        invBaseline = HarvestCore.countInventoryItems(bot, targetDrops);
-        collected = 0;
+        int inventoryNow = HarvestCore.countInventoryItems(bot, targetDrops);
+        invBaseline = restoredTimedCollection == null
+                ? inventoryNow : restoredTimedCollection.inventoryBaseline();
+        collected = restoredTimedCollection == null ? 0 : Math.max(
+                restoredTimedCollection.collected(), Math.max(0, inventoryNow - invBaseline));
+        if (restoredTimedCollection != null) {
+            // AbstractTask starts a new JVM-local counter at zero. Restore the bounded session
+            // counter so a server restart leaves only the unspent portion of its original window.
+            elapsed = restoredTimedCollection.elapsedTicks();
+        }
         budgetOffset = restoredCheckpoint != null && restoredCheckpoint.batchOpen()
                 ? restoredCheckpoint.budgetUsed() : 0;
-        lastProgressBudget = restoredCheckpoint != null && restoredCheckpoint.batchOpen()
+        lastProgressBudget = restoredTimedCollection != null ? totalBudget()
+                : restoredCheckpoint != null && restoredCheckpoint.batchOpen()
                 ? restoredCheckpoint.lastProgressBudget() : 0;
         pickupGrace = 0;
         moveInFlight = null;
@@ -882,9 +983,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         targetOre = null;
         observedOreSearch.reset();
         clearObservedOreSearchLeg();
+        clearVisibleOreSighting();
         observedOreSearchCompletedHops = 0;
         observedOreSearchLastScanTick = -SCAN_INTERVAL;
         clearQueuedVeinHintReobservation();
+        clearHighTargetStairSearch();
         miningExploration = null;
         miningExplorationAttempted = false;
         miningExplorationCaveSurveyRequired = false;
@@ -1008,6 +1111,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         publishInterruptionCursor(bot, true);
         clearPendingBlindAdvance();
         clearObservedOreSearchLeg();
+        clearVisibleOreSighting();
+        clearHighTargetStairSearch();
         miner.cancel(bot);
         bot.getActionPack().stopAll();
     }
@@ -1046,6 +1151,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         publishInterruptionCursor(bot, false);
         clearPendingBlindAdvance();
         clearObservedOreSearchLeg();
+        clearVisibleOreSighting();
+        clearHighTargetStairSearch();
         markMineFace(bot);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
@@ -1122,8 +1229,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // Keep its hard budget outside the ordinary count-mode branch so an unobservable queued
         // member cannot bypass the only global timeout after a restart.
         if (totalBudget() > maxElapsed) {
-            fail("ore_dig_timeout collected=" + collected);
-            return;
+            if (!isTimedCollection()) {
+                fail("ore_dig_timeout collected=" + collected);
+                return;
+            }
         }
         // A restored zero-quota task can still own the factual frontier of an opened vein.  It
         // must first return to its saved, observable face; otherwise the one discovery scan below
@@ -1232,6 +1341,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (recoverPendingTargetDrop(bot)) {
             return;
         }
+        // The collection clock is a boundary for starting fresh work, not permission to orphan
+        // a just-broken ore drop.  The two settlement calls above retain any durable physical
+        // break/pickup obligation; this branch either lets the already-live break resolve or
+        // ends only after there is no such obligation left.
+        if (isTimedCollection() && totalBudget() >= collectionDurationTicks) {
+            finishTimedCollectionAtSafeBoundary(bot);
+            return;
+        }
         if (maybePlaceAutomaticTorchAtSafeBoundary(bot, world, false)) {
             return;
         }
@@ -1241,6 +1358,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // legitimate 12-block detour could be killed before its next view is surveyed.
         if (!veinMode && observedOreSearchTarget != null
                 && !bot.getActionPack().isPathExecutorIdle()) {
+            noteProgress();
+        }
+        // A render-distance ore landmark is either actively walking an admitted observed route
+        // or finishing one bounded first-hit look-around. It is factual work, but never a dig
+        // target; keep the watchdog from preempting the finite visual/route handoff.
+        if (!veinMode && targetOre == null && tickVisibleOreSighting(bot)) {
+            return;
+        }
+        if (!veinMode && targetOre == null && visibleOreHorizonScan != null) {
             noteProgress();
         }
 
@@ -1298,16 +1424,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             clearStripMovementOwnership();
             return;
         }
-        if (!veinMode && collected >= targetCount) {
-            if (hasPendingCurrentVein()) {
+        if (!isTimedCollection()) {
+            if (!veinMode && collected >= targetCount) {
+                if (hasPendingCurrentVein()) {
+                    return;
+                }
+                if (waitForFinalCountVeinDrops(bot)) {
+                    return;
+                }
+                markMineFace(bot);
+                complete();
                 return;
             }
-            if (waitForFinalCountVeinDrops(bot)) {
-                return;
-            }
-            markMineFace(bot);
-            complete();
-            return;
         }
 
         // Count mode has fully drained one local vein and still owes quota. Its factual side
@@ -1526,6 +1654,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 if (nearer != null && !nearer.equals(targetOre)
                         && bot.getEyePosition().distanceToSqr(nearer.getCenter())
                            < bot.getEyePosition().distanceToSqr(targetOre.getCenter()) * 0.36D) {
+                    // A high-ore recovery owns a concrete local Baritone hop. Do not carry that
+                    // hop across an ordinary re-lock: the newly chosen ore might be low or lie
+                    // in the opposite direction, and letting the former route run would move
+                    // away from the new finite owner before its approach controller can act.
+                    if (ownsHighTargetStairSearch(targetOre)
+                            && highTargetStairSearchTarget != null) {
+                        bot.getActionPack().stopAll();
+                    }
+                    clearHighTargetStairSearch(targetOre);
                     BotLog.action(bot, "ore_dig_relock_nearer",
                             "from", targetOre.toShortString(), "to", nearer.toShortString());
                     targetOre = nearer.immutable();
@@ -1664,6 +1801,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 }
                 return;
             }
+            if (tickHighTargetStairSearch(bot, targetOre)
+                    || startHighTargetStairSearch(bot, world, targetOre)) {
+                return;
+            }
             // Not at a safe mining position -> fall back to the unified approach primitive:
             // dig-aware pathfinding straight to a position adjacent to the ore (A* DIG with a large
             // budget, with a destination exemption allowing a solid cell that becomes standable once
@@ -1675,8 +1816,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
+        clearHighTargetStairSearch();
+
         if (veinMode) {
             tickVeinWithoutTarget(bot, world);
+            return;
+        }
+
+        // A currently visible remote ore takes precedence over an ordinary compass hop, but
+        // only as a walk-only, continuously re-proved landmark. It never becomes targetOre here.
+        if (interruptObservedOreSearchWithVisibleOre(bot)) {
             return;
         }
 
@@ -1684,6 +1833,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // runs before the scan throttle so a newly visible ore face interrupts travel immediately;
         // it never invokes the retired prospect/strip/tunnel machinery.
         if (tickObservedOreSearch(bot, world)) {
+            return;
+        }
+
+        // Once a visible landmark reaches the ordinary local scan envelope, hand it back to the
+        // established ore scanner/approach rather than issuing any remote digging route.
+        if (visibleOreSightingNeedsLocalScan) {
+            visibleOreSightingNeedsLocalScan = false;
+        } else if (seekVisibleOre(bot)) {
             return;
         }
 
@@ -1718,6 +1875,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         BlockPos found = nearestOre(bot, world);
         if (found != null) {
+            clearVisibleOreSighting();
             clearStripMovementOwnership();
             targetOre = found;
             lastTargetDist = Double.MAX_VALUE;  // P0: newly locked ore, reset approach monitoring
@@ -1815,6 +1973,75 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /**
+     * Settles the only physical ownership that may outlive the collection deadline, then reports
+     * the session result.  A live target break is allowed to finish so its factual drop ledger can
+     * be created and recovered; uncommitted target approaches, searches and exploration are
+     * cancelled rather than starting another unit of work after the deadline.
+     */
+    private void finishTimedCollectionAtSafeBoundary(AIPlayerEntity bot) {
+        BlockPos active = activeTargetBreakPos;
+        if (active != null && activeBreakStillMining(active, miner.target(),
+                bot.getActionPack().isMiningIdle(), activeTargetBreakConfirmedGone)) {
+            BlockMiner.Status status = miner.tick(bot);
+            if (status == BlockMiner.Status.DONE) {
+                if (finishTargetBreak(bot, active, activeTargetBreakInventory)) {
+                    if (active.equals(targetOre)) {
+                        targetOre = null;
+                    }
+                    veinQueue.remove(active);
+                    noteProgress();
+                }
+            } else if (status == BlockMiner.Status.FAILED
+                    && !failMissingMiningChannelTool(bot)) {
+                clearActiveTargetBreak(active);
+                if (active.equals(targetOre)) {
+                    targetOre = null;
+                }
+            }
+            return;
+        }
+
+        // settleObservedActiveBreakBeforeTerminalChecks() runs immediately before this method.
+        // If an unconfirmed owner remains, no observed physical break was established; releasing
+        // it is safe and prevents an unknown/approach-only target from extending the time box.
+        if (activeTargetBreakPos != null) {
+            miner.cancel(bot);
+            BlockPos unfinished = activeTargetBreakPos;
+            clearActiveTargetBreak(unfinished);
+            if (unfinished.equals(targetOre)) {
+                targetOre = null;
+            }
+        }
+        if (miningExploration != null) {
+            miningExploration.abort(bot);
+            miningExploration = null;
+        }
+        miner.cancel(bot);
+        clearStripMovementOwnership();
+        clearObservedOreSearchLeg();
+        clearVisibleOreSighting();
+        bonusOre = null;
+        targetOre = null;
+        bot.getActionPack().stopAll();
+
+        // Re-read only the ordinary inventory count after every pending-drop transaction has
+        // settled.  Held ore remains outside invBaseline, so the result is strictly new output.
+        collected = Math.max(collected, Math.max(0,
+                HarvestCore.countInventoryItems(bot, targetDrops) - invBaseline));
+        BotLog.action(bot, "ore_dig_timed_deadline",
+                "ores", oreFingerprint,
+                "collected", collected,
+                "duration_ticks", collectionDurationTicks,
+                "outcome", collected > 0 ? "complete" : NO_RESOURCE_FOUND_BY_DEADLINE);
+        if (collected > 0) {
+            markMineFace(bot);
+            complete();
+        } else {
+            fail(NO_RESOURCE_FOUND_BY_DEADLINE);
+        }
+    }
+
+    /**
      * Ends a former prospect/strip branch without opening a single unseen terrain cell. The event
      * distinguishes a policy refusal from an ordinary depleted visible vein in player logs.
      */
@@ -1825,6 +2052,305 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BotLog.action(bot, "ore_dig_observed_target_required",
                 "reason", reason, "collected", collected + "/" + targetCount);
         fail("no_observed_ore_target");
+    }
+
+    /**
+     * Lets a directly visible remote ore replace a generic compass hop, but only with the same
+     * walk-only observed-landmark route used by other render-distance target sightings.
+     */
+    private boolean interruptObservedOreSearchWithVisibleOre(AIPlayerEntity bot) {
+        if (observedOreSearchTarget == null || visibleOreSightingHint != null) {
+            return false;
+        }
+        VisibleTargetHorizonScan.Sighting sighting = nextVisibleOreSighting(bot);
+        if (sighting == null || oreExcluded(bot, sighting.pos())) {
+            return false;
+        }
+        BotLog.action(bot, "ore_dig_target_sighted",
+                "pos", sighting.pos().toShortString(),
+                "rays", sighting.raysCast(),
+                "mode", "interrupt_observed_hop");
+        if (insideLocalOreScanEnvelope(bot, sighting.pos())) {
+            bot.getActionPack().stopAll();
+            clearObservedOreSearchLeg();
+            yieldVisibleOreToLocalScan();
+            return false;
+        }
+        visibleOreSightingHint = sighting.pos().immutable();
+        // This is an ownership transfer, not a speculative route refresh.  Revoke the old
+        // compass leg first, so a denied landmark route cannot leave a cancelled Baritone path
+        // paired with an apparently live observed-search owner.
+        bot.getActionPack().stopAll();
+        clearObservedOreSearchLeg();
+        return startVisibleOreSightingPursuit(bot);
+    }
+
+    /**
+     * Steps the generic first-hit scan or continues an already admitted landmark route. A null
+     * result from the scan is deliberately not absence: only a completed bounded visual sweep
+     * clears it, and ordinary local/directional search remains the fallback afterwards.
+     */
+    private boolean seekVisibleOre(AIPlayerEntity bot) {
+        if (visibleOreSightingHint != null) {
+            if (insideLocalOreScanEnvelope(bot, visibleOreSightingHint)) {
+                yieldVisibleOreToLocalScan();
+                return false;
+            }
+            if (startVisibleOreSightingPursuit(bot)) {
+                return true;
+            }
+        }
+        VisibleTargetHorizonScan.Sighting sighting = nextVisibleOreSighting(bot);
+        if (sighting == null) {
+            // A sweep batch is only an additional observation source.  Do not make its
+            // multi-tick raster delay the established local scan (or the safe observed-hop
+            // fallback) while it is still looking for a remote first-hit target.
+            return false;
+        }
+        if (oreExcluded(bot, sighting.pos())) {
+            return false; // this one first-hit cell was consumed; keep normal local work live
+        }
+        BotLog.action(bot, "ore_dig_target_sighted",
+                "pos", sighting.pos().toShortString(),
+                "rays", sighting.raysCast(),
+                "mode", "no_lock");
+        if (insideLocalOreScanEnvelope(bot, sighting.pos())) {
+            yieldVisibleOreToLocalScan();
+            return false;
+        }
+        visibleOreSightingHint = sighting.pos().immutable();
+        if (startVisibleOreSightingPursuit(bot)) {
+            return true;
+        }
+        return false;
+    }
+
+    /** Re-checks a live render-distance landmark route before it can influence another tick. */
+    private boolean tickVisibleOreSighting(AIPlayerEntity bot) {
+        if (visibleOreSightingHint == null) {
+            return false;
+        }
+        if (!isCurrentVisibleTargetOre(bot, visibleOreSightingHint)) {
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "ore_dig_target_sighting_lost",
+                    "hint", visibleOreSightingHint.toShortString());
+            clearVisibleOreSighting();
+            lastScanTick = -SCAN_INTERVAL;
+            return false;
+        }
+        if (insideLocalOreScanEnvelope(bot, visibleOreSightingHint)) {
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "ore_dig_target_sighting_local",
+                    "hint", visibleOreSightingHint.toShortString());
+            yieldVisibleOreToLocalScan();
+            return false;
+        }
+        // A directly overhead ore has no horizontal direction for the special landmark route.
+        // Its safe recovery instead probes only ordinary observed ledges/stairs around the bot;
+        // it remains a visual hint and never becomes targetOre until the existing local scan
+        // independently re-observes it.
+        if (ownsHighTargetStairSearch(visibleOreSightingHint)) {
+            if (tickHighTargetStairSearch(bot, visibleOreSightingHint)) {
+                return true;
+            }
+            // The previous local leg settled. Start the next finite observed alternative here,
+            // before generic landmark timeout accounting mistakes this vertical recovery for an
+            // idle horizontal route.
+            return startVisibleOreVerticalRecovery(bot);
+        }
+        int legAge = totalBudget() - visibleOreSightingStartedBudget;
+        boolean timedOut = legAge > VISIBLE_ORE_SIGHTING_MOVE_LIMIT;
+        boolean routeEnded = legAge > 20 && bot.getActionPack().isPathExecutorIdle();
+        if (!timedOut && !routeEnded) {
+            noteProgress();
+            return true;
+        }
+        boolean moved = visibleOreSightingStart != null
+                && horizontalDistanceSquared(bot.blockPosition(), visibleOreSightingHint) + 4.0D
+                < horizontalDistanceSquared(visibleOreSightingStart, visibleOreSightingHint);
+        if (timedOut) {
+            bot.getActionPack().stopAll();
+        }
+        BotLog.action(bot, "ore_dig_target_sighting_leg_end",
+                "reason", timedOut ? "timeout" : "route_ended",
+                "moved", moved,
+                "hint", visibleOreSightingHint.toShortString());
+        if (!moved) {
+            visibleOreSightingHint = null;
+        } else {
+            noteProgress();
+        }
+        visibleOreSightingStart = null;
+        return false;
+    }
+
+    /** Starts one full-render or short fallback observed-only leg, never a target mining route. */
+    private boolean startVisibleOreSightingPursuit(AIPlayerEntity bot) {
+        if (visibleOreSightingHint == null) {
+            return false;
+        }
+        if (!isCurrentVisibleTargetOre(bot, visibleOreSightingHint)) {
+            BotLog.action(bot, "ore_dig_target_sighting_lost",
+                    "hint", visibleOreSightingHint.toShortString());
+            visibleOreSightingHint = null;
+            return false;
+        }
+        if (hasNoHorizontalHeading(bot, visibleOreSightingHint)) {
+            return startVisibleOreVerticalRecovery(bot);
+        }
+        int requestedHop = visibleOreSightingPursuitDistance(bot);
+        ActionResult route = bot.getActionPack().startVisibleLandmarkPursuitTo(
+                visibleOreSightingHint, requestedHop);
+        if (route.isFailed() && requestedHop > VISIBLE_ORE_SIGHTING_HOP_DISTANCE) {
+            String longRouteReason = route.reason();
+            requestedHop = VISIBLE_ORE_SIGHTING_HOP_DISTANCE;
+            route = bot.getActionPack().startVisibleLandmarkPursuitTo(
+                    visibleOreSightingHint, requestedHop);
+            if (!route.isFailed()) {
+                BotLog.action(bot, "ore_dig_target_sighting_short_leg_fallback",
+                        "hint", visibleOreSightingHint.toShortString(),
+                        "reason", longRouteReason, "max_hop", requestedHop);
+            }
+        }
+        if (route.isFailed()) {
+            BotLog.action(bot, "ore_dig_target_sighting_pursuit_refused",
+                    "hint", visibleOreSightingHint.toShortString(), "reason", route.reason());
+            visibleOreSightingHint = null;
+            return false;
+        }
+        BlockPos observedGoal = bot.getActionPack().activePathGoal();
+        if (observedGoal == null) {
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "ore_dig_target_sighting_pursuit_refused",
+                    "hint", visibleOreSightingHint.toShortString(), "reason", "missing_observed_goal");
+            visibleOreSightingHint = null;
+            return false;
+        }
+        visibleOreSightingStart = bot.blockPosition().immutable();
+        visibleOreSightingStartedBudget = totalBudget();
+        BotLog.action(bot, "ore_dig_target_sighting_pursuit",
+                "hint", visibleOreSightingHint.toShortString(),
+                "to", observedGoal.toShortString(), "max_hop", requestedHop);
+        return true;
+    }
+
+    /** One batched generic scan shared by the idle and in-flight observed-hop paths. */
+    private VisibleTargetHorizonScan.Sighting nextVisibleOreSighting(AIPlayerEntity bot) {
+        if (visibleOreHorizonScan == null) {
+            visibleOreHorizonScan = new VisibleTargetHorizonScan(targetOres);
+        }
+        VisibleTargetHorizonScan.Sighting sighting = visibleOreHorizonScan.step(bot);
+        if (sighting == null && visibleOreHorizonScan.complete()) {
+            visibleOreHorizonScan = null;
+        }
+        return sighting;
+    }
+
+    /** Re-proves the exact ore after current line of sight, before a route can use it as a heading. */
+    private boolean isCurrentVisibleTargetOre(AIPlayerEntity bot, BlockPos target) {
+        return target != null
+                && !oreExcluded(bot, target)
+                && ObservableWorldQuery.canObserveBlock(bot, target)
+                && OreScan.isOre(bot.level().getBlockState(target), targetOres);
+    }
+
+    /** The regular nearestOre box is deliberately the only handoff point to digging logic. */
+    private boolean insideLocalOreScanEnvelope(AIPlayerEntity bot, BlockPos target) {
+        if (target == null) {
+            return false;
+        }
+        BlockPos feet = bot.blockPosition();
+        return Math.abs(target.getX() - feet.getX()) <= SCAN_RADIUS
+                && Math.abs(target.getY() - feet.getY()) <= VERTICAL_SCAN
+                && Math.abs(target.getZ() - feet.getZ()) <= SCAN_RADIUS;
+    }
+
+    private void yieldVisibleOreToLocalScan() {
+        clearHighTargetStairSearch(visibleOreSightingHint);
+        visibleOreHorizonScan = null;
+        visibleOreSightingHint = null;
+        visibleOreSightingStart = null;
+        visibleOreSightingStartedBudget = 0;
+        visibleOreSightingNeedsLocalScan = true;
+        lastScanTick = -SCAN_INTERVAL;
+    }
+
+    private void clearVisibleOreSighting() {
+        clearHighTargetStairSearch(visibleOreSightingHint);
+        visibleOreHorizonScan = null;
+        visibleOreSightingHint = null;
+        visibleOreSightingStart = null;
+        visibleOreSightingStartedBudget = 0;
+        visibleOreSightingNeedsLocalScan = false;
+    }
+
+    private int visibleOreSightingPursuitDistance(AIPlayerEntity bot) {
+        if (visibleOreSightingHint == null) {
+            return VISIBLE_ORE_SIGHTING_HOP_DISTANCE;
+        }
+        int renderRange = Math.max(1, ObservableWorldQuery.visibleRangeBlocks(bot) - 2);
+        int landmarkDistance = (int) Math.ceil(Math.sqrt(
+                horizontalDistanceSquared(bot.blockPosition(), visibleOreSightingHint)));
+        return Math.min(renderRange, Math.max(VISIBLE_ORE_SIGHTING_HOP_DISTANCE, landmarkDistance));
+    }
+
+    private static double horizontalDistanceSquared(BlockPos first, BlockPos second) {
+        double dx = first.getX() - second.getX();
+        double dz = first.getZ() - second.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    /** True only when a visual landmark cannot supply any direction for a walk-only hop. */
+    private static boolean hasNoHorizontalHeading(AIPlayerEntity bot, BlockPos target) {
+        return bot != null && target != null
+                && bot.blockPosition().getX() == target.getX()
+                && bot.blockPosition().getZ() == target.getZ();
+    }
+
+    /**
+     * Recovers a render-visible ore directly above the bot without promoting the remote sighting
+     * into a dig target. It uses the existing finite, walk-only high-ore stair search with its
+     * null-heading compass alternatives; every admitted leg is still selected by Baritone's
+     * observed-navigation fence. Once the bot reaches the local ore envelope, the normal local
+     * scan owns all mining/placement decisions.
+     */
+    private boolean startVisibleOreVerticalRecovery(AIPlayerEntity bot) {
+        BlockPos ore = visibleOreSightingHint;
+        if (ore == null || ore.getY() - bot.blockPosition().getY() <= MAX_TARGET_BREAK_DY) {
+            return false;
+        }
+        if (!ownsHighTargetStairSearch(ore)) {
+            clearHighTargetStairSearch();
+            highTargetStairSearchOwner = ore.immutable();
+            highTargetStairSearchHeading = null;
+        }
+        ObservedSearchHops.Attempt attempt = highTargetStairSearch.begin(bot, null);
+        if (!attempt.started()) {
+            BotLog.action(bot, "ore_dig_target_sighting_vertical_hop_refused",
+                    "ore", ore.toShortString(),
+                    "attempt", attempt.number(),
+                    "reason", attempt.reason(),
+                    "remaining", Math.max(0, OBSERVED_SEARCH_MAX_HOPS
+                            - highTargetStairSearch.attempts()));
+            boolean exhausted = highTargetStairSearch.exhausted();
+            if (exhausted) {
+                clearHighTargetStairSearch(ore);
+                visibleOreSightingHint = null;
+            } else {
+                noteProgress();
+            }
+            return !exhausted;
+        }
+        highTargetStairSearchTarget = attempt.observedGoal();
+        highTargetStairSearchStart = bot.blockPosition().immutable();
+        highTargetStairSearchStartedBudget = totalBudget();
+        BotLog.action(bot, "ore_dig_target_sighting_vertical_hop",
+                "ore", ore.toShortString(),
+                "attempt", attempt.number(),
+                "to", highTargetStairSearchTarget.toShortString(),
+                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+        noteProgress();
+        return true;
     }
 
     /**
@@ -1913,7 +2439,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         observedOreSearchStartedBudget = 0;
     }
 
-    /** Ends a bounded search by reporting only the observation boundary the bot actually reached. */
+    /**
+     * Rolls over one bounded safe-search episode without turning an empty local view into task
+     * completion/failure.  Fixed quotas and time-boxed collections both keep looking through
+     * newly observed terrain until their own quota/window expires; only the individual episode is
+     * bounded.  No restart here creates a target beyond current observation.
+     */
     private void finishObservedOreSearch(AIPlayerEntity bot) {
         miner.cancel(bot);
         clearStripMovementOwnership();
@@ -1928,8 +2459,22 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BotLog.action(bot, "ore_dig_observed_search_exhausted",
                 "hops", observedOreSearchCompletedHops,
                 "attempts", observedOreSearch.attempts(),
-                "collected", collected + "/" + targetCount);
-        fail(reason);
+                "collected", collected + "/" + targetCount,
+                "boundary", reason);
+        // A fresh ObservationSearchHops episode anchors itself at the bot's factual current
+        // position. It may choose only a new locally observed walk goal, never a hidden ore or
+        // blind tunnelling route. The overall task budget remains monotonic and supplies the
+        // eventual finite termination for explicit count requests.
+        observedOreSearch.reset();
+        observedOreSearchCompletedHops = 0;
+        observedOreSearchLastScanTick = -SCAN_INTERVAL;
+        lastScanTick = -SCAN_INTERVAL;
+        noteProgress();
+        BotLog.action(bot, "ore_dig_observed_search_episode_reset",
+                "next_episode", observedOreSearch.attempts() + 1,
+                "budget", totalBudget(),
+                "mode", isTimedCollection() ? "timed" : "quota");
+        startObservedOreSearch(bot);
     }
 
     /** Starts a fresh dimension-aware descent, reopening it only after productive observed cave exploration. */
@@ -2253,7 +2798,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (assistDetourActive()) {
             return false;
         }
-        if (restoringFace || targetCount <= 0 || collected >= targetCount
+        if (restoringFace || targetCount <= 0 || (!isTimedCollection() && collected >= targetCount)
                 || targetOre != null || pendingPickupPos != null
                 || activeTargetBreakPos != null || !veinQueue.isEmpty()
                 || bonusOre != null || stripDirIndex < 0
@@ -2644,6 +3189,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     public Map<String, String> checkpoint() {
+        if (isTimedCollection()) {
+            return new TimedCollectionCheckpoint(collectionDurationTicks,
+                    Math.min(collectionDurationTicks, totalBudget()), invBaseline, collected).encode();
+        }
         // A live MiningExplorationTask is deliberately fresh/non-durable.  Saving this parent
         // cursor while its child owns a staircase would restore a stale strip face after a
         // restart, so the normal observed search is restarted instead.
@@ -3148,6 +3697,157 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private boolean ownsQueuedVeinHintReobservation(BlockPos owner) {
         return owner != null && owner.equals(queuedVeinHintSearchOwner);
+    }
+
+    /** Clears the ephemeral Baritone route used to re-observe a high ore's safe work pose. */
+    private void clearHighTargetStairSearch() {
+        highTargetStairSearch.reset();
+        highTargetStairSearchOwner = null;
+        highTargetStairSearchHeading = null;
+        highTargetStairSearchTarget = null;
+        highTargetStairSearchStart = null;
+        highTargetStairSearchStartedBudget = 0;
+    }
+
+    /** Clears the high-ore route only when the caller settles its exact finite owner. */
+    private void clearHighTargetStairSearch(BlockPos owner) {
+        if (owner == null || owner.equals(highTargetStairSearchOwner)) {
+            clearHighTargetStairSearch();
+        }
+    }
+
+    private boolean ownsHighTargetStairSearch(BlockPos owner) {
+        return owner != null && owner.equals(highTargetStairSearchOwner);
+    }
+
+    /** Retires only the active local leg; the finite high-ore owner may start the next one. */
+    private void clearHighTargetStairSearchLeg() {
+        highTargetStairSearchTarget = null;
+        highTargetStairSearchStart = null;
+        highTargetStairSearchStartedBudget = 0;
+    }
+
+    /**
+     * Keeps an admitted Baritone hop alive while it walks only to an observed local stance. This
+     * does not authorize digging, placing, or routing to the remote ore coordinate itself.
+     */
+    private boolean tickHighTargetStairSearch(AIPlayerEntity bot, BlockPos ore) {
+        if (!ownsHighTargetStairSearch(ore) || highTargetStairSearchTarget == null) {
+            return false;
+        }
+        BlockPos observedGoal = highTargetStairSearchTarget;
+        boolean arrived = bot.blockPosition().distSqr(observedGoal) <= 9.0D;
+        boolean routeIdle = bot.getActionPack().isPathExecutorIdle()
+                && bot.getActionPack().isWalkToIdle();
+        int legAge = totalBudget() - highTargetStairSearchStartedBudget;
+        if (arrived || legAge > OBSERVED_SEARCH_MOVE_LIMIT || (legAge > 20 && routeIdle)) {
+            boolean moved = highTargetStairSearchStart != null
+                    && bot.blockPosition().distSqr(highTargetStairSearchStart) > 9.0D;
+            highTargetStairSearch.retireObservedGoal(observedGoal);
+            bot.getActionPack().stopAll();
+            clearHighTargetStairSearchLeg();
+            BotLog.action(bot, "ore_dig_high_stair_hop_ended",
+                    "ore", ore.toShortString(),
+                    "to", observedGoal.toShortString(),
+                    "reason", arrived ? "arrived"
+                            : legAge > OBSERVED_SEARCH_MOVE_LIMIT ? "timeout" : "route_ended");
+            // The primary target's ordinary approach lease is suspended while this finite,
+            // observed-only route owns movement. Re-evaluate its safe work pose next tick rather
+            // than letting the old horizontal-tunnel timeout immediately discard it.
+            targetApproachTick = elapsed;
+            if (moved || !highTargetStairSearch.exhausted()) {
+                noteProgress();
+            }
+            return true;
+        }
+        targetApproachTick = elapsed;
+        noteProgress();
+        return true;
+    }
+
+    /**
+     * Prefers an existing observed staircase/ledge for a visible high ore before a generic
+     * horizontal tunnel produces an unsafe vertical drop shaft. After a finite set of walk-only
+     * hops, the existing abandonment path remains responsible for the normal exploration handoff.
+     */
+    private boolean startHighTargetStairSearch(AIPlayerEntity bot,
+                                               ServerLevel world,
+                                               BlockPos ore) {
+        if (!needsHighTargetStairSearch(bot, world, ore)) {
+            clearHighTargetStairSearch();
+            return false;
+        }
+        if (!ownsHighTargetStairSearch(ore)) {
+            clearHighTargetStairSearch();
+            highTargetStairSearchOwner = ore.immutable();
+            highTargetStairSearchHeading = highTargetStairHeading(bot.blockPosition(), ore);
+        } else if (highTargetStairSearchHeading != null) {
+            // A heading is only an input to the bounded, observed-hop admission. Re-project it
+            // from the bot's current stance between hops so an ore beyond the first 48-block
+            // compass point remains the preferred direction rather than degrading into a generic
+            // compass sweep. A search that began directly below the ore intentionally retains
+            // its null heading: there is no horizontal bearing in that case, so the helper's
+            // finite compass alternatives are the useful behavior.
+            highTargetStairSearchHeading = highTargetStairHeading(bot.blockPosition(), ore);
+        }
+        ObservedSearchHops.Attempt attempt = highTargetStairSearch.begin(
+                bot, highTargetStairSearchHeading);
+        if (!attempt.started()) {
+            BotLog.action(bot, "ore_dig_high_stair_hop_refused",
+                    "ore", ore.toShortString(),
+                    "attempt", attempt.number(),
+                    "heading", attempt.heading() == null ? "none" : attempt.heading().toShortString(),
+                    "reason", attempt.reason(),
+                    "remaining", Math.max(0, OBSERVED_SEARCH_MAX_HOPS
+                            - highTargetStairSearch.attempts()));
+            targetApproachTick = elapsed;
+            if (highTargetStairSearch.exhausted()) {
+                abandonTargetApproach(bot, ore, "high_stair_route_unreachable", ore.below());
+            } else {
+                noteProgress();
+            }
+            return true;
+        }
+        highTargetStairSearchTarget = attempt.observedGoal();
+        highTargetStairSearchStart = bot.blockPosition().immutable();
+        highTargetStairSearchStartedBudget = totalBudget();
+        targetApproachTick = elapsed;
+        BotLog.action(bot, "ore_dig_high_stair_hop",
+                "ore", ore.toShortString(),
+                "attempt", attempt.number(),
+                "heading", attempt.heading().toShortString(),
+                "to", highTargetStairSearchTarget.toShortString(),
+                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+        noteProgress();
+        return true;
+    }
+
+    /**
+     * Projects one remote compass point from the current local stance. It is recomputed after
+     * each guided hop, never used as a route endpoint, and deliberately has no bearing when the
+     * ore is directly overhead.
+     */
+    private static BlockPos highTargetStairHeading(BlockPos from, BlockPos ore) {
+        int dx = Integer.compare(ore.getX(), from.getX());
+        int dz = Integer.compare(ore.getZ(), from.getZ());
+        if (dx == 0 && dz == 0) {
+            return null;
+        }
+        return from.offset(dx * HIGH_TARGET_STAIR_HEADING_DISTANCE, 0,
+                dz * HIGH_TARGET_STAIR_HEADING_DISTANCE).immutable();
+    }
+
+    /** True exactly when a high target has no currently observed or retained safe work pose. */
+    private boolean needsHighTargetStairSearch(AIPlayerEntity bot,
+                                                ServerLevel world,
+                                                BlockPos ore) {
+        if (ore == null || ore.getY() - bot.blockPosition().getY() <= MAX_TARGET_BREAK_DY) {
+            return false;
+        }
+        if (approachGoalFor(bot, world, ore) != null) {
+            return false;
+        }
+        return rememberedHighWorkPose(bot, world, ore) == null;
     }
 
     /**
@@ -4805,9 +5505,26 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             noteProgress();
         } else if (status == BlockMiner.Status.FAILED
                 && !failMissingMiningChannelTool(bot)) {
+            String failure = miner.failureReason();
             if (intent == TunnelIntent.TARGET_APPROACH) {
-                abandonTargetApproach(bot, goal, "channel_failed", obstruction);
+                // A real player is standing on this channel block.  Treat that as a route
+                // boundary, not a mining/tool failure: drop the finite owner and let the normal
+                // observed scan pick a different ore or route rather than retrying the same
+                // occupied footing on every tick.
+                if (isPlayerSupportRefusal(failure)) {
+                    BotLog.action(bot, "ore_dig_player_support_bypass",
+                            "blocked", obstruction.toShortString(),
+                            "goal", goal.toShortString(), "intent", intent);
+                    abandonTargetApproach(bot, goal, MiningSafety.PLAYER_SUPPORT, obstruction);
+                } else {
+                    abandonTargetApproach(bot, goal, "channel_failed", obstruction);
+                }
             } else {
+                if (isPlayerSupportRefusal(failure)) {
+                    BotLog.action(bot, "ore_dig_player_support_bypass",
+                            "blocked", obstruction.toShortString(),
+                            "goal", goal.toShortString(), "intent", intent);
+                }
                 excludeOre(bot, goal);
             }
         }
@@ -4970,6 +5687,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                        BlockPos goal,
                                        String reason,
                                        BlockPos blocked) {
+        clearHighTargetStairSearch(goal);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
         clearActiveTargetBreak(goal);
@@ -5024,6 +5742,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (st == BlockMiner.Status.DONE) {
                 noteProgress();
             } else if (st == BlockMiner.Status.FAILED) {
+                String reason = miner.failureReason();
+                if (isPlayerSupportRefusal(reason)) {
+                    // The stair chooser ordinarily considers all four observed directions. A
+                    // player may step onto its selected body block after that proof, however;
+                    // release this finite approach rather than repeatedly selecting/mining the
+                    // occupied cell. The caller blacklists this ore for the current episode and
+                    // resumes its ordinary observed search elsewhere.
+                    BotLog.action(bot, "ore_dig_player_support_stair_bypass",
+                            "blocked", solid.toShortString(),
+                            "from", feet.toShortString());
+                    return false;
+                }
                 failMissingMiningChannelTool(bot);
             }
             return true;
@@ -5181,6 +5911,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     .max(Direction.Axis.Y) > 0.0D;
             if (supported
                     && isDiggableBody(world, ahead, ahead.above(), next)
+                    && !hasPlayerSupportedBodyBlock(bot, ahead, ahead.above(), next)
                     && !isLava(world, next) && !isLava(world, support)
                     && !isLava(world, ahead) && !isLava(world, ahead.above())
                     && !isWater(world, next) && !isWater(world, support)
@@ -5189,6 +5920,22 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
         }
         return null;
+    }
+
+    /** A live player on a body block makes that stair direction a route boundary, never diggable terrain. */
+    private static boolean hasPlayerSupportedBodyBlock(AIPlayerEntity bot, BlockPos... bodyCells) {
+        for (BlockPos bodyCell : bodyCells) {
+            if (MiningSafety.supportOccupancy(bot, bodyCell)
+                    == MiningSafety.SupportOccupancy.PLAYER) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Package-visible so route-policy tests can pin the typed shared refusal. */
+    static boolean isPlayerSupportRefusal(String reason) {
+        return MiningSafety.PLAYER_SUPPORT.equals(reason);
     }
 
     /** Whether every solid cell among {@code cells} is natural terrain the shared {@link BreakRule} lets a bot dig. */

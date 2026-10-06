@@ -40,7 +40,7 @@ class ToolRegistryStrictMiningBoundaryTest {
         assertTrue(registry.contains("List.of(\"count\", \"vein\")"), "the valid modes are declared once");
         int check = registry.indexOf("!MINE_ORE_MODES.contains(mineOreMode)");
         int veinBranch = registry.indexOf("if (\"vein\".equals(mineOreMode))");
-        int countPath = registry.indexOf("Task task = new OreDigTask(oreTargetsFrom(requiredString(args, \"ore\")), optionalInt(args, \"count\", 1));");
+        int countPath = registry.indexOf("Task task = hasCount ? new OreDigTask(ores, count) : OreDigTask.collectForDuration(ores);");
         assertTrue(check >= 0 && veinBranch > check && countPath > check,
                 "an unknown mode must be rejected before either mode assigns anything");
         assertTrue(registry.contains("invalid_mode: mine_ore mode must be one of"), "the error lists the valid modes");

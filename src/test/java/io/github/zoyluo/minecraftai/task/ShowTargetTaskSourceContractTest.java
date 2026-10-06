@@ -58,19 +58,19 @@ final class ShowTargetTaskSourceContractTest {
     }
 
     @Test
-    void pointingIsThreeSeparatedAnimationOnlySwings() throws IOException {
+    void pointingIsFiveSeparatedAnimationOnlySwings() throws IOException {
         String task = read("task/ShowTargetTask.java");
 
-        assertTrue(task.contains("SWING_COUNT = 3")
+        assertTrue(task.contains("SWING_COUNT = 5")
                         && task.contains("SWING_INTERVAL_TICKS = 4")
                         && task.contains("if (now < nextSwingTick || bot.isUsingItem())"),
-                "air punches must be exactly three distinct, safely scheduled taps");
+                "air punches must be exactly five distinct, safely scheduled taps");
         assertTrue(task.contains("LookAction.lookAt(bot, Vec3.atCenterOf(target))")
                         && task.contains("bot.swing(InteractionHand.MAIN_HAND);")
                         && task.contains("swings++")
                         && task.contains("nextSwingTick = now + SWING_INTERVAL_TICKS")
                         && task.contains("if (swings >= SWING_COUNT)"),
-                "the bot must face the target and use only three visual main-hand swings");
+                "the bot must face the target and use only five visual main-hand swings");
         assertFalse(task.contains("setAttack") || task.contains("player.attack")
                         || task.contains("MiningAction") || task.contains("InteractAction")
                         || task.contains("useItem"),

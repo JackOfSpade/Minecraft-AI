@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.KnownCellPickupSweep;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -19,11 +20,13 @@ import org.slf4j.event.Level;
 
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.stats.Stats;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -33,10 +36,16 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 
 public final class GatherQuotaTask extends AbstractTask {
+    /** Ten real-time minutes at Minecraft's normal twenty ticks per second. */
+    public static final int DEFAULT_COLLECTION_DURATION_TICKS = 20 * 60 * 10;
+    /** A timed collection ended without obtaining any new matching resource. */
+    public static final String NO_RESOURCE_FOUND_BY_DEADLINE = "no_resource_found_by_deadline";
     private static final int SEARCH_RADIUS = 16;
     /** Exact block-breaking requests stay local rather than becoming roaming gather missions. */
     private static final int EXACT_BREAK_SEARCH_RADIUS = 16;
-    private static final int EXACT_BREAK_TIMEOUT = 1200;
+    // A strict all-pitch render-distance sight pass can take just under 1,000 small batches;
+    // leave room for one bounded high-target pillar proof and the final physical break.
+    private static final int EXACT_BREAK_TIMEOUT = 1500;
     // A gather survey can widen only as far as the configured perception radius.  In strict
     // survival the default is 16, so a 32/48-block scan would merely enumerate cells that the
     // observation fence must reject.  An empty local view should instead enter observed
@@ -44,6 +53,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private static final int MAX_SEARCH_RADIUS = ObservableSearchBounds.MAX_SURVEY_RADIUS;
     private static final int SEARCH_DOWN = 6;
     private static final int SEARCH_UP = 12;
+    /** High targets may extend above the shallow ordinary survey; pillar recovery stays bounded. */
+    private static final int PILLAR_SEARCH_UP = 32;
     private static final int LARGE_SCAN_THROTTLE_TICKS = 10; // Throttle large-radius scans to protect TPS
     private static final int MAX_PICKUP_MISSES = 5;  // Tolerated consecutive failed-pickup count before roaming to a new patch
     private static final int MAX_ROAMS = 8;          // Stuck-step escape: max roam-to-new-patch hops (shared by tree search/patch switching, ~224 blocks total); fail only after exhausting this
@@ -78,6 +89,17 @@ public final class GatherQuotaTask extends AbstractTask {
     private static final int KNOWN_RESOURCE_RANGE = 192; // Max distance for heading toward a knowledge-base remembered point
     private static final int GOTO_FAIL_EXCLUDE = 2;      // N consecutive GOTO failures toward the same target → blacklist it in working memory
     private static final int GOTO_STUCK_LIMIT = 80;      // R1: if the coordinate hasn't moved for this long (4s) while GOTO paths toward a tree → assume airborne/stuck and force recovery
+    /** A short proven fallback when a full render-distance landmark corridor is not admissible. */
+    private static final int TREE_SIGHTING_HOP_DISTANCE = 48;
+    private static final int TREE_SIGHTING_MOVE_LIMIT = 300;
+    /** Same bounded fallback for a directly visible non-tree gather target. */
+    private static final int TARGET_SIGHTING_HOP_DISTANCE = 48;
+    private static final int TARGET_SIGHTING_MOVE_LIMIT = 300;
+    /** Keep emergency pillar material collection genuinely local to the unreachable target. */
+    private static final int SCAFFOLD_SUPPLY_RADIUS = 8;
+    private static final int SCAFFOLD_SUPPLY_TIMEOUT = 600;
+    /** One extra safe support prevents a minimal vertical count from failing on a small step. */
+    private static final int SCAFFOLD_SUPPORT_CUSHION = 1;
 
     private static int configuredObservationRadius() {
         return Math.max(1, MinecraftAiConfig.get().perception().radius());
@@ -93,11 +115,19 @@ public final class GatherQuotaTask extends AbstractTask {
         DEPOSIT,
         ROAM,
         EXPLORE,
+        TREE_SIGHTING,
+        TARGET_SIGHTING,
+        SCAFFOLD_SUPPLY,
         DONE
     }
 
     private final Item targetItem;
     private final int targetCount;
+    /** Positive only for an open-ended, time-boxed collection rather than an item quota. */
+    private final int collectionDurationTicks;
+    /** Positive only for an internal, local-only support-material gathering child. */
+    private final int localSearchRadius;
+    private final int localTimeoutTicks;
     /** True when a player/tool requested an additional amount rather than an inventory total. */
     private final boolean countNewItems;
     /** Counts matching blocks actually broken instead of inventory items. */
@@ -211,9 +241,40 @@ public final class GatherQuotaTask extends AbstractTask {
     private int miningExplorationTimeoutCredit;
     private BlockPos lastGotoTarget;
     private int gotoFailStreak;
-    private boolean treeDigTried; // Whether the current target has already been escalated to dig-approach (tunnel down/through when a cliff-face/below-grade tree can't be reached)
+    private boolean treeDigTried; // Whether the current target has already been escalated to dig-approach (tunnel down/through when a cliff-face/below-grade target can't be reached)
+    /**
+     * The current GOTO was admitted specifically as an observed no-dig pillar.  If it ends
+     * short, do not silently replace that limited construction request with a terrain-digging
+     * route just because ordinary GOTO recovery happens to share the same phase.
+     */
+    private boolean pillarApproachActive;
     private BlockPos gotoStuckPos; // R1: last coordinate recorded by GOTO (used to detect an airborne/deadlocked bot that hasn't moved in a long time)
     private int gotoStuckTick;
+    // Visible-tree recovery: a budgeted 360-degree first-hit sweep nominates a trunk or leaf;
+    // leaf landmarks are pursued only through a locally observed directional route.
+    private TreeHorizonScan treeHorizonScan;
+    private BlockPos treeSightingHint;
+    private BlockPos treeSightingGoal;
+    private BlockPos treeSightingStart;
+    private int treeSightingStartedTick;
+    // Ordinary gather / exact-break recovery: only the requested block itself may become a
+    // landmark. Tree leaves remain a tree-only navigation cue in TreeHorizonScan.
+    private VisibleTargetHorizonScan targetHorizonScan;
+    private BlockPos targetSightingHint;
+    private BlockPos targetSightingGoal;
+    private BlockPos targetSightingStart;
+    private int targetSightingStartedTick;
+    // High-target recovery: if the bot needs a few safe supports, this local child gathers only
+    // nearby common material before the explicit no-dig pillar route is retried.
+    private HarvestCore.PillarApproach pendingPillarApproach;
+    /** Resumable high-target scan; never repeat a full LOS volume in one survey tick. */
+    private HarvestCore.PillarApproachScan pillarApproachScan;
+    /** Vertical extent used for the active cursor; a high live sighting can widen it safely. */
+    private int pillarApproachScanUp;
+    private GatherQuotaTask scaffoldSupplyTask;
+    private int scaffoldSupportRequirement;
+    private int scaffoldSupplyItemIndex;
+    private Item scaffoldSupplyItem;
 
     // Auditable gather logging (docs/LOGGING.md "Auditing a gather"): observation-only counters
     // and state feeding gather_unit/gather_summary, so a player's "did the bot really gather
@@ -240,19 +301,63 @@ public final class GatherQuotaTask extends AbstractTask {
         return new GatherQuotaTask(targetItem, targetCount, false, null, "", "", true);
     }
 
+    /**
+     * Collects as much newly acquired material as possible for ten minutes.  Existing inventory
+     * establishes only the counting baseline; it can never complete this task.
+     */
+    public static GatherQuotaTask collectForDuration(Item targetItem) {
+        return collectForDuration(targetItem, DEFAULT_COLLECTION_DURATION_TICKS);
+    }
+
+    /**
+     * Time-boxed variant used by the player-facing no-count gather path.  The overload keeps the
+     * timing rule directly testable without changing the ten-minute public default.
+     */
+    public static GatherQuotaTask collectForDuration(Item targetItem, int durationTicks) {
+        return new GatherQuotaTask(targetItem, 1, false, null, "", "", true,
+                Math.max(1, durationTicks));
+    }
+
     private GatherQuotaTask(Item targetItem, int targetCount, boolean countBrokenBlocks,
                             Set<Block> exactBreakBlocks, String exactBreakTaskName,
                             String exactBreakTargetLabel, boolean countNewItems) {
+        this(targetItem, targetCount, countBrokenBlocks, exactBreakBlocks, exactBreakTaskName,
+                exactBreakTargetLabel, countNewItems, 0);
+    }
+
+    private GatherQuotaTask(Item targetItem, int targetCount, boolean countBrokenBlocks,
+                            Set<Block> exactBreakBlocks, String exactBreakTaskName,
+                            String exactBreakTargetLabel, boolean countNewItems, int collectionDurationTicks) {
+        this(targetItem, targetCount, countBrokenBlocks, exactBreakBlocks, exactBreakTaskName,
+                exactBreakTargetLabel, countNewItems, collectionDurationTicks, 0, 0);
+    }
+
+    private GatherQuotaTask(Item targetItem, int targetCount, boolean countBrokenBlocks,
+                            Set<Block> exactBreakBlocks, String exactBreakTaskName,
+                            String exactBreakTargetLabel, boolean countNewItems, int collectionDurationTicks,
+                            int localSearchRadius, int localTimeoutTicks) {
         this.targetItem = targetItem;
         this.targetCount = Math.max(1, targetCount);
         this.countBrokenBlocks = countBrokenBlocks;
         this.countNewItems = !countBrokenBlocks && countNewItems;
+        this.collectionDurationTicks = countBrokenBlocks ? 0 : Math.max(0, collectionDurationTicks);
+        this.localSearchRadius = countBrokenBlocks ? 0 : Math.max(0, localSearchRadius);
+        this.localTimeoutTicks = this.localSearchRadius == 0 ? 0 : Math.max(1, localTimeoutTicks);
         this.exactBreakTaskName = countBrokenBlocks ? exactBreakTaskName : "";
         this.exactBreakTargetLabel = countBrokenBlocks ? exactBreakTargetLabel : "";
         this.acceptItems = acceptItemsFor(targetItem);
         this.harvestBlocks = exactBreakBlocks == null ? harvestBlocksFor(this.acceptItems) : Set.copyOf(exactBreakBlocks);
         this.probabilisticDrop = !countBrokenBlocks && (harvestBlocks.contains(Blocks.SHORT_GRASS)
                 || harvestBlocks.contains(Blocks.SWEET_BERRY_BUSH));
+    }
+
+    /**
+     * A bounded, non-recursive child used only to get a few cheap natural supports beside a
+     * high target. MineTask shares this exact safety boundary for non-ore block targets.
+     */
+    static GatherQuotaTask collectNearbyPillarSupport(Item item, int count) {
+        return new GatherQuotaTask(item, count, false, null, "", "", true,
+                0, SCAFFOLD_SUPPLY_RADIUS, SCAFFOLD_SUPPLY_TIMEOUT);
     }
 
     /** Clears actual vegetation plants, independent of any random wheat-seed drops. */
@@ -295,13 +400,27 @@ public final class GatherQuotaTask extends AbstractTask {
     public String describe() {
         return countBrokenBlocks
                 ? "Breaking " + exactBreakTargetLabel + " " + countSoFar + "/" + targetCount + " phase=" + phase
+                : isTimedCollection()
+                ? "Gathering new " + BuiltInRegistries.ITEM.getKey(targetItem) + " " + countSoFar
+                + " collected in " + elapsed + "/" + collectionDurationTicks + " ticks phase=" + phase
                 : "Gathering " + (countNewItems ? "new " : "")
                 + BuiltInRegistries.ITEM.getKey(targetItem) + " " + countSoFar + "/" + targetCount + " phase=" + phase;
     }
 
     @Override
     public double progress() {
+        if (isTimedCollection()) {
+            return Math.min(1.0D, (double) elapsed / collectionDurationTicks);
+        }
         return Math.min(1.0D, (double) countSoFar / targetCount);
+    }
+
+    private boolean isTimedCollection() {
+        return collectionDurationTicks > 0;
+    }
+
+    private boolean quotaReached() {
+        return !isTimedCollection() && countSoFar >= targetCount;
     }
 
     @Override
@@ -313,7 +432,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // for a tree got aborted at 200t, derailing the whole diamond-mining goal → the brain took
         // over and mined itself to death). This task's own three-layer fallback is sufficient:
         // (1) self-stuck (no new material gathered within SELF_STUCK_LIMIT → observed search);
-        // (2) bounded observed hops; (3) gather_timeout (6000t).
+        // (2) repeated bounded observed-search episodes; (3) the task's deadline.
         return true;
     }
 
@@ -323,7 +442,7 @@ public final class GatherQuotaTask extends AbstractTask {
         pickedUpAtStart = countBrokenBlocks ? 0L : pickedUpAccepted(bot);
         countSoFar = countBrokenBlocks || countNewItems ? 0 : acceptedInventoryAtStart;
         searchRadius = defaultSearchRadius();
-        phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
+        phase = quotaReached() ? Phase.DONE : Phase.SURVEY;
         prospectScan = null;
         exploreScan = null;
         surveyScan = null;
@@ -333,6 +452,16 @@ public final class GatherQuotaTask extends AbstractTask {
         exploreTarget = null;
         exploreStart = null;
         exploreHint = null;
+        clearTreeSighting();
+        clearTargetSighting();
+        pillarApproachScan = null;
+        pillarApproachScanUp = 0;
+        pendingPillarApproach = null;
+        scaffoldSupplyTask = null;
+        scaffoldSupportRequirement = 0;
+        scaffoldSupplyItemIndex = 0;
+        scaffoldSupplyItem = null;
+        pillarApproachActive = false;
         nextExploreAdmissionTick = -1;
         miningExploration = null;
         miningExplorationAttempted = false;
@@ -363,6 +492,10 @@ public final class GatherQuotaTask extends AbstractTask {
 
     @Override
     protected void onResume(AIPlayerEntity bot) {
+        if (scaffoldSupplyTask != null) {
+            scaffoldSupplyTask.resume(bot);
+            return;
+        }
         if (miningExploration != null) {
             miningExploration.resume(bot);
             return;
@@ -370,10 +503,12 @@ public final class GatherQuotaTask extends AbstractTask {
         prospectScan = null; // a scan begun before the pause reflects a stale position
         exploreScan = null;
         surveyScan = null;
+        clearTreeSighting();
+        clearTargetSighting();
         if (!countBrokenBlocks) {
             refreshCountSoFar(bot);
         }
-        if (countSoFar >= targetCount) {
+        if (quotaReached()) {
             clearPickupLedger();
             phase = Phase.DONE;
             return;
@@ -387,7 +522,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // pause() releases the MiningController, so a still-reachable atomic harvest must be
         // restarted immediately. Keep the original local deadline monotonic: repeated safety
         // preemption must not renew one stale target forever. The physical pickup ledger and the
-        // task-wide 6000-tick budget remain monotonic for the same reason.
+        // task-wide collection budget remains monotonic for the same reason.
         if (HarvestCore.canReach(bot, targetPos)) {
             HarvestCore.startMining(bot, targetPos);
             BotLog.action(bot, "gather_harvest_resumed", "pos", targetPos.toShortString());
@@ -405,6 +540,7 @@ public final class GatherQuotaTask extends AbstractTask {
         lastGotoTarget = null;
         gotoFailStreak = 0;
         treeDigTried = false;
+        pillarApproachActive = false;
         gotoStuckPos = null;
         resetSurveyWatchdog();
         phase = Phase.SURVEY;
@@ -422,7 +558,18 @@ public final class GatherQuotaTask extends AbstractTask {
             // same tick or a previous one) is unattributed -- e.g. a player handed the bot an item.
             logGatherUnitGains(bot, "unattributed", null);
         }
-        if (countSoFar >= targetCount) {
+        // A block break or its local pickup was already physically committed before the window
+        // closed. Let that bounded transaction settle before deciding that nothing was found;
+        // no new target, route, or exploration leg is admitted after the deadline.
+        if (isTimedCollection() && elapsed >= collectionDurationTicks && !settlingCollection()) {
+            finishTimedCollection(bot);
+            return;
+        }
+        if (quotaReached()) {
+            if (scaffoldSupplyTask != null) {
+                scaffoldSupplyTask.abort(bot);
+                scaffoldSupplyTask = null;
+            }
             if (miningExploration != null) {
                 miningExploration.abort(bot);
                 miningExploration = null;
@@ -431,8 +578,13 @@ public final class GatherQuotaTask extends AbstractTask {
             clearPickupLedger();
             phase = Phase.DONE;
         }
-        int timeout = countBrokenBlocks ? EXACT_BREAK_TIMEOUT : 6000;
-        if (miningExploration == null && elapsed - miningExplorationTimeoutCredit > timeout) {
+        int timeout = countBrokenBlocks ? EXACT_BREAK_TIMEOUT
+                : isLocalScaffoldSupply() ? localTimeoutTicks : DEFAULT_COLLECTION_DURATION_TICKS;
+        // A pre-deadline HARVEST/PICKUP transaction is allowed to settle (above) before the
+        // timed receipt is final. Do not let the shared quota timeout turn that last bounded
+        // transaction into a generic failure one tick after the window closes.
+        if (miningExploration == null && elapsed - miningExplorationTimeoutCredit > timeout
+                && (!isTimedCollection() || !settlingCollection())) {
             fail(countBrokenBlocks ? name() + "_timeout" : "gather_timeout");
             return;
         }
@@ -453,9 +605,11 @@ public final class GatherQuotaTask extends AbstractTask {
                 && elapsed >= nextExploreAdmissionTick) {
             if (!startExplore(bot)) {
                 if (!startMiningExploration(bot)) {
-                    fail(exploreHops > 0
-                            ? "no_observed_resource_after_exploration"
-                            : "no_observed_resource_in_local_view");
+                    if (!continueAfterObservedSearchExhaustion(bot)) {
+                        fail(exploreHops > 0
+                                ? "no_observed_resource_after_exploration"
+                                : "no_observed_resource_in_local_view");
+                    }
                 }
             }
             return;
@@ -464,8 +618,8 @@ public final class GatherQuotaTask extends AbstractTask {
         // count is growing), not position. Slow GOTO progress with no gathering for a long time
         // (can't reach the tree / can't break it) also counts as stuck → roam to a new patch
         // promptly instead of slowly burning down to gather_timeout (observed: gathered 5 logs
-        // then couldn't reach the rest, and got killed by the 5-minute timeout).
-        if (phase == Phase.SURVEY || phase == Phase.GOTO) {
+        // then couldn't reach the rest, and got killed by the ten-minute timeout).
+        if (!isLocalScaffoldSupply() && (phase == Phase.SURVEY || phase == Phase.GOTO)) {
             if (countSoFar != selfStuckCount) {
                 selfStuckCount = countSoFar;
                 selfStuckTick = elapsed;
@@ -475,6 +629,14 @@ public final class GatherQuotaTask extends AbstractTask {
                 exploredSinceFind = true; // The next "found after exploring" is worth recording into memory again
             } else if (elapsed - selfStuckTick > SELF_STUCK_LIMIT) {
                 if (countBrokenBlocks) {
+                    // An exact break remains visual-only, but its line-of-sight raster is a
+                    // real bounded search rather than idle circling. Let it finish its current
+                    // pass (or its safe pillar proof) before reporting that nothing visible was
+                    // found; the normal exact timeout remains the outer bound.
+                    if (hasPendingExactVisibleSearch()) {
+                        selfStuckTick = elapsed;
+                        return;
+                    }
                     fail(exactBreakNoNearbyReason());
                     return;
                 }
@@ -502,8 +664,42 @@ public final class GatherQuotaTask extends AbstractTask {
             case DEPOSIT -> deposit(bot);
             case ROAM -> roamMove(bot);
             case EXPLORE -> exploreMove(bot);
+            case TREE_SIGHTING -> treeSightingMove(bot);
+            case TARGET_SIGHTING -> targetSightingMove(bot);
+            case SCAFFOLD_SUPPLY -> scaffoldSupply(bot);
             case DONE -> complete();
         }
+    }
+
+    /** Ends an open-ended collection at its fixed deadline without treating old inventory as progress. */
+    private void finishTimedCollection(AIPlayerEntity bot) {
+        if (scaffoldSupplyTask != null) {
+            scaffoldSupplyTask.abort(bot);
+            scaffoldSupplyTask = null;
+            pendingPillarApproach = null;
+        }
+        if (miningExploration != null) {
+            miningExploration.abort(bot);
+            miningExploration = null;
+        }
+        bot.getActionPack().stopAll();
+        clearPickupLedger();
+        phase = Phase.DONE;
+        BotLog.action(bot, "gather_timed_deadline",
+                "item", BuiltInRegistries.ITEM.getKey(targetItem).toString(),
+                "collected", countSoFar,
+                "duration_ticks", collectionDurationTicks,
+                "outcome", countSoFar > 0 ? "complete" : NO_RESOURCE_FOUND_BY_DEADLINE);
+        if (countSoFar > 0) {
+            complete();
+        } else {
+            fail(NO_RESOURCE_FOUND_BY_DEADLINE);
+        }
+    }
+
+    /** Physical break/pickup work started before a deadline must settle before the final receipt. */
+    private boolean settlingCollection() {
+        return phase == Phase.HARVEST || phase == Phase.PICKUP || phase == Phase.BOOTSTRAP_PICKUP;
     }
 
     // B: when the bot is underground (no sky overhead) and no reachable resource can be found
@@ -633,6 +829,7 @@ public final class GatherQuotaTask extends AbstractTask {
         targetPos = found.immutable();
         lastGotoTarget = targetPos;
         treeDigTried = false;
+        pillarApproachActive = false;
         gotoFailStreak = 0;
         gotoStuckPos = null;          // Reset the R1 watchdog baseline
         searchRadius = SEARCH_RADIUS;
@@ -900,6 +1097,10 @@ public final class GatherQuotaTask extends AbstractTask {
         int configuredRadius = configuredObservationRadius();
         int surveyRadiusLimit = ObservableSearchBounds.surveyRadius(configuredRadius);
         int prospectRadiusLimit = ObservableSearchBounds.prospectRadius(configuredRadius);
+        if (isLocalScaffoldSupply()) {
+            surveyRadiusLimit = Math.min(surveyRadiusLimit, localSearchRadius);
+            prospectRadiusLimit = Math.min(prospectRadiusLimit, localSearchRadius);
+        }
         // A task restored from an older build can carry a 32/48-radius survey.  Do not resume it
         // when the current profile cannot observe that far; it has no possible discovery outcome.
         if (!countBrokenBlocks && searchRadius > surveyRadiusLimit) {
@@ -927,7 +1128,8 @@ public final class GatherQuotaTask extends AbstractTask {
                 return;
             }
         }
-        if (!countBrokenBlocks && HarvestCore.isInventoryFull(bot) && countSoFar < targetCount) {
+        if (!countBrokenBlocks && HarvestCore.isInventoryFull(bot)
+                && (isTimedCollection() || countSoFar < targetCount)) {
             phase = Phase.DEPOSIT;
             return;
         }
@@ -969,12 +1171,41 @@ public final class GatherQuotaTask extends AbstractTask {
                     needsCellObservation());
         }
         if (choice == null) {
+            // The normal local survey is deliberately cheap. Before walking a blind compass
+            // hop, spend a bounded 360-degree first-hit look-around over what a player at this
+            // eye could actually see through the tracked render distance. Trees retain their
+            // leaf landmark behavior; every other target needs the requested block itself to be
+            // in current line of sight. This also lets exact-break requests honor a visibly
+            // distant requested block without becoming a hidden-world scan or a roaming mission.
+            if (gathersTreeLogs() ? seekVisibleTree(bot)
+                    : !isLocalScaffoldSupply() && seekVisibleTarget(bot)) {
+                return;
+            }
+            // After the short visual glance, an unreachable directly visible target may still
+            // be safely harvested from one explicit vertical pillar. This applies to every
+            // outer GatherQuotaTask target, including exact-break targets; only the private
+            // support-material child is excluded so it cannot recursively collect more filler
+            // to pillar toward filler. Keeping this after the view sweep lets a plainly visible
+            // tree/target win immediately instead of paying for an empty high-target scan.
+            if (!isLocalScaffoldSupply() && tryPillarApproach(bot, botId, now)) {
+                return;
+            }
+            if (countBrokenBlocks && hasPendingExactVisibleSearch()) {
+                return;
+            }
             if (countBrokenBlocks) {
-                // An exact break request is deliberately a small, nearby gesture. Do not surface,
-                // prospect, roam, or dig toward a distant patch when the player asks to break blocks.
+                // An exact break request is still bounded to what is directly visible or local.
+                // Do not surface, prospect, roam, or dig toward a patch beyond that evidence.
                 BotLog.action(bot, name() + "_no_nearby", "radius", searchRadius,
                         "block", exactBreakTargetLabel);
                 fail(exactBreakNoNearbyReason());
+                return;
+            }
+            if (isLocalScaffoldSupply()) {
+                BotLog.action(bot, "gather_scaffold_resupply_empty",
+                        "radius", surveyRadiusLimit,
+                        "item", BuiltInRegistries.ITEM.getKey(targetItem).toString());
+                fail("no_nearby_scaffold_support");
                 return;
             }
             // Expand only through terrain the current profile could actually observe.  Default
@@ -1010,7 +1241,12 @@ public final class GatherQuotaTask extends AbstractTask {
             escapeBarrenAreaOrFail(bot);
             return;
         }
+        clearTreeSighting();
+        clearTargetSighting();
+        pillarApproachScan = null;
+        pillarApproachScanUp = 0;
         targetPos = choice.pos();
+        pillarApproachActive = false;
         // A successful find via exploring: feed it into the RESOURCE_FOUND stream (distilled into
         // a knowledge-base resource point, so the next same-type need heads straight for it);
         // only record "the first find after having explored" to avoid flooding the stream on
@@ -1033,6 +1269,681 @@ public final class GatherQuotaTask extends AbstractTask {
         bot.getActionPack().startPathTo(choice.stand());
     }
 
+    /**
+     * Gives a log-gathering bot one factual render-distance look-around before generic compass
+     * exploration. A hit never becomes a hidden-world target: trunks are re-proved through
+     * {@link HarvestCore#targetChoice}, while leaf hits are only a direction for a bounded
+     * observed pursuit.
+     */
+    private boolean seekVisibleTree(AIPlayerEntity bot) {
+        if (treeSightingHint != null) {
+            if (isVerticalPillarHint(bot, treeSightingHint, true)) {
+                return false;
+            }
+            if (horizontalDistanceSquared(bot.blockPosition(), treeSightingHint) <= SEARCH_RADIUS * SEARCH_RADIUS) {
+                treeSightingHint = null;
+            } else if (startTreeSightingPursuit(bot)) {
+                return true;
+            }
+        }
+        if (treeHorizonScan == null) {
+            treeHorizonScan = new TreeHorizonScan(harvestBlocks);
+        }
+        TreeHorizonScan.Sighting sighting = treeHorizonScan.step(bot);
+        if (sighting == null) {
+            if (!treeHorizonScan.complete()) {
+                // Keep the coarse initial 360-degree glance responsive, but do not park
+                // normal tree gathering for the full fine raster. The persistent scan resumes
+                // at later survey boundaries while safe observed exploration continues.
+                return treeHorizonScan.shouldHoldFallback();
+            }
+            treeHorizonScan = null;
+            return false;
+        }
+        BotLog.action(bot, "gather_tree_sighted",
+                "kind", sighting.kind().name().toLowerCase(java.util.Locale.ROOT),
+                "pos", sighting.pos().toShortString(),
+                "rays", sighting.raysCast(),
+                "range", io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.visibleRangeBlocks(bot));
+        if (sighting.kind() == TreeHorizonScan.Kind.LOG && approachVisibleLog(bot, sighting.pos())) {
+            return true;
+        }
+        treeSightingHint = sighting.pos().immutable();
+        return startTreeSightingPursuit(bot);
+    }
+
+    private boolean approachVisibleLog(AIPlayerEntity bot, BlockPos log) {
+        // A remote log may have a ray-proven adjacent stance, but it must not turn that fact
+        // into an unrestricted long GOTO. Until it enters the ordinary local survey envelope it
+        // remains a continuously re-proved, walk-only landmark route.
+        if (!insideLocalHarvestSurvey(bot, log)) {
+            return false;
+        }
+        HarvestCore.TargetChoice choice = HarvestCore.targetChoice(bot, log);
+        if (choice == null) {
+            return false;
+        }
+        targetPos = choice.pos().immutable();
+        pillarApproachActive = false;
+        treeHorizonScan = null;
+        if (choice.direct()) {
+            treeSightingHint = null;
+            startHarvest(bot);
+            return true;
+        }
+        ActionResult route = bot.getActionPack().startPathTo(choice.stand());
+        if (route.isFailed()) {
+            targetPos = null;
+            BotLog.action(bot, "gather_tree_sighting_route_refused",
+                    "target", log.toShortString(), "reason", route.reason());
+            return false;
+        }
+        treeSightingHint = null;
+        treeSightingGoal = null;
+        treeSightingStart = null;
+        lastGotoTarget = targetPos;
+        gotoFailStreak = 0;
+        treeDigTried = false;
+        gotoStuckPos = null;
+        searchRadius = SEARCH_RADIUS;
+        phase = Phase.GOTO;
+        BotLog.action(bot, "gather_tree_sighting_direct_route",
+                "target", targetPos.toShortString(), "to", choice.stand().toShortString());
+        return true;
+    }
+
+    /** Starts one longer, but still locally admitted, leg toward a visible leaf/trunk landmark. */
+    private boolean startTreeSightingPursuit(AIPlayerEntity bot) {
+        if (treeSightingHint == null) {
+            return false;
+        }
+        // A remembered leaf/log is only a lead. The landmark must still be visible now before
+        // it is allowed to influence a route; moving behind a ridge or another canopy must not
+        // turn old sight into hidden-world navigation.
+        if (!isCurrentVisibleTreeLandmark(bot, treeSightingHint)) {
+            BotLog.action(bot, "gather_tree_sighting_lost", "hint", treeSightingHint.toShortString());
+            treeSightingHint = null;
+            return false;
+        }
+        if (isVerticalPillarHint(bot, treeSightingHint, true)) {
+            // The dedicated pillar path owns a visible vertical tree feature; a directional
+            // landmark hop would have no heading and must not manufacture one.
+            return false;
+        }
+        int requestedHop = treeSightingPursuitDistance(bot);
+        ActionResult route = bot.getActionPack().startVisibleLandmarkPursuitTo(
+                treeSightingHint, requestedHop);
+        // An unobstructed tree can be reached in one render-distance-aware leg. Terrain can
+        // expose the canopy while hiding part of the walkable ground corridor, though; retain a
+        // shorter all-observed leg in that case instead of abandoning the factual landmark or
+        // pretending the occluded terrain is navigable.
+        if (route.isFailed() && requestedHop > TREE_SIGHTING_HOP_DISTANCE) {
+            String longRouteReason = route.reason();
+            requestedHop = TREE_SIGHTING_HOP_DISTANCE;
+            route = bot.getActionPack().startVisibleLandmarkPursuitTo(treeSightingHint, requestedHop);
+            if (!route.isFailed()) {
+                BotLog.action(bot, "gather_tree_sighting_short_leg_fallback",
+                        "hint", treeSightingHint.toShortString(), "reason", longRouteReason,
+                        "max_hop", requestedHop);
+            }
+        }
+        if (route.isFailed()) {
+            BotLog.action(bot, "gather_tree_sighting_pursuit_refused",
+                    "hint", treeSightingHint.toShortString(), "reason", route.reason());
+            treeSightingHint = null;
+            return false;
+        }
+        BlockPos observedGoal = bot.getActionPack().activePathGoal();
+        if (observedGoal == null) {
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "gather_tree_sighting_pursuit_refused",
+                    "hint", treeSightingHint.toShortString(), "reason", "missing_observed_goal");
+            treeSightingHint = null;
+            return false;
+        }
+        treeSightingGoal = observedGoal.immutable();
+        treeSightingStart = bot.blockPosition().immutable();
+        treeSightingStartedTick = elapsed;
+        phase = Phase.TREE_SIGHTING;
+        BotLog.action(bot, "gather_tree_sighting_pursuit",
+                "hint", treeSightingHint.toShortString(),
+                "to", treeSightingGoal.toShortString(),
+                "max_hop", requestedHop);
+        return true;
+    }
+
+    /** Returns to a precise local survey after each factual, forward tree-sighting leg. */
+    private void treeSightingMove(AIPlayerEntity bot) {
+        if (treeSightingHint == null) {
+            phase = Phase.SURVEY;
+            return;
+        }
+        if (!isCurrentVisibleTreeLandmark(bot, treeSightingHint)) {
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "gather_tree_sighting_lost", "hint", treeSightingHint.toShortString());
+            clearTreeSighting();
+            phase = Phase.SURVEY;
+            return;
+        }
+        if (horizontalDistanceSquared(bot.blockPosition(), treeSightingHint) <= SEARCH_RADIUS * SEARCH_RADIUS) {
+            bot.getActionPack().stopAll();
+            treeSightingHint = null;
+            treeSightingGoal = null;
+            treeSightingStart = null;
+            phase = Phase.SURVEY;
+            return;
+        }
+        boolean timedOut = elapsed - treeSightingStartedTick > TREE_SIGHTING_MOVE_LIMIT;
+        boolean routeEnded = elapsed - treeSightingStartedTick > 20 && bot.getActionPack().isPathExecutorIdle();
+        if (!timedOut && !routeEnded) {
+            return;
+        }
+        boolean moved = treeSightingStart != null
+                && horizontalDistanceSquared(bot.blockPosition(), treeSightingHint) + 4.0D
+                < horizontalDistanceSquared(treeSightingStart, treeSightingHint);
+        if (timedOut) {
+            bot.getActionPack().stopAll();
+        }
+        BotLog.action(bot, "gather_tree_sighting_leg_end",
+                "reason", timedOut ? "timeout" : "route_ended",
+                "moved", moved,
+                "hint", treeSightingHint.toShortString());
+        if (!moved) {
+            treeSightingHint = null;
+        }
+        treeSightingGoal = null;
+        treeSightingStart = null;
+        phase = Phase.SURVEY;
+    }
+
+    /**
+     * Gives every non-tree outer gather target the same render-distance first-hit look-around.
+     * There is deliberately no proxy landmark here: unlike a leaf for logs, a nearby arbitrary
+     * block says nothing factual about where the requested block is.
+     */
+    private boolean seekVisibleTarget(AIPlayerEntity bot) {
+        if (targetSightingHint != null) {
+            if (isVerticalPillarHint(bot, targetSightingHint, false)) {
+                return false;
+            }
+            if (horizontalDistanceSquared(bot.blockPosition(), targetSightingHint)
+                    <= SEARCH_RADIUS * SEARCH_RADIUS) {
+                targetSightingHint = null;
+            } else if (startTargetSightingPursuit(bot)) {
+                return true;
+            }
+        }
+        if (targetHorizonScan == null) {
+            targetHorizonScan = new VisibleTargetHorizonScan(harvestBlocks);
+        }
+        VisibleTargetHorizonScan.Sighting sighting = targetHorizonScan.step(bot);
+        if (sighting == null) {
+            if (!targetHorizonScan.complete()) {
+                // Keep only a brief initial look-around stationary. The fine raster remains
+                // alive for later survey turns, while ordinary safe exploration continues.
+                // Exact-break commands stay visual-only, but their outer survey owns the
+                // incomplete raster after the initial glance; see hasPendingExactVisibleSearch.
+                // That avoids blocking every server tick while still preventing a blind fail.
+                return targetHorizonScan.shouldHoldFallback();
+            }
+            targetHorizonScan = null;
+            return false;
+        }
+        BotLog.action(bot, "gather_target_sighted",
+                "pos", sighting.pos().toShortString(),
+                "rays", sighting.raysCast(),
+                "range", io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.visibleRangeBlocks(bot));
+        if (approachVisibleTarget(bot, sighting.pos())) {
+            return true;
+        }
+        // A target that is visible but has no currently local mining stance is still a factual
+        // direction. The observed route below may bring the bot close enough for the normal
+        // local survey (and, if needed, its explicit pillar recovery) to take over.
+        targetSightingHint = sighting.pos().immutable();
+        return startTargetSightingPursuit(bot);
+    }
+
+    /** Starts ordinary harvesting when a directly sighted target already has a proven stance. */
+    private boolean approachVisibleTarget(AIPlayerEntity bot, BlockPos target) {
+        if (!isCurrentVisibleTargetLandmark(bot, target)) {
+            return false;
+        }
+        // See approachVisibleLog: a target beyond the local survey envelope is direction only,
+        // even when its stand happens to be visible from here. This preserves continual LOS
+        // reproof and prevents a remote sighting from gaining an ordinary break/place route.
+        if (!insideLocalHarvestSurvey(bot, target)) {
+            return false;
+        }
+        HarvestCore.TargetChoice choice = HarvestCore.targetChoice(bot, target);
+        if (choice == null) {
+            return false;
+        }
+        targetPos = choice.pos().immutable();
+        pillarApproachActive = false;
+        if (choice.direct()) {
+            clearTargetSighting();
+            startHarvest(bot);
+            return true;
+        }
+        ActionResult route = bot.getActionPack().startPathTo(choice.stand());
+        if (route.isFailed()) {
+            targetPos = null;
+            BotLog.action(bot, "gather_target_sighting_route_refused",
+                    "target", target.toShortString(), "reason", route.reason());
+            return false;
+        }
+        clearTargetSighting();
+        lastGotoTarget = targetPos;
+        gotoFailStreak = 0;
+        treeDigTried = false;
+        gotoStuckPos = null;
+        searchRadius = SEARCH_RADIUS;
+        phase = Phase.GOTO;
+        BotLog.action(bot, "gather_target_sighting_direct_route",
+                "target", targetPos.toShortString(), "to", choice.stand().toShortString());
+        return true;
+    }
+
+    /** Starts one render-range-aware observed-only leg toward the directly visible target. */
+    private boolean startTargetSightingPursuit(AIPlayerEntity bot) {
+        if (targetSightingHint == null) {
+            return false;
+        }
+        if (!isCurrentVisibleTargetLandmark(bot, targetSightingHint)) {
+            BotLog.action(bot, "gather_target_sighting_lost", "hint", targetSightingHint.toShortString());
+            targetSightingHint = null;
+            return false;
+        }
+        if (isVerticalPillarHint(bot, targetSightingHint, false)) {
+            return false;
+        }
+        int requestedHop = targetSightingPursuitDistance(bot);
+        ActionResult route = bot.getActionPack().startVisibleLandmarkPursuitTo(
+                targetSightingHint, requestedHop);
+        if (route.isFailed() && requestedHop > TARGET_SIGHTING_HOP_DISTANCE) {
+            String longRouteReason = route.reason();
+            requestedHop = TARGET_SIGHTING_HOP_DISTANCE;
+            route = bot.getActionPack().startVisibleLandmarkPursuitTo(targetSightingHint, requestedHop);
+            if (!route.isFailed()) {
+                BotLog.action(bot, "gather_target_sighting_short_leg_fallback",
+                        "hint", targetSightingHint.toShortString(), "reason", longRouteReason,
+                        "max_hop", requestedHop);
+            }
+        }
+        if (route.isFailed()) {
+            BotLog.action(bot, "gather_target_sighting_pursuit_refused",
+                    "hint", targetSightingHint.toShortString(), "reason", route.reason());
+            targetSightingHint = null;
+            return false;
+        }
+        BlockPos observedGoal = bot.getActionPack().activePathGoal();
+        if (observedGoal == null) {
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "gather_target_sighting_pursuit_refused",
+                    "hint", targetSightingHint.toShortString(), "reason", "missing_observed_goal");
+            targetSightingHint = null;
+            return false;
+        }
+        targetSightingGoal = observedGoal.immutable();
+        targetSightingStart = bot.blockPosition().immutable();
+        targetSightingStartedTick = elapsed;
+        phase = Phase.TARGET_SIGHTING;
+        BotLog.action(bot, "gather_target_sighting_pursuit",
+                "hint", targetSightingHint.toShortString(),
+                "to", targetSightingGoal.toShortString(),
+                "max_hop", requestedHop);
+        return true;
+    }
+
+    /** Re-checks the visible target as the bot walks; stale sight never guides a route. */
+    private void targetSightingMove(AIPlayerEntity bot) {
+        if (targetSightingHint == null) {
+            phase = Phase.SURVEY;
+            return;
+        }
+        if (!isCurrentVisibleTargetLandmark(bot, targetSightingHint)) {
+            bot.getActionPack().stopAll();
+            BotLog.action(bot, "gather_target_sighting_lost", "hint", targetSightingHint.toShortString());
+            clearTargetSighting();
+            phase = Phase.SURVEY;
+            return;
+        }
+        if (horizontalDistanceSquared(bot.blockPosition(), targetSightingHint)
+                <= SEARCH_RADIUS * SEARCH_RADIUS) {
+            bot.getActionPack().stopAll();
+            clearTargetSighting();
+            phase = Phase.SURVEY;
+            return;
+        }
+        boolean timedOut = elapsed - targetSightingStartedTick > TARGET_SIGHTING_MOVE_LIMIT;
+        boolean routeEnded = elapsed - targetSightingStartedTick > 20 && bot.getActionPack().isPathExecutorIdle();
+        if (!timedOut && !routeEnded) {
+            return;
+        }
+        boolean moved = targetSightingStart != null
+                && horizontalDistanceSquared(bot.blockPosition(), targetSightingHint) + 4.0D
+                < horizontalDistanceSquared(targetSightingStart, targetSightingHint);
+        if (timedOut) {
+            bot.getActionPack().stopAll();
+        }
+        BotLog.action(bot, "gather_target_sighting_leg_end",
+                "reason", timedOut ? "timeout" : "route_ended",
+                "moved", moved,
+                "hint", targetSightingHint.toShortString());
+        if (!moved) {
+            targetSightingHint = null;
+        }
+        targetSightingGoal = null;
+        targetSightingStart = null;
+        phase = Phase.SURVEY;
+    }
+
+    /** Attempts an explicit no-dig pillar for a visible, unreachable target block. */
+    private boolean tryPillarApproach(AIPlayerEntity bot, java.util.UUID botId, int now) {
+        // A tall tree or other high target can sit above the shallow ordinary survey.  This
+        // remains a small, line-of-sight-filtered candidate volume, but it is deliberately
+        // resumable: one empty survey must not cast tens of thousands of rays in a single tick
+        // (or repeat those rays while a separate horizon sweep is still progressing).
+        int scanUp = pillarSearchUp(bot);
+        if (pillarApproachScan == null
+                || pillarApproachScanUp != scanUp
+                || bot.blockPosition().distSqr(pillarApproachScan.origin()) > SCAN_STALE_DISTANCE_SQ) {
+            pillarApproachScan = HarvestCore.beginNearestPillarApproachScan(bot, harvestBlocks,
+                    SEARCH_RADIUS, SEARCH_DOWN, scanUp,
+                    pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, now));
+            pillarApproachScanUp = scanUp;
+        }
+        if (!pillarApproachScan.step(SCAN_STEP_BUDGET_NANOS)) {
+            return true;
+        }
+        HarvestCore.PillarApproach approach = pillarApproachScan.result();
+        pillarApproachScan = null;
+        pillarApproachScanUp = 0;
+        if (approach == null) {
+            return false;
+        }
+        int required = approach.supports() + SCAFFOLD_SUPPORT_CUSHION;
+        int available = MaterialPalette.countPillarSupportBlocks(bot);
+        if (available < required) {
+            pendingPillarApproach = approach;
+            scaffoldSupportRequirement = required;
+            scaffoldSupplyItemIndex = 0;
+            scaffoldSupplyItem = null;
+            phase = Phase.SCAFFOLD_SUPPLY;
+            if (startNextScaffoldSupply(bot)) {
+                return true;
+            }
+            pendingPillarApproach = null;
+            scaffoldSupportRequirement = 0;
+            phase = Phase.SURVEY;
+            return false;
+        }
+        return startPillarApproach(bot, approach, available);
+    }
+
+    /** Re-validates the exact target and recomputes its clear pillar column after a refill walk. */
+    private HarvestCore.PillarApproach refreshPillarApproach(AIPlayerEntity bot,
+                                                               HarvestCore.PillarApproach previous) {
+        if (previous == null || EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), previous.target(),
+                bot.level().getServer().getTickCount())) {
+            return null;
+        }
+        return HarvestCore.pillarApproachFor(bot, previous.target(), harvestBlocks);
+    }
+
+    private boolean startPillarApproach(AIPlayerEntity bot, HarvestCore.PillarApproach approach, int available) {
+        bot.getActionPack().stopAll();
+        ActionResult route = bot.getActionPack().startPillarPathTo(approach.goal());
+        if (route.isFailed()) {
+            pillarApproachActive = false;
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), approach.target(),
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+            BotLog.action(bot, "gather_pillar_refused",
+                    "target", approach.target().toShortString(),
+                    "goal", approach.goal().toShortString(), "reason", route.reason());
+            return false;
+        }
+        clearTreeSighting();
+        clearTargetSighting();
+        pillarApproachScan = null;
+        pillarApproachScanUp = 0;
+        pendingPillarApproach = null;
+        scaffoldSupportRequirement = 0;
+        scaffoldSupplyItemIndex = 0;
+        scaffoldSupplyItem = null;
+        targetPos = approach.target().immutable();
+        lastGotoTarget = targetPos;
+        gotoFailStreak = 0;
+        treeDigTried = false;
+        pillarApproachActive = true;
+        gotoStuckPos = null;
+        searchRadius = SEARCH_RADIUS;
+        pickupMisses = 0;
+        selfStuckTick = elapsed;
+        phase = Phase.GOTO;
+        BotLog.action(bot, "gather_pillar_start",
+                "target", targetPos.toShortString(), "goal", approach.goal().toShortString(),
+                "supports", approach.supports(), "available", available);
+        return true;
+    }
+
+    /** Lets the bounded nearby common-support gather child own its actions, then re-surveys the high target. */
+    private void scaffoldSupply(AIPlayerEntity bot) {
+        if (scaffoldSupplyTask == null) {
+            pendingPillarApproach = null;
+            scaffoldSupportRequirement = 0;
+            scaffoldSupplyItem = null;
+            phase = Phase.SURVEY;
+            return;
+        }
+        scaffoldSupplyTask.tick(bot);
+        if (scaffoldSupplyTask.state() == TaskState.RUNNING || scaffoldSupplyTask.state() == TaskState.PAUSED) {
+            return;
+        }
+        HarvestCore.PillarApproach approach = pendingPillarApproach;
+        int available = MaterialPalette.countPillarSupportBlocks(bot);
+        boolean supplied = approach != null && available >= scaffoldSupportRequirement;
+        String reason = scaffoldSupplyTask.failureReason();
+        Item attemptedItem = scaffoldSupplyItem;
+        scaffoldSupplyTask = null;
+        if (supplied) {
+            HarvestCore.PillarApproach refreshed = refreshPillarApproach(bot, approach);
+            if (refreshed == null) {
+                BotLog.action(bot, "gather_scaffold_resupply_target_lost",
+                        "target", approach.target().toShortString());
+                pendingPillarApproach = null;
+                scaffoldSupportRequirement = 0;
+                scaffoldSupplyItem = null;
+                searchRadius = SEARCH_RADIUS;
+                phase = Phase.SURVEY;
+                return;
+            }
+            approach = refreshed;
+            pendingPillarApproach = refreshed;
+            scaffoldSupportRequirement = refreshed.supports() + SCAFFOLD_SUPPORT_CUSHION;
+            if (available < scaffoldSupportRequirement) {
+                BotLog.action(bot, "gather_scaffold_resupply_recheck_needs_more",
+                        "target", refreshed.target().toShortString(), "required", scaffoldSupportRequirement,
+                        "available", available);
+                if (startNextScaffoldSupply(bot)) {
+                    return;
+                }
+                supplied = false;
+            }
+        }
+        if (supplied) {
+            BotLog.action(bot, "gather_scaffold_resupply_ready",
+                    "available", available, "target", approach.target().toShortString());
+            scaffoldSupplyItem = null;
+            scaffoldSupplyItemIndex = 0;
+            // The target and its air-only column were just selected from current observations.
+            // Re-admit that exact pillar now that the bot has filler, rather than losing the
+            // unfinished target to a generic survey (which may choose another low block first).
+            if (startPillarApproach(bot, approach, available)) {
+                return;
+            }
+            pendingPillarApproach = null;
+            scaffoldSupportRequirement = 0;
+            searchRadius = SEARCH_RADIUS;
+            phase = Phase.SURVEY;
+            return;
+        }
+        BotLog.action(bot, "gather_scaffold_resupply_source_miss",
+                "item", attemptedItem == null ? "none" : BuiltInRegistries.ITEM.getKey(attemptedItem),
+                "reason", reason == null || reason.isBlank() ? "insufficient_support" : reason,
+                "available", available);
+        if (startNextScaffoldSupply(bot)) {
+            return;
+        }
+        if (approach != null) {
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), approach.target(),
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+        }
+        BotLog.action(bot, "gather_scaffold_resupply_failed",
+                "reason", reason == null || reason.isBlank() ? "insufficient_support" : reason,
+                "available", available);
+        pendingPillarApproach = null;
+        scaffoldSupportRequirement = 0;
+        scaffoldSupplyItem = null;
+        searchRadius = SEARCH_RADIUS;
+        phase = Phase.SURVEY;
+    }
+
+    /** Reads a landmark state only after a current render-distance line-of-sight proof. */
+    private boolean isCurrentVisibleTreeLandmark(AIPlayerEntity bot, BlockPos landmark) {
+        if (landmark == null
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, landmark)) {
+            return false;
+        }
+        var state = bot.level().getBlockState(landmark);
+        return harvestBlocks.contains(state.getBlock()) || state.is(BlockTags.LEAVES);
+    }
+
+    /** Reads an ordinary target only after a current render-distance line-of-sight proof. */
+    private boolean isCurrentVisibleTargetLandmark(AIPlayerEntity bot, BlockPos landmark) {
+        if (landmark == null
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, landmark)) {
+            return false;
+        }
+        return harvestBlocks.contains(bot.level().getBlockState(landmark).getBlock());
+    }
+
+    /** A high same-column sighting has no directional-hop heading and belongs to pillar recovery. */
+    private boolean isVerticalPillarHint(AIPlayerEntity bot, BlockPos hint, boolean treeLandmark) {
+        if (bot == null || hint == null || !sameHorizontalColumn(bot.blockPosition(), hint)
+                || insideLocalHarvestSurvey(bot, hint) || hint.getY() <= bot.blockPosition().getY()) {
+            return false;
+        }
+        return treeLandmark ? isCurrentVisibleTreeLandmark(bot, hint)
+                : isCurrentVisibleTargetLandmark(bot, hint);
+    }
+
+    /** Extends the local high-target cursor only for one live vertical render-distance sighting. */
+    private int pillarSearchUp(AIPlayerEntity bot) {
+        BlockPos hint = gathersTreeLogs() ? treeSightingHint : targetSightingHint;
+        boolean treeLandmark = gathersTreeLogs();
+        if (isVerticalPillarHint(bot, hint, treeLandmark)) {
+            int visibleHeight = hint.getY() - bot.blockPosition().getY();
+            return Math.max(PILLAR_SEARCH_UP,
+                    Math.min(visibleHeight, io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.visibleRangeBlocks(bot)));
+        }
+        return PILLAR_SEARCH_UP;
+    }
+
+    /** Starts the next cheap-natural-material child without ever considering wood or ores. */
+    private boolean startNextScaffoldSupply(AIPlayerEntity bot) {
+        int missing = scaffoldSupportRequirement - MaterialPalette.countPillarSupportBlocks(bot);
+        if (missing <= 0) {
+            return false;
+        }
+        List<Item> candidates = MaterialPalette.nearbyPillarSupportGatherItems();
+        if (scaffoldSupplyItemIndex >= candidates.size()) {
+            return false;
+        }
+        scaffoldSupplyItem = candidates.get(scaffoldSupplyItemIndex++);
+        scaffoldSupplyTask = collectNearbyPillarSupport(scaffoldSupplyItem, missing);
+        scaffoldSupplyTask.start(bot);
+        BotLog.action(bot, "gather_scaffold_resupply",
+                "target", pendingPillarApproach == null ? "none" : pendingPillarApproach.target().toShortString(),
+                "item", BuiltInRegistries.ITEM.getKey(scaffoldSupplyItem),
+                "needed", missing,
+                "available", MaterialPalette.countPillarSupportBlocks(bot),
+                "radius", SCAFFOLD_SUPPLY_RADIUS);
+        return true;
+    }
+
+    private void clearTreeSighting() {
+        treeHorizonScan = null;
+        treeSightingHint = null;
+        treeSightingGoal = null;
+        treeSightingStart = null;
+        treeSightingStartedTick = 0;
+    }
+
+    private void clearTargetSighting() {
+        targetHorizonScan = null;
+        targetSightingHint = null;
+        targetSightingGoal = null;
+        targetSightingStart = null;
+        targetSightingStartedTick = 0;
+    }
+
+    /** An exact break may await only an active line-of-sight sweep, never blind exploration. */
+    private boolean hasPendingExactVisibleSearch() {
+        return countBrokenBlocks
+                && ((treeHorizonScan != null && !treeHorizonScan.complete())
+                || (targetHorizonScan != null && !targetHorizonScan.complete()));
+    }
+
+    private static double horizontalDistanceSquared(BlockPos first, BlockPos second) {
+        double dx = first.getX() - second.getX();
+        double dz = first.getZ() - second.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    private static boolean sameHorizontalColumn(BlockPos first, BlockPos second) {
+        return first != null && second != null
+                && first.getX() == second.getX() && first.getZ() == second.getZ();
+    }
+
+    /** The same small volume that the ordinary survey may turn into a normal harvest route. */
+    private static boolean insideLocalHarvestSurvey(AIPlayerEntity bot, BlockPos target) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        BlockPos feet = bot.blockPosition();
+        return horizontalDistanceSquared(feet, target) <= SEARCH_RADIUS * SEARCH_RADIUS
+                && target.getY() >= feet.getY() - SEARCH_DOWN
+                && target.getY() <= feet.getY() + SEARCH_UP;
+    }
+
+    /**
+     * A tree point seen through clear air may receive one route request all the way to that
+     * factual landmark. The observation fence independently caps it to the bot's currently
+     * tracked render view, so this never grants a remote/unloaded movement target.
+     */
+    private int treeSightingPursuitDistance(AIPlayerEntity bot) {
+        if (treeSightingHint == null) {
+            return TREE_SIGHTING_HOP_DISTANCE;
+        }
+        int renderRange = Math.max(1,
+                io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.visibleRangeBlocks(bot) - 2);
+        int landmarkDistance = (int) Math.ceil(Math.sqrt(
+                horizontalDistanceSquared(bot.blockPosition(), treeSightingHint)));
+        return Math.min(renderRange, Math.max(TREE_SIGHTING_HOP_DISTANCE, landmarkDistance));
+    }
+
+    private int targetSightingPursuitDistance(AIPlayerEntity bot) {
+        if (targetSightingHint == null) {
+            return TARGET_SIGHTING_HOP_DISTANCE;
+        }
+        int renderRange = Math.max(1,
+                io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.visibleRangeBlocks(bot) - 2);
+        int landmarkDistance = (int) Math.ceil(Math.sqrt(
+                horizontalDistanceSquared(bot.blockPosition(), targetSightingHint)));
+        return Math.min(renderRange, Math.max(TARGET_SIGHTING_HOP_DISTANCE, landmarkDistance));
+    }
+
     private void escapeBarrenAreaOrFail(AIPlayerEntity bot) {
         // At this point the local survey and its observable vertical prospect both found no
         // source.  For a real mining source (stone/cobblestone or a profiled ore), a player at
@@ -1049,15 +1960,47 @@ public final class GatherQuotaTask extends AbstractTask {
             surfaceTried = false; // New area — allow the "surface fallback" again
             return;
         }
-        // Report only what actually happened.  A denied local route is not a completed search;
-        // a model must not turn it into an assertion about terrain it never saw.
-        if (observedSearchHops.exhausted()) {
-            fail(exploreHops > 0
-                    ? "no_observed_resource_after_exploration"
-                    : "no_observed_resource_in_local_view");
+        // A bounded episode protects individual navigation attempts, not the player's entire
+        // gathering request.  Normal collection keeps starting fresh, observation-fenced
+        // episodes until it reaches its quota/deadline; only exact local break requests retain
+        // the old immediate no-observed-resource boundary.
+        if (continueAfterObservedSearchExhaustion(bot)) {
             return;
         }
-        fail("no_observed_resource_in_local_view");
+        fail(observedSearchHops.exhausted() && exploreHops > 0
+                ? "no_observed_resource_after_exploration"
+                : "no_observed_resource_in_local_view");
+    }
+
+    /**
+     * Reopens a fresh bounded observed-search episode after the previous one spent all of its
+     * safe local-hop attempts.  This deliberately does not reset {@link #exploreHops}: that
+     * counter remains factual physical movement across the entire request, including a cave
+     * survey that may permit a later safe re-descent.
+     */
+    private boolean continueAfterObservedSearchExhaustion(AIPlayerEntity bot) {
+        if (countBrokenBlocks) {
+            return false;
+        }
+        BotLog.action(bot, "gather_observed_search_restart",
+                "item", BuiltInRegistries.ITEM.getKey(targetItem).toString(),
+                "elapsed_ticks", elapsed,
+                "collected", countSoFar,
+                "previous_hops", exploreHops);
+        observedSearchHops.reset();
+        explorationProgress.reset();
+        nextExploreAdmissionTick = -1;
+        searchRadius = SEARCH_RADIUS;
+        lastScanTick = -100;
+        lastProspectTick = -100;
+        prospectScan = null;
+        surveyScan = null;
+        exploreScan = null;
+        surfaceTried = false;
+        // The first attempt of a fresh episode can only be STARTED or schedule a bounded retry;
+        // either way the task remains active and the deadline remains authoritative.
+        startExplore(bot);
+        return true;
     }
 
     /**
@@ -1238,6 +2181,7 @@ public final class GatherQuotaTask extends AbstractTask {
         targetPos = tree.immutable();
         lastGotoTarget = targetPos;
         treeDigTried = true;
+        pillarApproachActive = false;
         gotoFailStreak = 0;
         phase = Phase.GOTO;
         return true;
@@ -1245,6 +2189,7 @@ public final class GatherQuotaTask extends AbstractTask {
 
     private void goToTarget(AIPlayerEntity bot) {
         if (targetPos == null || !isHarvestBlock(bot, targetPos)) {
+            pillarApproachActive = false;
             invalidateConsumedResource(bot);
             phase = Phase.SURVEY;
             return;
@@ -1266,6 +2211,7 @@ public final class GatherQuotaTask extends AbstractTask {
             BotLog.action(bot, "gather_goto_water_bail",
                     "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ());
             targetPos = null;
+            pillarApproachActive = false;
             phase = Phase.SURVEY;
             return;
         }
@@ -1292,6 +2238,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 BotLog.action(bot, "gather_goto_unstick",
                         "pos", hereNow.toShortString(), "on_ground", bot.onGround());
                 gotoStuckPos = null;
+                pillarApproachActive = false;
                 phase = Phase.SURVEY;
                 return;
             }
@@ -1300,6 +2247,22 @@ public final class GatherQuotaTask extends AbstractTask {
             gotoStuckTick = elapsed;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
+            if (pillarApproachActive) {
+                // This route was explicitly admitted to place safe filler but never to mine a
+                // shortcut.  A short/failed pillar must re-survey rather than fall through to
+                // the generic dig-approach recovery below.
+                bot.getActionPack().stopAll();
+                EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                        bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+                BotLog.action(bot, "gather_pillar_ended_short",
+                        "target", targetPos.toShortString());
+                targetPos = null;
+                lastGotoTarget = null;
+                gotoStuckPos = null;
+                pillarApproachActive = false;
+                phase = Phase.SURVEY;
+                return;
+            }
             if (countBrokenBlocks) {
                 // The survey chooser has already proved an ordinary walking path. If it turns
                 // out to be stale, reject this block and try another nearby one; never tunnel
@@ -1325,7 +2288,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // nothing to switch to when every tree is on a cliff). Each target is escalated only
             // once; only blacklisted (and revived after its TTL) if dig-approach also can't reach
             // it. This is the key to being able to gather wood on any terrain.
-            if (!treeDigTried) {
+            if (!pillarApproachActive && !treeDigTried) {
                 treeDigTried = true;
                 ActionResult dig = bot.getActionPack().startDigPathTo(targetPos);
                 BotLog.action(bot, "gather_dig_approach",
@@ -1479,7 +2442,20 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private int defaultSearchRadius() {
-        return countBrokenBlocks ? EXACT_BREAK_SEARCH_RADIUS : SEARCH_RADIUS;
+        if (countBrokenBlocks) {
+            return EXACT_BREAK_SEARCH_RADIUS;
+        }
+        return isLocalScaffoldSupply() ? localSearchRadius : SEARCH_RADIUS;
+    }
+
+    private boolean isLocalScaffoldSupply() {
+        return localSearchRadius > 0;
+    }
+
+    /** True only when the tree-specific horizon look-around is meaningful. */
+    private boolean gathersTreeLogs() {
+        return !countBrokenBlocks && harvestBlocks.stream()
+                .anyMatch(block -> block.defaultBlockState().is(BlockTags.LOGS));
     }
 
     /**
@@ -1566,7 +2542,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 // Probabilistic drop (clearing grass for seeds / harvesting berry bushes): not
                 // dropping anything this time is normal, not a "failed pickup" — return to
                 // SURVEY and gather the next one; rely on survey finding no block (→ roam) and
-                // on gather_timeout (6000t) as fallbacks, avoiding a false pickup_miss timeout
+                // on gather_timeout as fallbacks, avoiding a false pickup_miss timeout
                 // (observed: clearing grass for seeds hit pickup_timeout and failed after
                 // gathering just 1).
                 clearPickupLedger();
@@ -1618,7 +2594,7 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupsCount++; // Auditable gather logging: one confirmed physical pickup (see gather_summary)
         logGatherUnitGains(bot, "pickup", pickupOrigin);
         clearPickupLedger();
-        if (countSoFar >= targetCount) {
+        if (quotaReached()) {
             phase = Phase.DONE;
         } else {
             // A vanilla pickup can coincide with accepted-item consumption, leaving no quota
@@ -1651,6 +2627,7 @@ public final class GatherQuotaTask extends AbstractTask {
         bot.getActionPack().stopAll();
         invalidateKnownResource(bot, targetPos);
         targetPos = null;
+        pillarApproachActive = false;
     }
 
     private boolean waitForDryGround(AIPlayerEntity bot) {
@@ -1679,6 +2656,7 @@ public final class GatherQuotaTask extends AbstractTask {
         exploreStart = null;
         explorationProgress.reset();
         targetPos = null;
+        pillarApproachActive = false;
         searchRadius = SEARCH_RADIUS;
         phase = Phase.SURVEY;
         selfStuckTick = elapsed;
@@ -1775,6 +2753,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void doStartHarvest(AIPlayerEntity bot) {
+        pillarApproachActive = false;
         countBeforeHarvest = countAccepted(bot);
         pickupSweepAttempted = false;
         harvestStartedTick = elapsed;
@@ -2000,6 +2979,8 @@ public final class GatherQuotaTask extends AbstractTask {
                         "delta", delta,
                         "total", countSoFar,
                         "target", targetCount,
+                        "mode", isTimedCollection() ? "timed" : "quota",
+                        "duration_ticks", collectionDurationTicks,
                         "source", source,
                         "pos", attributedPos == null ? "unknown" : attributedPos.toShortString());
             } else {
@@ -2009,6 +2990,8 @@ public final class GatherQuotaTask extends AbstractTask {
                         "delta", delta,
                         "total", countSoFar,
                         "target", targetCount,
+                        "mode", isTimedCollection() ? "timed" : "quota",
+                        "duration_ticks", collectionDurationTicks,
                         "source", source);
             }
         }
@@ -2062,6 +3045,8 @@ public final class GatherQuotaTask extends AbstractTask {
         BotLog.action(bot, "gather_summary",
                 "item", itemLabel,
                 "target", targetCount,
+                "mode", isTimedCollection() ? "timed" : "quota",
+                "duration_ticks", collectionDurationTicks,
                 "baseline", baseline,
                 "final", finalCount,
                 "gained", gainedTotal,
@@ -2089,10 +3074,25 @@ public final class GatherQuotaTask extends AbstractTask {
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
+        if (scaffoldSupplyTask != null) {
+            scaffoldSupplyTask.pause(bot);
+            return;
+        }
         if (miningExploration != null) {
             miningExploration.pause(bot);
             return;
         }
+        if (phase == Phase.TREE_SIGHTING || phase == Phase.TARGET_SIGHTING) {
+            clearTreeSighting();
+            clearTargetSighting();
+            phase = Phase.SURVEY;
+        }
+        clearTreeSighting();
+        clearTargetSighting();
+        // The scan cursor is anchored at the old physical pose; restart its observations after
+        // any external pause/safety displacement rather than comparing stale candidates.
+        pillarApproachScan = null;
+        pillarApproachScanUp = 0;
         super.onPause(bot);
     }
 
@@ -2100,10 +3100,18 @@ public final class GatherQuotaTask extends AbstractTask {
     protected void onAbort(AIPlayerEntity bot) {
         // abort()/cancel() have already set state+failureReason by the time this runs: "aborted"
         // for abort(), the given reason (or "") for cancel(reason).
+        if (scaffoldSupplyTask != null) {
+            scaffoldSupplyTask.abort(bot);
+            scaffoldSupplyTask = null;
+            pendingPillarApproach = null;
+        }
         if (miningExploration != null) {
             miningExploration.abort(bot);
             miningExploration = null;
         }
+        pillarApproachScan = null;
+        pillarApproachScanUp = 0;
+        pendingPillarApproach = null;
         logGatherSummary(bot, failureReason.isBlank() ? "cancelled" : failureReason);
         super.onAbort(bot);
     }

@@ -34,6 +34,14 @@ public final class HarvestCore {
     private static final double PICKUP_SUPPORT_PROBE_DEPTH = 0.26D;
     /** Maximum observed, collision-free fall column that pickup recovery may wait beneath. */
     private static final int PICKUP_DRY_SHAFT_DEPTH = 6;
+    /** The navigation fence also needs three body/headroom cells above a pillar goal. */
+    private static final int PILLAR_HEADROOM = 3;
+    /**
+     * Nearby foliage or terrain can fill the cells immediately beside a high target. A short
+     * outer ring still keeps the finished pillar inside ordinary mining reach, while giving the
+     * planner a real air column instead of asking it to tunnel through an obstruction.
+     */
+    private static final int PILLAR_MAX_HORIZONTAL_OFFSET = 3;
 
     private HarvestCore() {
     }
@@ -871,6 +879,18 @@ public final class HarvestCore {
     }
 
     /**
+     * Pillar recovery deliberately uses the bot's actual tracked render view rather than the
+     * shallow gather-survey tuning radius. The caller still must pass a small bounded volume, and
+     * {@link #canObserveHarvestTarget(AIPlayerEntity, BlockPos, boolean)} immediately follows
+     * this distance prefilter to prove an unobstructed line of sight before any state read.
+     */
+    private static boolean withinRenderObservationReach(AIPlayerEntity bot, BlockPos pos) {
+        double reach = Math.max(1, ObservableWorldQuery.visibleRangeBlocks(bot)) + 0.87D;
+        return bot.getEyePosition().distanceToSqr(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D)
+                <= reach * reach;
+    }
+
+    /**
      * Converts a prior bot/owner line-of-sight observation into a candidate only after it is
      * visible again.  The current block-state read occurs after that exact proof, so stale
      * memory never becomes a hidden-world scan or a blind path destination.
@@ -951,6 +971,207 @@ public final class HarvestCore {
         return new TargetChoice(target, stand, false);
     }
 
+    /**
+     * Starts a resumable search for a visible high target that can be reached only by placing a
+     * short, fully observed pillar beside it. This deliberately does not change
+     * {@link #targetChoice}: callers must explicitly opt in after ordinary reachable-target
+     * selection has failed.
+     *
+     * <p>The old eager stream asked an eye-ray question for every cell in a 16×39×16 volume in
+     * one server tick. A no-target survey could repeat that work every tick while another visual
+     * sweep was in flight. The cursor below preserves exactly the same visibility-before-state
+     * rule, but lets the task advance it under a small time budget.</p>
+     */
+    public static PillarApproachScan beginNearestPillarApproachScan(AIPlayerEntity bot,
+                                                                      Set<Block> targetBlocks,
+                                                                      int horizontalRadius, int down, int up,
+                                                                      Predicate<BlockPos> posFilter) {
+        return new PillarApproachScan(bot, targetBlocks, horizontalRadius, down, up, posFilter);
+    }
+
+    /** Time-budgeted, observation-only counterpart to the former eager pillar candidate scan. */
+    public static final class PillarApproachScan {
+        private static final int CLOCK_CHECK_MASK = 31;
+
+        private final AIPlayerEntity bot;
+        private final Set<Block> targetBlocks;
+        private final Predicate<BlockPos> posFilter;
+        private final BlockPos origin;
+        private final int minX;
+        private final int minY;
+        private final int minZ;
+        private final int sizeX;
+        private final int sizeY;
+        private final long total;
+        private long index;
+        private PillarApproach result;
+        private boolean done;
+
+        private PillarApproachScan(AIPlayerEntity bot, Set<Block> targetBlocks,
+                                   int horizontalRadius, int down, int up,
+                                   Predicate<BlockPos> posFilter) {
+            this.bot = bot;
+            this.targetBlocks = targetBlocks == null ? Set.of() : Set.copyOf(targetBlocks);
+            this.posFilter = posFilter;
+            this.origin = bot == null ? BlockPos.ZERO : bot.blockPosition().immutable();
+            int radius = Math.max(0, horizontalRadius);
+            int below = Math.max(0, down);
+            int above = Math.max(0, up);
+            this.minX = origin.getX() - radius;
+            this.minY = origin.getY() - below;
+            this.minZ = origin.getZ() - radius;
+            this.sizeX = radius * 2 + 1;
+            this.sizeY = below + above + 1;
+            long sizeZ = radius * 2L + 1L;
+            this.total = (long) sizeX * sizeY * sizeZ;
+            this.done = bot == null || this.targetBlocks.isEmpty() || total <= 0L;
+        }
+
+        public BlockPos origin() {
+            return origin;
+        }
+
+        public boolean isDone() {
+            return done;
+        }
+
+        /** The nearest viable approach, meaningful only after {@link #isDone()}. */
+        public PillarApproach result() {
+            return result;
+        }
+
+        /**
+         * Advances the fixed candidate cursor for at most {@code budgetNanos}. A candidate's
+         * block state is still read only after a live render-distance line-of-sight proof.
+         */
+        public boolean step(long budgetNanos) {
+            if (done) {
+                return true;
+            }
+            long start = System.nanoTime();
+            long deadline = budgetNanos >= Long.MAX_VALUE - start ? Long.MAX_VALUE : start + budgetNanos;
+            BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+            int visited = 0;
+            while (index < total) {
+                long current = index++;
+                int x = (int) (current % sizeX);
+                long rest = current / sizeX;
+                int y = (int) (rest % sizeY);
+                int z = (int) (rest / sizeY);
+                cursor.set(minX + x, minY + y, minZ + z);
+                if (withinRenderObservationReach(bot, cursor)
+                        && canObserveHarvestTarget(bot, cursor, false)
+                        // Observation deliberately precedes this only live state read.
+                        && targetBlocks.contains(bot.level().getBlockState(cursor).getBlock())
+                        && (posFilter == null || posFilter.test(cursor))) {
+                    PillarApproach candidate = pillarApproach(bot, cursor.immutable());
+                    if (candidate != null && (result == null
+                            || candidate.target().distSqr(origin) < result.target().distSqr(origin))) {
+                        result = candidate;
+                    }
+                }
+                if ((++visited & CLOCK_CHECK_MASK) == 0 && System.nanoTime() >= deadline) {
+                    return false;
+                }
+            }
+            done = true;
+            return true;
+        }
+    }
+
+    /**
+     * Re-proves one previously selected high target before a placement-enabled pillar begins.
+     * Unlike the bounded nearest-target search, this does not enumerate a volume: it only reads
+     * the supplied coordinate after a current line-of-sight proof, then recomputes its exact
+     * clear column from the bot's current position.
+     */
+    public static PillarApproach pillarApproachFor(AIPlayerEntity bot, BlockPos target,
+                                                    Set<Block> targetBlocks) {
+        if (bot == null || target == null || targetBlocks == null || targetBlocks.isEmpty()
+                || !canObserveHarvestTarget(bot, target, false)) {
+            return null;
+        }
+        if (!targetBlocks.contains(bot.level().getBlockState(target).getBlock())) {
+            return null;
+        }
+        return pillarApproach(bot, target.immutable());
+    }
+
+    private static PillarApproach pillarApproach(AIPlayerEntity bot, BlockPos target) {
+        if (canDirectMine(bot, target)) {
+            return null;
+        }
+        BlockPos feet = bot.blockPosition();
+        PillarApproach best = null;
+        int minY = feet.getY() + 1;
+        // The cells directly next to an upper target are often obstructed. Search the
+        // observed one-to-three-block ring, then choose the lowest clear altitude that is still
+        // within ordinary 4.5-block mining reach from the eventual pillar eye position.
+        for (int dx = -PILLAR_MAX_HORIZONTAL_OFFSET; dx <= PILLAR_MAX_HORIZONTAL_OFFSET; dx++) {
+            for (int dz = -PILLAR_MAX_HORIZONTAL_OFFSET; dz <= PILLAR_MAX_HORIZONTAL_OFFSET; dz++) {
+                int horizontalSquared = dx * dx + dz * dz;
+                if (horizontalSquared == 0
+                        || horizontalSquared > PILLAR_MAX_HORIZONTAL_OFFSET * PILLAR_MAX_HORIZONTAL_OFFSET) {
+                    continue;
+                }
+                for (int goalY = minY; goalY <= target.getY(); goalY++) {
+                    BlockPos goal = target.offset(dx, goalY - target.getY(), dz);
+                    if (!canReachFromPillarGoal(bot, target, goal)) {
+                        continue;
+                    }
+                    if (!isObservedClearPillarColumn(bot, goal)) {
+                        continue;
+                    }
+                    PillarApproach candidate = new PillarApproach(target, goal,
+                            Math.max(1, goalY - feet.getY()));
+                    if (best == null
+                            || candidate.supports() < best.supports()
+                            || candidate.supports() == best.supports()
+                            && candidate.goal().distSqr(feet) < best.goal().distSqr(feet)) {
+                        best = candidate;
+                    }
+                    // This is the lowest usable level in this air column; a higher one would
+                    // consume more of the user's throwaway material for no benefit.
+                    break;
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Tests mining reach from the eye position the bot will have after it arrives on a pillar. */
+    private static boolean canReachFromPillarGoal(AIPlayerEntity bot, BlockPos target, BlockPos goal) {
+        double eyeHeight = bot.getEyePosition().y - bot.blockPosition().getY();
+        Vec3 pillarEye = new Vec3(goal.getX() + 0.5D, goal.getY() + eyeHeight, goal.getZ() + 0.5D);
+        return pillarEye.distanceTo(target.getCenter()) <= 4.5D;
+    }
+
+    /**
+     * Proves the exact column Baritone will use before it receives a placement-enabled route.
+     * Every raw block-state/standability query is preceded by the matching eye-ray predicate.
+     */
+    private static boolean isObservedClearPillarColumn(AIPlayerEntity bot, BlockPos goal) {
+        BlockPos feet = bot.blockPosition();
+        if (goal.getY() <= feet.getY()) {
+            return false;
+        }
+        BlockPos base = new BlockPos(goal.getX(), feet.getY(), goal.getZ());
+        if (!canObserveStand(bot, base) || !Standability.isStandable(bot.level(), base)) {
+            return false;
+        }
+        for (int y = base.getY(); y <= goal.getY() + PILLAR_HEADROOM; y++) {
+            BlockPos cell = new BlockPos(base.getX(), y, base.getZ());
+            if (!ObservableWorldQuery.canObserveCell(bot, cell)) {
+                return false;
+            }
+            var state = bot.level().getBlockState(cell);
+            if (!state.isAir() || Standability.isDangerous(state)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos candidate = target.relative(direction);
@@ -983,5 +1204,14 @@ public final class HarvestCore {
     }
 
     public record TargetChoice(BlockPos pos, BlockPos stand, boolean direct) {
+    }
+
+    /** A high target, its air-only pillar goal, and the minimum number of supporting blocks. */
+    public record PillarApproach(BlockPos target, BlockPos goal, int supports) {
+        public PillarApproach {
+            target = target == null ? null : target.immutable();
+            goal = goal == null ? null : goal.immutable();
+            supports = Math.max(1, supports);
+        }
     }
 }

@@ -56,7 +56,9 @@ public final class QuickActionCard extends PanelCard {
         idField.setMaxLength(128);
         idField.setSuggestion(Theme.tr("quick.minecraftai.id"));
         countField = new EditBox(renderer, 0, 0, 36, INPUT_H, Component.translatable("quick.minecraftai.count"));
-        countField.setValue("1");
+        // An empty count is meaningful for Mine: it requests the same ten-minute exploration
+        // and collection window as a player who says "mine coal" without naming a quantity.
+        countField.setValue("");
         countField.setMaxLength(3);
         countField.setSuggestion(Theme.tr("quick.minecraftai.count"));
 
@@ -134,8 +136,12 @@ public final class QuickActionCard extends PanelCard {
     }
 
     private int count() {
+        String value = countField.getValue().trim();
+        if (value.isEmpty()) {
+            return 0;
+        }
         try {
-            return Math.max(1, Integer.parseInt(countField.getValue().trim()));
+            return Math.max(1, Integer.parseInt(value));
         } catch (NumberFormatException ignored) {
             return 1;
         }

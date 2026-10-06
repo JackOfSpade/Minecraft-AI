@@ -32,6 +32,7 @@ class ActionPackAdmissionSourceContractTest {
             "(?ms)^\\s*(?!(?:if|return)\\b)(?![^;\\n]*=)[A-Za-z_$][\\w$().]*\\.runStep\\s*\\([^;]*?\\);");
 
     private static final List<String> MIGRATED_RUN_STEP_SOURCES = List.of(
+            "action/BlockMiner.java",
             "action/InCellWalk.java",
             "task/CreateObsidianTask.java",
             "task/DescendToYTask.java",
@@ -137,6 +138,14 @@ class ActionPackAdmissionSourceContractTest {
                 "if (lease == null)",
                 "moveInFlight = new MoveInFlight(lease");
         assertExactLeaseReconciliation(ore, "OreDigTask");
+
+        String miner = source("action/BlockMiner.java");
+        assertContains(miner, "ActionPack.StepLease selfSupportMoveLease",
+                "BlockMiner must retain the sidestep admission that releases its own support");
+        assertContains(miner, "stepInFlightFor(lease)",
+                "BlockMiner must wait only for its own support-release step");
+        assertContains(miner, "stepResultFor(lease)",
+                "BlockMiner must reconcile only its own support-release step");
 
         assertTaskLeaseLifecycle("task/DigDownTask.java", "private boolean launchStep(",
                 "step = walked", "stepLease = lease", "DigDownTask");

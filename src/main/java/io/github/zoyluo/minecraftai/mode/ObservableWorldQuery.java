@@ -342,6 +342,10 @@ public final class ObservableWorldQuery {
      * Use that actual view radius for block sight rather than an unrelated action/perception
      * tuning radius: render distance is supplied in chunks, so its block-space radius is ×16.
      */
+    public static int visibleRangeBlocks(AIPlayerEntity bot) {
+        return botRenderDistanceBlocks(bot);
+    }
+
     private static int botRenderDistanceBlocks(AIPlayerEntity bot) {
         if (bot == null || bot.level().getServer() == null) {
             return Math.max(1, MinecraftAiConfig.get().perception().radius());

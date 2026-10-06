@@ -93,9 +93,12 @@ final class ObservedSearchHopsSourceContractTest {
                 "a direct mine request needs the same generic recovery after its first local scan");
         assertFalse(mineExplore.contains("startPathTo(") || mineExplore.contains("getBlockState("),
                 "direct mining must not turn an unseen material guess into a route or terrain read");
-        assertTrue(mine.contains("no_observed_ore_after_exploration")
-                        && mine.contains("no_observed_resource_after_exploration"),
-                "direct mining should end at an observation boundary after the finite search");
+        String mineRestart = methodBody(mine, "private void restartObservedExploration(");
+        assertTrue(mine.contains("restartObservedExploration(bot)")
+                        && mineRestart.contains("observedSearchHops.reset()")
+                        && mineRestart.contains("phase = Phase.SEARCHING"),
+                "direct mining must begin another bounded, observation-fenced episode rather than "
+                        + "mistaking its first finite search boundary for resource absence");
 
         assertTrue(oreDig.contains("new ObservedSearchHops(OBSERVED_SEARCH_MAX_HOPS)")
                         && oreExplore.contains("observedOreSearch.begin(bot, null)"),

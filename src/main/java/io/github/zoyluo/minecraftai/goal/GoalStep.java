@@ -23,11 +23,15 @@ public record GoalStep(Kind kind,
         GATHER,
         MINE,
         MINE_ORE,
+        /** Collect a resource until a fixed elapsed-time window closes, rather than to a quota. */
+        MINE_ORE_FOR_DURATION,
         MINING_SERVICE,
         CRAFT,
         SMELT,
         MOVE,
         FARM,
+        /** Tend and harvest a crop until a fixed elapsed-time window closes. */
+        FARM_FOR_DURATION,
         HUNT,
         COOK_FOOD,
         MILK_COW,
@@ -63,6 +67,16 @@ public record GoalStep(Kind kind,
 
     public static GoalStep mineOre(Set<Block> ores, int count) {
         return new GoalStep(Kind.MINE_ORE, null, count, null, ores, null, null, null, null, false);
+    }
+
+    /**
+     * Mine newly discovered members of an ore family for {@code durationTicks}.  The duration is
+     * deliberately carried by the step rather than faked as a huge item quota: a ten-minute
+     * collection request must stop at its time boundary even in a rich cave.
+     */
+    public static GoalStep mineOreForDuration(Set<Block> ores, int durationTicks) {
+        return new GoalStep(Kind.MINE_ORE_FOR_DURATION, null, durationTicks,
+                null, ores, null, null, null, null, false);
     }
 
     /** Long-running mining checkpoint between bounded ore batches. */
@@ -168,6 +182,12 @@ public record GoalStep(Kind kind,
     /** P3: FARM step -- block=crop block, input=seed, item=produce item, count=amount to harvest. */
     public static GoalStep farm(Block crop, Item seed, Item produce, int count) {
         return new GoalStep(Kind.FARM, produce, count, crop, Set.of(), seed, null, null, null, false);
+    }
+
+    /** Tend a crop field for a fixed number of task ticks, reporting its actual new yield. */
+    public static GoalStep farmForDuration(Block crop, Item seed, Item produce, int durationTicks) {
+        return new GoalStep(Kind.FARM_FOR_DURATION, produce, durationTicks,
+                crop, Set.of(), seed, null, null, null, false);
     }
 
     /** Layer 4: HUNT step -- kill animals to obtain count raw meat (best-effort: skipped when no animals are nearby, does not block the mining goal). */
@@ -348,6 +368,10 @@ public record GoalStep(Kind kind,
                     .map(GoalStep::blockName)
                     .sorted()
                     .collect(Collectors.joining("/")) + " x" + count;
+            case MINE_ORE_FOR_DURATION -> "Collect ore " + ores.stream()
+                    .map(GoalStep::blockName)
+                    .sorted()
+                    .collect(Collectors.joining("/")) + " for " + count + " ticks";
             case MINING_SERVICE -> isObsidianPreflight()
                     ? "Obsidian first-batch supply check"
                     : isObsidianService()
@@ -363,6 +387,7 @@ public record GoalStep(Kind kind,
             case SMELT -> "Smelt " + itemName(input) + " into " + itemName(output) + " x" + count;
             case MOVE -> "Move to " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
             case FARM -> "Farm " + blockName(block) + " x" + count;
+            case FARM_FOR_DURATION -> "Farm " + blockName(block) + " for " + count + " ticks";
             case HUNT -> "Hunt for food x" + count;
             case COOK_FOOD -> "Cook food x" + count;
             case MILK_COW -> "Milk cows x" + count;

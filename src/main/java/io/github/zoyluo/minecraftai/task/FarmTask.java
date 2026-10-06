@@ -26,7 +26,9 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 
-public final class FarmTask extends AbstractTask {
+public final class FarmTask extends AbstractTask implements CheckpointableTask {
+    /** Ten real-time minutes at Minecraft's ordinary twenty ticks per second. */
+    public static final int DEFAULT_COLLECTION_DURATION_TICKS = 20 * 60 * 10;
     private enum Phase {
         SURVEY,
         GOTO,
@@ -38,6 +40,8 @@ public final class FarmTask extends AbstractTask {
         DEPOSIT,
         DEPOSIT_GOTO,
         DEPOSIT_TRANSFER,
+        /** A short navigation leg admitted from terrain currently visible to the bot. */
+        EXPLORE,
         DONE
     }
 
@@ -53,6 +57,8 @@ public final class FarmTask extends AbstractTask {
     private static final int BONE_CRAFT_MAX_BONES = 4;     // bones turned into bone meal per craft (3 meal each)
     static final int FAILED_CELL_TTL_TICKS = 600; // a cell whose click proof failed is skipped this long
     private static final int CROP_LIGHT_MIN = 8;          // vanilla crop rule: raw brightness of the crop cell
+    private static final int EXPLORE_MAX_HOPS = 16;
+    private static final int EXPLORE_MOVE_LIMIT = 300;
 
     private final BlockPos areaCenter;
     private final int radius;
@@ -64,7 +70,14 @@ public final class FarmTask extends AbstractTask {
     // complete() fires as soon as targetHarvest units of the produce have been collected.
     private final Item produceItem;
     private final int targetHarvest;
+    /** Positive only for an open-ended collection window, never for a fixed harvest quota. */
+    private final int collectionDurationTicks;
+    /** Restored accounting only; farm targets and in-flight actions are deliberately re-observed. */
+    private final TimedCollectionCheckpoint restoredTimedCollection;
+    private final boolean invalidTimedCollectionCheckpoint;
     private int produceBaseline;
+    /** Latest factual yield above the task-start baseline (also keeps status reporting side-effect free). */
+    private int collectedProduce;
     private final List<FarmTarget> targets = new ArrayList<>();
     private final List<BlockPos> depositContainers = new ArrayList<>();
     private final BlockMiner harvestMiner = new BlockMiner();
@@ -88,15 +101,51 @@ public final class FarmTask extends AbstractTask {
     private CraftTask boneMealCraft;
     private boolean boneMealCraftFailed;
     private boolean waitingForMaturity; // After planting, stay put waiting for crops to mature naturally (quantity-limited mode); not stuck
+    /** Resource-gathering crop requests may widen their local field view only by safe, observed walk hops. */
+    private final ObservedSearchHops observedCropSearch = new ObservedSearchHops(EXPLORE_MAX_HOPS);
+    private BlockPos exploreTarget;
+    private BlockPos exploreStart;
+    private int exploreStartedTick;
     private String note = "";
 
     public FarmTask(BlockPos areaCenter, int radius, Item seed, Block crop, boolean keepTending, boolean harvestOnly) {
-        this(areaCenter, radius, seed, crop, keepTending, harvestOnly, null, 0);
+        this(areaCenter, radius, seed, crop, keepTending, harvestOnly, null, 0, 0, Map.of());
     }
 
     /** P3: quantity-limited constructor — completes once produceItem reaches targetHarvest units (for GoalExecutor's FARM step). */
     public FarmTask(BlockPos areaCenter, int radius, Item seed, Block crop, boolean keepTending,
                     boolean harvestOnly, Item produceItem, int targetHarvest) {
+        this(areaCenter, radius, seed, crop, keepTending, harvestOnly, produceItem, targetHarvest, 0,
+                Map.of());
+    }
+
+    /**
+     * Tends an observed crop field for a fixed window. Existing produce becomes the baseline,
+     * never a completion shortcut; the task reports the factual new yield at the deadline.
+     */
+    public static FarmTask collectForDuration(BlockPos areaCenter, int radius, Item seed,
+                                              Block crop, Item produceItem) {
+        return collectForDuration(areaCenter, radius, seed, crop, produceItem,
+                DEFAULT_COLLECTION_DURATION_TICKS);
+    }
+
+    /** Testable duration variant used by the timed goal step. */
+    public static FarmTask collectForDuration(BlockPos areaCenter, int radius, Item seed,
+                                              Block crop, Item produceItem, int durationTicks) {
+        return collectForDuration(areaCenter, radius, seed, crop, produceItem, durationTicks, Map.of());
+    }
+
+    /** Restores only the elapsed/baseline session accounting for a timed crop collection. */
+    public static FarmTask collectForDuration(BlockPos areaCenter, int radius, Item seed,
+                                              Block crop, Item produceItem, int durationTicks,
+                                              Map<String, String> checkpoint) {
+        return new FarmTask(areaCenter, radius, seed, crop, true, false, produceItem, 1,
+                Math.max(1, durationTicks), checkpoint);
+    }
+
+    private FarmTask(BlockPos areaCenter, int radius, Item seed, Block crop, boolean keepTending,
+                     boolean harvestOnly, Item produceItem, int targetHarvest,
+                     int collectionDurationTicks, Map<String, String> checkpoint) {
         this.areaCenter = areaCenter.immutable();
         this.radius = Math.max(1, radius);
         this.seed = seed;
@@ -105,6 +154,13 @@ public final class FarmTask extends AbstractTask {
         this.harvestOnly = harvestOnly;
         this.produceItem = produceItem;
         this.targetHarvest = Math.max(0, targetHarvest);
+        this.collectionDurationTicks = Math.max(0, collectionDurationTicks);
+        Map<String, String> values = checkpoint == null ? Map.of() : checkpoint;
+        this.restoredTimedCollection = isTimedCollection()
+                ? TimedCollectionCheckpoint.decode(values).orElse(null) : null;
+        this.invalidTimedCollectionCheckpoint = isTimedCollection() && !values.isEmpty()
+                && (restoredTimedCollection == null
+                || restoredTimedCollection.durationTicks() != this.collectionDurationTicks);
     }
 
     @Override
@@ -115,13 +171,19 @@ public final class FarmTask extends AbstractTask {
     @Override
     public String describe() {
         return name() + " crop=" + crop + " center=" + BlockPosText.compact(areaCenter) + " radius=" + radius
-                + " done=" + completedActions + " phase=" + phase + (note.isBlank() ? "" : " note=" + note);
+                + " done=" + completedActions
+                + (isTimedCollection() ? " collected=" + collectedProduce() + " elapsed=" + elapsed
+                + "/" + collectionDurationTicks : "")
+                + " phase=" + phase + (note.isBlank() ? "" : " note=" + note);
     }
 
     @Override
     public double progress() {
         if (state == TaskState.COMPLETED) {
             return 1.0D;
+        }
+        if (isTimedCollection()) {
+            return Math.min(0.99D, (double) elapsed / collectionDurationTicks);
         }
         if (keepTending) {
             return Math.min(0.95D, completedActions / 16.0D);
@@ -132,6 +194,10 @@ public final class FarmTask extends AbstractTask {
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
+        if (invalidTimedCollectionCheckpoint) {
+            fail("farm_invalid_timed_collection_checkpoint");
+            return;
+        }
         phase = Phase.SURVEY;
         lastDepositActionCount = completedActions;
         failedCells.clear();
@@ -144,16 +210,34 @@ public final class FarmTask extends AbstractTask {
         boneMealCraft = null;
         boneMealCraftFailed = false;
         waitingForMaturity = false;
-        produceBaseline = produceItem == null ? 0 : InventoryAction.countItem(bot, produceItem);
+        observedCropSearch.reset();
+        clearExploreLeg();
+        exploreStartedTick = 0;
+        int inventoryNow = produceItem == null ? 0 : InventoryAction.countItem(bot, produceItem);
+        produceBaseline = restoredTimedCollection == null ? inventoryNow
+                : restoredTimedCollection.inventoryBaseline();
+        collectedProduce = restoredTimedCollection == null ? 0 : Math.max(
+                restoredTimedCollection.collected(), Math.max(0, inventoryNow - produceBaseline));
+        if (restoredTimedCollection != null) {
+            elapsed = restoredTimedCollection.elapsedTicks();
+        }
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
+        collectedProduce = produceItem == null ? 0 : Math.max(collectedProduce,
+                Math.max(0, InventoryAction.countItem(bot, produceItem) - produceBaseline));
+        // Do not abandon a break or its pickup/replant transaction at the precise deadline. Once
+        // it settles, no fresh work is admitted and the task reports its actual new yield.
+        if (isTimedCollection() && elapsed >= collectionDurationTicks && !settlingHarvest()) {
+            finishTimedCollection(bot);
+            return;
+        }
         // P3: quantity-limited mode — complete as soon as the target produce count is reached (checked before any other phase logic).
         // (Not mid-harvest: the picked-up drops and the replant of the cell just harvested finish first.)
-        if (produceItem != null
+        if (!isTimedCollection() && produceItem != null
                 && phase != Phase.HARVEST && phase != Phase.PICKUP
-                && InventoryAction.countItem(bot, produceItem) - produceBaseline >= targetHarvest) {
+                && collectedProduce() >= targetHarvest) {
             complete();
             return;
         }
@@ -168,9 +252,9 @@ public final class FarmTask extends AbstractTask {
         }
         // P3: quantity-limited mode has its own hard timeout (waiting for crops to mature takes time,
         // but not forever); it reuses keepTending's patrol logic.
-        if (produceItem != null && elapsed > 12000) {
+        if (!isTimedCollection() && produceItem != null && elapsed > 12000) {
             fail("farm_quota_timeout collected="
-                    + (InventoryAction.countItem(bot, produceItem) - produceBaseline) + "/" + targetHarvest);
+                    + collectedProduce() + "/" + targetHarvest);
             return;
         }
         switch (phase) {
@@ -184,7 +268,48 @@ public final class FarmTask extends AbstractTask {
             case DEPOSIT -> prepareDeposit(bot);
             case DEPOSIT_GOTO -> goToDepositContainer(bot);
             case DEPOSIT_TRANSFER -> depositTransfer(bot);
+            case EXPLORE -> explore(bot);
             case DONE -> done(bot);
+        }
+    }
+
+    private boolean isTimedCollection() {
+        return collectionDurationTicks > 0;
+    }
+
+    /** A high-level produce request may widen its observed search; coordinate-only farm jobs may not. */
+    private boolean isResourceCollection() {
+        return isTimedCollection() || produceItem != null;
+    }
+
+    private int collectedProduce() {
+        return collectedProduce;
+    }
+
+    @Override
+    public Map<String, String> checkpoint() {
+        if (!isTimedCollection() || invalidTimedCollectionCheckpoint) {
+            return Map.of();
+        }
+        return new TimedCollectionCheckpoint(collectionDurationTicks,
+                Math.min(collectionDurationTicks, elapsed), produceBaseline, collectedProduce).encode();
+    }
+
+    private boolean settlingHarvest() {
+        return phase == Phase.PICKUP || (phase == Phase.HARVEST && harvestMiner.target() != null);
+    }
+
+    private void finishTimedCollection(AIPlayerEntity bot) {
+        bot.getActionPack().stopAll();
+        int collected = Math.max(collectedProduce,
+                Math.max(0, InventoryAction.countItem(bot, produceItem) - produceBaseline));
+        BotLog.action(bot, "farm_timed_deadline", "crop", String.valueOf(crop),
+                "collected", collected, "duration_ticks", collectionDurationTicks,
+                "outcome", collected > 0 ? "complete" : GatherQuotaTask.NO_RESOURCE_FOUND_BY_DEADLINE);
+        if (collected > 0) {
+            complete();
+        } else {
+            fail(GatherQuotaTask.NO_RESOURCE_FOUND_BY_DEADLINE);
         }
     }
 
@@ -204,7 +329,8 @@ public final class FarmTask extends AbstractTask {
         // a crop is outline-only, interior farmland is 15/16 high and a seed goes into a cell that may be empty air.
         // The farm-cell query samples the top of the cell's real shape with outline rays (and accepts the empty cell
         // above a field), so farm cells are judged by what a player looking down at the field sees.
-        BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
+        BlockPos surveyCenter = isResourceCollection() ? bot.blockPosition() : areaCenter;
+        BlockPos.betweenClosedStream(surveyCenter.offset(-radius, -1, -radius), surveyCenter.offset(radius, 1, radius))
                 .map(BlockPos::immutable)
                 .filter(pos -> !isFailed(pos))
                 // Cheap first: the block-state verdict is a few lookups, the outline ray tests are not.
@@ -216,7 +342,19 @@ public final class FarmTask extends AbstractTask {
         targets.sort(Comparator.comparingDouble(pos -> pos.ground().distSqr(bot.blockPosition())));
         if (targets.isEmpty()) {
             if (!harvestOnly && InventoryAction.countItem(bot, seed) <= 0 && completedActions == 0) {
-                fail("missing " + seed + " x1");
+                if (!isResourceCollection()) {
+                    fail("missing " + seed + " x1");
+                    return;
+                }
+                // A resource-gathering player request stays alive through its collection window rather
+                // than declaring success/failure from the initial inventory. Another observed
+                // crop patch can appear on a later survey (or a player can supply seed); the
+                // deadline owns the definitive "none found" outcome.
+                note = "waiting_for_seed_or_observed_crop";
+                if (startResourceExploration(bot)) {
+                    return;
+                }
+                phase = Phase.DONE;
                 return;
             }
             // Wait for maturity (a lifeline for real-terrain farming to produce bread): if crops are planted
@@ -227,7 +365,7 @@ public final class FarmTask extends AbstractTask {
             // testing showed 6-12 till/plant cycles but harvest=0); the lab food_farm test only passed
             // because perTick force-ripened crops. The 12000t quota timeout above is the backstop, so even
             // if crops never mature we won't wait forever.
-            boolean needMore = produceItem != null
+            boolean needMore = isTimedCollection() || produceItem != null
                     && InventoryAction.countItem(bot, produceItem) - produceBaseline < targetHarvest;
             collectImmatureCrops(bot, world);
             if (!harvestOnly && needMore && !immatureCrops.isEmpty()) {
@@ -239,11 +377,24 @@ public final class FarmTask extends AbstractTask {
             if (darkCells > 0 && needMore && completedActions == 0) {
                 // Crops need light >= 8 at the crop cell (vanilla rule); seeds cannot be planted here, and
                 // waiting would only burn the whole quota timeout.
-                fail("farm_area_too_dark cells=" + darkCells);
+                if (!isResourceCollection()) {
+                    fail("farm_area_too_dark cells=" + darkCells);
+                    return;
+                }
+                note = "waiting_for_observed_lit_crop_area";
+                if (startResourceExploration(bot)) {
+                    return;
+                }
+                phase = Phase.DONE;
                 return;
             }
-            if (keepTending && hasDepositItems(bot)) {
+            // A resource collection's inventory delta is its player-facing receipt. Do not move
+            // produce into a chest during that window or a real harvest could be erased from the
+            // baseline comparison and falsely reported as "none found."
+            if (!isResourceCollection() && keepTending && hasDepositItems(bot)) {
                 phase = Phase.DEPOSIT;
+            } else if (isResourceCollection() && startResourceExploration(bot)) {
+                return;
             } else {
                 phase = Phase.DONE;
             }
@@ -251,6 +402,73 @@ public final class FarmTask extends AbstractTask {
         }
         waitingForMaturity = false;
         phase = Phase.NEXT;
+    }
+
+    /**
+     * Opens one observation-fenced local leg when a resource-gathering farm survey is empty. The compass
+     * heading is never a route destination: {@link ObservedSearchHops} resolves it to a visible
+     * standable goal first, and the next survey reads only terrain revealed from that position.
+     */
+    private boolean startResourceExploration(AIPlayerEntity bot) {
+        if (!isResourceCollection()) {
+            return false;
+        }
+        ObservedSearchHops.Attempt attempt = observedCropSearch.begin(bot, null);
+        if (!attempt.started()) {
+            BotLog.action(bot, "farm_explore_hop_refused",
+                    "attempt", attempt.number(),
+                    "reason", attempt.reason());
+            if (observedCropSearch.exhausted()) {
+                // A finite episode guards individual routes, not the whole ten-minute request.
+                // Start another from the factual current position; no hidden terrain is read.
+                observedCropSearch.reset();
+                BotLog.action(bot, "farm_explore_episode_reset", "elapsed_ticks", elapsed);
+            }
+            return true;
+        }
+        exploreTarget = attempt.observedGoal();
+        exploreStart = bot.blockPosition().immutable();
+        exploreStartedTick = elapsed;
+        phase = Phase.EXPLORE;
+        note = "exploring_for_observed_crop_area";
+        BotLog.action(bot, "farm_explore_hop",
+                "attempt", attempt.number(),
+                "heading", attempt.heading().toShortString(),
+                "to", exploreTarget.toShortString(),
+                "max_hop", ObservedSearchHops.HOP_DISTANCE);
+        return true;
+    }
+
+    private void explore(AIPlayerEntity bot) {
+        if (exploreTarget == null || bot.blockPosition().equals(exploreTarget)) {
+            if (exploreStart != null && !bot.blockPosition().equals(exploreStart)) {
+                BotLog.action(bot, "farm_explore_arrived",
+                        "at", bot.blockPosition().toShortString(),
+                        "attempts", observedCropSearch.attempts());
+            } else {
+                observedCropSearch.retireObservedGoal(exploreTarget);
+            }
+            bot.getActionPack().stopAll();
+            clearExploreLeg();
+            phase = Phase.SURVEY;
+            return;
+        }
+        if (elapsed - exploreStartedTick > EXPLORE_MOVE_LIMIT
+                || elapsed - exploreStartedTick > 20 && bot.getActionPack().isPathExecutorIdle()) {
+            observedCropSearch.retireObservedGoal(exploreTarget);
+            BotLog.action(bot, "farm_explore_hop_ended",
+                    "reason", elapsed - exploreStartedTick > EXPLORE_MOVE_LIMIT
+                            ? "timeout" : "route_ended",
+                    "to", exploreTarget.toShortString());
+            bot.getActionPack().stopAll();
+            clearExploreLeg();
+            phase = Phase.SURVEY;
+        }
+    }
+
+    private void clearExploreLeg() {
+        exploreTarget = null;
+        exploreStart = null;
     }
 
     /** What a survey would do with {@code ground} judged by block state alone (no visibility test yet). */
@@ -309,7 +527,7 @@ public final class FarmTask extends AbstractTask {
     }
 
     private void next(AIPlayerEntity bot) {
-        if (keepTending && completedActions - lastDepositActionCount >= DEPOSIT_INTERVAL_ACTIONS
+        if (!isResourceCollection() && keepTending && completedActions - lastDepositActionCount >= DEPOSIT_INTERVAL_ACTIONS
                 && hasDepositItems(bot)) {
             phase = Phase.DEPOSIT;
             return;
@@ -593,7 +811,8 @@ public final class FarmTask extends AbstractTask {
     /** Observed, still-growing crops of this task's crop within the area (a snapshot for the waiting loop). */
     private void collectImmatureCrops(AIPlayerEntity bot, ServerLevel world) {
         immatureCrops.clear();
-        BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
+        BlockPos surveyCenter = isResourceCollection() ? bot.blockPosition() : areaCenter;
+        BlockPos.betweenClosedStream(surveyCenter.offset(-radius, -1, -radius), surveyCenter.offset(radius, 1, radius))
                 .map(BlockPos::immutable)
                 .filter(ground -> world.getBlockState(ground.above()).is(crop)
                         && !FarmAction.isMature(world, ground.above()))
@@ -721,7 +940,11 @@ public final class FarmTask extends AbstractTask {
         // While waiting for maturity, the bot standing still at the field edge is normal work (waiting for
         // crops to grow), so it's exempt from being wrongly flagged by StuckWatcher; a genuine stall is
         // caught by the 12000t quota timeout as the backstop.
-        return (keepTending && phase == Phase.DONE) || waitingForMaturity;
+        // A resource collection may spend its full task window surveying and retrying short,
+        // observation-fenced search legs.  Its own quota/deadline is the authoritative bound;
+        // the generic stuck watcher must not cut an empty-but-active search short in SURVEY.
+        return (keepTending && phase == Phase.DONE) || waitingForMaturity
+                || isResourceCollection() && (phase == Phase.SURVEY || phase == Phase.EXPLORE);
     }
 
     private boolean hasDepositItems(AIPlayerEntity bot) {

@@ -47,10 +47,27 @@ public final class ObservedNavigationFence {
     static final int REFRESH_RAYS = 24;
     /** A running route acquires a fresh view cone at most this often. */
     static final int REFRESH_INTERVAL_TICKS = 4;
+    /**
+     * A render-distance landmark can be nominated from far away, but every individual Baritone
+     * leg remains a modest observed segment. Repeated legs still walk directly toward the same
+     * live landmark without rebuilding a multi-thousand-cell corridor every refresh.
+     */
+    private static final int VISIBLE_LANDMARK_MAX_HOP_RANGE = 24;
+    /** A running visible-landmark leg only extends fresh evidence a short distance ahead. */
+    private static final int VISIBLE_LANDMARK_REFRESH_LOOKAHEAD = 12;
+    /** Full landmark-corridor refreshes are deliberately less frequent than local routes. */
+    private static final int VISIBLE_LANDMARK_REFRESH_INTERVAL_TICKS = 12;
+    /** Keep a short live landmark leg from inheriting a full route-evidence cache. */
+    private static final int VISIBLE_LANDMARK_SHARED_SIGHT_LIMIT = 256;
     /** Parallel, individually visible walking strips captured toward a proven target stance. */
     private static final int BASE_CORRIDOR_HALF_WIDTH = 2;
     /** Baritone validates a movement's source/destination headroom up to three cells above its feet. */
     private static final int NAVIGATION_HEADROOM = 3;
+    /**
+     * The only directional-pursuit label permitted to use the factual tracked render range.
+     * Ordinary follow/search pursuits deliberately retain the configured small local horizon.
+     */
+    private static final String VISIBLE_LANDMARK_PURSUIT = "visible_landmark_pursuit";
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     private static final ObservedNavigationFence EMPTY = new ObservedNavigationFence("", Integer.MIN_VALUE,
             0L, 0, new long[0], new BlockState[0], new int[0]);
@@ -67,9 +84,14 @@ public final class ObservedNavigationFence {
 
     /** Result of a route admission or a view refresh. */
     public record Capture(ObservedNavigationFence fence, boolean accepted, String failure,
-                          TargetProvenance provenance, int rays, int freshCells, boolean pillarGoal) {
+                          TargetProvenance provenance, int rays, int freshCells, boolean pillarGoal,
+                          BlockPos pillarBase) {
+        public Capture {
+            pillarBase = pillarBase == null ? null : pillarBase.immutable();
+        }
+
         static Capture refused(String failure, int rays, int freshCells) {
-            return new Capture(EMPTY, false, failure, TargetProvenance.DIRECTION_ONLY, rays, freshCells, false);
+            return new Capture(EMPTY, false, failure, TargetProvenance.DIRECTION_ONLY, rays, freshCells, false, null);
         }
     }
 
@@ -184,18 +206,33 @@ public final class ObservedNavigationFence {
         Objects.requireNonNull(route, "route");
         int tick = bot.getServer().getTickCount();
         String dimension = BotEdits.dimensionKey(bot.level());
-        Map<Long, Cell> observed = retained(previous, dimension, tick);
+        // A visible-landmark route is a short live-sight leg, not a map-memory route. Starting
+        // it from fresh local evidence bounds the snapshot even when an unrelated previous
+        // route happened to fill its retained cache, and avoids repeated MAX_CELLS eviction
+        // scans while retaining only terrain that the bot can currently re-prove.
+        Map<Long, Cell> observed = isVisibleLandmarkPursuit(route)
+                ? new HashMap<>() : retained(previous, dimension, tick);
         int before = observed.size();
         BlockPos feet = navigationFeet(bot);
         seedBodyEnvelope(bot, observed, tick);
-        mergeSharedWorldSight(bot, route.target(), observed, tick);
+        // A route carrying the render-distance landmark label gets a larger view budget than
+        // ordinary directional pursuit. Re-prove that exact marker here too, rather than
+        // trusting its public label or retained memory. This runs before any terrain capture
+        // and therefore cannot turn a stale landmark into a route heading.
+        if (isVisibleLandmarkPursuit(route)
+                && !ObservableWorldQuery.canObserveBlock(bot, route.target())) {
+            return Capture.refused("visible_landmark_unobserved", 0,
+                    Math.max(0, observed.size() - before));
+        }
+        mergeSharedWorldSight(bot, route.target(), observed, tick,
+                isVisibleLandmarkPursuit(route) ? VISIBLE_LANDMARK_SHARED_SIGHT_LIMIT : Integer.MAX_VALUE);
         if (route.shape() == NavRoute.Shape.OWNER_FOLLOW) {
             // A live coordinate of this bot's already-verified owner is intentionally not a terrain observation. The navigator
             // separately validates the UUID and installs a server-captured full-chunk snapshot in ServerPlayerContext; the only
             // ordinary terrain evidence merged here is the owner's own line-of-sight rays, never a global allow list.
             ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
             return new Capture(candidate, true, "", TargetProvenance.DIRECTION_ONLY, 0,
-                    Math.max(0, observed.size() - before), false);
+                    Math.max(0, observed.size() - before), false, null);
         }
         int rays = scan(bot, observed, route.target(), ADMISSION_RAYS, tick);
 
@@ -228,7 +265,7 @@ public final class ObservedNavigationFence {
                 // column through fluids, so Baritone can swim only in water it can truly see.
                 observeVisibleCorridors(bot, feet, route.target(), true, observed, tick);
                 ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
-                return new Capture(candidate, true, "", provenance, rays, Math.max(0, observed.size() - before), false);
+                return new Capture(candidate, true, "", provenance, rays, Math.max(0, observed.size() - before), false, null);
             }
             ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
             // Do not snap a visibly observed vine/ladder goal back to the dry platform beside it:
@@ -248,7 +285,7 @@ public final class ObservedNavigationFence {
                     if (isObservedPillarColumn(candidate, pillarBase, route.target())
                             && ObservedGraphSearch.path(feet, pillarBase, new SnapshotEnvironment(candidate)) != null) {
                         return new Capture(candidate, true, "", provenance, rays,
-                                Math.max(0, observed.size() - before), true);
+                                Math.max(0, observed.size() - before), true, pillarBase);
                     }
                 }
                 return Capture.refused("navigation_goal_without_observed_stance", rays, Math.max(0, observed.size() - before));
@@ -278,7 +315,7 @@ public final class ObservedNavigationFence {
                             Math.max(0, observed.size() - before));
                 }
             }
-            return new Capture(candidate, true, "", provenance, rays, Math.max(0, observed.size() - before), false);
+            return new Capture(candidate, true, "", provenance, rays, Math.max(0, observed.size() - before), false, null);
         }
 
         if (route.shape() == NavRoute.Shape.NEAR) {
@@ -294,12 +331,21 @@ public final class ObservedNavigationFence {
             // view. That coordinate supplies a heading only: expose one short local corridor,
             // then select an already observed stance that actually advances in that direction.
             // No remote cell, chunk, or terrain state becomes route authority here.
+            boolean visibleLandmarkPursuit = isVisibleLandmarkPursuit(route);
+            int pursuitRange = pursuitObservationRange(bot, route);
             BlockPos pursuitPoint = pursuitObservationPoint(bot, route);
-            observeVisibleCorridors(bot, feet, pursuitPoint, waterTraversal, observed, tick);
-            observeDirectionalDetourCorridors(bot, feet, pursuitPoint, route, waterTraversal, observed, tick);
+            if (visibleLandmarkPursuit) {
+                observeVisibleCorridorsWithinRange(bot, feet, pursuitPoint, waterTraversal, observed, pursuitRange, tick);
+                BlockPos detourPoint = pursuitObservationPoint(bot, route, VISIBLE_LANDMARK_REFRESH_LOOKAHEAD);
+                observeDirectionalDetourCorridorsWithinRange(bot, feet, detourPoint, route, waterTraversal, observed,
+                        pursuitRange, tick);
+            } else {
+                observeVisibleCorridors(bot, feet, pursuitPoint, waterTraversal, observed, tick);
+                observeDirectionalDetourCorridors(bot, feet, pursuitPoint, route, waterTraversal, observed, tick);
+            }
             ObservedNavigationFence candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
             BlockPos hop = nearestDirectionalPursuitStance(candidate, feet, route.target(), route.radius(),
-                    route.options().allowBreak());
+                    pursuitRange, route.options().allowBreak());
             if (hop == null) {
                 return Capture.refused("navigation_pursuit_no_observed_hop", rays,
                         Math.max(0, observed.size() - before));
@@ -308,13 +354,17 @@ public final class ObservedNavigationFence {
             // lower on a hill.  Give that exact elevation-changing leg its full, ray-proven
             // movement envelope before Baritone receives it; otherwise its source/destination
             // headroom becomes virtual bedrock even when the snowy slope is plainly walkable.
-            observeVisibleCorridors(bot, feet, hop, waterTraversal, observed, tick);
+            if (visibleLandmarkPursuit) {
+                observeVisibleCorridorsWithinRange(bot, feet, hop, waterTraversal, observed, pursuitRange, tick);
+            } else {
+                observeVisibleCorridors(bot, feet, hop, waterTraversal, observed, tick);
+            }
             candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
             // The remote target intentionally remains NavRoute.target() for the next heading
             // calculation and logs. The local observed hop is the only Baritone GoalBlock.
             route.setResolvedGoal(hop);
             return new Capture(candidate, true, "", TargetProvenance.DIRECTION_ONLY, rays,
-                    Math.max(0, observed.size() - before), false);
+                    Math.max(0, observed.size() - before), false, null);
         } else if (route.shape() == NavRoute.Shape.RUN_AWAY) {
             // GoalRunAway itself chooses the safe destination.  This merely exposes a short,
             // visible corridor away from the observed threat so it cannot discover terrain by
@@ -330,7 +380,7 @@ public final class ObservedNavigationFence {
         // cardinal walking, steps and drops. Baritone's synchronous admission and its pre-input
         // replan guard require a complete fence-constrained dry/no-place path, which preserves
         // the edge-safety rule without rejecting a visibly valid jump, door, ladder or vine.
-        return new Capture(candidate, true, "", provenance, rays, Math.max(0, observed.size() - before), false);
+        return new Capture(candidate, true, "", provenance, rays, Math.max(0, observed.size() - before), false, null);
     }
 
     /** Adds a modest fresh view cone to an active route, preserving only bounded, same-dimension memory. */
@@ -339,31 +389,56 @@ public final class ObservedNavigationFence {
         Objects.requireNonNull(bot, "bot");
         Objects.requireNonNull(route, "route");
         int tick = bot.getServer().getTickCount();
+        // Do this before the refresh cadence shortcut. A target that left direct view may not
+        // keep a privileged landmark leg alive for the remainder of its twelve-tick interval.
+        if (isVisibleLandmarkPursuit(route)
+                && !ObservableWorldQuery.canObserveBlock(bot, route.target())) {
+            return Capture.refused("visible_landmark_unobserved", 0, 0);
+        }
+        int refreshInterval = isVisibleLandmarkPursuit(route)
+                ? VISIBLE_LANDMARK_REFRESH_INTERVAL_TICKS : REFRESH_INTERVAL_TICKS;
         if (previous != null && previous.dimension.equals(BotEdits.dimensionKey(bot.level()))
                 && tick >= previous.lastObservationTick
-                && tick - previous.lastObservationTick < REFRESH_INTERVAL_TICKS) {
-            return new Capture(previous, true, "", TargetProvenance.DIRECTION_ONLY, 0, 0, false);
+                && tick - previous.lastObservationTick < refreshInterval) {
+            return new Capture(previous, true, "", TargetProvenance.DIRECTION_ONLY, 0, 0, false, null);
         }
         String dimension = BotEdits.dimensionKey(bot.level());
-        Map<Long, Cell> observed = retained(previous, dimension, tick);
+        // Keep the short live landmark leg local on every refresh as well. The route's exact
+        // marker is re-proved above, then this fresh evidence window supplies the next legal
+        // observed hop without inheriting a large, stale terrain map.
+        Map<Long, Cell> observed = isVisibleLandmarkPursuit(route)
+                ? new HashMap<>() : retained(previous, dimension, tick);
         int before = observed.size();
         seedBodyEnvelope(bot, observed, tick);
-        mergeSharedWorldSight(bot, route.target(), observed, tick);
+        mergeSharedWorldSight(bot, route.target(), observed, tick,
+                isVisibleLandmarkPursuit(route) ? VISIBLE_LANDMARK_SHARED_SIGHT_LIMIT : Integer.MAX_VALUE);
         if (route.shape() == NavRoute.Shape.OWNER_FOLLOW) {
             // Return a fresh object (rather than `previous`) at the regular refresh cadence. BaritoneNavigator sees the replacement
             // and renews the paired LoadedChunkSnapshot, so newly normal-player-loaded chunks can become available without a force load.
             ObservedNavigationFence fence = freeze(dimension, route.minimumY(), generation, tick, observed);
             return new Capture(fence, true, "", TargetProvenance.DIRECTION_ONLY, 0,
-                    Math.max(0, observed.size() - before), false);
+                    Math.max(0, observed.size() - before), false, null);
         }
         int rays = scan(bot, observed, route.target(), REFRESH_RAYS, tick);
         BlockPos feet = navigationFeet(bot);
         if (route.shape() == NavRoute.Shape.RUN_AWAY) {
             observeVisibleCorridors(bot, feet, fleeObservationPoint(bot, route), false, observed, tick);
         } else if (route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT) {
-            BlockPos pursuitPoint = pursuitObservationPoint(bot, route);
-            observeVisibleCorridors(bot, feet, pursuitPoint, route.options().allowWater(), observed, tick);
-            observeDirectionalDetourCorridors(bot, feet, pursuitPoint, route, route.options().allowWater(), observed, tick);
+            boolean visibleLandmarkPursuit = isVisibleLandmarkPursuit(route);
+            int pursuitRange = pursuitObservationRange(bot, route);
+            BlockPos pursuitPoint = visibleLandmarkPursuit
+                    ? pursuitObservationPoint(bot, route, VISIBLE_LANDMARK_REFRESH_LOOKAHEAD)
+                    : pursuitObservationPoint(bot, route);
+            if (visibleLandmarkPursuit) {
+                observeVisibleCorridorsWithinRange(bot, feet, pursuitPoint, route.options().allowWater(), observed,
+                        pursuitRange, tick);
+                observeDirectionalDetourCorridorsWithinRange(bot, feet, pursuitPoint, route,
+                        route.options().allowWater(), observed, pursuitRange, tick);
+            } else {
+                observeVisibleCorridors(bot, feet, pursuitPoint, route.options().allowWater(), observed, tick);
+                observeDirectionalDetourCorridors(bot, feet, pursuitPoint, route,
+                        route.options().allowWater(), observed, tick);
+            }
         } else {
             // Rays refresh faces and air cells, but they do not by themselves establish every
             // feet/head/support triple that a newly reached walking cell needs.  Carry a narrow
@@ -375,7 +450,7 @@ public final class ObservedNavigationFence {
             return Capture.refused("navigation_observation_lost", rays, Math.max(0, observed.size() - before));
         }
         return new Capture(fence, true, "", TargetProvenance.DIRECTION_ONLY, rays,
-                Math.max(0, observed.size() - before), false);
+                Math.max(0, observed.size() - before), false, null);
     }
 
     /** Re-proves a remembered target and its exact state before a route reports arrival. No raw read occurs before the view proof. */
@@ -407,7 +482,29 @@ public final class ObservedNavigationFence {
      */
     private static void mergeSharedWorldSight(AIPlayerEntity bot, BlockPos target,
                                               Map<Long, Cell> observed, int tick) {
-        for (SharedWorldSight.Observation observation : SharedWorldSight.routeEvidence(bot, target)) {
+        List<SharedWorldSight.Observation> evidence = SharedWorldSight.routeEvidence(bot, target);
+        for (SharedWorldSight.Observation observation : evidence) {
+            if ((long) tick - observation.seenTick() <= MEMORY_TTL_TICKS) {
+                put(observed, observation.packedPos(), observation.state(), observation.seenTick());
+            }
+        }
+    }
+
+    /**
+     * Imports the newest route evidence only. A visible-landmark route already re-proves its
+     * exact target and builds a new local corridor below, so retaining thousands of older shared
+     * cells would only pressure the immutable fence's bounded snapshot.
+     */
+    private static void mergeSharedWorldSight(AIPlayerEntity bot, BlockPos target,
+                                              Map<Long, Cell> observed, int tick, int limit) {
+        if (limit == Integer.MAX_VALUE) {
+            mergeSharedWorldSight(bot, target, observed, tick);
+            return;
+        }
+        List<SharedWorldSight.Observation> evidence = SharedWorldSight.routeEvidence(bot, target);
+        int first = Math.max(0, evidence.size() - Math.max(0, limit));
+        for (int index = first; index < evidence.size(); index++) {
+            SharedWorldSight.Observation observation = evidence.get(index);
             if ((long) tick - observation.seenTick() <= MEMORY_TTL_TICKS) {
                 put(observed, observation.packedPos(), observation.state(), observation.seenTick());
             }
@@ -527,6 +624,18 @@ public final class ObservedNavigationFence {
         observeFloorTopIfVisible(bot, feet.below(), false, observed, tick);
     }
 
+    /** The landmark-only form retains the same per-cell proof while widening only its support ray. */
+    private static void observeVisibleStanceWithinRange(AIPlayerEntity bot, BlockPos feet, Map<Long, Cell> observed,
+                                                        int observationRange, int tick) {
+        // Baritone validates more than ordinary player headroom for parkour, climbing, and
+        // fall transitions.  Each higher cell is independently ray-proven before it is read;
+        // this is evidence for the actual movement envelope, not an inferred vertical scan.
+        for (int y = 0; y <= NAVIGATION_HEADROOM; y++) {
+            observeCellIfVisible(bot, feet.above(y), observed, tick);
+        }
+        observeFloorTopIfVisibleWithinRange(bot, feet.below(), false, observed, observationRange, tick);
+    }
+
     /**
      * A visible water/shore slice used by a swim corridor. Every cell has an independent
      * through-water sight proof: its support, submerged body and the headroom Baritone checks
@@ -547,6 +656,49 @@ public final class ObservedNavigationFence {
         double dz = top.z - eye.z;
         double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (!(distance > 1.0E-9D) || distance > Math.max(1, MinecraftAiConfig.get().perception().radius())) {
+            return;
+        }
+        ObservableWorldQuery.ViewHit view = throughFluids
+                ? ObservableWorldQuery.castViewRayThroughFluids(
+                        bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER)
+                : ObservableWorldQuery.castViewRay(bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER);
+        if (view.hit() && floor.equals(view.pos())) {
+            put(observed, floor.asLong(), view.state(), tick);
+        } else if (!throughFluids && !view.isUnknown() && !view.hit()) {
+            // The endpoint is inside this exact floor cell. A dry, ordinary player-eye ray that
+            // reaches it without a first hit proves the cell is currently clear navigation space;
+            // record only that ray-proven AIR fact. Do not use this branch through water: its
+            // fluid-transparent ray deliberately cannot establish a dry placement destination.
+            // Do not downgrade an earlier exact proof of a non-colliding traversal block such as
+            // a vine or rail: the collider ray reaches the endpoint precisely because that block
+            // has no collider, not because the cell is air.
+            Cell prior = observed.get(floor.asLong());
+            if (mayReplaceFloorEvidenceWithAir(prior == null ? null : prior.state())) {
+                // A lower slab, rail, or other partial block can be visibly supporting the route
+                // even though this full-height top aim misses above its real shape. Give it the
+                // ordinary state-free cell/outline proof first; only an unproved miss remains AIR.
+                if (!observeRouteCellIfVisible(bot, floor, throughFluids, observed, tick)) {
+                    put(observed, floor.asLong(), AIR, tick);
+                }
+            }
+        }
+    }
+
+    /**
+     * Records a proved floor face without silently shrinking a render-distance landmark route
+     * back to the general perception tuning. The final ray still clamps to tracked chunks.
+     */
+    private static void observeFloorTopIfVisibleWithinRange(AIPlayerEntity bot, BlockPos floor,
+                                                            boolean throughFluids, Map<Long, Cell> observed,
+                                                            int observationRange, int tick) {
+        Vec3 eye = bot.getEyePosition();
+        Vec3 top = new Vec3(floor.getX() + 0.5D, floor.getY() + 0.999D, floor.getZ() + 0.5D);
+        double dx = top.x - eye.x;
+        double dy = top.y - eye.y;
+        double dz = top.z - eye.z;
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        int range = Math.max(1, observationRange);
+        if (!(distance > 1.0E-9D) || distance > range) {
             return;
         }
         ObservableWorldQuery.ViewHit view = throughFluids
@@ -638,10 +790,89 @@ public final class ObservedNavigationFence {
         }
     }
 
+    /**
+     * Captures a corridor whose extent is chosen by the admitted landmark route, while each cell
+     * still needs its own eye-ray proof. The caller supplies only the actual tracked view range.
+     */
+    private static void observeVisibleCorridorsWithinRange(AIPlayerEntity bot, BlockPos from, BlockPos to,
+                                                           boolean throughFluids, Map<Long, Cell> observed,
+                                                           int observationRange, int tick) {
+        if (from.getY() != to.getY()) {
+            // A diagonal ray fan alone only samples a staircase through a vertical route. A
+            // vine/ladder ascent or descent needs the real source and destination columns, so
+            // capture them cell-by-cell only where the player's eye can prove them.
+            observeVisibleElevationColumnsWithinRange(bot, from, to, throughFluids, observed, observationRange, tick);
+        }
+        if (to.getY() < from.getY()) {
+            // A descent needs the first actual drop column, not merely diagonal air samples
+            // between a cliff edge and its visible landing. This applies to ordinary dry falls
+            // as well as water traversal: Baritone reads the fall column before it can plan a
+            // safe descent. Every cell remains independently ray-proven, so this adds no
+            // terrain authority behind the lip.
+            observeVisibleDescentColumnWithinRange(bot, from, to, throughFluids, observed, observationRange, tick);
+        }
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        int steps = Math.max(Math.abs(dx), Math.abs(dz));
+        if (steps == 0) {
+            if (throughFluids) {
+                observeWaterEnvelope(bot, from, observed, tick);
+            } else {
+                observeVisibleStanceWithinRange(bot, from, observed, observationRange, tick);
+            }
+            return;
+        }
+        double horizontal = Math.sqrt((double) dx * dx + (double) dz * dz);
+        double sideX = horizontal > 1.0E-9D ? -dz / horizontal : 0.0D;
+        double sideZ = horizontal > 1.0E-9D ? dx / horizontal : 0.0D;
+        int radius = Math.max(1, observationRange);
+        int halfWidth = corridorHalfWidth();
+        for (int strip = -halfWidth; strip <= halfWidth; strip++) {
+            for (int index = 0; index <= steps; index++) {
+                double fraction = (double) index / steps;
+                int x = (int) Math.floor(from.getX() + dx * fraction + sideX * strip + 0.5D);
+                int y = (int) Math.floor(from.getY() + (to.getY() - from.getY()) * fraction + 0.5D);
+                int z = (int) Math.floor(from.getZ() + dz * fraction + sideZ * strip + 0.5D);
+                BlockPos stance = new BlockPos(x, y, z);
+                if (bot.getEyePosition().distanceToSqr(stance.getCenter()) <= (double) radius * radius) {
+                    if (throughFluids) {
+                        observeWaterEnvelope(bot, stance, observed, tick);
+                    } else {
+                        observeVisibleStanceWithinRange(bot, stance, observed, observationRange, tick);
+                    }
+                }
+            }
+        }
+    }
+
     /** Gives a seen hostile's Baritone avoidance sphere only ray-proven candidate terrain. */
     private static int corridorHalfWidth() {
         return MinecraftAiConfig.get().nav().baritoneCaps().mobAvoidanceEnabled()
                 ? BaritoneSettings.MOB_AVOIDANCE_RADIUS : BASE_CORRIDOR_HALF_WIDTH;
+    }
+
+    private static int configuredObservationRange() {
+        return Math.max(1, MinecraftAiConfig.get().perception().radius());
+    }
+
+    private static boolean isVisibleLandmarkPursuit(NavRoute route) {
+        return route != null && route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT
+                && VISIBLE_LANDMARK_PURSUIT.equals(route.label());
+    }
+
+    /**
+     * A tree/landmark route is created only after a first-hit view ray or shared player sight
+     * nominated it. Its exact target can be re-proved out to the real tracked view boundary, but
+     * its walking corridor is capped to one 24-block observed leg. The label is intentionally
+     * exact so owner follow, generic exploration, and all pre-existing directional pursuits are
+     * unchanged.
+     */
+    private static int pursuitObservationRange(AIPlayerEntity bot, NavRoute route) {
+        if (isVisibleLandmarkPursuit(route)) {
+            return Math.min(Math.max(1, ObservableWorldQuery.visibleRangeBlocks(bot)),
+                    VISIBLE_LANDMARK_MAX_HOP_RANGE);
+        }
+        return configuredObservationRange();
     }
 
     /** Captures the visible ends of an elevation-changing route without manufacturing a column. */
@@ -654,6 +885,19 @@ public final class ObservedNavigationFence {
         if (from.getX() != to.getX() || from.getZ() != to.getZ()) {
             observeVisibleColumn(bot, to.getX(), to.getZ(), minimumY, maximumY,
                     throughFluids, observed, tick);
+        }
+    }
+
+    private static void observeVisibleElevationColumnsWithinRange(AIPlayerEntity bot, BlockPos from, BlockPos to,
+                                                                   boolean throughFluids, Map<Long, Cell> observed,
+                                                                   int observationRange, int tick) {
+        int minimumY = Math.min(from.getY(), to.getY()) - 1;
+        int maximumY = Math.max(from.getY(), to.getY()) + NAVIGATION_HEADROOM;
+        observeVisibleColumnWithinRange(bot, from.getX(), from.getZ(), minimumY, maximumY,
+                throughFluids, observed, observationRange, tick);
+        if (from.getX() != to.getX() || from.getZ() != to.getZ()) {
+            observeVisibleColumnWithinRange(bot, to.getX(), to.getZ(), minimumY, maximumY,
+                    throughFluids, observed, observationRange, tick);
         }
     }
 
@@ -683,6 +927,27 @@ public final class ObservedNavigationFence {
                 throughFluids, observed, tick);
     }
 
+    private static void observeVisibleDescentColumnWithinRange(AIPlayerEntity bot, BlockPos from, BlockPos to,
+                                                                boolean throughFluids, Map<Long, Cell> observed,
+                                                                int observationRange, int tick) {
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (dx == 0 && dz == 0) {
+            return;
+        }
+        BlockPos drop = Math.abs(dx) >= Math.abs(dz) && dx != 0
+                ? from.offset(Integer.signum(dx), 0, 0)
+                : from.offset(0, 0, Integer.signum(dz));
+        int minimumY = Math.min(from.getY(), to.getY()) - 1;
+        int maximumY = Math.max(from.getY(), to.getY()) + NAVIGATION_HEADROOM;
+        observeVisibleColumnWithinRange(bot, drop.getX(), drop.getZ(), minimumY, maximumY,
+                throughFluids, observed, observationRange, tick);
+        // A range-aware descent must keep the full landing leg on the same strictly ray-proven
+        // landmark corridor; it cannot recurse because both endpoints share Y.
+        observeVisibleCorridorsWithinRange(bot, new BlockPos(drop.getX(), to.getY(), drop.getZ()), to,
+                throughFluids, observed, observationRange, tick);
+    }
+
     /**
      * Bounded, per-cell evidence capture used by visible climb and descent envelopes. The helper
      * deliberately contains no world read: {@link #observeRouteCellIfVisible} reads a state only
@@ -691,6 +956,18 @@ public final class ObservedNavigationFence {
     private static void observeVisibleColumn(AIPlayerEntity bot, int x, int z, int minimumY, int maximumY,
                                              boolean throughFluids, Map<Long, Cell> observed, int tick) {
         int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int feetY = bot.blockPosition().getY();
+        int lower = Math.max(minimumY, feetY - radius);
+        int upper = Math.min(maximumY, feetY + radius);
+        for (int y = lower; y <= upper; y++) {
+            observeRouteCellIfVisible(bot, new BlockPos(x, y, z), throughFluids, observed, tick);
+        }
+    }
+
+    private static void observeVisibleColumnWithinRange(AIPlayerEntity bot, int x, int z, int minimumY,
+                                                        int maximumY, boolean throughFluids, Map<Long, Cell> observed,
+                                                        int observationRange, int tick) {
+        int radius = Math.max(1, observationRange);
         int feetY = bot.blockPosition().getY();
         int lower = Math.max(minimumY, feetY - radius);
         int upper = Math.min(maximumY, feetY + radius);
@@ -721,12 +998,18 @@ public final class ObservedNavigationFence {
     }
 
     /**
-     * The far end of one follow-pursuit lookahead. It is deliberately a horizontal projection
-     * from the bot's own current cell: a remote player's height must not manufacture an unseen
-     * cliff, stair, or pillar target. The subsequent corridor and stance proofs decide whether
-     * any safe local move actually exists.
+     * The far end of one directional-pursuit lookahead. It is deliberately a horizontal
+     * projection from the bot's own current cell: a remote landmark/player height must not
+     * manufacture an unseen cliff, stair, or pillar target. The specially labelled visible
+     * landmark form may use the bot's actual tracked render range; every other pursuit retains
+     * the configured local observation range.
      */
     private static BlockPos pursuitObservationPoint(AIPlayerEntity bot, NavRoute route) {
+        return pursuitObservationPoint(bot, route, pursuitObservationRange(bot, route));
+    }
+
+    /** Same direction-only projection with a smaller fresh-evidence lookahead for route refresh. */
+    private static BlockPos pursuitObservationPoint(AIPlayerEntity bot, NavRoute route, int observationRange) {
         BlockPos feet = navigationFeet(bot);
         double dx = route.target().getX() - feet.getX();
         double dz = route.target().getZ() - feet.getZ();
@@ -734,7 +1017,7 @@ public final class ObservedNavigationFence {
         if (length <= 1.0E-9D) {
             return feet;
         }
-        int perception = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int perception = Math.max(1, observationRange);
         // Leave two blocks of sight range for a ray-proven feet/head/support envelope at the
         // hop edge. A low configured perception radius simply yields a very short or no hop.
         int distance = Math.min(Math.max(1, route.radius()), Math.max(1, perception - 2));
@@ -771,6 +1054,41 @@ public final class ObservedNavigationFence {
             BlockPos flank = from.offset(offsetX, 0, offsetZ);
             observeVisibleCorridors(bot, from, flank, throughFluids, observed, tick);
             observeVisibleCorridors(bot, flank, forward, throughFluids, observed, tick);
+            // A wall can hide the centre ray to a gap at its end even though the bot can really
+            // see an inset corner of that gap from its current eye. Prove only that one corner
+            // stance; the normal graph still has to connect it through the visible flank lane.
+            int advanceX = Math.abs(dx) >= Math.abs(dz) ? Integer.signum(dx) : 0;
+            int advanceZ = advanceX == 0 ? Integer.signum(dz) : 0;
+            if (advanceX != 0 || advanceZ != 0) {
+                observeInsetDetourStance(bot, flank.offset(advanceX, 0, advanceZ),
+                        advanceX, advanceZ, offsetX, offsetZ, throughFluids, observed, tick);
+            }
+        }
+    }
+
+    /** The visible-landmark form uses the tracked render range but retains each individual eye-ray proof. */
+    private static void observeDirectionalDetourCorridorsWithinRange(AIPlayerEntity bot, BlockPos from, BlockPos forward,
+                                                            NavRoute route, boolean throughFluids,
+                                                            Map<Long, Cell> observed, int observationRange, int tick) {
+        int dx = forward.getX() - from.getX();
+        int dz = forward.getZ() - from.getZ();
+        double length = Math.sqrt((double) dx * dx + (double) dz * dz);
+        if (length <= 1.0E-9D) {
+            return;
+        }
+        int perception = Math.max(1, observationRange);
+        int lateral = Math.min(6, Math.max(1, Math.min(route.radius(), perception - 2)));
+        double sideX = -dz / length;
+        double sideZ = dx / length;
+        for (int sign : new int[]{-1, 1}) {
+            int offsetX = (int) Math.round(sideX * lateral * sign);
+            int offsetZ = (int) Math.round(sideZ * lateral * sign);
+            if (offsetX == 0 && offsetZ == 0) {
+                continue;
+            }
+            BlockPos flank = from.offset(offsetX, 0, offsetZ);
+            observeVisibleCorridorsWithinRange(bot, from, flank, throughFluids, observed, observationRange, tick);
+            observeVisibleCorridorsWithinRange(bot, flank, forward, throughFluids, observed, observationRange, tick);
             // A wall can hide the centre ray to a gap at its end even though the bot can really
             // see an inset corner of that gap from its current eye. Prove only that one corner
             // stance; the normal graph still has to connect it through the visible flank lane.
@@ -857,7 +1175,7 @@ public final class ObservedNavigationFence {
      */
     private static BlockPos nearestDirectionalPursuitStance(ObservedNavigationFence fence, BlockPos origin,
                                                              BlockPos remoteTarget, int requestedHop,
-                                                             boolean allowBreakFallback) {
+                                                             int observationRange, boolean allowBreakFallback) {
         double towardX = remoteTarget.getX() - origin.getX();
         double towardZ = remoteTarget.getZ() - origin.getZ();
         double targetDistanceSq = towardX * towardX + towardZ * towardZ;
@@ -867,7 +1185,7 @@ public final class ObservedNavigationFence {
         double targetDistance = Math.sqrt(targetDistanceSq);
         double unitX = towardX / targetDistance;
         double unitZ = towardZ / targetDistance;
-        int perception = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        int perception = Math.max(1, observationRange);
         int maxHop = Math.min(Math.max(1, requestedHop), Math.max(1, perception - 2));
         double maxHopSq = (double) maxHop * maxHop;
         // A locally standable cell is not necessarily a walking destination: the air above a

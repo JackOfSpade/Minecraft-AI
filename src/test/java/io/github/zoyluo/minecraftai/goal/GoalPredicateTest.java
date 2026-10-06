@@ -33,6 +33,23 @@ class GoalPredicateTest {
     }
 
     @Test
+    void timedCollectionTracksOnlyNewItemsAndNeverLetsHeldInventoryFinishTheWindow() {
+        GoalPredicate timed = new GoalPredicate.TimedCollection(
+                Set.of("minecraft:coal"), 63, "ore_drops");
+
+        GoalEvaluation heldOnly = timed.evaluate(snapshot(
+                Map.of("minecraft:coal", 63), 0, Set.of(), Map.of(), Map.of(), 0, null));
+        GoalEvaluation oneNew = timed.evaluate(snapshot(
+                Map.of("minecraft:coal", 64), 0, Set.of(), Map.of(), Map.of(), 0, null));
+
+        assertEquals(GoalEvaluation.State.UNSATISFIED, heldOnly.state());
+        assertEquals(0, heldOnly.matched());
+        assertEquals(GoalEvaluation.State.UNSATISFIED, oneNew.state(),
+                "the executor, not an inventory count, closes a time collection window");
+        assertEquals(1, oneNew.matched());
+    }
+
+    @Test
     void armorRequiresAllFiveCapabilities() {
         GoalPredicate predicate = new GoalPredicate.ArmorSet(GoalPredicates.ARMOR_CAPABILITIES);
         assertState(predicate, snapshot(Map.of(), 0, GoalPredicates.ARMOR_CAPABILITIES, Map.of(), Map.of(), 0, null),

@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class GatherExactBreakSourceContractTest {
     @Test
-    void exactBlockBreakingCountsDestructionRatherThanDropsAndStaysLocal() throws IOException {
+    void exactBlockBreakingCountsDestructionRatherThanDropsAndUsesOnlyVisibleTargets() throws IOException {
         String source = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
 
@@ -20,8 +20,16 @@ final class GatherExactBreakSourceContractTest {
         assertTrue(source.contains("countBrokenBlocks ? 0 : countAccepted(bot)"));
         assertTrue(source.contains("countSoFar++"));
         assertTrue(source.contains("if (countBrokenBlocks) {\n                // An exact break request"));
-        assertTrue(source.contains("return countBrokenBlocks ? EXACT_BREAK_SEARCH_RADIUS : SEARCH_RADIUS"));
+        String defaultSearchRadius = methodBody(source, "private int defaultSearchRadius()");
+        assertTrue(defaultSearchRadius.contains("if (countBrokenBlocks)")
+                        && defaultSearchRadius.contains("return EXACT_BREAK_SEARCH_RADIUS;"),
+                "exact breaking must retain its small local survey radius");
         assertTrue(source.contains("if (countBrokenBlocks) {\n            return false;"));
+        String survey = methodBody(source, "private void survey(");
+        int visibleSight = survey.indexOf("seekVisibleTarget(bot)");
+        int exactFailure = survey.indexOf("if (countBrokenBlocks)", visibleSight);
+        assertTrue(visibleSight >= 0 && exactFailure > visibleSight,
+                "an exact break may pursue only the exact target when it is directly visible at render range before failing");
     }
 
     @Test

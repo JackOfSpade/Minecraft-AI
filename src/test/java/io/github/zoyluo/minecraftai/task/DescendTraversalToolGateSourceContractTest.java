@@ -52,6 +52,28 @@ class DescendTraversalToolGateSourceContractTest {
     }
 
     @Test
+    void observedDamageFreeLateralDropsPrecedeCavityFallback() throws IOException {
+        String source = Files.readString(SOURCE);
+        int drop = source.indexOf("if (tryObservedSafeLateralDrop(bot, world, feet, ahead))");
+        int viability = source.indexOf("if (containsOwnedWaterSeal(world, ahead, ahead.above(), next)", drop);
+        int helper = source.indexOf("private boolean tryObservedSafeLateralDrop(");
+
+        assertTrue(drop >= 0 && viability > drop,
+                "the observed drop must run before open-cavity viability/sealing can reject it");
+        assertTrue(helper > viability);
+        String body = source.substring(helper, source.indexOf("    /**", helper + 1));
+        assertTrue(body.contains("WalkedStepRules.zeroDamageDropLimit(MinecraftAiConfig.get().nav().maxSafeFall())"));
+        assertTrue(body.contains("for (int depth = 2; depth <= maxDrop; depth++)"));
+        assertTrue(body.contains("isObservedDryStandable(bot, world, landing)"));
+        assertTrue(body.contains("SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, landing, WalkedStep.Kind.STEP_DOWN)"));
+        assertTrue(body.contains("hasSafeObservedDropColumn(world, origin, landing)"));
+        assertTrue(body.contains("WalkedStep.refusal(bot, landing, WalkedStep.Kind.STEP_DOWN)"));
+        assertTrue(body.contains("beginDescend(landing, \"descend_observed_safe_drop\")"));
+        assertTrue(body.contains("StepPurpose.STAIR, origin, landing, stairDirIndex"),
+                "safe drops must share normal stair settlement/checkpoint bookkeeping");
+    }
+
+    @Test
     void delayedDetourMiningFailureRetainsAndPoisonsItsOriginalEdge() throws IOException {
         String source = Files.readString(SOURCE);
 

@@ -64,7 +64,9 @@ class OreDigAssistSourceContractTest {
         assertEquals(1, count(source, "if (miningVein)"));
         assertEquals(1, count(source, "BlockPos found = nearestOre(bot, world)"));
         assertEquals(1, count(source, "miner.begin(bot, pos, true)"));
-        assertEquals(10, count(source, "failMissingMiningChannelTool(bot)"));
+        // Timed collection settlement shares the existing missing-channel-tool safeguard for an
+        // in-flight break at the deadline, adding one legitimate guarded call site.
+        assertEquals(11, count(source, "failMissingMiningChannelTool(bot)"));
         // Finite target owners now route only through surface paths or one-cell guarded digging;
         // the remaining generic path calls are non-target strip/face recovery work.
         assertEquals(2, count(source, "startPathTo("));

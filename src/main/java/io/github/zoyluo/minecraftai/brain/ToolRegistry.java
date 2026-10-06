@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
@@ -246,13 +247,15 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("gather", "Gather the requested number of NEW/additional items. Existing copies in inventory never satisfy count: collect 3 logs means collect 3 more logs. It loops survey, move, harvest, and pickup without assigning child tasks. It uses the right tool for the block, crafts one from inventory if needed, and otherwise reports missing_tool. For a request to break a precise number of blocks where drops do not matter, use break_blocks; for grass/tall grass use clear_grass.", objectSchema()
+        register("gather", "Gather a specific resource. When count is supplied, it means that many NEW/additional items: collect 3 logs means collect 3 more even when copies are already carried. Existing copies in inventory never satisfy count. A count always means NEW/additional inventory items. When count is omitted, collect as much newly gathered material as possible for up to ten minutes; actively explore through short safe observed hops and rescan newly revealed terrain rather than stopping at the first view. It reports none found only after that window. It loops survey, move, harvest, and pickup without assigning child tasks. It uses the right tool for the block, crafts one from inventory if needed, and otherwise reports missing_tool. For a request to break a precise number of blocks where drops do not matter, use break_blocks; for grass/tall grass use clear_grass.", objectSchema()
                 .property("item", stringSchema("target item id, for example minecraft:cobblestone"))
-                .property("count", integerSchema("number of new items to collect"))
+                .property("count", integerSchema("number of new items to collect; omit to collect for up to ten minutes"))
                 .required("item")
                 .build(), (bot, args) -> {
-            Task task = GatherQuotaTask.collectAdditional(
-                    requiredItem(args, "item"), optionalInt(args, "count", 1));
+            Item item = requiredItem(args, "item");
+            Task task = args.has("count")
+                    ? GatherQuotaTask.collectAdditional(item, optionalInt(args, "count", 1))
+                    : GatherQuotaTask.collectForDuration(item);
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
         });
@@ -358,10 +361,10 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine only observed ore. For non-ore inventory items such as minecraft:obsidian, use achieve_goal instead. Do not manually break this into gather/craft/mine steps. Two modes: mode=count (default) mines at least `count` ore drops, but always drains the connected observed vein it opens and confirms each physical drop before looking for another vein; when the local view is empty, it automatically follows a bounded series of short observed walk-only hops, rescans, and resumes if ore becomes visible. It never tunnels, strip-mines, or paths toward unseen ore. mode=vein is for stopping after one specific 'whole/entire vein', 'this vein', or 'until the vein is gone': it mines exactly the connected, observed vein of the nearest ore of that type the bot can see (or of the ore at x/y/z), then STOPS and reports how many were mined -- no branch mining, no digging down, no other veins. count is ignored in vein mode. Vein mode needs a suitable pickaxe already in the inventory and a visible ore.", objectSchema()
+        register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine only observed ore. For non-ore inventory items such as minecraft:obsidian, use achieve_goal instead. Do not manually break this into gather/craft/mine steps. Two modes: mode=count (default) with count mines at least that many NEW ore drops, even when the bot already carries that material; without count it collects as many NEW drops as it can for up to ten minutes. In both cases it always drains the connected observed vein it opens, confirms each physical drop, actively follows repeated short safe observed walk-only hops when the local view is empty, rescans newly revealed terrain, and resumes if ore becomes visible. It never tunnels, strip-mines, or paths toward unseen ore; it reports none found only when the no-count window ends. mode=vein is for stopping after one specific 'whole/entire vein', 'this vein', or 'until the vein is gone': it mines exactly the connected, observed vein of the nearest ore of that type the bot can see (or of the ore at x/y/z), then STOPS and reports how many were mined -- no branch mining, no digging down, no other veins. count is ignored in vein mode. Vein mode needs a suitable pickaxe already in the inventory and a visible ore.", objectSchema()
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore or minecraft:raw_iron"))
-                .property("count", integerSchema("how many ore blocks to mine (mode=count only)"))
-                .property("mode", enumStringSchema("count (default): finish each connected observed vein, then keep mining until `count` drops are collected; safely widens the view with bounded observed hops when needed. vein: mine one connected visible vein and stop when it is exhausted", MINE_ORE_MODES.toArray(new String[0])))
+                .property("count", integerSchema("how many new ore drops to mine (mode=count only); omit to collect for up to ten minutes"))
+                .property("mode", enumStringSchema("count (default): with count, finish connected observed veins until `count` new drops are collected; without count, collect for up to ten minutes. Both safely widen the view through repeated bounded observed hops and rescans. vein: mine one connected visible vein and stop when it is exhausted", MINE_ORE_MODES.toArray(new String[0])))
                 .property("x", integerSchema("vein mode only: x of an ore in the vein the player means (optional; default nearest visible ore)"))
                 .property("y", integerSchema("vein mode only: y of an ore in the vein the player means (give x, y and z together)"))
                 .property("z", integerSchema("vein mode only: z of an ore in the vein the player means"))
@@ -385,13 +388,16 @@ public final class ToolRegistry {
                 assignLlm(bot, task);
                 return ok("assigned: mine_ore vein (stops when the vein is exhausted)");
             }
+            Set<Block> ores = oreTargetsFrom(requiredString(args, "ore"));
+            boolean hasCount = args.has("count");
+            int count = optionalInt(args, "count", 1);
             if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
-                Task task = new OreDigTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
+                Task task = hasCount ? new OreDigTask(ores, count) : OreDigTask.collectForDuration(ores);
                 assignLlm(bot, task);
                 return ok("assigned: " + task.name());
             }
             boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
-                    new Goal.MineOre(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1)));
+                    hasCount ? additionalOreGoal(bot, ores, count) : timedOreGoal(bot, ores));
             return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
         });
 
@@ -413,17 +419,21 @@ public final class ToolRegistry {
             return started ? ok("goal_assigned: achieve_goal") : fail("goal_plan_failed");
         });
 
-        register("harvest_crop", "Grow and harvest a crop with deterministic planning. Use for requests like plant wheat/collect some wheat/get wheat. Crop is wheat, carrot, or potato. The system auto-prepares a hoe, tills, plants, waits for growth, and harvests; do not decompose manually.", objectSchema()
+        register("harvest_crop", "Grow and harvest a crop with deterministic planning. When count is supplied, it means that many NEW produce items; existing wheat, carrots, or potatoes do not satisfy it. When count is omitted, tend, explore, and harvest as much new produce as possible for up to ten minutes, reporting none found only after that window. Use for requests like plant wheat/collect some wheat/get wheat. Crop is wheat, carrot, or potato. The system auto-prepares a hoe, tills, plants, waits for growth, and harvests; do not decompose manually.", objectSchema()
                 .property("crop", stringSchema("crop: wheat, carrot, or potato"))
-                .property("count", integerSchema("how many to harvest"))
+                .property("count", integerSchema("how many new produce items to harvest; omit to collect for up to ten minutes"))
                 .required("crop")
                 .build(), (bot, args) -> {
             FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
             net.minecraft.world.item.Item produce = spec.crop() == net.minecraft.world.level.block.Blocks.WHEAT
                     ? net.minecraft.world.item.Items.WHEAT
                     : spec.seed(); // carrot/potato: the produce item is the same as the seed item
+            int heldProduce = HarvestCore.countInventoryItems(bot, Set.of(produce));
             boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
-                    new Goal.HarvestCrop(spec.crop(), spec.seed(), produce, optionalInt(args, "count", 1)));
+                    args.has("count")
+                            ? new Goal.HarvestCrop(spec.crop(), spec.seed(), produce,
+                                    optionalInt(args, "count", 1), heldProduce)
+                            : Goal.HarvestCrop.timedCollection(spec.crop(), spec.seed(), produce, heldProduce));
             return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
         });
 
@@ -437,14 +447,17 @@ public final class ToolRegistry {
             return started ? ok("goal_assigned: provision_food") : fail("goal_plan_failed");
         });
 
-        register("forage", "Forage SPECIFIC wild berries/melon nearby. ONLY when the user EXPLICITLY asks for berries/wild fruit, NOT for general food. "
+        register("forage", "Forage SPECIFIC wild berries/melon nearby. When count is supplied, it means that many NEW items and existing copies never satisfy it. When count is omitted, collect as much as possible for up to ten minutes by safely exploring and rescanning newly revealed terrain; report none found only after the window. ONLY when the user EXPLICITLY asks for berries/wild fruit, NOT for general food. "
                 + "Use for pick some wild fruit/pick some berries/pick berries/pick sweet berries/pick watermelon/want to eat berries; needs berry bushes or melons around. "
-                + "For ANY general find food/get some food request use provision_food instead (it auto-picks hunt or farm). count = how many (default 4).", objectSchema()
-                .property("count", integerSchema("how many wild food to gather (default 4)"))
+                + "For ANY general find food/get some food request use provision_food instead (it auto-picks hunt or farm).", objectSchema()
+                .property("count", integerSchema("how many new wild food items to gather; omit to collect for up to ten minutes"))
                 .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
-                    new Goal.HaveItem(net.minecraft.world.item.Items.SWEET_BERRIES, optionalInt(args, "count", 4)));
-            return started ? ok("goal_assigned: forage") : fail("goal_plan_failed");
+            Task task = args.has("count")
+                    ? GatherQuotaTask.collectAdditional(net.minecraft.world.item.Items.SWEET_BERRIES,
+                            optionalInt(args, "count", 1))
+                    : GatherQuotaTask.collectForDuration(net.minecraft.world.item.Items.SWEET_BERRIES);
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
         });
 
         register("achieve_armor", "Make and equip a full set of iron armor plus an iron sword with deterministic planning. Use for arm yourself up/make a full set of gear/put armor on me/gear up. Auto-plans mining, smelting and crafting; do not decompose manually.", objectSchema()
@@ -512,7 +525,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("show_location", "Physically show this bot's owner where any known, verified location or target is. The bot first tells the owner it will show them, uses Baritone to sprint within 5 blocks of that owner (even if out of view), then uses only safe observed Baritone navigation to within 3 blocks of the target, faces it, and makes three harmless air swings. Pass all x/y/z when another tool, visible context, memory, or the player supplied a verified coordinate; omit them only to use the latest successful find in this dimension. It never mines, attacks, opens, or interacts with the target.", objectSchema()
+        register("show_location", "Physically show this bot's owner where any known, verified location or target is. The bot first tells the owner it will show them, uses Baritone to sprint within 5 blocks of that owner (even if out of view), then uses only safe observed Baritone navigation to within 3 blocks of the target, faces it, and makes five harmless air swings. Pass all x/y/z when another tool, visible context, memory, or the player supplied a verified coordinate; omit them only to use the latest successful find in this dimension. It never mines, attacks, opens, or interacts with the target.", objectSchema()
                 .property("x", integerSchema("optional verified target x; omit x/y/z only to use the latest find"))
                 .property("y", integerSchema("optional verified target y; omit x/y/z only to use the latest find"))
                 .property("z", integerSchema("optional verified target z; omit x/y/z only to use the latest find"))
@@ -963,8 +976,8 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("resume_mining", "Continue mining where the last mining session left off: walks back to the remembered mine face and mines the same ore kinds. Use when the player says things like 'continue mining'/'keep digging'.", objectSchema()
-                .property("count", integerSchema("how many more ore blocks to mine, default 8"))
+        register("resume_mining", "Continue mining where the last mining session left off: walks back to the remembered mine face and mines the same ore kinds. With count it mines that many NEW drops; without count it keeps actively exploring, rescanning, and collecting for up to ten minutes, then reports whether it found any. Use when the player says things like 'continue mining'/'keep digging'.", objectSchema()
+                .property("count", integerSchema("how many more NEW ore drops to mine; omit to collect for up to ten minutes"))
                 .build(), (bot, args) -> {
             var mem = BotMemoryStore.INSTANCE.of(bot.getUUID());
             var face = mem.place("mine_face");
@@ -987,20 +1000,24 @@ public final class ToolRegistry {
             // Queue relay: walk back to the work face first, then resume mining the same ore type (the goal queue chains automatically, and it can resume even if interrupted midway).
             Task back = new MoveTask(bot, face.get().pos());
             assignLlm(bot, back);
-            GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.MineOre(
-                    ores.isEmpty() ? java.util.Set.of(net.minecraft.world.level.block.Blocks.IRON_ORE) : ores,
-                    optionalInt(args, "count", 8)));
-            return ok("resuming at " + face.get().pos().toShortString());
+            Set<Block> resumeOres = ores.isEmpty()
+                    ? java.util.Set.of(net.minecraft.world.level.block.Blocks.IRON_ORE)
+                    : ores;
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, args.has("count")
+                    ? additionalOreGoal(bot, resumeOres, optionalInt(args, "count", 1))
+                    : timedOreGoal(bot, resumeOres));
+            return started ? ok("resuming at " + face.get().pos().toShortString()) : fail("goal_plan_failed");
         });
 
-        register("mine_and_stockpile", "Mine ores then deposit the yield into a chest near the remembered base. Use when the player wants mined goods stored, not carried.", objectSchema()
+        register("mine_and_stockpile", "Mine a specified number of new ore drops, then deposit the yield into a chest near the remembered base. Use when the player wants mined goods stored, not carried. A count is required because this combined mining-and-storage workflow has a precise delivery target; use mine_ore without count for the ten-minute collect-as-much-as-possible workflow.", objectSchema()
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore"))
-                .property("count", integerSchema("how many ore blocks to mine"))
+                .property("count", integerSchema("how many new ore drops to mine", 1, Integer.MAX_VALUE))
                 .required("ore")
+                .required("count")
                 .build(), (bot, args) -> {
             var ores = oreTargetsFrom(requiredString(args, "ore"));
-            int count = optionalInt(args, "count", 1);
-            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.MineOre(ores, count));
+            int count = requiredPositiveInt(args, "count");
+            boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, additionalOreGoal(bot, ores, count));
             if (!started) {
                 return fail("goal_plan_failed");
             }
@@ -1047,8 +1064,8 @@ public final class ToolRegistry {
 
     /** assign_task and the task lifecycle tools it shares status/cancellation with. */
     private void registerTaskLifecycleTools() {
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, container work, or showing any known verified location. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool; count mode safely explores through bounded observed hops when its first view is empty, never by tunneling toward unseen ore. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, find, show_location, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw"))
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, container work, or showing any known verified location. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; with count it means NEW/additional inventory items, never the total already carried, and without count it gathers for up to ten minutes while safely exploring and rescanning. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine: with a count it keeps the physical mining quota, while an omitted count gathers that block's normal drops for up to ten minutes. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool; both explicit-quota and no-count collection safely explore through repeated bounded observed hops and rescans, never by tunneling toward unseen ore. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+                .property("task_type", stringSchema("move, find, show_location, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_ore, mine_valuables, harvest_crop, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -1059,27 +1076,45 @@ public final class ToolRegistry {
                 return fail("missing_or_bad_arg: params");
             }
             if ("mine_ore".equals(taskType)) {
+                Set<Block> ores = oreTargetsFrom(requiredString(params, "ore"));
+                boolean hasCount = params.has("count");
+                int count = optionalInt(params, "count", 1);
                 if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
-                    Task task = new OreDigTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
+                    Task task = hasCount ? new OreDigTask(ores, count) : OreDigTask.collectForDuration(ores);
                     assignLlm(bot, task);
                     return ok("assigned: " + task.name());
                 }
                 boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
-                        new Goal.MineOre(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1)));
+                        hasCount ? additionalOreGoal(bot, ores, count) : timedOreGoal(bot, ores));
                 return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
             }
             if ("mine".equals(taskType)) {
                 Block block = blockWithAlias(params, "block", "block_type");
                 if (OreScan.isOreBlock(block)) {
+                    boolean hasCount = params.has("count");
                     int count = optionalInt(params, "count", 1);
                     if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
-                        Task task = new OreDigTask(OreScan.oreFamily(block), count);
+                        Task task = hasCount ? new OreDigTask(OreScan.oreFamily(block), count)
+                                : OreDigTask.collectForDuration(OreScan.oreFamily(block));
                         assignLlm(bot, task);
                         return ok("assigned: " + task.name());
                     }
-                    boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, new Goal.MineOre(OreScan.oreFamily(block), count));
+                    boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot,
+                            hasCount ? additionalOreGoal(bot, OreScan.oreFamily(block), count)
+                                    : timedOreGoal(bot, OreScan.oreFamily(block)));
                     return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
                 }
+            }
+            if ("harvest_crop".equals(taskType)) {
+                FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(params, "crop"));
+                Item produce = spec.crop() == net.minecraft.world.level.block.Blocks.WHEAT
+                        ? Items.WHEAT : spec.seed();
+                int heldProduce = HarvestCore.countInventoryItems(bot, Set.of(produce));
+                boolean started = GoalExecutor.INSTANCE.submitAdaptive(bot, params.has("count")
+                        ? new Goal.HarvestCrop(spec.crop(), spec.seed(), produce,
+                                optionalInt(params, "count", 1), heldProduce)
+                        : Goal.HarvestCrop.timedCollection(spec.crop(), spec.seed(), produce, heldProduce));
+                return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
             }
             if ("attack".equals(taskType) && BossRefusal.refuses(requiredEntityType(params, "entity_type"))) {
                 BossRefusal.logRefused(bot, "task_type");
@@ -1123,8 +1158,9 @@ public final class ToolRegistry {
             // as a safe persistent locate-only alias instead of leaving the bot idle.
             case "find_container" -> DiscoveryTask.find(optionalString(params, "target", "bonus_chest"),
                     optionalInt(params, "radius", 64));
-            case "forage" -> GatherQuotaTask.collectAdditional(
-                    net.minecraft.world.item.Items.SWEET_BERRIES, optionalInt(params, "count", 4));
+            case "forage" -> params.has("count")
+                    ? GatherQuotaTask.collectAdditional(Items.SWEET_BERRIES, optionalInt(params, "count", 1))
+                    : GatherQuotaTask.collectForDuration(Items.SWEET_BERRIES);
             case "attack" -> new CombatTask(
                     requiredEntityType(params, "entity_type"),
                     optionalInt(params, "count", 1),
@@ -1132,12 +1168,20 @@ public final class ToolRegistry {
             case "mine" -> {
                 Block block = blockWithAlias(params, "block", "block_type");
                 int count = optionalInt(params, "count", 1);
-                yield OreScan.isOreBlock(block) ? new OreDigTask(OreScan.oreFamily(block), count) : new MineTask(block, count);
+                yield OreScan.isOreBlock(block)
+                        ? (params.has("count") ? new OreDigTask(OreScan.oreFamily(block), count)
+                                : OreDigTask.collectForDuration(OreScan.oreFamily(block)))
+                        : (params.has("count") ? new MineTask(block, count) : timedResourceMineTask(block));
             }
-            case "mine_ore" -> new OreDigTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
+            case "mine_ore" -> {
+                Set<Block> ores = oreTargetsFrom(requiredString(params, "ore"));
+                yield params.has("count") ? new OreDigTask(ores, optionalInt(params, "count", 1))
+                        : OreDigTask.collectForDuration(ores);
+            }
             case "mine_valuables" -> new MineValuablesTask(optionalInt(params, "radius", MineValuablesTask.DEFAULT_RADIUS));
-            case "gather" -> GatherQuotaTask.collectAdditional(
-                    requiredItem(params, "item"), optionalInt(params, "count", 1));
+            case "gather" -> params.has("count")
+                    ? GatherQuotaTask.collectAdditional(requiredItem(params, "item"), optionalInt(params, "count", 1))
+                    : GatherQuotaTask.collectForDuration(requiredItem(params, "item"));
             case "clear_grass" -> GatherQuotaTask.clearGrass(requiredPositiveInt(params, "count"));
             case "break_blocks" -> isAnyLeavesRequest(params, "block")
                     ? GatherQuotaTask.breakLeaves(requiredPositiveInt(params, "count"))
@@ -1332,6 +1376,34 @@ public final class ToolRegistry {
             return defaultValue;
         }
         return args.get(name).getAsInt();
+    }
+
+    /**
+     * Public mining tools promise a newly mined quota.  Keep the inventory snapshot with the
+     * goal so its completion target and mission-sized planning stay distinct.
+     */
+    private static Goal.MineOre additionalOreGoal(AIPlayerEntity bot, Set<Block> ores, int requestedDrops) {
+        int heldDrops = HarvestCore.countInventoryItems(bot, HarvestCore.expectedDropsFor(ores));
+        return new Goal.MineOre(ores, requestedDrops, heldDrops);
+    }
+
+    /**
+     * A no-count player request is not satisfied by stock already carried.  Keep that snapshot
+     * solely as an accounting baseline for the timed mission's eventual result.
+     */
+    private static Goal.MineOre timedOreGoal(AIPlayerEntity bot, Set<Block> ores) {
+        int heldDrops = HarvestCore.countInventoryItems(bot, HarvestCore.expectedDropsFor(ores));
+        return Goal.MineOre.timedCollection(ores, heldDrops);
+    }
+
+    /**
+     * Generic {@code assign_task mine} names a block, while resource collection is measured in
+     * drops.  Preserve stone -> cobblestone and the other actual drop mappings instead of using
+     * {@link Block#asItem()}, which would ask a timed gather task for an unobtainable stone item.
+     */
+    private static Task timedResourceMineTask(Block block) {
+        Item drop = HarvestCore.expectedDropsFor(block).stream().findFirst().orElse(null);
+        return drop == null ? new MineTask(block, 1) : GatherQuotaTask.collectForDuration(drop);
     }
 
     private static boolean optionalBoolean(JsonObject args, String name, boolean defaultValue) {

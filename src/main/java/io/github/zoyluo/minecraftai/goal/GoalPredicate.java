@@ -8,6 +8,7 @@ import java.util.Set;
 public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
         GoalPredicate.PickaxeTier,
         GoalPredicate.AnyItemCount,
+        GoalPredicate.TimedCollection,
         GoalPredicate.ArmorSet,
         GoalPredicate.Workstation,
         GoalPredicate.Stockpile,
@@ -45,6 +46,31 @@ public sealed interface GoalPredicate permits GoalPredicate.ItemCount,
             return GoalEvaluation.count(actual, count,
                     Map.of(evidenceKey, String.valueOf(actual), "items", String.join(",", itemIds)),
                     "insufficient_" + evidenceKey);
+        }
+    }
+
+    /**
+     * A collection window is intentionally not satisfied by inventory alone.  It records only
+     * mission-owned growth above the captured baseline, while the executor completes it when its
+     * timed physical task reaches the window boundary.  This prevents a preexisting stack from
+     * turning a player request to gather into an immediate no-op.
+     */
+    record TimedCollection(Set<String> itemIds, int initialCount, String evidenceKey) implements GoalPredicate {
+        public TimedCollection {
+            itemIds = Set.copyOf(itemIds);
+            initialCount = Math.max(0, initialCount);
+        }
+
+        @Override
+        public GoalEvaluation evaluate(GoalSnapshot snapshot) {
+            int actual = itemIds.stream().mapToInt(snapshot::inventoryCount).sum();
+            int collected = Math.max(0, actual - initialCount);
+            return new GoalEvaluation(GoalEvaluation.State.UNSATISFIED, collected, 1,
+                    Map.of(evidenceKey, String.valueOf(actual),
+                            "baseline", String.valueOf(initialCount),
+                            "collected", String.valueOf(collected),
+                            "items", String.join(",", itemIds)),
+                    List.of("collection_window_active"));
         }
     }
 

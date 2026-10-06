@@ -80,6 +80,17 @@ class WalkedStepRulesTest {
     }
 
     @Test
+    void zeroDamageDropLimitNeverLetsConfigurationAuthorizeFallDamage() {
+        assertTrue(WalkedStepRules.isZeroDamageFall(1));
+        assertTrue(WalkedStepRules.isZeroDamageFall(3));
+        assertFalse(WalkedStepRules.isZeroDamageFall(4));
+        assertEquals(2, WalkedStepRules.zeroDamageDropLimit(2));
+        assertEquals(3, WalkedStepRules.zeroDamageDropLimit(3));
+        assertEquals(3, WalkedStepRules.zeroDamageDropLimit(8));
+        assertEquals(0, WalkedStepRules.zeroDamageDropLimit(-1));
+    }
+
+    @Test
     void timeoutIsTwentyTicksOrEightPerBlockAndAnItemInUseStretchesItFiveTimes() {
         assertEquals(20.0D, WalkedStepRules.timeoutBudget(1.0D));
         assertEquals(20.0D, WalkedStepRules.timeoutBudget(0.0D));

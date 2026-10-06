@@ -65,6 +65,31 @@ public final class MaterialPalette {
             Items.STONE,
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE);
+
+    /**
+     * Common expendable supports accepted by Baritone's default throwaway-item policy.
+     *
+     * <p>A broader path palette is useful to higher-level callers, but a placement-enabled
+     * pillar has to select an item the route engine will actually put down. Keeping this small
+     * and explicit prevents a bot from counting a tuff/andesite stack as scaffold and then
+     * having every placement refused. These are all ordinary, non-wood, non-ore blocks; dirt is
+     * merely the first preference rather than the only option.</p>
+     */
+    private static final List<Item> PILLAR_SUPPORT_BLOCKS = List.of(
+            Items.DIRT,
+            Items.COBBLESTONE,
+            Items.NETHERRACK,
+            Items.STONE);
+
+    /**
+     * Cheap, common natural sources whose ordinary drops can be used by the explicit pillar
+     * route. Stone is intentionally omitted: without Silk Touch it supplies cobblestone, which
+     * is already named here.
+     */
+    private static final List<Item> NEARBY_PILLAR_SUPPORT_GATHER_ITEMS = List.of(
+            Items.DIRT,
+            Items.COBBLESTONE,
+            Items.NETHERRACK);
     private static final List<Item> SHELTER_EASY_BLOCKS = List.of(
             Items.DIRT,
             Items.COARSE_DIRT,
@@ -169,6 +194,43 @@ public final class MaterialPalette {
             }
         }
         return OptionalInt.empty();
+    }
+
+    /**
+     * Selects a common nonvaluable support that Baritone is configured to place for a pillar.
+     * This is deliberately separate from the wider path palette above.
+     */
+    public static OptionalInt pickPillarSupportBlockSlot(AIPlayerEntity bot) {
+        for (Item item : PILLAR_SUPPORT_BLOCKS) {
+            OptionalInt slot = InventoryAction.findItem(bot, item);
+            if (slot.isPresent()) {
+                return slot;
+            }
+        }
+        return OptionalInt.empty();
+    }
+
+    /** Counts the broader stable, non-wood, non-ore supports eligible for an ordinary path. */
+    public static int countPathSupportBlocks(AIPlayerEntity bot) {
+        int total = 0;
+        for (Item item : PATH_SUPPORT_BLOCKS) {
+            total += InventoryAction.countItem(bot, item);
+        }
+        return total;
+    }
+
+    /** Counts only supports the placement-enabled pillar route can really use. */
+    public static int countPillarSupportBlocks(AIPlayerEntity bot) {
+        int total = 0;
+        for (Item item : PILLAR_SUPPORT_BLOCKS) {
+            total += InventoryAction.countItem(bot, item);
+        }
+        return total;
+    }
+
+    /** Natural, normally obtainable candidates for a short emergency pillar-material refill. */
+    public static List<Item> nearbyPillarSupportGatherItems() {
+        return NEARBY_PILLAR_SUPPORT_GATHER_ITEMS;
     }
 
     private static boolean isProtectedMiningStoneLike(Item item) {

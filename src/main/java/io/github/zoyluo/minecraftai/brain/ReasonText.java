@@ -25,6 +25,7 @@ public final class ReasonText {
             Map.entry("inventory_full", "My inventory is full; I need to store items first."),
             Map.entry("no_resource_nearby", "I could not observe a collectable resource from my current view."),
             Map.entry("no_resource_after_explore", "I explored several safe routes but did not observe a collectable resource."),
+            Map.entry("no_resource_found_by_deadline", "I explored for ten minutes but did not find the requested resource."),
             Map.entry("unsupported_resource_type", "That resource type cannot be collected automatically yet."),
             Map.entry("gather_timeout", "Gathering took too long, so I will stop and reassess."),
             Map.entry("no_base", "No base is marked yet; I need to remember the base position first."),

@@ -72,6 +72,34 @@ class DescendToYCheckpointTest {
                 "schema-4 checkpoint accepted an unexpected landing_drift_recoveries key");
     }
 
+    @Test
+    void pendingDamageFreeDeepStairLandingSurvivesCheckpointValidation() {
+        for (int depth : new int[]{2, 3}) {
+            Map<String, String> checkpoint = pendingStairCheckpoint(depth);
+            assertTrue(DescendToYTask.inspectCheckpoint(checkpoint).isPresent(),
+                    "checkpoint rejected the in-flight " + depth + "-block damage-free stair drop");
+        }
+    }
+
+    @Test
+    void pendingDamagingOrNonAdjacentStairLandingIsRejected() {
+        assertFalse(DescendToYTask.inspectCheckpoint(pendingStairCheckpoint(4)).isPresent(),
+                "checkpoint accepted a fall-damaging four-block stair drop");
+
+        Map<String, String> nonAdjacent = pendingStairCheckpoint(2);
+        nonAdjacent.put("pending_landing_target", "12,62,10");
+        assertFalse(DescendToYTask.inspectCheckpoint(nonAdjacent).isPresent(),
+                "checkpoint accepted a non-adjacent stair landing");
+    }
+
+    private static Map<String, String> pendingStairCheckpoint(int depth) {
+        Map<String, String> values = new LinkedHashMap<>(baseCheckpoint());
+        values.put("pending_landing_origin", "10,64,10");
+        values.put("pending_landing_target", "10," + (64 - depth) + ",9");
+        values.put("pending_landing_direction", "0"); // NORTH
+        return values;
+    }
+
     /**
      * A minimal, otherwise-valid schema-5 idle checkpoint: no pending/rejected landing, no
      * detours, at the lowest legal budget window. Every test above overlays just the field(s)
