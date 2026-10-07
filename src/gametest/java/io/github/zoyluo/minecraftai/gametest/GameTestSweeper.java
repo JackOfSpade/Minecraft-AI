@@ -56,8 +56,14 @@ public final class GameTestSweeper {
     private static io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig baselineAssistConfig;
     private static GameRules baselineRules;
     private static boolean baselinePerception;
+    private static int baselineViewDistance;
 
     private GameTestSweeper() {
+    }
+
+    /** The view distance the suite's player list started with, which block sight is derived from (see {@link GameTestSightDistance}). */
+    static int baselineViewDistance() {
+        return baselineViewDistance;
     }
 
     /** {@code SERVER_STARTED}, after the harness has set the ambient: remembers what every test is entitled to find. */
@@ -67,6 +73,7 @@ public final class GameTestSweeper {
         ServerLevel world = server.overworld();
         baselineRules = world.getGameRules().copy(world.enabledFeatures());
         baselinePerception = io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled();
+        baselineViewDistance = server.getPlayerList().getViewDistance();
     }
 
     /**
@@ -101,7 +108,7 @@ public final class GameTestSweeper {
      * a degraded-TPS verdict), for their own run and undo it in their cleanup; one that fails before it gets there leaves it behind for
      * every later test. Put the suite's own back and say which test it was.
      */
-    private static void guardGlobals(List<String> tests) {
+    private static void guardGlobals(MinecraftServer server, List<String> tests) {
         if (baselineConfig != null && io.github.zoyluo.minecraftai.MinecraftAiConfig.get() != baselineConfig) {
             LOG.warn("a test left a different MinecraftAiConfig behind, restoring the suite's own; tests: {}", tests);
             try {
@@ -129,6 +136,9 @@ public final class GameTestSweeper {
             LOG.warn("a test left realistic perception switched {}, switching it back; tests: {}",
                     io.github.zoyluo.minecraftai.perception.CreatureSenses.enabled() ? "on" : "off", tests);
             io.github.zoyluo.minecraftai.perception.CreatureSenses.forceEnabledForTests(false);
+        }
+        if (GameTestSightDistance.restoreLeaked(server)) {
+            LOG.warn("a test left the production view distance in force, restoring the harness's {}; tests: {}", baselineViewDistance, tests);
         }
     }
 
@@ -178,7 +188,7 @@ public final class GameTestSweeper {
             for (GameTestInfo info : KNOWN) {
                 finished.add(info.id().getPath());
             }
-            guardGlobals(finished.size() > 6 ? finished.subList(0, 6) : finished);
+            guardGlobals(server, finished.size() > 6 ? finished.subList(0, 6) : finished);
             restoreAmbient(server);
             KNOWN.clear();
         }
