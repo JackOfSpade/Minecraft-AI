@@ -178,6 +178,16 @@ Acceptance:
 
 Completion result: The unified `runtime.json` uses `schemaVersion=1`, with a background 750ms merge-write and a synchronous flush on server stop; the temp file is unique and is atomically replaced after fsync. A corrupted or future schema enters read-only protection without overwriting the original file. On restart, planning resumes from `MissionSpec` and applies checkpoint/postconditions first; `CLAIMED` Jobs from an old session are automatically reopened. `scripts/persistence_restart_test.sh` has launched two JVMs back-to-back against the same world, precisely comparing non-default checkpoint maps, the active Mission, the queue, and pause state; it verifies stale-lease reopening and confirms the original Mission reaches `COMPLETED 4/4` after resuming.
 
+Follow-up, the tower a bot stands on: the pillar machinery (gather, mine, ore-dig) builds throwaway towers that `TowerDescent`, `TowerCustody` and
+`ActionPack.startOwnSupportMining` take down again, and a restart used to leave a bot stranded on one. `BotRecord.towerBase` ("x,y,z", the floor
+cell of the tower, `persist/TowerBaseCodec`) now carries it. It is written only while the bot stands in the tower's column above its floor, so a
+bot revived at the spawn after dying saves none. `AIPlayerManager.respawnFromRecord` restores it through `BotPersistence.restoreTower` into
+`TowerCustody` with no owner, an orphan from its first tick: the restored bot comes down by the same observed, one-block-at-a-time descent before
+its task (restored or not) goes on. The field is optional and the schema stays at 1: an old save has none and restores as it always did; an
+older build ignores it; a value that is not three canonical integers, a bot restored in another dimension or one that is not on the saved column
+restores no tower and logs `tower_restore_rejected` (see `docs/LOGGING.md`). Tests: `TowerBaseCodecTest`, `TowerPersistenceSourceContractTest`, and the
+GameTests of `TowerRestoreGameTests` (real capture, runtime.json codec, despawn, `respawnFromRecord`).
+
 ## P0-06: Operating Mode and Fairness Contract
 
 Decided: fresh installs default to `strict_survival`, with `operator` requiring explicit opt-in; when an old config is missing a profile, it currently falls back to `operator` for compatibility and emits a migration warning.
