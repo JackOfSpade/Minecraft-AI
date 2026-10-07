@@ -260,8 +260,13 @@ final class NavigationCourseRun {
 
     // ---------------------------------------------------------------------------------------------------------------
 
+    /**
+     * The follower waits as soon as it is within the stop distance, and a descent satisfies that while the bot is still airborne
+     * over its last drop. It has only arrived once it stands, so a run never ends (and the lowest-Y rule is never judged) mid-fall.
+     */
     private boolean followerArrived(Runner r) {
-        return r.follow.isWaiting() && r.bot.distanceTo(holder) <= ARRIVED && Math.abs(r.bot.getY() - holder.getY()) <= LEVEL;
+        return r.follow.isWaiting() && r.bot.onGround() && r.bot.distanceTo(holder) <= ARRIVED
+                && Math.abs(r.bot.getY() - holder.getY()) <= LEVEL;
     }
 
     private void followProgress(int now) {

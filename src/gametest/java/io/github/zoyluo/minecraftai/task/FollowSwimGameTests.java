@@ -713,8 +713,11 @@ public final class FollowSwimGameTests {
             require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
                             "strict_diagonal_land_approach").allowed(),
                     "diagonal strict fixture unexpectedly enabled a hidden scan");
-            require(context, !ObservableWorldQuery.canObserveCellThroughFluids(bot, shore)
-                            && !ObservableWorldQuery.canObserveCellThroughFluids(bot, water),
+            // The eye ray alone reaches the whole render distance, so only the follower's own
+            // observation column (the configured perception radius plus that ray) says whether it
+            // knows an entry edge yet. The shore and water here lie just beyond that radius.
+            require(context, !SwimRoute.canObserveColumn(bot, shore)
+                            && !SwimRoute.canObserveColumn(bot, water),
                     "fixture accidentally exposed an entry edge before the local approach step");
             require(context, SwimRoute.observedCell(bot, world, diagonal, false) == SwimRoute.Cell.DRY,
                     "fixture lost its only visible diagonal dry landing");
