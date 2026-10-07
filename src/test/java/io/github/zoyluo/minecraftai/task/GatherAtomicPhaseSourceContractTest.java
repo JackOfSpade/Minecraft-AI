@@ -24,9 +24,10 @@ final class GatherAtomicPhaseSourceContractTest {
                 "physical pickup confirmation must reset the consecutive-miss ledger");
         assertTrue(source.contains("private BlockPos pickupOrigin"),
                 "gather must retain the factual break coordinate until pickup resolves");
-        assertTrue(source.contains("new KnownCellPickupSweep(pickupOrigin)")
+        assertTrue(source.contains("BlockPos lookAround = dropRestedAt != null ? dropRestedAt : pickupOrigin;")
+                        && source.contains("new KnownCellPickupSweep(lookAround)")
                         && source.contains("pickupOriginSweep.step(bot)"),
-                "an occluded drop must fall back to the remembered break coordinate");
+                "an occluded drop must fall back to where it was last seen at rest, else to the remembered break coordinate");
         assertTrue(source.contains("Stats.ITEM_PICKED_UP"),
                 "vanilla pickup stats must distinguish collection from concurrent inventory consumption");
         int miss = source.indexOf("gather_pickup_miss");

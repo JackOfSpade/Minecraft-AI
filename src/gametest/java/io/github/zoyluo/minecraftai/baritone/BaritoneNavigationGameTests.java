@@ -285,6 +285,17 @@ public final class BaritoneNavigationGameTests {
                 "navigation_goal_without_observed_stance");
     }
 
+    @GameTest(maxTicks = 200)
+    public void admitsAPillarWhoseFootIsEightCellsAwayOnAnExactDiagonalWithNothingSeenBeforehand(GameTestHelper context) {
+        Course c = Course.begin(context, "NavPillarFarGT", 7, -3, 11, 10);
+        c.snapshot();
+        c.giveBlocks(Items.COBBLESTONE, 16);
+        // The walk to the column's foot is proved by rays when the route is asked for, not left to whatever the bot happened to
+        // look at before: this bot has just spawned and has looked at nothing. Eight cells on each axis is the diagonal on which
+        // the strips of an ordinary route prove no cardinal walk (every one of their cells has the same parity of x + z).
+        c.expectGoalBlockAdmission(c.feet.offset(8, 4, 8), new NavRoute.Options(false, true, false));
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
     // Breaking: a hidden far-side goal must not turn into an inferred tunnel
     // ---------------------------------------------------------------------------------------------------------------
@@ -681,6 +692,20 @@ public final class BaritoneNavigationGameTests {
         /** Verifies that a target without an actually observed stance cannot invent one by placing blocks. */
         void expectGoalBlockRefusal(BlockPos goal, NavRoute.Options options, String expectedReason) {
             expectRefusal(admitGoalBlock(goal, options), expectedReason, goal);
+        }
+
+        /** Verifies that a goal whose every cell the bot can see is admitted at the production observation boundary. */
+        void expectGoalBlockAdmission(BlockPos goal, NavRoute.Options options) {
+            BaritoneNavigator.Admission admission = admitGoalBlock(goal, options);
+            try {
+                require(context, admission.accepted(), name + ": goal " + goal + " was refused as " + admission.failure());
+            } finally {
+                AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+                BaritoneCapabilityGameTests.restoreConfig();
+            }
+            require(context, BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null,
+                    "the admitted route's Baritone instance outlived the bot");
+            context.succeed();
         }
 
         private void expectRefusal(BaritoneNavigator.Admission admission, String expectedReason, BlockPos goal) {

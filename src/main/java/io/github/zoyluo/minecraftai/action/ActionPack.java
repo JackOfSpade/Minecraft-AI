@@ -659,6 +659,19 @@ public final class ActionPack {
     }
 
     /**
+     * Starts a digging approach that only breaks: Baritone may tunnel through observed natural blocks toward {@code goal} but
+     * places nothing, so it cannot raise a stair or a tower of its own. A climb is the pillar route's ({@link #startPillarPathTo}),
+     * whose owner knows the tower and takes it down again; a tower that a dig route builds is nobody's, and the bot stays on it.
+     */
+    public ActionResult startTunnelPathTo(BlockPos goal) {
+        if (controllerStartBlocked()) {
+            return ActionResult.failed(GUARDED_STEP_FENCE);
+        }
+        ActionResult routed = routeOnBaritone("dig_path_to", goal, false, true, 0, RouteConstraints.unrestricted());
+        return routed == null ? ActionResult.failed(NavRouteRules.BARITONE_UNAVAILABLE) : routed;
+    }
+
+    /**
      * Starts a surface-exploration path without digging or disposable pillar shortcuts.
      * Hunt/Gather roaming must be able to keep moving after it reaches a waypoint; a path that
      * spends the last few dirt blocks pillaring out of a depression is not a reusable surface route.

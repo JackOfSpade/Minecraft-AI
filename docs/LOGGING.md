@@ -319,4 +319,11 @@ the API key (HTTP 401/403, or Google's 400 "API key not valid"); `llm_retry_noti
 delivered (the retry it announced goes on regardless).
 `gather_pickup_miss` can now follow a break by as little as the vanilla fall time of the drop (`ItemDropSettle`): the
 pickup window ends early once the sweep around the break cell has visited every cell it can see to be standable and no
-drop is visible.
+drop is visible. The sweep goes around the cell the item was last seen lying in when the bot has seen it come to rest (from
+its pillar's head or from the floor; the bottom of a one-block hole is seen only from its edge) and around the break cell
+otherwise; `gather_pickup_miss` and the sweep's events then carry that cell (`rested_at`, `drop_at` and `origin`).
+`gather_pillar_refused` carries the bot's cell (`from`) and for how long the log is set aside (`excluded_ticks`: a refusal
+for want of sight, such as `navigation_goal_without_observed_stance`, keeps it out for 600 ticks, any other for 1200). When
+such a refusal meets a pillar whose foot is more than three blocks away the bot does not set the log aside: it walks to the
+foot (`walking_to_foot`, then `gather_pillar_base_walk`) and plans the pillar from there. The gather's dig approach
+(`gather_dig_approach`) only breaks: a tower that a dig route placed would be nobody's to take down.

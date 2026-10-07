@@ -302,6 +302,41 @@ public final class GatherCanopyGameTests {
         });
     }
 
+    @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_drop_resting_in_a_hole_far_from_the_tower_is_fetched_from_the_holes_edge", maxTicks = 1800)
+    public void dropRestingInAHoleFarFromTheTowerIsFetchedFromTheHolesEdge(GameTestHelper context) {
+        // The real session's pit, with the drop put where it makes the case: the log is overhead and climbed from its own
+        // column, and its drop (put to rest in a one-block hole two cells to the side, where the random pop of a real
+        // drop puts it about one run in ten) lies at the bottom of a hole whose floor is seen only from within a block
+        // or so of its edge. The bot sees the item come to rest from the pillar's head; from the floor, at the foot of the
+        // tower, it sees nothing. It must remember where the item lies, walk to the edge, and pick it up out of the hole.
+        Case c = new Case(context, "GatherCanopyHoleGT", 7, 9);
+        BlockPos log = c.at(3, 10, 0);
+        BlockPos hole = c.at(5, -1, 0);
+        BlockPos holeFloor = c.at(5, -2, 0);
+        c.set(3, 10, 0, Blocks.OAK_LOG);
+        c.set(5, -1, 0, Blocks.AIR);
+        c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 12));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
+        task.start(c.bot);
+
+        boolean[] placed = {false};
+        c.run(task, () -> {
+            placed[0] |= !placed[0] && restDropOn(c, log, Items.OAK_LOG, holeFloor);
+            if (task.state() != TaskState.COMPLETED) {
+                return false;
+            }
+            List<String> lines = c.log();
+            c.require(placed[0], "the felled log's drop never appeared");
+            c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 1 && c.count(lines, "gather_pickup_miss") == 0,
+                    "the log was left in the hole: " + c.tail(lines));
+            c.require(c.count(lines, "gather_pickup_origin_approach", "origin='" + hole.toShortString() + "'") >= 1,
+                    "the bot never walked to the edge of the hole the item rests in: " + c.tail(lines, "gather_pickup"));
+            c.require(c.count(lines, "gather_tower_descended") >= 1 && c.bot.blockPosition().getY() <= c.feet.getY(),
+                    "the bot did not come down from its tower: " + c.tail(lines));
+            return true;
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_exact_break_log_on_a_ledge_is_climbed_before_it_is_excluded", maxTicks = 1800)
     public void exactBreakLogOnALedgeIsClimbedBeforeItIsExcluded(GameTestHelper context) {
         // The ledge geometry of the plain gather case: the survey picks a log whose stance Baritone then refuses.
@@ -391,6 +426,11 @@ public final class GatherCanopyGameTests {
         // trunk beside it, a canopy log ten up on the far side with leaves around it and a pit under it, and one
         // thirteen up on the other side. Five logs in all. The bot has to get every one (or say why not), and no
         // refused sighting or refused route may repeat.
+        // Two things in this fixture are not under the test's control, and the run has to end the same whichever way
+        // they go: the two last logs are about as far from the trunks at the start, so which of them is climbed first
+        // depends on the cell the bot stands in when it has picked up the third log's drop (where that drop came to rest
+        // is a matter of its random pop); and the drop of the log over the pit lands in the one-block hole or beside it,
+        // and a hole's bottom shows only from its edge.
         Case c = new Case(context, "GatherCanopySessionGT", 0, 12);
         c.set(0, 7, 0, Blocks.OAK_LOG);
         c.leaf(-6, 6, -4);
@@ -414,18 +454,25 @@ public final class GatherCanopyGameTests {
             }
             List<String> lines = c.log();
             c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 5, "fewer than five logs: " + c.tail(lines));
-            c.require(c.bot.blockPosition().getY() == c.feet.getY(),
+            // At the floor, or one down in the hole the last drop may have been fetched from: not up on a tower.
+            c.require(c.bot.blockPosition().getY() <= c.feet.getY(),
                     "the task ended with the bot still up on a tower: " + c.tail(lines));
             c.require(c.count(lines, "gather_tower_descent_failed") == 0, "a tower could not be taken down: " + c.tail(lines));
+            // Refusal spam is a bot that says the same thing again and again without getting anywhere. Every survey of a
+            // healthy run sights the nearest leaf anew (the sweep forgets what it declined once the bot stands in another
+            // cell, which it does while it walks to a drop), so the count starts over with each log gathered.
             Map<String, Integer> repeats = new HashMap<>();
             for (String line : lines) {
-                if (line.contains("event=gather_") && (line.contains("refused") || line.contains("excluded")
+                if (line.contains("event=gather_unit ")) {
+                    repeats.clear();
+                } else if (line.contains("event=gather_") && (line.contains("refused") || line.contains("excluded")
                         || line.contains("sighted") || line.contains("unstick") || line.contains("timeout"))) {
-                    repeats.merge(line.substring(line.indexOf("event=")).replaceAll(" rays='\\d+'", ""), 1, Integer::sum);
+                    String said = line.substring(line.indexOf("event=")).replaceAll(" rays='\\d+'", "");
+                    int count = repeats.merge(said, 1, Integer::sum);
+                    c.require(count <= 3, "the same line was logged " + count + " times without a log gathered in between: "
+                            + said);
                 }
             }
-            repeats.forEach((line, count) -> c.require(count <= 3,
-                    "the same line was logged " + count + " times: " + line));
             return true;
         });
     }

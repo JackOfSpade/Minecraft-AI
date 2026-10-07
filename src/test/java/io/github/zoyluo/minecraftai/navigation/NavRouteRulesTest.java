@@ -34,6 +34,19 @@ final class NavRouteRulesTest {
     }
 
     @Test
+    void onlyARefusalThatSaysWhatWasSeenIsAnObservationRefusal() {
+        assertTrue(NavRouteRules.isObservationRefusal("navigation_goal_unobserved"));
+        assertTrue(NavRouteRules.isObservationRefusal("navigation_goal_without_observed_stance"));
+        assertTrue(NavRouteRules.isObservationRefusal("navigation_observed_corridor_unavailable"));
+        assertTrue(NavRouteRules.isObservationRefusal("navigation_observation_fence_insufficient"));
+        assertFalse(NavRouteRules.isObservationRefusal(NavRouteRules.GOAL_UNREACHABLE));
+        assertFalse(NavRouteRules.isObservationRefusal(NavRouteRules.POLICY_REFUSED));
+        assertFalse(NavRouteRules.isObservationRefusal(NavRouteRules.BARITONE_UNAVAILABLE));
+        assertFalse(NavRouteRules.isObservationRefusal(""));
+        assertFalse(NavRouteRules.isObservationRefusal(null));
+    }
+
+    @Test
     void deadlineGrowsWithDistanceAndIsBounded() {
         assertEquals(600, NavRouteRules.deadlineTicks(0.0D));
         assertEquals(600, NavRouteRules.deadlineTicks(-5.0D));

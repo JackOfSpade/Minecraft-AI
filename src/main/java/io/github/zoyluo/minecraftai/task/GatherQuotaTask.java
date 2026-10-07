@@ -17,6 +17,7 @@ import io.github.zoyluo.minecraftai.log.GatherConsistency;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import org.slf4j.event.Level;
@@ -104,6 +105,11 @@ public final class GatherQuotaTask extends AbstractTask {
     private static final int SCAFFOLD_SUPPLY_TIMEOUT = 600;
     /** One extra safe support prevents a minimal vertical count from failing on a small step. */
     private static final int SCAFFOLD_SUPPORT_CUSHION = 1;
+    /**
+     * A pillar's foot farther than this from the bot (squared, three blocks) is a walk: when the pillar route is refused for
+     * want of sight, the bot walks to the foot by an ordinary route and plans the pillar from there.
+     */
+    private static final double PILLAR_FOOT_WALK_DISTANCE_SQ = 9.0D;
 
     private static int configuredObservationRadius() {
         return Math.max(1, MinecraftAiConfig.get().perception().radius());
@@ -171,9 +177,14 @@ public final class GatherQuotaTask extends AbstractTask {
     /** The last break start waited on a guarded step's fence: not a refusal of the block, so the next tick starts it again. */
     private boolean harvestStartFenced;
     private BlockPos pickupOrigin;
+    /**
+     * The cell the felled item was last seen lying in (from the pillar's head or from the floor): the item moved from
+     * {@link #pickupOrigin} by its fall, and a hole beside the tower shows its bottom only from close to its edge.
+     */
+    private BlockPos dropRestedAt;
     private long pickupStatBeforeHarvest;
     private boolean pickupOriginApproachLogged;
-    // Bounded walk around pickupOrigin when the drop is not observable (see KnownCellPickupSweep).
+    // Bounded walk around the drop's resting cell (else pickupOrigin) when the drop is not observable (see KnownCellPickupSweep).
     private KnownCellPickupSweep pickupOriginSweep;
     private int pickupOriginSweepLogged;
     private int pickupMisses; // Count of consecutive "broke it but didn't pick up the drop" events; only ruled pickup_timeout past this limit (avoids failing the whole gather over one missed pickup)
@@ -587,6 +598,7 @@ public final class GatherQuotaTask extends AbstractTask {
         miningExplorationTimeoutCredit = 0;
         stockpileTask = null;
         pickupOrigin = null;
+        dropRestedAt = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
         bootstrapPickupOrigin = null;
@@ -1969,7 +1981,7 @@ public final class GatherQuotaTask extends AbstractTask {
             }
             return false;
         }
-        if (!admitPillarApproach(bot, flat)) {
+        if (!admitPillarApproach(bot, flat, mayStepOntoFloor)) {
             return false;
         }
         pillarApproachScan = null;
@@ -1994,6 +2006,10 @@ public final class GatherQuotaTask extends AbstractTask {
             clearTreeSighting();
             clearTargetSighting();
             pillarApproachScan = null;
+            pendingPillarApproach = null;
+            scaffoldSupportRequirement = 0;
+            scaffoldSupplyItemIndex = 0;
+            scaffoldSupplyItem = null;
             targetPos = block.immutable();
             pillarBaseWalk = targetPos;
             lastGotoTarget = targetPos;
@@ -2025,7 +2041,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     /** Admits a re-proved pillar target, obtaining only cheap nearby supports when necessary. */
-    private boolean admitPillarApproach(AIPlayerEntity bot, HarvestCore.PillarApproach approach) {
+    private boolean admitPillarApproach(AIPlayerEntity bot, HarvestCore.PillarApproach approach, boolean mayWalkToFoot) {
         if (approach == null) {
             return false;
         }
@@ -2045,7 +2061,7 @@ public final class GatherQuotaTask extends AbstractTask {
             phase = Phase.SURVEY;
             return false;
         }
-        return startPillarApproach(bot, approach, available);
+        return startPillarApproach(bot, approach, available, mayWalkToFoot);
     }
 
     /** Re-validates the exact target and recomputes its clear pillar column after a refill walk. */
@@ -2058,17 +2074,34 @@ public final class GatherQuotaTask extends AbstractTask {
         return HarvestCore.pillarApproachFor(bot, previous.target(), harvestBlocks);
     }
 
-    private boolean startPillarApproach(AIPlayerEntity bot, HarvestCore.PillarApproach approach, int available) {
+    /**
+     * Starts the pillar route to the approach's goal. A route refused for want of sight, with the column's foot a walk away, is
+     * not the end of the log: the bot walks to the foot by an ordinary route (every lane proved, as for any walk) and plans the
+     * pillar from there, where the foot is its own cell; {@code mayWalkToFoot} is false on that second planning.
+     */
+    private boolean startPillarApproach(AIPlayerEntity bot, HarvestCore.PillarApproach approach, int available,
+                                        boolean mayWalkToFoot) {
         bot.getActionPack().stopAll();
         ActionResult route = bot.getActionPack().startPillarPathTo(approach.goal());
         if (route.isFailed()) {
             pillarApproachActive = false;
-            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), approach.target(),
-                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
+            boolean walkingToFoot = mayWalkToFoot && NavRouteRules.isObservationRefusal(route.reason())
+                    && horizontalDistanceSquared(bot.blockPosition(), HarvestCore.pillarFloor(approach))
+                            > PILLAR_FOOT_WALK_DISTANCE_SQ
+                    && stepOntoPillarBase(bot, approach.target(), List.of(approach));
+            // A refusal for want of sight only says what the bot has seen from where it stands. The log is set aside
+            // for less time than one that cannot be reached, so that another stance can show it again.
+            int excludedTicks = walkingToFoot ? 0 : EpisodeMemory.ttlAfterRouteRefusal(route.reason());
+            if (!walkingToFoot) {
+                EpisodeMemory.INSTANCE.exclude(bot.getUUID(), approach.target(),
+                        bot.level().getServer().getTickCount(), excludedTicks);
+            }
             BotLog.action(bot, "gather_pillar_refused",
                     "target", approach.target().toShortString(),
-                    "goal", approach.goal().toShortString(), "reason", route.reason());
-            return false;
+                    "goal", approach.goal().toShortString(), "reason", route.reason(),
+                    "from", bot.blockPosition().toShortString(), "excluded_ticks", excludedTicks,
+                    "walking_to_foot", walkingToFoot);
+            return walkingToFoot;
         }
         clearTreeSighting();
         clearTargetSighting();
@@ -2148,7 +2181,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // The target and its air-only column were just selected from current observations.
             // Re-admit that exact pillar now that the bot has filler, rather than losing the
             // unfinished target to a generic survey (which may choose another low block first).
-            if (startPillarApproach(bot, approach, available)) {
+            if (startPillarApproach(bot, approach, available, true)) {
                 return;
             }
             pendingPillarApproach = null;
@@ -2505,8 +2538,9 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     // Dig-approach: when a cliff-face/elevation-difference tree is GOAL_UNREACHABLE by plain
-    // walking, switch to startDigPathTo to tunnel down/through (the same primitive used to reach
-    // buried ore while mining). On successful start → set targetPos=the tree and switch to GOTO,
+    // walking, switch to startTunnelPathTo to tunnel down/through (a dig route that never places:
+    // a stair or tower it built would be nobody's to take down, and the bot would stay up on it;
+    // climbing is the pillar approach's). On successful start → set targetPos=the tree and switch to GOTO,
     // letting goToTarget uniformly drive "arrive → harvest"; treeDigTried=true prevents
     // goToTarget from re-issuing it immediately. If digging also fails (rare: sealed off by
     // bedrock / out of bounds) → return false, and the caller blacklists it and switches trees.
@@ -2514,7 +2548,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (countBrokenBlocks || protectsPlaceableSupport) {
             return false;
         }
-        ActionResult dig = bot.getActionPack().startDigPathTo(tree);
+        ActionResult dig = bot.getActionPack().startTunnelPathTo(tree);
         if (dig.isFailed()) {
             return false;
         }
@@ -2667,14 +2701,14 @@ public final class GatherQuotaTask extends AbstractTask {
             }
             // Can't reach a cliff-face/below-grade tree (plain walking gives GOAL_UNREACHABLE —
             // the #1 obstacle behind 67% of real-diamond-run failures): escalate to
-            // dig-approach — startDigPathTo to tunnel down/through, just like reaching buried ore
+            // dig-approach — startTunnelPathTo to tunnel down/through, just like reaching buried ore
             // while mining, rather than immediately blacklisting and switching trees (there's
             // nothing to switch to when every tree is on a cliff). Each target is escalated only
             // once; only blacklisted (and revived after its TTL) if dig-approach also can't reach
             // it. This is the key to being able to gather wood on any terrain.
             if (!pillarApproachActive && !treeDigTried && !protectsPlaceableSupport) {
                 treeDigTried = true;
-                ActionResult dig = bot.getActionPack().startDigPathTo(targetPos);
+                ActionResult dig = bot.getActionPack().startTunnelPathTo(targetPos);
                 BotLog.action(bot, "gather_dig_approach",
                         "to", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ(),
                         "ok", !dig.isFailed());
@@ -2921,6 +2955,7 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         pickupTicks--;
         var visibleDrop = HarvestCore.nearestDropAnyOf(bot, acceptItems, 8.0D);
+        noteRestingPlace(bot, visibleDrop.orElse(null));
         boolean chasingVisibleDrop = false;
         if (visibleDrop.isPresent()) {
             if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()
@@ -2944,21 +2979,25 @@ public final class GatherQuotaTask extends AbstractTask {
         // cell now instead of standing four blocks away until the whole pickup window expires.
         // The sweep runs only while no observed drop is being approached (approachDropPhysically above
         // returned false or there is no visible drop): it must never pull the bot away from a chased drop.
-        if (!chasingVisibleDrop && pickupOrigin != null
+        // It goes around the cell the item was last seen lying in when the bot has seen it come to rest
+        // (the item is not in the cell it was broken from); else around the break cell.
+        BlockPos lookAround = dropRestedAt != null ? dropRestedAt : pickupOrigin;
+        if (!chasingVisibleDrop && lookAround != null
                 && bot.getActionPack().isPathExecutorIdle()
                 && bot.getActionPack().isWalkToIdle() && bot.getActionPack().stepIdle()) {
             // The sweep starts with that walk and, when the drop is still not in reach (it came to rest
-            // a cell or two away, hidden behind standing blocks), keeps walking the standable cells
-            // around the break cell instead of nudging in one spot until the window expires.
-            if (pickupOriginSweep == null || !pickupOriginSweep.origin().equals(pickupOrigin)) {
-                pickupOriginSweep = new KnownCellPickupSweep(pickupOrigin);
+            // a cell or two away, hidden behind standing blocks, or in a hole whose bottom shows only from
+            // its edge), keeps walking the standable cells around that cell instead of nudging in one spot
+            // until the window expires.
+            if (pickupOriginSweep == null || !pickupOriginSweep.origin().equals(lookAround)) {
+                pickupOriginSweep = new KnownCellPickupSweep(lookAround);
                 pickupOriginSweepLogged = 0;
             }
             KnownCellPickupSweep.Step swept = pickupOriginSweep.step(bot);
             if (swept == KnownCellPickupSweep.Step.MOVING && !pickupOriginApproachLogged) {
                 pickupOriginApproachLogged = true;
                 BotLog.action(bot, "gather_pickup_origin_approach",
-                        "origin", pickupOrigin.toShortString(),
+                        "origin", lookAround.toShortString(),
                         "from", bot.blockPosition().toShortString());
             }
             // Nothing is left to try: no drop can be seen and every cell it could rest in has been visited.
@@ -2966,13 +3005,13 @@ public final class GatherQuotaTask extends AbstractTask {
             // says when it has (ItemDropSettle); the rest of the window would be the bot standing about.
             if (swept == KnownCellPickupSweep.Step.EXHAUSTED && visibleDrop.isEmpty()
                     && elapsed - pickupStartedTick >= ItemDropSettle.ticksToSettle(
-                            Math.max(0, pickupOrigin.getY() - bot.blockPosition().getY()) + 1)) {
+                            Math.max(0, lookAround.getY() - bot.blockPosition().getY()) + 1)) {
                 pickupTicks = 0;
             }
             if (pickupOriginSweep.cellsVisited() > pickupOriginSweepLogged) {
                 pickupOriginSweepLogged = pickupOriginSweep.cellsVisited();
                 BotLog.action(bot, "gather_pickup_origin_sweep",
-                        "origin", pickupOrigin.toShortString(),
+                        "origin", lookAround.toShortString(),
                         "cells", pickupOriginSweepLogged,
                         "at", bot.blockPosition().toShortString());
             }
@@ -3016,7 +3055,9 @@ public final class GatherQuotaTask extends AbstractTask {
                         "origin", pickupOrigin == null ? "unknown" : pickupOrigin.toShortString(),
                         "at", bot.blockPosition().toShortString(),
                         "pickup_stat_delta", Math.max(0L, pickupStatNow - pickupStatBeforeHarvest),
-                        "visible_drop", visibleDrop.isPresent());
+                        "visible_drop", visibleDrop.isPresent(),
+                        "drop_at", visibleDrop.map(drop -> drop.blockPosition().toShortString()).orElse("none"),
+                        "rested_at", dropRestedAt == null ? "none" : dropRestedAt.toShortString());
                 clearPickupLedger();
                 resetSurveyWatchdog();
                 phase = Phase.SURVEY;
@@ -3030,6 +3071,19 @@ public final class GatherQuotaTask extends AbstractTask {
                     fail("pickup_timeout");
                 }
             }
+        }
+    }
+
+    /**
+     * Remembers the cell the felled item lies in, from where the bot sees it at rest now or, failing that, from where the tower's
+     * watch saw it come to rest (the tower is taken down before the pickup, and the floor may not show the item at all: the bottom
+     * of a hole beside the tower is seen only from above or from its edge). An item still falling lies nowhere yet.
+     */
+    private void noteRestingPlace(AIPlayerEntity bot, ItemEntity visibleDrop) {
+        if (visibleDrop != null && HarvestCore.isDropPhysicallySupported(bot, visibleDrop)) {
+            dropRestedAt = visibleDrop.blockPosition().immutable();
+        } else if (dropRestedAt == null && dropWatch != null) {
+            dropRestedAt = dropWatch.restedAt();
         }
     }
 
@@ -3064,6 +3118,7 @@ public final class GatherQuotaTask extends AbstractTask {
     private void clearPickupLedger() {
         dropWatch = null;
         pickupOrigin = null;
+        dropRestedAt = null;
         pickupOriginApproachLogged = false;
         pickupOriginSweep = null;
     }
@@ -3224,6 +3279,7 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupSweepAttempted = false;
         harvestStartedTick = elapsed;
         pickupOrigin = targetPos == null ? null : targetPos.immutable();
+        dropRestedAt = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
         pickupOriginSweep = null;

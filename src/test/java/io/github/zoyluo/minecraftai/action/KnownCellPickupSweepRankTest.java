@@ -49,6 +49,32 @@ class KnownCellPickupSweepRankTest {
     }
 
     @Test
+    void aSweepAroundTheCellAnItemRestsInReachesTheEdgeOfTheHoleThatTheBreakCellSweepNeverDoes() {
+        // A log felled ten up over a one-block hole: its drop comes to rest in the hole, and the floor of the hole is seen
+        // only from its edge (a ray over the near lip meets the far wall), so the cell it rests in is no stand yet.
+        BlockPos hole = new BlockPos(7, -1, 5);
+        BlockPos breakCell = hole.above(11);
+        BlockPos nearBot = new BlockPos(5, 0, 6);
+        BlockPos edgeBesideBot = new BlockPos(6, 0, 5);
+        Set<BlockPos> floorSeenFromHere = new HashSet<>();
+        for (int x = 3; x <= 9; x++) {
+            for (int z = 3; z <= 9; z++) {
+                if (x != hole.getX() || z != hole.getZ()) {
+                    floorSeenFromHere.add(new BlockPos(x, 0, z));
+                }
+            }
+        }
+
+        List<BlockPos> aroundTheBreak = KnownCellPickupSweep.rank(breakCell, nearBot, new HashSet<>(), floorSeenFromHere::contains);
+        List<BlockPos> aroundTheItem = KnownCellPickupSweep.rank(hole, nearBot, new HashSet<>(), floorSeenFromHere::contains);
+
+        assertEquals(List.of(), aroundTheBreak, "no stand lies within two cells of a break cell eleven up");
+        assertFalse(aroundTheItem.contains(hole), "the hole's own cell is not named: it is not seen to be a stand");
+        assertEquals(edgeBesideBot, aroundTheItem.get(0),
+                "the edge cell right beside the hole, nearest the bot, comes first: from there the hole's floor is in view");
+    }
+
+    @Test
     void visitedCellsAreNotAskedAgain() {
         Set<BlockPos> visited = new HashSet<>();
         for (int dx = -2; dx <= 2; dx++) {
