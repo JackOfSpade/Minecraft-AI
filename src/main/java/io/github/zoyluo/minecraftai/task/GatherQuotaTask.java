@@ -31,6 +31,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.stats.Stats;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -2940,6 +2941,16 @@ public final class GatherQuotaTask extends AbstractTask {
             if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()
                     && bot.getActionPack().stepIdle()) {
                 chasingVisibleDrop = HarvestCore.approachDropPhysically(bot, visibleDrop.get());
+                ItemEntity drop = visibleDrop.get();
+                // The eyes see an item through the leaves it lies on, out of the reach of ordinary movement (the log
+                // of a canopy broken from a pillar the route built, which is no tower the bot takes down): a player
+                // lets it fall by breaking that leaf, and so does the bot, when it sees the leaf and can reach it.
+                if (!chasingVisibleDrop && bot.getActionPack().isMiningIdle()
+                        && HarvestCore.isDropPhysicallySupported(bot, drop) && !HarvestCore.canCollectNow(bot, drop)
+                        && TowerDropWatch.releaseLeafUnder(bot, drop, "gather",
+                                pickupOrigin == null ? drop.blockPosition() : pickupOrigin)) {
+                    return;
+                }
             }
         }
         // A freshly spawned visible ItemEntity can remain airborne, making entity-based pickup

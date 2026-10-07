@@ -139,18 +139,16 @@ public final class GatherCanopyGameTests {
     @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_log_over_a_leaf_platform_is_climbed_and_its_drop_let_fall", maxTicks = 1800)
     public void logOverALeafPlatformIsClimbedAndItsDropLetFall(GameTestHelper context) {
         // A canopy log at the edge of a platform of leaves, three blocks wide, with the leaf under it (the platform is
-        // what the log's drop could not slide off, and what keeps it out of the bot's sight once it lies there: above
-        // the eye line, behind the leaf). The bot lets it fall by breaking that leaf from the pillar before it comes down.
-        // (The fixture puts the drop on that leaf: where a drop comes to rest is a matter of its random pop.)
+        // what the log's drop could not slide off). The eyes see through the platform's edge, so a cell beside the log is
+        // a stance a route could take; leaves above those cells leave no room to stand in them, so the log can only be
+        // climbed to by a pillar. The bot lets the drop fall by breaking the leaf under the log from the pillar before it
+        // comes down. (The fixture puts the drop on that leaf: where a drop comes to rest is a matter of its random pop.)
         Case c = new Case(context, "GatherCanopyPlatformGT", 2, 9);
         BlockPos log = c.at(3, 8, 0);
         BlockPos under = c.at(3, 7, 0);
         c.set(3, 8, 0, Blocks.OAK_LOG);
-        for (int dx = 3; dx <= 5; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                c.leaf(dx, 7, dz);
-            }
-        }
+        leafPlatform(c);
+        roofTheStances(c);
         c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 12));
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
         task.start(c.bot);
@@ -174,22 +172,67 @@ public final class GatherCanopyGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_drop_on_a_leaf_beside_the_felled_log_is_looked_for_and_its_leaf_broken", maxTicks = 2400)
-    public void dropOnALeafBesideTheFelledLogIsLookedForAndItsLeafBroken(GameTestHelper context) {
-        // The platform case, with the felled log's drop on the leaf next to the one under the cell it was broken from
-        // (where a drop comes to rest is a matter of its random pop; the fixture puts it there). That leaf is not the
-        // one the bot breaks blind, and the item on it is out of sight from the pillar, under the platform's own
-        // edge. The bot builds up to the level of the log, sees the item, breaks the leaf it lies on, comes down and
-        // picks the log up from the floor.
-        Case c = new Case(context, "GatherCanopyBesideGT", 5, 9);
+    @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_log_on_a_leaf_platform_seen_through_its_edge_is_mined_from_the_routes_pillar_and_its_drop_let_fall", maxTicks = 1800)
+    public void logOnALeafPlatformSeenThroughItsEdgeIsMinedFromTheRoutesPillarAndItsDropLetFall(GameTestHelper context) {
+        // The platform again, with room to stand beside the log on top of it. The eyes see that stance through the
+        // platform's edge, so the ordinary route (which may place the bot's own blocks) is admitted to it: the bot
+        // climbs by the route's pillar, a tower nobody takes down, and breaks the log as soon as it is in reach, below the
+        // platform. The drop lies on the platform, which no ordinary movement reaches from there; the bot sees it
+        // through the leaf and lets it fall by breaking the leaf, as a player does, instead of leaving the log behind.
+        Case c = new Case(context, "GatherCanopyDirectGT", 6, 9);
         BlockPos log = c.at(3, 8, 0);
-        BlockPos beside = c.at(4, 7, 0);
+        BlockPos under = c.at(3, 7, 0);
         c.set(3, 8, 0, Blocks.OAK_LOG);
+        leafPlatform(c);
+        c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 12));
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
+        task.start(c.bot);
+
+        boolean[] placed = {false};
+        c.run(task, () -> {
+            placed[0] |= !placed[0] && restDropOn(c, log, Items.OAK_LOG, under);
+            if (task.state() != TaskState.COMPLETED) {
+                return false;
+            }
+            List<String> lines = c.log();
+            c.require(placed[0], "the felled log's drop never appeared: " + c.tail(lines));
+            c.require(c.count(lines, "gather_drop_released", "leaf='" + under.toShortString() + "'") >= 1,
+                    "the leaf the felled log lay on was never broken: " + c.tail(lines));
+            c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 1 && c.count(lines, "gather_pickup_miss") == 0,
+                    "the felled log was left on the platform: " + c.tail(lines));
+            return true;
+        });
+    }
+
+    /** A platform of leaves three blocks wide under and beside the log's cell, one level under the log. */
+    private static void leafPlatform(Case c) {
         for (int dx = 3; dx <= 5; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 c.leaf(dx, 7, dz);
             }
         }
+    }
+
+    /** Leaves over the cells of the platform beside the log: the eyes see them, but nobody can stand in them. */
+    private static void roofTheStances(Case c) {
+        c.leaf(3, 9, -1);
+        c.leaf(3, 9, 1);
+        c.leaf(4, 9, 0);
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_drop_on_a_leaf_beside_the_felled_log_is_seen_through_the_platform_and_its_leaf_broken", maxTicks = 2400)
+    public void dropOnALeafBesideTheFelledLogIsSeenThroughThePlatformAndItsLeafBroken(GameTestHelper context) {
+        // The platform case, with the felled log's drop on the leaf next to the one under the cell it was broken from
+        // (where a drop comes to rest is a matter of its random pop; the fixture puts it there). That leaf is not the
+        // one the bot breaks blind, but the eyes see the item through the platform's edge: the bot breaks the leaf it
+        // lies on (building up to the level of the log first when the leaf is out of reach from the pillar's head),
+        // comes down and picks the log up from the floor.
+        Case c = new Case(context, "GatherCanopyBesideGT", 5, 9);
+        BlockPos log = c.at(3, 8, 0);
+        BlockPos beside = c.at(4, 7, 0);
+        c.set(3, 8, 0, Blocks.OAK_LOG);
+        leafPlatform(c);
+        roofTheStances(c);
         c.give(new ItemStack(Items.WOODEN_AXE), new ItemStack(Items.DIRT, 12));
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 1);
         task.start(c.bot);
@@ -203,8 +246,6 @@ public final class GatherCanopyGameTests {
             }
             List<String> lines = c.log();
             c.require(placed[0], "the felled log's drop never appeared: " + c.tail(lines));
-            c.require(c.count(lines, "gather_drop_climb") == 1,
-                    "the bot never built up to look for the item: " + c.tail(lines));
             c.require(c.count(lines, "gather_drop_released", "leaf='" + beside.toShortString() + "'") == 1,
                     "the leaf the log lay on was not broken: " + c.tail(lines));
             c.require(InventoryAction.countItem(c.bot, Items.OAK_LOG) >= 1 && c.count(lines, "gather_pickup_miss") == 0,

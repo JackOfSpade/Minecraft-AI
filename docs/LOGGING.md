@@ -289,13 +289,16 @@ from the ground: before the bot leaves its pillar, the leaf in the column under 
 broken so the drop falls on (`gather_drop_released`, `origin`, `leaf`; repeated while the canopy has layers); only a leaf is
 ever broken this way, never terrain.
 Both tasks then see to the item the break gave before they take the tower down (`TowerDropWatch`). The bot waits while the
-item falls or lies within vanilla's pickup box (a block drop cannot be collected for ten ticks). An item it does not see,
-nor has collected, after the time an item takes to fall lies out of sight, on the very ledge or leaf that hides it from
-below: the pillar is built up, in its own column, to the level of the block that was broken (`gather_drop_climb` /
-`mine_drop_climb`, `around`, `goal`, `levels`; `*_drop_climb_refused`, plus `reason`; it uses only the supports carried
-beyond the tower's own). An item it then sees on a leaf it can reach is let fall by breaking that leaf
-(`gather_drop_released` / `mine_drop_released`, `origin`, `leaf`); one on anything else is left for the floor. The whole
-tower is taken down afterwards. The tower's own blocks come back as items: when they are of the kind being mined or gathered
+item falls or lies within vanilla's pickup box (a block drop cannot be collected for ten ticks). An item it sees on a leaf
+it can reach is let fall by breaking that leaf (`gather_drop_released` / `mine_drop_released`, `origin`, `leaf`): the eyes see an
+item through the leaves it lies on, so this needs no climb. An item it does not see, nor has collected, after the time an item
+takes to fall lies out of sight, on the very ledge that hides it from below: the pillar is built up, in its own column, to the
+level of the block that was broken (`gather_drop_climb` / `mine_drop_climb`, `around`, `goal`, `levels`; `*_drop_climb_refused`,
+plus `reason`; it uses only the supports carried beyond the tower's own). An item it then sees on a leaf it can reach is let
+fall the same way; one on anything else is left for the floor. The whole tower is taken down afterwards.
+A gather whose route built its own pillar (an ordinary route may place the bot's blocks, and the log is broken from it as soon as
+it is in reach: no tower the bot takes down) lets a seen drop resting on a leaf out of ordinary reach fall the same way in its
+pickup (`gather_drop_released`), instead of leaving the log on the canopy. The tower's own blocks come back as items: when they are of the kind being mined or gathered
 they are not counted as progress.
 A tower whose task has ended (stopped, replaced, timed out, failed) before the bot was back down is taken down anyway
 (`TowerCustody`), before the bot's next task goes on; an active safety task keeps the bot's attention first. The lines are

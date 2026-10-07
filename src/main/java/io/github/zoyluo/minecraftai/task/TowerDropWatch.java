@@ -19,11 +19,11 @@ import net.minecraft.world.item.Item;
  * What a bot standing on its pillar does about the item the block it has just broken gave, before it takes the
  * tower down and can no longer get to it. An item that falls into the pillar's column lands on the bot, and the
  * watch only waits for it (a block's drop cannot be collected for ten ticks, and the next block of the descent would
- * drop the bot out of range). One that comes to rest on a ledge or a leaf above the pillar's head is hidden from
- * there by the very block it lies on, so the pillar is built up to the level of the block that was broken and the bot
- * looks from there. An item it then sees on a leaf is let fall by breaking the leaf (it can reach the leaf from the
- * pillar even when the item is a block or two to the side); one that lies on anything else is left, and picked up from
- * below if it ever comes within reach of the floor.
+ * drop the bot out of range). One that comes to rest on a ledge above the pillar's head is hidden from there by the
+ * very block it lies on, so the pillar is built up to the level of the block that was broken and the bot looks from
+ * there. A leaf hides nothing from eyes that see through foliage: an item on a leaf is seen at once, and is let fall by
+ * breaking the leaf (it can reach the leaf from the pillar even when the item is a block or two to the side); one that
+ * lies on anything else is left, and picked up from below if it ever comes within reach of the floor.
  *
  * <p>Nothing is read that the bot has not seen: the item is an entity in sight, the leaf a cell it observes and can
  * reach, and the climb stays in the pillar's own column, up to the supports the bot carries beyond the tower's.</p>
@@ -79,7 +79,7 @@ final class TowerDropWatch {
             if (!HarvestCore.isDropPhysicallySupported(bot, drop) || HarvestCore.canCollectNow(bot, drop)) {
                 return true;
             }
-            return releaseLeafUnder(bot, drop);
+            return releaseLeafUnder(bot, drop, event, broken);
         }
         if (looked) {
             return false;
@@ -92,8 +92,13 @@ final class TowerDropWatch {
         return climbToLook(bot);
     }
 
-    /** Lets the item fall by breaking the leaf it rests on, when the bot sees that leaf and can reach it. */
-    private boolean releaseLeafUnder(AIPlayerEntity bot, ItemEntity drop) {
+    /**
+     * Lets the item fall by breaking the leaf it rests on, when the bot sees that leaf and can reach it, as a player does for an
+     * item stuck in a canopy. The eyes see an item through the leaves under it, so this is asked whether the bot stands on a tower or
+     * not. {@code event} is the prefix of the event logged ({@code gather} or {@code mine}), {@code broken} the cell the
+     * item's block was broken in. True while the bot should stay: the leaf's break started (or waits for a guarded step).
+     */
+    static boolean releaseLeafUnder(AIPlayerEntity bot, ItemEntity drop, String event, BlockPos broken) {
         BlockPos rest = HarvestCore.restingOn(drop);
         if (!ObservableWorldQuery.canObserveCell(bot, rest)
                 || !bot.level().getBlockState(rest).is(BlockTags.LEAVES)
