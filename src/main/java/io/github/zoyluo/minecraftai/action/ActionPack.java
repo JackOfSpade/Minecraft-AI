@@ -1321,11 +1321,17 @@ public final class ActionPack {
         }
         // Do this before claim() can preempt another controller. A coordinate supplied by a task,
         // command, or stale checkpoint does not authorise a direct world read or tool switch;
-        // MiningController keeps re-proving the same target while the break is in flight.
-        if (!MiningController.currentObservedTarget(player, pos)) {
-            BotLog.action(player, "mine_refused", "reason", MiningController.TARGET_NOT_OBSERVED,
+        // MiningController keeps re-proving the same target while the break is in flight. A target
+        // the eyes see only through leaves or a fence is admitted when its way can be cleared;
+        // the controller then breaks those blocks first (see MiningObstruction).
+        MiningObstruction.Plan admission = MiningController.admission(player, pos);
+        if (admission.refused()) {
+            BotLog.action(player, "mine_refused", "reason", admission.refusal(),
                     "pos", LogFields.pos(pos));
-            return ActionResult.failed(MiningController.TARGET_NOT_OBSERVED);
+            if (admission.kind() == MiningObstruction.Kind.PROTECTED) {
+                MiningObstruction.logRefused(player, pos, admission.obstruction(), admission.reason());
+            }
+            return ActionResult.failed(admission.refusal());
         }
         // Never claim or preempt a mining controller for the block holding up this bot or a
         // nearby player. The observation proof above deliberately comes first; MiningSafety may
@@ -1838,27 +1844,43 @@ public final class ActionPack {
         }
 
         if (result.isSuccess()) {
-            // Auditable break record (see docs/LOGGING.md "Auditing a gather"): block is captured
-            // BEFORE the break by MiningController, so this reports what was actually destroyed
-            // even though the world cell is air by now.
-            BlockState brokenState = mining.brokenBlockState();
-            ItemStack tool = player.getMainHandItem();
-            String brokenBlock = brokenState == null ? "unknown" : BuiltInRegistries.BLOCK.getKey(brokenState.getBlock()).toString();
-            String toolName = tool.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(tool.getItem()).toString();
-            BotLog.action(player, "mine_complete",
-                    "block", brokenBlock,
-                    "pos", LogFields.pos(mining.pos()),
-                    "tool", toolName,
-                    "ticks", mining.elapsedTicks());
+            recordBreak(mining, null);
             completedMining = new MiningCompletion(miningGeneration, mining.pos());
-            if (brokenState != null) {
-                BaritoneEdits.recordBreak(player, mining.pos(), brokenBlock, toolName, mining.elapsedTicks());
-            }
         } else {
             BotLog.warn(LogCategory.ERROR, player, "mine_failed", "reason", result.reason());
             failedMining = new MiningFailure(miningGeneration, mining.pos(), result.reason());
         }
         mining = null;
+    }
+
+    /**
+     * The audit record of one finished break (see docs/LOGGING.md "Auditing a gather"): the {@code mine_complete} line and the
+     * entry in the edits ledger. The block is captured BEFORE the break by MiningController, so this reports what was actually
+     * destroyed even though the world cell is air by now. {@code obstructionOf} is the target a see-through block was broken for
+     * (a leaf in front of a log), {@code null} for the break of a target itself.
+     */
+    void recordBreak(MiningController finished, BlockPos obstructionOf) {
+        BlockState brokenState = finished.brokenBlockState();
+        ItemStack tool = player.getMainHandItem();
+        String brokenBlock = brokenState == null ? "unknown" : BuiltInRegistries.BLOCK.getKey(brokenState.getBlock()).toString();
+        String toolName = tool.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(tool.getItem()).toString();
+        if (obstructionOf == null) {
+            BotLog.action(player, "mine_complete",
+                    "block", brokenBlock,
+                    "pos", LogFields.pos(finished.pos()),
+                    "tool", toolName,
+                    "ticks", finished.elapsedTicks());
+        } else {
+            BotLog.action(player, "mine_complete",
+                    "block", brokenBlock,
+                    "pos", LogFields.pos(finished.pos()),
+                    "tool", toolName,
+                    "ticks", finished.elapsedTicks(),
+                    "obstruction_of", LogFields.pos(obstructionOf));
+        }
+        if (brokenState != null) {
+            BaritoneEdits.recordBreak(player, finished.pos(), brokenBlock, toolName, finished.elapsedTicks());
+        }
     }
 
     /**

@@ -10,8 +10,9 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * Whether a pillar head will still be able to mine its target. The pillar's own column is proven air,
- * but beside the target a leaf or a ledge between the head and the block makes the break controller
- * refuse the mine once the pillar stands, after the throwaway blocks are spent. The question is asked of
+ * but beside the target a ledge, a wall or a fence between the head and the block makes the break controller
+ * refuse the mine once the pillar stands, after the throwaway blocks are spent (a leaf does not: the controller
+ * breaks it first, and the caller's {@code shut} test leaves it out). The question is asked of
  * what the bot has already seen: a cell it cannot see proves nothing either way (and reading it would be
  * looking through a wall), so the caller's {@code shut} test answers false for it and it never rules a
  * column out. The geometry is the observer's: the center and the inset corners of each face of the

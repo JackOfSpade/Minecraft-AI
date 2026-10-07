@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.SightClipContext;
 import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
 import java.util.List;
 import java.util.Set;
@@ -13,9 +14,10 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * A small, budgeted 360-degree look-around for tree gathering.
  *
- * <p>It deliberately uses only first-hit eye rays (and already ray-proven shared sight), rather
- * than enumerating a render-distance cube. A visible trunk is a direct target; a visible leaf is
- * a factual landmark that gather can pursue with its existing observed-navigation boundary.</p>
+ * <p>It deliberately uses only eye rays that stop at the first opaque block (and already ray-proven shared sight), rather
+ * than enumerating a render-distance cube. The eye sees through leaves, so a visible trunk is a direct target even when the
+ * canopy hides it from a hand; a visible leaf is a factual landmark that gather can pursue with its existing
+ * observed-navigation boundary.</p>
  */
 final class TreeHorizonScan {
     /**
@@ -116,13 +118,13 @@ final class TreeHorizonScan {
         int range = Math.max(1, ObservableWorldQuery.visibleRangeBlocks(bot) - 1);
         // A trunk or canopy directly overhead/underfoot has no azimuth; keep those factual
         // vertical rays outside the finite angular lattice.
-        Sighting vertical = treeSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, 1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
+        Sighting vertical = treeSighting(ObservableWorldQuery.castSightRay(bot, 0.0D, 1.0D, 0.0D,
+                range, ObservableWorldQuery.ViewShape.OUTLINE, null), feet);
         if (vertical != null) {
             return vertical;
         }
-        Sighting downward = treeSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, -1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
+        Sighting downward = treeSighting(ObservableWorldQuery.castSightRay(bot, 0.0D, -1.0D, 0.0D,
+                range, ObservableWorldQuery.ViewShape.OUTLINE, null), feet);
         if (downward != null) {
             return downward;
         }
@@ -142,9 +144,9 @@ final class TreeHorizonScan {
             double azimuth = (Math.PI * 2.0D * (azimuthIndex + subcellOffset)) / AZIMUTH_SAMPLES;
             double elevation = elevation(elevationSample, subcellOffset);
             double horizontal = Math.cos(elevation);
-            ObservableWorldQuery.ViewHit hit = ObservableWorldQuery.castViewRay(bot,
+            ObservableWorldQuery.ViewHit hit = ObservableWorldQuery.castSightRay(bot,
                     Math.cos(azimuth) * horizontal, Math.sin(elevation), Math.sin(azimuth) * horizontal,
-                    range, ObservableWorldQuery.ViewShape.OUTLINE);
+                    range, ObservableWorldQuery.ViewShape.OUTLINE, null);
             advance();
             Sighting sighting = treeSighting(hit, feet);
             if (sighting != null) {
@@ -175,17 +177,34 @@ final class TreeHorizonScan {
         return null;
     }
 
-    /** Converts one already cast first-hit ray into a tree feature without a second world read. */
+    /**
+     * Converts one already cast sight ray into a tree feature without a second world read. The eye sees through foliage, so a
+     * ray reports the leaves it crossed and what lies behind them: a trunk that shows, even behind the canopy, is always the
+     * better answer, and the nearest leaf is the landmark only when no trunk does. A block the caller has declined from the
+     * cell the bot stands in (see {@link #decline}) is passed over wherever the ray meets it, crossed or struck.
+     */
     private Sighting treeSighting(ObservableWorldQuery.ViewHit hit, BlockPos feet) {
         raysCast++;
-        if (!hit.hit() || hit.pos() == null || hit.state() == null) {
-            return null;
+        Sighting landmark = null;
+        for (SightClipContext.Crossing crossing : hit.crossed()) {
+            Kind kind = kindOf(crossing.state());
+            if (kind == null || declined.isDeclined(feet, crossing.pos())) {
+                continue;
+            }
+            if (kind == Kind.LOG) {
+                return new Sighting(crossing.pos(), kind, raysCast);
+            }
+            if (landmark == null) {
+                landmark = new Sighting(crossing.pos(), kind, raysCast);
+            }
         }
-        Kind kind = kindOf(hit.state());
-        if (kind == null || declined.isDeclined(feet, hit.pos())) {
-            return null;
+        if (hit.hit() && hit.pos() != null && hit.state() != null) {
+            Kind kind = kindOf(hit.state());
+            if (kind != null && (kind == Kind.LOG || landmark == null) && !declined.isDeclined(feet, hit.pos())) {
+                return new Sighting(hit.pos(), kind, raysCast);
+            }
         }
-        return new Sighting(hit.pos(), kind, raysCast);
+        return landmark;
     }
 
     private Kind kindOf(BlockState state) {

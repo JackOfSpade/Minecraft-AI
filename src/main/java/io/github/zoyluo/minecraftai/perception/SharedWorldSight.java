@@ -2,6 +2,8 @@ package io.github.zoyluo.minecraftai.perception;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mining.assist.RayGrid;
+import io.github.zoyluo.minecraftai.mode.SightClip;
+import io.github.zoyluo.minecraftai.mode.SightClipContext;
 import io.github.zoyluo.minecraftai.task.SharedVision;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -24,7 +26,8 @@ import net.minecraft.world.phys.Vec3;
  * Small, line-of-sight-only world memory shared by an AI player and its linked human owner.
  *
  * <p>This is deliberately not a chunk scan. Every remembered cell is either traversed by a
- * vanilla clip ray or is the ray's first hit. A human observer uses the render-distance value it
+ * clip ray (which a bot's or player's eye lets pass through foliage, fences, glass and water) or is the
+ * ray's first hit. A human observer uses the render-distance value it
  * actually supplied to the server, expressed in blocks ({@code chunks * 16}); an unloaded end
  * chunk suppresses the ray entirely. The memory is only route evidence -- callers still recheck
  * a remembered target before interacting with mutable terrain.</p>
@@ -343,7 +346,11 @@ public final class SharedWorldSight {
                 new Vec3(floor.getX() + 0.5D, floor.getY() + 0.999D, floor.getZ() + 0.5D), memory, tick);
     }
 
-    /** Records only cells established by the ray; it never calls getBlockState before a hit. */
+    /**
+     * Records only cells established by the ray: its first hit, and the see-through cells it passed through (leaves, fences,
+     * glass, water) with the state they really hold. Everything else it crossed is empty space; it never reads a block state
+     * a ray did not reach.
+     */
     private static void captureRay(AIPlayerEntity bot, ServerPlayer observer, Vec3 direction, double range,
                                    Memory memory, int tick) {
         if (!(range > 0.0D) || direction.lengthSqr() <= 1.0E-9D) {
@@ -362,8 +369,12 @@ public final class SharedWorldSight {
         // vine, torch, crop, or other non-colliding block is therefore remembered as that block
         // when it is the first thing the observer can actually see; treating it as AIR would
         // violate the shared-world-memory contract and corrupt later navigation evidence.
-        BlockHitResult hit = world.clip(new ClipContext(
-                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, observer));
+        // The observer's eye passes through foliage, fences, glass and water, so the ray goes on to the first opaque block
+        // (or lava); the cells it skipped are remembered as what they are, never as free space Baritone could walk through.
+        SightClipContext sight = SightClip.context(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, observer, null, true);
+        BlockHitResult hit = world.clip(sight);
+        List<SightClipContext.Crossing> crossed = sight.crossed();
         double distance = hit.getType() == HitResult.Type.BLOCK
                 ? eye.distanceTo(hit.getLocation()) : range;
         // RayGrid intentionally has a conservative 256-block work window.  A player's render
@@ -377,8 +388,8 @@ public final class SharedWorldSight {
                     (x, y, z) -> {
                         BlockPos pos = new BlockPos(x, y, z);
                         BlockState state = hit.getType() == HitResult.Type.BLOCK && pos.equals(hit.getBlockPos())
-                                ? world.getBlockState(pos) : AIR;
-                        remember(memory, new Observation(pos.asLong(), state, tick));
+                                ? world.getBlockState(pos) : SightClip.crossedState(crossed, pos.asLong());
+                        remember(memory, new Observation(pos.asLong(), state != null ? state : AIR, tick));
                         return true;
                     });
         }

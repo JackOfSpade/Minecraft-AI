@@ -56,15 +56,17 @@ final class SharedWorldSightSourceContractTest {
                 "a route request must test the exact target from both legitimate observers");
         assertTrue(evidence.contains("isEligibleOwner(bot, owner)"),
                 "the second observer is only the linked, same-level living non-spectator owner");
-        assertTrue(ray.contains("world.clip(new ClipContext(") && ray.contains("RayGrid.traverse("),
-                "remembered terrain must be traversed by a real vanilla clip ray, never a volume scan");
+        assertTrue(ray.contains("SightClip.context(") && ray.contains("world.clip(sight)") && ray.contains("RayGrid.traverse("),
+                "remembered terrain must be traversed by a real clip ray (the observer's eyes: vanilla's own traversal with foliage, fences, glass and water skipped), never a volume scan");
         assertTrue(ray.contains("for (double offset = 0.0D; offset < distance; offset += RayGrid.MAX_RANGE)"),
                 "a render-distance ray longer than RayGrid's work window must be retained in contiguous proven segments");
         assertTrue(ray.contains("ClipContext.Block.OUTLINE"),
                 "the memory must retain a plainly visible non-colliding block (rail, vine, crop, torch) as that block, not AIR");
         assertTrue(ray.contains("hit.getType() == HitResult.Type.BLOCK")
-                        && ray.contains("pos.equals(hit.getBlockPos())"),
-                "a non-air state is recorded only at the first ray-hit cell");
+                        && ray.contains("pos.equals(hit.getBlockPos())")
+                        && ray.contains("SightClip.crossedState(crossed, pos.asLong())")
+                        && ray.contains("state != null ? state : AIR"),
+                "a non-air state is recorded only at the first ray-hit cell and at the see-through cells (leaf, fence, glass, water) the ray crossed, which keep their real state: foliage and water are never remembered as free air");
         assertFalse(ray.contains(".getChunks("),
                 "route evidence must not enumerate chunks to populate its memory");
     }
@@ -77,12 +79,12 @@ final class SharedWorldSightSourceContractTest {
         String shapes = methodBody(query, "private static boolean observeShapeFaces(");
 
         int botRangeCheck = cell.indexOf("bot.getEyePosition().distanceToSqr(pos.getCenter())");
-        int ownerFallback = cell.indexOf("ownerCanObserveCell(bot, pos, fluid)");
+        int ownerFallback = cell.indexOf("ownerCanObserveCell(bot, pos, fluid, seeThrough)");
         assertTrue(botRangeCheck >= 0 && ownerFallback > botRangeCheck,
                 "the bot's short-range clip remains the first inexpensive proof");
-        assertTrue(cell.contains("return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid));"),
+        assertTrue(cell.contains("return rememberIfVisible(bot, pos, ownerCanObserveCell(bot, pos, fluid, seeThrough));"),
                 "when a cell is beyond the bot radius, owner render-distance LOS must be attempted instead of returning false");
-        assertTrue(shapes.contains("ownerCanObserveShape(bot, pos, outlineFallback, fluid)"),
+        assertTrue(shapes.contains("ownerCanObserveShape(bot, pos, outlineFallback, fluid, seeThrough)"),
                 "shape-aware block observation likewise accepts a linked owner's legitimate LOS");
     }
 
@@ -103,8 +105,8 @@ final class SharedWorldSightSourceContractTest {
         assertTrue(tracking.contains("owner.getChunkTrackingView().contains(chunkX, chunkZ)")
                         && tracking.contains("owner.level().getChunkSource().hasChunk(chunkX, chunkZ)"),
                 "an active client chunk and an actually loaded server chunk are both required");
-        assertTrue(cell.contains("owner.getEyePosition()") && cell.contains("owner.level().clip(new ClipContext("),
-                "owner terrain knowledge comes from the owner's own vanilla clip ray");
+        assertTrue(cell.contains("owner.getEyePosition()") && cell.contains("eyeClip(owner, eye, target,"),
+                "owner terrain knowledge comes from the owner's own clip ray");
     }
 
     @Test
@@ -141,7 +143,7 @@ final class SharedWorldSightSourceContractTest {
         assertTrue(remembered.contains("SharedWorldSight.rememberConfirmed(bot, pos)"),
                 "every successful current observation must update the shared block memory");
         assertTrue(query.contains("return rememberIfVisible(bot, pos, true);")
-                        && query.contains("ownerCanObserveCell(bot, pos, fluid)"),
+                        && query.contains("ownerCanObserveCell(bot, pos, fluid, seeThrough)"),
                 "both direct block/cell rays and owner-side rays must feed that memory");
         assertTrue(harvest.contains("SharedWorldSight.knownBlocks(")
                         && harvest.contains("knownVisibleTarget(bot, targetBlocks, posFilter, allowObservableCellFallback)"),

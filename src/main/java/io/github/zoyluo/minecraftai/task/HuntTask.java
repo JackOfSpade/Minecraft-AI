@@ -650,7 +650,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         for (BlockPos candidate : candidates) {
             if (candidate.equals(preyCell)
                     || candidatePoseIntersectsPrey(bot, candidate, prey)
-                    || !isObservableStandCandidate(bot, candidate, current, floorY)) {
+                    || !isObservableStandCandidate(bot, candidate, current, floorY)
+                    || !canStrikeFrom(bot, candidate, prey)) {
                 continue;
             }
             // Each candidate gets a route proof for its next normal-radius leg. This keeps a
@@ -671,6 +672,17 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         return AttackPoseSelection.failed(retryObserved
                 ? SurfaceRouteProof.RETRY : SurfaceRouteProof.UNREACHABLE);
+    }
+
+    /**
+     * A pose is only worth walking to when the prey can be struck from it. The bot's eyes see prey through glass, a fence or
+     * leaves, but a blow cannot cross them: the pose nearest a cow penned behind a pane would be reached and stood on while
+     * {@link #readyToStrikeFromProvenPose} never held, and the open cow beyond would never be chosen. With no pose that has the
+     * physical line the prey is rejected like any other that cannot be reached, and the next one is hunted.
+     */
+    private static boolean canStrikeFrom(AIPlayerEntity bot, BlockPos pose, LivingEntity prey) {
+        Vec3 eye = new Vec3(pose.getX() + 0.5D, pose.getY() + bot.getEyeHeight(), pose.getZ() + 0.5D);
+        return CombatCore.hasLineOfSightFrom(bot, eye, prey);
     }
 
     private static boolean candidatePoseIntersectsPrey(

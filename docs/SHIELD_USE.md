@@ -41,7 +41,8 @@ failing test.
 
 ## What it reacts to (noticed, never magic)
 
-* **An incoming projectile** the bot senses: any blockable projectile seen in flight inside its view field with a clear line, plus an
+* **An incoming projectile** the bot senses: any blockable projectile seen in flight inside its view field with a clear line (the bot's
+  eyes see through leaves, fences, glass and water, so a shot seen through them can raise the shield early: it cannot cross them), plus an
   exact vanilla arrow, spectral arrow, trident, or llama spit whose `PROJECTILE_SHOOT` vibration matches both its back-projected
   ballistic event block and the vibration's original travel time. Hearing alone never associates fireballs, wither skulls, shulker
   bullets, rockets, wind charges, or modded subclasses: their source or future target is not information the bot has. The course uses

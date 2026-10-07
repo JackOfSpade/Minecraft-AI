@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.MiningController;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
@@ -75,6 +76,16 @@ public final class EpisodeMemory {
      */
     public long earlyRevivals() {
         return earlyRevivals.get();
+    }
+
+    /**
+     * How long a target the miner refused stays excluded, by the typed refusal. A block seen only through blocks the bot may not
+     * break (a pane, a fence, a cobweb) is refused from every stance that looks at it through them, so it stays out as long as an
+     * unreachable one ({@link #TTL_UNREACHABLE}). Anything else (the block left the bot's sight, the break could not go on) is a
+     * state of the moment: another stance may show it, or a line to it, again ({@link #TTL_SHORT}).
+     */
+    public static int ttlAfterMiningRefusal(String reason) {
+        return MiningController.TARGET_OBSTRUCTED.equals(reason) ? TTL_UNREACHABLE : TTL_SHORT;
     }
 
     /** Excludes a target point (unreachable/dug out/tried with no result); it automatically revives after the TTL. */

@@ -149,8 +149,9 @@ public final class BlockMiner {
         }
         // A BlockMiner may be restored from a task checkpoint, so its retained coordinate is not
         // evidence. Prove the exact exposed target before every raw state read below.
-        if (!MiningController.currentObservedTarget(bot, target)) {
-            return targetNotObserved(bot);
+        MiningObstruction.Plan admission = MiningController.admission(bot, target);
+        if (admission.refused()) {
+            return targetNotObserved(bot, admission);
         }
         // Target already broken (air / replaced with something else is the caller's concern; here we only recognize "no longer minable" = air).
         BlockState targetState = world.getBlockState(target);
@@ -210,8 +211,9 @@ public final class BlockMiner {
             if (admissionSupport != MiningSafety.SupportOccupancy.NONE) {
                 return handleSupportOccupancy(bot, admissionSupport);
             }
-            if (!MiningController.currentObservedTarget(bot, target)) {
-                return targetNotObserved(bot);
+            MiningObstruction.Plan reproved = MiningController.admission(bot, target);
+            if (reproved.refused()) {
+                return targetNotObserved(bot, reproved);
             }
             BlockState equipTarget = world.getBlockState(target);
             if (miningChannelToolPolicy) {
@@ -360,16 +362,22 @@ public final class BlockMiner {
         selfSupportMoveTarget = null;
     }
 
-    /** Refusal is terminal for this retained coordinate; callers may only nominate a new visible target. */
-    private Status targetNotObserved(AIPlayerEntity bot) {
+    /**
+     * Refusal is terminal for this retained coordinate; callers may only nominate a new visible target. The reason is the typed one
+     * of the admission: not observed at all, or seen only through see-through blocks that may not be broken.
+     */
+    private Status targetNotObserved(AIPlayerEntity bot, MiningObstruction.Plan admission) {
         BlockPos refused = target;
         stopOwnedMining(bot);
-        failureReason = MiningController.TARGET_NOT_OBSERVED;
+        failureReason = admission.refusal();
         started = false;
         miningGeneration = -1L;
         target = null;
         BotLog.action(bot, "miner_target_unobserved", "target", refused.toShortString(),
                 "reason", failureReason);
+        if (admission.kind() == MiningObstruction.Kind.PROTECTED) {
+            MiningObstruction.logRefused(bot, refused, admission.obstruction(), admission.reason());
+        }
         return Status.FAILED;
     }
 

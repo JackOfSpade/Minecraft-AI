@@ -179,6 +179,9 @@ does; see the "Constraints" note against each event.
 | Category | event | When it's written | Key fields |
 |---|---|---|---|
 | ACTION | `mine_complete` | `MiningController` finishes breaking a block successfully (see `ActionPack.tickMining`) | `block` (registry id of the block, captured before the break), `pos`, `tool` (held item id, or `empty`), `ticks` (break duration). A Baritone-driven break additionally carries `driver=baritone`; a directly admitted observed interaction has the same physical evidence and deliberately no route-driver label. |
+| ACTION | `mining_obstruction_detected` | The bot sees its mining target only through see-through blocks (leaves, a fence, a pane) and starts breaking the one nearest the eye on the best line first (see `action/MiningObstruction`) | `pos` and `block` (the target), `obstruction` (position of the block being broken first), `obstruction_block` (its registry id), `obstructions` (how many see-through blocks the chosen line has in all, that one included). |
+| ACTION | `mining_obstruction_cleared` | One of those blocks is gone; the line is re-planned from the strict proof, which either starts the next one or the target | `pos` (the target), `obstruction`, `obstruction_block`, `ticks` (break duration). The break itself also has a `mine_complete` line with the extra field `obstruction_of=<target pos>`, and an entry in the edits ledger. |
+| ACTION | `mining_obstruction_refused` | The target is seen but cannot be mined from here: every line to it crosses a block that may not be broken (a fence, a pane, glass, bars ... : the mod-wide `BreakRule`), a block the bot or another player stands on, a block next to lava the bot can see or to water that would flow in, or a step that failed. The operation fails with the typed `target_obstructed`; nothing is broken | `pos` (the target), `obstruction` (the first block that may not be broken), `obstruction_block`, `reason` (`structure_block`, `protected_block`, `self_support`, `exposes_lava`, `exposes_water`, `obstruction_persisted`, or the failure of the step). |
 | ACTION | `gather_unit` | `GatherQuotaTask`'s counted total for an accepted item increases | `item`, `delta`, `total`, `target`, `source` (`pickup` when attributable to a block this task broke, with that block's `pos` included; `unattributed` otherwise, e.g. a player handed the bot an item mid-task) |
 | ACTION | `gather_summary` | Exactly one line whenever a `GatherQuotaTask` ends, for any reason (complete, fail, abort, cancel) | `item`/family, `target`, `baseline` (accepted-item inventory count at task start), `final` (at task end), `gained` (sum of `gather_unit` deltas), `breaks` (blocks of the family this task itself broke), `pickups` (confirmed physical pickups), `pickup_misses`, `unattributed_gains`, `capability_denials` (privileged decisions denied during this task), `elapsed_ticks`, `outcome`, `consistent` (see below) |
 | ACTION | `inventory_delta` | A bot's inventory differs from the previous sample, sampled at the same cadence as `diag_snapshot` (every ~2s, driven from the same per-tick call site — see `log/InventoryAudit.java`); only written when something actually changed | `task` (active task name), `viewer` (name of a player with this bot's inventory screen open, or `none`), `gained` (e.g. `minecraft:spruce_log+1`), `lost` (e.g. `minecraft:torch-1`); both are bounded to a handful of items with a `+N more` tail if more changed at once |
@@ -264,8 +267,12 @@ Every Baritone route admission builds an `ObservedNavigationFence` snapshot (`na
 inside every insertion scanned the whole map per new cell and made one exploration hop (`gather_explore_hop`) cost
 300-900 ms. `fresh_cells` now counts every cell the admission added, also when the snapshot was already full.
 New gather events: `gather_harvest_refused` (`pos`, `reason`: the break controller ended without breaking the block,
-e.g. `target_not_observed`; the target is excluded for `EpisodeMemory.TTL_SHORT` and the survey re-plans at once,
-instead of `gather_harvest_timeout` 240 ticks later).
+e.g. `target_not_observed`, or `target_obstructed` for a log seen only through blocks the bot may not break; the target is
+excluded and the survey re-plans at once, instead of `gather_harvest_timeout` 240 ticks later: for `EpisodeMemory.TTL_UNREACHABLE` when it is
+`target_obstructed` (every line to it crosses blocks the bot may not break), for `EpisodeMemory.TTL_SHORT` otherwise (`EpisodeMemory.ttlAfterMiningRefusal`)).
+`mine_target_refused` (`pos`, `reason`) is the same for a generic mine request: a block the miner refused as `target_obstructed` or
+`target_not_observed` still stands and gave nothing, so it is set aside for that time and the search goes on, instead of waiting
+out a pickup of a drop that cannot come (`pickup_timeout`).
 A break start that a guarded step's fence holds back (`ActionPack.GUARDED_STEP_FENCE`) is not a refusal of the block: the
 harvest stays in HARVEST and starts again the next tick, so no `gather_harvest_refused` follows.
 `gather_pillar_scan_empty` (`search=hint|volume`, `from`, plus `target` or `up`) is logged once per pillar search that found
@@ -289,13 +296,17 @@ from the ground: before the bot leaves its pillar, the leaf in the column under 
 broken so the drop falls on (`gather_drop_released`, `origin`, `leaf`; repeated while the canopy has layers); only a leaf is
 ever broken this way, never terrain.
 Both tasks then see to the item the break gave before they take the tower down (`TowerDropWatch`). The bot waits while the
-item falls or lies within vanilla's pickup box (a block drop cannot be collected for ten ticks). An item it does not see,
-nor has collected, after the time an item takes to fall lies out of sight, on the very ledge or leaf that hides it from
-below: the pillar is built up, in its own column, to the level of the block that was broken (`gather_drop_climb` /
-`mine_drop_climb`, `around`, `goal`, `levels`; `*_drop_climb_refused`, plus `reason`; it uses only the supports carried
-beyond the tower's own). An item it then sees on a leaf it can reach is let fall by breaking that leaf
-(`gather_drop_released` / `mine_drop_released`, `origin`, `leaf`); one on anything else is left for the floor. The whole
-tower is taken down afterwards. The tower's own blocks come back as items: when they are of the kind being mined or gathered
+item falls or lies within vanilla's pickup box (a block drop cannot be collected for ten ticks). An item it sees on a leaf
+it can reach is let fall by breaking that leaf (`gather_drop_released` / `mine_drop_released`, `origin`, `leaf`): the eyes see an
+item through the leaves it lies on, so this needs no climb, unless the leaf is farther than an arm from the pillar's head: that one gets the
+climb below, once. An item it does not see, nor has collected, after the time an item
+takes to fall lies out of sight, on the very ledge that hides it from below: the pillar is built up, in its own column, to the
+level of the block that was broken (`gather_drop_climb` / `mine_drop_climb`, `around`, `goal`, `levels`; `*_drop_climb_refused`,
+plus `reason`; it uses only the supports carried beyond the tower's own). An item it then sees on a leaf it can reach is let
+fall the same way; one on anything else is left for the floor. The whole tower is taken down afterwards.
+A gather whose route built its own pillar (an ordinary route may place the bot's blocks, and the log is broken from it as soon as
+it is in reach: no tower the bot takes down) lets a seen drop resting on a leaf out of ordinary reach fall the same way in its
+pickup (`gather_drop_released`), instead of leaving the log on the canopy. The tower's own blocks come back as items: when they are of the kind being mined or gathered
 they are not counted as progress.
 A tower whose task has ended (stopped, replaced, timed out, failed) before the bot was back down is taken down anyway
 (`TowerCustody`), before the bot's next task goes on; an active safety task keeps the bot's attention first. The lines are

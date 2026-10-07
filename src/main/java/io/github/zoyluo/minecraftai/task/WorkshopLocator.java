@@ -184,8 +184,9 @@ public final class WorkshopLocator {
      * The cells of the box that match {@code matches} AND that the bot can observe, in {@link
      * BlockPos#betweenClosed} order. Cheapest conjunct first: chunk sections whose palette cannot hold a
      * match are skipped whole, then the cell state is tested, and only a matching cell pays the ray casts of
-     * {@link ObservableWorldQuery#canObserveBlock}. The returned set is identical to ray-check-then-match;
-     * nothing reacts to a match that is not observable.
+     * {@link ObservableWorldQuery#canObserveBlockStrict}. The returned set is identical to ray-check-then-match;
+     * nothing reacts to a match that is not observable. A station is something a hand uses (a crafting table, a furnace
+     * loaded without a click ray), so it is found with the strict proof: one seen through a pane is not usable.
      */
     private static java.util.List<BlockPos> observableMatches(
             AIPlayerEntity bot, BlockPos min, BlockPos max, Predicate<BlockState> matches) {
@@ -197,7 +198,7 @@ public final class WorkshopLocator {
                     || !matches.test(SectionPrefilter.stateIn(section, cell.getX(), cell.getY(), cell.getZ()))) {
                 continue;
             }
-            if (ObservableWorldQuery.canObserveBlock(bot, cell)) {
+            if (ObservableWorldQuery.canObserveBlockStrict(bot, cell)) {
                 found.add(cell.immutable());
             }
         }

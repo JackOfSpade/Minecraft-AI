@@ -48,7 +48,7 @@ class BaritoneObservedActionProvenanceContractTest {
 
         String current = method(policy, "private static boolean currentObservedNavigationCell(");
         assertTrue(current.contains("BaritoneRegistry.INSTANCE.allowNavigationActionCell(bot, pos)")
-                        && current.contains("ObservableWorldQuery.canObserveCell(bot, pos)"),
+                        && current.contains("ObservableWorldQuery.canObserveCellStrict(bot, pos)"),
                 "the live break proof must use the context fence, not a dimensionless raw snapshot");
 
         String click = method(policy, "public static Decision checkClickBlock(");
@@ -66,12 +66,22 @@ class BaritoneObservedActionProvenanceContractTest {
 
         String goals = read("baritone/BaritoneGoals.java");
         String mine = method(goals, "public static Outcome mineAt(");
-        int cellProof = mine.indexOf("ObservableWorldQuery.canObserveBlockCellFace(bot, target)");
-        int cellRay = mine.indexOf("ObservableWorldQuery.canObserveCell(bot, target)");
-        int shapeProof = mine.indexOf("ObservableWorldQuery.canObserveBlock(bot, target)");
+        // The miner's own admission starts with the state-free cell proofs (the strict gate, then the sight proof of a way it clears).
+        int admission = mine.indexOf("MiningController.admissionRefusal(bot, target)");
         int liveRead = mine.indexOf("bot.level().getBlockState(target)");
-        assertTrue(cellProof >= 0 && cellRay > cellProof && shapeProof > cellRay && liveRead > shapeProof,
-                "the public direct-mine seam needs a state-free cell proof before shape or state reads");
+        assertTrue(admission >= 0 && liveRead > admission,
+                "the public direct-mine seam needs the miner's state-free admission before shape or state reads");
+        String controller = read("action/MiningController.java");
+        String gate = method(controller, "static MiningObstruction.Plan admission(");
+        assertTrue(gate.indexOf("currentObservedTarget(player, pos)") >= 0
+                        && gate.indexOf("MiningObstruction.plan(player, pos, List.of())") > gate.indexOf("currentObservedTarget(player, pos)"),
+                "the strict gate comes first; only when it fails is a way cleared");
+        String plan = method(read("action/MiningObstruction.java"), "static Plan plan(");
+        int sightProof = plan.indexOf("ObservableWorldQuery.canObserveBlockCellFace(player, target)");
+        int sightCell = plan.indexOf("ObservableWorldQuery.canObserveCell(player, target)");
+        int planRead = plan.indexOf("player.level().getBlockState(target)");
+        assertTrue(sightProof >= 0 && sightCell > sightProof && planRead > sightCell,
+                "the plan reads the target's state only after a state-free proof that the eyes see the cell");
     }
 
     @Test

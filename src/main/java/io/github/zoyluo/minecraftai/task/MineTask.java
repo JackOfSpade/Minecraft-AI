@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.MiningController;
 import io.github.zoyluo.minecraftai.action.TowerDescent;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -1116,9 +1117,27 @@ public final class MineTask extends AbstractTask {
         }
         // P1-a: mining goes through BlockMiner (only starts when idle, never restarts and resets progress); block break/timeout moves to the pickup phase.
         BlockMiner.Status status = miner.tick(bot);
+        if (status == BlockMiner.Status.FAILED && MiningController.isSightRefusal(miner.failureReason())) {
+            setAsideRefusedTarget(bot, miner.failureReason());
+            return;
+        }
         if (status == BlockMiner.Status.DONE || status == BlockMiner.Status.FAILED) {
             startPickup(bot);
         }
+    }
+
+    /**
+     * The miner refused the block the eyes nominated: it is seen, but only through blocks the bot may not break (a pane, a fence, a
+     * cobweb), or no longer seen at all. It still stands and gave nothing, so there is no drop to wait 120 ticks for (and fail the
+     * task over): the block is set aside for the time its refusal calls for and the search goes on with the next one.
+     */
+    private void setAsideRefusedTarget(AIPlayerEntity bot, String reason) {
+        BotLog.action(bot, "mine_target_refused", "pos", targetPos.toShortString(), "reason", reason);
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                bot.level().getServer().getTickCount(), EpisodeMemory.ttlAfterMiningRefusal(reason));
+        clearPillarRecovery();
+        targetPos = null;
+        phase = Phase.SEARCHING;
     }
 
     private void startPickup(AIPlayerEntity bot) {

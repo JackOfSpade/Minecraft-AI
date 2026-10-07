@@ -410,7 +410,10 @@ public final class EvadeTask extends AbstractTask {
         LivingEntity source = threat.entity();
         if (source == null
                 || !DangerWatcher.isActiveHostileThreat(bot, source)
-                || !ObservableWorldQuery.canNoticeCreature(bot, source)) {
+                || !ObservableWorldQuery.canNoticeCreature(bot, source)
+                // The eyes see through leaves, fences and glass, which a blow, a shot or a blast cannot cross: a source seen
+                // only that way presses on nobody, and the flight from it would never settle while it stays in view.
+                || !CombatCore.hasLineOfSight(bot, source)) {
             return false;
         }
         // Creepers are never a melee target and can close the ordinary ten-block contact envelope

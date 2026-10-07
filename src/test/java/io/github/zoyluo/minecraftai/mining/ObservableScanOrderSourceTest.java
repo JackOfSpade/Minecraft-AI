@@ -43,9 +43,9 @@ class ObservableScanOrderSourceTest {
         assertTrue(helper > 0);
         String body = source.substring(helper);
         assertTrue(body.indexOf("candidateSection(") < body.indexOf("matches.test(")
-                && body.indexOf("matches.test(") < body.indexOf("ObservableWorldQuery.canObserveBlock(bot, cell)"));
-        assertEquals(1, source.split("ObservableWorldQuery\\.canObserveBlock\\(", -1).length - 1,
-                "a single ray gate remains, after the state match");
+                && body.indexOf("matches.test(") < body.indexOf("ObservableWorldQuery.canObserveBlockStrict(bot, cell)"));
+        assertEquals(1, source.split("ObservableWorldQuery\\.canObserveBlock\\w*\\(", -1).length - 1,
+                "a single ray gate remains, after the state match; a station is something a hand uses, so it is the strict proof");
     }
 
     @Test
