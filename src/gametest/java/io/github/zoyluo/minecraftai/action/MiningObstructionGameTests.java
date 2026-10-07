@@ -508,27 +508,63 @@ public final class MiningObstructionGameTests {
         AIPlayerEntity bot = arena.bot();
         arena.giveAxe();
         // A trunk log that only leaves show the bot: two leaves deep on the line to it, and the bot cannot walk through them.
-        arena.wall(2, 1, LEAF);
-        arena.wall(3, 1, LEAF);
+        List<BlockPos> watched = new ArrayList<>(arena.wall(2, 1, LEAF));
+        watched.addAll(arena.wall(3, 1, LEAF));
         BlockPos log = arena.log();
         arena.set(log, LOG);
+        watched.add(log);
         arena.require(arena.sees(log) && !arena.reaches(log), "fixture: the log must be seen but not reachable");
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
+        BreakOrder order = new BreakOrder(watched);
+        int[] tick = {0};
         context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(bot);
             }
+            tick[0]++;
+            order.observe(arena.world(), tick[0]);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 arena.fail("gather ended as " + task.state() + ":" + task.failureReason() + " " + task.describe());
                 return;
+            }
+            List<String> lines = SensingArena.botLog(arena.name());
+            arena.require(lines != null, "the per-bot log is unavailable");
+            if (arena.world().getBlockState(log).is(Blocks.OAK_LOG)
+                    && lines.stream().anyMatch(line -> line.contains("event=mine_start ") && line.contains("pos=" + pos(log)))) {
+                // The log is being broken now: the vanilla crosshair (Entity.pick, which is what a player's click follows) must be
+                // on it, however plainly the eyes saw it through the leaves. Not a mod predicate: the game's own ray.
+                HitResult crosshair = bot.pick(bot.blockInteractionRange(), 1.0F, false);
+                arena.require(crosshair.getType() == HitResult.Type.BLOCK && ((BlockHitResult) crosshair).getBlockPos().equals(log),
+                        "the log was being broken while the vanilla pick ray ended on " + crosshair.getType()
+                                + (crosshair instanceof BlockHitResult hit ? " " + hit.getBlockPos().toShortString() : ""));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
             arena.require(InventoryAction.countItem(bot, Items.OAK_LOG) >= 1, "gather completed without the log in the inventory");
             arena.require(arena.world().getBlockState(log).isAir(), "the log is still standing");
-            arena.require(!arena.events("mining_obstruction_cleared").isEmpty(), "the log was mined without clearing the leaves in front of it");
+            List<BlockPos> broken = order.order();
+            arena.require(broken.size() >= 3 && broken.get(broken.size() - 1).equals(log),
+                    "the log must go after the leaves in front of it: " + broken);
+            arena.require(broken.get(0).getX() == arena.at(2, 0, 0).getX(), "the leaf nearest the eye must go first: " + broken);
+            List<String> cleared = arena.events("mining_obstruction_cleared");
+            arena.require(cleared.size() == broken.size() - 1, "every leaf that went was cleared for the log: " + cleared + " vs " + broken);
+            int lastCleared = -1;
+            int logStart = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (line.contains("event=mining_obstruction_cleared ")) {
+                    lastCleared = i;
+                } else if (line.contains("event=mine_start ") && line.contains("pos=" + pos(log)) && logStart < 0) {
+                    logStart = i;
+                }
+            }
+            arena.require(lastCleared >= 0 && logStart > lastCleared,
+                    "the log was started before the last leaf was cleared: cleared at " + lastCleared + ", started at " + logStart);
+            long leafBreaks = lines.stream().filter(line -> line.contains("event=mine_complete ")
+                    && line.contains("block='minecraft:oak_leaves'") && line.contains("obstruction_of=" + pos(log))).count();
+            arena.require(leafBreaks == cleared.size(), "each leaf is audited as a break for the log: " + leafBreaks);
             arena.finish();
         });
     }
