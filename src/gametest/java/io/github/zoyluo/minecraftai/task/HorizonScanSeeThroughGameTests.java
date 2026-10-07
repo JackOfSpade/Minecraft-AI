@@ -108,6 +108,52 @@ public final class HorizonScanSeeThroughGameTests {
         finish(context, failures);
     }
 
+    @GameTest(environment = "minecraftai-gametest:horizon_scan_see_through_game_tests_a_declined_sighting_stays_declined_whether_the_ray_crosses_or_strikes_it", maxTicks = 100)
+    public void aDeclinedSightingStaysDeclinedWhetherTheRayCrossesOrStrikesIt(GameTestHelper context) {
+        // What the caller could do nothing with from where the bot stands is not offered again from there, however the eyes meet
+        // it: a log the ray strikes behind a leaf, the leaf it crosses on the way, a cobweb it crosses.
+        BlockPos feet = context.absolutePos(new BlockPos(2, 4, 4));
+        prepare(context, feet);
+        AIPlayerEntity bot = spawn(context, "SeeThroughDeclined", feet);
+        var world = context.getLevel();
+        BlockPos leaf = feet.above(3);
+        BlockPos log = feet.above(4);
+        world.setBlock(leaf, LEAF, Block.UPDATE_ALL);
+        world.setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        List<String> failures = new ArrayList<>();
+        SharedWorldSight.forget(bot.getUUID());
+        TreeHorizonScan tree = new TreeHorizonScan(Set.of(Blocks.OAK_LOG));
+        TreeHorizonScan.Sighting trunk = tree.step(bot);
+        if (trunk == null || trunk.kind() != TreeHorizonScan.Kind.LOG || !log.equals(trunk.pos())) {
+            failures.add("the trunk behind the leaf was not sighted first: " + trunk);
+        }
+        tree.decline(bot, log);
+        TreeHorizonScan.Sighting landmark = tree.step(bot);
+        if (landmark == null || landmark.kind() != TreeHorizonScan.Kind.LEAF || !leaf.equals(landmark.pos())) {
+            failures.add("with the struck log declined the leaf the ray crosses was not the landmark: " + landmark);
+        }
+        tree.decline(bot, leaf);
+        TreeHorizonScan.Sighting nothing = tree.step(bot);
+        if (nothing != null) {
+            failures.add("a declined log and a declined leaf were offered again from the same cell: " + nothing);
+        }
+        world.setBlock(leaf, Blocks.COBWEB.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(log, AIR, Block.UPDATE_ALL);
+        SharedWorldSight.forget(bot.getUUID());
+        VisibleTargetHorizonScan target = new VisibleTargetHorizonScan(Set.of(Blocks.COBWEB));
+        VisibleTargetHorizonScan.Sighting web = target.step(bot);
+        if (web == null || !leaf.equals(web.pos())) {
+            failures.add("the cobweb was not found first: " + web);
+        }
+        target.decline(bot, leaf);
+        VisibleTargetHorizonScan.Sighting again = target.step(bot);
+        if (again != null) {
+            failures.add("a declined cobweb the ray crosses was offered again from the same cell: " + again);
+        }
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "SeeThroughDeclined");
+        finish(context, failures);
+    }
+
     @GameTest(environment = "minecraftai-gametest:horizon_scan_see_through_game_tests_a_pool_behind_leaves_is_seen_and_a_pool_behind_stone_is_not", maxTicks = 100)
     public void aPoolBehindLeavesIsSeenAndAPoolBehindStoneIsNot(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(2, 4, 4));
