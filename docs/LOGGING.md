@@ -268,7 +268,11 @@ inside every insertion scanned the whole map per new cell and made one explorati
 300-900 ms. `fresh_cells` now counts every cell the admission added, also when the snapshot was already full.
 New gather events: `gather_harvest_refused` (`pos`, `reason`: the break controller ended without breaking the block,
 e.g. `target_not_observed`, or `target_obstructed` for a log seen only through blocks the bot may not break; the target is
-excluded for `EpisodeMemory.TTL_SHORT` and the survey re-plans at once, instead of `gather_harvest_timeout` 240 ticks later).
+excluded and the survey re-plans at once, instead of `gather_harvest_timeout` 240 ticks later: for `EpisodeMemory.TTL_UNREACHABLE` when it is
+`target_obstructed` (every line to it crosses blocks the bot may not break), for `EpisodeMemory.TTL_SHORT` otherwise (`EpisodeMemory.ttlAfterMiningRefusal`)).
+`mine_target_refused` (`pos`, `reason`) is the same for a generic mine request: a block the miner refused as `target_obstructed` or
+`target_not_observed` still stands and gave nothing, so it is set aside for that time and the search goes on, instead of waiting
+out a pickup of a drop that cannot come (`pickup_timeout`).
 A break start that a guarded step's fence holds back (`ActionPack.GUARDED_STEP_FENCE`) is not a refusal of the block: the
 harvest stays in HARVEST and starts again the next tick, so no `gather_harvest_refused` follows.
 `gather_pillar_scan_empty` (`search=hint|volume`, `from`, plus `target` or `up`) is logged once per pillar search that found
@@ -291,7 +295,8 @@ ever broken this way, never terrain.
 Both tasks then see to the item the break gave before they take the tower down (`TowerDropWatch`). The bot waits while the
 item falls or lies within vanilla's pickup box (a block drop cannot be collected for ten ticks). An item it sees on a leaf
 it can reach is let fall by breaking that leaf (`gather_drop_released` / `mine_drop_released`, `origin`, `leaf`): the eyes see an
-item through the leaves it lies on, so this needs no climb. An item it does not see, nor has collected, after the time an item
+item through the leaves it lies on, so this needs no climb, unless the leaf is farther than an arm from the pillar's head: that one gets the
+climb below, once. An item it does not see, nor has collected, after the time an item
 takes to fall lies out of sight, on the very ledge that hides it from below: the pillar is built up, in its own column, to the
 level of the block that was broken (`gather_drop_climb` / `mine_drop_climb`, `around`, `goal`, `levels`; `*_drop_climb_refused`,
 plus `reason`; it uses only the supports carried beyond the tower's own). An item it then sees on a leaf it can reach is let

@@ -2756,9 +2756,9 @@ public final class GatherQuotaTask extends AbstractTask {
             // The break controller is gone: the block left the bot's sight, or it is seen but not mineable from
             // here (a log behind a pane, a fence or leaves it may not break), or it was never admitted, so nothing
             // in this phase can progress. Plan another target at once rather than idling out the harvest deadline
-            // (18 s on one log in a real session). The exclusion is short: a different stance may show the block,
-            // or a line to it, again.
-            abandonHarvestTarget(bot, "gather_harvest_refused", refusal, EpisodeMemory.TTL_SHORT);
+            // (18 s on one log in a real session). A log behind blocks it may not break stays out as long as an
+            // unreachable one; any other refusal is short: a different stance may show the block, or a line to it, again.
+            abandonHarvestTarget(bot, "gather_harvest_refused", refusal, EpisodeMemory.ttlAfterMiningRefusal(refusal));
             return;
         }
         if (elapsed - harvestStartedTick > HARVEST_LIMIT) {

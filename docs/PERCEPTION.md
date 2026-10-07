@@ -264,9 +264,10 @@ first) does `MiningController` clear the way, and it does so inside the one oper
 OreDig, farming and the rest need no change and see one coherent break: it starts as in progress, keeps the generation, the break
 delay and the cancel semantics (a cancel aborts the step that is running), and succeeds when the target is gone. Gather does read
 the miner's refusal from every place it starts a break (start, resume after a pause, retry): a log its eyes nominated but its hand may
-not reach (`target_obstructed`, `target_not_observed`) is given up on the next tick (`gather_harvest_refused`, excluded for
-`EpisodeMemory.TTL_SHORT` and the survey re-plans: another stance may show a clear line) instead of standing in HARVEST until the
-deadline.
+not reach (`target_obstructed`, `target_not_observed`) is given up on the next tick (`gather_harvest_refused`, and the survey
+re-plans) instead of standing in HARVEST until the deadline. A log behind blocks it may not break (`target_obstructed`) is excluded for
+`EpisodeMemory.TTL_UNREACHABLE`; one that left its sight, for `EpisodeMemory.TTL_SHORT` (another stance may show it again). A generic mine
+request does the same with its block (`mine_target_refused`) instead of waiting for a drop that cannot come.
 
 `mode/ReachObstructions` lists, for each of the strict gate's own aim lines, the see-through blocks that gate would meet first: it
 casts the very ray the strict twins do (`SightClip.pick`, tracked) and reads `obstructions()`, the see-through blocks whose outline the

@@ -23,9 +23,18 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class MiningController {
     private static final int MAX_TICKS = 600;
     /** A direct break may inspect or affect only a block the player can currently see. */
-    static final String TARGET_NOT_OBSERVED = "target_not_observed";
+    public static final String TARGET_NOT_OBSERVED = "target_not_observed";
     /** The target is seen, but every line to it crosses a see-through block that may not be broken (see {@link MiningObstruction}). */
-    static final String TARGET_OBSTRUCTED = "target_obstructed";
+    public static final String TARGET_OBSTRUCTED = "target_obstructed";
+
+    /**
+     * Whether {@code reason} is one of the two typed refusals of what the bot sees of its target: the block is not in sight
+     * ({@link #TARGET_NOT_OBSERVED}), or in sight only through blocks it may not break ({@link #TARGET_OBSTRUCTED}). Either way
+     * the block still stands and nothing was broken, so a caller that nominated it sets it aside and looks for another.
+     */
+    public static boolean isSightRefusal(String reason) {
+        return TARGET_NOT_OBSERVED.equals(reason) || TARGET_OBSTRUCTED.equals(reason);
+    }
 
     private final BlockPos pos;
     private final Direction face;

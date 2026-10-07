@@ -256,6 +256,52 @@ public final class GatherCanopyGameTests {
         });
     }
 
+    @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_drop_seen_on_a_leaf_out_of_reach_of_the_pillars_head_is_climbed_to_and_its_leaf_broken", maxTicks = 700)
+    public void dropSeenOnALeafOutOfReachOfThePillarsHeadIsClimbedToAndItsLeafBroken(GameTestHelper context) {
+        // The tower watch alone, on a pillar that is still low: the cell a log was broken in is seven blocks up, and its drop
+        // lies on a leaf of a platform four blocks to the side and a level under that cell. The eyes see the item through the
+        // platform at once, but the leaf is more than an arm from the bot's eye (the watch used to end there, and the tower
+        // came down with the log left on the canopy). One climb to the level of the break, the same an unseen item gets,
+        // brings the leaf within reach; the bot breaks it from there and the item falls.
+        Case c = new Case(context, "TowerDropFarLeafGT", 4, 9);
+        BlockPos broken = c.at(0, 7, 0);
+        BlockPos leaf = c.at(4, 6, 0);
+        for (int dx = 3; dx <= 5; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                c.leaf(dx, 6, dz);
+            }
+        }
+        c.give(new ItemStack(Items.DIRT, 12));
+        ItemEntity log = new ItemEntity(c.world(), leaf.getX() + 0.5D, leaf.getY() + 1.0D, leaf.getZ() + 0.5D, new ItemStack(Items.OAK_LOG));
+        log.setDeltaMovement(Vec3.ZERO);
+        c.world().addFreshEntity(log);
+        TowerDropWatch watch = new TowerDropWatch(broken, c.world().getGameTime(), Set.of(Items.OAK_LOG), 400, "gather");
+
+        boolean[] checked = {false};
+        c.budget = 600;
+        c.watch(() -> {
+            if (!checked[0]) {
+                checked[0] = true;
+                c.require(HarvestCore.nearestDropAnyOf(c.bot, Set.of(Items.OAK_LOG), 8.0D).isPresent(),
+                        "fixture: the bot must see the item through the platform");
+                c.require(!HarvestCore.canReach(c.bot, leaf),
+                        "fixture: the leaf under the item must be out of reach from the bot's eye");
+            }
+            if (watch.hold(c.bot)) {
+                return false;
+            }
+            List<String> lines = c.log();
+            c.require(c.count(lines, "gather_drop_climb") == 1 && c.count(lines, "gather_drop_climb_refused") == 0,
+                    "the bot never built up to the leaf it could see but not reach: " + c.tail(lines));
+            c.require(c.count(lines, "gather_drop_released", "leaf='" + leaf.toShortString() + "'") == 1,
+                    "the leaf the item lay on was not broken from the pillar: " + c.tail(lines));
+            c.require(c.world().getBlockState(leaf).isAir(), "the leaf is still standing");
+            c.require(c.bot.blockPosition().getY() == broken.getY() - 1,
+                    "the bot did not stand at the level of the break: " + c.bot.blockPosition());
+            return true;
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:gather_canopy_game_tests_exact_break_log_on_a_ledge_is_climbed_before_it_is_excluded", maxTicks = 1800)
     public void exactBreakLogOnALedgeIsClimbedBeforeItIsExcluded(GameTestHelper context) {
         // The ledge geometry of the plain gather case: the survey picks a log whose stance Baritone then refuses.

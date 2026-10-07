@@ -5,7 +5,9 @@ import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.task.EpisodeMemory;
 import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.SensingArena;
 import io.github.zoyluo.minecraftai.task.TaskState;
 import java.util.ArrayList;
@@ -778,6 +780,54 @@ public final class MiningObstructionGameTests {
             arena.require(refused.get(0).contains("reason='target_obstructed'") && refused.get(0).contains("pos='" + log.toShortString() + "'"),
                     "the refusal is not logged with the target and why: " + refused);
             arena.require(arena.world().getBlockState(log).is(Blocks.OAK_LOG), "the log was broken through the panes");
+            int now = arena.world().getServer().getTickCount();
+            arena.require(EpisodeMemory.INSTANCE.excludedUntil(bot.getUUID(), log, now) - now > EpisodeMemory.TTL_SHORT,
+                    "a log behind blocks the bot may not break is excluded no longer than one that merely left its sight");
+            arena.finish();
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:mining_obstruction_game_tests_mine_sets_aside_an_ore_behind_cobweb_and_mines_the_one_in_the_open", maxTicks = 700)
+    public void mineSetsAsideAnOreBehindCobwebAndMinesTheOneInTheOpen(GameTestHelper context) {
+        // A generic mine request nominates the nearest ore its eyes see, and the nearest is seen through a column of cobweb the
+        // bot may not break. The miner refuses it as obstructed. The task took that for a finished break and waited 120 ticks for
+        // a drop that cannot exist, then failed with pickup_timeout without ever trying the second ore, which lies in the open:
+        // now the ore behind the web is set aside (for as long as an unreachable one) and the one in the open is mined.
+        Arena arena = Arena.begin(context, "ObstructMineWeb");
+        AIPlayerEntity bot = arena.bot();
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
+        List<BlockPos> webs = arena.wall(2, 0, Blocks.COBWEB.defaultBlockState());
+        BlockPos behind = arena.log();
+        BlockPos open = arena.at(5, 0, -3);
+        arena.set(behind, Blocks.IRON_ORE.defaultBlockState());
+        arena.set(open, Blocks.IRON_ORE.defaultBlockState());
+        arena.require(arena.sees(behind) && !arena.reaches(behind), "fixture: the ore behind the web must be seen but not reachable");
+        arena.require(arena.sees(open), "fixture: the ore in the open must be seen");
+        MineTask task = new MineTask(Blocks.IRON_ORE, 1);
+        task.start(bot);
+        context.failIfEver(() -> {
+            if (task.state() == TaskState.RUNNING) {
+                task.tick(bot);
+            }
+            if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
+                arena.fail("mine ended as " + task.state() + ":" + task.failureReason() + " " + arena.events("mine_target_refused"));
+            }
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            List<String> refused = arena.events("mine_target_refused");
+            arena.require(refused.size() == 1 && refused.get(0).contains("reason='target_obstructed'")
+                            && refused.get(0).contains("pos='" + behind.toShortString() + "'"),
+                    "the ore behind the web was not refused once, with the target and why: " + refused);
+            arena.require(arena.world().getBlockState(behind).is(Blocks.IRON_ORE) && arena.world().getBlockState(open).isAir(),
+                    "the ore behind the web was mined, or the one in the open was not");
+            for (BlockPos web : webs) {
+                arena.require(arena.world().getBlockState(web).is(Blocks.COBWEB), "a cobweb was broken at " + web);
+            }
+            arena.require(InventoryAction.countItem(bot, Items.RAW_IRON) == 1, "the mined ore's drop was not collected");
+            int now = arena.world().getServer().getTickCount();
+            arena.require(EpisodeMemory.INSTANCE.excludedUntil(bot.getUUID(), behind, now) - now > EpisodeMemory.TTL_SHORT,
+                    "an ore behind blocks the bot may not break is excluded no longer than one that merely left its sight");
             arena.finish();
         });
     }

@@ -65,7 +65,7 @@ class GatherHarvestRefusalSourceContractTest {
         assertTrue(stop >= 0 && exclude > stop && retarget > exclude && phase > retarget,
                 "stop, exclude, forget the target, survey again: " + abandon);
         String harvest = body(source, "private void harvest(");
-        int refusal = harvest.indexOf("abandonHarvestTarget(bot, \"gather_harvest_refused\", refusal, EpisodeMemory.TTL_SHORT)");
+        int refusal = harvest.indexOf("abandonHarvestTarget(bot, \"gather_harvest_refused\", refusal, EpisodeMemory.ttlAfterMiningRefusal(refusal))");
         int deadline = harvest.indexOf("abandonHarvestTarget(bot, \"gather_harvest_timeout\", null, EpisodeMemory.TTL_UNREACHABLE)");
         assertTrue(refusal >= 0 && deadline > refusal,
                 "a refusal is read before the deadline, and both end in the same give-up: " + harvest);

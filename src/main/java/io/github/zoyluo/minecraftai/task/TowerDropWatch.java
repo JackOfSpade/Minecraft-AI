@@ -22,8 +22,9 @@ import net.minecraft.world.item.Item;
  * drop the bot out of range). One that comes to rest on a ledge above the pillar's head is hidden from there by the
  * very block it lies on, so the pillar is built up to the level of the block that was broken and the bot looks from
  * there. A leaf hides nothing from eyes that see through foliage: an item on a leaf is seen at once, and is let fall by
- * breaking the leaf (it can reach the leaf from the pillar even when the item is a block or two to the side); one that
- * lies on anything else is left, and picked up from below if it ever comes within reach of the floor.
+ * breaking the leaf (it can reach the leaf from the pillar even when the item is a block or two to the side, and when
+ * it cannot, the bot builds up to the level of the break first, as it does for an item it cannot see); one that lies on
+ * anything else is left, and picked up from below if it ever comes within reach of the floor.
  *
  * <p>Nothing is read that the bot has not seen: the item is an entity in sight, the leaf a cell it observes and can
  * reach, and the climb stays in the pillar's own column, up to the supports the bot carries beyond the tower's.</p>
@@ -79,7 +80,16 @@ final class TowerDropWatch {
             if (!HarvestCore.isDropPhysicallySupported(bot, drop) || HarvestCore.canCollectNow(bot, drop)) {
                 return true;
             }
-            return releaseLeafUnder(bot, drop, event, broken);
+            BlockPos leaf = observedLeafUnder(bot, drop);
+            if (leaf == null) {
+                return false; // it lies on anything else (or on a leaf the bot does not see): left, as it always was
+            }
+            if (HarvestCore.canReach(bot, leaf)) {
+                return breakLeaf(bot, leaf, event, broken);
+            }
+            // The eyes see the item through the foliage, but the leaf under it is farther than an arm from the head of the
+            // pillar: the one climb to the level of the break (the same an unseen item gets) may bring it within reach.
+            return !looked && climbToLook(bot);
         }
         if (looked) {
             return false;
@@ -88,7 +98,6 @@ final class TowerDropWatch {
         if (sinceBreak <= PickupReach.settledTicks(fall)) {
             return true;
         }
-        looked = true;
         return climbToLook(bot);
     }
 
@@ -99,12 +108,18 @@ final class TowerDropWatch {
      * item's block was broken in. True while the bot should stay: the leaf's break started (or waits for a guarded step).
      */
     static boolean releaseLeafUnder(AIPlayerEntity bot, ItemEntity drop, String event, BlockPos broken) {
+        BlockPos leaf = observedLeafUnder(bot, drop);
+        return leaf != null && HarvestCore.canReach(bot, leaf) && breakLeaf(bot, leaf, event, broken);
+    }
+
+    /** The cell the item lies on, when the bot observes that cell and sees a leaf in it; null for anything else. */
+    private static BlockPos observedLeafUnder(AIPlayerEntity bot, ItemEntity drop) {
         BlockPos rest = HarvestCore.restingOn(drop);
-        if (!ObservableWorldQuery.canObserveCell(bot, rest)
-                || !bot.level().getBlockState(rest).is(BlockTags.LEAVES)
-                || !HarvestCore.canReach(bot, rest)) {
-            return false;
-        }
+        return ObservableWorldQuery.canObserveCell(bot, rest) && bot.level().getBlockState(rest).is(BlockTags.LEAVES)
+                ? rest : null;
+    }
+
+    private static boolean breakLeaf(AIPlayerEntity bot, BlockPos rest, String event, BlockPos broken) {
         ActionResult started = HarvestCore.startMining(bot, rest);
         if (started.isFailed()) {
             return ActionPack.GUARDED_STEP_FENCE.equals(started.reason()); // an unstarted retry, not a refusal
@@ -113,7 +128,9 @@ final class TowerDropWatch {
         return true;
     }
 
+    /** The one climb a watch makes, to the level of the break; it is not asked for twice, whatever came of it. */
     private boolean climbToLook(AIPlayerEntity bot) {
+        looked = true;
         int spare = MaterialPalette.countPillarSupportBlocks(bot) - SUPPORT_CUSHION;
         BlockPos goal = HarvestCore.lookClimbGoal(bot, broken, spare);
         if (goal == null) {

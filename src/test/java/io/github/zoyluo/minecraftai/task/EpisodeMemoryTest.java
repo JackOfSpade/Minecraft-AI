@@ -1,5 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.MiningController;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -42,5 +44,26 @@ class EpisodeMemoryTest {
         assertFalse(memory.isExcluded(bot, log, 101 + EpisodeMemory.TTL_SHORT), "revived on the next one");
         assertEquals(-1, memory.excludedUntil(bot, log, 101 + EpisodeMemory.TTL_SHORT));
         memory.reset(bot);
+    }
+
+    @Test
+    void aTargetSeenOnlyThroughBlocksTheBotMayNotBreakStaysOutLongerThanOneThatLeftItsSight() {
+        assertEquals(EpisodeMemory.TTL_UNREACHABLE, EpisodeMemory.ttlAfterMiningRefusal(MiningController.TARGET_OBSTRUCTED),
+                "every stance that looks through the pane is refused alike");
+        assertEquals(EpisodeMemory.TTL_SHORT, EpisodeMemory.ttlAfterMiningRefusal(MiningController.TARGET_NOT_OBSERVED),
+                "another stance may show a block that left sight");
+        assertEquals(EpisodeMemory.TTL_SHORT, EpisodeMemory.ttlAfterMiningRefusal("timeout"));
+        assertEquals(EpisodeMemory.TTL_SHORT, EpisodeMemory.ttlAfterMiningRefusal(null));
+        assertTrue(EpisodeMemory.TTL_UNREACHABLE > EpisodeMemory.TTL_SHORT);
+    }
+
+    @Test
+    void onlyTheTwoTypedSightRefusalsAreSightRefusals() {
+        assertTrue(MiningController.isSightRefusal(MiningController.TARGET_OBSTRUCTED));
+        assertTrue(MiningController.isSightRefusal(MiningController.TARGET_NOT_OBSERVED));
+        assertFalse(MiningController.isSightRefusal("mine_timeout"));
+        assertFalse(MiningController.isSightRefusal("out_of_reach"));
+        assertFalse(MiningController.isSightRefusal(BlockMiner.MINING_PREEMPTED));
+        assertFalse(MiningController.isSightRefusal(null));
     }
 }
