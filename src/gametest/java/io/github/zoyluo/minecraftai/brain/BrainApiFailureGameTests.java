@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.AbstractTask;
 import io.github.zoyluo.minecraftai.task.TaskManager;
@@ -28,11 +29,14 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * The brain against a model service that fails, end to end through the real {@link BrainCoordinator},
@@ -88,7 +92,7 @@ public final class BrainApiFailureGameTests {
         }));
     }
 
-    @GameTest(maxTicks = 6000)
+    @GameTest(maxTicks = 18000)
     public void transientErrorsReplayTheSameRequestAndSpendOneModelCall(GameTestHelper context) {
         // The 2026-10-05 burst, shortened: overload twice, then the answer. The client's own retry is
         // configured to sleep a minute, so passing in seconds also proves it does not stack under the brain's.
@@ -125,7 +129,7 @@ public final class BrainApiFailureGameTests {
         }));
     }
 
-    @GameTest(maxTicks = 6000)
+    @GameTest(maxTicks = 18000)
     public void newMessageEndsTheWaitForTheOldRequest(GameTestHelper context) {
         // The first request is refused with a 503 and its retry is waiting out a backoff when the player
         // says something else: the old request must never be sent again, only the new one.
@@ -145,7 +149,7 @@ public final class BrainApiFailureGameTests {
             harness.whenAnswered("Six.", () -> {
                 // The old request's wait is at most its first backoff, which is measured in wall-clock time.
                 answeredAtNanos.compareAndSet(0L, System.nanoTime());
-                long outlast = Duration.ofMillis(2L * LlmRetryPolicy.INITIAL_BACKOFF_MS).toNanos();
+                long outlast = Duration.ofMillis(LlmRetryPolicy.INITIAL_BACKOFF_MS + 500L).toNanos();
                 if (System.nanoTime() - answeredAtNanos.get() < outlast) {
                     return;
                 }
@@ -241,7 +245,206 @@ public final class BrainApiFailureGameTests {
         });
     }
 
+    @GameTest(maxTicks = 4000)
+    public void aServiceThatKeepsFailingTellsTheWaitingPlayerOnceThatTheBotIsStillTrying(GameTestHelper context) {
+        // A refusal that asks for a ten second wait: the wait that makes the player's request unanswered for ten
+        // seconds is the moment to say so, at once, not when the retry finally lands.
+        Harness harness = Harness.start(context, "ApiNoticeGT", Reply.status(503).retryAfter(10), Reply.answer("Four."));
+        harness.ask("What is two plus two?");
+
+        context.onEachTick(() -> {
+            if (!harness.said(ApiFailureReport.stillTryingMessage())) {
+                return;
+            }
+            require(context, harness.service.requests() == 1, "the retry is still waiting: " + harness.service.requests());
+            // A later failed attempt of the same request would announce it again; the player hears it once.
+            BrainCoordinator.INSTANCE.deliverRetryNoticeForTest(harness.bot, OUTAGE, false);
+            BrainCoordinator.INSTANCE.deliverRetryNoticeForTest(harness.bot, OUTAGE, false);
+            require(context, harness.count(ApiFailureReport.stillTryingMessage()) == 1,
+                    "the player must hear that the bot is still trying exactly once, heard it "
+                            + harness.count(ApiFailureReport.stillTryingMessage()) + " times");
+            require(context, !harness.said(OUTAGE_TEXT), "a request that is still being retried is not a failure");
+            context.succeed();
+        });
+    }
+
+    @GameTest(maxTicks = 400)
+    public void aPlayerHearsOfARetryOnlyWhileHeWaitsForTheRequest(GameTestHelper context) {
+        Harness harness = Harness.start(context, "ApiNoNoticeGT");
+        TaskManager.INSTANCE.assign(harness.bot, new OneShotTask(true), origin());
+        AtomicBoolean checked = new AtomicBoolean();
+
+        context.onEachTick(() -> {
+            if (checked.get() || TaskManager.INSTANCE.getActive(harness.bot).isPresent()
+                    || TaskManager.INSTANCE.status(harness.bot).state() != TaskState.COMPLETED) {
+                return;
+            }
+            checked.set(true);
+            // The task finished and the call that would have worded it keeps failing: nothing to tell the player.
+            harness.freshInstruction();
+            BrainCoordinator.INSTANCE.deliverRetryNoticeForTest(harness.bot, OUTAGE, true);
+            require(context, !harness.said(ApiFailureReport.stillTryingMessage()),
+                    "a finished request must not be followed by a notice about its closing call");
+            // Control: the same wait for a request that never started is one the player is waiting on.
+            harness.freshInstruction();
+            BrainCoordinator.INSTANCE.deliverRetryNoticeForTest(harness.bot, OUTAGE, false);
+            require(context, harness.said(ApiFailureReport.stillTryingMessage()),
+                    "a request that never started has a player waiting for it");
+            context.succeed();
+        });
+    }
+
+    @GameTest(maxTicks = 2000)
+    public void aKeyGoogleRejectsWithABadRequestFailsFastAsACredentialsProblem(GameTestHelper context) {
+        Harness harness = Harness.start(context, "ApiKeyGT", Reply.apiKeyRejected());
+        harness.ask("What is two plus two?");
+
+        context.onEachTick(() -> harness.whenSettled(() -> harness.said("credentials"), () -> {
+            require(context, harness.service.requests() == 1,
+                    "a rejected key must not be sent again, saw " + harness.service.requests() + " requests");
+            require(context, harness.said("API key"), "the player is told who has to fix it: " + harness.transcript());
+            require(context, !harness.said("usable answer"), "a rejected key is not a garbled reply");
+            context.succeed();
+        }));
+    }
+
+    @GameTest(maxTicks = 18000)
+    public void expiredGeminiInteractionContinuesInAFreshOneAndSpendsOneMoreCall(GameTestHelper context) {
+        // The first reply asks for a read-only tool, so the brain continues the stored interaction with its
+        // result. The service no longer has that interaction (it keeps them for a limited time): the request
+        // can never succeed, so the conversation carries on in a fresh interaction.
+        Harness harness = Harness.startGemini(context, "ApiStaleGT",
+                Reply.geminiTool("interaction-1", "inventory", "{}"),
+                Reply.geminiNotFound(),
+                Reply.geminiAnswer("interaction-2", "Four."));
+        harness.ask("What is two plus two?");
+
+        context.onEachTick(() -> harness.whenAnswered("Four.", () -> {
+            List<String> bodies = harness.service.bodies();
+            require(context, bodies.size() == 3, "expected the call, the rejected continuation and the fresh call, saw " + bodies.size());
+            require(context, !bodies.get(0).contains("previous_interaction_id"), "the first call starts an interaction");
+            require(context, bodies.get(1).contains("\"previous_interaction_id\":\"interaction-1\""),
+                    "the second call continues the first interaction: " + bodies.get(1));
+            require(context, !bodies.get(2).contains("previous_interaction_id"),
+                    "the recovery must not name the interaction the service lost: " + bodies.get(2));
+            require(context, bodies.get(2).contains("fresh start") && bodies.get(2).contains("inventory"),
+                    "the fresh interaction must say it starts over and carry the last tool results: " + bodies.get(2));
+            require(context, BrainCoordinator.INSTANCE.modelCallsUsedForTest(harness.bot) == 3,
+                    "the recovery is one more planner call, spent " + BrainCoordinator.INSTANCE.modelCallsUsedForTest(harness.bot));
+            require(context, !harness.said("usable answer") && !harness.said(OUTAGE_TEXT),
+                    "a recovered conversation must not be reported as a failure: " + harness.transcript());
+            context.succeed();
+        }));
+    }
+
+    @GameTest(maxTicks = 18000)
+    public void aFreshGeminiInteractionThatIsRejectedTooIsReportedNotRetried(GameTestHelper context) {
+        Harness harness = Harness.startGemini(context, "ApiStaleTwiceGT",
+                Reply.geminiTool("interaction-1", "inventory", "{}"),
+                Reply.geminiNotFound(), Reply.geminiNotFound(), Reply.geminiAnswer("interaction-3", "Four."));
+        harness.ask("What is two plus two?");
+
+        context.onEachTick(() -> harness.whenSettled(() -> harness.said("usable answer"), () -> {
+            require(context, harness.service.requests() == 3,
+                    "the call, the rejected continuation and one fresh call, then the report: " + harness.service.requests());
+            require(context, !harness.said("Four."), "the fourth scripted reply must never be asked for");
+            context.succeed();
+        }));
+    }
+
+    @GameTest(maxTicks = 400)
+    public void finalOutageAfterAPlanWithFurtherStepsIsNotSilent(GameTestHelper context) {
+        planThenFinishedTask(context, "ApiMoreStepsGT", true,
+                harness -> require(context, harness.said(OUTAGE_TEXT),
+                        "the first task of a plan with further steps finished, and nothing will start the next one: "
+                                + "the player must be told"));
+    }
+
+    @GameTest(maxTicks = 400)
+    public void finalOutageAfterASingleTaskPlanStaysSilent(GameTestHelper context) {
+        planThenFinishedTask(context, "ApiSingleStepGT", false,
+                harness -> require(context, !harness.said(OUTAGE_TEXT),
+                        "the plan had no further step, so only the closing words were lost: " + harness.transcript()));
+    }
+
+    /**
+     * Announces a plan through the real coordinator, lets its one task finish, then fails the model for good
+     * the way a five-minute outage does, and hands the harness to {@code check}.
+     */
+    private static void planThenFinishedTask(GameTestHelper context, String botName, boolean moreSteps,
+                                             Consumer<Harness> check) {
+        Harness harness = Harness.start(context, botName, Reply.plan("I will gather logs for you.", moreSteps));
+        harness.ask("Gather some logs");
+        AtomicInteger phase = new AtomicInteger();
+
+        context.onEachTick(() -> {
+            if (phase.get() == 0 && harness.said("I will gather logs for you.")) {
+                TaskManager.INSTANCE.assign(harness.bot, new OneShotTask(true), origin());
+                phase.set(1);
+            } else if (phase.get() == 1 && TaskManager.INSTANCE.getActive(harness.bot).isEmpty()
+                    && TaskManager.INSTANCE.status(harness.bot).state() == TaskState.COMPLETED) {
+                BrainCoordinator.INSTANCE.deliverFinalFailureForTest(harness.bot, OUTAGE, true);
+                check.accept(harness);
+                phase.set(2);
+                context.succeed();
+            }
+        });
+    }
+
+    @GameTest(maxTicks = 18000)
+    public void chatRouterRetriesWithoutHoldingAWorkerThreadAndAnswersOnTheServerThread(GameTestHelper context) {
+        // Three chat lines at once, each refused once. The router has two worker threads: a retry that slept on
+        // its thread (the client's own sleep-and-retry, configured here to a minute) would leave the third
+        // line's first attempt waiting for a thread, so all three first attempts must reach the service at once.
+        FakeModelService service = FakeModelService.start(
+                Reply.status(503), Reply.status(503), Reply.status(503),
+                Reply.routeTo("Alpha"), Reply.routeTo("Alpha"), Reply.routeTo("Alpha"));
+        MinecraftAiConfig previous = MinecraftAiConfig.get();
+        installConfig(previous.withLlm(new MinecraftAiConfig.Llm("test-key", service.baseUrl(), "fake-model",
+                256, 0.0D, 10, 3, 60_000, Boolean.FALSE, "low")));
+        ChatRecipientRouter.INSTANCE.configure(MinecraftAiConfig.get());
+        GameTestCleanup.whenFinished(context, () -> {
+            service.stop();
+            installConfig(previous);
+            ChatRecipientRouter.INSTANCE.configure(previous);
+        });
+        var sender = context.makeMockServerPlayerInLevel();
+        List<ChatRecipientRouter.Candidate> candidates = List.of(
+                routerCandidate("Alpha", UUID.fromString("00000000-0000-0000-0000-00000000000a")),
+                routerCandidate("Bravo", UUID.fromString("00000000-0000-0000-0000-00000000000b")));
+        AtomicInteger decisions = new AtomicInteger();
+        AtomicBoolean offThread = new AtomicBoolean();
+        long started = System.nanoTime();
+        for (int line = 0; line < 3; line++) {
+            ChatRecipientRouter.INSTANCE.select(sender, "gather wood please", candidates, decision -> {
+                offThread.compareAndSet(false, !context.getLevel().getServer().isSameThread());
+                require(context, decision.target() == ChatRecipientRouter.Target.BOT, "routed to " + decision);
+                decisions.incrementAndGet();
+            }, failure -> context.fail(Component.nullToEmpty("routing failed: " + failure)));
+        }
+
+        context.onEachTick(() -> {
+            if (service.requests() >= 3 && service.requests() < 6) {
+                require(context, System.nanoTime() - started < Duration.ofSeconds(10).toNanos(),
+                        "the first attempts of all three lines must not wait for a sleeping worker");
+            }
+            if (decisions.get() == 3) {
+                require(context, !offThread.get(), "a routing decision must be applied on the server thread");
+                require(context, service.requests() == 6, "expected 3 refusals and 3 answers, saw " + service.requests());
+                context.succeed();
+            }
+        });
+    }
+
+    private static ChatRecipientRouter.Candidate routerCandidate(String name, UUID id) {
+        PerceptionSnapshot.Equipment equipment = new PerceptionSnapshot.Equipment(null, null, null, null, null, null);
+        return new ChatRecipientRouter.Candidate(id, name, true, 4.0D, "Alpha".equals(name),
+                new ChatRecipientRouter.CapabilitySummary(Map.of(), equipment, 20.0F, 20, 30, "none",
+                        "on_foot", new ChatRecipientRouter.TaskSummary("idle", "IDLE", 0.0D)));
+    }
+
     private static TaskOrigin origin() {
+
         return TaskOrigin.of(TaskOrigin.Kind.VERIFY, "api_failure_gametest");
     }
 
@@ -264,6 +467,10 @@ public final class BrainApiFailureGameTests {
         }
 
         static Harness start(GameTestHelper context, String botName, Reply... script) {
+            return start(context, botName, "", script);
+        }
+
+        private static Harness start(GameTestHelper context, String botName, String basePath, Reply... script) {
             var world = context.getLevel();
             BlockPos spawn = context.absolutePos(new BlockPos(1, 126, 1));
             prepareCell(world, spawn);
@@ -275,7 +482,7 @@ public final class BrainApiFailureGameTests {
             MinecraftAiConfig previous = MinecraftAiConfig.get();
             // retryCount 2 with a minute of backoff: if the planner client retried on its own under the
             // brain's retry, a single 503 would stall the test for a minute.
-            MinecraftAiConfig.Llm llm = new MinecraftAiConfig.Llm("test-key", service.baseUrl(), "fake-model",
+            MinecraftAiConfig.Llm llm = new MinecraftAiConfig.Llm("test-key", service.baseUrl() + basePath, "fake-model",
                     256, 0.0D, 10, 2, 60_000, Boolean.FALSE, "low");
             installConfig(previous.withLlm(llm));
             BrainCoordinator.INSTANCE.configure(MinecraftAiConfig.get());
@@ -290,7 +497,26 @@ public final class BrainApiFailureGameTests {
             return new Harness(context, bot, service);
         }
 
+        /** The same harness against the Gemini Interactions endpoint, which a loopback server can pose as. */
+        static Harness startGemini(GameTestHelper context, String botName, Reply... script) {
+            return start(context, botName, "/generativelanguage.googleapis.com/v1beta", script);
+        }
+
+        int count(String fragment) {
+            String transcript = transcript();
+            int found = 0;
+            for (int at = transcript.indexOf(fragment); at >= 0; at = transcript.indexOf(fragment, at + 1)) {
+                found++;
+            }
+            return found;
+        }
+
+        String transcript() {
+            return ChatTranscript.renderRecentChat(bot.getUUID());
+        }
+
         void ask(String text) {
+
             require(context, BrainCoordinator.INSTANCE.handleMessage(bot, "Tester", text),
                     "the coordinator did not take the instruction");
         }
@@ -301,7 +527,7 @@ public final class BrainApiFailureGameTests {
         }
 
         boolean said(String fragment) {
-            return ChatTranscript.renderRecentChat(bot.getUUID()).contains(fragment);
+            return transcript().contains(fragment);
         }
 
         void whenAnswered(String answer, Runnable then) {
@@ -316,9 +542,60 @@ public final class BrainApiFailureGameTests {
         }
     }
 
-    private record Reply(int status, String body) {
+    private record Reply(int status, String body, int retryAfterSeconds) {
+        Reply(int status, String body) {
+            this(status, body, 0);
+        }
+
         static Reply status(int status) {
             return new Reply(status, "{\"error\":{\"message\":\"scripted " + status + "\"}}");
+        }
+
+        /** The same reply with a Retry-After header: the service's own request for how long to wait. */
+        Reply retryAfter(int seconds) {
+            return new Reply(status, body, seconds);
+        }
+
+        /** Google's answer to a wrong API key: HTTP 400, not 401. */
+        static Reply apiKeyRejected() {
+            return new Reply(400, "{\"error\":{\"code\":400,\"message\":\"API key not valid. Please pass a valid API key.\","
+                    + "\"status\":\"INVALID_ARGUMENT\",\"details\":[{\"reason\":\"API_KEY_INVALID\"}]}}");
+        }
+
+        /** An interaction the Gemini service answers with one function call. */
+        static Reply geminiTool(String interactionId, String tool, String arguments) {
+            return new Reply(200, "{\"id\":\"" + interactionId + "\",\"status\":\"completed\",\"steps\":[{\"type\":\"function_call\","
+                    + "\"id\":\"call_" + interactionId + "\",\"name\":\"" + tool + "\",\"arguments\":" + arguments + "}]}");
+        }
+
+        static Reply geminiAnswer(String interactionId, String text) {
+            JsonObject arguments = new JsonObject();
+            arguments.addProperty("message", text);
+            arguments.addProperty("purpose", "answer");
+            return geminiTool(interactionId, "say", arguments.toString());
+        }
+
+        /** What the Gemini service answers for a stored interaction it no longer has. */
+        static Reply geminiNotFound() {
+            return new Reply(404, "{\"error\":{\"code\":404,\"message\":\"Interaction not found.\",\"status\":\"NOT_FOUND\"}}");
+        }
+
+        /** A plan announcement, optionally declaring that more steps follow its first task. */
+        static Reply plan(String text, boolean moreSteps) {
+            JsonObject arguments = new JsonObject();
+            arguments.addProperty("message", text);
+            arguments.addProperty("purpose", "plan");
+            if (moreSteps) {
+                arguments.addProperty("more_steps", true);
+            }
+            return toolCall("say", arguments);
+        }
+
+        /** The recipient router's required choice. */
+        static Reply routeTo(String target) {
+            JsonObject arguments = new JsonObject();
+            arguments.addProperty("target", target);
+            return toolCall("select_chat_recipient", arguments);
         }
 
         /** HTTP 200 whose choice list is empty: nothing the brain can use. */
@@ -331,8 +608,13 @@ public final class BrainApiFailureGameTests {
             JsonObject arguments = new JsonObject();
             arguments.addProperty("message", text);
             arguments.addProperty("purpose", "answer");
+            return toolCall("say", arguments);
+        }
+
+        /** A well-formed chat completion whose one choice is a single call of {@code tool}. */
+        private static Reply toolCall(String tool, JsonObject arguments) {
             JsonObject function = new JsonObject();
-            function.addProperty("name", "say");
+            function.addProperty("name", tool);
             function.addProperty("arguments", arguments.toString());
             JsonObject call = new JsonObject();
             call.addProperty("id", "call_1");
@@ -359,6 +641,7 @@ public final class BrainApiFailureGameTests {
         private final HttpServer server;
         private final List<Reply> script;
         private final List<String> bodies = new CopyOnWriteArrayList<>();
+        private final AtomicInteger arrivals = new AtomicInteger();
 
         private FakeModelService(HttpServer server, List<Reply> script) {
             this.server = server;
@@ -371,11 +654,14 @@ public final class BrainApiFailureGameTests {
                 FakeModelService service = new FakeModelService(server, List.of(replies));
                 server.createContext("/", exchange -> {
                     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-                    int index = service.bodies.size();
+                    int index = service.arrivals.getAndIncrement();
                     service.bodies.add(body);
                     // An unscripted request is a bug in the code under test: answer it so it fails loudly there.
                     Reply reply = index < service.script.size() ? service.script.get(index) : Reply.status(500);
                     byte[] bytes = reply.body().getBytes(StandardCharsets.UTF_8);
+                    if (reply.retryAfterSeconds() > 0) {
+                        exchange.getResponseHeaders().add("Retry-After", Integer.toString(reply.retryAfterSeconds()));
+                    }
                     exchange.sendResponseHeaders(reply.status(), bytes.length);
                     exchange.getResponseBody().write(bytes);
                     exchange.close();

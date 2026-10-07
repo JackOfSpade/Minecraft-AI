@@ -7,21 +7,34 @@ import java.util.Set;
 
 /**
  * What a bot that looks for a resource remembers about the search so far: from where it has already
- * looked around, which way it was walking, and which headings were refused where it stands. A person
- * who found nothing here walks on into ground not yet seen instead of circling back over it.
+ * looked around, how far it could see in each direction when it did, which way it was walking, and
+ * which headings were refused where it stands. A person who found nothing here walks on into ground
+ * not yet seen instead of circling back over it.
  *
- * <p>Only a search the bot really made counts. A caller marks a stance after it scanned what it can
- * perceive from there (within the perception radius) and found nothing; nothing is inferred about
- * terrain the bot has not looked at, and the compass headings are directions, never destinations.</p>
+ * <p>Only what the bot really saw counts. A caller records a stance after it looked around there
+ * (see {@link #markSearched}): the ground it could see within the perception radius is searched, and
+ * the ground behind whatever blocked its view is not, because it was never seen. Ground it could not
+ * see is not worth walking toward either, since nothing says the way there is open: it is neither
+ * credited nor sought. The compass headings are directions, never destinations.</p>
  */
 final class ExplorationMemory {
+    /** How finely the horizon around a stance is divided. */
+    static final int SECTORS = 64;
     /** Only the first stance marked in each 4x4 columns is kept: standing still adds nothing, a walk adds a point per few blocks. */
     private static final int GRID = 4;
-    /** Probe points of the disc a hop would reveal: its centre, a ring at half the radius, a ring near the edge. */
+    /**
+     * Probe points of the disc a hop would reveal: its centre, a ring at half the radius, a ring near the edge.
+     * Eight and sixteen points keep the set the same under a quarter of the compass's turn, so with nothing
+     * known every compass heading is worth exactly the same and the bot's own heading decides.
+     */
     private static final double[][] PROBES = probes();
 
+    /** One look around: where the bot stood, how far it could see, and how far it saw in each sector of the horizon. */
+    private record Stance(int x, int z, int radius, double[] sight) {
+    }
+
     private final Set<Long> searchedKeys = new HashSet<>();
-    private final List<int[]> searched = new ArrayList<>();
+    private final List<Stance> searched = new ArrayList<>();
     private int lastDirection;
     private int refusedX;
     private int refusedZ;
@@ -29,39 +42,78 @@ final class ExplorationMemory {
     /** The stance and remembered resource of the last guided hop that was refused, or null. */
     private int[] guidedRefused;
 
-    /** Records that the surroundings of a stance were searched without finding the resource. */
-    void markSearched(int x, int z) {
-        int cellX = Math.floorDiv(x, GRID);
-        int cellZ = Math.floorDiv(z, GRID);
-        if (searchedKeys.add(((long) cellX << 32) ^ (cellZ & 0xFFFFFFFFL))) {
-            searched.add(new int[] {x, z});
-        }
+    /** Whether a look around from here would add anything: no stance of this 4x4 column was recorded yet. */
+    boolean wantsLookAround(int x, int z) {
+        return !searchedKeys.contains(key(x, z));
     }
 
     /**
-     * How many of the probe points of the disc of {@code radius} around (x, z) lie outside every
-     * searched disc: the ground a bot standing there could still reveal.
+     * Records that the bot looked around from a stance and searched what it saw there without finding the
+     * resource.
+     *
+     * @param radius how far the bot searches from where it stands (its perception radius)
+     * @param sight  for each of the {@link #SECTORS} sectors of the horizon, counted from the direction of
+     *               negative X by increasing azimuth ({@link #sector}), how far the bot saw along it:
+     *               {@code radius} where nothing blocked its view, less where something did, 0 where it
+     *               could not look at all
      */
-    int unsearchedProbes(int x, int z, int radius) {
-        long radiusSquared = (long) radius * radius;
+    void markSearched(int x, int z, int radius, double[] sight) {
+        if (sight.length != SECTORS) {
+            throw new IllegalArgumentException("one sight distance per sector");
+        }
+        if (searchedKeys.add(key(x, z))) {
+            searched.add(new Stance(x, z, radius, sight.clone()));
+        }
+    }
+
+    /** The sector of the horizon in which the offset (dx, dz) lies. */
+    static int sector(double dx, double dz) {
+        double turn = (Math.atan2(dz, dx) + Math.PI) / (2.0D * Math.PI);
+        return Math.min(SECTORS - 1, (int) (turn * SECTORS));
+    }
+
+    /** The azimuth, as a direction (dx, dz) with length 1, at the middle of a sector. */
+    static double[] sectorCentre(int sector) {
+        double azimuth = (sector + 0.5D) / SECTORS * 2.0D * Math.PI - Math.PI;
+        return new double[] {Math.cos(azimuth), Math.sin(azimuth)};
+    }
+
+    /**
+     * How many of the probe points of the disc of {@code radius} around (x, z) a bot standing there could
+     * still reveal: ground that was neither seen from a stance already searched nor hidden from one by
+     * something that blocked its view.
+     */
+    int unsearchedProbes(double x, double z, int radius) {
         int unsearched = 0;
         for (double[] probe : PROBES) {
-            int probeX = x + (int) Math.round(probe[0] * radius);
-            int probeZ = z + (int) Math.round(probe[1] * radius);
-            boolean covered = false;
-            for (int[] centre : searched) {
-                long dx = probeX - centre[0];
-                long dz = probeZ - centre[1];
-                if (dx * dx + dz * dz <= radiusSquared) {
-                    covered = true;
-                    break;
-                }
-            }
-            if (!covered) {
+            if (!seenOrHidden(x + probe[0] * radius, z + probe[1] * radius)) {
                 unsearched++;
             }
         }
         return unsearched;
+    }
+
+    /**
+     * Whether the point was seen from a searched stance, or lies behind something that stance's view ran
+     * into: only a point no stance accounts for is ground that walking there could reveal.
+     */
+    private boolean seenOrHidden(double probeX, double probeZ) {
+        boolean hidden = false;
+        for (Stance stance : searched) {
+            double dx = probeX - stance.x();
+            double dz = probeZ - stance.z();
+            double distance = Math.hypot(dx, dz);
+            // Past twice the radius a single sector of the horizon is too wide to say anything about the point.
+            if (distance > 2.0D * stance.radius()) {
+                continue;
+            }
+            double seen = stance.sight()[sector(dx, dz)];
+            if (distance <= seen) {
+                return true;
+            }
+            hidden |= seen < stance.radius();
+        }
+        return hidden;
     }
 
     /**
@@ -85,9 +137,8 @@ final class ExplorationMemory {
                 continue;
             }
             double length = Math.hypot(directions[direction][0], directions[direction][1]);
-            int hopX = x + (int) Math.round(directions[direction][0] / length * hop);
-            int hopZ = z + (int) Math.round(directions[direction][1] / length * hop);
-            int unsearched = unsearchedProbes(hopX, hopZ, radius);
+            int unsearched = unsearchedProbes(
+                    x + directions[direction][0] / length * hop, z + directions[direction][1] / length * hop, radius);
             if (unsearched > bestUnsearched) {
                 best = direction;
                 bestUnsearched = unsearched;
@@ -130,15 +181,19 @@ final class ExplorationMemory {
         return refusedX == x && refusedZ == z ? refusedMask : 0;
     }
 
+    private static long key(int x, int z) {
+        return ((long) Math.floorDiv(x, GRID) << 32) ^ (Math.floorDiv(z, GRID) & 0xFFFFFFFFL);
+    }
+
     private static double[][] probes() {
         List<double[]> points = new ArrayList<>();
         points.add(new double[] {0.0D, 0.0D});
-        for (int i = 0; i < 6; i++) {
-            double angle = Math.toRadians(60.0D * i);
+        for (int i = 0; i < 8; i++) {
+            double angle = Math.toRadians(45.0D * i);
             points.add(new double[] {0.5D * Math.cos(angle), 0.5D * Math.sin(angle)});
         }
-        for (int i = 0; i < 12; i++) {
-            double angle = Math.toRadians(30.0D * i);
+        for (int i = 0; i < 16; i++) {
+            double angle = Math.toRadians(22.5D * i);
             points.add(new double[] {0.9D * Math.cos(angle), 0.9D * Math.sin(angle)});
         }
         return points.toArray(new double[0][]);

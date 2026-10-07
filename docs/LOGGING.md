@@ -271,6 +271,8 @@ harvest stays in HARVEST and starts again the next tick, so no `gather_harvest_r
 `gather_pillar_scan_empty` (`search=hint|volume`, `from`, plus `target` or `up`) is logged once per pillar search that found
 no approach. The search is then not repeated while the bot stays in the same cell (`PillarSearchMemo`): until a target the
 scan skipped as excluded is available again, until a bot changes terrain, or for `EpisodeMemory.TTL_UNREACHABLE` ticks at most.
+The finding also ends when exclusions disappear before their end (`EpisodeMemory.earlyRevivals`: a full table shed its
+older half, or an episode was reset).
 A pillar the bot built (`gather_pillar_start`, `mine_pillar_start`, `ore_dig_pillar_started`) is taken down again before the bot does anything else:
 it breaks the block under its feet one at a time, as a player does (`TowerDescent`; every drop is a single block, and the
 blocks come back as items), so a pillar of any height can be left. `gather_tower_descended` / `mine_tower_descended` /
@@ -298,3 +300,12 @@ they are not counted as progress.
 A tower whose task has ended (stopped, replaced, timed out, failed) before the bot was back down is taken down anyway
 (`TowerCustody`), before the bot's next task goes on; an active safety task keeps the bot's attention first. The lines are
 `tower_orphan_descended` (`owner`, `blocks`, `at`) and `tower_orphan_descent_failed` (`owner`, `reason`, `at`).
+Model-service events: `still_trying_notice` (`kind`, `status`, `instruction`) is logged when a waiting player was told, once
+per instruction, that the bot is still trying after about ten seconds of failed model calls; `gemini_interaction_dropped`
+(`status`, `reason`, `model_call`) when a continuation was rejected because the service no longer has the stored
+interaction and the conversation carried on in a fresh one; `llm_credentials_rejected` (`status`) when the service refuses
+the API key (HTTP 401/403, or Google's 400 "API key not valid"); `llm_retry_notice_failed` when a notice could not be
+delivered (the retry it announced goes on regardless).
+`gather_pickup_miss` can now follow a break by as little as the vanilla fall time of the drop (`ItemDropSettle`): the
+pickup window ends early once the sweep around the break cell has visited every cell it can see to be standable and no
+drop is visible.

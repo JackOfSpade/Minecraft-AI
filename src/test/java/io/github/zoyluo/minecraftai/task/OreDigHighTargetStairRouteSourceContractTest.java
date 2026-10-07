@@ -69,7 +69,7 @@ final class OreDigHighTargetStairRouteSourceContractTest {
     void sharedHopPrimitiveKeepsTheRemoteOreAsHeadingOnly() throws IOException {
         String source = Files.readString(OBSERVED_HOPS);
 
-        assertTrue(source.contains("startDirectionalPursuitTo(heading, HOP_DISTANCE, false, false)"),
+        assertTrue(source.contains("startDirectionalPursuitTo(heading, hopDistance(), false, false)"),
                 "the route must ask Baritone for a no-break/no-place directional hop");
         assertTrue(source.contains("BlockPos observedGoal = bot.getActionPack().activePathGoal()")
                         && source.contains("directional_hop_missing_observed_goal"),

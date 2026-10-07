@@ -205,6 +205,56 @@ final class LlmRetryRunnerTest {
     }
 
     @Test
+    void aWaitingPlayerIsToldOnceWhenTheRequestHasBeenUnansweredForTenSeconds() {
+        // Waits of 1, 2, 4 and 8 s: the first three end at 7 s and the fourth would carry the request past
+        // ten, so the notice comes with the fourth failure, at 7 s, and never again however long the outage.
+        List<Long> noticeTimes = new ArrayList<>();
+        Script service = new Script(time, repeat(OVERLOADED, 11), "answer");
+
+        runner.run("Moss", service::call, wanted::get, failure -> noticeTimes.add(time.nowMs), answers::add, failures::add);
+        time.advanceBy(Duration.ofMinutes(10).toMillis());
+
+        assertEquals(List.of(7_000L), noticeTimes);
+        assertEquals(List.of("answer"), answers);
+    }
+
+    @Test
+    void aQuickBlipIsNotWorthANotice() {
+        List<Long> noticeTimes = new ArrayList<>();
+        Script service = new Script(time, repeat(OVERLOADED, 2), "answer");
+
+        runner.run("Moss", service::call, wanted::get, failure -> noticeTimes.add(time.nowMs), answers::add, failures::add);
+        time.advanceBy(Duration.ofMinutes(1).toMillis());
+
+        assertTrue(noticeTimes.isEmpty(), "a retry that lands within ten seconds needs no word to the player");
+        assertEquals(List.of("answer"), answers);
+    }
+
+    @Test
+    void aServiceThatAsksForALongWaitIsReportedAtOnceNotTenSecondsLater() {
+        LlmApiException limited = http(429, "rate_limited: status=429 body=slow down", Duration.ofSeconds(34));
+        List<LlmApiException> notices = new ArrayList<>();
+        Script service = new Script(time, List.of(limited), "answer");
+
+        runner.run("Moss", service::call, wanted::get, notices::add, answers::add, failures::add);
+
+        assertEquals(List.of(limited), notices, "the 34 s wait that has just begun is the reason to speak, at 0 s");
+        assertEquals(0, time.nowMs);
+    }
+
+    @Test
+    void aNoticeThatCannotBeDeliveredDoesNotStrandTheRetry() {
+        Script service = new Script(time, repeat(OVERLOADED, 6), "answer");
+
+        runner.run("Moss", service::call, wanted::get, failure -> {
+            throw new IllegalStateException("server is stopping");
+        }, answers::add, failures::add);
+        time.advanceBy(Duration.ofMinutes(10).toMillis());
+
+        assertEquals(List.of("answer"), answers);
+    }
+
+    @Test
     void anImmediateAnswerSchedulesNothing() {
         Script service = new Script(time, List.of(), "answer");
 

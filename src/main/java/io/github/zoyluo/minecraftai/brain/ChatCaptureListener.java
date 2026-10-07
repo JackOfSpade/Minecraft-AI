@@ -48,6 +48,8 @@ public final class ChatCaptureListener {
                     sender,
                     text,
                     candidates,
+                    () -> isCurrent(sender.getUUID(), epoch),
+                    () -> reportRoutingDelay(sender, epoch),
                     decision -> applyDecision(sender, text, candidates, epoch, decision),
                     failure -> reportRoutingFailure(sender, epoch, failure));
         });
@@ -173,7 +175,19 @@ public final class ChatCaptureListener {
         BotLog.warn(LogCategory.COMM, null, "chat_recipient_routing_failed",
                 "sender", sender.getGameProfile().name(),
                 "reason", reason);
-        sender.displayClientMessage(Component.literal("[Minecraft-AI] I couldn't determine which companion you meant. Please try again."), false);
+        // A model service that is down is not a line that could not be understood: say which it was.
+        String text = failure instanceof LlmApiException llmFailure
+                ? ApiFailureReport.playerMessage(llmFailure)
+                : "I couldn't determine which companion you meant. Please try again.";
+        sender.displayClientMessage(Component.literal("[Minecraft-AI] " + text), false);
+    }
+
+    /** The routing call keeps failing: the line is not lost, the service is slow, and the player waits on it. */
+    private static void reportRoutingDelay(ServerPlayer sender, long epoch) {
+        if (!isCurrent(sender.getUUID(), epoch)) {
+            return;
+        }
+        sender.displayClientMessage(Component.literal("[Minecraft-AI] " + ApiFailureReport.stillTryingMessage()), false);
     }
 
     private static long nextEpoch(UUID senderId) {

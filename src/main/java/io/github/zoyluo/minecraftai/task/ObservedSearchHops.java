@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.HashSet;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
@@ -18,11 +19,23 @@ import net.minecraft.core.BlockPos;
  *
  * <p>Which compass heading to try is decided by what the bot remembers of its own search
  * ({@link ExplorationMemory}): it keeps walking its way into ground it has not searched and does not
- * circle back over what it has.</p>
+ * circle back over what it has. Each time it reaches a new place it looks around once, and only the
+ * ground it saw from there counts as searched.</p>
  */
 final class ObservedSearchHops {
-    /** One physical leg stays inside the currently observed navigation fence. */
-    static final int HOP_DISTANCE = 12;
+    /**
+     * One physical leg stays inside the currently observed navigation fence, so a hop is as long as the fence
+     * allows: the perception radius less the two cells it keeps for the feet, head and support of the hop's far
+     * end ({@code ObservedNavigationFence.pursuitObservationPoint}). Any longer and the fence cuts it back to this.
+     */
+    static int hopDistance() {
+        return Math.max(1, perceptionRadius() - 2);
+    }
+
+    private static int perceptionRadius() {
+        return Math.max(1, MinecraftAiConfig.get().perception().radius());
+    }
+
     /** The remote heading only shapes a direction; it is never a navigation destination. */
     private static final int HEADING_DISTANCE = 48;
     private static final int[][] COMPASS = {
@@ -92,8 +105,12 @@ final class ObservedSearchHops {
             return new Attempt(Status.EXHAUSTED, attempts, null, null, false, "search_budget_exhausted");
         }
         BlockPos feet = bot.blockPosition();
-        // Callers ask for a hop only after they searched what they can perceive from here.
-        memory.markSearched(feet.getX(), feet.getZ());
+        int radius = perceptionRadius();
+        // Callers ask for a hop only after they searched what they can perceive from here: the bot looks around
+        // once from each new place and counts as searched what that look showed it.
+        if (memory.wantsLookAround(feet.getX(), feet.getZ())) {
+            memory.markSearched(feet.getX(), feet.getZ(), radius, lookAround(bot, radius));
+        }
         int number = attempts + 1;
         boolean guided = rememberedHint != null && horizontalDistanceSquared(feet, rememberedHint) > 4.0D
                 && !memory.isGuidedRefused(feet.getX(), feet.getZ(), rememberedHint.getX(), rememberedHint.getZ());
@@ -102,12 +119,11 @@ final class ObservedSearchHops {
         if (guided) {
             heading = rememberedHint.immutable();
         } else {
-            int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
-            direction = memory.chooseDirection(COMPASS, feet.getX(), feet.getZ(), HOP_DISTANCE, radius);
+            direction = memory.chooseDirection(COMPASS, feet.getX(), feet.getZ(), hopDistance(), radius);
             heading = compassHeading(feet, COMPASS[direction]);
         }
         attempts++;
-        ActionResult route = bot.getActionPack().startDirectionalPursuitTo(heading, HOP_DISTANCE, false, false);
+        ActionResult route = bot.getActionPack().startDirectionalPursuitTo(heading, hopDistance(), false, false);
         if (route.isFailed()) {
             refuse(feet, direction, guided ? rememberedHint : null);
             return new Attempt(Status.REFUSED, number, heading, null, guided, route.reason());
@@ -134,6 +150,22 @@ final class ObservedSearchHops {
             memory.noteHeading(direction);
         }
         return new Attempt(Status.STARTED, number, heading, observedGoal.immutable(), guided, "");
+    }
+
+    /**
+     * How far the bot sees from where it stands in each sector of the horizon, along its own line of sight at eye
+     * height: the distance to the first thing that blocks it, the full radius where nothing does, 0 where it cannot
+     * look at all (the chunk there is not loaded). One look per new place, not one per tick.
+     */
+    private static double[] lookAround(AIPlayerEntity bot, int radius) {
+        double[] sight = new double[ExplorationMemory.SECTORS];
+        for (int sector = 0; sector < sight.length; sector++) {
+            double[] direction = ExplorationMemory.sectorCentre(sector);
+            ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castViewRay(bot, direction[0], 0.0D, direction[1],
+                    radius, ObservableWorldQuery.ViewShape.COLLIDER);
+            sight[sector] = view.isUnknown() ? 0.0D : view.hit() ? Math.min(radius, view.distance()) : radius;
+        }
+        return sight;
     }
 
     /** A refused compass heading, or a refused heading toward a remembered resource, is not offered again from the same stance. */

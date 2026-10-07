@@ -7,6 +7,7 @@ import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class LlmHttpStatusTest {
     private static final Instant NOW = Instant.parse("2026-10-06T12:00:00Z");
@@ -74,7 +75,69 @@ final class LlmHttpStatusTest {
     }
 
     @Test
+    void geminiNamesItsOwnWaitInTheErrorBodyAsAProtobufDuration() {
+        String body = "{\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"details\":["
+                + "{\"@type\":\"type.googleapis.com/google.rpc.QuotaFailure\"},"
+                + "{\"@type\":\"type.googleapis.com/google.rpc.RetryInfo\",\"retryDelay\":\"34s\"}]}}";
+
+        assertEquals(Duration.ofSeconds(34), LlmHttpStatus.retryDelayFromBody(body));
+        assertEquals(Duration.ofMillis(500), LlmHttpStatus.retryDelayFromBody(retryInfo("0.5s")));
+        assertEquals(Duration.ofMillis(34_123), LlmHttpStatus.retryDelayFromBody(retryInfo("34.123456789s")));
+        assertEquals(Duration.ZERO, LlmHttpStatus.retryDelayFromBody(retryInfo("0s")));
+    }
+
+    @Test
+    void theOpenAiCompatibleEndpointWrapsTheSameErrorInAnArray() {
+        assertEquals(Duration.ofSeconds(12), LlmHttpStatus.retryDelayFromBody("[" + retryInfo("12s") + "]"));
+    }
+
+    @Test
+    void aBodyWithoutAUsableRetryDelayMeansNoPreference() {
+        assertNull(LlmHttpStatus.retryDelayFromBody(null));
+        assertNull(LlmHttpStatus.retryDelayFromBody(""));
+        assertNull(LlmHttpStatus.retryDelayFromBody("overloaded, try later"));
+        assertNull(LlmHttpStatus.retryDelayFromBody("{\"error\":{\"code\":429}}"));
+        assertNull(LlmHttpStatus.retryDelayFromBody(retryInfo("soon")));
+        assertNull(LlmHttpStatus.retryDelayFromBody(retryInfo("-5s")));
+        assertNull(LlmHttpStatus.retryDelayFromBody(retryInfo("34")));
+    }
+
+    @Test
+    void anAbsurdRetryDelayInTheBodyIsClamped() {
+        assertEquals(Duration.ofDays(365), LlmHttpStatus.retryDelayFromBody(retryInfo("99999999999999999999s")));
+    }
+
+    @Test
+    void googleAnswersAWrongApiKeyWithABadRequestAndThatIsACredentialsProblem() {
+        String invalid = "{\"error\":{\"code\":400,\"message\":\"API key not valid. Please pass a valid API key.\","
+                + "\"status\":\"INVALID_ARGUMENT\",\"details\":[{\"reason\":\"API_KEY_INVALID\"}]}}";
+        String expired = "{\"error\":{\"code\":400,\"message\":\"API key expired. Please renew the API key.\"}}";
+
+        assertEquals(LlmApiException.Kind.AUTH, LlmHttpStatus.kind(400, invalid));
+        assertEquals(LlmApiException.Kind.AUTH, LlmHttpStatus.kind(400, expired));
+        assertTrue(LlmHttpStatus.classify(400, invalid, 200).startsWith("auth_error: status=400"));
+        // The excerpt is cut at 200 characters, the verdict is not: the reason may sit past the cut.
+        String reasonPastTheExcerpt = "{\"error\":{\"message\":\"" + "x".repeat(300) + "\",\"details\":[{\"reason\":\"API_KEY_INVALID\"}]}}";
+        assertEquals(LlmApiException.Kind.AUTH, LlmHttpStatus.kind(400, reasonPastTheExcerpt));
+    }
+
+    @Test
+    void anotherBadRequestStaysPermanentAndOnlyStatus400ReadsTheKeyReason() {
+        assertEquals(LlmApiException.Kind.PERMANENT, LlmHttpStatus.kind(400, "{\"error\":\"invalid argument: bad schema\"}"));
+        assertEquals(LlmApiException.Kind.PERMANENT, LlmHttpStatus.kind(400, null));
+        assertEquals(LlmApiException.Kind.PERMANENT, LlmHttpStatus.kind(404, "API key not valid"),
+                "a missing model or interaction is not a key problem, whatever the text says");
+        assertEquals(LlmApiException.Kind.TRANSIENT, LlmHttpStatus.kind(503, "API_KEY_INVALID"));
+        assertEquals("http_error: status=400 body=bad schema", LlmHttpStatus.classify(400, "bad schema", 200));
+    }
+
+    private static String retryInfo(String delay) {
+        return "{\"error\":{\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.RetryInfo\",\"retryDelay\":\"" + delay + "\"}]}}";
+    }
+
+    @Test
     void anAbsurdRetryAfterIsClampedSoItCannotOverflowMilliseconds() {
+
         Duration wait = LlmHttpStatus.parseRetryAfter("99999999999999999999999", NOW);
 
         assertEquals(Duration.ofDays(365), wait);

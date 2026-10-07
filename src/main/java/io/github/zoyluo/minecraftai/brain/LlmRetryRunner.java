@@ -4,7 +4,10 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 
 import java.util.OptionalLong;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -47,6 +50,15 @@ final class LlmRetryRunner {
         this.policy = policy;
     }
 
+    /** The production wiring: waits are scheduled on the JDK's delayed executor and jittered randomly. */
+    static LlmRetryRunner standard(Executor worker) {
+        return new LlmRetryRunner(
+                worker,
+                (delayMillis, task) -> CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS).execute(task),
+                () -> System.nanoTime() / 1_000_000L,
+                new LlmRetryPolicy(() -> ThreadLocalRandom.current().nextDouble()));
+    }
+
     /**
      * @param botName only for log lines
      * @param stillWanted false once the request was replaced or cancelled
@@ -58,17 +70,34 @@ final class LlmRetryRunner {
                  BooleanSupplier stillWanted,
                  Consumer<T> onSuccess,
                  Consumer<LlmApiException> onFailure) {
+        run(botName, attempt, stillWanted, null, onSuccess, onFailure);
+    }
+
+    /**
+     * @param onWaiting called at most once, on a worker thread, with the failure that started the wait: the
+     *                  request has now gone unanswered for {@link LlmRetryPolicy#NOTICE_AFTER_MS} and is
+     *                  still being retried, so a player who waits on it can be told. Null for a caller
+     *                  nobody waits on.
+     */
+    <T> void run(String botName,
+                 Attempt<T> attempt,
+                 BooleanSupplier stillWanted,
+                 Consumer<LlmApiException> onWaiting,
+                 Consumer<T> onSuccess,
+                 Consumer<LlmApiException> onFailure) {
         long started = clockMillis.getAsLong();
-        worker.execute(() -> tryOnce(botName, attempt, stillWanted, onSuccess, onFailure, started, 1));
+        worker.execute(() -> tryOnce(botName, attempt, stillWanted, onWaiting, onSuccess, onFailure, started, 1, false));
     }
 
     private <T> void tryOnce(String botName,
                              Attempt<T> attempt,
                              BooleanSupplier stillWanted,
+                             Consumer<LlmApiException> onWaiting,
                              Consumer<T> onSuccess,
                              Consumer<LlmApiException> onFailure,
                              long started,
-                             int attemptNumber) {
+                             int attemptNumber,
+                             boolean waitingReported) {
         if (!stillWanted.getAsBoolean()) {
             if (attemptNumber > 1) {
                 BotLog.api(null, "llm_retry_cancelled",
@@ -107,8 +136,21 @@ final class LlmRetryRunner {
                     "elapsed_ms", elapsed,
                     "status", failure.httpStatus(),
                     "reason", abbreviate(failure.getMessage()));
+            boolean report = !waitingReported && onWaiting != null
+                    && LlmRetryPolicy.worthTellingThePlayer(elapsed, delay.getAsLong());
+            if (report) {
+                try {
+                    onWaiting.accept(failure);
+                } catch (RuntimeException noticeFailure) {
+                    // A notice that cannot be delivered must not strand the retry it only announces.
+                    BotLog.warn(LogCategory.API, null, "llm_retry_notice_failed",
+                            "bot", botName, "reason", abbreviate(noticeFailure.getMessage()));
+                }
+            }
+            boolean reported = waitingReported || report;
             scheduler.schedule(delay.getAsLong(), () -> worker.execute(() ->
-                    tryOnce(botName, attempt, stillWanted, onSuccess, onFailure, started, attemptNumber + 1)));
+                    tryOnce(botName, attempt, stillWanted, onWaiting, onSuccess, onFailure, started,
+                            attemptNumber + 1, reported)));
             return;
         }
         if (attemptNumber > 1) {

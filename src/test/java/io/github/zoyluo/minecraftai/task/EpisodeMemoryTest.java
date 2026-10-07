@@ -28,7 +28,41 @@ class EpisodeMemoryTest {
     }
 
     @Test
+    void aFullTableShedsItsOlderHalfAndSaysSo() {
+        UUID bot = UUID.randomUUID();
+        EpisodeMemory memory = EpisodeMemory.INSTANCE;
+        memory.reset(bot);
+        for (int index = 0; index < 128; index++) {
+            memory.exclude(bot, new BlockPos(index, 70, 0), 100, 100 + index);
+        }
+        long before = memory.earlyRevivals();
+
+        memory.exclude(bot, new BlockPos(500, 70, 0), 100, 1000);
+
+        assertTrue(memory.earlyRevivals() > before, "targets were revived before their time");
+        assertFalse(memory.isExcluded(bot, new BlockPos(0, 70, 0), 101), "the one that ended first is gone");
+        assertTrue(memory.isExcluded(bot, new BlockPos(127, 70, 0), 101), "the one that ends last stays");
+        assertTrue(memory.isExcluded(bot, new BlockPos(500, 70, 0), 101));
+        memory.reset(bot);
+    }
+
+    @Test
+    void aTableThatIsNotFullAndOrdinaryExpiryNeverMoveTheCounter() {
+        UUID bot = UUID.randomUUID();
+        EpisodeMemory memory = EpisodeMemory.INSTANCE;
+        memory.reset(bot);
+        long before = memory.earlyRevivals();
+
+        memory.exclude(bot, new BlockPos(1, 70, 0), 100, 10);
+        assertFalse(memory.isExcluded(bot, new BlockPos(1, 70, 0), 500), "expired on its own");
+
+        assertEquals(before, memory.earlyRevivals(), "an exclusion that ended when it was due is not an early revival");
+        memory.reset(bot);
+    }
+
+    @Test
     void anExclusionReportsTheLastTickItHoldsAndRevivesTheNextOne() {
+
         UUID bot = UUID.randomUUID();
         EpisodeMemory memory = EpisodeMemory.INSTANCE;
         BlockPos log = new BlockPos(3, 70, 9);

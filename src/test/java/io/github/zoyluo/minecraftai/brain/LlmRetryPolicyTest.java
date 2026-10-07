@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class LlmRetryPolicyTest {
@@ -69,7 +70,17 @@ final class LlmRetryPolicyTest {
     }
 
     @Test
+    void theNoticeComesWithTheWaitThatCarriesTheRequestPastTenSeconds() {
+        assertFalse(LlmRetryPolicy.worthTellingThePlayer(0, 1_000));
+        assertFalse(LlmRetryPolicy.worthTellingThePlayer(7_000, 2_999));
+        assertTrue(LlmRetryPolicy.worthTellingThePlayer(7_000, 3_000));
+        assertTrue(LlmRetryPolicy.worthTellingThePlayer(0, 34_000), "a service that asks for a long wait is reported at once");
+        assertTrue(LlmRetryPolicy.worthTellingThePlayer(60_000, 1), "an attempt that itself took a minute to time out");
+    }
+
+    @Test
     void thePatienceSurvivesAMultiMinuteOutage() {
+
         assertTrue(LlmRetryPolicy.TOTAL_PATIENCE_MS >= 4 * 60_000L);
     }
 }

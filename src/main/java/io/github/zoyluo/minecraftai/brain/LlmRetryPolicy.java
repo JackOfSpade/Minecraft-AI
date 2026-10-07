@@ -28,6 +28,12 @@ final class LlmRetryPolicy {
      * A newer player message or intent cancel ends the wait at once, whatever is left of this.
      */
     static final long TOTAL_PATIENCE_MS = 5 * 60_000L;
+    /**
+     * How long a player waits in silence before being told the bot is still trying. A person asked
+     * something wonders after about ten seconds without a word, and a quick blip (one 503 retried a
+     * second later) must not turn into chatter.
+     */
+    static final long NOTICE_AFTER_MS = 10_000L;
 
     private final DoubleSupplier jitter;
 
@@ -55,5 +61,16 @@ final class LlmRetryPolicy {
             delay = Math.max(delay, retryAfter.toMillis());
         }
         return elapsedMs + delay > TOTAL_PATIENCE_MS ? OptionalLong.empty() : OptionalLong.of(delay);
+    }
+
+    /**
+     * Whether the wait that is about to start is the one that makes the request unanswered for
+     * {@link #NOTICE_AFTER_MS}: that is when a still-waiting player is told, once.
+     *
+     * @param elapsedMs time since the first attempt started
+     * @param delayMs the wait about to start
+     */
+    static boolean worthTellingThePlayer(long elapsedMs, long delayMs) {
+        return elapsedMs + delayMs >= NOTICE_AFTER_MS;
     }
 }
