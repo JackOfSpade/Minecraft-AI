@@ -74,6 +74,7 @@ Each route records a PATH-category admission decision. The important events are:
 
 - `nav_engine_legacy_migrated`, `nav_engine_invalid_migrated`
 - `nav_goal_rejected` with a target, reason, ray count, and fresh-cell count
+- `nav_pillar_goal_refused` (just before a `navigation_goal_without_observed_stance` refusal of a block goal) with the goal, the bot's cell, the column's base, and which proofs held: `live_goal` (the goal cell is in view), `column_seen` (every cell of the column up to the goal's headroom is in view), `column_clear` (it is air over a standable base), `walk_seen` (an observed walk from the bot to the base exists; the lanes to the base are captured by ray before this is asked)
 - `nav_observation_fence_updated` with its generation, cell count, rays, and target provenance
 - `baritone_admission` with planner outcome, duration, node count, movement count, policy, and fence size
 - `observed_target_route_started`, `observed_target_revalidated`, and `observed_target_memory_revoked` for remembered targets

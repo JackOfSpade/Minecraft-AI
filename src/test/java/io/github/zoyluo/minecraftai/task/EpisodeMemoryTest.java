@@ -30,6 +30,18 @@ class EpisodeMemoryTest {
     }
 
     @Test
+    void aRouteRefusedForWantOfSightKeepsItsTargetOutBrieflyAndAVerdictKeepsItOutLong() {
+        for (String reason : new String[] {"navigation_goal_without_observed_stance", "navigation_goal_unobserved",
+                "navigation_observed_corridor_unavailable", "navigation_observation_fence_insufficient"}) {
+            assertEquals(EpisodeMemory.TTL_SHORT, EpisodeMemory.ttlAfterRouteRefusal(reason), reason);
+        }
+        for (String reason : new String[] {"pathfinding_failed: GOAL_UNREACHABLE", "policy_refused", "missing_path_support", ""}) {
+            assertEquals(EpisodeMemory.TTL_UNREACHABLE, EpisodeMemory.ttlAfterRouteRefusal(reason), reason);
+        }
+        assertEquals(EpisodeMemory.TTL_UNREACHABLE, EpisodeMemory.ttlAfterRouteRefusal(null));
+    }
+
+    @Test
     void aFullTableShedsItsOlderHalfAndSaysSo() {
         UUID bot = UUID.randomUUID();
         EpisodeMemory memory = EpisodeMemory.INSTANCE;

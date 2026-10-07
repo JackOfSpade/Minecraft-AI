@@ -130,16 +130,17 @@ final class GatherExactBreakSourceContractTest {
         String pickup = methodBody(source, "private void pickup(AIPlayerEntity bot)");
 
         assertTrue(matches(pickup,
-                        "!chasingVisibleDrop\\s*&&\\s*pickupOrigin\\s*!=\\s*null\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
+                        "!chasingVisibleDrop\\s*&&\\s*lookAround\\s*!=\\s*null\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
                                 + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isWalkToIdle\\(\\)"
                                 + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.stepIdle\\(\\)"),
                 "the pickup origin sweep must wait for every movement owner and must not run while a visible drop is chased");
         assertTrue(matches(pickup,
                         "chasingVisibleDrop\\s*=\\s*HarvestCore\\.approachDropPhysically\\(\\s*bot\\s*,\\s*visibleDrop\\.get\\(\\)\\s*\\)"),
                 "a supported observed drop is chased first and suppresses the sweep");
-        assertTrue(matches(pickup, "new KnownCellPickupSweep\\(\\s*pickupOrigin\\s*\\)")
+        assertTrue(matches(pickup, "BlockPos\\s+lookAround\\s*=\\s*dropRestedAt\\s*!=\\s*null\\s*\\?\\s*dropRestedAt\\s*:\\s*pickupOrigin;")
+                        && matches(pickup, "new KnownCellPickupSweep\\(\\s*lookAround\\s*\\)")
                         && matches(pickup, "pickupOriginSweep\\.step\\(bot\\)"),
-                "pickup must sweep from the recorded break cell");
+                "pickup must sweep from where the drop was last seen at rest, else from the recorded break cell");
         assertTrue(matches(pickup,
                         "swept\\s*==\\s*KnownCellPickupSweep\\.Step\\.MOVING\\s*&&\\s*!pickupOriginApproachLogged"),
                 "the approach is logged only when a walk really started");

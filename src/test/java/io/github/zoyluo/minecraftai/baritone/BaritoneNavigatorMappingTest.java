@@ -439,6 +439,23 @@ final class BaritoneNavigatorMappingTest {
     }
 
     @Test
+    void aPillarGoalProvesTheWalkToItsFootByRaysBeforeItAsksForThePathAndSaysWhichProofFailed() throws IOException {
+        String fence = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ObservedNavigationFence.java"));
+        String admit = method(fence, "public static Capture admit(");
+        int column = admit.indexOf("observePillarColumn(bot, feet, route.target(), observed, tick)");
+        int corridors = admit.indexOf("observePillarWalk(bot, feet, pillarBase, observed, tick)", column);
+        int frozen = admit.indexOf("freeze(dimension, route.minimumY(), generation, tick, observed)", corridors);
+        int path = admit.indexOf("ObservedGraphSearch.path(feet, pillarBase", frozen);
+        assertTrue(column > 0 && corridors > column && frozen > corridors && path > frozen,
+                "the cardinal lanes to the column's foot are each proved by a ray before the snapshot is frozen and searched: the walk"
+                        + " was otherwise proved only by what the eyes happened to cross earlier, and a foot eight cells away on"
+                        + " each axis was refused where one seven away was not");
+        int refusal = admit.indexOf("nav_pillar_goal_refused", path);
+        assertTrue(refusal > path && admit.indexOf("navigation_goal_without_observed_stance", refusal) > refusal,
+                "the refusal says which of the proofs (the goal, the column, the clear air, the walk) was missing");
+    }
+
+    @Test
     void theInlineSearchResultBecomesTheLegacyAnswer() {
         assertNull(BaritoneNavigator.admissionFailure(PathCalculationResult.Type.SUCCESS_TO_GOAL, 3L, 100L));
         assertNull(BaritoneNavigator.admissionFailure(PathCalculationResult.Type.SUCCESS_SEGMENT, 3L, 100L),

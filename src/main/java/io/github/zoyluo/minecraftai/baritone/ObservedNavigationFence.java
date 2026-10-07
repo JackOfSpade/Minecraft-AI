@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.baritone;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import io.github.zoyluo.minecraftai.mining.assist.ObservedGraphSearch;
 import io.github.zoyluo.minecraftai.mining.assist.RayGrid;
@@ -284,14 +285,28 @@ public final class ObservedNavigationFence {
                 // column was individually observed. This never infers a floor or an unseen height.
                 BlockPos pillarBase = route.options().allowPlace() && liveTarget && route.returnAnchor() == null
                         ? observePillarColumn(bot, feet, route.target(), observed, tick) : null;
+                boolean columnClear = false;
+                boolean walkProved = false;
                 if (pillarBase != null) {
+                    // The walk to the column's foot is proved like the walk to any other stance: lanes toward it,
+                    // each cell by its own ray. Without them the bot gets to the foot only over whatever its eyes
+                    // happened to cross earlier, which depends on where it had been looking (over the same open
+                    // floor a foot seven cells away on each axis was admitted, eight cells away refused every time).
+                    observePillarWalk(bot, feet, pillarBase, observed, tick);
                     candidate = freeze(dimension, route.minimumY(), generation, tick, observed);
-                    if (isObservedPillarColumn(candidate, pillarBase, route.target())
-                            && ObservedGraphSearch.path(feet, pillarBase, new SnapshotEnvironment(candidate)) != null) {
+                    columnClear = isObservedPillarColumn(candidate, pillarBase, route.target());
+                    walkProved = columnClear
+                            && ObservedGraphSearch.path(feet, pillarBase, new SnapshotEnvironment(candidate)) != null;
+                    if (walkProved) {
                         return new Capture(candidate, true, "", provenance, rays,
                                 Math.max(0, observed.size() - before), true, pillarBase);
                     }
                 }
+                // One refusal covers several proofs that can fail; the log says which one did.
+                BotLog.path(bot, "nav_pillar_goal_refused", "goal", route.target(), "from", feet,
+                        "base", pillarBase == null ? "none" : pillarBase.toShortString(),
+                        "live_goal", liveTarget, "column_seen", pillarBase != null,
+                        "column_clear", columnClear, "walk_seen", walkProved);
                 return Capture.refused("navigation_goal_without_observed_stance", rays, Math.max(0, observed.size() - before));
             }
             // A fan tells us what the eye happened to cross, but a walk needs known feet, head,
@@ -1379,6 +1394,20 @@ public final class ObservedNavigationFence {
             }
         }
         return base;
+    }
+
+    /**
+     * The lanes to a pillar's foot ({@link PillarWalkLanes}), each stance the eye reaches proved by its own rays like the
+     * stances of any walk: nothing outside the perception radius, nothing a wall hides.
+     */
+    private static void observePillarWalk(AIPlayerEntity bot, BlockPos from, BlockPos base,
+                                          Map<Long, Cell> observed, int tick) {
+        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
+        for (BlockPos stance : PillarWalkLanes.stances(from, base)) {
+            if (bot.getEyePosition().distanceToSqr(stance.getCenter()) <= (double) radius * radius) {
+                observeVisibleStance(bot, stance, observed, tick);
+            }
+        }
     }
 
     /** True only for an air column that starts on a safe, collision-bearing observed base. */

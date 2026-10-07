@@ -40,6 +40,7 @@ final class TowerDropWatch {
     private int ticksLeft;
     private boolean looked;
     private boolean climbing;
+    private BlockPos restedAt;
 
     /**
      * {@code window} is how many ticks the bot may stay up on its tower for the item (the owner's own pickup window,
@@ -77,7 +78,11 @@ final class TowerDropWatch {
                 drop -> drop.getAge() <= sinceBreak + 3);
         if (seen.isPresent()) {
             ItemEntity drop = seen.get();
-            if (!HarvestCore.isDropPhysicallySupported(bot, drop) || HarvestCore.canCollectNow(bot, drop)) {
+            boolean supported = HarvestCore.isDropPhysicallySupported(bot, drop);
+            if (supported) {
+                restedAt = drop.blockPosition().immutable();
+            }
+            if (!supported || HarvestCore.canCollectNow(bot, drop)) {
                 return true;
             }
             BlockPos leaf = observedLeafUnder(bot, drop);
@@ -99,6 +104,15 @@ final class TowerDropWatch {
             return true;
         }
         return climbToLook(bot);
+    }
+
+    /**
+     * The cell the item was last seen lying in, or null when the watch never saw it at rest. The tower comes down before the
+     * item is picked up, and from the floor it can be out of sight (the bottom of a hole beside the tower is seen only from
+     * above): the bot remembers where it saw it come to rest.
+     */
+    BlockPos restedAt() {
+        return restedAt;
     }
 
     /**

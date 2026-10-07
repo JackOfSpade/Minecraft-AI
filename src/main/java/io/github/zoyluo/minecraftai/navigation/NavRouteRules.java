@@ -37,6 +37,17 @@ public final class NavRouteRules {
         return new NavRoute.Options(allowDigFallback, canPillar && protectedStoneLikeReserve <= 0, botInWater);
     }
 
+    /**
+     * Whether a route was refused for want of sight: the eyes had not seen the goal, a stance at it, or a way to it. That says
+     * what the bot has seen from where it stands, not that the goal cannot be reached; another stance may show it.
+     */
+    public static boolean isObservationRefusal(String reason) {
+        return "navigation_goal_unobserved".equals(reason)
+                || "navigation_goal_without_observed_stance".equals(reason)
+                || "navigation_observed_corridor_unavailable".equals(reason)
+                || "navigation_observation_fence_insufficient".equals(reason);
+    }
+
     /** Ticks a route may run before it is abandoned: a base allowance plus twenty ticks per block of straight-line distance. */
     public static int deadlineTicks(double horizontalDistance) {
         return Math.min(6000, 600 + (int) (20.0D * Math.max(0.0D, horizontalDistance)));

@@ -128,7 +128,7 @@ final class GatherTreeRecoverySourceContractTest {
                 "a pillar route must not hide a digging fallback behind its placement request");
         assertTrue(pillarStart.contains("startPillarPathTo(") && pillarStart.contains("pillarApproachActive = true"),
                 "a successful pillar approach must be marked so its later route failure keeps the no-dig contract");
-        int digFallback = gotoTarget.indexOf("startDigPathTo(targetPos)");
+        int digFallback = gotoTarget.indexOf("startTunnelPathTo(targetPos)");
         assertTrue(digFallback > 0
                         && gotoTarget.substring(Math.max(0, digFallback - 700), digFallback)
                                 .contains("!pillarApproachActive"),
@@ -142,6 +142,77 @@ final class GatherTreeRecoverySourceContractTest {
         assertTrue(palette.contains("countPillarSupportBlocks")
                         && !supports.contains("Items.OAK_LOG"),
                 "the support count must use the dedicated non-wood common-block palette");
+    }
+
+    @Test
+    void everyTowerTheGatherBuildsIsOneItTracksAndTakesDown() throws IOException {
+        String gather = read("task/GatherQuotaTask.java");
+        String pack = read("action/ActionPack.java");
+
+        assertFalse(gather.contains("startDigPathTo("),
+                "a dig route that may place builds a stair or tower that nobody takes down, and the bot stays up on it"
+                        + " (a log's pillar refused from one stance was followed by a Baritone-built tower of seven dirt"
+                        + " and a bot that never came down); the gather's dig approach only breaks");
+        assertTrue(gather.contains("startTunnelPathTo(tree)") && gather.contains("startTunnelPathTo(targetPos)"),
+                "both dig approaches of the gather use the route that places nothing");
+        String tunnel = methodBody(pack, "public ActionResult startTunnelPathTo(");
+        assertTrue(tunnel.contains("routeOnBaritone(\"dig_path_to\", goal, false, true, 0, RouteConstraints.unrestricted())")
+                        && tunnel.contains("controllerStartBlocked()"),
+                "the tunnel route may break (dig fallback) and may not pillar, behind the same guarded-step fence");
+    }
+
+    @Test
+    void aPillarRefusedForWantOfSightIsNotWrittenOffAsLongAsAnUnreachableOne() throws IOException {
+        String gather = read("task/GatherQuotaTask.java");
+        String start = methodBody(gather, "private boolean startPillarApproach(");
+        int refused = start.indexOf("if (route.isFailed())");
+        int ttl = start.indexOf("EpisodeMemory.ttlAfterRouteRefusal(route.reason())", refused);
+        int exclude = start.indexOf("EpisodeMemory.INSTANCE.exclude(", ttl);
+        assertTrue(refused >= 0 && ttl > refused && exclude > ttl && !start.contains("TTL_UNREACHABLE"),
+                "the exclusion after a refused pillar follows the reason of the refusal");
+        assertTrue(start.contains("\"from\", bot.blockPosition().toShortString()") && start.contains("\"excluded_ticks\""),
+                "the refusal logs where the bot stood and for how long the log is out");
+    }
+
+    @Test
+    void aPillarRefusedForWantOfSightFromAFarFootIsWalkedToBeforeItIsSetAside() throws IOException {
+        String gather = read("task/GatherQuotaTask.java");
+        String start = methodBody(gather, "private boolean startPillarApproach(");
+        int refused = start.indexOf("if (route.isFailed())");
+        int walk = start.indexOf("stepOntoPillarBase(bot, approach.target(), List.of(approach))", refused);
+        int setAside = start.indexOf("EpisodeMemory.INSTANCE.exclude(", refused);
+        assertTrue(refused >= 0 && walk > refused && walk < setAside
+                        && start.contains("mayWalkToFoot && NavRouteRules.isObservationRefusal(route.reason())")
+                        && start.contains("> PILLAR_FOOT_WALK_DISTANCE_SQ"),
+                "a log whose pillar route is refused for want of sight, with the column's foot more than three blocks away,"
+                        + " is walked to first (the foot's own lanes are proved like any walk) rather than set aside");
+        assertTrue(methodBody(gather, "private boolean pillarToBlock(").contains("admitPillarApproach(bot, flat, mayStepOntoFloor)"),
+                "the planning after a walk onto a floor (which passes false) never walks again: no shuttling between two refusals");
+        assertTrue(methodBody(gather, "private void goToTarget(").contains("pillarToBlock(bot, targetPos, false)"),
+                "the pillar is planned from the foot with no further walk");
+        assertTrue(methodBody(gather, "private boolean stepOntoPillarBase(").contains("scaffoldSupplyItem = null;"),
+                "a walk to the foot ends any pending resupply of the pillar it replaces, as a started pillar does");
+    }
+
+    @Test
+    void theItemsRestingPlaceSeenFromThePillarSurvivesTheTowerComingDown() throws IOException {
+        String watch = read("task/TowerDropWatch.java");
+        String gather = read("task/GatherQuotaTask.java");
+
+        String hold = methodBody(watch, "boolean hold(AIPlayerEntity bot)");
+        assertTrue(Pattern.compile("boolean supported = HarvestCore\\.isDropPhysicallySupported\\(bot, drop\\);\\s*"
+                                + "if \\(supported\\) \\{\\s*restedAt = drop\\.blockPosition\\(\\)\\.immutable\\(\\);")
+                        .matcher(hold).find(),
+                "only an item seen at rest (supported) has a resting place: one that is still falling lies nowhere yet");
+        String note = methodBody(gather, "private void noteRestingPlace(");
+        assertTrue(note.contains("HarvestCore.isDropPhysicallySupported(bot, visibleDrop)")
+                        && note.contains("dropRestedAt = dropWatch.restedAt()"),
+                "the pickup learns the resting place from the floor when it sees the item, else from the watch on the tower");
+        assertTrue(methodBody(gather, "private void pickup(").contains("noteRestingPlace(bot, visibleDrop.orElse(null));"),
+                "every tick of the pickup window refreshes it");
+        assertTrue(methodBody(gather, "private void clearPickupLedger()").contains("dropRestedAt = null;")
+                        && methodBody(gather, "private void doStartHarvest(").contains("dropRestedAt = null;"),
+                "a resting place belongs to one felled log and is forgotten with its ledger");
     }
 
     private static String listBody(String source, String name) {

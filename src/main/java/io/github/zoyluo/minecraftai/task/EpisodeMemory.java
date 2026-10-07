@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.MiningController;
+import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
@@ -86,6 +87,15 @@ public final class EpisodeMemory {
      */
     public static int ttlAfterMiningRefusal(String reason) {
         return MiningController.TARGET_OBSTRUCTED.equals(reason) ? TTL_UNREACHABLE : TTL_SHORT;
+    }
+
+    /**
+     * How long a target stays excluded after a route to it was refused, by the reason. A refusal for want of sight is a state of
+     * the moment (the bot had not seen the way from where it stood, and another stance may show it): {@link #TTL_SHORT}. A route
+     * that Baritone found no way along, or that ended on its own, is a verdict on the target: {@link #TTL_UNREACHABLE}.
+     */
+    public static int ttlAfterRouteRefusal(String reason) {
+        return NavRouteRules.isObservationRefusal(reason) ? TTL_SHORT : TTL_UNREACHABLE;
     }
 
     /** Excludes a target point (unreachable/dug out/tried with no result); it automatically revives after the TTL. */
