@@ -192,7 +192,9 @@ public final class HuntCrossRegionGameTests {
         // heightmap-anchored (flush with the natural surface, obstacles above cleared) so the
         // surface-route proof cannot become marginal when the batch places the structure above
         // or below the natural floor; the sight contract only needs a distance clearly past
-        // the base radius, not the full 64.
+        // the base radius, not the full 64. Block sight (the render distance, 16 blocks in this
+        // harness) is shorter than prey sight, so the ground under this cow, 28 blocks out, has
+        // not been seen: the hunt must walk to it by observed legs, not reject it as unreachable.
         var world = context.getLevel();
         BlockPos origin = context.absolutePos(new BlockPos(4, 0, 4));
         int baseY = world.getHeight(
@@ -1731,6 +1733,8 @@ public final class HuntCrossRegionGameTests {
         // Hunt has a distinct 64-block line-of-sight acquisition contract. Keep the prey beyond
         // ordinary interaction range while inside that observable range; this proves the active
         // acquisition and physical-pickup path without depending on blind waypoint exploration.
+        // Block sight (16 blocks in this harness) is shorter than prey sight: the ground under the
+        // chicken is not in view at the start, so the approach begins with an observed leg toward it.
         chicken.snapTo(
                 start.getX() + 20.5D, start.getY(), start.getZ() + 0.5D, 0.0F, 0.0F);
         require(context, world.addFreshEntity(chicken), "failed to spawn cross-region chicken");

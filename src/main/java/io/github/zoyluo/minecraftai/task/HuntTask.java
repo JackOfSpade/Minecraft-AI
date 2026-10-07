@@ -560,6 +560,9 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (!isSafePreyPose(bot, prey)) {
             return SurfacePathStart.UNREACHABLE;
         }
+        if (standsBeyondBlockSight(bot, prey.blockPosition())) {
+            return startLegTowardUnseenPrey(bot, prey, returnAnchor);
+        }
         AttackPoseSelection selection = selectSafeAttackPose(bot, prey);
         if (selection.proof() == SurfaceRouteProof.RETRY) {
             return SurfacePathStart.RETRY;
@@ -598,6 +601,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         return started;
     }
 
+    /**
+     * False when the prey is gone, no longer seen, below the surface floor or seen to stand where nothing can stand. An animal is
+     * nominated out to {@link #PREY_SIGHT_RANGE}, but block sight reaches only the render distance: the ground of an animal seen
+     * beyond it has not been seen at all, so it is not judged here. A far-away target must not be rejected as no_round_trip on the
+     * very first step; {@link #startLegTowardUnseenPrey} closes in on it by observed legs until its cell is in sight.
+     */
     private boolean isSafePreyPose(AIPlayerEntity bot, LivingEntity prey) {
         if (prey == null || !prey.isAlive()
                 || !ObservableWorldQuery.canObserveEntityWithin(bot, prey, PREY_SIGHT_RANGE)) {
@@ -605,17 +614,48 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         BlockPos feet = prey.blockPosition();
         ServerLevel world = bot.level();
-        // Prey-cell validation uses the same range as prey sight: if you can see the animal but not
-        // the cell it's standing on, a far-away target would be rejected as no_round_trip on the very
-        // first step, contradicting the sight/safety chain.
-        if (feet.getY() < surfaceFloorY(bot)
-                || !ObservableWorldQuery.canObserveCellWithin(bot, feet, PREY_SIGHT_RANGE)
+        if (feet.getY() < surfaceFloorY(bot)) {
+            return false;
+        }
+        if (standsBeyondBlockSight(bot, feet)) {
+            return true;
+        }
+        if (!ObservableWorldQuery.canObserveCellWithin(bot, feet, PREY_SIGHT_RANGE)
                 || !ObservableWorldQuery.canObserveCellWithin(bot, feet.above(), PREY_SIGHT_RANGE)
                 || !ObservableWorldQuery.canObserveColliderWithin(bot, feet.below(), PREY_SIGHT_RANGE)) {
             return false;
         }
         Standability.clearCache();
         return Standability.isStandable(world, feet);
+    }
+
+    /** Whether {@code cell} is farther from the eye than block sight (the render distance) reaches, so nothing of it can be seen yet. */
+    private static boolean standsBeyondBlockSight(AIPlayerEntity bot, BlockPos cell) {
+        double reach = ObservableWorldQuery.visibleRangeBlocks(bot);
+        return bot.getEyePosition().distanceToSqr(cell.getCenter()) > reach * reach;
+    }
+
+    /**
+     * Walks one observed leg toward an animal whose ground is beyond block sight. There is no attack pose to prove yet: the
+     * animal's own cell, the stands around it and the way back from them are all unseen, and none of them is read. Each leg is
+     * proved like any other (walk-only way back to where it starts), and once the animal's cell comes into sight the next call
+     * selects its attack pose.
+     */
+    private SurfacePathStart startLegTowardUnseenPrey(AIPlayerEntity bot, LivingEntity prey, BlockPos returnAnchor) {
+        attackPose = null;
+        attackPreyCell = null;
+        BlockPos leg = HuntSurfaceRoutes.nextObservedSurfaceLeg(bot, prey.blockPosition(), surfaceFloorY(bot));
+        if (leg == null) {
+            return SurfacePathStart.UNREACHABLE;
+        }
+        SurfacePathStart started = HuntSurfaceRoutes.startExactSurfacePath(
+                bot, leg,
+                HuntSurfaceRoutes.digBreakthroughFloor(bot.blockPosition(), leg, surfaceFloorY(bot)),
+                returnAnchor, true);
+        if (started == SurfacePathStart.STARTED) {
+            approachLeg = leg.immutable();
+        }
+        return started;
     }
 
     /**
@@ -1048,7 +1088,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         CombatCore.lookAt(bot, target);
-        if (!attackPoseMatchesTarget(bot, target)) {
+        // An animal whose ground is not in sight yet has no attack pose: the leg walked toward it is kept until it ends.
+        if (!standsBeyondBlockSight(bot, target.blockPosition()) && !attackPoseMatchesTarget(bot, target)) {
             bot.getActionPack().stopAll();
             SurfacePathStart retarget = startSafePreyApproach(bot, target);
             if (retarget == SurfacePathStart.UNREACHABLE) {
