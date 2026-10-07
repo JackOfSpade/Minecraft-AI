@@ -127,6 +127,50 @@ public final class DescendDetourSupportGameTests {
                 }));
     }
 
+    /**
+     * The supports a descent places to bridge floorless cells are counted per layer, and once a layer has had its budget the
+     * bridge stops: a descent that cannot find ground within the radius it looks for a rim in is not made to spend its
+     * cobblestone on cells with nothing beyond them. The pillar over open air takes four supports (one a side) before the descent
+     * is given up on its own, so the task starts with all but one of its budget already spent and must place that one and no more.
+     */
+    @GameTest(environment = "minecraftai-gametest:descend_detour_support_game_tests_the_bridge_stops_after_the_last_support_of_its_layer_budget", maxTicks = 2400)
+    public void theBridgeStopsAfterTheLastSupportOfItsLayerBudget(GameTestHelper context) {
+        BlockPos start = pillar(context);
+        String name = "DetourBudgetGT";
+        AIPlayerEntity bot = spawnOnNearEdge(context, name, start);
+
+        DescendToYTask task = DescendToYTask.forMiningExploration(start.getY() - 6);
+        setDetourSupportsPlaced(task, DescendToYTask.MAX_DETOUR_SUPPORTS_PER_LAYER - 1);
+        task.start(bot);
+
+        DescendTickStages.run(context,
+                DescendTickStages.tickUntil(context, task, bot, 2000,
+                        "the descent never ended although its bridge budget was spent",
+                        () -> task.state() == TaskState.FAILED),
+                DescendTickStages.once(() -> {
+                    int supports = 0;
+                    for (Direction side : SIDES) {
+                        supports += hasSupport(context, start, side) ? 1 : 0;
+                    }
+                    require(context, supports == 1, "the last support of the budget was followed by " + (supports - 1) + " more");
+                    require(context, task.failureReason().startsWith("descend_no_safe_landing"),
+                            "the descent did not end for want of a landing: " + task.failureReason());
+                    TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
+                    AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+                    context.succeed();
+                }));
+    }
+
+    private static void setDetourSupportsPlaced(DescendToYTask task, int placed) {
+        try {
+            Field field = DescendToYTask.class.getDeclaredField("detourSupportsPlaced");
+            field.setAccessible(true);
+            field.setInt(task, placed);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("could not set the support count of the descent", exception);
+        }
+    }
+
     /** A one-block stone pillar in the middle of open air, and the cell on top of it. */
     private static BlockPos pillar(GameTestHelper context) {
         BlockPos start = context.absolutePos(new BlockPos(6, 12, 6));

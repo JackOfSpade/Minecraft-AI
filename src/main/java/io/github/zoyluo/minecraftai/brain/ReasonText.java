@@ -113,6 +113,7 @@ public final class ReasonText {
             case "gather" -> "gathering";
             case "hunt" -> "hunting";
             case "dig_down" -> "digging downward";
+            case "dig_out" -> "digging out of the dark";
             case "descend_to_y" -> "descending to the mining layer";
             case "ore_dig" -> "mining ore";
             case "mine_valuables" -> "mining valuables";

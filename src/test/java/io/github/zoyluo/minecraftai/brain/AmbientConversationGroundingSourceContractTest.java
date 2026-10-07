@@ -65,6 +65,8 @@ final class AmbientConversationGroundingSourceContractTest {
                         || fallback.toLowerCase().contains("terrain")
                         || fallback.toLowerCase().contains("search"),
                 "the no-evidence fallback must not itself narrate a scene or a journey");
+        assertFalse(fallback.toLowerCase().contains("company"),
+                "the canned fallback must not claim company that nothing the speaker observed supports");
     }
 
     /** The decisions themselves are unit-tested in AmbientConversationCoordinatorTest; this pins that every line passes through them. */

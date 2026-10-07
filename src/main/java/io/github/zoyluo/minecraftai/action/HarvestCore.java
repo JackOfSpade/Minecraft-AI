@@ -47,6 +47,8 @@ public final class HarvestCore {
      * planner a real air column instead of asking it to tunnel through an obstruction.
      */
     private static final int PILLAR_MAX_HORIZONTAL_OFFSET = 3;
+    /** The pillar planner's default: it may end on any cell within reach of the target. */
+    private static final Predicate<BlockPos> ANY_PILLAR_GOAL = goal -> true;
 
     private HarvestCore() {
     }
@@ -1113,7 +1115,8 @@ public final class HarvestCore {
                         && (posFilter == null || posFilter.test(cursor))
                         && !canDirectMine(bot, cursor)) {
                     BlockPos found = cursor.immutable();
-                    PillarApproach candidate = pillarApproachFromFloor(bot, found, bot.blockPosition().getY());
+                    PillarApproach candidate = pillarApproachFromFloor(
+                            bot, found, bot.blockPosition().getY(), ANY_PILLAR_GOAL);
                     if (candidate == null) {
                         beyondLevel.add(found);
                     } else if (isBetterPillar(candidate, result, origin)) {
@@ -1150,10 +1153,21 @@ public final class HarvestCore {
      */
     public static PillarApproach pillarApproachFor(AIPlayerEntity bot, BlockPos target,
                                                     Set<Block> targetBlocks) {
+        return pillarApproachFor(bot, target, targetBlocks, ANY_PILLAR_GOAL);
+    }
+
+    /**
+     * {@link #pillarApproachFor(AIPlayerEntity, BlockPos, Set)} for a caller that can only work from
+     * some of the cells a pillar could end on (a digger that mines the target from a pose the
+     * target's drop can be recovered from): the pillar ends on the lowest cell in reach that
+     * {@code goalFilter} accepts.
+     */
+    public static PillarApproach pillarApproachFor(AIPlayerEntity bot, BlockPos target,
+                                                    Set<Block> targetBlocks, Predicate<BlockPos> goalFilter) {
         if (!isObservedHarvestTarget(bot, target, targetBlocks)) {
             return null;
         }
-        return pillarApproach(bot, target.immutable());
+        return pillarApproach(bot, target.immutable(), goalFilter);
     }
 
     /**
@@ -1173,7 +1187,7 @@ public final class HarvestCore {
             return List.of();
         }
         BlockPos feet = bot.blockPosition();
-        return columnApproaches(bot, target.immutable(), (x, z) -> {
+        return columnApproaches(bot, target.immutable(), ANY_PILLAR_GOAL, (x, z) -> {
             int walk = Math.max(Math.abs(x - feet.getX()), Math.abs(z - feet.getZ()));
             BlockPos base = highestObservedStand(bot, x, z,
                     Math.min(target.getY() - 1, feet.getY() + walk + 1), feet.getY() - walk - 1);
@@ -1238,19 +1252,20 @@ public final class HarvestCore {
                 && targetBlocks.contains(bot.level().getBlockState(target).getBlock());
     }
 
-    private static PillarApproach pillarApproach(AIPlayerEntity bot, BlockPos target) {
+    private static PillarApproach pillarApproach(AIPlayerEntity bot, BlockPos target, Predicate<BlockPos> goalFilter) {
         if (canDirectMine(bot, target)) {
             return null;
         }
-        return pillarApproachFromFloor(bot, target, bot.blockPosition().getY());
+        return pillarApproachFromFloor(bot, target, bot.blockPosition().getY(), goalFilter);
     }
 
     /**
      * The cheapest observed column to pillar up in beside (or under) {@code target}, starting from a
      * floor at height {@code baseY}.
      */
-    private static PillarApproach pillarApproachFromFloor(AIPlayerEntity bot, BlockPos target, int baseY) {
-        List<PillarApproach> approaches = columnApproaches(bot, target, (x, z) -> {
+    private static PillarApproach pillarApproachFromFloor(AIPlayerEntity bot, BlockPos target, int baseY,
+                                                          Predicate<BlockPos> goalFilter) {
+        List<PillarApproach> approaches = columnApproaches(bot, target, goalFilter, (x, z) -> {
             BlockPos base = new BlockPos(x, baseY, z);
             return canObserveStand(bot, base) && Standability.isStandable(bot.level(), base) ? base : null;
         });
@@ -1272,7 +1287,8 @@ public final class HarvestCore {
      * for a log left hanging above a felled trunk. A goal whose headroom would run into the target fails
      * the air check, so the target itself can never end up inside the chosen column.
      */
-    private static List<PillarApproach> columnApproaches(AIPlayerEntity bot, BlockPos target, ColumnFloor floors) {
+    private static List<PillarApproach> columnApproaches(AIPlayerEntity bot, BlockPos target,
+                                                          Predicate<BlockPos> goalFilter, ColumnFloor floors) {
         BlockPos feet = bot.blockPosition();
         record Column(PillarApproach approach, boolean own) {
         }
@@ -1288,7 +1304,7 @@ public final class HarvestCore {
                     continue;
                 }
                 boolean own = horizontalSquared == 0;
-                PillarApproach approach = columnApproach(bot, target, base, own);
+                PillarApproach approach = columnApproach(bot, target, base, own, goalFilter);
                 if (approach != null) {
                     columns.add(new Column(approach, own));
                 }
@@ -1301,11 +1317,12 @@ public final class HarvestCore {
     }
 
     /** The lowest level of the column over {@code base} that the bot can mine {@code target} from, or null. */
-    private static PillarApproach columnApproach(AIPlayerEntity bot, BlockPos target, BlockPos base, boolean ownColumn) {
+    private static PillarApproach columnApproach(AIPlayerEntity bot, BlockPos target, BlockPos base, boolean ownColumn,
+                                                  Predicate<BlockPos> goalFilter) {
         int baseY = base.getY();
         for (int goalY = baseY + 1; goalY <= target.getY(); goalY++) {
             BlockPos goal = base.above(goalY - baseY);
-            if (!canReachFromPillarGoal(bot, target, goal)) {
+            if (!canReachFromPillarGoal(bot, target, goal) || !goalFilter.test(goal)) {
                 continue;
             }
             // Mining straight up the target's own column crosses every cell between the pillar

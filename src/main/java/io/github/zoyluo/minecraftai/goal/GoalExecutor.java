@@ -3109,13 +3109,24 @@ public final class GoalExecutor {
 
     /**
      * The goal a queued request becomes when it is promoted to the active mission.  A fresh
-     * Fulfill is measured from the inventory held at that moment, not from the one it was
-     * accepted with while another mission was still running (see {@link Goal.Fulfill#rebaselined}).
+     * Fulfill and an incremental ore or crop request are measured from the inventory held at that
+     * moment, not from the one they were accepted with while another mission was still running
+     * (see {@link Goal.Fulfill#rebaselined}).  An absolute goal is never re-measured: it carries no
+     * incremental marker, so it comes out unchanged.
      */
     private static Goal startingGoal(AIPlayerEntity bot, Goal queued) {
-        return queued instanceof Goal.Fulfill fulfill
-                ? fulfill.rebaselined(item -> GoalSnapshotCollector.inventoryCount(bot, item))
-                : queued;
+        if (queued instanceof Goal.Fulfill fulfill) {
+            return fulfill.rebaselined(item -> GoalSnapshotCollector.inventoryCount(bot, item));
+        }
+        if (queued instanceof Goal.MineOre mineOre) {
+            return mineOre.rebaselined(io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
+                    bot, io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(mineOre.ores())));
+        }
+        if (queued instanceof Goal.HarvestCrop crop) {
+            return crop.rebaselined(io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
+                    bot, Set.of(crop.produce())));
+        }
+        return queued;
     }
 
     /**

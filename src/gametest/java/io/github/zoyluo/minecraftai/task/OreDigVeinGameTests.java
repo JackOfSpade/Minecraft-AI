@@ -152,7 +152,7 @@ public final class OreDigVeinGameTests {
         int heldCoal = InventoryAction.countItem(bot, Items.COAL);
         require(context, heldCoal == 1, "fixture did not start with exactly one held coal");
         int requestedDrops = 1;
-        Goal.MineOre expectedGoal = new Goal.MineOre(
+        Goal.MineOre expectedGoal = Goal.MineOre.additional(
                 OreScan.oreFamily(Blocks.COAL_ORE), requestedDrops, heldCoal);
         require(context, expectedGoal.count() == requestedDrops
                         && expectedGoal.initialDropCount() == heldCoal

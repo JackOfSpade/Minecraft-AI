@@ -157,6 +157,7 @@ public final class BotReporter {
             case "mine_valuables" -> "mining nearby valuables";
             case "hunt" -> "hunting for food";
             case "dig_down" -> "digging downward";
+            case "dig_out" -> "digging out of the dark";
             default -> ReasonText.taskName(status.name());
         };
     }

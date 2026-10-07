@@ -111,6 +111,40 @@ final class TowerDescentSourceContractTest {
     }
 
     @Test
+    void oreDigBuildsItsPillarWithThePlannerOfTheOthersAndTakesItDownBeforeItWalksOff() throws IOException {
+        String ore = read("task/OreDigTask.java");
+        String start = methodBody(ore, "private boolean startOrePillar(");
+        String route = methodBody(ore, "private boolean beginOrePillarRoute(");
+        String descend = methodBody(ore, "private boolean descendOreTower(");
+        String inUse = methodBody(ore, "private boolean towerInUse(");
+        String onTick = methodBody(ore, "protected void onTick(AIPlayerEntity bot)");
+
+        assertTrue(start.contains("HarvestCore.pillarApproachFor(bot, ore, targetOres,")
+                        && start.contains("isRecoverableBreakPose(goal, ore)"),
+                "an ore pillar is the planner of the gather and mine tasks, asked to end on a pose the ore's drop is recovered from");
+        assertTrue(!start.contains("maxPillarSupports") && !ore.contains("OrePillarTower"),
+                "a tower of any height can be left: the descent takes it down, so no height is invented as a cap");
+        assertTrue(route.contains("TowerDescent.over(goal, goal.getY() - floor.getY())")
+                        && route.contains("tower.standsOnTower(bot) ? tower.base()")
+                        && route.contains("TowerCustody.INSTANCE.hold(bot, this, tower)"),
+                "every pillar route is remembered, to be taken down, from the floor the first of a stack of pillars rose from");
+        assertTrue(descend.contains("TowerCustody.INSTANCE.release(bot, tower)") && descend.contains("tower.tick(bot)"),
+                "the task hands the tower back once it is down");
+        assertTrue(inUse.contains("orePillarGoal != null") && inUse.contains("miner.target() != null")
+                        && inUse.contains("canBreakTargetFromHere(bot, owner)") && inUse.contains("owner.equals(towerOre)"),
+                "a pillar being built or mined from is in use; the ore next in line that cannot be mined from its top is not");
+
+        int descent = onTick.indexOf("if (descendOreTower(bot))");
+        assertTrue(descent > 0
+                        && descent > onTick.indexOf("recoverPendingTargetDrop(bot)")
+                        && descent < onTick.indexOf("maybePlaceAutomaticTorchAtSafeBoundary(bot, world, false)")
+                        && descent < onTick.indexOf("tickVisibleOreSighting(bot)")
+                        && onTick.indexOf("failForNoProgress(bot, world)", descent) > descent
+                        && descent < onTick.indexOf("waitForFinalCountVeinDrops(bot)"),
+                "the descent comes after the drop of the last break is settled and before anything that walks the bot off its tower or ends the task");
+    }
+
+    @Test
     void onlyTheTowerDescentMayBreakTheBotsOwnFooting() throws IOException {
         String pack = read("action/ActionPack.java");
         String own = methodBody(pack, "public ActionResult startOwnSupportMining(BlockPos pos)");

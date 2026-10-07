@@ -55,11 +55,26 @@ denies the teleport, so the bot answers with what it carries (`dark_trap_respons
   a stuck `move` is paused first and resumes once the lighting ends;
 * `CRAFT_TORCHES`: it carries no torch but coal or charcoal and sticks (or planks), so it crafts torches in the
   inventory grid; the lighting follows once it has them;
-* `NONE`: nothing to light the cell with, so it tells the player once and does nothing else;
+* `DIG_OUT`: nothing to light the cell with and nothing to make a torch from, so it tells the player once and starts
+  `DigOutTask`, which digs a stair up out of the dark (see below);
 * `LIGHTING_OFF`: `night.autoLight` is `false`, so it places nothing, whatever it carries, and says that automatic
-  lighting is switched off (once, like `NONE`).
+  lighting is switched off (once).
 
 A cell is answered with the same thing at most once: it is announced again only after the bot has moved or its
-means changed (a torch used up, coal crafted), so the same trap is never reported every eight seconds. Digging out
-toward the sky is not implemented: the dig helpers only go down or sideways, and a bot sealed in a pocket has observed
-nothing that says which way is out.
+means changed (a torch used up, coal crafted), so the same trap is never reported every eight seconds.
+
+### Digging out
+
+`DigOutTask` is the answer of a bot that has nothing to light the cell with. It climbs a block per step, a block forward
+and a block up (`OreClimb`'s rise, the stair OreDig digs up to an ore), until the cell it stands in is no longer a
+dark trap: lit by anything, or under open sky. It never lights the surface and it does not know where the sky is; it
+digs up, as a player does, and only what it sees decides each step. In the middle of a room, where there is no wall to
+start a rise in, it first walks to the nearest wall it can see, and never back onto a cell it has stood in since its
+last rise.
+
+A step is opened only when what the bot sees allows it (`StairDig` through `MiningSafety.openingRefusal`): no fluid
+or falling block in, over or beside any cell of the step (an open cell beside a lava or water cell that an earlier
+opening revealed is refused too, since the flow comes in through it), nothing the break rule does not let a bot dig,
+no player standing on it. A refused heading is turned from (right, left, back); when all four are refused, or a block
+will not give, or the build limit is reached, the task ends and says why. A stuck `move` that was paused for it
+resumes afterwards, as after the lighting.

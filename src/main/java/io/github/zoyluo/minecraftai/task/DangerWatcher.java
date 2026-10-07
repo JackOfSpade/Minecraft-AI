@@ -1239,7 +1239,7 @@ public final class DangerWatcher {
     // detected, teleport back to the surface + clear the current goal + request help (throttled).
     // Sacrifice the current goal to save the bot's life; the brain can retry after returning to the
     // surface (by then torches should be better stocked, making it safer). Where the teleport is denied
-    // (strict survival) the bot lights the cell with its own torches instead, see answerDarkTrapWithoutTeleport.
+    // (strict survival) the bot lights the cell with its own torches, or digs its way out, instead, see answerDarkTrapWithoutTeleport.
     private boolean maybeEscapeDarkTrap(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
         // isWaiting = the task self-reports "standing still in place is a normal state": MoveTask can
         // stand still for several seconds while tunnel-digging straight through hard stone, and
@@ -1305,8 +1305,8 @@ public final class DangerWatcher {
         LIGHT,
         /** It carries the makings of torches (coal or charcoal, and sticks or planks): craft them first, in the inventory grid. */
         CRAFT_TORCHES,
-        /** Nothing to light the cell with. */
-        NONE,
+        /** Nothing to light the cell with and nothing to make a torch from: dig a stair up out of the dark ({@link DigOutTask}). */
+        DIG_OUT,
         /** Automatic lighting is switched off ({@code night.autoLight}), like the other lighting reflexes: whatever the bot carries stays put. */
         LIGHTING_OFF
     }
@@ -1321,7 +1321,7 @@ public final class DangerWatcher {
         if (torchesCarried > 0) {
             return DarkTrapResponse.LIGHT;
         }
-        return torchesCraftable ? DarkTrapResponse.CRAFT_TORCHES : DarkTrapResponse.NONE;
+        return torchesCraftable ? DarkTrapResponse.CRAFT_TORCHES : DarkTrapResponse.DIG_OUT;
     }
 
     private static DarkTrapResponse darkTrapResponse(AIPlayerEntity bot) {
@@ -1336,11 +1336,11 @@ public final class DangerWatcher {
         return darkTrapResponse(autoLight, torches, craftable);
     }
 
-    /** What the bot tells its player when it can do nothing about being stuck in the dark; the reason is the one that is true. */
+    /** What the bot tells its player when it is stuck in the dark and lights nothing; the reason is the one that is true. */
     static String darkTrapReport(String botName, BlockPos feet, DarkTrapResponse response) {
         String reason = response == DarkTrapResponse.LIGHTING_OFF
                 ? "automatic lighting is switched off (night.autoLight)."
-                : "has nothing to light it with.";
+                : "has nothing to light it with, so it is digging a stair up out of it.";
         return botName + " is stuck in the dark at (" + feet.getX() + "," + feet.getY() + "," + feet.getZ() + ") and " + reason;
     }
 
@@ -1357,9 +1357,10 @@ public final class DangerWatcher {
 
     /**
      * The surface teleport is denied (strict survival) or there is no open sky above, so the trapped bot answers the way a player in a
-     * dark pocket does: it places a torch if it has one, crafts torches from coal and sticks first if it can, and otherwise can only
-     * say so. Lighting stays underground-only: {@link LightAreaTask#automatic} skips the surface and a trap cell is never on it. Like
-     * the other lighting reflexes this is a background task, so the work it interrupts is resumed once it ends.
+     * dark pocket does: it places a torch if it has one, crafts torches from coal and sticks first if it can, and otherwise digs a stair
+     * up out of the dark ({@link DigOutTask}), which ends in a lit cell or under open sky and so lights nothing on the surface. Like the
+     * other lighting reflexes these are background tasks, so the work they interrupt is resumed once they end. With automatic lighting
+     * switched off it only says so.
      */
     private boolean answerDarkTrapWithoutTeleport(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active,
                                                   BlockPos feet, DarkTrapResponse response) {
@@ -1371,15 +1372,18 @@ public final class DangerWatcher {
         Task task = switch (response) {
             case LIGHT -> LightAreaTask.automatic(8, 8);
             case CRAFT_TORCHES -> new CraftTask(net.minecraft.world.item.Items.TORCH, DARK_TRAP_TORCHES);
-            case NONE, LIGHTING_OFF -> null;
+            case DIG_OUT -> new DigOutTask();
+            case LIGHTING_OFF -> null;
         };
-        if (task == null) {
+        if (response == DarkTrapResponse.DIG_OUT || response == DarkTrapResponse.LIGHTING_OFF) {
             int now = server.getTickCount();
             if (now >= nextEscapeHelpTick.getOrDefault(bot.getUUID(), 0)) {
                 BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
                         darkTrapReport(bot.getGameProfile().name(), feet, response));
                 nextEscapeHelpTick.put(bot.getUUID(), now + TRAP_HELP_INTERVAL);
             }
+        }
+        if (task == null) {
             return false;
         }
         String reason = "dark_trap_" + response.name().toLowerCase(java.util.Locale.ROOT);

@@ -19,7 +19,7 @@ class ToolRegistryIncrementalGatherBoundaryTest {
         assertTrue(registry.contains(
                 "int heldProduce = HarvestCore.countInventoryItems(bot, Set.of(produce));"));
         assertTrue(registry.contains(
-                "new Goal.HarvestCrop(spec.crop(), spec.seed(), produce,"));
+                "Goal.HarvestCrop.additional(spec.crop(), spec.seed(), produce,"));
         assertTrue(registry.contains(
                 "Goal.HarvestCrop.timedCollection(spec.crop(), spec.seed(), produce, heldProduce)"));
         assertTrue(registry.contains("NEW produce items"));

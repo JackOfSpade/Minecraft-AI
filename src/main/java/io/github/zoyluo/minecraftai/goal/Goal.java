@@ -87,18 +87,30 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
      * total.  Planner-internal ore prerequisites and existing persisted missions therefore retain
      * their original behavior.</p>
      *
+     * <p>{@code incremental} is the explicit marker of a public request whose baseline is a
+     * snapshot of what the bot held when it asked: an absolute goal with a zero baseline looks
+     * identical to an incremental request that held nothing, so the baseline alone cannot say
+     * whether a request that waited in the queue may be measured again from the inventory it
+     * starts with ({@link #rebaselined}).  Only {@link #additional} and the timed factory with a
+     * baseline set it.</p>
+     *
      * <p>For timed collection, {@code count} is retained as a
      * positive compatibility value but is not a completion target. Callers must use
      * {@link #isTimedCollection()} and {@link #timeLimitTicks()} instead of the inventory target
      * when deciding whether the mission is complete.</p>
      */
-    record MineOre(Set<Block> ores, int count, int initialDropCount, CollectionMode collectionMode) implements Goal {
+    record MineOre(Set<Block> ores, int count, int initialDropCount, CollectionMode collectionMode,
+                   boolean incremental) implements Goal {
         public MineOre(Set<Block> ores, int count) {
-            this(ores, count, 0, CollectionMode.FIXED_QUOTA);
+            this(ores, count, 0, CollectionMode.FIXED_QUOTA, false);
         }
 
         public MineOre(Set<Block> ores, int count, int initialDropCount) {
-            this(ores, count, initialDropCount, CollectionMode.FIXED_QUOTA);
+            this(ores, count, initialDropCount, CollectionMode.FIXED_QUOTA, false);
+        }
+
+        public MineOre(Set<Block> ores, int count, int initialDropCount, CollectionMode collectionMode) {
+            this(ores, count, initialDropCount, collectionMode, false);
         }
 
         public MineOre {
@@ -111,14 +123,35 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
             }
         }
 
+        /** A public request for {@code count} NEW drops above the {@code heldDrops} carried right now. */
+        public static MineOre additional(Set<Block> ores, int count, int heldDrops) {
+            return new MineOre(ores, count, heldDrops, CollectionMode.FIXED_QUOTA, true);
+        }
+
         /** Start an open-ended ten-minute collection mission from the current ore baseline. */
         public static MineOre timedCollection(Set<Block> ores, int initialDropCount) {
-            return new MineOre(ores, 1, initialDropCount, CollectionMode.TIMED_COLLECTION);
+            return new MineOre(ores, 1, initialDropCount, CollectionMode.TIMED_COLLECTION, true);
         }
 
         /** Start an open-ended ten-minute collection mission with no prior inventory baseline. */
         public static MineOre timedCollection(Set<Block> ores) {
-            return timedCollection(ores, 0);
+            return new MineOre(ores, 1, 0, CollectionMode.TIMED_COLLECTION, false);
+        }
+
+        /**
+         * The same request measured from {@code heldDrops}, the inventory the bot holds now.  A
+         * public request that waited behind another mission was snapshotted when it was accepted,
+         * but it must be measured from what it STARTS with: whatever the mission ahead of it mined
+         * is not "new" for this request.  Only an incremental request is ever re-measured; an
+         * absolute goal keeps the target it was built with.  A baseline the quota cannot be added
+         * to without overflowing int keeps the old one rather than throwing on the promoting tick.
+         */
+        public MineOre rebaselined(int heldDrops) {
+            int held = Math.max(0, heldDrops);
+            if (!incremental || held > Integer.MAX_VALUE - count) {
+                return this;
+            }
+            return new MineOre(ores, count, held, collectionMode, true);
         }
 
         public boolean isTimedCollection() {
@@ -156,15 +189,25 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
      * <p>The legacy four-argument constructor keeps its original absolute-inventory behavior by
      * supplying a zero baseline. In timed mode, {@code count} is a positive compatibility value,
      * not a terminal inventory requirement.</p>
+     *
+     * <p>{@code incremental} marks a public request whose baseline is a snapshot of what the bot
+     * held when it asked, so a request that waited in the queue may be measured again from the
+     * inventory it starts with ({@link #rebaselined}); see {@link MineOre} for why a zero baseline
+     * cannot say that by itself.</p>
      */
     record HarvestCrop(Block crop, Item seed, Item produce, int count, int initialProduceCount,
-                       CollectionMode collectionMode) implements Goal {
+                       CollectionMode collectionMode, boolean incremental) implements Goal {
         public HarvestCrop(Block crop, Item seed, Item produce, int count) {
-            this(crop, seed, produce, count, 0, CollectionMode.FIXED_QUOTA);
+            this(crop, seed, produce, count, 0, CollectionMode.FIXED_QUOTA, false);
         }
 
         public HarvestCrop(Block crop, Item seed, Item produce, int count, int initialProduceCount) {
-            this(crop, seed, produce, count, initialProduceCount, CollectionMode.FIXED_QUOTA);
+            this(crop, seed, produce, count, initialProduceCount, CollectionMode.FIXED_QUOTA, false);
+        }
+
+        public HarvestCrop(Block crop, Item seed, Item produce, int count, int initialProduceCount,
+                           CollectionMode collectionMode) {
+            this(crop, seed, produce, count, initialProduceCount, collectionMode, false);
         }
 
         public HarvestCrop {
@@ -176,15 +219,29 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
             }
         }
 
+        /** A public request for {@code count} NEW produce above the {@code heldProduce} carried right now. */
+        public static HarvestCrop additional(Block crop, Item seed, Item produce, int count, int heldProduce) {
+            return new HarvestCrop(crop, seed, produce, count, heldProduce, CollectionMode.FIXED_QUOTA, true);
+        }
+
         /** Start an open-ended ten-minute crop-collection mission from the current produce baseline. */
         public static HarvestCrop timedCollection(Block crop, Item seed, Item produce, int initialProduceCount) {
             return new HarvestCrop(crop, seed, produce, 1, initialProduceCount,
-                    CollectionMode.TIMED_COLLECTION);
+                    CollectionMode.TIMED_COLLECTION, true);
         }
 
         /** Start an open-ended ten-minute crop-collection mission with no prior produce baseline. */
         public static HarvestCrop timedCollection(Block crop, Item seed, Item produce) {
-            return timedCollection(crop, seed, produce, 0);
+            return new HarvestCrop(crop, seed, produce, 1, 0, CollectionMode.TIMED_COLLECTION, false);
+        }
+
+        /** The same request measured from {@code heldProduce}; see {@link MineOre#rebaselined}. */
+        public HarvestCrop rebaselined(int heldProduce) {
+            int held = Math.max(0, heldProduce);
+            if (!incremental || held > Integer.MAX_VALUE - count) {
+                return this;
+            }
+            return new HarvestCrop(crop, seed, produce, count, held, collectionMode, true);
         }
 
         public boolean isTimedCollection() {

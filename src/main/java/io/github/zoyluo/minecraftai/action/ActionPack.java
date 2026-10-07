@@ -646,6 +646,19 @@ public final class ActionPack {
     }
 
     /**
+     * {@link #startPillarPathTo(BlockPos)} for a caller that keeps a protected mining-stone reserve. A
+     * route cannot be told a reserve (it would place nothing at all, see {@link NavRouteRules#optionsFor}),
+     * but it places from the first support stack the bot carries until that stack is gone, so the pillar is
+     * started only when that stack alone holds {@code supports} blocks beyond the reserve.
+     */
+    public ActionResult startPillarPathTo(BlockPos goal, int supports, int protectedStoneLikeReserve) {
+        if (MaterialPalette.spendableFirstPillarSupports(player, protectedStoneLikeReserve) < supports) {
+            return ActionResult.failed("pillar_support_below_reserve");
+        }
+        return startPillarPathTo(goal);
+    }
+
+    /**
      * Starts a surface-exploration path without digging or disposable pillar shortcuts.
      * Hunt/Gather roaming must be able to keep moving after it reaches a waypoint; a path that
      * spends the last few dirt blocks pillaring out of a depression is not a reusable surface route.

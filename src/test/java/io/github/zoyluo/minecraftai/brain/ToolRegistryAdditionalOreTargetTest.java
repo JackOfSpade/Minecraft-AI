@@ -17,7 +17,7 @@ class ToolRegistryAdditionalOreTargetTest {
         String registry = Files.readString(REGISTRY);
 
         assertTrue(registry.contains("int heldDrops = HarvestCore.countInventoryItems(bot, HarvestCore.expectedDropsFor(ores));"));
-        assertTrue(registry.contains("return new Goal.MineOre(ores, requestedDrops, heldDrops);"),
+        assertTrue(registry.contains("return Goal.MineOre.additional(ores, requestedDrops, heldDrops);"),
                 "one held coal plus a request to mine one must remain a one-drop mission with a one-coal baseline");
     }
 

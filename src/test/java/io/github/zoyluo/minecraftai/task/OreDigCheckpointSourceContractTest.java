@@ -254,7 +254,7 @@ class OreDigCheckpointSourceContractTest {
     @Test
     void primaryAndVeinTargetsShareTheCloseBreakAndApproachPolicy() throws IOException {
         String source = Files.readString(SOURCE);
-        int helper = source.indexOf("private static boolean hasRecoverableTargetBreakPose");
+        int helper = source.indexOf("static boolean isRecoverableBreakPose");
         int vertical = source.indexOf("int vertical = pos.getY() - feet.getY()", helper);
         int manhattan = source.indexOf("int horizontalManhattan =", vertical);
         int lowerLimit = source.indexOf("vertical >= MIN_TARGET_BREAK_DY", manhattan);
@@ -262,7 +262,8 @@ class OreDigCheckpointSourceContractTest {
         int closeLimit = source.indexOf("horizontalManhattan <= 1", upperLimit);
         int raisedLimit = source.indexOf(
                 "vertical < MAX_TARGET_BREAK_DY || horizontalManhattan == 0", closeLimit);
-        int vanillaReach = source.indexOf("withinReach(bot, pos)", raisedLimit);
+        int vanillaReach = source.indexOf(
+                "isRecoverableBreakPose(bot.blockPosition(), pos) && withinReach(bot, pos)");
         int breakHelper = source.indexOf("private static boolean canBreakTargetFromHere");
         int sharedEnvelope = source.indexOf("hasRecoverableTargetBreakPose(bot, pos)", breakHelper);
         int idlePath = source.indexOf("isPathExecutorIdle()", sharedEnvelope);
@@ -338,17 +339,22 @@ class OreDigCheckpointSourceContractTest {
         int missingPose = source.indexOf("if (workPose == null)", workPose);
         int rememberedRoute = source.indexOf(
                 "tryRememberedHighWorkPoseRoute(bot, world, ore)", missingPose);
-        int highColumn = source.indexOf(
-                "isOverheadInOwnColumn(bot, ore)", rememberedRoute);
-        int typedAbandon = source.indexOf(
-                "\"overhead_drop_catch_unproven\"", highColumn);
-        int approachPath = source.indexOf("startSurfacePathTo(workPose)", typedAbandon);
+        int climb = source.indexOf("if (climbsTo(bot, ore))", rememberedRoute);
+        int approachPath = source.indexOf("startSurfacePathTo(workPose)", climb);
         assertTrue(approachPathIdle > approach && approachWalkIdle > approachPathIdle
                         && workPose > approachWalkIdle && missingPose > workPose
-                        && rememberedRoute > missingPose && highColumn > rememberedRoute
-                        && typedAbandon > highColumn
-                        && approachPath > typedAbandon,
-                "high overhead ore must use a live/remembered non-destructive side route or be released intact");
+                        && rememberedRoute > missingPose && climb > rememberedRoute
+                        && approachPath > climb,
+                "high overhead ore must use a live/remembered non-destructive side route, or be climbed to");
+        // An ore whose own floor is open is kept intact, whichever way it would have been reached: a drop launched into an
+        // open column can leave it and settle out of reach.
+        String climbing = source.substring(source.indexOf("private void climbTowardHighTarget"));
+        assertTrue(climbing.indexOf("hasReliableObservedDropCatch(bot, world, support)") >= 0
+                        && climbing.indexOf("\"overhead_drop_catch_unproven\"")
+                        > climbing.indexOf("hasReliableObservedDropCatch(bot, world, support)")
+                        && climbing.indexOf("\"overhead_drop_catch_unproven\"") < climbing.indexOf("StairDig.refusal(")
+                        && climbing.indexOf("StairDig.refusal(") < climbing.indexOf("startOrePillar(bot, world, ore)"),
+                "an overhead ore with no proven catch under it is released before any stair or pillar is attempted");
 
         int commitGate = source.indexOf("private boolean passesTargetDropCommitGate");
         int poseGate = source.indexOf("if (!hasRecoverableTargetBreakPose(bot, ore))", commitGate);
