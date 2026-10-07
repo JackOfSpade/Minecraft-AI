@@ -76,7 +76,15 @@ public final class InteractAction {
         return null;
     }
 
+    /**
+     * A right click on an entity (feed, milk, board). {@code Entity.interact} carries no pick ray and vanilla's server checks
+     * no line of sight for it, so the click proves the vanilla collider line itself, whatever sight the caller chose its target
+     * with: an animal the bot's eyes see through a leaf or a fence is not one its hand can reach.
+     */
     public static ActionResult useItemOnEntity(AIPlayerEntity player, Entity target, InteractionHand hand) {
+        if (!StrikeLegality.hasStrikeLineOfSight(player, target)) {
+            return ActionResult.failed("no_line_of_sight");
+        }
         net.minecraft.world.InteractionResult result = target.interact(player, hand);
         return result.consumesAction() ? ActionResult.SUCCESS : ActionResult.failed("interact_entity_" + result.getClass().getSimpleName());
     }

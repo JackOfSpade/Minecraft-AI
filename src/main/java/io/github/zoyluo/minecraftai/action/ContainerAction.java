@@ -119,12 +119,16 @@ public final class ContainerAction {
      * first. The usual face-center test cannot be used here, because a chest collision box is a
      * sixteenth smaller than the block on every side and the ray would end short of it, so a chest
      * in plain view never counted as observable. A wall (or any other block) in between still does.
+     *
+     * <p>This is the strict (vanilla clip) proof, not the see-through sight one: opening a container sends no pick ray, so a
+     * chest behind a fence, a pane or a leaf must stay out of reach, and the discovery callers use the same answer as the
+     * transfer phases so a seen chest can always be opened.</p>
      */
     public static boolean canSee(AIPlayerEntity bot, BlockPos pos) {
         if (!bot.level().hasChunkAt(pos)) {
             return false; // a remembered position in an unloaded chunk is unknown, never "seen"
         }
-        return ObservableWorldQuery.canObserveCell(bot, pos);
+        return ObservableWorldQuery.canObserveCellStrict(bot, pos);
     }
 
     /** True when the bot stands within reach of {@code pos} and can see it (the same test every transfer phase uses). */

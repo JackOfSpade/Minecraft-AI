@@ -170,7 +170,7 @@ public final class PlaceStationsTask extends AbstractTask {
         BlockPos origin = bot.blockPosition();
         return BlockPos.betweenClosedStream(origin.offset(-STATION_RADIUS, -3, -STATION_RADIUS),
                         origin.offset(STATION_RADIUS, 4, STATION_RADIUS))
-                .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> ObservableWorldQuery.canObserveBlockStrict(bot, pos))
                 .anyMatch(pos -> bot.level().getBlockState(pos).is(Blocks.CHEST)
                         || bot.level().getBlockState(pos).is(Blocks.TRAPPED_CHEST));
     }

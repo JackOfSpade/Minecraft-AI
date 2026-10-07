@@ -2752,29 +2752,16 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         harvestStartRefusal = null;
         if (refusal != null) {
-            // The break controller is gone: the block left the bot's sight (or was never admitted), so
-            // nothing in this phase can progress. Plan another target at once rather than idling out
-            // the harvest deadline (18 s on one log in a real session). The exclusion is short: a
-            // different stance may show the block again.
-            bot.getActionPack().stopAll();
-            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
-                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_SHORT);
-            BotLog.action(bot, "gather_harvest_refused", "pos", targetPos.toShortString(), "reason", refusal);
-            targetPos = null;
-            clearPickupLedger();
-            resetSurveyWatchdog();
-            phase = Phase.SURVEY;
+            // The break controller is gone: the block left the bot's sight, or it is seen but not mineable from
+            // here (a log behind a pane, a fence or leaves it may not break), or it was never admitted, so nothing
+            // in this phase can progress. Plan another target at once rather than idling out the harvest deadline
+            // (18 s on one log in a real session). The exclusion is short: a different stance may show the block,
+            // or a line to it, again.
+            abandonHarvestTarget(bot, "gather_harvest_refused", refusal, EpisodeMemory.TTL_SHORT);
             return;
         }
         if (elapsed - harvestStartedTick > HARVEST_LIMIT) {
-            bot.getActionPack().stopAll();
-            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
-                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
-            BotLog.action(bot, "gather_harvest_timeout", "pos", targetPos.toShortString());
-            targetPos = null;
-            clearPickupLedger();
-            resetSurveyWatchdog();
-            phase = Phase.SURVEY;
+            abandonHarvestTarget(bot, "gather_harvest_timeout", null, EpisodeMemory.TTL_UNREACHABLE);
             return;
         }
         if (bot.getActionPack().isMiningIdle() && (harvestStartFenced || elapsed % 200 == 0)) {
@@ -2783,6 +2770,27 @@ public final class GatherQuotaTask extends AbstractTask {
             // 240-tick deadline whenever the target had become out of reach.
             startHarvestMining(bot);
         }
+    }
+
+    /**
+     * Gives up the harvest target, excludes it for {@code ttl} and surveys again: the way out of a harvest that cannot go on,
+     * whether its deadline passed or its break was refused (see {@link #startHarvestMining}).
+     *
+     * @param reason the miner's typed refusal, or {@code null} for the deadline
+     */
+    private void abandonHarvestTarget(AIPlayerEntity bot, String event, String reason, int ttl) {
+        bot.getActionPack().stopAll();
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                bot.level().getServer().getTickCount(), ttl);
+        if (reason == null) {
+            BotLog.action(bot, event, "pos", targetPos.toShortString());
+        } else {
+            BotLog.action(bot, event, "pos", targetPos.toShortString(), "reason", reason);
+        }
+        targetPos = null;
+        clearPickupLedger();
+        resetSurveyWatchdog();
+        phase = Phase.SURVEY;
     }
 
     private void recordBrokenBlock(AIPlayerEntity bot) {
@@ -3219,7 +3227,12 @@ public final class GatherQuotaTask extends AbstractTask {
         phase = Phase.HARVEST;
     }
 
-    /** Starts the break controller and remembers how to learn that it ended without breaking. */
+    /**
+     * Starts the break controller and remembers how to learn that it ended without breaking. The miner refuses at once a target the
+     * eyes that nominated it see further than the hand reaches (a log behind a pane or a fence, or leaves it may not break:
+     * {@code target_obstructed}, or {@code target_not_observed}): {@link #harvest} reads that refusal on its next tick and gives
+     * the target up instead of waiting out the harvest deadline, whichever start it came from.
+     */
     private void startHarvestMining(AIPlayerEntity bot) {
         ActionResult started = HarvestCore.startMining(bot, targetPos);
         harvestMiningGeneration = bot.getActionPack().miningGeneration();

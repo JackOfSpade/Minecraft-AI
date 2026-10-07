@@ -871,12 +871,18 @@ public final class CreeperDefenseTask extends AbstractTask {
         return 1;
     }
 
+    /**
+     * The creepers that are a risk right now: noticed and on a physical line. A blast's exposure rays are collider rays, so a creeper
+     * the bot's eyes see through a leaf, a fence line or a pane (and its fuse cannot start across either) is not one to flee from;
+     * counting it as visible would also hold the escape open for as long as it stays in view ("visible but unreachable", F10).
+     */
     private static List<VisibleCreeper> observableCreeperSnapshots(AIPlayerEntity bot) {
         return bot.level()
                 .getEntitiesOfClass(
                         Creeper.class,
                         bot.getBoundingBox().inflate(CREEPER_SCAN_RANGE),
-                        entity -> ObservableWorldQuery.canNoticeCreature(bot, entity))
+                        entity -> ObservableWorldQuery.canNoticeCreature(bot, entity)
+                                && CombatCore.hasLineOfSight(bot, entity))
                 .stream()
                 .filter(Creeper::isAlive)
                 .map(entity -> {

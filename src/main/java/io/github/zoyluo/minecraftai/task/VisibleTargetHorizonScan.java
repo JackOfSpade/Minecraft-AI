@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.SightClipContext;
 import io.github.zoyluo.minecraftai.perception.SharedWorldSight;
 import java.util.List;
 import java.util.Set;
@@ -12,7 +13,8 @@ import net.minecraft.world.level.block.Block;
  * Budgeted, line-of-sight-only discovery for an ordinary gather or mine target.
  *
  * <p>This is intentionally a view sweep, not a render-distance block scan. Each new fact is
- * either the first hit of an eye ray or an already ray-proven shared-sight memory entry that is
+ * either what an eye ray reaches (the eye sees through foliage, fences, glass and water) or an
+ * already ray-proven shared-sight memory entry that is
  * proved again before it is returned. Unlike {@link TreeHorizonScan}, it has no landmark class:
  * a non-tree target is useful only when the target block itself is currently visible.</p>
  */
@@ -96,13 +98,13 @@ final class VisibleTargetHorizonScan {
         int range = Math.max(1, ObservableWorldQuery.visibleRangeBlocks(bot) - 1);
         // Exact vertical targets have no meaningful azimuth. Probe both axes every slice so an
         // overhead/underfoot block is not left between finite angular bands.
-        Sighting vertical = targetSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, 1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
+        Sighting vertical = targetSighting(ObservableWorldQuery.castSightRay(bot, 0.0D, 1.0D, 0.0D,
+                range, ObservableWorldQuery.ViewShape.OUTLINE, null), feet);
         if (vertical != null) {
             return vertical;
         }
-        Sighting downward = targetSighting(ObservableWorldQuery.castViewRay(bot, 0.0D, -1.0D, 0.0D,
-                range, ObservableWorldQuery.ViewShape.OUTLINE), feet);
+        Sighting downward = targetSighting(ObservableWorldQuery.castSightRay(bot, 0.0D, -1.0D, 0.0D,
+                range, ObservableWorldQuery.ViewShape.OUTLINE, null), feet);
         if (downward != null) {
             return downward;
         }
@@ -122,9 +124,9 @@ final class VisibleTargetHorizonScan {
             double azimuth = (Math.PI * 2.0D * (azimuthIndex + subcellOffset)) / AZIMUTH_SAMPLES;
             double elevation = elevation(elevationSample, subcellOffset);
             double horizontal = Math.cos(elevation);
-            ObservableWorldQuery.ViewHit hit = ObservableWorldQuery.castViewRay(bot,
+            ObservableWorldQuery.ViewHit hit = ObservableWorldQuery.castSightRay(bot,
                     Math.cos(azimuth) * horizontal, Math.sin(elevation), Math.sin(azimuth) * horizontal,
-                    range, ObservableWorldQuery.ViewShape.OUTLINE);
+                    range, ObservableWorldQuery.ViewShape.OUTLINE, null);
             advance();
             Sighting sighting = targetSighting(hit, feet);
             if (sighting != null) {
@@ -153,9 +155,19 @@ final class VisibleTargetHorizonScan {
         return null;
     }
 
-    /** Converts one already cast first-hit ray into a target sighting without any extra read. */
+    /**
+     * Converts one already cast sight ray into a target sighting without any extra read. The ray passes through foliage,
+     * fences, glass and water, so the target may be the block behind them or one of those cells itself (a plant, a vine,
+     * a cobweb): the nearest cell of the ray that is a target block wins. A block the caller has declined from the cell the
+     * bot stands in (see {@link #decline}) is passed over wherever the ray meets it, crossed or struck.
+     */
     private Sighting targetSighting(ObservableWorldQuery.ViewHit hit, BlockPos feet) {
         raysCast++;
+        for (SightClipContext.Crossing crossing : hit.crossed()) {
+            if (targetBlocks.contains(crossing.state().getBlock()) && !declined.isDeclined(feet, crossing.pos())) {
+                return new Sighting(crossing.pos(), raysCast);
+            }
+        }
         if (hit.hit() && hit.pos() != null && hit.state() != null
                 && targetBlocks.contains(hit.state().getBlock())
                 && !declined.isDeclined(feet, hit.pos())) {

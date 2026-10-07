@@ -323,8 +323,11 @@ public final class CombatCore {
 
     /**
      * The nearest live entity of {@code targetType} the bot may fight. A HOSTILE one must have been noticed (realistic perception:
-     * seen for the reaction time, heard and in view, or struck by it); a non-hostile one (a cow the bot was asked to kill) is a
-     * deliberate search, so the bot glances around for it: omnidirectional observation, as for every hunt.
+     * seen for the reaction time, heard and in view, or struck by it) and be on a physical line ({@link #hasLineOfSight}): the
+     * bot's eyes see through a leaf or a pane, but a fight against what stands behind it would be swung at the leaf. A non-hostile
+     * one (a cow the bot was asked to kill) is a deliberate search, so the bot glances around for it: omnidirectional observation,
+     * as for every hunt. It must be on a physical line as well: a cow behind glass that is nearer than one in the open would be
+     * walked to, lost for want of a line and the fight reported complete with nothing killed.
      */
     public static Optional<LivingEntity> nearestTarget(AIPlayerEntity bot, EntityType<?> targetType, double range) {
         return bot.level()
@@ -333,8 +336,8 @@ public final class CombatCore {
                                 && !isFriendly(bot, entity))
                 .stream()
                 .filter(entity -> hostileTo(bot, entity)
-                        ? ObservableWorldQuery.canNoticeCreature(bot, entity)
-                        : ObservableWorldQuery.canObserveEntity(bot, entity))
+                        ? ObservableWorldQuery.canNoticeCreature(bot, entity) && hasLineOfSight(bot, entity)
+                        : ObservableWorldQuery.canObserveEntity(bot, entity) && hasLineOfSight(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
@@ -356,6 +359,9 @@ public final class CombatCore {
                                 && allowed.test(entity))
                 .stream()
                 .filter(entity -> SharedVision.seenByBotOrOwner(bot, entity))
+                // Seen is not fightable: a hostile the eyes only see through a leaf, a fence or a pane would be walked up to and
+                // abandoned again for want of a line (the guard's cooldown cycle), so only one on a physical line is acquired.
+                .filter(entity -> hasLineOfSightOrOwnerSees(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
@@ -369,10 +375,20 @@ public final class CombatCore {
     // what's needed to determine "is a wall in the way". A blocked hostile can't land a melee hit,
     // can't land a ranged shot, and a creeper can't explode on the bot, so it should not
     // trigger/sustain combat (observed bug: a mob blocked by blocks left the bot stuck "in combat"
-    // forever).
+    // forever). This is the PHYSICAL line (the vanilla collider ray), not the bot's sight: its eyes see
+    // through leaves, fences, glass and water (ObservableWorldQuery.canNoticeCreature), but a blow, an
+    // arrow or a blast cannot cross them, so every fight, pressure and shot decision asks this one.
     public static boolean hasLineOfSight(AIPlayerEntity bot, LivingEntity mob) {
+        return hasLineOfSightFrom(bot, bot.getEyePosition(), mob);
+    }
+
+    /**
+     * {@link #hasLineOfSight} for a bot whose eyes are at {@code eye}, say at a stand it has not reached yet: a hunt only commits
+     * to a pose from which the prey can be struck.
+     */
+    public static boolean hasLineOfSightFrom(AIPlayerEntity bot, Vec3 eye, LivingEntity mob) {
         HitResult hit = bot.level().clip(new ClipContext(
-                bot.getEyePosition(), mob.getEyePosition(),
+                eye, mob.getEyePosition(),
                 ClipContext.Block.COLLIDER,
                 ClipContext.Fluid.NONE,
                 bot));
@@ -380,12 +396,13 @@ public final class CombatCore {
     }
 
     /**
-     * {@link #hasLineOfSight} for combat bookkeeping (the lost-sight timer, whether a threat is worth a task): the bot's own line
-     * of sight, or, for a foreign bot only, the owner's nomination ({@link SharedVision#ownerSees}). It nominates, it never permits a
-     * strike: {@code StrikeLegality.strikeRefusal} still needs the bot's own reach and collider line of sight.
+     * {@link #hasLineOfSight} for combat bookkeeping (the lost-sight timer, whether a threat is worth a task): the bot's own physical
+     * line, or, for a foreign bot only, the owner's nomination along the owner's own collider line
+     * ({@link SharedVision#ownerSeesStrict}: an owner looking through a window must not hold a fight alive). It nominates, it
+     * never permits a strike: {@code StrikeLegality.strikeRefusal} still needs the bot's own reach and collider line of sight.
      */
     public static boolean hasLineOfSightOrOwnerSees(AIPlayerEntity bot, LivingEntity target) {
-        return hasLineOfSight(bot, target) || SharedVision.ownerSees(bot, target);
+        return hasLineOfSight(bot, target) || SharedVision.ownerSeesStrict(bot, target);
     }
 
     /**

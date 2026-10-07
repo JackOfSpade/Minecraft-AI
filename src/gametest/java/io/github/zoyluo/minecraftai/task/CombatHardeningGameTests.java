@@ -783,10 +783,12 @@ public final class CombatHardeningGameTests {
 
     /**
      * A hostile the guard can see from its post but never reach: the moment the guard engages it, a
-     * glass partition cuts the line of sight, and once the guard has given up and returned the
+     * glass partition cuts the physical line (the bot's EYES see through glass, a blow does not: the
+     * husk stays in sight the whole time), and once the guard has given up and returned the
      * partition is gone again (as when a mob is visible across a gap but out of sight on any route
      * to it). The guard must drop it for a cooldown instead of cycling engage / walk up /
-     * disengage / return.
+     * disengage / return. Now that glass is see-through this is the stronger case: only the
+     * physical line, never sight, ends the engagement, or the guard would stand at the pane for good.
      */
     @GameTest(environment = ENV + "guard_does_not_cycle_on_the_target_it_lost_sight_of", maxTicks = 220)
     public void guardDoesNotCycleOnTheTargetItLostSightOf(GameTestHelper context) {
@@ -824,6 +826,8 @@ public final class CombatHardeningGameTests {
             wasApproaching[0] = approaching;
             require(context, !wallUp[0] || husk.getHealth() == husk.getMaxHealth(),
                     "the guard struck through the glass");
+            require(context, !wallUp[0] || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, husk),
+                    "the premise is the husk stays SEEN through the glass; the guard drops it for want of a line to hit it by");
             if (context.getTick() >= 150) {
                 require(context, engagements.get() >= 1 && lostSightExit.get(),
                         "the guard never engaged and dropped the unreachable husk: engagements="

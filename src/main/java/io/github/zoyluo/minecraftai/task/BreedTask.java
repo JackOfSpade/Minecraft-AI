@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
@@ -93,7 +94,10 @@ public final class BreedTask extends AbstractTask {
                                 && animal.getAge() == 0
                                 && animal.canFallInLove())
                 .stream()
-                .filter(animal -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, animal))
+                // Seen AND feedable from here: the eyes pass through glass and fences, but feeding needs the plain vanilla line
+                // (InteractAction.useItemOnEntity), so a penned pair nearer than an open one would be walked to and never fed.
+                .filter(animal -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, animal)
+                        && StrikeLegality.hasStrikeLineOfSight(bot, animal))
                 .sorted(Comparator.comparingDouble(bot::distanceTo))
                 .toList();
         if (candidates.size() < 2) {

@@ -93,7 +93,8 @@ public final class FarmAction {
     /**
      * Click-time proof for breaking a ripe crop: it is still ripe, inside the physical block
      * interaction reach, and its outline is actually visible. The break itself is a real mining
-     * action (BlockMiner), so tools, swing and the vanilla break path all apply.
+     * action (BlockMiner), so tools, swing and the vanilla break path all apply. The outline proof is
+     * the strict one: a crop behind a taller crop is seen but not reachable.
      */
     public static ActionResult harvestProof(AIPlayerEntity bot, BlockPos cropPos) {
         if (!isMature(bot.level(), cropPos)) {
@@ -102,7 +103,7 @@ public final class FarmAction {
         if (!bot.isWithinBlockInteractionRange(cropPos, 0.0D)) {
             return ActionResult.failed("out_of_reach");
         }
-        if (!ObservableWorldQuery.canObserveFarmCell(bot, cropPos)) {
+        if (!ObservableWorldQuery.canObserveFarmCellStrict(bot, cropPos)) {
             return ActionResult.failed("crop_not_visible");
         }
         return ActionResult.SUCCESS;

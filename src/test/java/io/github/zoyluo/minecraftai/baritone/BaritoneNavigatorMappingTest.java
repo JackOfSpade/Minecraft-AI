@@ -145,9 +145,10 @@ final class BaritoneNavigatorMappingTest {
                 "a route allowed to swim must prove a visible dry shore through water, rather than treating water as an opaque wall");
 
         String floorProof = method(fence, "private static void observeFloorTopIfVisible(");
-        assertTrue(floorProof.contains("ObservableWorldQuery.castViewRayThroughFluids")
-                        && floorProof.contains("ObservableWorldQuery.castViewRay("),
-                "the floor proof must choose Fluid.NONE only for an explicitly water-capable route");
+        assertTrue(floorProof.contains("ObservableWorldQuery.castSightRay(")
+                        && floorProof.contains("ObservableWorldQuery.ViewShape.COLLIDER, floor)")
+                        && !floorProof.contains("castViewRay"),
+                "the floor proof is a sight ray that never skips the floor cell itself (a leaf, fence or water floor is hit and recorded as what it is); only a dry route may record a visibly empty floor as AIR");
         assertFalse(floorProof.contains("bot.level().getBlockState(floor)"),
                 "a shore support state must come from the first ray hit, never a raw floor read");
 
@@ -216,7 +217,7 @@ final class BaritoneNavigatorMappingTest {
         String routeCell = method(fence, "private static boolean observeRouteCellIfVisible(");
         assertTrue(routeCell.contains("ObservableWorldQuery.canObserveCellThroughFluids")
                         && routeCell.contains("ObservableWorldQuery.canObserveCell(bot, pos)")
-                        && routeCell.contains("observeRouteOutlineIfVisible(bot, pos, throughFluids, observed, tick)"),
+                        && routeCell.contains("observeRouteOutlineIfVisible(bot, pos, observed, tick)"),
                 "a non-colliding climbing block must have either a cell proof or an exact outline proof");
         String outline = method(fence, "private static boolean observeRouteOutlineIfVisible(");
         assertTrue(outline.contains("ObservableWorldQuery.ViewShape.OUTLINE")

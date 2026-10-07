@@ -1089,14 +1089,7 @@ public final class DangerWatcher {
         // there's no calculating -- fight even bare-handed, trading damage for a window to survive.
         if (repeat >= 2 && bot.hurtTime > 0) {
             trapRecords.remove(bot.getUUID());
-            var hostile = bot.level().getEntitiesOfClass(
-                    LivingEntity.class,
-                    bot.getBoundingBox().inflate(4.0D), e -> e.isAlive())
-                    .stream()
-                    .filter(e -> isActiveHostileThreat(bot, e))
-                    .filter(e -> !CombatCore.isMeleeForbiddenThreat(e))
-                    .filter(e -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canNoticeCreature(bot, e))
-                    .findFirst().orElse(null);
+            var hostile = lastStandTarget(bot);
             if (hostile != null) {
                 BotLog.danger(bot, "trapped_fight_back", "target", hostile.getType().toString());
                 if (TaskManager.INSTANCE.getActive(bot).isPresent()
@@ -1123,6 +1116,23 @@ public final class DangerWatcher {
             trapRecords.put(bot.getUUID(), new TrapRecord(here, repeat, rec.lastHelpTick()));
         }
         return true;
+    }
+
+    /**
+     * The hostile a last stand fights: the nearest within melee reach that is noticed AND on a physical line. Noticed is not
+     * hittable: a hostile seen through a pane or a hedge would be picked over the one actually landing the blows, and the fight
+     * (which only acquires on a physical line) would end at once with the last stand spent.
+     */
+    static LivingEntity lastStandTarget(AIPlayerEntity bot) {
+        return bot.level().getEntitiesOfClass(
+                        LivingEntity.class,
+                        bot.getBoundingBox().inflate(4.0D), e -> e.isAlive())
+                .stream()
+                .filter(e -> isActiveHostileThreat(bot, e))
+                .filter(e -> !CombatCore.isMeleeForbiddenThreat(e))
+                .filter(e -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canNoticeCreature(bot, e))
+                .filter(e -> CombatCore.hasLineOfSight(bot, e))
+                .min(Comparator.comparingDouble(bot::distanceTo)).orElse(null);
     }
 
     private boolean maybeStartNightTask(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
@@ -1488,6 +1498,11 @@ public final class DangerWatcher {
         return !observableActiveHostilePressure(bot).isEmpty();
     }
 
+    /**
+     * Hostiles that press on the bot: seen, inside the pressure envelope and on a physical line. The line matters here because the
+     * bot's eyes see through leaves, fences, glass and water: a zombie in a glass-walled farm or behind a hedge is seen, but it can
+     * neither reach the bot nor be reached, so it must not stop the bot eating, healing or cleaning up (nor gate a detour).
+     */
     private static List<LivingEntity> observableActiveHostilePressure(AIPlayerEntity bot) {
         return bot.level()
                 .getEntitiesOfClass(
@@ -1495,7 +1510,8 @@ public final class DangerWatcher {
                         bot.getBoundingBox().inflate(CombatCore.hostilePressureScanRange()),
                         entity -> isActiveHostileThreat(bot, entity)
                                 && SharedVision.seenByBotOrOwner(bot, entity)
-                                && CombatCore.isWithinHostilePressureEnvelope(bot, entity));
+                                && CombatCore.isWithinHostilePressureEnvelope(bot, entity)
+                                && CombatCore.hasLineOfSightOrOwnerSees(bot, entity));
     }
 
     /**
@@ -1844,7 +1860,9 @@ public final class DangerWatcher {
     // for judging "is there a wall in the way". A melee mob without line of sight can't hit it, a
     // ranged mob without line of sight can't shoot it, and a Creeper without line of sight can't blow
     // it up either -- none of these count as a current threat (they'll be re-detected once they come
-    // around or into view).
+    // around or into view). This is the physical collider line, not the bot's sight: its eyes see
+    // through leaves, fences, glass and water (canNoticeCreature), so a mob it merely sees through
+    // one of them is noticed but is no threat to run from or fight until it has a line.
     private static boolean canReachThreat(AIPlayerEntity bot, LivingEntity mob) {
         // A foreign bot the owner is looking at counts as reachable: the owner nominates it, the strike gate still needs the bot's own line.
         return CombatCore.hasLineOfSightOrOwnerSees(bot, mob);

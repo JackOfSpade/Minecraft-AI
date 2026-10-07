@@ -20,12 +20,18 @@ public final class MilkCowAction {
     private MilkCowAction() {
     }
 
+    /**
+     * The nearest adult cow the bot sees and can milk from where it stands: its eyes pass through glass and fences, but the
+     * click needs the plain vanilla line ({@link InteractAction#useItemOnEntity}), so a cow behind a pane must not hide the one
+     * in the open that is a little farther.
+     */
     public static Cow nearestCow(AIPlayerEntity bot, double radius) {
         ServerLevel world = bot.level();
         return world.getEntitiesOfClass(Cow.class, bot.getBoundingBox().inflate(radius),
                         cow -> cow.isAlive() && !cow.isBaby())
                 .stream()
-                .filter(cow -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, cow))
+                .filter(cow -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, cow)
+                        && StrikeLegality.hasStrikeLineOfSight(bot, cow))
                 .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .orElse(null);
     }

@@ -541,7 +541,7 @@ public final class StripMineTask extends AbstractTask {
     private void deposit(AIPlayerEntity bot) {
         if (activeDepotChest == null
                 || bot.getEyePosition().distanceToSqr(activeDepotChest.getCenter()) > REACH_SQUARED
-                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, activeDepotChest)) {
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlockStrict(bot, activeDepotChest)) {
             phase = Phase.RETURN;
             return;
         }

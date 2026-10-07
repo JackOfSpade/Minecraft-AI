@@ -583,11 +583,11 @@ public final class ObservedNavigationFence {
         // collider behind it. The cell ray correctly rejects that as empty space, so earn its
         // state instead from an outline ray whose first hit is this exact cell. The hit owns the
         // only state read; no target state is consulted before visibility succeeds.
-        return observeRouteOutlineIfVisible(bot, pos, throughFluids, observed, tick);
+        return observeRouteOutlineIfVisible(bot, pos, observed, tick);
     }
 
     /** Records a plainly visible non-colliding route block from an exact first-hit outline ray. */
-    private static boolean observeRouteOutlineIfVisible(AIPlayerEntity bot, BlockPos pos, boolean throughFluids,
+    private static boolean observeRouteOutlineIfVisible(AIPlayerEntity bot, BlockPos pos,
                                                         Map<Long, Cell> observed, int tick) {
         Vec3 eye = bot.getEyePosition();
         Vec3 centre = pos.getCenter();
@@ -600,12 +600,10 @@ public final class ObservedNavigationFence {
             return false;
         }
         // Continue slightly beyond the cell centre so a thin outline attached to its far face
-        // (notably a vine on a wall) can become the genuine first hit.
-        ObservableWorldQuery.ViewHit view = throughFluids
-                ? ObservableWorldQuery.castViewRayThroughFluids(bot, dx, dy, dz,
-                        Math.min(radius, distance + 1.0D), ObservableWorldQuery.ViewShape.OUTLINE)
-                : ObservableWorldQuery.castViewRay(bot, dx, dy, dz,
-                        Math.min(radius, distance + 1.0D), ObservableWorldQuery.ViewShape.OUTLINE);
+        // (notably a vine on a wall) can become the genuine first hit. A sight ray sees through
+        // foliage, fences and water, and never skips the cell itself.
+        ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castSightRay(bot, dx, dy, dz,
+                Math.min(radius, distance + 1.0D), ObservableWorldQuery.ViewShape.OUTLINE, pos);
         if (!view.hit() || !pos.equals(view.pos()) || view.state() == null) {
             return false;
         }
@@ -662,10 +660,10 @@ public final class ObservedNavigationFence {
         if (!(distance > 1.0E-9D) || distance > Math.max(1, MinecraftAiConfig.get().perception().radius())) {
             return;
         }
-        ObservableWorldQuery.ViewHit view = throughFluids
-                ? ObservableWorldQuery.castViewRayThroughFluids(
-                        bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER)
-                : ObservableWorldQuery.castViewRay(bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER);
+        // The floor cell is the ray's target: a leaf, fence or water floor is hit and recorded as what it is,
+        // never mistaken for the empty cell a ray that skipped it would reach.
+        ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castSightRay(
+                bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER, floor);
         if (view.hit() && floor.equals(view.pos())) {
             put(observed, floor.asLong(), view.state(), tick);
         } else if (!throughFluids && !view.isUnknown() && !view.hit()) {
@@ -705,10 +703,8 @@ public final class ObservedNavigationFence {
         if (!(distance > 1.0E-9D) || distance > range) {
             return;
         }
-        ObservableWorldQuery.ViewHit view = throughFluids
-                ? ObservableWorldQuery.castViewRayThroughFluids(
-                        bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER)
-                : ObservableWorldQuery.castViewRay(bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER);
+        ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castSightRay(
+                bot, dx, dy, dz, distance, ObservableWorldQuery.ViewShape.COLLIDER, floor);
         if (view.hit() && floor.equals(view.pos())) {
             put(observed, floor.asLong(), view.state(), tick);
         } else if (!throughFluids && !view.isUnknown() && !view.hit()) {
@@ -1065,7 +1061,7 @@ public final class ObservedNavigationFence {
             int advanceZ = advanceX == 0 ? Integer.signum(dz) : 0;
             if (advanceX != 0 || advanceZ != 0) {
                 observeInsetDetourStance(bot, flank.offset(advanceX, 0, advanceZ),
-                        advanceX, advanceZ, offsetX, offsetZ, throughFluids, observed, tick);
+                        advanceX, advanceZ, offsetX, offsetZ, observed, tick);
             }
         }
     }
@@ -1100,7 +1096,7 @@ public final class ObservedNavigationFence {
             int advanceZ = advanceX == 0 ? Integer.signum(dz) : 0;
             if (advanceX != 0 || advanceZ != 0) {
                 observeInsetDetourStance(bot, flank.offset(advanceX, 0, advanceZ),
-                        advanceX, advanceZ, offsetX, offsetZ, throughFluids, observed, tick);
+                        advanceX, advanceZ, offsetX, offsetZ, observed, tick);
             }
         }
     }
@@ -1112,21 +1108,21 @@ public final class ObservedNavigationFence {
      */
     private static void observeInsetDetourStance(AIPlayerEntity bot, BlockPos feet,
                                                   int advanceX, int advanceZ, int lateralX, int lateralZ,
-                                                  boolean throughFluids, Map<Long, Cell> observed, int tick) {
+                                                  Map<Long, Cell> observed, int tick) {
         int lateralSignX = Integer.signum(lateralX);
         int lateralSignZ = Integer.signum(lateralZ);
         for (int y = 0; y <= NAVIGATION_HEADROOM; y++) {
             observeInsetRouteCell(bot, feet.above(y), advanceX, advanceZ, lateralSignX, lateralSignZ,
-                    0.5D, throughFluids, observed, tick);
+                    0.5D, observed, tick);
         }
         observeInsetRouteCell(bot, feet.below(), advanceX, advanceZ, lateralSignX, lateralSignZ,
-                0.999D, throughFluids, observed, tick);
+                0.999D, observed, tick);
     }
 
     /** Records only a genuine first hit at this cell, or a collider miss that proves its interior is visible. */
     private static void observeInsetRouteCell(AIPlayerEntity bot, BlockPos cell,
                                                int advanceX, int advanceZ, int lateralSignX, int lateralSignZ,
-                                               double height, boolean throughFluids,
+                                               double height,
                                                Map<Long, Cell> observed, int tick) {
         Vec3 eye = bot.getEyePosition();
         // Keep the endpoint just inside the visible face: this has enough margin to expose a
@@ -1142,11 +1138,8 @@ public final class ObservedNavigationFence {
         if (!(distance > 1.0E-9D) || distance > radius) {
             return;
         }
-        ObservableWorldQuery.ViewHit view = throughFluids
-                ? ObservableWorldQuery.castViewRayThroughFluids(bot, dx, dy, dz, distance,
-                        ObservableWorldQuery.ViewShape.COLLIDER)
-                : ObservableWorldQuery.castViewRay(bot, dx, dy, dz, distance,
-                        ObservableWorldQuery.ViewShape.COLLIDER);
+        ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castSightRay(bot, dx, dy, dz, distance,
+                ObservableWorldQuery.ViewShape.COLLIDER, cell);
         if (view.isUnknown()) {
             return;
         }
@@ -1292,8 +1285,8 @@ public final class ObservedNavigationFence {
 
     private static void scanRay(AIPlayerEntity bot, Map<Long, Cell> observed,
                                 double dx, double dy, double dz, double range, int tick) {
-        ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castViewRay(bot, dx, dy, dz, range,
-                ObservableWorldQuery.ViewShape.COLLIDER);
+        ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castSightRay(bot, dx, dy, dz, range,
+                ObservableWorldQuery.ViewShape.COLLIDER, null);
         if (view.isUnknown()) {
             return;
         }
@@ -1303,11 +1296,13 @@ public final class ObservedNavigationFence {
             return;
         }
         double distance = view.distance();
+        // The eye passes through leaves, fences, glass and water, and Baritone plans on what is stored here: a cell
+        // the ray crossed keeps the state it really holds, so foliage and water are never remembered as free air.
         RayGrid.traverse(eye.x, eye.y, eye.z, dx / length, dy / length, dz / length, distance,
                 (x, y, z) -> {
                     BlockPos pos = new BlockPos(x, y, z);
-                    BlockState state = view.hit() && pos.equals(view.pos()) ? view.state() : AIR;
-                    put(observed, pos.asLong(), state, tick);
+                    BlockState seen = view.seenState(pos);
+                    put(observed, pos.asLong(), seen != null ? seen : AIR, tick);
                     return true;
                 });
         if (view.hit()) {

@@ -42,8 +42,10 @@ final class PerceptionFollowupSourceContractTest {
                 "while the scan is failing every creature question is the old omnidirectional test, never blindness");
         String projectile = between(senses, "public boolean noticedProjectile(AIPlayerEntity bot, Entity projectile)",
                 "/** The place {@code bot} should turn");
-        assertTrue(projectile.contains("scanFailedRecently(bot)") && projectile.contains("bot.hasLineOfSight(projectile)"),
-                "the projectile test degrades the same way");
+        assertTrue(projectile.contains("scanFailedRecently(bot)") && projectile.contains("SightClip.hasLineOfSight(bot, projectile)"),
+                "the projectile test degrades the same way, with the same see-through eyes as the live path");
+        assertTrue(senses.contains("&& SightClip.hasLineOfSight(bot, creature)") && !senses.contains("bot.hasLineOfSight("),
+                "the fail-safe sees what the live scan sees (through leaves, fences, glass and water), never through the plain vanilla ray");
     }
 
     @Test

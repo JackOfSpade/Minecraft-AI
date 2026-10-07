@@ -104,7 +104,7 @@ class AssistObservationSourceContractTest {
     private static String castViewRayBody() throws IOException {
         String source = read(MAIN.resolve("mode/ObservableWorldQuery.java"));
         int start = source.indexOf("private static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,\n"
-                + "                                        double range, ViewShape shape, ClipContext.Fluid fluid) {");
+                + "                                        double range, ViewShape shape, boolean seeThrough, BlockPos target) {");
         assertTrue(start >= 0, "the shared castViewRay implementation must exist");
         int end = source.indexOf("\n    }\n", start);
         assertTrue(end > start, "the shared castViewRay implementation must end with a method-level closing brace");
@@ -136,6 +136,9 @@ class AssistObservationSourceContractTest {
     void theSweeperUsesTheAnswerOfCastViewRayAndTreatsASkippedRayAsUnknown() throws IOException {
         String sweeper = code(ASSIST.resolve("ViewSweeper.java"));
         assertEquals(1, count(sweeper, "ObservableWorldQuery.castViewRay("));
+        assertFalse(sweeper.contains("castSightRay"),
+                "the sweeper keeps the strict first-hit ray: its occupancy grid writes air for every traversed cell and its "
+                        + "hazard field takes a water surface for a fluid hit, so a ray through foliage or water would erase both");
         assertTrue(Pattern.compile("ObservableWorldQuery\\.ViewHit\\s+view\\s*=\\s*ObservableWorldQuery\\.castViewRay\\(")
                 .matcher(sweeper).find(), "the answer is kept, not thrown away");
         int unknown = sweeper.indexOf("if (view.isUnknown()) {");
@@ -157,10 +160,10 @@ class AssistObservationSourceContractTest {
         assertFalse(body.contains("CapabilityRuntime.decide"), "no privileged read exists here");
         assertFalse(body.contains("CapabilityRuntime"), "not even a mention");
         assertTrue(body.contains("bot.getEyePosition()"), "the ray starts at the bot's own eye");
-        assertTrue(source.contains("return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.ANY);"),
-                "the ordinary view ray must preserve its opaque-fluid policy");
-        assertTrue(source.contains("return castViewRay(bot, dx, dy, dz, range, shape, ClipContext.Fluid.NONE);"),
-                "the explicitly named water-route view ray may share only the same bounded first-hit implementation");
+        assertTrue(source.contains("return castViewRay(bot, dx, dy, dz, range, shape, false, null);"),
+                "the ordinary view ray stays the strict vanilla clip, opaque to foliage, fences, glass and water, for the sweeper");
+        assertTrue(source.contains("return castViewRay(bot, dx, dy, dz, range, shape, true, target);"),
+                "the see-through sight ray may share only the same bounded first-hit implementation");
 
         int typeCheck = body.indexOf("HitResult.Type.BLOCK");
         int stateRead = body.indexOf("getBlockState(");
@@ -181,7 +184,8 @@ class AssistObservationSourceContractTest {
                         + "double range, ViewShape shape)"));
         assertTrue(source.contains("public enum ViewShape {"));
         assertTrue(source.contains(
-                "public record ViewHit(boolean hit, BlockPos pos, Direction side, double distance, BlockState state)"));
+                "public record ViewHit(boolean hit, BlockPos pos, Direction side, double distance, BlockState state, "
+                        + "List<SightClipContext.Crossing> crossed)"));
     }
 
     // ---- no privilege anywhere in the assist ---------------------------------------------------

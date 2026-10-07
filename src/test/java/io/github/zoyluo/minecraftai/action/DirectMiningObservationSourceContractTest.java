@@ -24,7 +24,8 @@ class DirectMiningObservationSourceContractTest {
         assertInOrder(start,
                 "if (controllerStartBlocked())",
                 "if (pos == null || face == null)",
-                "if (!MiningController.currentObservedTarget(player, pos))",
+                "MiningObstruction.Plan admission = MiningController.admission(player, pos);",
+                "if (admission.refused())",
                 "BotLog.action(player, \"mine_refused\"",
                 "MiningSafety.SupportOccupancy support = MiningSafety.supportOccupancy(player, pos);",
                 "if (support != MiningSafety.SupportOccupancy.NONE)",
@@ -41,16 +42,19 @@ class DirectMiningObservationSourceContractTest {
         String observation = body(source, "static boolean currentObservedTarget(AIPlayerEntity player, BlockPos pos)");
         assertInOrder(observation,
                 "ownBodyEmergencyBlock(player, pos)",
-                "ObservableWorldQuery.canObserveBlockCellFace(player, pos)",
-                "ObservableWorldQuery.canObserveCell(player, pos)",
-                "ObservableWorldQuery.canObserveBlock(player, pos)",
-                "ObservableWorldQuery.canObserveBlockWithInsetFaces(player, pos)");
-        assertTrue(observation.contains("ObservableWorldQuery.canObserveBlockCellFace(player, pos)\n"
-                        + "                || ObservableWorldQuery.canObserveCell(player, pos)"),
+                "ObservableWorldQuery.canObserveBlockCellFaceStrict(player, pos)",
+                "ObservableWorldQuery.canObserveCellStrict(player, pos)",
+                "ObservableWorldQuery.canObserveBlockStrict(player, pos)",
+                "ObservableWorldQuery.canObserveBlockWithInsetFacesStrict(player, pos)");
+        assertTrue(observation.contains("ObservableWorldQuery.canObserveBlockCellFaceStrict(player, pos)\n"
+                        + "                || ObservableWorldQuery.canObserveCellStrict(player, pos)"),
                 "a partial but exposed block needs the ordinary state-free cell ray when it cannot reach a unit-cell face");
+        assertFalse(observation.matches("(?s).*canObserve(Block|BlockCellFace|Cell|BlockWithInsetFaces|FarmCell)\\(.*"),
+                "the break gate is the reach gate: it asks the strict (vanilla clip) predicates, never the see-through sight ones, "
+                        + "so a log seen behind a leaf is not mined through the leaf");
         String crop = body(source, "private static boolean currentObservedCropTarget(AIPlayerEntity player, BlockPos pos)");
         assertInOrder(crop,
-                "ObservableWorldQuery.canObserveFarmCell(player, pos)",
+                "ObservableWorldQuery.canObserveFarmCellStrict(player, pos)",
                 "player.level().getBlockState(pos)",
                 "instanceof CropBlock");
         String bodyEmergency = body(source, "private static boolean ownBodyEmergencyBlock(AIPlayerEntity player, BlockPos pos)");
@@ -75,8 +79,9 @@ class DirectMiningObservationSourceContractTest {
         assertInOrder(tick,
                 "if (visiblyAir(player, pos))",
                 "return settleVisibleAir(player);",
+                "if (clearing != null)",
                 "if (!currentObservedTarget(player, pos))",
-                "return visibilityRefused(player);",
+                "clearsObstructions && !started ? clearTheWay(pack, player) : visibilityRefused(player);",
                 "MiningSafety.SupportOccupancy support = footingOccupancy(player);",
                 "return supportRefused(player, support);",
                 "BlockState state = world.getBlockState(pos);");
@@ -130,12 +135,13 @@ class DirectMiningObservationSourceContractTest {
                 "return handleSupportOccupancy(bot, initialSupport);",
                 "if (MiningController.visiblyAir(bot, target))",
                 "return Status.DONE;",
-                "if (!MiningController.currentObservedTarget(bot, target))",
-                "return targetNotObserved(bot);",
+                "MiningObstruction.Plan admission = MiningController.admission(bot, target);",
+                "if (admission.refused())",
+                "return targetNotObserved(bot, admission);",
                 "BlockState targetState = world.getBlockState(target);");
         int idle = tick.indexOf("if (bot.getActionPack().isMiningIdle())");
         int support = tick.indexOf("MiningSafety.SupportOccupancy admissionSupport = MiningSafety.supportOccupancy(bot, target);", idle);
-        int reproved = tick.indexOf("if (!MiningController.currentObservedTarget(bot, target))", support);
+        int reproved = tick.indexOf("MiningObstruction.Plan reproved = MiningController.admission(bot, target);", support);
         int toolState = tick.indexOf("BlockState equipTarget = world.getBlockState(target);", support);
         assertTrue(idle >= 0 && support > idle && reproved > support && toolState > reproved,
                 "a target retained through the task tick must be checked for new live footing and re-proven before tool selection");
