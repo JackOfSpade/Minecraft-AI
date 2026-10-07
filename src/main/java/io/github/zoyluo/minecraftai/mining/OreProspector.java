@@ -112,7 +112,7 @@ public final class OreProspector {
     public static final class Scan {
         /** A face endpoint lies within half a block diagonal (sqrt(3)/2) of its block centre. */
         private static final double CENTER_TO_FACE_SLACK = 0.87D;
-        private static final int CLOCK_CHECK_MASK = 7; // read the clock every 8 candidate positions
+        private static final int CLOCK_CHECK_MASK = 7; // read the clock every 8 positions examined
 
         private final AIPlayerEntity bot;
         private final ServerLevel world;
@@ -261,6 +261,12 @@ public final class OreProspector {
                     double dy = cursorY + 0.5D - eye.y;
                     double dxy2 = dx2 + dy * dy;
                     while (cursorZ <= maxZ) {
+                        // The clock is read every 8 positions examined, a skipped one included: ground with nothing to find
+                        // does all its work on the skipping paths below, and a read only after a candidate cell would let a
+                        // wide scan of it run as one step however small its budget.
+                        if ((++counter & CLOCK_CHECK_MASK) == 0 && System.nanoTime() >= deadline) {
+                            return;
+                        }
                         int z = cursorZ++;
                         double dz = z + 0.5D - eye.z;
                         if (dxy2 + dz * dz > radiusWithSlackSq) {
@@ -283,9 +289,6 @@ public final class OreProspector {
                                     best = pos.immutable();
                                 }
                             }
-                        }
-                        if ((++counter & CLOCK_CHECK_MASK) == 0 && System.nanoTime() >= deadline) {
-                            return;
                         }
                     }
                     cursorZ = minZ;

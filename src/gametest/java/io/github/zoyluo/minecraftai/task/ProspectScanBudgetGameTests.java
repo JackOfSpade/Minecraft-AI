@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -18,6 +19,7 @@ import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Field;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -64,6 +66,11 @@ public final class ProspectScanBudgetGameTests {
     public void strictScanIsSpreadAndMatchesSynchronous(GameTestHelper context) {
         Fixture fixture = fixture(context, "ProspectScanGT");
         AIPlayerEntity bot = fixture.bot();
+        // A scan is only as wide as the configured perception radius (16 by default), and at that radius this fixture holds less than
+        // one budget of work, which proves nothing about spreading. Give the bot the radius a 96 scan exists for; the config is put
+        // back before the test ends (the sweeper does it for a failure).
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        installConfig(withPerceptionRadius(original, 96));
         BlockPos log = fixture.start().east(4);
         bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
 
@@ -98,6 +105,7 @@ public final class ProspectScanBudgetGameTests {
             requireSpread(context, "budgeted hit scan", scan.steps(), scan.maxStepNanos(), scan.totalNanos());
             requireSpread(context, "budgeted empty scan", emptyScan.steps(), emptyScan.maxStepNanos(),
                     emptyScan.totalNanos());
+            installConfig(original);
             finish(context, fixture);
         });
     }
@@ -105,7 +113,7 @@ public final class ProspectScanBudgetGameTests {
     /**
      * The palette prefilter makes a scan of a small fixture finish in one 2 ms step, so the budgeted tests above no
      * longer prove that a scan is resumable. This one forces it: a 1 ns budget stops the scan at every clock check (each
-     * 8 candidate cells), so the log's chunk section takes hundreds of steps. The scan must still end with exactly the
+     * 8 positions examined), so the log's chunk section takes hundreds of steps. The scan must still end with exactly the
      * synchronous answer, the NEAREST of two matches, even though the farther one is met first by the x-major cursor.
      */
     @GameTest(environment = "minecraftai-gametest:prospect_scan_budget_game_tests_tiny_budget_scan_resumes_over_many_steps", maxTicks = 700)
@@ -122,7 +130,7 @@ public final class ProspectScanBudgetGameTests {
 
         OreProspector.Scan scan = OreProspector.begin(bot, 96, state -> state.is(Blocks.OAK_LOG), null);
         context.failIfEver(() -> {
-            // Many steps per game tick: each step covers only 8 candidate cells, so one per tick would need more ticks
+            // Many steps per game tick: each step covers only 8 positions, so one per tick would need more ticks
             // than the test may run.
             for (int i = 0; i < 64 && !scan.isDone(); i++) {
                 scan.step(1L);
@@ -185,9 +193,16 @@ public final class ProspectScanBudgetGameTests {
         Fixture fixture = fixture(context, "ProspectGatherGT");
         AIPlayerEntity bot = fixture.bot();
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
-        // Synchronous references for what one tick used to carry (measured, never asserted as fixed numbers).
-        long surveyRef = timeNanos(() -> HarvestCore.nearestReachableBlock(bot, Set.of(Blocks.OAK_LOG), 48, 6, 12, null, false));
-        long prospectRef = timeNanos(() -> OreProspector.nearest(bot, 96, state -> state.is(Blocks.OAK_LOG)));
+        // Gather surveys and prospects only as far as the bot is configured to observe (the perception radius, 16 by default), so
+        // at the default radius the wide 32/48 survey and the 96 prospect that once landed in one tick never run at all. Give the
+        // bot the radius those scans exist for; the config is put back before the test ends (the sweeper does it for a failure).
+        MinecraftAiConfig original = MinecraftAiConfig.get();
+        installConfig(withPerceptionRadius(original, 96));
+        // Synchronous references for what one tick used to carry (measured, never asserted as fixed numbers). The first run of a scan
+        // is cold (class loading, JIT) and costs several times what the same work does warm, as the task's own scans then run, so
+        // each reference is the second run.
+        long surveyRef = warmTimeNanos(() -> HarvestCore.nearestReachableBlock(bot, Set.of(Blocks.OAK_LOG), 48, 6, 12, null, false));
+        long prospectRef = warmTimeNanos(() -> OreProspector.nearest(bot, 96, state -> state.is(Blocks.OAK_LOG)));
         // A pure scan tick must stay far below what the synchronous scan cost. The floor keeps a fast machine (where
         // the reference itself is small) from being held to a few milliseconds that a load spike would break.
         long ceiling = Math.max(60_000_000L, Math.max(surveyRef, prospectRef) / 2L);
@@ -233,7 +248,7 @@ public final class ProspectScanBudgetGameTests {
             } else if (prospectBefore) {
                 finishTickNanos.set(spent);
             } else if (task.prospectScansFinished() > finishedBefore) {
-                // The palette prefilter skips every chunk section without a log, so a scan of a treeless area can
+                // The palette prefilter skips every chunk section without a log, so on a fast machine a scan of a treeless area can
                 // begin and finish inside one tick as a single step far below the ceiling (the tick itself also plans the roam path).
                 oneTickScanNanos.set(task.lastProspectScanMaxStepNanos());
                 scanFinishedAt.compareAndSet(-1, t);
@@ -260,6 +275,7 @@ public final class ProspectScanBudgetGameTests {
                     "a tick carrying the survey scan took " + maxSurveyScanTickNanos.get() / 1_000_000L + " ms (ceiling " + ceiling / 1_000_000L + ")");
             require(context, maxScanTickNanos.get() <= ceiling,
                     "a tick carrying the prospect scan took " + maxScanTickNanos.get() / 1_000_000L + " ms (ceiling " + ceiling / 1_000_000L + ")");
+            installConfig(original);
             finish(context, fixture);
         });
     }
@@ -268,6 +284,32 @@ public final class ProspectScanBudgetGameTests {
         long start = System.nanoTime();
         work.run();
         return System.nanoTime() - start;
+    }
+
+    private static long warmTimeNanos(Runnable work) {
+        work.run();
+        return timeNanos(work);
+    }
+
+    /** Test-only immutable-config replacement, as in the sibling GameTests. */
+    private static MinecraftAiConfig withPerceptionRadius(MinecraftAiConfig config, int radius) {
+        MinecraftAiConfig.Perception perception = config.perception();
+        return new MinecraftAiConfig(config.profile(), config.operatorCapabilities(), config.llm(),
+                new MinecraftAiConfig.Perception(radius, perception.maxBlocks(), perception.maxEntities(),
+                        perception.maxItems(), perception.includeRawLists()),
+                config.brain(), config.watchdog(), config.logging(), config.survival(), config.combat(), config.night(),
+                config.mining(), config.goal(), config.nav(), config.pickup(), config.conversation(), config.storage(),
+                config.behaviour());
+    }
+
+    private static void installConfig(MinecraftAiConfig config) {
+        try {
+            Field instance = MinecraftAiConfig.class.getDeclaredField("instance");
+            instance.setAccessible(true);
+            instance.set(null, config);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("failed to install GameTest config", exception);
+        }
     }
 
     private static Fixture fixture(GameTestHelper context, String name) {

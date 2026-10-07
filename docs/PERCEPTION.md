@@ -343,7 +343,10 @@ nothing killed, a trade or a feeding that never starts, a hunt standing at the p
 trade, a milking and a breeding therefore nominate an animal that is seen AND on the plain vanilla line from where the bot stands; a
 hunt keeps the see-through nomination (prey is spotted across a hedge and walked to) and asks for the line from each attack pose
 (`HuntTask.canStrikeFrom`), so prey with no pose it can be struck from is rejected like any other that cannot be reached; and the
-last stand fights the nearest hostile it can hit, not the first one it merely sees. What the shelter's exit and the shield guard ask of a noticed creature stay sight: they plan for what is out there, and the
+last stand fights the nearest hostile it can hit, not the first one it merely sees. Prey is nominated out to 64 blocks but block sight
+ends at the render distance: the ground under an animal seen beyond it has not been seen, so the hunt does not judge it (no
+`no_round_trip` on the first step) and walks observed legs toward the animal until its cell is in sight
+(`HuntTask.startLegTowardUnseenPrey`). What the shelter's exit and the shield guard ask of a noticed creature stay sight: they plan for what is out there, and the
 mob's own vanilla AI (opaque) gates what it can do to the bot.
 
 The PvP BOT wrapper is not changed: its inhabitants keep vanilla's opaque ray (`AggroDriver`, `AggroWorld`), as they do for any
