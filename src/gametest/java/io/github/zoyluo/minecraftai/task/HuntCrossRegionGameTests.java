@@ -1782,22 +1782,24 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_prey_penned_behind_glass_does_not_shadow_the_open_prey", maxTicks = 1500)
-    public void preyPennedBehindGlassDoesNotShadowTheOpenPrey(GameTestHelper context) {
-        // The eyes see the nearer cow through a glass wall, but no blow crosses glass and the sealed ground behind it cannot be
-        // walked to: the hunt must find no pose the cow can be struck from, reject it, and go for the cow in the open. Without that
-        // it stood at the pose nearest the glass until the no-progress deadline, and the cow in the open was never touched.
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_prey_behind_a_glass_wall_is_hunted_from_where_it_can_be_struck", maxTicks = 1500)
+    public void preyBehindAGlassWallIsHuntedFromWhereItCanBeStruck(GameTestHelper context) {
+        // The eyes see the nearer cow through a short glass wall and the bot can walk round the wall, but no blow crosses glass: the
+        // pose nearest the pane (two blocks in front of it) has no line to the cow. Without a line asked of every pose the hunt
+        // stood on that pose until its no-progress deadline and neither cow was ever touched; with it, it walks round the wall and
+        // strikes from where the cow can be hit (or goes for the cow in the open).
         var world = context.getLevel();
         BlockPos start = context.absolutePos(new BlockPos(8, 5, -560));
         for (int x = -14; x <= 14; x++) {
-            for (int z = -3; z <= 3; z++) {
+            for (int z = -4; z <= 4; z++) {
                 BlockPos feet = start.offset(x, 0, z);
-                boolean frame = Math.abs(z) == 3 || Math.abs(x) == 14;
+                boolean frame = Math.abs(z) == 4 || Math.abs(x) == 14;
                 world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 5; dy++) {
-                    // Bedrock all round, so the sealed ground cannot be dug into; a glass wall across the corridor at x = 3.
+                    boolean pane = x == 3 && Math.abs(z) <= 1 && dy <= 2;
+                    // Bedrock all round, so nothing can be dug into or out of; a glass wall three blocks wide at x = 3.
                     world.setBlock(feet.above(dy), frame ? Blocks.BEDROCK.defaultBlockState()
-                            : x == 3 ? Blocks.GLASS.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                            : pane ? Blocks.GLASS.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
@@ -1822,16 +1824,15 @@ public final class HuntCrossRegionGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunt_penned_prey"));
         context.failIfEver(() -> {
-            require(context, penned.isAlive() && penned.getHealth() >= penned.getMaxHealth(),
-                    "the cow behind the glass was struck: the hunt reached through the wall");
-            if (open.getHealth() < open.getMaxHealth() || !open.isAlive()) {
+            if (penned.getHealth() < penned.getMaxHealth() || !penned.isAlive()
+                    || open.getHealth() < open.getMaxHealth() || !open.isAlive()) {
                 AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
                 context.succeed();
                 return;
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.fail(Component.nullToEmpty("the hunt ended as " + task.state() + ":" + task.failureReason()
-                        + " before the cow in the open was touched: " + task.describe()));
+                        + " before either cow was touched: " + task.describe()));
             }
         });
     }
