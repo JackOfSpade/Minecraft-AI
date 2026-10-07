@@ -90,8 +90,11 @@ public final class TowerRestoreGameTests {
                     "the restored task started before the saved tower was down: " + r.c.tail(lines, ""));
             r.c.require(r.c.world().getBlockState(r.target).isAir() && InventoryAction.countItem(r.restored(), Items.DIRT) >= 1,
                     "the restored task did not finish the mine: " + r.c.tail(lines, ""));
-            r.c.require(r.restored().blockPosition().equals(r.c.feet) && r.towerBlocksStanding() == 0,
-                    "the bot did not end on the floor with no tower left: " + r.c.tail(lines, ""));
+            // The mine's own pickup may have walked the bot off to the dirt it dropped: anywhere on the floor will do.
+            r.c.require(r.restored().blockPosition().getY() == r.c.feet.getY() && r.restored().onGround()
+                            && r.towerBlocksStanding() == 0,
+                    "the bot did not end on the floor with no tower left, at " + r.restored().blockPosition() + ": "
+                            + r.c.tail(lines, ""));
             r.requireNoFall();
             return true;
         });
@@ -355,9 +358,10 @@ public final class TowerRestoreGameTests {
                     && c.count(c.log(), "tower_orphan_descended") > 0;
         }
 
+        /** The blocks standing in the tower's column below the target (a second tower may add a block to the six). */
         int towerBlocksStanding() {
             int standing = 0;
-            for (int up = 0; up < SUPPORTS; up++) {
+            for (int up = 0; up < TARGET_UP; up++) {
                 if (!c.world().getBlockState(c.at(0, up, 0)).isAir()) {
                     standing++;
                 }
