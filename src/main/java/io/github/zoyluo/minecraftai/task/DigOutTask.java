@@ -98,6 +98,8 @@ public final class DigOutTask extends AbstractTask {
     private final Set<BlockPos> visitedAtThisLevel = new HashSet<>();
     /** The cells this task broke: the only ones it closes again when a flow comes in through them. */
     private final Set<BlockPos> openedByUs = new HashSet<>();
+    /** Fresh openings and where the bot stood when it made them, held until its next factual safety look. */
+    private final Map<BlockPos, BlockPos> openedFlowChecks = new HashMap<>();
     /** The cells closed against a flow: no step goes through one again. */
     private final Set<BlockPos> sealedCells = new HashSet<>();
     /** The cells the bot has stood in on the way, the first one first: the way back down the stair. */
@@ -112,10 +114,17 @@ public final class DigOutTask extends AbstractTask {
     private BlockPos stepOrigin;
     private BlockPos stepLanding;
     private boolean stepRises;
+    /** The stair step that owns the miner's current target, retained until its asynchronous receipt settles. */
+    private BlockPos miningStepOrigin;
+    private BlockPos miningStepLanding;
     private int lastProgressTick;
     private int risen;
     /** Set once a flow could not be closed: the reason the task ends with when the bot is back down the stair. */
     private String retreatReason;
+    /** A flow that an opening just exposed. It is sealed before light from that opening may end the task. */
+    private StairDig.Refusal pendingFlow;
+    /** A sealed flow's glow is not an escape: make at least one other rise before accepting the ordinary dark-trap check. */
+    private int riseBeforeFlowCanFinish;
     /** The pickaxe being made, or null. */
     private CraftTask toolCraft;
     /** Whether a pickaxe was made or found impossible to make: it is tried once. */
@@ -165,7 +174,20 @@ public final class DigOutTask extends AbstractTask {
         ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
         visitedAtThisLevel.add(feet.immutable());
-        if (!DangerWatcher.isDarkTrapCell(world, feet)) {
+        // Mining completes between task ticks. Settle its receipt before any light-based completion:
+        // the freshly opened cell may be where a flow enters, and it must be recorded as ours first.
+        if (miner.target() != null) {
+            settleMiner(bot);
+            return;
+        }
+        if (pendingFlow != null) {
+            closeFlow(bot, feet, pendingFlow);
+            return;
+        }
+        if (checkFreshOpenings(bot, feet)) {
+            return;
+        }
+        if (!DangerWatcher.isDarkTrapCell(world, feet) && risen >= riseBeforeFlowCanFinish) {
             BotLog.action(bot, "dig_out_done", "at", feet.toShortString(), "risen", risen);
             complete();
             return;
@@ -186,6 +208,16 @@ public final class DigOutTask extends AbstractTask {
             end(bot, "dig_out_build_limit");
             return;
         }
+        Direction brighterWalk = walkableBrighterDirection(bot, world, feet);
+        if (brighterWalk != null) {
+            if (brighterWalk != heading) {
+                BotLog.action(bot, "dig_out_turned", "at", feet.toShortString(),
+                        "from", heading.getSerializedName(), "to", brighterWalk.getSerializedName());
+                heading = brighterWalk;
+            }
+            walk(bot, world, feet, brighterWalk);
+            return;
+        }
         Direction[] order = {heading, heading.getClockWise(), heading.getCounterClockWise(), heading.getOpposite()};
         for (Direction direction : order) {
             OreClimb.Move move = new OreClimb.Move(direction, true);
@@ -193,7 +225,8 @@ public final class DigOutTask extends AbstractTask {
             if (why == null) {
                 StairDig.Refusal refusal = StairDig.refusalAt(bot, world, feet, move);
                 if (refusal != null && flowsIn(world, feet, move, refusal)) {
-                    closeFlow(bot, feet, refusal);
+                    queueFlow(refusal);
+                    closeFlow(bot, feet, pendingFlow);
                     return;
                 }
                 why = refusal != null ? refusal.reason() : touchesSealedCell(feet, move) ? SEALED_FLOW : null;
@@ -246,16 +279,39 @@ public final class DigOutTask extends AbstractTask {
             if (!toolReady(bot, world, feet, move, cell, state)) {
                 return;
             }
+            miningStepOrigin = feet.immutable();
+            miningStepLanding = OreClimb.landing(feet, move).immutable();
+            miner.begin(bot, cell);
         }
-        miner.begin(bot, cell);
+        settleMiner(bot);
+    }
+
+    /** Settles the active miner exactly once; it can be called before any completion path on the next task tick. */
+    private void settleMiner(AIPlayerEntity bot) {
+        BlockPos cell = miner.target();
+        if (cell == null) {
+            return;
+        }
+        // BlockMiner selects again when it starts a physical swing. Keep both DigOut-only modes
+        // explicit at that boundary: a cancelled/reused miner must never turn a weapon into its
+        // fallback for ordinary stone, nor dig player/structure blocks while escaping.
+        miner.naturalTerrainOnly(true);
+        miner.swordsMine(false);
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.DONE) {
             openedByUs.add(cell.immutable());
+            openedFlowChecks.put(cell.immutable(), bot.blockPosition().immutable());
             lastProgressTick = elapsed;
+            miningStepOrigin = null;
+            miningStepLanding = null;
         } else if (status == BlockMiner.Status.FAILED) {
             // The cell cannot be opened (a break the rule refuses, a block that will not give): this step is not made again.
             String reason = miner.failureReason().isEmpty() ? STEP_FAILED : miner.failureReason();
-            failStep(feet, OreClimb.landing(feet, move), reason);
+            if (miningStepOrigin != null && miningStepLanding != null) {
+                failStep(miningStepOrigin, miningStepLanding, reason);
+            }
+            miningStepOrigin = null;
+            miningStepLanding = null;
             BotLog.action(bot, "dig_out_mine_failed", "cell", cell.toShortString(), "reason", reason);
         }
     }
@@ -359,6 +415,64 @@ public final class DigOutTask extends AbstractTask {
     }
 
     /**
+     * Rechecks an opening after the bot has had a tick to see through the face it just made. The
+     * common case is a first look from the original stance, then one from the next ordinary step;
+     * each call is {@link MiningSafety#openingRefusal(AIPlayerEntity, BlockPos)} and therefore
+     * reads only what that real eye-ray proves. A bright lava opening cannot finish the task first.
+     */
+    private boolean checkFreshOpenings(AIPlayerEntity bot, BlockPos feet) {
+        var checks = openedFlowChecks.entrySet().iterator();
+        while (checks.hasNext()) {
+            var opening = checks.next();
+            String reason = seenFluidAtOpening(bot, opening.getKey());
+            if (reason == null) {
+                reason = MiningSafety.openingRefusal(bot, opening.getKey());
+            }
+            if (isFlowReason(reason)) {
+                checks.remove();
+                queueFlow(new StairDig.Refusal(reason, opening.getKey()));
+                closeFlow(bot, feet, pendingFlow);
+                return true;
+            }
+            if (!feet.equals(opening.getValue())) {
+                checks.remove();
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A fluid has no collision shape for ordinary block-face probes, so look at its actual surface
+     * with the same short eye ray used by fire extinguishing. The fluid height selects a point to
+     * look at; the ray is still the observation proof before its type is used.
+     */
+    private static String seenFluidAtOpening(AIPlayerEntity bot, BlockPos opening) {
+        for (Direction direction : Direction.values()) {
+            BlockPos neighbour = opening.relative(direction);
+            if (!FireExtinguishTask.canSeeWaterSurface(bot, neighbour)) {
+                continue;
+            }
+            var fluid = bot.level().getFluidState(neighbour);
+            if (fluid.is(net.minecraft.tags.FluidTags.LAVA)) {
+                return "lava";
+            }
+            if (fluid.is(net.minecraft.tags.FluidTags.WATER)) {
+                return "water";
+            }
+        }
+        return null;
+    }
+
+    /** Remembers a newly seen flow until the placement has succeeded or the task begins its retreat. */
+    private void queueFlow(StairDig.Refusal flow) {
+        if (pendingFlow != null) {
+            return;
+        }
+        pendingFlow = flow;
+        riseBeforeFlowCanFinish = Math.max(riseBeforeFlowCanFinish, risen + 1);
+    }
+
+    /**
      * Closes the cell a flow comes in through with a block the bot carries, put there with a real pick ray like every sealing
      * ({@link MaterialPalette#pickSacrificialBlockSlot}, {@link BuildAction#placeBlockAt}); a cell that already holds the fluid is
      * filled, since a block replaces it. The cell is never opened again ({@link #SEALED_FLOW}). With no block to place, or a placement
@@ -384,6 +498,7 @@ public final class DigOutTask extends AbstractTask {
             return;
         }
         sealedCells.add(cell.immutable());
+        pendingFlow = null;
         lastProgressTick = elapsed;
         BotLog.action(bot, "dig_out_flow_sealed", "cell", cell.toShortString(), "fluid", refusal.reason(),
                 "block", BuiltInRegistries.ITEM.getKey(block).toString(), "at", feet.toShortString());
@@ -392,6 +507,7 @@ public final class DigOutTask extends AbstractTask {
     /** No flow can be closed: the bot walks back down the stair, away from the opening, and the task ends with the typed reason. */
     private void retreatFrom(AIPlayerEntity bot, BlockPos feet, StairDig.Refusal refusal, String why) {
         resetMiner(bot);
+        pendingFlow = null;
         retreatReason = FLOW_UNSEALED + ":" + why;
         BotLog.action(bot, "dig_out_flow_unsealed", "cell", refusal.cell().toShortString(), "fluid", refusal.reason(),
                 "why", why, "at", feet.toShortString(), "back_down", trail.size() - 1);
@@ -444,10 +560,14 @@ public final class DigOutTask extends AbstractTask {
      * The direction to take one step in toward the nearest wall the bot can see at its own level, when
      * that wall is two or more cells away (a wall next to the bot is one a rise starts in) and the
      * first cell toward it can be walked onto. Each such step brings the nearest wall one closer, so
-     * the walk ends beside one. The direction of the brightest thing in sight ({@link #lit}) goes first
-     * when it has such a wall.
+     * the walk ends beside one. A seen brighter direction goes first whenever its next open cell is
+     * walkable: a lit corridor is already an escape route, not a wall that must be dug toward.
      */
     private Direction wallToWalkTo(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        Direction brighterWalk = walkableBrighterDirection(bot, world, feet);
+        if (brighterWalk != null) {
+            return brighterWalk;
+        }
         Direction best = null;
         int bestDistance = Integer.MAX_VALUE;
         int range = ObservableWorldQuery.visibleRangeBlocks(bot);
@@ -472,6 +592,18 @@ public final class DigOutTask extends AbstractTask {
             }
         }
         return best;
+    }
+
+    /** The next real, visible floor cell toward the brighter direction, or null when rock or a hazard still bars it. */
+    private Direction walkableBrighterDirection(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        if (lit == null) {
+            return null;
+        }
+        BlockPos towardLight = feet.relative(lit);
+        return ObservableWorldQuery.canObserveCell(bot, towardLight)
+                && !failedSteps.containsKey(stepKey(feet, towardLight))
+                && !visitedAtThisLevel.contains(towardLight)
+                && Standability.isStandable(world, towardLight) ? lit : null;
     }
 
     private void walk(AIPlayerEntity bot, ServerLevel world, BlockPos feet, Direction direction) {
@@ -558,6 +690,8 @@ public final class DigOutTask extends AbstractTask {
     /** Stops any break in flight and puts the miner back in the modes this task digs in: natural terrain only, no sword. */
     private void resetMiner(AIPlayerEntity bot) {
         miner.cancel(bot);
+        miningStepOrigin = null;
+        miningStepLanding = null;
         miner.naturalTerrainOnly(true);
         miner.swordsMine(false);
     }

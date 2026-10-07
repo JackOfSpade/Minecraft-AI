@@ -78,3 +78,21 @@ opening revealed is refused too, since the flow comes in through it), nothing th
 no player standing on it. A refused heading is turned from (right, left, back); when all four are refused, or a block
 will not give, or the build limit is reached, the task ends and says why. A stuck `move` that was paused for it
 resumes afterwards, as after the lighting.
+
+After it breaks a cell, the bot gives the opening a factual safety look before accepting the light that may now enter
+through it. It may identify lava or water only after a short real eye ray reaches that fluid's surface; with a carried
+solid block it places that block into the opening by the ordinary reach/pick-ray placement path, records the cell as
+sealed, and takes another direction. It never reopens or enters a sealed flow cell. If it has no suitable block, or
+the placement is refused, it walks its recorded stair back down and ends with `dig_out_flow_unsealed:<reason>`.
+
+Rock is mined with the lowest tool that can actually harvest it; a sword is not used as a bare-hand substitute. If no
+usable pickaxe is carried but the bot can make one from its own materials, it crafts the cheapest suitable pickaxe
+first, including placing and recovering a crafting table when needed. Bare-hand stone remains legal. A block that the
+held tool cannot finish in the miner's ordinary timeout is refused before any swing using vanilla's break progress:
+`break_refused:unbreakable` for a no-progress block and `break_refused:too_slow` otherwise.
+
+The choice of direction also has no sky knowledge. At task start and after each landed rise, the bot considers only
+open, fluid-free foot/head cells that pass `ObservableWorldQuery.canObserveCell` within its normal visible range; it
+may prefer a direction whose seen light is brighter than its own cell, but never one where lava is seen. With no such
+cell, it follows the ordinary wall-and-stair behavior. A lit adjacent cell that is visibly walkable is an escape route
+to walk through, not a wall to dig toward.

@@ -255,6 +255,9 @@ public final class BlockMiner {
                 started = false;
                 return Status.FAILED;
             }
+            // MiningController chooses its hand only when the admitted physical break begins. Carry
+            // this miner's policy across that boundary so a task that refused swords is not undone.
+            bot.getActionPack().miningSwordsMine(swordsMine);
             started = true;
             miningGeneration = bot.getActionPack().miningGeneration();
         }

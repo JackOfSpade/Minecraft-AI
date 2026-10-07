@@ -163,6 +163,26 @@ detour happen, why didn't it, and was it worth it": whether ore worth detouring 
 in `ore_dig_detour_start`/`_skip`, what happened mid-route is in `_abort`/`_route`, and how many
 blocks a detour actually netted is in `_end`.
 
+## Dark-trap dig-out logging
+
+`DigOutTask` emits the following ACTION records while strict-survival recovery is digging a stair from a
+dark trap. They are an account of real observations and ordinary actions, not a claim that the bot knows
+where the surface or hidden fluids are.
+
+| event | When it's written | Key fields |
+|---|---|---|
+| `dig_out_bearing` | A real observed brighter direction replaces the current heading at task start or after a landed rise | `at`, `from`, `to`, `seen_light`, `own_light`. “Seen” means the candidate foot/head cell passed `ObservableWorldQuery.canObserveCell`, is open and fluid-free, and is within normal visible range; it is not a sky lookup. |
+| `dig_out_flow_sealed` | A fluid exposed through a cell this task opened is closed with a carried solid block | `cell`, `fluid` (`lava` or `water`), `block`, `at`. The fluid type is read only after a short real eye ray reaches its surface. |
+| `dig_out_flow_unsealed` | The exposed flow cannot be closed and the bot starts walking back down its recorded stair | `cell`, `fluid`, `why` (`no_block` or the ordinary placement refusal), `at`, `back_down`. The eventual task failure is `dig_out_flow_unsealed:<why>`. |
+| `dig_out_break_refused` | Before a swing, vanilla break progress says the held tool cannot finish the next block in `BlockMiner.MINE_TIMEOUT_TICKS` | `cell`, `block`, `tool`, `reason` (`unbreakable` or `too_slow`). The step's typed reason is `break_refused:unbreakable` or `break_refused:too_slow`. |
+| `dig_out_tool_craft` / `dig_out_tool_crafted` / `dig_out_tool_craft_failed` | The task starts crafting a needed pickaxe, completes it, or cannot complete it | `item`, `for` on start; `ticks` on success; `reason` on failure. Crafting uses the normal table and inventory actions. |
+| `dig_out_tool_none` | No carried or craftable pickaxe can harvest the next block, so the task proceeds with its ordinary non-sword fallback | `for` (the next block id). |
+
+A step refused because it would reopen a previously sealed flow is reported as `sealed_flow`; a task that
+cannot use any heading eventually ends with its usual `dig_out_blocked:<reason>` result. Ordinary
+`mine_start`/`mine_complete` and task-completion records supply the associated physical break and
+completion evidence.
+
 ## Auditable Gather / Mining Logging
 
 Prompted by a real question: the user asked a bot to gather 32 logs and then wanted to confirm

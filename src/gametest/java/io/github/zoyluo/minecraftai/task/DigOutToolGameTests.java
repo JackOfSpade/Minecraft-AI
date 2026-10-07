@@ -31,8 +31,9 @@ import static io.github.zoyluo.minecraftai.task.DigOutTaskGameTests.stoneWithRoo
  * that vanilla's own break time says the held tool cannot finish (bedrock; deepslate by hand; ancient debris with an iron pickaxe),
  * typed {@code break_refused:<reason>}.
  *
- * <p>Fixture: {@link DigOutTaskGameTests}'s room under rock, with two cells of rock over the room instead of five, so that a stair of two
- * rises (six cells) leads out.</p>
+ * <p>Fixture: {@link DigOutTaskGameTests}'s room under rock, with two cells of rock over the room instead of five. The first rise
+ * opens the second roof cell over its landing, letting daylight reach that landing; that is the same factual escape condition the
+ * ordinary dig-out uses.</p>
  */
 public final class DigOutToolGameTests {
     private static final int THIN_ROOF = 2;
@@ -74,6 +75,9 @@ public final class DigOutToolGameTests {
         stoneWithRoom(world, feet, Blocks.STONE, THIN_ROOF);
         world.setDayTime(NOON);
         AIPlayerEntity bot = spawnAt(context, name, feet);
+        // giveItem may consume a source stack while moving it to the bot, so retain the fixture's
+        // intended loadout before handing those mutable stacks over.
+        boolean onlyWoodenSword = carried.length == 1 && carried[0].is(Items.WOODEN_SWORD);
         for (ItemStack stack : carried) {
             InventoryAction.giveItem(bot, stack);
         }
@@ -93,8 +97,8 @@ public final class DigOutToolGameTests {
             if (task.state() == TaskState.COMPLETED) {
                 require(context, !DangerWatcher.isDarkTrapCell(world, bot.blockPosition()),
                         "the dig-out ended in the dark at " + bot.blockPosition());
-                require(context, task.risen() >= 2, "the stair rose only " + task.risen());
-                require(context, dug(world, before) >= 5, "almost nothing was dug: " + dug(world, before));
+                require(context, task.risen() >= 1, "the stair never rose: " + task.risen());
+                require(context, dug(world, before) >= 4, "almost nothing was dug: " + dug(world, before));
                 switch (craft) {
                     case PICKAXE_FIRST -> {
                         require(context, dugWhenThePickaxeAppeared[0] >= 0, "no pickaxe was ever made");
@@ -103,7 +107,7 @@ public final class DigOutToolGameTests {
                         require(context, wear(bot, Items.WOODEN_PICKAXE) > 0, "the pickaxe that was made was never used");
                     }
                     case NONE -> {
-                        if (carried.length == 1 && carried[0].is(Items.WOODEN_SWORD)) {
+                        if (onlyWoodenSword) {
                             require(context, !carriesPickaxe(bot), "a pickaxe came from nowhere");
                             require(context, wear(bot, Items.WOODEN_SWORD) == 0,
                                     "the sword was worn down on rock: " + wear(bot, Items.WOODEN_SWORD));

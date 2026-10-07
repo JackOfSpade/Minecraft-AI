@@ -1369,6 +1369,17 @@ public final class ActionPack {
     }
 
     /**
+     * Applies a caller's tool restriction to its just-admitted direct mining controller. The controller makes its tool choice on
+     * its first physical swing, after {@link #startMining(BlockPos, Direction)} has returned; this keeps that late selection in
+     * the same policy as the task that nominated the target.
+     */
+    public void miningSwordsMine(boolean on) {
+        if (mining != null) {
+            mining.swordsMine(on);
+        }
+    }
+
+    /**
      * Starts breaking the block the bot stands on, for the one case where that is the point: a bot on top of
      * a pillar it placed itself takes it down block by block ({@link TowerDescent}). Every other break of the
      * bot's own footing stays refused ({@link MiningSafety}). It is admitted only for the cell directly under
