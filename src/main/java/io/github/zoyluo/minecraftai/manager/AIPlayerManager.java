@@ -239,6 +239,7 @@ public final class AIPlayerManager {
                     "mode", gameMode.getSerializedName(),
                     "dimension", bot.level().dimension().identifier(),
                     "fallback", target.fallback());
+            BotPersistence.restoreTower(bot, record);
         });
         return spawned;
     }

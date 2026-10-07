@@ -311,6 +311,14 @@ they are not counted as progress.
 A tower whose task has ended (stopped, replaced, timed out, failed) before the bot was back down is taken down anyway
 (`TowerCustody`), before the bot's next task goes on; an active safety task keeps the bot's attention first. The lines are
 `tower_orphan_descended` (`owner`, `blocks`, `at`) and `tower_orphan_descent_failed` (`owner`, `reason`, `at`).
+A server restart while the bot stands on its own tower does not strand it: the tower is saved with the bot (`BotRecord.towerBase`, the
+"x,y,z" of the floor cell it was built from, only while the bot stands in its column above it) and the restored bot takes it down first,
+whether or not the task that built it is restored (the mission starts a new one, which waits). `tower_restored` (`base`, `at`) is logged when a
+restored bot is on the saved tower; the descent is the orphan descent above, with `owner='restart'`. `tower_restore_rejected` (`reason`, `saved`,
+`at`; a lifecycle warning) says why a saved tower was not restored: `malformed` (the text is not three canonical integers), `other_dimension` (the
+bot came back in another dimension than it was saved in) or `not_on_tower` (it was put elsewhere than on its column above the floor, by the
+safe-spawn snap or an edited world). A record without the field restores exactly as before. A death carries no tower: the revived bot is at
+the world spawn, nothing is saved for it, and the dead bot's tower is not restored.
 Model-service events: `still_trying_notice` (`kind`, `status`, `instruction`) is logged when a waiting player was told, once
 per instruction, that the bot is still trying after about ten seconds of failed model calls; `gemini_interaction_dropped`
 (`status`, `reason`, `model_call`) when a continuation was rejected because the service no longer has the stored

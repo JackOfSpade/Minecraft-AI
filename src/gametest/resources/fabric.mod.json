@@ -70,6 +70,7 @@
       "io.github.zoyluo.minecraftai.task.MineOverheadGameTests",
       "io.github.zoyluo.minecraftai.task.HorizonScanGameTests",
       "io.github.zoyluo.minecraftai.task.TowerCustodyGameTests",
+      "io.github.zoyluo.minecraftai.task.TowerRestoreGameTests",
       "io.github.zoyluo.minecraftai.task.GatherStallGameTests",
       "io.github.zoyluo.minecraftai.task.ExplorationGameTests",
       "io.github.zoyluo.minecraftai.persist.BotPersistenceRestoreGameTests",

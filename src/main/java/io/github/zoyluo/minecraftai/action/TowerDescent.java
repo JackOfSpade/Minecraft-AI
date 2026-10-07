@@ -54,6 +54,14 @@ public final class TowerDescent {
         return new TowerDescent(goal.below(Math.max(1, supports)));
     }
 
+    /**
+     * The descent from a pillar that is already standing and whose floor cell is {@code base}: the tower of a bot restored from
+     * a save (see {@link io.github.zoyluo.minecraftai.task.TowerCustody#restore}), where only the floor was kept.
+     */
+    public static TowerDescent from(BlockPos base) {
+        return new TowerDescent(base);
+    }
+
     public BlockPos base() {
         return base;
     }

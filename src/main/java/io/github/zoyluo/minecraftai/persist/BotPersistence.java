@@ -8,9 +8,11 @@ import io.github.zoyluo.minecraftai.coordination.TaskBoard;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TowerCustody;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
@@ -222,7 +224,28 @@ public final class BotPersistence {
                 AIPlayerManager.INSTANCE.skinIndex(bot),
                 BotPlayerState.encode(bot),
                 io.github.zoyluo.minecraftai.brain.ChatMemory.encode(bot.getUUID(),
-                        MinecraftAiConfig.get().brain().memorySettings()));
+                        MinecraftAiConfig.get().brain().memorySettings()),
+                TowerCustody.INSTANCE.standingBase(bot).map(TowerBaseCodec::encode).orElse(null));
+    }
+
+    /**
+     * Puts the tower the bot stood on when it was saved back in the care of {@link TowerCustody}, which takes it down before the
+     * bot's task goes on, whether or not the task that built it is restored (the mission restores a new one). A record without
+     * the field restores as it always did; one that does not decode, or whose bot is not where its tower is (another dimension,
+     * a spot the safe-spawn snap or an edited world moved it off the column), restores no tower and says why.
+     */
+    public static void restoreTower(AIPlayerEntity bot, BotRecord record) {
+        TowerBaseCodec.Decoded saved = TowerBaseCodec.decode(record.towerBase());
+        if (saved.status() == TowerBaseCodec.Status.ABSENT) {
+            return;
+        }
+        String refused = saved.status() == TowerBaseCodec.Status.MALFORMED ? "malformed"
+                : !bot.level().dimension().identifier().toString().equals(record.dimension()) ? "other_dimension"
+                : !TowerCustody.INSTANCE.restore(bot, saved.base()) ? "not_on_tower" : null;
+        if (refused != null) {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot, "tower_restore_rejected",
+                    "reason", refused, "saved", record.towerBase(), "at", LogFields.pos(bot.blockPosition()));
+        }
     }
 
     /** Restores equipment, ender chest, XP, effects etc. (see {@link BotPlayerState}); null = old record. */
