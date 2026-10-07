@@ -49,6 +49,8 @@ public final class MiningController {
     private final boolean clearsObstructions;
     /** See {@link #ownSupport}: the one break that may take away the footing of the bot itself. */
     private final boolean releasesOwnFooting;
+    /** Whether this controller may choose a sword when its first physical swing starts. */
+    private boolean swordsMine;
     private boolean started;
     private BlockState targetState;
     private float progress;
@@ -60,16 +62,17 @@ public final class MiningController {
     private final List<BlockPos> cleared = new ArrayList<>();
 
     public MiningController(BlockPos pos, Direction face) {
-        this(pos, face, false, true, false);
+        this(pos, face, false, true, false, true);
     }
 
     private MiningController(BlockPos pos, Direction face, boolean driven, boolean clearsObstructions,
-                             boolean releasesOwnFooting) {
+                             boolean releasesOwnFooting, boolean swordsMine) {
         this.pos = pos;
         this.face = face;
         this.driven = driven;
         this.clearsObstructions = clearsObstructions;
         this.releasesOwnFooting = releasesOwnFooting;
+        this.swordsMine = swordsMine;
     }
 
     /**
@@ -78,7 +81,7 @@ public final class MiningController {
      * still never broken: only the bot's own occupancy is released.
      */
     static MiningController ownSupport(BlockPos pos, Direction face) {
-        return new MiningController(pos, face, false, false, true);
+        return new MiningController(pos, face, false, false, true, true);
     }
 
     /** Who stands on the target, with the bot's own footing set aside when this break is allowed to take it. */
@@ -96,7 +99,15 @@ public final class MiningController {
      * vanilla START/STOP/ABORT handshake, progress, reach, timeout, cache invalidation, the assist hook) is identical.
      */
     public static MiningController driven(BlockPos pos, Direction face) {
-        return new MiningController(pos, face, true, false, false);
+        return new MiningController(pos, face, true, false, false, true);
+    }
+
+    /** Changes the selection policy before this controller's next physical swing. */
+    void swordsMine(boolean on) {
+        swordsMine = on;
+        if (clearing != null) {
+            clearing.swordsMine(on);
+        }
     }
 
     /** The cell this controller is (or was) mining. Lets a caller react once it finishes. */
@@ -249,7 +260,7 @@ public final class MiningController {
                 }
                 BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face, "driver", "baritone");
             } else {
-                ToolSelector.equipBestTool(player, state);
+                ToolSelector.equipBestTool(player, state, swordsMine);
                 if (!sendBreakActionIfObserved(player, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK)) {
                     MiningSafety.SupportOccupancy liveSupport = footingOccupancy(player);
                     if (liveSupport != MiningSafety.SupportOccupancy.NONE) {
@@ -298,7 +309,8 @@ public final class MiningController {
         MiningObstruction.Plan plan = MiningObstruction.plan(player, pos, cleared);
         switch (plan.kind()) {
             case CLEAR -> {
-                clearing = new MiningController(plan.obstruction().pos(), faceToward(player, plan.obstruction().pos()), false, false, false);
+                clearing = new MiningController(plan.obstruction().pos(), faceToward(player, plan.obstruction().pos()),
+                        false, false, false, swordsMine);
                 clearingFor = plan.obstruction();
                 MiningObstruction.logDetected(player, pos, plan);
                 return tickClearing(pack, player);

@@ -36,8 +36,11 @@ import net.minecraft.world.level.block.state.BlockState;
  * Runs entirely on the main thread (G2); never assign() (G1).
  */
 public final class BlockMiner {
-    /** Per-block mining timeout (ticks). Even bedrock-tier hard stone with a diamond pickaxe finishes well under this; a timeout is treated as unreachable/abnormal. */
-    private static final int MINE_TIMEOUT_TICKS = 200;
+    /**
+     * Per-block mining timeout (ticks). Even bedrock-tier hard stone with a diamond pickaxe finishes well under this; a timeout is treated as unreachable/abnormal.
+     * A break that vanilla's own rate ({@link BreakEffort}) says needs longer than this can never finish through this miner.
+     */
+    public static final int MINE_TIMEOUT_TICKS = 200;
     /** Another ActionPack mining controller replaced or cancelled this miner's lease. */
     public static final String MINING_PREEMPTED = "mining_preempted";
 
@@ -55,6 +58,8 @@ public final class BlockMiner {
     private boolean miningChannelToolPolicy;
     /** Refuse (fail with {@code break_refused:<reason>}) a target the shared {@link BreakRule} denies for the legacy diggers ({@link BreakRule#legacyDenialOf}). */
     private boolean naturalTerrainOnly;
+    /** Whether a sword may be chosen to break a block ({@link ToolSelector#equipBestTool(AIPlayerEntity, BlockState, boolean)}); on unless a task turns it off. */
+    private boolean swordsMine = true;
     private String failureReason = "";
 
     /** Start mining a new target block (if it's the same as the current target and already mining, don't interrupt or reset progress). */
@@ -90,6 +95,15 @@ public final class BlockMiner {
      */
     public void naturalTerrainOnly(boolean on) {
         this.naturalTerrainOnly = on;
+    }
+
+    /**
+     * Sets whether this miner may pick a sword to break a block. A digger with no tool that suits a block breaks it by hand, as a player
+     * does, instead of wearing a weapon down on stone at bare-hand speed (with it off a sword counts like an empty hand). Like
+     * {@link #naturalTerrainOnly} it is a mode of the miner that survives {@code begin} and is reset by {@link #cancel}.
+     */
+    public void swordsMine(boolean on) {
+        this.swordsMine = on;
     }
 
     public BlockPos target() {
@@ -231,7 +245,7 @@ public final class BlockMiner {
                     return Status.FAILED;
                 }
             } else {
-                ToolSelector.equipBestTool(bot, equipTarget);
+                ToolSelector.equipBestTool(bot, equipTarget, swordsMine);
             }
             Direction face = faceToward(bot, target);
             ActionResult startedAction = MiningAction.startMining(bot, target, face);
@@ -241,6 +255,9 @@ public final class BlockMiner {
                 started = false;
                 return Status.FAILED;
             }
+            // MiningController chooses its hand only when the admitted physical break begins. Carry
+            // this miner's policy across that boundary so a task that refused swords is not undone.
+            bot.getActionPack().miningSwordsMine(swordsMine);
             started = true;
             miningGeneration = bot.getActionPack().miningGeneration();
         }
@@ -257,6 +274,7 @@ public final class BlockMiner {
         sinceTick = 0;
         miningChannelToolPolicy = false;
         naturalTerrainOnly = false;
+        swordsMine = true;
     }
 
     /** The direction from the bot's eyes toward the block's center, used as the breaking face (snapped to the dominant axis). Just needs to roughly face the block; doesn't need to be exact. */

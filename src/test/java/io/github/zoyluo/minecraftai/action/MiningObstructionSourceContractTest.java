@@ -58,17 +58,17 @@ class MiningObstructionSourceContractTest {
     @Test
     void onlyAnOrdinaryControllerClearsAndItsStepsAreOrdinaryControllersThatDoNot() throws IOException {
         String controller = read("action/MiningController.java");
-        assertTrue(body(controller, "public MiningController(BlockPos pos, Direction face)").contains("this(pos, face, false, true, false)"),
+        assertTrue(body(controller, "public MiningController(BlockPos pos, Direction face)").contains("this(pos, face, false, true, false, true)"),
                 "a directly started controller clears the way to its target");
         assertTrue(body(controller, "public static MiningController driven(BlockPos pos, Direction face)")
-                        .contains("new MiningController(pos, face, true, false, false)"),
+                        .contains("new MiningController(pos, face, true, false, false, true)"),
                 "Baritone clicks what its own pick ray meets, which is the leaf: its controller must not clear anything on top of that");
         assertEquals(1, count(controller, "new MiningController(plan.obstruction().pos()"),
                 "a clearing step is created in one place");
-        assertTrue(controller.contains("faceToward(player, plan.obstruction().pos()), false, false, false)"),
+        assertTrue(controller.contains("faceToward(player, plan.obstruction().pos()),\n                        false, false, false, swordsMine)"),
                 "a step is neither driven, nor clearing, nor allowed to take the bot's footing: it aims, picks its tool and has the full gate itself");
         assertTrue(body(controller, "static MiningController ownSupport(BlockPos pos, Direction face)")
-                        .contains("new MiningController(pos, face, false, false, true)"),
+                        .contains("new MiningController(pos, face, false, false, true, true)"),
                 "the break of the bot's own footing (TowerDescent) aims only at the block under its feet and never clears anything in front of it");
         assertTrue(body(controller, "public ActionResult tick(ActionPack pack)")
                         .contains("clearsObstructions && !started ? clearTheWay(pack, player) : visibilityRefused(player);"),

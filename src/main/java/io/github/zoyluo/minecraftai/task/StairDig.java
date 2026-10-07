@@ -22,6 +22,10 @@ final class StairDig {
     private StairDig() {
     }
 
+    /** Why a step is refused, and the cell the reason was found at: a cell of the step, or the floor it lands on. */
+    record Refusal(String reason, BlockPos cell) {
+    }
+
     /**
      * The first reason, from what {@code bot} can see, that {@code move} cannot be opened and stood on
      * safely, or null when nothing seen forbids it. Every cell of the step is checked by
@@ -29,20 +33,26 @@ final class StairDig {
      * opening revealed over or beside it is the reason to stop before the next cell is opened.
      */
     static String refusal(AIPlayerEntity bot, ServerLevel world, BlockPos feet, OreClimb.Move move) {
+        Refusal refusal = refusalAt(bot, world, feet, move);
+        return refusal == null ? null : refusal.reason();
+    }
+
+    /** {@link #refusal} with the cell it was found at: the digger that opened that cell is the one that may close it again. */
+    static Refusal refusalAt(AIPlayerEntity bot, ServerLevel world, BlockPos feet, OreClimb.Move move) {
         for (BlockPos cell : OreClimb.bodyCells(feet, move)) {
             String refusal = MiningSafety.openingRefusal(bot, cell);
             if (refusal != null) {
-                return refusal;
+                return new Refusal(refusal, cell);
             }
         }
         BlockPos floor = OreClimb.landing(feet, move).below();
         if (ObservableWorldQuery.canObserveCell(bot, floor) || ObservableWorldQuery.canObserveBlock(bot, floor)) {
             BlockState floorState = world.getBlockState(floor);
             if (!floorState.getFluidState().isEmpty()) {
-                return floorState.getFluidState().is(FluidTags.WATER) ? "water" : "lava";
+                return new Refusal(floorState.getFluidState().is(FluidTags.WATER) ? "water" : "lava", floor);
             }
             if (Standability.isDangerous(floorState) || floorState.getCollisionShape(world, floor).isEmpty()) {
-                return OPEN_DROP;
+                return new Refusal(OPEN_DROP, floor);
             }
         }
         return null;

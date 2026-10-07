@@ -29,9 +29,9 @@ import net.minecraft.world.phys.Vec3;
  * <p>Fixture: a block of stone, a 5x5 room in it two cells high with five blocks of rock over it, and open sky over that.</p>
  */
 public final class DigOutTaskGameTests {
-    private static final long NOON = 6000L;
-    private static final int HALF = 12;
-    private static final int ROOF = 5;
+    static final long NOON = 6000L;
+    static final int HALF = 12;
+    static final int ROOF = 5;
 
     @GameTest(maxTicks = 2400)
     public void aBotWithNothingToLightItselfDigsAStairOutOfARoomUnderRock(GameTestHelper context) {
@@ -153,22 +153,27 @@ public final class DigOutTaskGameTests {
      * Rock (of {@code rock}) from {@code HALF} blocks either way and one under the room to {@code ROOF + 2} over its floor, a 5x5
      * room two cells high in it with {@code feet} at its centre, and clear air over the top.
      */
-    private static void stoneWithRoom(ServerLevel world, BlockPos feet, Block rock) {
+    static void stoneWithRoom(ServerLevel world, BlockPos feet, Block rock) {
+        stoneWithRoom(world, feet, rock, ROOF);
+    }
+
+    /** {@link #stoneWithRoom(ServerLevel, BlockPos, Block)} with {@code roof} cells of rock over the room instead of {@code ROOF}. */
+    static void stoneWithRoom(ServerLevel world, BlockPos feet, Block rock, int roof) {
         for (int dx = -HALF; dx <= HALF; dx++) {
             for (int dz = -HALF; dz <= HALF; dz++) {
-                for (int dy = -1; dy <= ROOF + 1; dy++) {
+                for (int dy = -1; dy <= roof + 1; dy++) {
                     boolean room = Math.abs(dx) <= 2 && Math.abs(dz) <= 2 && (dy == 0 || dy == 1);
                     world.setBlock(feet.offset(dx, dy, dz),
                             room ? Blocks.AIR.defaultBlockState() : rock.defaultBlockState(), Block.UPDATE_ALL);
                 }
-                for (int dy = ROOF + 2; dy <= ROOF + 12; dy++) {
+                for (int dy = roof + 2; dy <= roof + 12; dy++) {
                     world.setBlock(feet.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
     }
 
-    private static Map<BlockPos, BlockState> snapshot(ServerLevel world, BlockPos feet) {
+    static Map<BlockPos, BlockState> snapshot(ServerLevel world, BlockPos feet) {
         Map<BlockPos, BlockState> states = new HashMap<>();
         for (int dx = -HALF; dx <= HALF; dx++) {
             for (int dz = -HALF; dz <= HALF; dz++) {
@@ -181,7 +186,7 @@ public final class DigOutTaskGameTests {
         return states;
     }
 
-    private static boolean noTorchPlaced(ServerLevel world, BlockPos feet) {
+    static boolean noTorchPlaced(ServerLevel world, BlockPos feet) {
         for (int dx = -HALF; dx <= HALF; dx++) {
             for (int dz = -HALF; dz <= HALF; dz++) {
                 for (int dy = -1; dy <= ROOF + 12; dy++) {
@@ -195,7 +200,7 @@ public final class DigOutTaskGameTests {
         return true;
     }
 
-    private static AIPlayerEntity spawnAt(GameTestHelper context, String name, BlockPos feet) {
+    static AIPlayerEntity spawnAt(GameTestHelper context, String name, BlockPos feet) {
         ServerLevel world = context.getLevel();
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3.atBottomCenterOf(feet),
@@ -209,13 +214,13 @@ public final class DigOutTaskGameTests {
         return bot;
     }
 
-    private static void cleanUp(AIPlayerEntity bot) {
+    static void cleanUp(AIPlayerEntity bot) {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         DangerWatcher.INSTANCE.clear(bot);
         AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), bot.getGameProfile().name());
     }
 
-    private static void require(GameTestHelper context, boolean condition, String message) {
+    static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
             context.fail(Component.nullToEmpty(message));
         }

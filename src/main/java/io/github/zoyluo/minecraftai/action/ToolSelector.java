@@ -109,10 +109,7 @@ public final class ToolSelector {
             }
         }
         ItemStack currentStack = main.get(currentSlot);
-        float currentScore = score(currentStack, state, swordsMine);
-        if (!swordsMine && currentStack.is(ItemTags.SWORDS)) {
-            currentScore -= 0.002F; // a sword that is only in hand by chance yields to any other stack on a tie (cobweb: nothing beats the bare hand)
-        }
+        float currentScore = candidateScore(currentStack, state, swordsMine);
         int bestSlot = currentSlot;
         boolean bestOffhand = false;
         ItemStack bestStack = currentStack;
@@ -126,7 +123,7 @@ public final class ToolSelector {
             if (stack.isEmpty() && !Inventory.isHotbarSlot(slot)) {
                 continue;
             }
-            float candidateScore = score(stack, state, swordsMine);
+            float candidateScore = candidateScore(stack, state, swordsMine);
             int candidateHandSafety = softBlockHandSafety(stack, state);
             if (isBetterCandidate(candidateScore, candidateHandSafety,
                     bestScore, bestHandSafety)) {
@@ -138,7 +135,7 @@ public final class ToolSelector {
             }
         }
         if (!offhand.isEmpty()) {
-            float candidateScore = score(offhand, state, swordsMine);
+            float candidateScore = candidateScore(offhand, state, swordsMine);
             int candidateHandSafety = softBlockHandSafety(offhand, state);
             if (isBetterCandidate(candidateScore, candidateHandSafety,
                     bestScore, bestHandSafety)) {
@@ -360,6 +357,16 @@ public final class ToolSelector {
             return 2;
         }
         return stack.is(ItemTags.SWORDS) || stack.getItem() instanceof AxeItem ? 0 : 1;
+    }
+
+    /**
+     * The score a stack competes with. With {@code swordsMine} false a sword counts like an empty hand and yields to any other stack on a
+     * tie, the one in hand included (cobweb, or stone with no pickaxe: nothing beats the bare hand), so a sword that is only selected by
+     * chance is put away and not worn down for nothing.
+     */
+    private static float candidateScore(ItemStack stack, BlockState state, boolean swordsMine) {
+        float score = score(stack, state, swordsMine);
+        return !swordsMine && stack.is(ItemTags.SWORDS) ? score - 0.002F : score;
     }
 
     private static float score(ItemStack stack, BlockState state, boolean swordsMine) {
