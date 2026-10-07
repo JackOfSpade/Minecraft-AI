@@ -698,6 +698,60 @@ public final class MiningObstructionGameTests {
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // The bot's own footing is never in the way of a break, and its own break keeps its dedicated path
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @GameTest(environment = "minecraftai-gametest:mining_obstruction_game_tests_the_block_the_bot_stands_on_is_never_cleared_for_a_log_below_it_and_only_the_own_support_break_takes_it", maxTicks = 300)
+    public void theBlockTheBotStandsOnIsNeverClearedForALogBelowItAndOnlyTheOwnSupportBreakTakesIt(GameTestHelper context) {
+        Arena arena = Arena.begin(context, "ObstructFooting");
+        AIPlayerEntity bot = arena.bot();
+        arena.giveAxe();
+        BlockPos under = arena.at(0, -1, 0);
+        BlockPos log = arena.at(0, -2, 0);
+        List<BlockPos> sealed = new ArrayList<>();
+        for (Direction side : Direction.values()) {
+            if (side != Direction.UP) {
+                sealed.add(log.relative(side));
+                arena.set(log.relative(side), Blocks.STONE.defaultBlockState());
+            }
+        }
+        arena.set(log, LOG);
+        // The log's one open face is covered by the leaf the bot stands on: the eyes see it through that leaf, a hand cannot reach it
+        // without the leaf, and the leaf is the one block the bot must not break.
+        arena.set(under, LEAF);
+        arena.require(arena.sees(log) && !arena.reaches(log), "fixture: the log must be seen through the leaf under the bot, not reachable");
+        ActionResult refused = bot.getActionPack().startMining(log, Direction.UP);
+        arena.require(refused.isFailed() && MiningController.TARGET_OBSTRUCTED.equals(refused.reason()),
+                "a log under the leaf the bot stands on was not refused as obstructed: " + refused);
+        arena.require(bot.getActionPack().isMiningIdle() && arena.world().getBlockState(under).is(Blocks.OAK_LEAVES),
+                "the leaf the bot stands on was broken for the log under it");
+        List<String> refusals = arena.events("mining_obstruction_refused");
+        arena.require(refusals.size() == 1 && refusals.get(0).contains("reason='self_support'") && refusals.get(0).contains("obstruction=" + pos(under)),
+                "the refusal does not say that the leaf is the bot's own footing: " + refusals);
+        arena.require(arena.events("mining_obstruction_detected").isEmpty(), "a clearing step was planned for the bot's own footing");
+
+        // The same cell, now one of the pillar's throwaway blocks: the ordinary break still refuses it, the dedicated path takes it.
+        arena.set(under, Blocks.DIRT.defaultBlockState());
+        ActionResult plain = bot.getActionPack().startMining(under, Direction.UP);
+        arena.require(plain.isFailed() && MiningSafety.SELF_SUPPORT.equals(plain.reason()),
+                "the ordinary break of the block under the bot was not refused as its own footing: " + plain);
+        ActionResult own = bot.getActionPack().startOwnSupportMining(under);
+        arena.require(own.isInProgress(), "the dedicated break of the bot's own pillar block was refused: " + own);
+        context.failIfEver(() -> {
+            if (!arena.world().getBlockState(under).isAir()) {
+                return;
+            }
+            arena.require(arena.events("mining_obstruction_detected").isEmpty() && arena.events("mining_obstruction_cleared").isEmpty(),
+                    "the own-support break was treated as an obstruction");
+            arena.require(arena.world().getBlockState(log).is(Blocks.OAK_LOG), "the log under the bot's footing was broken with it");
+            for (BlockPos stone : sealed) {
+                arena.require(arena.world().getBlockState(stone).is(Blocks.STONE), "the break of the footing reached " + stone);
+            }
+            arena.finish();
+        });
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // Gather does not wait out its deadline for a target the miner has refused
     // ---------------------------------------------------------------------------------------------------------------
 
