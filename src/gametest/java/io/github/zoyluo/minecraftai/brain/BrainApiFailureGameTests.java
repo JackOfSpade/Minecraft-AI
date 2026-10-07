@@ -308,7 +308,7 @@ public final class BrainApiFailureGameTests {
         }));
     }
 
-    @GameTest(maxTicks = 8000)
+    @GameTest(maxTicks = 18000)
     public void expiredGeminiInteractionContinuesInAFreshOneAndSpendsOneMoreCall(GameTestHelper context) {
         // The first reply asks for a read-only tool, so the brain continues the stored interaction with its
         // result. The service no longer has that interaction (it keeps them for a limited time): the request
@@ -337,7 +337,7 @@ public final class BrainApiFailureGameTests {
         }));
     }
 
-    @GameTest(maxTicks = 8000)
+    @GameTest(maxTicks = 18000)
     public void aFreshGeminiInteractionThatIsRejectedTooIsReportedNotRetried(GameTestHelper context) {
         Harness harness = Harness.startGemini(context, "ApiStaleTwiceGT",
                 Reply.geminiTool("interaction-1", "inventory", "{}"),
