@@ -191,6 +191,19 @@ class MiningObstructionTest {
     }
 
     @Test
+    void aPlannerLeavesLeavesSmallPlantsAndWaterOutOfWhatShutsALineAndKeepsEverythingElseIn() {
+        for (BlockState passed : new BlockState[] {LEAF, Blocks.SPRUCE_LEAVES.defaultBlockState(),
+                Blocks.SHORT_GRASS.defaultBlockState(), Blocks.WATER.defaultBlockState()}) {
+            assertTrue(MiningObstruction.handGetsPast(passed), passed.getBlock() + " is cleared or passed by the bot's hand");
+        }
+        for (BlockState shut : new BlockState[] {FENCE, PANE, Blocks.GLASS.defaultBlockState(), Blocks.STONE.defaultBlockState(),
+                Blocks.DIRT.defaultBlockState(), Blocks.OAK_LOG.defaultBlockState(), Blocks.OAK_SLAB.defaultBlockState(),
+                Blocks.COBWEB.defaultBlockState(), Blocks.LAVA.defaultBlockState()}) {
+            assertFalse(MiningObstruction.handGetsPast(shut), shut.getBlock() + " stays in the way of a break");
+        }
+    }
+
+    @Test
     void theBreakRuleLetsABotClearFoliageAndNothingSomebodyBuilt() {
         // Natural terrain only: the leaves of every tree and the small plants that grow in the way.
         for (BlockState natural : new BlockState[] {LEAF, Blocks.BIRCH_LEAVES.defaultBlockState(),

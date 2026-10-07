@@ -286,7 +286,17 @@ leaf beside lava the bot can see, or beside water that would flow into its cell,
 When no line is left the operation fails with the typed `target_obstructed` (the callers' "not mineable from this stand": a task
 tries another stand), and `mining_obstruction_refused` says which block and why;
 `target_not_observed` stays for a target the eyes do not see (an opaque block, lava, out of reach). A Baritone driver's
-controller does not clear anything on top of that: Baritone clicks what its own pick ray meets, which is the leaf.
+controller does not clear anything on top of that: Baritone clicks what its own pick ray meets, which is the leaf. Neither does the
+break of the bot's own footing (`ActionPack.startOwnSupportMining`, the one that takes a pillar the bot built down again,
+`TowerDescent`): it aims only at the block under the bot's feet, goes through the same strict gate, is refused unless that block
+is seen, and never clears anything in front of it. Clearing never breaks a block the bot or another player stands on, so the tower
+the bot is on is only ever taken down by that dedicated path.
+
+A pillar plan weighs the same split before the bot stands on the pillar (`HarvestCore.isSightlineBlocked`): a line from the pillar
+head to the target that only leaves, small plants or water cross is not shut (the controller breaks the first and a hand passes
+the second, `MiningObstruction.handGetsPast`), so a log in a canopy is climbed to from the lowest pillar in reach; a line crossed by
+anything else the bot has seen (a ledge, a wall, a fence, a pane) is shut, as before. The pillar's own column still has to be air
+all the way up to the target.
 
 `castViewRay` stays the strict first-hit view ray: the mining assist's sweeper and the suffocation escape's dig choice use it,
 because an occupancy grid that writes air for every traversed cell and a hazard field that takes a water surface for a fluid hit

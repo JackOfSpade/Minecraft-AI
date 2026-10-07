@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.ReachObstructions;
 import io.github.zoyluo.minecraftai.mode.ReachObstructions.Line;
 import io.github.zoyluo.minecraftai.mode.ReachObstructions.Obstruction;
+import io.github.zoyluo.minecraftai.mode.SeeThrough;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -21,6 +22,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.phys.Vec3;
@@ -206,6 +208,19 @@ final class MiningObstruction {
             }
         }
         return false;
+    }
+
+    /**
+     * Whether a hand gets past a block that stands on the line to a target: water (a hand passes it) or a see-through block the bot
+     * breaks first (leaves and the small plants of the {@link BreakRule}). A planner that judges a stance before the bot stands in it
+     * asks this of what it has seen on the line, so that it does not rule out a stance whose line only leaves and water cross, which
+     * this class would clear or pass. Anything else (a fence, a pane, a ledge, a wall) is in the way, or the plan would refuse it.
+     */
+    static boolean handGetsPast(BlockState state) {
+        if (state.getBlock() instanceof LiquidBlock && state.getFluidState().is(FluidTags.WATER)) {
+            return true;
+        }
+        return SeeThrough.cell(state) && BreakRule.denialOf(state) == null;
     }
 
     /** The step after this plan is a normal break of {@code obstruction}: within arm's length and passing the strict proof. */

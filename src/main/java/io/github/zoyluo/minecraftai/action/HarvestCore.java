@@ -1309,17 +1309,19 @@ public final class HarvestCore {
                 continue;
             }
             // Mining straight up the target's own column crosses every cell between the pillar
-            // head and the target, which the body's headroom stops short of; a leaf or log in
-            // there would make the break controller refuse the mine after the pillar is built.
+            // head and the target, which the body's headroom stops short of; a log in there would
+            // make the break controller refuse the mine after the pillar is built, and a leaf in
+            // there would have to be cleared first, so that column has to be proven air all the way.
             int top = ownColumn ? Math.max(goalY + PILLAR_HEADROOM, target.getY() - 1)
                     : goalY + PILLAR_HEADROOM;
             if (!isObservedClearPillarColumn(bot, base, top)) {
                 return null; // a higher level has to prove every cell this one does, and more
             }
             // Beside the target the same refusal comes from a cell between the pillar head and the
-            // target. This is the lowest level in reach, so the cheapest: a higher one spends more of
-            // the user's throwaway material, and is proved only when every line from this head to the
-            // target is seen to be shut (a head one block higher looks along other lines).
+            // target (leaves and water do not: the bot clears the one and passes the other). This is
+            // the lowest level in reach, so the cheapest: a higher one spends more of the user's
+            // throwaway material, and is proved only when every line from this head to the target is
+            // seen to be shut (a head one block higher looks along other lines).
             if (!ownColumn && isSightlineBlocked(bot, goal, target)) {
                 continue;
             }
@@ -1344,10 +1346,17 @@ public final class HarvestCore {
     /**
      * True when the bot has already seen every line from the eye it will have on a pillar at {@code goal}
      * to the target shut (see {@link PillarSightline}): the break controller would refuse the mine from there.
+     * A line that only leaves, small plants or water cross is not shut: the controller breaks the first and a hand passes
+     * the second ({@link MiningObstruction#handGetsPast}), so a log behind a canopy is mined from the lowest pillar in reach.
      */
     private static boolean isSightlineBlocked(AIPlayerEntity bot, BlockPos goal, BlockPos target) {
-        return PillarSightline.isBlocked(pillarEye(bot, goal), target, goal,
-                cell -> ObservableWorldQuery.canObserveCell(bot, cell) && !bot.level().getBlockState(cell).isAir());
+        return PillarSightline.isBlocked(pillarEye(bot, goal), target, goal, cell -> {
+            if (!ObservableWorldQuery.canObserveCell(bot, cell)) {
+                return false;
+            }
+            var state = bot.level().getBlockState(cell);
+            return !state.isAir() && !MiningObstruction.handGetsPast(state);
+        });
     }
 
     /**
