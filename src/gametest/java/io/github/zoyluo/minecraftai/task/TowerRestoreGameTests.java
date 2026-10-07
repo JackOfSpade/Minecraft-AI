@@ -294,11 +294,12 @@ public final class TowerRestoreGameTests {
             beforeSave.run();
             AIPlayerEntity bot = c.bot;
             cobbleAtSave = InventoryAction.countItem(bot, Items.COBBLESTONE);
-            record = roundTrip(BotPersistence.capture(bot));
+            BotRecord captured = BotPersistence.capture(bot);
             c.require(savedWithTower
-                            ? TowerBaseCodec.encode(c.feet).equals(record.towerBase()) : record.towerBase() == null,
+                            ? TowerBaseCodec.encode(c.feet).equals(captured.towerBase()) : captured.towerBase() == null,
                     (savedWithTower ? "the bot standing on its tower was saved without it: "
-                            : "a bot that is not on its tower was saved with one: ") + record.towerBase());
+                            : "a bot that is not on its tower was saved with one: ") + captured.towerBase());
+            record = roundTrip(captured);
             unload();
         }
 
