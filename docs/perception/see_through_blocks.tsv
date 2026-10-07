@@ -1,0 +1,1167 @@
+id	verdict	reason
+acacia_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+acacia_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+acacia_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+acacia_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+acacia_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+acacia_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+acacia_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+acacia_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+acacia_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+acacia_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+acacia_shelf	OPAQUE	-: shelf: solid wooden shelf
+acacia_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+acacia_slab	OPAQUE	-: slab: solid half block
+acacia_stairs	OPAQUE	-: stairs: solid
+acacia_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+acacia_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+acacia_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+acacia_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+activator_rail	SEE_THROUGH	S7: rail: flat track with gaps, no collision
+air	SEE_THROUGH	S7: air
+allium	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+amethyst_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+amethyst_cluster	OPAQUE	-: small solid crystal/stone object, own shape only
+ancient_debris	OPAQUE	-: full opaque solid cube (isSolidRender)
+andesite	OPAQUE	-: full opaque solid cube (isSolidRender)
+andesite_slab	OPAQUE	-: slab: solid half block
+andesite_stairs	OPAQUE	-: stairs: solid
+andesite_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+anvil	OPAQUE	-: anvil: solid
+attached_melon_stem	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+attached_pumpkin_stem	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+azalea	OPAQUE	-: RESOLVED OPAQUE: azalea_top/side textures are opaque (only the stem area is clear), unlike azalea_leaves; 8/16-high slab, collider = visible mass, T_v=0
+azalea_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+azure_bluet	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+bamboo	SEE_THROUGH	S6:RESOLVED SEE_THROUGH: plant with leaf cutouts (T_h 0.58); outline (0.14-0.39 vol) is far bigger than 3px stalk collider (0.04), so OPAQUE+outline would over-block; consistent with fence/chain posts
+bamboo_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+bamboo_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+bamboo_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+bamboo_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+bamboo_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+bamboo_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+bamboo_mosaic	OPAQUE	-: full opaque solid cube (isSolidRender)
+bamboo_mosaic_slab	OPAQUE	-: slab: solid half block
+bamboo_mosaic_stairs	OPAQUE	-: stairs: solid
+bamboo_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+bamboo_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+bamboo_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+bamboo_shelf	OPAQUE	-: shelf: solid wooden shelf
+bamboo_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+bamboo_slab	OPAQUE	-: slab: solid half block
+bamboo_stairs	OPAQUE	-: stairs: solid
+bamboo_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+bamboo_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+bamboo_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+barrel	OPAQUE	-: composter/barrel/furnace-like workstation: solid
+barrier	SEE_THROUGH	S6: invisible in normal play (barrier/light/structure void)
+basalt	OPAQUE	-: full opaque solid cube (isSolidRender)
+beacon	OPAQUE	-: beacon: glass shell but opaque obsidian/orb core covers about 62 percent
+bedrock	OPAQUE	-: full opaque solid cube (isSolidRender)
+bee_nest	OPAQUE	-: full opaque solid cube (isSolidRender)
+beehive	OPAQUE	-: full opaque solid cube (isSolidRender)
+beetroots	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+bell	OPAQUE	-: grindstone/stonecutter/lectern/enchanting table/bell/etc: solid workstation
+big_dripleaf	OPAQUE	-: big dripleaf platform: opaque flat leaf
+big_dripleaf_stem	SEE_THROUGH	S7: big dripleaf stem: thin 6px stem, no collision
+birch_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+birch_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+birch_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+birch_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+birch_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+birch_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+birch_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+birch_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+birch_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+birch_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+birch_shelf	OPAQUE	-: shelf: solid wooden shelf
+birch_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+birch_slab	OPAQUE	-: slab: solid half block
+birch_stairs	OPAQUE	-: stairs: solid
+birch_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+birch_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+birch_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+birch_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+black_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+black_bed	OPAQUE	-: bed: solid 9/16 high block
+black_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+black_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+black_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+black_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+black_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+black_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+black_shulker_box	OPAQUE	-: shulker box: solid
+black_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+black_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+black_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+black_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+black_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+blackstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+blackstone_slab	OPAQUE	-: slab: solid half block
+blackstone_stairs	OPAQUE	-: stairs: solid
+blackstone_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+blast_furnace	OPAQUE	-: full opaque solid cube (isSolidRender)
+blue_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+blue_bed	OPAQUE	-: bed: solid 9/16 high block
+blue_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+blue_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+blue_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+blue_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+blue_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+blue_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+blue_ice	OPAQUE	-: blue ice: opaque SOLID layer (HalfTransparentBlock class only for culling)
+blue_orchid	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+blue_shulker_box	OPAQUE	-: shulker box: solid
+blue_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+blue_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+blue_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+blue_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+blue_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+bone_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+bookshelf	OPAQUE	-: full opaque solid cube (isSolidRender)
+brain_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+brain_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+brain_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+brain_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+brewing_stand	OPAQUE	-: brewing stand: base plate and rod are solid, arms are thin; shape clips correctly
+brick_slab	OPAQUE	-: slab: solid half block
+brick_stairs	OPAQUE	-: stairs: solid
+brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+brown_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+brown_bed	OPAQUE	-: bed: solid 9/16 high block
+brown_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+brown_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+brown_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+brown_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+brown_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+brown_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+brown_mushroom	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+brown_mushroom_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+brown_shulker_box	OPAQUE	-: shulker box: solid
+brown_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+brown_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+brown_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+brown_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+brown_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+bubble_column	SEE_THROUGH	S7: bubble column: translucent water column
+bubble_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+bubble_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+bubble_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+bubble_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+budding_amethyst	OPAQUE	-: full opaque solid cube (isSolidRender)
+bush	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+cactus	OPAQUE	-: cactus: opaque green column (spikes are 1px fringe)
+cactus_flower	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+cake	OPAQUE	-: cake: solid
+calcite	OPAQUE	-: full opaque solid cube (isSolidRender)
+calibrated_sculk_sensor	OPAQUE	-: sculk sensor-type: solid 8/16 body
+campfire	OPAQUE	-: campfire: solid logs
+candle	OPAQUE	-: candle: small opaque wax object, own shape only
+candle_cake	OPAQUE	-: candle cake: solid cake with candle
+carrots	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+cartography_table	OPAQUE	-: full opaque solid cube (isSolidRender)
+carved_pumpkin	OPAQUE	-: full opaque solid cube (isSolidRender)
+cauldron	OPAQUE	-: cauldron: solid walls and floor
+cave_air	SEE_THROUGH	S7: air
+cave_vines	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+cave_vines_plant	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+chain_command_block	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+cherry_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+cherry_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+cherry_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+cherry_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+cherry_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+cherry_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+cherry_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+cherry_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+cherry_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+cherry_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+cherry_shelf	OPAQUE	-: shelf: solid wooden shelf
+cherry_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+cherry_slab	OPAQUE	-: slab: solid half block
+cherry_stairs	OPAQUE	-: stairs: solid
+cherry_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+cherry_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+cherry_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+cherry_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+chest	OPAQUE	-: chest family: solid entity-rendered box
+chipped_anvil	OPAQUE	-: anvil: solid
+chiseled_bookshelf	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_deepslate	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_nether_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_polished_blackstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_quartz_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_red_sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_resin_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_tuff	OPAQUE	-: full opaque solid cube (isSolidRender)
+chiseled_tuff_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+chorus_flower	OPAQUE	-: solid small object with its own shape
+chorus_plant	OPAQUE	-: solid small object with its own shape
+clay	OPAQUE	-: full opaque solid cube (isSolidRender)
+closed_eyeblossom	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+coal_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+coal_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+coarse_dirt	OPAQUE	-: full opaque solid cube (isSolidRender)
+cobbled_deepslate	OPAQUE	-: full opaque solid cube (isSolidRender)
+cobbled_deepslate_slab	OPAQUE	-: slab: solid half block
+cobbled_deepslate_stairs	OPAQUE	-: stairs: solid
+cobbled_deepslate_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+cobblestone	OPAQUE	-: full opaque solid cube (isSolidRender)
+cobblestone_slab	OPAQUE	-: slab: solid half block
+cobblestone_stairs	OPAQUE	-: stairs: solid
+cobblestone_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+cobweb	SEE_THROUGH	S7: cobweb: cutout strings, mostly clear, no collision
+cocoa	OPAQUE	-: solid small object with its own shape
+command_block	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+comparator	OPAQUE	-: redstone gadget: opaque slab-like body
+composter	OPAQUE	-: composter/barrel/furnace-like workstation: solid
+conduit	OPAQUE	-: solid small object with its own shape
+copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+copper_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+copper_bulb	OPAQUE	-: copper bulb: opaque
+copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+copper_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+copper_torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+copper_wall_torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+cornflower	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+cracked_deepslate_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+cracked_deepslate_tiles	OPAQUE	-: full opaque solid cube (isSolidRender)
+cracked_nether_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+cracked_polished_blackstone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+cracked_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+crafter	OPAQUE	-: full opaque solid cube (isSolidRender)
+crafting_table	OPAQUE	-: full opaque solid cube (isSolidRender)
+creaking_heart	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+creeper_head	OPAQUE	-: head/skull: solid small block
+creeper_wall_head	OPAQUE	-: head/skull: solid small block
+crimson_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+crimson_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+crimson_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+crimson_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+crimson_fungus	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+crimson_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+crimson_hyphae	OPAQUE	-: full opaque solid cube (isSolidRender)
+crimson_nylium	OPAQUE	-: full opaque solid cube (isSolidRender)
+crimson_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+crimson_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+crimson_roots	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+crimson_shelf	OPAQUE	-: shelf: solid wooden shelf
+crimson_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+crimson_slab	OPAQUE	-: slab: solid half block
+crimson_stairs	OPAQUE	-: stairs: solid
+crimson_stem	OPAQUE	-: full opaque solid cube (isSolidRender)
+crimson_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+crimson_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+crimson_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+crying_obsidian	OPAQUE	-: full opaque solid cube (isSolidRender)
+cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+cut_copper_slab	OPAQUE	-: slab: solid half block
+cut_copper_stairs	OPAQUE	-: stairs: solid
+cut_red_sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+cut_red_sandstone_slab	OPAQUE	-: slab: solid half block
+cut_sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+cut_sandstone_slab	OPAQUE	-: slab: solid half block
+cyan_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+cyan_bed	OPAQUE	-: bed: solid 9/16 high block
+cyan_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+cyan_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+cyan_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+cyan_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+cyan_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+cyan_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+cyan_shulker_box	OPAQUE	-: shulker box: solid
+cyan_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+cyan_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+cyan_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+cyan_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+cyan_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+damaged_anvil	OPAQUE	-: anvil: solid
+dandelion	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dark_oak_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+dark_oak_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+dark_oak_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+dark_oak_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+dark_oak_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+dark_oak_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+dark_oak_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+dark_oak_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+dark_oak_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+dark_oak_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dark_oak_shelf	OPAQUE	-: shelf: solid wooden shelf
+dark_oak_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+dark_oak_slab	OPAQUE	-: slab: solid half block
+dark_oak_stairs	OPAQUE	-: stairs: solid
+dark_oak_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+dark_oak_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+dark_oak_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+dark_oak_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+dark_prismarine	OPAQUE	-: full opaque solid cube (isSolidRender)
+dark_prismarine_slab	OPAQUE	-: slab: solid half block
+dark_prismarine_stairs	OPAQUE	-: stairs: solid
+daylight_detector	OPAQUE	-: redstone gadget: opaque slab-like body
+dead_brain_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_brain_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+dead_brain_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_brain_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_bubble_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_bubble_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+dead_bubble_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_bubble_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_bush	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_fire_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_fire_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+dead_fire_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_fire_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_horn_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_horn_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+dead_horn_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_horn_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_tube_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_tube_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+dead_tube_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+dead_tube_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+decorated_pot	OPAQUE	-: solid small object with its own shape
+deepslate	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_brick_slab	OPAQUE	-: slab: solid half block
+deepslate_brick_stairs	OPAQUE	-: stairs: solid
+deepslate_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+deepslate_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_coal_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_copper_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_diamond_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_emerald_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_gold_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_iron_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_lapis_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_redstone_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+deepslate_tile_slab	OPAQUE	-: slab: solid half block
+deepslate_tile_stairs	OPAQUE	-: stairs: solid
+deepslate_tile_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+deepslate_tiles	OPAQUE	-: full opaque solid cube (isSolidRender)
+detector_rail	SEE_THROUGH	S7: rail: flat track with gaps, no collision
+diamond_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+diamond_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+diorite	OPAQUE	-: full opaque solid cube (isSolidRender)
+diorite_slab	OPAQUE	-: slab: solid half block
+diorite_stairs	OPAQUE	-: stairs: solid
+diorite_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+dirt	OPAQUE	-: full opaque solid cube (isSolidRender)
+dirt_path	OPAQUE	-: farmland / dirt path / soul sand / mud: opaque, slightly short cube
+dispenser	OPAQUE	-: full opaque solid cube (isSolidRender)
+dragon_egg	OPAQUE	-: solid small object with its own shape
+dragon_head	OPAQUE	-: head/skull: solid small block
+dragon_wall_head	OPAQUE	-: head/skull: solid small block
+dried_ghast	OPAQUE	-: solid small object with its own shape
+dried_kelp_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+dripstone_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+dropper	OPAQUE	-: full opaque solid cube (isSolidRender)
+emerald_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+emerald_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+enchanting_table	OPAQUE	-: grindstone/stonecutter/lectern/enchanting table/bell/etc: solid workstation
+end_gateway	OPAQUE	-: end gateway: renders solid starfield cube with beam
+end_portal	OPAQUE	-: end portal: renders a solid starfield cube, cannot see the world through it
+end_portal_frame	OPAQUE	-: end portal frame: solid
+end_rod	OPAQUE	-: solid small object with its own shape
+end_stone	OPAQUE	-: full opaque solid cube (isSolidRender)
+end_stone_brick_slab	OPAQUE	-: slab: solid half block
+end_stone_brick_stairs	OPAQUE	-: stairs: solid
+end_stone_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+end_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+ender_chest	OPAQUE	-: chest family: solid entity-rendered box
+exposed_chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+exposed_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+exposed_copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+exposed_copper_bulb	OPAQUE	-: copper bulb: opaque
+exposed_copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+exposed_copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+exposed_copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+exposed_copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+exposed_copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+exposed_copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+exposed_copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+exposed_cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+exposed_cut_copper_slab	OPAQUE	-: slab: solid half block
+exposed_cut_copper_stairs	OPAQUE	-: stairs: solid
+exposed_lightning_rod	OPAQUE	-: lightning rod: solid rod
+farmland	OPAQUE	-: farmland / dirt path / soul sand / mud: opaque, slightly short cube
+fern	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+fire	SEE_THROUGH	S7: fire: flame cutout, no collision
+fire_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+fire_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+fire_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+fire_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+firefly_bush	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+fletching_table	OPAQUE	-: full opaque solid cube (isSolidRender)
+flower_pot	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+flowering_azalea	OPAQUE	-: RESOLVED OPAQUE: azalea_top/side textures are opaque (only the stem area is clear), unlike azalea_leaves; 8/16-high slab, collider = visible mass, T_v=0
+flowering_azalea_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+frogspawn	SEE_THROUGH	S7: vine/lichen/vein/litter/spawn: thin patchy cutout overlay, no collision
+frosted_ice	SEE_THROUGH	S5: ice: translucent layer, entities visible through it
+furnace	OPAQUE	-: full opaque solid cube (isSolidRender)
+gilded_blackstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+glass	SEE_THROUGH	S5: glass: transparent pane texture
+glass_pane	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+glow_lichen	SEE_THROUGH	S7: vine/lichen/vein/litter/spawn: thin patchy cutout overlay, no collision
+glowstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+gold_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+gold_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+granite	OPAQUE	-: full opaque solid cube (isSolidRender)
+granite_slab	OPAQUE	-: slab: solid half block
+granite_stairs	OPAQUE	-: stairs: solid
+granite_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+grass_block	OPAQUE	-: grass block: opaque (cutout layer only for the overlay)
+gravel	OPAQUE	-: full opaque solid cube (isSolidRender)
+gray_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+gray_bed	OPAQUE	-: bed: solid 9/16 high block
+gray_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+gray_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+gray_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+gray_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+gray_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+gray_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+gray_shulker_box	OPAQUE	-: shulker box: solid
+gray_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+gray_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+gray_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+gray_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+gray_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+green_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+green_bed	OPAQUE	-: bed: solid 9/16 high block
+green_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+green_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+green_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+green_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+green_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+green_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+green_shulker_box	OPAQUE	-: shulker box: solid
+green_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+green_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+green_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+green_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+green_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+grindstone	OPAQUE	-: grindstone/stonecutter/lectern/enchanting table/bell/etc: solid workstation
+hanging_roots	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+hay_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+heavy_core	OPAQUE	-: heavy core: solid 8px block
+heavy_weighted_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+honey_block	SEE_THROUGH	S5: honey block: translucent amber
+honeycomb_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+hopper	OPAQUE	-: hopper: solid funnel
+horn_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+horn_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+horn_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+horn_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+ice	SEE_THROUGH	S5: ice: translucent layer, entities visible through it
+infested_chiseled_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+infested_cobblestone	OPAQUE	-: full opaque solid cube (isSolidRender)
+infested_cracked_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+infested_deepslate	OPAQUE	-: full opaque solid cube (isSolidRender)
+infested_mossy_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+infested_stone	OPAQUE	-: full opaque solid cube (isSolidRender)
+infested_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+iron_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+iron_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+iron_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+iron_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+iron_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+iron_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+jack_o_lantern	OPAQUE	-: full opaque solid cube (isSolidRender)
+jigsaw	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+jukebox	OPAQUE	-: full opaque solid cube (isSolidRender)
+jungle_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+jungle_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+jungle_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+jungle_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+jungle_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+jungle_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+jungle_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+jungle_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+jungle_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+jungle_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+jungle_shelf	OPAQUE	-: shelf: solid wooden shelf
+jungle_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+jungle_slab	OPAQUE	-: slab: solid half block
+jungle_stairs	OPAQUE	-: stairs: solid
+jungle_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+jungle_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+jungle_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+jungle_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+kelp	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+kelp_plant	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+ladder	SEE_THROUGH	S6: ladder: thin rungs on a wall plane, over half clear
+lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+lapis_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+lapis_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+large_amethyst_bud	OPAQUE	-: small solid crystal/stone object, own shape only
+large_fern	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+lava	OPAQUE	-: lava: opaque (user rule)
+lava_cauldron	OPAQUE	-: cauldron: solid walls and floor
+leaf_litter	SEE_THROUGH	S7: vine/lichen/vein/litter/spawn: thin patchy cutout overlay, no collision
+lectern	OPAQUE	-: grindstone/stonecutter/lectern/enchanting table/bell/etc: solid workstation
+lever	OPAQUE	-: lever: opaque base and handle fixture; no collision so clip on outline
+light	SEE_THROUGH	S7: invisible in normal play (barrier/light/structure void)
+light_blue_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+light_blue_bed	OPAQUE	-: bed: solid 9/16 high block
+light_blue_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+light_blue_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+light_blue_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+light_blue_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_blue_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_blue_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_blue_shulker_box	OPAQUE	-: shulker box: solid
+light_blue_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+light_blue_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+light_blue_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_blue_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+light_blue_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_gray_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+light_gray_bed	OPAQUE	-: bed: solid 9/16 high block
+light_gray_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+light_gray_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+light_gray_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+light_gray_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_gray_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_gray_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_gray_shulker_box	OPAQUE	-: shulker box: solid
+light_gray_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+light_gray_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+light_gray_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_gray_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+light_gray_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+light_weighted_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+lightning_rod	OPAQUE	-: lightning rod: solid rod
+lilac	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+lily_of_the_valley	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+lily_pad	OPAQUE	-: RESOLVED OPAQUE: opaque 1/16 disc (59% opaque, T_v 0.41); carpet analogy; blocks only rays that cross the thin layer (T_h=1.0)
+lime_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+lime_bed	OPAQUE	-: bed: solid 9/16 high block
+lime_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+lime_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+lime_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+lime_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+lime_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+lime_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+lime_shulker_box	OPAQUE	-: shulker box: solid
+lime_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+lime_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+lime_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+lime_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+lime_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+lodestone	OPAQUE	-: full opaque solid cube (isSolidRender)
+loom	OPAQUE	-: full opaque solid cube (isSolidRender)
+magenta_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+magenta_bed	OPAQUE	-: bed: solid 9/16 high block
+magenta_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+magenta_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+magenta_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+magenta_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+magenta_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+magenta_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+magenta_shulker_box	OPAQUE	-: shulker box: solid
+magenta_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+magenta_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+magenta_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+magenta_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+magenta_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+magma_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+mangrove_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+mangrove_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+mangrove_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+mangrove_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+mangrove_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+mangrove_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+mangrove_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+mangrove_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+mangrove_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+mangrove_propagule	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+mangrove_roots	SEE_THROUGH	S6: mangrove roots: open root lattice, about 38 percent clear, leaf-like
+mangrove_shelf	OPAQUE	-: shelf: solid wooden shelf
+mangrove_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+mangrove_slab	OPAQUE	-: slab: solid half block
+mangrove_stairs	OPAQUE	-: stairs: solid
+mangrove_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+mangrove_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+mangrove_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+mangrove_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+medium_amethyst_bud	OPAQUE	-: small solid crystal/stone object, own shape only
+melon	OPAQUE	-: full opaque solid cube (isSolidRender)
+melon_stem	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+moss_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+moss_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+mossy_cobblestone	OPAQUE	-: full opaque solid cube (isSolidRender)
+mossy_cobblestone_slab	OPAQUE	-: slab: solid half block
+mossy_cobblestone_stairs	OPAQUE	-: stairs: solid
+mossy_cobblestone_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+mossy_stone_brick_slab	OPAQUE	-: slab: solid half block
+mossy_stone_brick_stairs	OPAQUE	-: stairs: solid
+mossy_stone_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+mossy_stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+moving_piston	OPAQUE	-: moving piston: block entity renders a moving solid block, shape is dynamic
+mud	OPAQUE	-: farmland / dirt path / soul sand / mud: opaque, slightly short cube
+mud_brick_slab	OPAQUE	-: slab: solid half block
+mud_brick_stairs	OPAQUE	-: stairs: solid
+mud_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+mud_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+muddy_mangrove_roots	OPAQUE	-: full opaque solid cube (isSolidRender)
+mushroom_stem	OPAQUE	-: full opaque solid cube (isSolidRender)
+mycelium	OPAQUE	-: full opaque solid cube (isSolidRender)
+nether_brick_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+nether_brick_slab	OPAQUE	-: slab: solid half block
+nether_brick_stairs	OPAQUE	-: stairs: solid
+nether_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+nether_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+nether_gold_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+nether_portal	SEE_THROUGH	S7: nether portal: translucent swirl, world visible through it
+nether_quartz_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+nether_sprouts	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+nether_wart	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+nether_wart_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+netherite_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+netherrack	OPAQUE	-: full opaque solid cube (isSolidRender)
+note_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+oak_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+oak_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+oak_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+oak_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+oak_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+oak_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+oak_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+oak_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+oak_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+oak_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+oak_shelf	OPAQUE	-: shelf: solid wooden shelf
+oak_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+oak_slab	OPAQUE	-: slab: solid half block
+oak_stairs	OPAQUE	-: stairs: solid
+oak_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+oak_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+oak_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+oak_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+observer	OPAQUE	-: full opaque solid cube (isSolidRender)
+obsidian	OPAQUE	-: full opaque solid cube (isSolidRender)
+ochre_froglight	OPAQUE	-: full opaque solid cube (isSolidRender)
+open_eyeblossom	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+orange_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+orange_bed	OPAQUE	-: bed: solid 9/16 high block
+orange_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+orange_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+orange_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+orange_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+orange_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+orange_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+orange_shulker_box	OPAQUE	-: shulker box: solid
+orange_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+orange_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+orange_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+orange_tulip	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+orange_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+orange_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+oxeye_daisy	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+oxidized_chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+oxidized_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+oxidized_copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+oxidized_copper_bulb	OPAQUE	-: copper bulb: opaque
+oxidized_copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+oxidized_copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+oxidized_copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+oxidized_copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+oxidized_copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+oxidized_copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+oxidized_copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+oxidized_cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+oxidized_cut_copper_slab	OPAQUE	-: slab: solid half block
+oxidized_cut_copper_stairs	OPAQUE	-: stairs: solid
+oxidized_lightning_rod	OPAQUE	-: lightning rod: solid rod
+packed_ice	OPAQUE	-: packed ice: opaque SOLID layer, full cube
+packed_mud	OPAQUE	-: full opaque solid cube (isSolidRender)
+pale_hanging_moss	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+pale_moss_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+pale_moss_carpet	OPAQUE	-: pale moss carpet: opaque 1/16 layer with side skirts
+pale_oak_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+pale_oak_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+pale_oak_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+pale_oak_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+pale_oak_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+pale_oak_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+pale_oak_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+pale_oak_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+pale_oak_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+pale_oak_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+pale_oak_shelf	OPAQUE	-: shelf: solid wooden shelf
+pale_oak_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+pale_oak_slab	OPAQUE	-: slab: solid half block
+pale_oak_stairs	OPAQUE	-: stairs: solid
+pale_oak_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+pale_oak_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+pale_oak_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+pale_oak_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+pearlescent_froglight	OPAQUE	-: full opaque solid cube (isSolidRender)
+peony	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+petrified_oak_slab	OPAQUE	-: slab: solid half block
+piglin_head	OPAQUE	-: head/skull: solid small block
+piglin_wall_head	OPAQUE	-: head/skull: solid small block
+pink_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+pink_bed	OPAQUE	-: bed: solid 9/16 high block
+pink_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+pink_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+pink_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+pink_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+pink_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+pink_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+pink_petals	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+pink_shulker_box	OPAQUE	-: shulker box: solid
+pink_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+pink_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+pink_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+pink_tulip	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+pink_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+pink_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+piston	OPAQUE	-: piston parts: solid
+piston_head	OPAQUE	-: piston parts: solid
+pitcher_crop	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+pitcher_plant	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+player_head	OPAQUE	-: head/skull: solid small block
+player_wall_head	OPAQUE	-: head/skull: solid small block
+podzol	OPAQUE	-: full opaque solid cube (isSolidRender)
+pointed_dripstone	OPAQUE	-: small solid crystal/stone object, own shape only
+polished_andesite	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_andesite_slab	OPAQUE	-: slab: solid half block
+polished_andesite_stairs	OPAQUE	-: stairs: solid
+polished_basalt	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_blackstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_blackstone_brick_slab	OPAQUE	-: slab: solid half block
+polished_blackstone_brick_stairs	OPAQUE	-: stairs: solid
+polished_blackstone_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+polished_blackstone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_blackstone_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+polished_blackstone_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+polished_blackstone_slab	OPAQUE	-: slab: solid half block
+polished_blackstone_stairs	OPAQUE	-: stairs: solid
+polished_blackstone_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+polished_deepslate	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_deepslate_slab	OPAQUE	-: slab: solid half block
+polished_deepslate_stairs	OPAQUE	-: stairs: solid
+polished_deepslate_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+polished_diorite	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_diorite_slab	OPAQUE	-: slab: solid half block
+polished_diorite_stairs	OPAQUE	-: stairs: solid
+polished_granite	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_granite_slab	OPAQUE	-: slab: solid half block
+polished_granite_stairs	OPAQUE	-: stairs: solid
+polished_tuff	OPAQUE	-: full opaque solid cube (isSolidRender)
+polished_tuff_slab	OPAQUE	-: slab: solid half block
+polished_tuff_stairs	OPAQUE	-: stairs: solid
+polished_tuff_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+poppy	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+potatoes	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+potted_acacia_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_allium	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_azalea_bush	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_azure_bluet	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_bamboo	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_birch_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_blue_orchid	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_brown_mushroom	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_cactus	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_cherry_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_closed_eyeblossom	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_cornflower	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_crimson_fungus	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_crimson_roots	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_dandelion	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_dark_oak_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_dead_bush	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_fern	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_flowering_azalea_bush	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_jungle_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_lily_of_the_valley	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_mangrove_propagule	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_oak_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_open_eyeblossom	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_orange_tulip	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_oxeye_daisy	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_pale_oak_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_pink_tulip	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_poppy	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_red_mushroom	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_red_tulip	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_spruce_sapling	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_torchflower	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_warped_fungus	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_warped_roots	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_white_tulip	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+potted_wither_rose	OPAQUE	-: flower pot (empty or potted): opaque pot, plant above is outside the shape
+powder_snow	OPAQUE	-: powder snow: opaque white cube (no collision, needs outline clip)
+powder_snow_cauldron	OPAQUE	-: cauldron: solid walls and floor
+powered_rail	SEE_THROUGH	S7: rail: flat track with gaps, no collision
+prismarine	OPAQUE	-: full opaque solid cube (isSolidRender)
+prismarine_brick_slab	OPAQUE	-: slab: solid half block
+prismarine_brick_stairs	OPAQUE	-: stairs: solid
+prismarine_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+prismarine_slab	OPAQUE	-: slab: solid half block
+prismarine_stairs	OPAQUE	-: stairs: solid
+prismarine_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+pumpkin	OPAQUE	-: full opaque solid cube (isSolidRender)
+pumpkin_stem	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+purple_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+purple_bed	OPAQUE	-: bed: solid 9/16 high block
+purple_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+purple_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+purple_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+purple_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+purple_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+purple_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+purple_shulker_box	OPAQUE	-: shulker box: solid
+purple_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+purple_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+purple_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+purple_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+purple_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+purpur_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+purpur_pillar	OPAQUE	-: full opaque solid cube (isSolidRender)
+purpur_slab	OPAQUE	-: slab: solid half block
+purpur_stairs	OPAQUE	-: stairs: solid
+quartz_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+quartz_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+quartz_pillar	OPAQUE	-: full opaque solid cube (isSolidRender)
+quartz_slab	OPAQUE	-: slab: solid half block
+quartz_stairs	OPAQUE	-: stairs: solid
+rail	SEE_THROUGH	S7: rail: flat track with gaps, no collision
+raw_copper_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+raw_gold_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+raw_iron_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+red_bed	OPAQUE	-: bed: solid 9/16 high block
+red_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+red_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+red_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+red_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_mushroom	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+red_mushroom_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_nether_brick_slab	OPAQUE	-: slab: solid half block
+red_nether_brick_stairs	OPAQUE	-: stairs: solid
+red_nether_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+red_nether_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_sand	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_sandstone_slab	OPAQUE	-: slab: solid half block
+red_sandstone_stairs	OPAQUE	-: stairs: solid
+red_sandstone_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+red_shulker_box	OPAQUE	-: shulker box: solid
+red_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+red_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+red_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+red_tulip	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+red_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+red_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+redstone_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+redstone_lamp	OPAQUE	-: full opaque solid cube (isSolidRender)
+redstone_ore	OPAQUE	-: full opaque solid cube (isSolidRender)
+redstone_torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+redstone_wall_torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+redstone_wire	SEE_THROUGH	S7: redstone dust: flat translucent dots, mostly clear
+reinforced_deepslate	OPAQUE	-: full opaque solid cube (isSolidRender)
+repeater	OPAQUE	-: redstone gadget: opaque slab-like body
+repeating_command_block	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+resin_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+resin_brick_slab	OPAQUE	-: slab: solid half block
+resin_brick_stairs	OPAQUE	-: stairs: solid
+resin_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+resin_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+resin_clump	SEE_THROUGH	S7: sculk vein / resin clump: thin patchy face overlay, no collision
+respawn_anchor	OPAQUE	-: full opaque solid cube (isSolidRender)
+rooted_dirt	OPAQUE	-: full opaque solid cube (isSolidRender)
+rose_bush	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+sand	OPAQUE	-: full opaque solid cube (isSolidRender)
+sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+sandstone_slab	OPAQUE	-: slab: solid half block
+sandstone_stairs	OPAQUE	-: stairs: solid
+sandstone_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+scaffolding	SEE_THROUGH	S6: scaffolding: open lattice (side frame is hollow)
+sculk	OPAQUE	-: full opaque solid cube (isSolidRender)
+sculk_catalyst	OPAQUE	-: full opaque solid cube (isSolidRender)
+sculk_sensor	OPAQUE	-: sculk sensor-type: solid 8/16 body
+sculk_shrieker	OPAQUE	-: sculk sensor-type: solid 8/16 body
+sculk_vein	SEE_THROUGH	S7: sculk vein / resin clump: thin patchy face overlay, no collision
+sea_lantern	OPAQUE	-: full opaque solid cube (isSolidRender)
+sea_pickle	OPAQUE	-: RESOLVED OPAQUE: solid olive textured cluster (84% opaque), collider = outline, candle/turtle-egg analogy
+seagrass	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+short_dry_grass	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+short_grass	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+shroomlight	OPAQUE	-: full opaque solid cube (isSolidRender)
+shulker_box	OPAQUE	-: shulker box: solid
+skeleton_skull	OPAQUE	-: head/skull: solid small block
+skeleton_wall_skull	OPAQUE	-: head/skull: solid small block
+slime_block	SEE_THROUGH	S5: slime block: translucent outer shell and inner cube
+small_amethyst_bud	OPAQUE	-: small solid crystal/stone object, own shape only
+small_dripleaf	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+smithing_table	OPAQUE	-: full opaque solid cube (isSolidRender)
+smoker	OPAQUE	-: full opaque solid cube (isSolidRender)
+smooth_basalt	OPAQUE	-: full opaque solid cube (isSolidRender)
+smooth_quartz	OPAQUE	-: full opaque solid cube (isSolidRender)
+smooth_quartz_slab	OPAQUE	-: slab: solid half block
+smooth_quartz_stairs	OPAQUE	-: stairs: solid
+smooth_red_sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+smooth_red_sandstone_slab	OPAQUE	-: slab: solid half block
+smooth_red_sandstone_stairs	OPAQUE	-: stairs: solid
+smooth_sandstone	OPAQUE	-: full opaque solid cube (isSolidRender)
+smooth_sandstone_slab	OPAQUE	-: slab: solid half block
+smooth_sandstone_stairs	OPAQUE	-: stairs: solid
+smooth_stone	OPAQUE	-: full opaque solid cube (isSolidRender)
+smooth_stone_slab	OPAQUE	-: slab: solid half block
+sniffer_egg	OPAQUE	-: solid small object with its own shape
+snow	OPAQUE	-: snow layer: opaque layered block
+snow_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+soul_campfire	OPAQUE	-: campfire: solid logs
+soul_fire	SEE_THROUGH	S7: fire: flame cutout, no collision
+soul_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+soul_sand	OPAQUE	-: farmland / dirt path / soul sand / mud: opaque, slightly short cube
+soul_soil	OPAQUE	-: full opaque solid cube (isSolidRender)
+soul_torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+soul_wall_torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+spawner	SEE_THROUGH	S6: spawner cage: grid with open holes (about 31 percent clear), mob visible inside
+sponge	OPAQUE	-: full opaque solid cube (isSolidRender)
+spore_blossom	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+spruce_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+spruce_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+spruce_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+spruce_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+spruce_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+spruce_leaves	SEE_THROUGH	S1: leaves: cutout leaf texture with holes (fancy graphics), user rule
+spruce_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+spruce_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+spruce_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+spruce_sapling	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+spruce_shelf	OPAQUE	-: shelf: solid wooden shelf
+spruce_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+spruce_slab	OPAQUE	-: slab: solid half block
+spruce_stairs	OPAQUE	-: stairs: solid
+spruce_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+spruce_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+spruce_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+spruce_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+sticky_piston	OPAQUE	-: piston parts: solid
+stone	OPAQUE	-: full opaque solid cube (isSolidRender)
+stone_brick_slab	OPAQUE	-: slab: solid half block
+stone_brick_stairs	OPAQUE	-: stairs: solid
+stone_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+stone_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+stone_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+stone_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+stone_slab	OPAQUE	-: slab: solid half block
+stone_stairs	OPAQUE	-: stairs: solid
+stonecutter	OPAQUE	-: grindstone/stonecutter/lectern/enchanting table/bell/etc: solid workstation
+stripped_acacia_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_acacia_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_bamboo_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_birch_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_birch_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_cherry_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_cherry_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_crimson_hyphae	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_crimson_stem	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_dark_oak_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_dark_oak_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_jungle_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_jungle_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_mangrove_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_mangrove_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_oak_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_oak_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_pale_oak_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_pale_oak_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_spruce_log	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_spruce_wood	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_warped_hyphae	OPAQUE	-: full opaque solid cube (isSolidRender)
+stripped_warped_stem	OPAQUE	-: full opaque solid cube (isSolidRender)
+structure_block	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+structure_void	SEE_THROUGH	S7: invisible in normal play (barrier/light/structure void)
+sugar_cane	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+sunflower	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+suspicious_gravel	OPAQUE	-: full opaque solid cube (isSolidRender)
+suspicious_sand	OPAQUE	-: full opaque solid cube (isSolidRender)
+sweet_berry_bush	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+tall_dry_grass	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+tall_grass	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+tall_seagrass	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+target	OPAQUE	-: full opaque solid cube (isSolidRender)
+terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+test_block	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+test_instance_block	OPAQUE	-: creaking heart/jigsaw/structure/command/test blocks: visible opaque cubes
+tinted_glass	SEE_THROUGH	S5: tinted glass: dark but translucent layer, still see-through
+tnt	OPAQUE	-: full opaque solid cube (isSolidRender)
+torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+torchflower	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+torchflower_crop	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+trapped_chest	OPAQUE	-: chest family: solid entity-rendered box
+trial_spawner	SEE_THROUGH	S6:RESOLVED SEE_THROUGH: same cage-window texture as spawner, T_h 0.24 > cherry leaves 0.16 and mangrove roots 0.15 (both SEE_THROUGH)
+tripwire	SEE_THROUGH	S7: tripwire string, no collision
+tripwire_hook	SEE_THROUGH	S7: tripwire hook: small stick and hook, mostly clear, no collision
+tube_coral	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+tube_coral_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+tube_coral_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+tube_coral_wall_fan	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+tuff	OPAQUE	-: full opaque solid cube (isSolidRender)
+tuff_brick_slab	OPAQUE	-: slab: solid half block
+tuff_brick_stairs	OPAQUE	-: stairs: solid
+tuff_brick_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+tuff_bricks	OPAQUE	-: full opaque solid cube (isSolidRender)
+tuff_slab	OPAQUE	-: slab: solid half block
+tuff_stairs	OPAQUE	-: stairs: solid
+tuff_wall	OPAQUE	-: wall: solid stone post and low segments (14/16 high), unlike a fence has no gaps
+turtle_egg	OPAQUE	-: solid small object with its own shape
+twisting_vines	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+twisting_vines_plant	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+vault	OPAQUE	-: trial spawner / vault: cage faces have only small holes (about 8-11 percent), dark interior
+verdant_froglight	OPAQUE	-: full opaque solid cube (isSolidRender)
+vine	SEE_THROUGH	S7: vine/lichen/vein/litter/spawn: thin patchy cutout overlay, no collision
+void_air	SEE_THROUGH	S7: air
+wall_torch	SEE_THROUGH	S7: torch: thin stick and flame, no collision, user rule
+warped_button	OPAQUE	-: button: tiny opaque fixture; no collision so clip on outline
+warped_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+warped_fence	SEE_THROUGH	S2: fence: rails with open gaps, user rule
+warped_fence_gate	SEE_THROUGH	S3: fence gate: bars with gaps (open or closed), same look as fence
+warped_fungus	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+warped_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+warped_hyphae	OPAQUE	-: full opaque solid cube (isSolidRender)
+warped_nylium	OPAQUE	-: full opaque solid cube (isSolidRender)
+warped_planks	OPAQUE	-: full opaque solid cube (isSolidRender)
+warped_pressure_plate	OPAQUE	-: pressure plate: opaque thin plate (user rule); no collision so must clip on outline
+warped_roots	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+warped_shelf	OPAQUE	-: shelf: solid wooden shelf
+warped_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+warped_slab	OPAQUE	-: slab: solid half block
+warped_stairs	OPAQUE	-: stairs: solid
+warped_stem	OPAQUE	-: full opaque solid cube (isSolidRender)
+warped_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+warped_wall_hanging_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+warped_wall_sign	OPAQUE	-: sign: opaque board; no collision so clip on outline
+warped_wart_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+water	SEE_THROUGH	S7: water: translucent fluid (user rule)
+water_cauldron	OPAQUE	-: cauldron: solid walls and floor
+waxed_chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+waxed_copper_block	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_copper_bulb	OPAQUE	-: copper bulb: opaque
+waxed_copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+waxed_copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+waxed_copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+waxed_copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+waxed_copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+waxed_copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+waxed_copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+waxed_cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_cut_copper_slab	OPAQUE	-: slab: solid half block
+waxed_cut_copper_stairs	OPAQUE	-: stairs: solid
+waxed_exposed_chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_exposed_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_exposed_copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+waxed_exposed_copper_bulb	OPAQUE	-: copper bulb: opaque
+waxed_exposed_copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+waxed_exposed_copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+waxed_exposed_copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+waxed_exposed_copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+waxed_exposed_copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+waxed_exposed_copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+waxed_exposed_copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+waxed_exposed_cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_exposed_cut_copper_slab	OPAQUE	-: slab: solid half block
+waxed_exposed_cut_copper_stairs	OPAQUE	-: stairs: solid
+waxed_exposed_lightning_rod	OPAQUE	-: lightning rod: solid rod
+waxed_lightning_rod	OPAQUE	-: lightning rod: solid rod
+waxed_oxidized_chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_oxidized_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_oxidized_copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+waxed_oxidized_copper_bulb	OPAQUE	-: copper bulb: opaque
+waxed_oxidized_copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+waxed_oxidized_copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+waxed_oxidized_copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+waxed_oxidized_copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+waxed_oxidized_copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+waxed_oxidized_copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+waxed_oxidized_copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+waxed_oxidized_cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_oxidized_cut_copper_slab	OPAQUE	-: slab: solid half block
+waxed_oxidized_cut_copper_stairs	OPAQUE	-: stairs: solid
+waxed_oxidized_lightning_rod	OPAQUE	-: lightning rod: solid rod
+waxed_weathered_chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_weathered_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_weathered_copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+waxed_weathered_copper_bulb	OPAQUE	-: copper bulb: opaque
+waxed_weathered_copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+waxed_weathered_copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+waxed_weathered_copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+waxed_weathered_copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+waxed_weathered_copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+waxed_weathered_copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+waxed_weathered_copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+waxed_weathered_cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+waxed_weathered_cut_copper_slab	OPAQUE	-: slab: solid half block
+waxed_weathered_cut_copper_stairs	OPAQUE	-: stairs: solid
+waxed_weathered_lightning_rod	OPAQUE	-: lightning rod: solid rod
+weathered_chiseled_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+weathered_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+weathered_copper_bars	SEE_THROUGH	S6: bars: iron-bars lattice, over half of the texture is clear
+weathered_copper_bulb	OPAQUE	-: copper bulb: opaque
+weathered_copper_chain	SEE_THROUGH	S6: chain: 3px lattice of links, thin and hollow
+weathered_copper_chest	OPAQUE	-: chest family: solid entity-rendered box
+weathered_copper_door	OPAQUE	-: door panel: solid wood/metal slab (user rule); only its own shape blocks
+weathered_copper_golem_statue	OPAQUE	-: copper golem statue: solid entity-rendered figure
+weathered_copper_grate	SEE_THROUGH	S5: copper grate: cutout grid, about 30 percent open (same as leaves)
+weathered_copper_lantern	OPAQUE	-: lantern: solid metal body with light window, own shape only
+weathered_copper_trapdoor	OPAQUE	-: trapdoor: solid panel (user rule); only its own shape blocks
+weathered_cut_copper	OPAQUE	-: full opaque solid cube (isSolidRender)
+weathered_cut_copper_slab	OPAQUE	-: slab: solid half block
+weathered_cut_copper_stairs	OPAQUE	-: stairs: solid
+weathered_lightning_rod	OPAQUE	-: lightning rod: solid rod
+weeping_vines	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+weeping_vines_plant	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+wet_sponge	OPAQUE	-: full opaque solid cube (isSolidRender)
+wheat	SEE_THROUGH	S4: plant (cross/tall/flat cutout), mostly clear, no collision
+white_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+white_bed	OPAQUE	-: bed: solid 9/16 high block
+white_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+white_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+white_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+white_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+white_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+white_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+white_shulker_box	OPAQUE	-: shulker box: solid
+white_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+white_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+white_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+white_tulip	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+white_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+white_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+wildflowers	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+wither_rose	SEE_THROUGH	S7: plant (cross/tall/flat cutout), mostly clear, no collision
+wither_skeleton_skull	OPAQUE	-: head/skull: solid small block
+wither_skeleton_wall_skull	OPAQUE	-: head/skull: solid small block
+yellow_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+yellow_bed	OPAQUE	-: bed: solid 9/16 high block
+yellow_candle	OPAQUE	-: candle: small opaque wax object, own shape only
+yellow_candle_cake	OPAQUE	-: candle cake: solid cake with candle
+yellow_carpet	OPAQUE	-: carpet: opaque 1/16 layer, only blocks a ray crossing it
+yellow_concrete	OPAQUE	-: full opaque solid cube (isSolidRender)
+yellow_concrete_powder	OPAQUE	-: full opaque solid cube (isSolidRender)
+yellow_glazed_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+yellow_shulker_box	OPAQUE	-: shulker box: solid
+yellow_stained_glass	SEE_THROUGH	S5: stained glass: translucent colour, clearly see-through
+yellow_stained_glass_pane	SEE_THROUGH	S6: glass pane: thin pane, mostly clear texture
+yellow_terracotta	OPAQUE	-: full opaque solid cube (isSolidRender)
+yellow_wall_banner	OPAQUE	-: banner: opaque cloth; no collision so clip on outline
+yellow_wool	OPAQUE	-: full opaque solid cube (isSolidRender)
+zombie_head	OPAQUE	-: head/skull: solid small block
+zombie_wall_head	OPAQUE	-: head/skull: solid small block

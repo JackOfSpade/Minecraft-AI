@@ -218,7 +218,10 @@ and honey, chains, ladders, scaffolding, crops, and every plant, torch, rail, we
 (waterlogged or not). Lava never is, and neither are walls, doors, trapdoors, slabs, stairs, chests, beds, signs, buttons or any
 solid cube. `mode/SeeThrough` decides per block from vanilla's own classes, tags and collision shapes (so a modded block falls
 into a rule instead of needing a list entry) and `SeeThroughGoldenTest` pins the verdict of all 1166 vanilla blocks (248
-see-through): a block a later Minecraft adds fails the test until somebody decides on purpose.
+see-through): a block a later Minecraft adds fails the test until somebody decides on purpose. The per-block list with the reason
+for each verdict (researched from the game's own models, textures and shapes, and judged twice independently) is
+[`perception/see_through_blocks.tsv`](perception/see_through_blocks.tsv); the judgement calls are walls (opaque: solid stone), doors,
+vault and beacon (opaque), tinted glass, slime, honey, spawners and the barrier block (see-through).
 
 `mode/SightClip` is `level.clip` with those cells skipped. `SightClipContext` is a vanilla `ClipContext` whose two per-cell hooks
 answer an empty shape for what is skipped, so vanilla's own traversal and nearest-hit rule do the rest and a ray that crosses
