@@ -17,8 +17,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 /**
- * Fixture pieces shared by the sensing-arena GameTests ({@code MiningAssistSenseGameTests} and the OreDig /
- * LegChooser suites of this package): the sealed stone {@link Room} and the per-bot structured-log readers.
+ * Fixture pieces shared by the sensing-arena GameTests ({@code MiningAssistSenseGameTests} and the OreDig suites
+ * of this package): the sealed stone {@link Room} and the per-bot structured-log readers.
  * Each of those files used to carry its own byte-identical copy; a caller now imports {@code SensingArena.Room}
  * and statically imports {@link #botLog}/{@link #hasSpawnLine}, so it keeps referring to them by the bare names.
  */

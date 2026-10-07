@@ -154,16 +154,18 @@ final class ObservedSearchHops {
 
     /**
      * How far the bot sees from where it stands in each sector of the horizon, along its own line of sight at eye
-     * height: the distance to the first thing that blocks it, the full radius where nothing does, 0 where it cannot
-     * look at all (the chunk there is not loaded). One look per new place, not one per tick.
+     * height: the distance to the first thing that blocks it, as far as it can see where nothing does (the radius, or
+     * its block sight when that is shorter: a ray that misses reports the range it was really cast over), 0 where it
+     * cannot look at all (the chunk there is not loaded). One look per new place, not one per tick. Package-visible
+     * for {@code LongSightGameTests}.
      */
-    private static double[] lookAround(AIPlayerEntity bot, int radius) {
+    static double[] lookAround(AIPlayerEntity bot, int radius) {
         double[] sight = new double[ExplorationMemory.SECTORS];
         for (int sector = 0; sector < sight.length; sector++) {
             double[] direction = ExplorationMemory.sectorCentre(sector);
             ObservableWorldQuery.ViewHit view = ObservableWorldQuery.castViewRay(bot, direction[0], 0.0D, direction[1],
                     radius, ObservableWorldQuery.ViewShape.COLLIDER);
-            sight[sector] = view.isUnknown() ? 0.0D : view.hit() ? Math.min(radius, view.distance()) : radius;
+            sight[sector] = view.isUnknown() ? 0.0D : Math.min(radius, view.distance());
         }
         return sight;
     }
